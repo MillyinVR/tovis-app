@@ -13,27 +13,41 @@ import { ServiceLocationType } from '@prisma/client'
 const mocks = vi.hoisted(() => ({
   inviteFindMany: vi.fn(),
   filterStillOpenRows: vi.fn(),
+  // Every other read the loader fans out, held so `beforeEach` can re-stub them.
+  // 🔴 Vitest runs with `mockReset: true`, which drops every implementation
+  // between tests — including the "resolves empty" ones set at mock-definition
+  // time. An unstubbed read then returns `undefined`, which passes for an empty
+  // list right up until something maps over it.
+  clientProfileFindUnique: vi.fn(),
+  bookingFindFirst: vi.fn(),
+  bookingCount: vi.fn(),
+  aftercareFindFirst: vi.fn(),
+  waitlistFindMany: vi.fn(),
+  favoriteProFindMany: vi.fn(),
+  favoriteServiceFindMany: vi.fn(),
+  viralFindMany: vi.fn(),
+  reviewAggregate: vi.fn(),
 }))
 
 /**
  * Every other read this loader fans out is irrelevant here, so they all resolve
  * empty; only `lastMinuteRecipient.findMany` returns rows.
  */
-vi.mock('@/lib/prisma', () => {
-  const empty = () => vi.fn().mockResolvedValue([])
-  return {
-    prisma: {
-      booking: { findFirst: vi.fn().mockResolvedValue(null), count: vi.fn().mockResolvedValue(0) },
-      aftercareSummary: { findFirst: vi.fn().mockResolvedValue(null) },
-      lastMinuteRecipient: { findMany: mocks.inviteFindMany },
-      waitlistEntry: { findMany: empty() },
-      professionalFavorite: { findMany: empty() },
-      serviceFavorite: { findMany: empty() },
-      viralServiceOffer: { findMany: empty() },
-      viralServiceRequest: { findMany: empty() },
-    },
-  }
-})
+vi.mock('@/lib/prisma', () => ({
+  prisma: {
+    clientProfile: { findUnique: mocks.clientProfileFindUnique },
+    booking: { findFirst: mocks.bookingFindFirst, count: mocks.bookingCount },
+    aftercareSummary: { findFirst: mocks.aftercareFindFirst },
+    lastMinuteRecipient: { findMany: mocks.inviteFindMany },
+    // Two reads hit this model — the viewer's own entries, then their peers for
+    // the FIFO rank. One mock serves both; both are empty here.
+    waitlistEntry: { findMany: mocks.waitlistFindMany },
+    professionalFavorite: { findMany: mocks.favoriteProFindMany },
+    serviceFavorite: { findMany: mocks.favoriteServiceFindMany },
+    viralServiceRequest: { findMany: mocks.viralFindMany },
+    review: { aggregate: mocks.reviewAggregate },
+  },
+}))
 
 vi.mock('@/lib/media/bookingBeforeAfter', () => ({
   loadBookingBeforeAfterThumbsFor: vi.fn().mockResolvedValue(null),
@@ -67,6 +81,18 @@ function inviteRow(openingId: string) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mocks.clientProfileFindUnique.mockResolvedValue(null)
+  mocks.bookingFindFirst.mockResolvedValue(null)
+  mocks.bookingCount.mockResolvedValue(0)
+  mocks.aftercareFindFirst.mockResolvedValue(null)
+  mocks.waitlistFindMany.mockResolvedValue([])
+  mocks.favoriteProFindMany.mockResolvedValue([])
+  mocks.favoriteServiceFindMany.mockResolvedValue([])
+  mocks.viralFindMany.mockResolvedValue([])
+  mocks.reviewAggregate.mockResolvedValue({
+    _avg: { rating: null },
+    _count: { _all: 0 },
+  })
   mocks.inviteFindMany.mockResolvedValue([inviteRow('opening_1')])
   mocks.filterStillOpenRows.mockImplementation(
     async (args: { rows: unknown[] }) => args.rows,

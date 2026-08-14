@@ -49,11 +49,37 @@ export type BookingTrustSignals = {
  */
 export const MIN_BOOKED_COUNT_TO_SHOW = 10
 
+/**
+ * The visible-review aggregate for one pro, on its own — null when they have no
+ * visible reviews, so a caller never renders "0.0★" or a star with nothing
+ * behind it.
+ *
+ * Split out of the full trust-signal load because the surfaces that want ONLY a
+ * rating (the client home's next-booking card) would otherwise pay for a
+ * verification lookup, a completed-booking count and the no-show settings to get
+ * one number — or, more likely, hand-copy the aggregate. It stays the same
+ * `visibleReviewsWhere` either way, which is the part that must not drift.
+ */
+export async function loadProRating(
+  professionalId: string,
+  db: Db = prisma,
+): Promise<BookingTrustSignals['rating']> {
+  const reviewStats = await db.review.aggregate({
+    where: { professionalId, ...visibleReviewsWhere },
+    _avg: { rating: true },
+    _count: { _all: true },
+  })
+
+  const average = reviewStats._avg.rating
+  const count = reviewStats._count._all
+  return average != null && count > 0 ? { average, count } : null
+}
+
 export async function loadBookingTrustSignals(
   professionalId: string,
   db: Db = prisma,
 ): Promise<BookingTrustSignals> {
-  const [pro, completed, reviewStats, noShow] = await Promise.all([
+  const [pro, completed, rating, noShow] = await Promise.all([
     db.professionalProfile.findUnique({
       where: { id: professionalId },
       select: { verificationStatus: true },
@@ -61,21 +87,14 @@ export async function loadBookingTrustSignals(
     db.booking.count({
       where: { professionalId, status: BookingStatus.COMPLETED },
     }),
-    db.review.aggregate({
-      where: { professionalId, ...visibleReviewsWhere },
-      _avg: { rating: true },
-      _count: { _all: true },
-    }),
+    loadProRating(professionalId, db),
     getProNoShowSettings(professionalId).catch(() => null),
   ])
-
-  const average = reviewStats._avg.rating
-  const count = reviewStats._count._all
 
   return {
     verified: pro ? !isBlockedVerificationStatus(pro.verificationStatus) : false,
     completedBookings: completed >= MIN_BOOKED_COUNT_TO_SHOW ? completed : null,
-    rating: average != null && count > 0 ? { average, count } : null,
+    rating,
     // A fee the pro never charges is not a cancellation window. Both switches
     // matter: `enabled` is the master opt-in, and a pro can run no-show fees
     // while still letting clients cancel free at any point.

@@ -57,8 +57,10 @@ function renderShell() {
   // list, so this is a real value of the type rather than a cast. The children
   // are stubbed anyway; what matters is that the header renders.
   const home: ClientHomeData = {
+    displayName: 'Maya',
     upcoming: null,
     upcomingCount: 0,
+    upcomingProRating: null,
     action: null,
     invites: [],
     waitlists: [],

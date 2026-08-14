@@ -60,7 +60,11 @@ describe('incentiveLabel', () => {
     ).toBe('Free add-on')
   })
 
-  it('falls back to "No incentive" for NONE or missing data', () => {
+  // 🔴 NULL, not the words "No incentive". Every caller renders this string the
+  // moment it is truthy, so the old fallback put a bright "NO INCENTIVE" badge on
+  // the client home beside the service name, and "✦ No incentive" on the openings
+  // feed — the absence of a discount, advertised as if it were one.
+  it('returns null for NONE or missing data', () => {
     expect(
       incentiveLabel({
         offerType: LastMinuteOfferType.NONE,
@@ -68,9 +72,9 @@ describe('incentiveLabel', () => {
         amountOff: null,
         freeAddOnService: null,
       }),
-    ).toBe('No incentive')
+    ).toBeNull()
 
-    // percent-off with no percent value -> no incentive
+    // percent-off with no percent value -> nothing to promise
     expect(
       incentiveLabel({
         offerType: LastMinuteOfferType.PERCENT_OFF,
@@ -78,13 +82,27 @@ describe('incentiveLabel', () => {
         amountOff: null,
         freeAddOnService: null,
       }),
-    ).toBe('No incentive')
+    ).toBeNull()
   })
 })
 
 describe('mapPublicIncentiveDto', () => {
   it('returns null when there is no plan', () => {
     expect(mapPublicIncentiveDto(null)).toBeNull()
+  })
+
+  it('returns null for a matched plan that carries no incentive', () => {
+    // The DTO's own contract ("null when the matched plan carries no
+    // incentive") — kept here, not at each of the four surfaces that read it.
+    expect(
+      mapPublicIncentiveDto({
+        tier: LastMinuteTier.DISCOVERY,
+        offerType: LastMinuteOfferType.NONE,
+        percentOff: null,
+        amountOff: null,
+        freeAddOnService: null,
+      }),
+    ).toBeNull()
   })
 
   it('maps a plan to its DTO, formatting amountOff as a money string', () => {

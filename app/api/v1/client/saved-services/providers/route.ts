@@ -27,6 +27,7 @@ import {
   haversineMiles,
 } from '@/lib/discovery/nearby'
 import { requireClient } from '@/app/api/_utils/auth/requireClient'
+import { mapPublicIncentiveDto } from '@/lib/lastMinute/openingDto'
 import { prisma } from '@/lib/prisma'
 import {
   clampFloat,
@@ -237,50 +238,15 @@ function pickPublicTierPlan(
   return null
 }
 
-function incentiveLabel(plan: PublicTierPlanRow): string {
-  if (
-    plan.offerType === LastMinuteOfferType.PERCENT_OFF &&
-    plan.percentOff != null
-  ) {
-    return `${plan.percentOff}% off`
-  }
-
-  if (
-    plan.offerType === LastMinuteOfferType.AMOUNT_OFF &&
-    plan.amountOff
-  ) {
-    return `$${plan.amountOff.toString()} off`
-  }
-
-  if (plan.offerType === LastMinuteOfferType.FREE_SERVICE) {
-    return 'Free service'
-  }
-
-  if (plan.offerType === LastMinuteOfferType.FREE_ADD_ON) {
-    return plan.freeAddOnService?.name || 'Free add-on'
-  }
-
-  return 'No incentive'
-}
-
+// The incentive block comes from the SHARED mapper the two opening feeds use
+// (`lib/lastMinute/openingDto.ts`). This route used to carry its own hand-copied
+// `incentiveLabel` + mapper, which is how it inherited the "No incentive" label
+// bug independently: the copy has to be fixed twice, and only one of them ever
+// is. Same copy, one place.
 function mapPublicIncentive(
   plan: PublicTierPlanRow | null,
 ): SavedServiceProviderEntry['opening']['publicIncentive'] {
-  if (!plan) return null
-
-  return {
-    tier: plan.tier,
-    offerType: plan.offerType,
-    label: incentiveLabel(plan),
-    percentOff: plan.percentOff ?? null,
-    amountOff: plan.amountOff ? plan.amountOff.toString() : null,
-    freeAddOnService: plan.freeAddOnService
-      ? {
-          id: plan.freeAddOnService.id,
-          name: plan.freeAddOnService.name,
-        }
-      : null,
-  }
+  return mapPublicIncentiveDto(plan)
 }
 
 export async function GET(req: Request) {

@@ -92,6 +92,7 @@ export default function ClientHomeShell({
           <UpcomingAppointmentCard
             booking={home.upcoming}
             upcomingCount={home.upcomingCount}
+            proRating={home.upcomingProRating}
           />
         </div>
         <div className="grid min-w-0 grid-cols-1 content-start gap-5 md:gap-[22px]">

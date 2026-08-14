@@ -26,8 +26,16 @@ export type IncentiveLabelPlan = {
 /**
  * Human-readable incentive copy shown on an opening (e.g. "20% off", "$15 off",
  * "Free service"). Single source of truth shared by both opening feeds.
+ *
+ * 🔴 NULL when the plan carries no incentive — an opening with `offerType: NONE`
+ * is an ordinary free slot, not an offer, and every caller renders this string
+ * the moment it is truthy. It used to answer "No incentive", which the client
+ * home printed as a bright accent badge beside the service name and the openings
+ * feed as "✦ No incentive": the absence of a discount, advertised as if it were
+ * one. A malformed plan (PERCENT_OFF with no percent) is the same case — there
+ * is nothing to promise, so there is no label.
  */
-export function incentiveLabel(plan: IncentiveLabelPlan): string {
+export function incentiveLabel(plan: IncentiveLabelPlan): string | null {
   if (
     plan.offerType === LastMinuteOfferType.PERCENT_OFF &&
     plan.percentOff != null
@@ -47,7 +55,7 @@ export function incentiveLabel(plan: IncentiveLabelPlan): string {
     return plan.freeAddOnService?.name || 'Free add-on'
   }
 
-  return 'No incentive'
+  return null
 }
 
 // --- Public incentive block ----------------------------------------------
@@ -70,10 +78,17 @@ export function mapPublicIncentiveDto(
 ): PublicIncentiveDto | null {
   if (!plan) return null
 
+  // A matched tier plan with no incentive is not an incentive block. Both DTOs
+  // that carry this field already document it as "null when the matched plan
+  // carries no incentive" (lib/dto/clientHome.ts) — this is where that promise
+  // is kept, and `label` stays a non-null string for everyone downstream.
+  const label = incentiveLabel(plan)
+  if (label === null) return null
+
   return {
     tier: plan.tier,
     offerType: plan.offerType,
-    label: incentiveLabel(plan),
+    label,
     percentOff: plan.percentOff ?? null,
     amountOff: moneyToString(plan.amountOff),
     freeAddOnService: plan.freeAddOnService

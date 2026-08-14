@@ -18,6 +18,7 @@ import {
   type BookingBeforeAfterThumbs,
 } from '@/lib/media/bookingBeforeAfter'
 import { filterStillOpenRows } from '@/lib/booking/storedSlotLiveness'
+import { loadProRating } from '@/lib/booking/trustSignals'
 import { openingLivenessCandidate } from '@/lib/lastMinute/openingLiveness'
 
 export const clientHomeBookingSelect = Prisma.validator<Prisma.BookingSelect>()({
@@ -401,7 +402,22 @@ export type ClientHomeLastMinuteInvite = Prisma.LastMinuteRecipientGetPayload<{
 
 export type ClientHomeWaitlistEntry = Prisma.WaitlistEntryGetPayload<{
   select: typeof clientHomeWaitlistSelect
-}>
+}> & {
+  /**
+   * The client's real FIFO place in this pro's queue FOR THIS SERVICE — the same
+   * rank the pro sees (`app/api/v1/pro/waitlist/route.ts`: *"FIFO: the client
+   * who joined first is rank #1 within their service"*).
+   *
+   * 🔴 Both clients used to print `#{index + 1} in line`, which is the row's
+   * position in the viewer's OWN list. A client on one waitlist therefore always
+   * read "#1 in line" — "you're next", from a screen that had never counted
+   * anyone else — and the pro looking at the same entry could be seeing #7.
+   *
+   * Null when the rank cannot be established (see WAITLIST_PEER_CAP): no number
+   * is honest, a wrong one is not.
+   */
+  queuePosition: number | null
+}
 
 export type ClientHomeFavoritePro = Prisma.ProfessionalFavoriteGetPayload<{
   select: typeof clientHomeFavoriteProSelect
@@ -433,8 +449,25 @@ export type ClientHomeAction =
   | null
 
 export type ClientHomeData = {
+  /**
+   * What the greeting calls this client — their own first name, their email if
+   * they have not given one, and "there" if neither.
+   *
+   * Resolved HERE rather than at each surface so both clients greet the same
+   * person the same way. iOS had no name on the wire at all and derived one from
+   * the email's local part (`demo-maya@` → "Demo"), falling back to "Welcome
+   * back" whenever the session user was not loaded yet — which, on a cold
+   * launch, is every time.
+   */
+  displayName: string
   upcoming: ClientHomeBooking | null
   upcomingCount: number
+  /**
+   * The visible-review aggregate for the pro on the next-booking card. Loaded
+   * only when there IS a next booking, and null when that pro has no visible
+   * reviews — the card then shows no star rather than an empty one.
+   */
+  upcomingProRating: { average: number; count: number } | null
   action: ClientHomeAction
   invites: ClientHomeLastMinuteInvite[]
   waitlists: ClientHomeWaitlistEntry[]
@@ -456,6 +489,7 @@ export async function getClientHomeData({
   const now = new Date()
 
   const [
+    viewer,
     upcoming,
     upcomingCount,
     pendingConsultation,
@@ -467,6 +501,14 @@ export async function getClientHomeData({
     viralLive,
     viralPending,
   ] = await Promise.all([
+    prisma.clientProfile.findUnique({
+      where: { id: clientId },
+      select: {
+        firstName: true, // pii-plaintext-read-ok: the viewer's own first name, for their own greeting
+        user: { select: { email: true } },
+      },
+    }),
+
     prisma.booking.findFirst({
       where: {
         clientId,
@@ -643,6 +685,14 @@ export async function getClientHomeData({
     }),
   ])
 
+  const rankedWaitlists = await withQueuePositions(waitlists)
+
+  // Only when there is a card to put it on — a client with no upcoming booking
+  // pays nothing for it.
+  const upcomingProRating = upcoming
+    ? await loadProRating(upcoming.professional.id)
+    : null
+
   // Tori's rule (F15): a stored time the pro's schedule can no longer serve is
   // not shown at all. These are the same opening rows /api/v1/client/openings
   // serves, on the home screen — and this loader backs BOTH the web home and
@@ -677,14 +727,101 @@ export async function getClientHomeData({
   }
 
   return {
+    displayName:
+      (viewer?.firstName ?? '').trim() || // pii-plaintext-read-ok: the viewer's own first name, for their own greeting
+      (viewer?.user?.email ?? '').trim() || // pii-plaintext-read-ok: the viewer's own email, the greeting's fallback
+      'there',
     upcoming,
     upcomingCount,
+    upcomingProRating,
     action,
     invites: liveInvites,
-    waitlists,
+    waitlists: rankedWaitlists,
     favoritePros,
     favoriteServices,
     viralLive,
     viralPending,
   }
+}
+
+/**
+ * How many peer entries one read will consider. The pro's own waitlist route
+ * takes 500, so this matches the largest queue that surface can rank; past it,
+ * the two screens could not agree anyway.
+ */
+const WAITLIST_PEER_CAP = 500
+
+/**
+ * Attaches each entry's FIFO rank within its (professional, service) queue.
+ *
+ * ONE extra query, not one per row: the strip takes up to 12 entries, and a
+ * count each would put a dozen round-trips on every home render — the mistake
+ * `resolvePrepForBookings` exists to avoid. Peers for every pair come back in a
+ * single read and the ranks are counted in memory.
+ *
+ * Counts ACTIVE **and** NOTIFIED, because the pro's list does: sending an offer
+ * moves an entry to NOTIFIED without giving up its place, so skipping those
+ * would quietly promote everyone behind it.
+ */
+async function withQueuePositions(
+  entries: Prisma.WaitlistEntryGetPayload<{
+    select: typeof clientHomeWaitlistSelect
+  }>[],
+): Promise<ClientHomeWaitlistEntry[]> {
+  if (entries.length === 0) return []
+
+  const pairs = new Map<string, { professionalId: string; serviceId: string }>()
+  for (const entry of entries) {
+    const serviceId = entry.service?.id
+    if (!serviceId) continue
+    pairs.set(`${entry.professional.id}:${serviceId}`, {
+      professionalId: entry.professional.id,
+      serviceId,
+    })
+  }
+
+  if (pairs.size === 0) {
+    return entries.map((entry) => ({ ...entry, queuePosition: null }))
+  }
+
+  const peers = await prisma.waitlistEntry.findMany({
+    where: {
+      status: { in: [WaitlistStatus.ACTIVE, WaitlistStatus.NOTIFIED] },
+      OR: Array.from(pairs.values()),
+    },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    take: WAITLIST_PEER_CAP,
+    select: {
+      id: true,
+      professionalId: true,
+      serviceId: true,
+      createdAt: true,
+    },
+  })
+
+  // A truncated read cannot rank anything: the rows it dropped are the ones
+  // that would have come LAST, but we cannot prove none of them belong ahead of
+  // an entry in another pair. Say nothing rather than say a number that is off.
+  if (peers.length >= WAITLIST_PEER_CAP) {
+    return entries.map((entry) => ({ ...entry, queuePosition: null }))
+  }
+
+  const queues = new Map<string, { id: string; createdAt: Date }[]>()
+  for (const peer of peers) {
+    const key = `${peer.professionalId}:${peer.serviceId}`
+    const queue = queues.get(key)
+    if (queue) queue.push(peer)
+    else queues.set(key, [peer])
+  }
+
+  return entries.map((entry) => {
+    const serviceId = entry.service?.id
+    if (!serviceId) return { ...entry, queuePosition: null }
+
+    // Already createdAt-then-id ascending from the query, so the index IS the
+    // rank — the same derivation the pro's route makes from the same ordering.
+    const queue = queues.get(`${entry.professional.id}:${serviceId}`) ?? []
+    const index = queue.findIndex((peer) => peer.id === entry.id)
+    return { ...entry, queuePosition: index >= 0 ? index + 1 : null }
+  })
 }

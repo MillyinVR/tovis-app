@@ -23,13 +23,6 @@ function isClientPageUser(user: MaybeCurrentUser): user is ClientPageUser {
   return Boolean(user && user.role === Role.CLIENT && user.clientProfile?.id)
 }
 
-function pickDisplayName(user: ClientPageUser): string {
-  const firstName = (user.clientProfile.firstName ?? '').trim()
-  const email = (user.email ?? '').trim()
-
-  return firstName || email || 'there'
-}
-
 async function requireClientOrRedirect(): Promise<ClientPageUser> {
   const user = await getCurrentUser().catch(() => null)
 
@@ -67,14 +60,14 @@ export default async function ClientHomePage() {
 
   const userId = user.id
   const clientId = user.clientProfile.id
-  const displayName = pickDisplayName(user)
-
+  // The greeting name comes from the loader, not from a local pick, so the web
+  // page and GET /api/v1/client/home cannot greet the same client differently.
   const home = await getClientHomeData({ clientId, userId })
 
   return (
     <ClientHomeShell
       brandText={brand.assets.wordmark.text}
-      displayName={displayName}
+      displayName={home.displayName}
       home={home}
       removeProFavoriteAction={removeProFavoriteAction}
     />
