@@ -6495,6 +6495,16 @@ model ViralServiceRequest {
   linksJson     Json?
   mediaUrlsJson Json?
 
+  /// The picture the look is shown by — on the client home's Viral Looks band
+  /// and anywhere else it is listed.
+  ///
+  /// Distinct from `mediaUrlsJson` on purpose: that is what the SUBMITTER
+  /// attached, and this is the one a REVIEWER chose to publish. Folding them
+  /// into one field would make an admin's replacement fight the submitter's
+  /// upload, and there would be no way to keep the original while showing
+  /// something better. Readers take `coverImageUrl ?? mediaUrls[0]`.
+  coverImageUrl String?
+
   requestedCategoryId String?
   requestedCategory   ServiceCategory? @relation(fields: [requestedCategoryId], references: [id], onDelete: SetNull)
 

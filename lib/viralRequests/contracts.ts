@@ -37,6 +37,12 @@ export type ViralRequestDto = {
   sourceUrl: string | null
   links: string[]
   mediaUrls: string[]
+  /**
+   * The picture this look is shown by. `coverImageUrl` is the REVIEWER's pick
+   * and wins; `mediaUrls[0]` is what the submitter attached. Null when there is
+   * neither — the surfaces then draw their own gradient.
+   */
+  coverImage: string | null
   requestedCategoryId: string | null
   requestedCategory: {
     id: string
@@ -56,6 +62,23 @@ export type ViralRequestDto = {
   updatedAt: string
 }
 
+/**
+ * The one place that decides which picture a viral look is shown by, so the
+ * admin queue, the client home and every future surface cannot disagree.
+ *
+ * The REVIEWER's pick wins over the submitter's attachment — that is the whole
+ * point of having both: an admin can replace a bad photo without destroying
+ * what the client sent.
+ */
+export function resolveViralCoverImage(row: {
+  coverImageUrl: string | null
+  mediaUrlsJson: ViralRequestListRow['mediaUrlsJson']
+}): string | null {
+  const chosen = row.coverImageUrl?.trim()
+  if (chosen) return chosen
+  return readStringArray(row.mediaUrlsJson)[0] ?? null
+}
+
 export function toViralRequestDto(row: ViralRequestListRow): ViralRequestDto {
   return {
     id: row.id,
@@ -64,6 +87,7 @@ export function toViralRequestDto(row: ViralRequestListRow): ViralRequestDto {
     sourceUrl: row.sourceUrl ?? null,
     links: readStringArray(row.linksJson),
     mediaUrls: readStringArray(row.mediaUrlsJson),
+    coverImage: resolveViralCoverImage(row),
     requestedCategoryId: row.requestedCategoryId ?? null,
     requestedCategory: row.requestedCategory
       ? {

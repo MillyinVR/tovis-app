@@ -13,6 +13,7 @@ import { safeError } from '@/lib/security/logging'
 import type {
   MediaAdminUploadFinalizeDTO,
   MediaAdminUploadInitDTO,
+  MediaAdminViralCoverFinalizeDTO,
 } from '@/lib/dto/media'
 import { safeUrl } from '@/lib/media'
 import { pickNumber, pickString } from '@/lib/pick'
@@ -20,23 +21,43 @@ import { prisma } from '@/lib/prisma'
 import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
 import { withCacheBuster } from '@/lib/url'
 import { getStorageEnvironmentMismatch } from '@/lib/media/storageEnvironment'
+import {
+  buildViralRequestCoverTargetPath,
+  setViralRequestCoverImage,
+} from '@/lib/viralRequests'
 
 export const dynamic = 'force-dynamic'
 
-type InitBody = {
-  kind: 'SERVICE_DEFAULT_IMAGE_PUBLIC'
-  serviceId: string
-  contentType: string
-  size: number
-}
+type InitBody =
+  | {
+      kind: 'SERVICE_DEFAULT_IMAGE_PUBLIC'
+      serviceId: string
+      contentType: string
+      size: number
+    }
+  | {
+      kind: 'VIRAL_REQUEST_COVER_IMAGE_PUBLIC'
+      requestId: string
+      contentType: string
+      size: number
+    }
 
-type FinalizeBody = {
-  kind: 'SERVICE_DEFAULT_IMAGE_PUBLIC_FINALIZE'
-  serviceId: string
-  publicUrl: string
-  cacheBuster?: number
-  path?: string
-}
+type FinalizeBody =
+  | {
+      kind: 'SERVICE_DEFAULT_IMAGE_PUBLIC_FINALIZE'
+      serviceId: string
+      publicUrl: string
+      cacheBuster?: number
+      path?: string
+    }
+  | {
+      kind: 'VIRAL_REQUEST_COVER_IMAGE_PUBLIC_FINALIZE'
+      requestId: string
+      /** Null clears the reviewer's pick, falling back to the submitter's photo. */
+      publicUrl: string | null
+      cacheBuster?: number
+      path?: string
+    }
 
 function isAllowedImageContentType(contentType: string): boolean {
   return contentType.toLowerCase().startsWith('image/')
@@ -88,6 +109,40 @@ async function requireSupportScope(args: {
   })
 }
 
+/**
+ * A viral request's reviewer scope.
+ *
+ * REVIEWER, not SUPPORT: setting the picture a look is published under is part
+ * of reviewing it, and it is the same pair of roles
+ * `app/api/v1/admin/viral-service-requests/[id]/moderate` already gates the
+ * approve/reject decision on. Scoped by the request's own requested category,
+ * exactly as `buildViralRequestPermissionScope` does for moderation, so a
+ * category-scoped reviewer cannot set covers outside their remit.
+ *
+ * Returns null when the request does not exist — the caller answers 404 rather
+ * than leaking existence through a 403.
+ */
+async function requireViralReviewScope(args: {
+  adminUserId: string
+  requestId: string
+}): Promise<boolean | null> {
+  const request = await prisma.viralServiceRequest.findUnique({
+    where: { id: args.requestId },
+    select: { id: true, requestedCategoryId: true },
+  })
+
+  if (!request) return null
+
+  return hasAdminPermission({
+    adminUserId: args.adminUserId,
+    allowedRoles: [
+      AdminPermissionRole.SUPER_ADMIN,
+      AdminPermissionRole.REVIEWER,
+    ],
+    scope: { categoryId: request.requestedCategoryId ?? undefined },
+  })
+}
+
 function buildPublicUrl(args: {
   base: string
   bucket: string
@@ -117,38 +172,38 @@ async function objectExists(args: {
 
 function parseInitBody(raw: Record<string, unknown>): InitBody | null {
   const kind = pickString(raw.kind)
-
-  if (kind !== 'SERVICE_DEFAULT_IMAGE_PUBLIC') {
-    return null
-  }
-
-  const serviceId = pickString(raw.serviceId)
   const contentType = pickString(raw.contentType)
   const size = pickNumber(raw.size)
 
-  if (!serviceId || !contentType || size == null) {
+  if (!contentType || size == null) {
     return null
   }
 
-  return {
-    kind: 'SERVICE_DEFAULT_IMAGE_PUBLIC',
-    serviceId,
-    contentType,
-    size,
+  if (kind === 'SERVICE_DEFAULT_IMAGE_PUBLIC') {
+    const serviceId = pickString(raw.serviceId)
+    if (!serviceId) return null
+
+    return { kind, serviceId, contentType, size }
   }
+
+  if (kind === 'VIRAL_REQUEST_COVER_IMAGE_PUBLIC') {
+    const requestId = pickString(raw.requestId)
+    if (!requestId) return null
+
+    return { kind, requestId, contentType, size }
+  }
+
+  return null
 }
 
 function parseFinalizeBody(raw: Record<string, unknown>): FinalizeBody | null {
   const kind = pickString(raw.kind)
-
-  if (kind !== 'SERVICE_DEFAULT_IMAGE_PUBLIC_FINALIZE') {
-    return null
-  }
-
-  const serviceId = pickString(raw.serviceId)
   const publicUrl = pickString(raw.publicUrl)
+  // Only the viral cover can be cleared — a service's default image is removed
+  // through its own form, and an unset `clear` must never read as "clear".
+  const clear = raw.clear === true
 
-  if (!serviceId || !publicUrl) {
+  if (!publicUrl && !clear) {
     return null
   }
 
@@ -160,13 +215,27 @@ function parseFinalizeBody(raw: Record<string, unknown>): FinalizeBody | null {
 
   const path = pickString(raw.path) ?? undefined
 
-  return {
-    kind: 'SERVICE_DEFAULT_IMAGE_PUBLIC_FINALIZE',
-    serviceId,
-    publicUrl,
-    cacheBuster,
-    path,
+  if (kind === 'SERVICE_DEFAULT_IMAGE_PUBLIC_FINALIZE') {
+    const serviceId = pickString(raw.serviceId)
+    if (!serviceId || !publicUrl) return null
+
+    return { kind, serviceId, publicUrl, cacheBuster, path }
   }
+
+  if (kind === 'VIRAL_REQUEST_COVER_IMAGE_PUBLIC_FINALIZE') {
+    const requestId = pickString(raw.requestId)
+    if (!requestId) return null
+
+    return {
+      kind,
+      requestId,
+      publicUrl: clear ? null : publicUrl,
+      cacheBuster,
+      path,
+    }
+  }
+
+  return null
 }
 
 async function createSignedUploadUrl(args: {
@@ -215,6 +284,62 @@ export async function POST(req: NextRequest) {
     }
 
     const finalize = parseFinalizeBody(rawJson)
+
+    if (finalize?.kind === 'VIRAL_REQUEST_COVER_IMAGE_PUBLIC_FINALIZE') {
+      const allowed = await requireViralReviewScope({
+        adminUserId: user.id,
+        requestId: finalize.requestId,
+      })
+
+      if (allowed === null) return jsonFail(404, 'Viral request not found')
+      if (!allowed) return jsonFail(403, 'Forbidden')
+
+      const cleaned =
+        finalize.publicUrl === null ? null : safeUrl(finalize.publicUrl)
+
+      if (finalize.publicUrl !== null && !cleaned) {
+        return jsonFail(400, 'Invalid publicUrl')
+      }
+
+      const bucket = 'media-public'
+
+      const uploadedObjectExists =
+        cleaned && finalize.path
+          ? await objectExists({ bucket, path: finalize.path }).catch(() => false)
+          : null
+
+      const finalUrl =
+        cleaned && finalize.cacheBuster
+          ? withCacheBuster(cleaned, finalize.cacheBuster)
+          : cleaned
+
+      await setViralRequestCoverImage(prisma, {
+        requestId: finalize.requestId,
+        coverImageUrl: finalUrl,
+      })
+
+      await writeAdminAuditLog({
+        adminUserId: user.id,
+        action: finalUrl
+          ? 'VIRAL_REQUEST_COVER_IMAGE_UPDATED'
+          : 'VIRAL_REQUEST_COVER_IMAGE_CLEARED',
+        note: finalUrl
+          ? 'Viral request cover image updated'
+          : 'Viral request cover image cleared',
+        targetType: 'other',
+        targetId: finalize.requestId,
+        metadata: {
+          requestId: finalize.requestId,
+          hasStoragePath: Boolean(finalize.path),
+          uploadedObjectExists,
+          cacheBusterProvided: finalize.cacheBuster !== undefined,
+        },
+      }).catch(() => null)
+
+      return jsonOk({
+        coverImageUrl: finalUrl,
+      } satisfies MediaAdminViralCoverFinalizeDTO)
+    }
 
     if (finalize) {
       const allowed = await requireSupportScope({
@@ -277,6 +402,48 @@ export async function POST(req: NextRequest) {
 
     if (!Number.isFinite(init.size) || init.size <= 0 || init.size > 8_000_000) {
       return jsonFail(400, 'Invalid size (max 8MB)')
+    }
+
+    if (init.kind === 'VIRAL_REQUEST_COVER_IMAGE_PUBLIC') {
+      const viralAllowed = await requireViralReviewScope({
+        adminUserId: user.id,
+        requestId: init.requestId,
+      })
+
+      if (viralAllowed === null) return jsonFail(404, 'Viral request not found')
+      if (!viralAllowed) return jsonFail(403, 'Forbidden')
+
+      const viralBase = mustBaseUrl()
+      const viralBucket = 'media-public'
+      const viralExt = safeExtFromContentType(init.contentType)
+      const viralCacheBuster = Date.now()
+      // One object per request, overwritten on replace — a cover has no history
+      // worth keeping. `upsert` below is what makes the second upload land.
+      const viralPath = buildViralRequestCoverTargetPath({
+        requestId: init.requestId,
+        extension: viralExt,
+      })
+
+      const viralToken = await createSignedUploadUrl({
+        bucket: viralBucket,
+        path: viralPath,
+      })
+
+      if (!viralToken) {
+        return jsonFail(500, 'Could not create upload URL')
+      }
+
+      return jsonOk({
+        bucket: viralBucket,
+        path: viralPath,
+        token: viralToken,
+        publicUrl: buildPublicUrl({
+          base: viralBase,
+          bucket: viralBucket,
+          path: viralPath,
+        }),
+        cacheBuster: viralCacheBuster,
+      } satisfies MediaAdminUploadInitDTO)
     }
 
     const allowed = await requireSupportScope({

@@ -129,6 +129,12 @@ export default async function AdminHomePage() {
                 cta="Open queue"
                 tone="highlight"
               />
+              <Card
+                title="Viral looks"
+                desc="Name, vet and publish the looks clients spotted — set the cover, then approve to fan it out."
+                href="/admin/viral-requests"
+                cta="Open queue"
+              />
             </>
           ) : null}
 

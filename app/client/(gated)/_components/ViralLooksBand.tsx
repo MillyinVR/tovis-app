@@ -1,6 +1,9 @@
 // app/client/(gated)/_components/ViralLooksBand.tsx
 import Link from 'next/link'
 
+import RemoteImage from '@/app/_components/media/RemoteImage'
+import { resolveViralCoverImage } from '@/lib/viralRequests/contracts'
+
 import type {
   ClientHomeViralLive,
   ClientHomeViralPending,
@@ -24,6 +27,7 @@ function currentStepIndex(status: ClientHomeViralPending['status']): number {
 function LiveLookHero({ live }: { live: ClientHomeViralLive }) {
   const platform = platformFromUrl(live.sourceUrl)
   const proCount = live._count.approvalFanOuts
+  const cover = resolveViralCoverImage(live)
 
   return (
     <div
@@ -33,6 +37,16 @@ function LiveLookHero({ live }: { live: ClientHomeViralLive }) {
           'radial-gradient(130% 110% at 26% 16%, rgb(var(--accent-primary) / 0.55), rgb(var(--bg-primary)) 60%)',
       }}
     >
+      {cover ? (
+        <RemoteImage
+          src={cover}
+          alt=""
+          className="absolute inset-0 h-full w-full object-cover"
+          loading="lazy"
+          width={640}
+          height={600}
+        />
+      ) : null}
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0"
@@ -115,10 +129,10 @@ function LiveLookHero({ live }: { live: ClientHomeViralLive }) {
  * 2026-08-14: once there is more than one live look, a single hero can only show
  * one of them, so they list like boards instead.
  *
- * The tiles are a gradient rather than photographs because a viral request
- * carries no media of its own yet — it is a NAME the platform got vetted and
- * matched, not a portfolio. Same reason the single hero has always been a
- * gradient.
+ * The picture is the reviewer's cover (or the submitter's own photo) when there
+ * is one, and a gradient when there is not — a viral look is a NAME the platform
+ * got vetted and matched, and it can be published before anyone has a shot of
+ * it. Set in /admin/viral-requests.
  */
 function LiveLookStrip({
   live,
@@ -129,17 +143,29 @@ function LiveLookStrip({
 }) {
   const platform = platformFromUrl(live.sourceUrl)
   const proCount = live._count.approvalFanOuts
+  const cover = resolveViralCoverImage(live)
 
   return (
     <Link
       href={`/search?q=${encodeURIComponent(live.name)}`}
       className="brand-focus group relative block aspect-[2.05/1] overflow-hidden rounded-[18px] border border-textPrimary/10 bg-bgSecondary"
     >
-      <div
-        aria-hidden="true"
-        className="absolute inset-0"
-        style={{ background: gradientAvatar(index) }}
-      />
+      {cover ? (
+        <RemoteImage
+          src={cover}
+          alt=""
+          className="absolute inset-0 h-full w-full object-cover"
+          loading="lazy"
+          width={640}
+          height={312}
+        />
+      ) : (
+        <div
+          aria-hidden="true"
+          className="absolute inset-0"
+          style={{ background: gradientAvatar(index) }}
+        />
+      )}
       <div
         aria-hidden="true"
         className="absolute inset-0 bg-linear-to-r from-bgPrimary/85 from-28% via-bgPrimary/25 via-70% to-transparent"

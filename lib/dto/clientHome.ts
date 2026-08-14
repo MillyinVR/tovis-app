@@ -8,6 +8,7 @@ import type { Prisma } from '@prisma/client'
 
 import { moneyToString } from '@/lib/money'
 import { mapPublicIncentiveDto } from '@/lib/lastMinute/openingDto'
+import { resolveViralCoverImage } from '@/lib/viralRequests/contracts'
 import { pickRecipientTierPlan } from '@/lib/lastMinute/pickTierPlan'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import type { BookingBeforeAfterThumbs } from '@/lib/media/bookingBeforeAfter'
@@ -313,6 +314,13 @@ export type ClientHomeViralLiveDTO = {
   name: string
   sourceUrl: string | null
   approvedAt: string | null
+  /**
+   * The picture this look is shown by — the reviewer's cover, else the photo the
+   * submitter attached, else null and the client draws its own gradient.
+   * Resolved server-side so the phone, the web and the admin queue cannot each
+   * pick a different one. Optional on the wire for older clients.
+   */
+  coverImage?: string | null
   _count: { approvalFanOuts: number }
 }
 
@@ -659,6 +667,7 @@ function serializeViralLive(row: ClientHomeViralLive): ClientHomeViralLiveDTO {
     name: row.name,
     sourceUrl: row.sourceUrl ?? null,
     approvedAt: iso(row.approvedAt),
+    coverImage: resolveViralCoverImage(row),
     _count: { approvalFanOuts: row._count.approvalFanOuts },
   }
 }

@@ -589,18 +589,26 @@ const VIRAL = {
       sourceUrl: 'https://www.tiktok.com/@demoseed/video/7300000000000000000',
       /** Pros who picked it up — the "N pros now offer this" row. */
       proKeys: ['noor', 'sasha', 'mara'] as const,
+      /** A reviewer's cover, set in /admin/viral-requests. */
+      coverImage: 'http://localhost:3000/seed-demo/cherry-cola-balayage.jpg',
     },
     {
       key: 'expensive-brunette',
       name: 'Expensive Brunette',
       sourceUrl: 'https://www.instagram.com/p/DemoSeedExpensiveBrunette/',
       proKeys: ['noor'] as const,
+      coverImage: 'http://localhost:3000/seed-demo/money-piece-blonde.jpg',
     },
     {
+      // 🔴 Deliberately WITHOUT a cover: an approved look can be published
+      // before anyone has a photograph of it, and a fixture where every strip
+      // has a picture would never render the gradient fallback the client is
+      // supposed to draw.
       key: 'milky-nails',
       name: 'Milky Nails',
       sourceUrl: 'https://www.tiktok.com/@demoseed/video/7300000000000000001',
       proKeys: ['sasha', 'mara'] as const,
+      coverImage: null,
     },
   ],
   pending: {
@@ -1818,6 +1826,7 @@ async function main(): Promise<void> {
         clientId: `${P}fan-0000`,
         name: look.name,
         sourceUrl: look.sourceUrl,
+        coverImageUrl: look.coverImage,
         status: ViralServiceRequestStatus.APPROVED,
         moderationStatus: ModerationStatus.APPROVED,
         approvedAt,
