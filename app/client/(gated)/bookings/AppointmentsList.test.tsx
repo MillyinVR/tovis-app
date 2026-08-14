@@ -60,6 +60,9 @@ function makeBooking(overrides?: Partial<ClientBookingDTO>): ClientBookingDTO {
     locationId: 'loc_1',
     timeZone: 'America/Los_Angeles',
     locationLabel: 'Main Studio',
+    locationAddress: '215 Bedford Ave, Brooklyn, NY 11211',
+    locationLat: null,
+    locationLng: null,
     professional: {
       id: 'pro_1',
       businessName: 'Glow Studio',

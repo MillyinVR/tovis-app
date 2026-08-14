@@ -3543,6 +3543,13 @@
           },
           "type": "array"
         },
+        "locationAddress": {
+          "description": "The appointment's actual street address (pro's location for SALON, the client's for MOBILE), or null when the booking carries no address. This is what every client turns into a maps link.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "locationId": {
           "type": [
             "string",
@@ -3550,8 +3557,22 @@
           ]
         },
         "locationLabel": {
+          "description": "Human label for the place — an address, a salon name, or a city. Display only; do NOT hand it to a maps app.",
           "type": [
             "string",
+            "null"
+          ]
+        },
+        "locationLat": {
+          "description": "Coordinates for that address, when the snapshot captured them.",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "locationLng": {
+          "type": [
+            "number",
             "null"
           ]
         },
@@ -3722,6 +3743,9 @@
         "locationId",
         "timeZone",
         "locationLabel",
+        "locationAddress",
+        "locationLat",
+        "locationLng",
         "professional",
         "bookedLocation",
         "display",

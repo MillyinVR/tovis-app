@@ -74,6 +74,13 @@ const bookingPageBookingSelect = {
   locationId: true,
   locationTimeZone: true,
   locationAddressSnapshot: true,
+  locationLatSnapshot: true,
+  locationLngSnapshot: true,
+  // MOBILE happens at the CLIENT's address — `buildClientBookingDTO`
+  // resolves the booked place from these, not from the pro's snapshot.
+  clientAddressSnapshot: true,
+  clientAddressLatSnapshot: true,
+  clientAddressLngSnapshot: true,
 
   service: {
     select: {

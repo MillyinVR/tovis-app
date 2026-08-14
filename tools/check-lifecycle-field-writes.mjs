@@ -81,6 +81,15 @@ const ALLOWED_FILE_PATTERNS = [
   // Prisma generated/migration files are not application write paths.
   /^prisma\/migrations\//,
   /^prisma\/seed\.[cm]?[jt]s$/,
+
+  // The client-walkthrough demo fixture, for the same reason as `prisma/seed`
+  // above: it is a LOCAL-ONLY seeder (its own hard guard refuses any non-
+  // localhost DATABASE_URL) whose whole job is to stage bookings in lifecycle
+  // states — COMPLETED with a finished session — that the write boundary can
+  // only reach by simulating a whole appointment. It is not a runtime mutation
+  // path, and nothing in the app imports it. Named exactly, not by directory:
+  // a future `prisma/scripts/*` is not covered and has to argue its own case.
+  /^prisma\/scripts\/seedDemoClientProfile\.ts$/,
 ]
 
 const BOOKING_WRITE_CALL_PATTERN =

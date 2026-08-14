@@ -15,6 +15,7 @@ import {
   type ClientConfirmationBookingRow,
 } from '@/lib/booking/clientConfirmation'
 import { clientConfirmationLoopEnabled } from '@/lib/booking/clientConfirmationLoop'
+import { resolveBookingLocationMeta } from '@/lib/booking/locationMeta'
 import { formatBookingServicesLabel } from '@/lib/booking/serviceLabel'
 import {
   resolveApptTimeZone,
@@ -162,7 +163,20 @@ export type ClientBookingDTO = {
   timeZone: string | null
   timeZoneSource?: ClientBookingTimeZoneSource
 
+  /**
+   * Human label for the place — an address, a salon name, or a city. Display
+   * only; do NOT hand it to a maps app.
+   */
   locationLabel: string | null
+  /**
+   * The appointment's actual street address (pro's location for SALON, the
+   * client's for MOBILE), or null when the booking carries no address. This is
+   * what every client turns into a maps link.
+   */
+  locationAddress: string | null
+  /** Coordinates for that address, when the snapshot captured them. */
+  locationLat: number | null
+  locationLng: number | null
 
   professional: {
     id: string
@@ -307,7 +321,14 @@ function multiplyMoneyString(unitPrice: unknown, quantity: unknown): string {
 }
 
 function buildLocationLabel(args: {
-  locationAddressSnapshot: unknown
+  /**
+   * The snapshot of the place the appointment actually happens — the pro's
+   * location for SALON, the CLIENT's address for MOBILE. Resolved by
+   * `resolveBookingLocationMeta`, not read off the booking directly: reading
+   * `locationAddressSnapshot` unconditionally is how this label used to print
+   * the pro's salon on a booking the pro travels to.
+   */
+  bookedAddress: string | null
   location: {
     formattedAddress: string | null
     name: string | null
@@ -315,9 +336,14 @@ function buildLocationLabel(args: {
     state: string | null
   } | null
   proLocation: string | null
+  isMobile: boolean
 }): string | null {
-  const snap = pickFormattedAddress(args.locationAddressSnapshot)
-  if (snap) return snap
+  if (args.bookedAddress) return args.bookedAddress
+
+  // Every fallback below describes the PRO's premises. On a MOBILE booking that
+  // is the one address the appointment definitely is not at, so a mobile
+  // booking with no client-address snapshot honestly has no location to show.
+  if (args.isMobile) return null
 
   const formatted = args.location?.formattedAddress?.trim()
   if (formatted) return formatted
@@ -370,6 +396,13 @@ export type ClientBookingRow = Prisma.BookingGetPayload<{
     locationId: true
     locationTimeZone: true
     locationAddressSnapshot: true
+    locationLatSnapshot: true
+    locationLngSnapshot: true
+    // MOBILE happens at the CLIENT's address, so the pro-location snapshot above
+    // is the wrong place for it — see `resolveBookedPlace` below.
+    clientAddressSnapshot: true
+    clientAddressLatSnapshot: true
+    clientAddressLngSnapshot: true
 
     service: { select: { id: true; name: true } }
 
@@ -568,18 +601,42 @@ export async function buildClientBookingDTO(input: {
     b.service?.name ?? null,
   )
 
-  const locationLabel = buildLocationLabel({
+  // Where the appointment actually happens. SALON reads the pro-location
+  // snapshot, MOBILE the client-address one — the shared resolver the pro's own
+  // bookings screens and the booking confirmation already use.
+  const bookedPlace = resolveBookingLocationMeta({
+    locationType: b.locationType ?? null,
     locationAddressSnapshot: b.locationAddressSnapshot,
-    location: b.location
-      ? {
-          formattedAddress: b.location.formattedAddress ?? null,
-          name: b.location.name ?? null,
-          city: b.location.city ?? null,
-          state: b.location.state ?? null,
-        }
-      : null,
-    proLocation: b.professional?.location ?? null,
+    locationLatSnapshot: b.locationLatSnapshot ?? null,
+    locationLngSnapshot: b.locationLngSnapshot ?? null,
+    clientAddressSnapshot: b.clientAddressSnapshot,
+    clientAddressLatSnapshot: b.clientAddressLatSnapshot ?? null,
+    clientAddressLngSnapshot: b.clientAddressLngSnapshot ?? null,
   })
+
+  const locationLabel = buildLocationLabel({
+    bookedAddress: bookedPlace.formattedAddress,
+    location: bookedPlace.isMobile
+      ? null
+      : b.location
+        ? {
+            formattedAddress: b.location.formattedAddress ?? null,
+            name: b.location.name ?? null,
+            city: b.location.city ?? null,
+            state: b.location.state ?? null,
+          }
+        : null,
+    proLocation: b.professional?.location ?? null,
+    isMobile: bookedPlace.isMobile,
+  })
+
+  // The label can be a salon NAME or a city — neither of which a maps app can
+  // find. `locationAddress` is the address itself, so every client can make the
+  // place tappable (Tori's standing rule) without guessing which of the two the
+  // label happens to be this time.
+  const locationAddress =
+    bookedPlace.formattedAddress ??
+    (bookedPlace.isMobile ? null : b.location?.formattedAddress?.trim() || null)
 
   const tzRes = await resolveApptTimeZone({
     bookingLocationTimeZone: b.locationTimeZone ?? null,
@@ -702,6 +759,9 @@ export async function buildClientBookingDTO(input: {
     timeZoneSource,
 
     locationLabel,
+    locationAddress,
+    locationLat: bookedPlace.lat,
+    locationLng: bookedPlace.lng,
 
     professional: b.professional
       ? {
