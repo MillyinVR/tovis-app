@@ -257,8 +257,36 @@ export type AvailabilityLocationOption = {
   name: string | null
   city: string | null
   state: string | null
+  /**
+   * The exact street address — **null unless the pro published it**
+   * (`ProfessionalLocation.isAddressPublic`). This endpoint is unauthenticated,
+   * and a "salon" is often a home studio, so an address arrives here only when
+   * the pro chose to publish one. Render `areaLabel` when this is null.
+   */
   formattedAddress: string | null
+  /**
+   * The coarse place ("Brooklyn, NY"). Always sent when the location has a city
+   * or state, published address or not — this is what lets the booking sheet
+   * answer "where is this pro?" for every pro without exposing a home address.
+   */
+  areaLabel?: string | null
   isPrimary: boolean
+}
+
+/**
+ * A MOBILE pro's reach: how far they travel, and from where.
+ *
+ * The sheet's answer to "where is this pro?" when there is no salon to name.
+ * Both halves describe the rule the write boundary actually enforces at booking
+ * time (`ProfessionalProfile.mobileRadiusMiles`, measured from the MOBILE_BASE
+ * location), so it can't drift into a second, softer promise. Null when the pro
+ * has published neither — an absent line beats "up to null miles around null".
+ *
+ * 🔴 Deliberately carries NO address. A mobile base is very often the pro's home.
+ */
+export type AvailabilityServiceArea = {
+  radiusMiles: number | null
+  areaLabel: string | null
 }
 
 export type AvailabilityBootstrapOk = ApiOk<
@@ -315,6 +343,8 @@ export type AvailabilityBootstrapOk = ApiOk<
 
     otherPros: AvailabilityOtherPro[]
     locationOptions: AvailabilityLocationOption[]
+    /** MOBILE only; null in salon mode and for pros with no published reach. */
+    serviceArea?: AvailabilityServiceArea | null
     waitlistSupported: boolean
     offering: AvailabilityOffering
 

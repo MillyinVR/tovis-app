@@ -4,6 +4,7 @@ import type {
   AvailabilityBootstrapResponse,
   AvailabilityDayResponse,
   AvailabilityLocationOption,
+  AvailabilityServiceArea,
   AvailabilityOffering,
   AvailabilityOtherPro,
   AvailabilityPrimaryPro,
@@ -279,11 +280,29 @@ function pickAvailabilityLocationOptions(
       state: row.state == null ? null : pickString(row.state),
       formattedAddress:
         row.formattedAddress == null ? null : pickString(row.formattedAddress),
+      areaLabel: row.areaLabel == null ? null : pickString(row.areaLabel),
       isPrimary: pickBoolean(row.isPrimary) ?? false,
     })
   }
 
   return out
+}
+
+/**
+ * A MOBILE pro's reach. Absent/garbage parses to null — the sheet then renders
+ * no service-area line, which is the honest state for a pro who has published
+ * neither a radius nor a base.
+ */
+function pickAvailabilityServiceArea(
+  x: unknown,
+): AvailabilityServiceArea | null {
+  if (!isRecord(x)) return null
+
+  const radiusMiles = pickNumber(x.radiusMiles)
+  const areaLabel = x.areaLabel == null ? null : pickString(x.areaLabel)
+
+  if (radiusMiles == null && !areaLabel) return null
+  return { radiusMiles, areaLabel }
 }
 
 function pickAvailabilitySelectedDay(
@@ -631,6 +650,7 @@ export function parseAvailabilityBootstrapResponse(
     selectedDay,
     otherPros,
     locationOptions: pickAvailabilityLocationOptions(x.locationOptions),
+    serviceArea: pickAvailabilityServiceArea(x.serviceArea),
     waitlistSupported,
     offering,
     ...(debug !== undefined ? { debug } : {}),

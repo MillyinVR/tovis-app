@@ -32,6 +32,7 @@ import DebugPanel from './components/DebugPanel'
 import DrawerShell from './components/DrawerShell'
 import MobileAddressSelector from './components/MobileAddressSelector'
 import SalonLocationSelector from './components/SalonLocationSelector'
+import WhereBlock from './components/WhereBlock'
 import OtherPros from './components/OtherPros'
 import SlotChips from './components/SlotChips'
 import StickyCTA from './components/StickyCTA'
@@ -1320,6 +1321,36 @@ export default function AvailabilityDrawer(props: {
 
   const showMobileAddressSelector = open && mobileAddressGateRequested
 
+  /**
+   * The salon the client is actually booking into, for the sheet's "where" line.
+   *
+   * `locationOptions` is the pro's whole bookable set; the one that matters is
+   * the one this request resolved to. Falls back to the primary so a sheet whose
+   * options list hasn't caught up with a just-changed selection still names a
+   * real place rather than none.
+   */
+  const bookedLocationOption = useMemo(() => {
+    const options = summary?.locationOptions ?? []
+    if (options.length === 0) return null
+
+    const activeId = requestedLocationId ?? summary?.request.locationId ?? null
+    return (
+      options.find((option) => option.id === activeId) ??
+      options.find((option) => option.isPrimary) ??
+      options[0] ??
+      null
+    )
+  }, [summary?.locationOptions, summary?.request.locationId, requestedLocationId])
+
+  /** The client's chosen service address, as text — MOBILE's "they come to you here". */
+  const selectedClientAddressLabel = useMemo(() => {
+    if (!selectedClientAddressId) return null
+    const match = mobileAddresses.find(
+      (address) => address.id === selectedClientAddressId,
+    )
+    return match?.formattedAddress?.trim() || null
+  }, [mobileAddresses, selectedClientAddressId])
+
   const displayError = (() => {
     if (holdError) return holdError
 
@@ -1723,6 +1754,13 @@ export default function AvailabilityDrawer(props: {
                 }}
               />
 
+              <WhereBlock
+                locationType={activeLocationType}
+                location={bookedLocationOption}
+                serviceArea={summary.serviceArea ?? null}
+                clientAddress={selectedClientAddressLabel}
+              />
+
               {activeLocationType === 'SALON' ? (
                 <SalonLocationSelector
                   value={requestedLocationId ?? summary.request.locationId}
@@ -1746,6 +1784,13 @@ export default function AvailabilityDrawer(props: {
                 onChange={(nextType) => {
                   void resetForLocationModeChange(nextType)
                 }}
+              />
+
+              <WhereBlock
+                locationType={activeLocationType}
+                location={null}
+                serviceArea={summary?.serviceArea ?? null}
+                clientAddress={selectedClientAddressLabel}
               />
 
               <MobileAddressSelector
