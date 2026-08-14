@@ -26,6 +26,7 @@ export const viralRequestListSelect =
     sourceUrl: true,
     linksJson: true,
     mediaUrlsJson: true,
+    coverImageUrl: true,
     requestedCategoryId: true,
     status: true,
     moderationStatus: true,
@@ -854,6 +855,91 @@ export async function markViralRequestApprovalFanOutRowsFailed(
   return {
     updatedCount: updated.count,
   }
+}
+
+/**
+ * Sets (or clears) the picture an approved viral look is shown by.
+ *
+ * Deliberately its own writer rather than a field on `updateViralRequestStatus`:
+ * a reviewer sets the cover BEFORE approving, and often without changing the
+ * status at all. Folding it into the status update would mean either a
+ * status-less status change or no way to fix a cover on an already-approved
+ * look.
+ *
+ * Passing null clears it, which falls the readers back to the submitter's own
+ * attachment (`resolveViralCoverImage`) rather than to nothing.
+ */
+export async function setViralRequestCoverImage(
+  db: ViralRequestsDb,
+  args: { requestId: string; coverImageUrl: string | null },
+): Promise<ViralRequestListRow> {
+  const requestId = normalizeRequiredId('requestId', args.requestId)
+  // Same validator every other URL on this model goes through, so a cover
+  // cannot be the one field that accepts a `javascript:` href.
+  const coverImageUrl = normalizeHttpUrl(args.coverImageUrl, 'coverImageUrl')
+
+  return db.viralServiceRequest.update({
+    where: { id: requestId },
+    data: { coverImageUrl },
+    select: viralRequestListSelect,
+  })
+}
+
+/**
+ * The admin review queue's read — every client's requests, newest first.
+ *
+ * Deliberately NOT `listClientViralRequests` with the client filter dropped:
+ * that one is a client reading their OWN submissions and is ordered for a
+ * "your requests" list. This is a work queue, so it sorts the things a reviewer
+ * has to act on to the top — REQUESTED and IN_REVIEW before anything already
+ * decided — and only then by age.
+ */
+const ADMIN_QUEUE_ACTIONABLE: ViralServiceRequestStatus[] = [
+  ViralServiceRequestStatus.REQUESTED,
+  ViralServiceRequestStatus.IN_REVIEW,
+]
+
+export async function listAdminViralRequests(
+  db: ViralRequestsDb,
+  options?: { take?: number },
+): Promise<ViralRequestListRow[]> {
+  const take = Math.min(Math.max(options?.take ?? 100, 1), 300)
+
+  const rows = await db.viralServiceRequest.findMany({
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    take,
+    select: viralRequestListSelect,
+  })
+
+  // Sorted in JS, not SQL: "needs a decision" is a two-value set rather than an
+  // ordering the enum happens to have, and the same helper is the one the page
+  // shows a count from.
+  return [...rows].sort((a, b) => {
+    const aActionable = ADMIN_QUEUE_ACTIONABLE.includes(a.status) ? 0 : 1
+    const bActionable = ADMIN_QUEUE_ACTIONABLE.includes(b.status) ? 0 : 1
+    if (aActionable !== bActionable) return aActionable - bActionable
+    return b.createdAt.getTime() - a.createdAt.getTime()
+  })
+}
+
+export function isViralRequestAwaitingReview(
+  status: ViralServiceRequestStatus,
+): boolean {
+  return ADMIN_QUEUE_ACTIONABLE.includes(status)
+}
+
+/**
+ * Where a reviewer's cover image lands. One object per request, overwritten on
+ * replace — a cover has no history worth keeping, and leaving the old bytes
+ * behind would make the bucket grow with every retry.
+ */
+export function buildViralRequestCoverTargetPath(args: {
+  requestId: string
+  extension: string
+}): string {
+  const requestId = normalizeRequiredId('requestId', args.requestId)
+  const extension = args.extension.replace(/[^a-z0-9]/gi, '').toLowerCase()
+  return `viral-requests/${requestId}/cover.${extension || 'jpg'}`
 }
 
 export function buildViralRequestUploadTargetPath(

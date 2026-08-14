@@ -39,3 +39,14 @@ export type MediaAdminUploadInitDTO = {
 export type MediaAdminUploadFinalizeDTO = {
   defaultImageUrl: string
 }
+
+// POST /api/v1/admin/uploads (finalize, viral cover) — the committed cover URL.
+// A separate shape rather than a widened one: the two finalize branches commit
+// different fields on different models, and a single optional-everything DTO
+// would let a caller read `defaultImageUrl` off a viral response and get
+// undefined.
+export type MediaAdminViralCoverFinalizeDTO = {
+  /** Null when the reviewer cleared their pick — readers fall back to the
+   *  submitter's own attachment, not to nothing. */
+  coverImageUrl: string | null
+}

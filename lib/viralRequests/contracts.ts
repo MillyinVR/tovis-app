@@ -37,6 +37,12 @@ export type ViralRequestDto = {
   sourceUrl: string | null
   links: string[]
   mediaUrls: string[]
+  /**
+   * The picture this look is shown by. `coverImageUrl` is the REVIEWER's pick
+   * and wins; `mediaUrls[0]` is what the submitter attached. Null when there is
+   * neither — the surfaces then draw their own gradient.
+   */
+  coverImage: string | null
   requestedCategoryId: string | null
   requestedCategory: {
     id: string
@@ -56,6 +62,39 @@ export type ViralRequestDto = {
   updatedAt: string
 }
 
+/**
+ * The one place that decides which picture a viral look is shown by, so the
+ * admin queue, the client home and every future surface cannot disagree.
+ *
+ * 🔴 ONLY the reviewer's `coverImageUrl` — never the submitter's attachment
+ * (Tori, 2026-08-14: *"the client can upload an image or video but only the
+ * admin can set it app wide"*).
+ *
+ * It is tempting to fall back to `mediaUrls[0]` so a look has a picture sooner,
+ * and that was the first cut of this function. It is wrong: a client attaches
+ * whatever they photographed or found, and approving the look would then publish
+ * that image across the platform with nobody having chosen it — someone else's
+ * copyrighted shot, or worse, on a surface every client sees. The submitter's
+ * media is EVIDENCE for the reviewer, shown in the queue; a reviewer promotes it
+ * with one tap ("Use this"), which copies it here. Nothing reaches a client
+ * surface until that happens.
+ */
+export function resolveViralCoverImage(row: {
+  coverImageUrl: string | null
+}): string | null {
+  return row.coverImageUrl?.trim() || null
+}
+
+/**
+ * What the SUBMITTER attached — reviewer-facing only. Never rendered on a client
+ * surface; see `resolveViralCoverImage`.
+ */
+export function readViralSubmitterMedia(row: {
+  mediaUrlsJson: ViralRequestListRow['mediaUrlsJson']
+}): string[] {
+  return readStringArray(row.mediaUrlsJson)
+}
+
 export function toViralRequestDto(row: ViralRequestListRow): ViralRequestDto {
   return {
     id: row.id,
@@ -64,6 +103,7 @@ export function toViralRequestDto(row: ViralRequestListRow): ViralRequestDto {
     sourceUrl: row.sourceUrl ?? null,
     links: readStringArray(row.linksJson),
     mediaUrls: readStringArray(row.mediaUrlsJson),
+    coverImage: resolveViralCoverImage(row),
     requestedCategoryId: row.requestedCategoryId ?? null,
     requestedCategory: row.requestedCategory
       ? {

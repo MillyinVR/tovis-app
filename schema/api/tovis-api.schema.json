@@ -5638,6 +5638,13 @@
             "null"
           ]
         },
+        "coverImage": {
+          "description": "The picture this look is shown by — the reviewer's cover, else the photo the submitter attached, else null and the client draws its own gradient. Resolved server-side so the phone, the web and the admin queue cannot each pick a different one. Optional on the wire for older clients.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "id": {
           "type": "string"
         },

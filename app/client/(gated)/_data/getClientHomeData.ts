@@ -367,6 +367,10 @@ export const clientHomeViralLiveSelect =
     name: true,
     sourceUrl: true,
     approvedAt: true,
+    // Both halves of the picture: the reviewer's pick and the submitter's own
+    // attachment. `resolveViralCoverImage` decides between them in one place.
+    coverImageUrl: true,
+    mediaUrlsJson: true,
     _count: {
       select: {
         approvalFanOuts: true,
@@ -381,6 +385,8 @@ export const clientHomeViralPendingSelect =
     sourceUrl: true,
     status: true,
     createdAt: true,
+    coverImageUrl: true,
+    mediaUrlsJson: true,
     _count: {
       select: {
         approvalFanOuts: true,
