@@ -47,6 +47,9 @@ const mocks = vi.hoisted(() => ({
     mediaAsset: {
       findMany: vi.fn(),
     },
+    proPrepItem: {
+      findMany: vi.fn(),
+    },
     practiceShot: {
       findMany: vi.fn(),
     },
@@ -155,6 +158,7 @@ function resetFindManyMocks() {
   mocks.db.clientAllergy.findMany.mockResolvedValue([])
   mocks.db.consultSession.findMany.mockResolvedValue([])
   mocks.db.mediaAsset.findMany.mockResolvedValue([])
+  mocks.db.proPrepItem.findMany.mockResolvedValue([])
   mocks.db.practiceShot.findMany.mockResolvedValue([])
   mocks.db.message.findMany.mockResolvedValue([])
   mocks.db.notification.findMany.mockResolvedValue([])
@@ -601,6 +605,7 @@ describe('exportUserData', () => {
             createdAt: '2026-04-07T00:00:00.000Z',
           },
         ],
+        proPrepItems: [],
         practiceShots: [],
         messages: [
           {

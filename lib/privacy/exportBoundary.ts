@@ -345,6 +345,11 @@ export const EXPORT_BOUNDARY: Readonly<Record<string, ExportDisposition>> = {
   ProfessionalNotificationPreference: { status: 'PENDING', note: PENDING_NOTE },
   ProfessionalPaymentSettings: { status: 'PENDING', note: PENDING_NOTE },
   ProfessionalReceiptInbox: { status: 'PENDING', note: PENDING_NOTE },
+  // The pro's own "Before you go" copy — text they wrote, shown verbatim to
+  // their clients. Straightforwardly theirs, so it is exported rather than
+  // parked in the backlog. The client's ticks against these rows
+  // (BookingPrepCheck) are the other party's activity and are not included.
+  ProPrepItem: { status: 'EXPORTED', keys: ['proPrepItems'] },
   ProfessionalServiceOffering: { status: 'PENDING', note: PENDING_NOTE },
   ProfessionalSubscription: { status: 'PENDING', note: PENDING_NOTE },
   Referral: { status: 'PENDING', note: PENDING_NOTE },

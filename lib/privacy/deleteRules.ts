@@ -531,6 +531,44 @@ export const DELETE_RULES: readonly DeleteRule[] = [
     },
   }),
   deleteRule({
+    model: 'ProPrepItem',
+    notes:
+      "The pro's authored 'Before you go' rows, both their default list and every per-offering one.",
+    delegate: (db) => db.proPrepItem,
+    where: (s) =>
+      s.professionalProfileId
+        ? { professionalId: s.professionalProfileId }
+        : null,
+  }),
+  deleteRule({
+    model: 'BookingPrepCheck',
+    notes:
+      "The client's ticks. 🔴 Scoped THROUGH the booking rather than by cascade: Booking is RETAIN, so a deleted client's ticks would otherwise survive on retained bookings forever. The pro side needs no arm — a pro deleting their account takes ProPrepItem with them, and these cascade from that.",
+    delegate: (db) => db.bookingPrepCheck,
+    where: (s) =>
+      s.clientProfileId
+        ? { booking: { clientId: s.clientProfileId } }
+        : null,
+  }),
+  deleteRule({
+    model: 'BookingBoardShare',
+    notes:
+      'The board-to-booking disclosure grant. Cascades from Board, but named explicitly so revoking it is never accidental — and scoped through the booking too, so a share survives neither side of the relationship being deleted.',
+    delegate: (db) => db.bookingBoardShare,
+    where: (s) => {
+      const or = orArms<Prisma.BookingBoardShareWhereInput>(
+        s.clientProfileId ? { board: { clientId: s.clientProfileId } } : null,
+        s.clientProfileId
+          ? { booking: { clientId: s.clientProfileId } }
+          : null,
+        s.professionalProfileId
+          ? { booking: { professionalId: s.professionalProfileId } }
+          : null,
+      )
+      return or.length > 0 ? { OR: or } : null
+    },
+  }),
+  deleteRule({
     model: 'ClientCreatorStat',
     notes: 'Derived creator standing; keyed 1:1 to the client profile.',
     delegate: (db) => db.clientCreatorStat,

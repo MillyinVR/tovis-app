@@ -24,6 +24,7 @@ import {
   type StepUnit,
 } from '@/lib/booking/rebookDates'
 import AvailabilityCalendar from '@/app/pro/_components/AvailabilityCalendar'
+import CareSectionsEditor from './CareSectionsEditor'
 import StepButtons from './StepButtons'
 import RebookSlotPicker, {
   type SelectedRebookSlot,
@@ -1303,6 +1304,12 @@ export default function AftercareForm({
               </div>
             </div>
           </div>
+
+          {/* The plan's labelled blocks. Saves through its own endpoint rather
+              than this form's submit — prose has no business widening the blast
+              radius of a save that also moves the session step and the rebook
+              slot. */}
+          <CareSectionsEditor bookingId={bookingId} />
         </div>
 
         <div className="brand-aftercare-col">

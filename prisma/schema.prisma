@@ -1946,12 +1946,12 @@ model ProfessionalProfile {
   scheduleConfigVersion Int @default(0)
 
   // Relationships
-  user            User                          @relation(fields: [userId], references: [id])
-  locations       ProfessionalLocation[]
-  offerings       ProfessionalServiceOffering[]
-  bookings        Booking[]
-  calendarBlocks  CalendarBlock[]
-  consultSessions ConsultSession[]
+  user                 User                          @relation(fields: [userId], references: [id])
+  locations            ProfessionalLocation[]
+  offerings            ProfessionalServiceOffering[]
+  bookings             Booking[]
+  calendarBlocks       CalendarBlock[]
+  consultSessions      ConsultSession[]
   consultBriefFeedback ConsultBriefFeedback[]
 
   calendarFeedSubscription CalendarFeedSubscription?
@@ -2043,6 +2043,17 @@ model ProfessionalProfile {
 
   badgeStat        ProfessionalBadgeStat?
   availabilityStat ProfessionalAvailabilityStat?
+
+  /// The pro's DEFAULT "Before you go" rows (`offeringId = null`) plus every
+  /// per-offering list they have written. Resolved per booking — see
+  /// ProPrepItem.
+  prepItems ProPrepItem[]
+
+  /// Default free-text note shown to a client on the appointment-prep screen
+  /// ("Plan for about three hours in the chair"). An offering's own `prepNote`
+  /// overrides it. Deliberately NOT `Booking.clientVisibleOverrideNote`, which
+  /// is scoped to booking-rule overrides and written only on that path.
+  prepNote String?
 
   @@index([handleNormalized])
   @@index([verificationStatus])
@@ -2951,6 +2962,95 @@ model OfferingAddOn {
   @@index([addOnServiceId])
 }
 
+/// A row of the pro's "Before you go" checklist — the short imperatives a
+/// client reads in the days before an appointment ("Arrive with clean, dry
+/// hair").
+///
+/// TWO SCOPES IN ONE TABLE, resolved at read time by
+/// `lib/booking/prep.ts#resolvePrepItems`:
+///   · `offeringId = null` — the pro's DEFAULT list, used by any service that
+///     has not written its own.
+///   · `offeringId` set    — that service's OWN list, which REPLACES the
+///     default rather than appending to it. A pro who writes one balayage row
+///     means "for a balayage, this row" — not "this row plus everything I say
+///     about every service".
+///
+/// Replace-not-merge is why the resolver checks for the existence of ANY
+/// offering row (active or not is decided there) rather than merging two lists:
+/// merging leaves a pro unable to REMOVE a default row for one service.
+model ProPrepItem {
+  id String @id @default(cuid())
+
+  professionalId String
+  /// null = the pro's default list; set = that offering's own list.
+  offeringId     String?
+
+  text      String
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  professional ProfessionalProfile          @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+  offering     ProfessionalServiceOffering? @relation(fields: [offeringId], references: [id], onDelete: Cascade)
+
+  checks BookingPrepCheck[]
+
+  @@index([professionalId, offeringId, isActive, sortOrder])
+  @@index([offeringId])
+}
+
+/// The CLIENT's tick against one prep row, for one booking.
+///
+/// 🔴 This is the FIRST client-written row on a booking — almost everything
+/// else hanging off `Booking` is pro-written or system-written. Existence IS
+/// the tick: unticking deletes the row rather than nulling a column, so there
+/// is no "checked = false" state to disagree with a missing row.
+///
+/// The write path (`POST /api/v1/client/bookings/[id]/prep`) re-checks at
+/// execution that the booking is still the client's and still in a state that
+/// accepts ticks — a booking that was cancelled or completed between the read
+/// and the tap must refuse, not write.
+model BookingPrepCheck {
+  id String @id @default(cuid())
+
+  bookingId  String
+  prepItemId String
+
+  checkedAt DateTime @default(now())
+
+  booking  Booking     @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  prepItem ProPrepItem @relation(fields: [prepItemId], references: [id], onDelete: Cascade)
+
+  @@unique([bookingId, prepItemId])
+  @@index([bookingId])
+  @@index([prepItemId])
+}
+
+/// The client's inspiration board, handed to the pro FOR ONE BOOKING.
+///
+/// 🔴 A disclosure, not a visibility change. `Board.visibility` is never
+/// touched: a PRIVATE board stays private to everyone except the pro on this
+/// booking, and deleting this row revokes that. The pro's read goes through
+/// this row (`lib/boards/bookingShare.ts`), so there is exactly one place that
+/// widens who can see a board.
+model BookingBoardShare {
+  id String @id @default(cuid())
+
+  bookingId String
+  boardId   String
+
+  sharedAt DateTime @default(now())
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  board   Board   @relation(fields: [boardId], references: [id], onDelete: Cascade)
+
+  @@unique([bookingId, boardId])
+  @@index([bookingId])
+  @@index([boardId])
+}
+
 // ALLOW grants a service to a (profession, state); DENY removes it. DENY lets
 // "allowed in every state except X" be a baseline ALLOW (stateCode null) plus
 // one DENY row, instead of a per-state ALLOW for every other jurisdiction.
@@ -3067,6 +3167,14 @@ model ProfessionalServiceOffering {
   lastMinuteOpeningServices LastMinuteOpeningService[]
   priceRamps                OfferingPriceRamp[]
   bookingSeries             BookingSeries[]
+
+  /// This service's OWN "Before you go" rows. Any row here REPLACES the pro's
+  /// default list for bookings of this offering — see ProPrepItem.
+  prepItems ProPrepItem[]
+
+  /// Per-service override of the pro's default prep note. Null falls back to
+  /// `ProfessionalProfile.prepNote`.
+  prepNote String?
 
   @@unique([professionalId, serviceId])
   @@index([professionalId, isActive])
@@ -3569,8 +3677,8 @@ model Booking {
   // the fee model: they let discovery conversion be compared with and without fees
   // (0 across a cold match = the fees were off), and `proDiscoveryFeeWaived`
   // distinguishes a membership waiver from the fees simply being off.
-  proDiscoveryFeeAmount  Int?
-  proDiscoveryFeeWaived  Boolean   @default(false)
+  proDiscoveryFeeAmount Int?
+  proDiscoveryFeeWaived Boolean @default(false)
 
   // No-show / late-cancel fee (Phase 2 revenue protection). Charged off-session
   // against the client's default saved card and routed to the pro's connected
@@ -3720,6 +3828,12 @@ model Booking {
   rescheduleHolds BookingHold[] @relation("BookingHoldRescheduleTarget")
 
   series BookingSeries? @relation(fields: [seriesId], references: [id], onDelete: SetNull)
+
+  /// The CLIENT's ticks against the pro's prep checklist for this booking.
+  prepChecks BookingPrepCheck[]
+
+  /// Inspiration boards the client handed to the pro for this booking.
+  boardShares BookingBoardShare[]
 
   @@unique([professionalId, scheduledFor])
   @@unique([clientId, creationIdempotencyKey])
@@ -4246,11 +4360,50 @@ model AftercareSummary {
   recommendedProducts ProductRecommendation[]
   clientNotifications ClientNotification[]
   clientActionTokens  ClientActionToken[]
+  careSections        AftercareCareSection[]
 
   @@index([sentToClientAt, createdAt])
   @@index([bookingId, sentToClientAt])
   @@index([featuredBeforeAssetId])
   @@index([featuredAfterAssetId])
+}
+
+/// One labelled block of the pro's care plan — the "what to do with this now"
+/// the client reads after the appointment.
+///
+/// 🔴 PROFESSION-NEUTRAL BY CONSTRUCTION (Tori, 2026-08-14: *"we need to find a
+/// different way to do it since it wont just be hairstylist on the app this is
+/// for all beauty pros"*). The design's reference frame hardcoded "Wash" and
+/// "Heat & styling", which are meaningless to a nail tech, a lash artist or a
+/// brow specialist. So the LABEL is the pro's own words and lives in the row,
+/// not in the schema and not in an enum: a colourist writes "Wash" and "Heat &
+/// styling", a nail tech writes "Cuticle oil" and "Water & gloves", a lash
+/// artist writes "First 24 hours" and "Cleansing".
+///
+/// `lib/aftercare/careSectionSuggestions.ts` offers starting labels per
+/// ProfessionType so the pro is not staring at a blank form — those are EDITOR
+/// PREFILL ONLY. Nothing validates a label against them, and a pro is free to
+/// ignore every one. Adding a profession must never require a migration here.
+///
+/// `AftercareSummary.notes` is unchanged and still the pro's closing note; a
+/// summary with no sections renders exactly as it does today.
+model AftercareCareSection {
+  id String @id @default(cuid())
+
+  aftercareSummaryId String
+
+  /// The pro's own heading, in their vocabulary. Never an enum.
+  label String
+  body  String
+
+  sortOrder Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  aftercareSummary AftercareSummary @relation(fields: [aftercareSummaryId], references: [id], onDelete: Cascade)
+
+  @@index([aftercareSummaryId, sortOrder])
 }
 
 model AftercareRebookSlot {
@@ -5024,11 +5177,11 @@ model UploadSession {
   consultSessionId     String?
   consultSession       ConsultSession? @relation(fields: [consultSessionId], references: [id], onDelete: Cascade)
   serviceCategoryId    String?
-  consultShotKey       String? @db.VarChar(64)
+  consultShotKey       String?         @db.VarChar(64)
   shotPackVersion      Int?
   captureSchemaVersion Int?
-  idempotencyKey       String? @db.VarChar(128)
-  requestHash          String? @db.Char(64)
+  idempotencyKey       String?         @db.VarChar(128)
+  requestHash          String?         @db.Char(64)
 
   // Authoritative storage pointer minted by the signing route. NEVER supplied by
   // the client on attach — the attach route reads it back from here.
@@ -5623,6 +5776,10 @@ model Board {
   // Per-board local visual taste vector (personalization spec §6.0/§6.1) —
   // decayed average of the embeddings of this board's saved looks.
   tasteVector BoardTasteVector?
+
+  /// Bookings this board has been handed to the pro for. Does NOT change
+  /// `visibility` — see BookingBoardShare.
+  bookingShares BookingBoardShare[]
 
   @@unique([clientId, name])
   @@unique([clientId, slug])

@@ -508,6 +508,13 @@ async function clean(): Promise<void> {
   // The look's primary MediaAsset is @unique + cascades TO the look, so the
   // looks above are already gone; drop the assets themselves now.
   await prisma.mediaAsset.deleteMany({ where: { id: idPrefix } })
+  // The pro's "Before you go" rows, and the clients' ticks against them. Both
+  // cascade from the offering/pro, but removing them explicitly keeps `--clean`
+  // honest about what it owns.
+  await prisma.bookingPrepCheck.deleteMany({ where: { id: idPrefix } })
+  await prisma.proPrepItem.deleteMany({ where: { id: idPrefix } })
+  await prisma.aftercareCareSection.deleteMany({ where: { id: idPrefix } })
+  await prisma.bookingBoardShare.deleteMany({ where: { id: idPrefix } })
   // Before the offerings they hang off (they would cascade, but the links also
   // hold a RESTRICT reference to their add-on Service, which is deleted below —
   // so they have to be gone before that runs either way).
@@ -612,6 +619,11 @@ async function main(): Promise<void> {
         // be signed into. No seeded password hash is shared with a real login.
         password: 'demo-seed-no-login',
         role: Role.PRO,
+        // Verified, because an unverified pro is refused by every pro-side API
+        // (VERIFICATION_REQUIRED) — which made the whole pro half of this
+        // fixture undemoable. A real approved pro has both of these.
+        emailVerifiedAt: NOW,
+        phoneVerifiedAt: NOW,
       },
     })
 
@@ -1112,6 +1124,11 @@ async function main(): Promise<void> {
     proTenantId: tenantId,
     clientHomeTenantId: tenantId,
     source: BookingSource.DISCOVERY,
+    // A booking made through the real flow carries the offering it was booked
+    // from, and the prep resolver needs it: without this the appointment falls
+    // back to the pro's DEFAULT checklist instead of the balayage's own rows,
+    // which is correct behaviour against a wrong fixture.
+    offeringId: `${P}offering-${OWN_APPOINTMENTS.proKey}-${OWN_APPOINTMENTS.serviceKey}`,
     locationType: ServiceLocationType.SALON,
     locationId: locationId(ownProKey),
     locationTimeZone: TIME_ZONE,
@@ -1136,6 +1153,88 @@ async function main(): Promise<void> {
       // Booked a couple of weeks ahead, like a colour appointment really is.
       createdAt: new Date(upcomingAt.getTime() - 17 * 24 * 60 * 60 * 1000),
       scheduledFor: upcomingAt,
+    },
+  })
+
+  // ── "Before you go" ────────────────────────────────────────────────────────
+  //
+  // Deliberately seeds BOTH scopes so the override rule is exercised rather
+  // than merely present: the pro's default list AND a longer one on the
+  // balayage offering. A screen reading the wrong scope renders visibly
+  // different text, instead of looking identical to a correct one.
+  const ownOfferingId = `${P}offering-${ownProKey}-${OWN_APPOINTMENTS.serviceKey}`
+
+  await prisma.proPrepItem.createMany({
+    data: [
+      // The pro's default list — what any of her OTHER services would show.
+      {
+        id: `${P}prep-default-1`,
+        professionalId: proId(ownProKey),
+        offeringId: null,
+        text: 'Come with clean, product-free hair.',
+        sortOrder: 0,
+      },
+      {
+        id: `${P}prep-default-2`,
+        professionalId: proId(ownProKey),
+        offeringId: null,
+        text: 'Text me if you are running more than 10 minutes late.',
+        sortOrder: 1,
+      },
+      // The balayage's OWN list. Because this exists, the two rows above must
+      // NOT appear on this booking.
+      {
+        id: `${P}prep-balayage-1`,
+        professionalId: proId(ownProKey),
+        offeringId: ownOfferingId,
+        text: 'Arrive with clean, dry hair.',
+        sortOrder: 0,
+      },
+      {
+        id: `${P}prep-balayage-2`,
+        professionalId: proId(ownProKey),
+        offeringId: ownOfferingId,
+        text: 'Skip washing for 24 hours before.',
+        sortOrder: 1,
+      },
+      {
+        id: `${P}prep-balayage-3`,
+        professionalId: proId(ownProKey),
+        offeringId: ownOfferingId,
+        text: 'Bring your inspiration board.',
+        sortOrder: 2,
+      },
+      {
+        id: `${P}prep-balayage-4`,
+        professionalId: proId(ownProKey),
+        offeringId: ownOfferingId,
+        text: "Wear a top you don't mind getting colour on.",
+        sortOrder: 3,
+      },
+    ],
+  })
+
+  // One row already ticked, so the progress bar and the struck-through style are
+  // both exercised on first load rather than only after a tap.
+  await prisma.bookingPrepCheck.create({
+    data: {
+      id: `${P}prep-check-1`,
+      bookingId: `${P}booking-own-upcoming`,
+      prepItemId: `${P}prep-balayage-1`,
+    },
+  })
+
+  // The note. Set on the OFFERING, with a different default on the pro, so a
+  // surface reading the wrong one is visibly wrong.
+  await prisma.professionalProfile.update({
+    where: { id: proId(ownProKey) },
+    data: { prepNote: 'Come as you are — I will talk you through everything.' },
+  })
+  await prisma.professionalServiceOffering.update({
+    where: { id: ownOfferingId },
+    data: {
+      prepNote:
+        'Plan for about three hours in the chair. Bring headphones and something to drink — I will handle the rest.',
     },
   })
 
