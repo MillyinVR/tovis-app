@@ -3,7 +3,7 @@
 import type { Metadata, Viewport } from 'next'
 import type { CSSProperties, ReactNode } from 'react'
 import { cookies } from 'next/headers'
-import { Space_Grotesk, Hanken_Grotesk, Space_Mono } from 'next/font/google'
+import localFont from 'next/font/local'
 
 import './globals.css'
 import '@/lib/brand/brand.css'
@@ -23,25 +23,52 @@ import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 import { Z } from '@/lib/zIndex'
 
+// The brand sheet is served from app/fonts/ rather than next/font/google: that
+// loader downloads the binaries from fonts.gstatic.com at BUILD time, and when
+// Google rotated Hanken Grotesk's file hashes the retired URL 404'd and took the
+// whole build down with it (see app/fonts/README.md for the exact error). Local
+// files take the network out of every build — CI, preview and prod alike.
+// Runtime is unchanged either way: next/font already self-hosted these, so no
+// user's browser ever requested them from Google.
+
 // Body / UI — Hanken Grotesk (brand sheet)
-const hankenGrotesk = Hanken_Grotesk({
+const hankenGrotesk = localFont({
   variable: '--font-body',
-  subsets: ['latin'],
-  weight: ['400', '500', '600', '700', '800'],
+  display: 'swap',
+  src: [
+    {
+      // Variable file: one src covers the whole 400–800 range the UI uses, which
+      // is exactly what Google was serving — it returned this same file for
+      // every weight in the old request.
+      path: './fonts/hanken-grotesk-variable.woff2',
+      weight: '400 800',
+      style: 'normal',
+    },
+  ],
 })
 
 // Display / headlines / wordmark — Space Grotesk
-const spaceGrotesk = Space_Grotesk({
+const spaceGrotesk = localFont({
   variable: '--font-display-face',
-  subsets: ['latin'],
-  weight: ['400', '500', '600', '700'],
+  display: 'swap',
+  src: [
+    {
+      path: './fonts/space-grotesk-variable.woff2',
+      weight: '400 700',
+      style: 'normal',
+    },
+  ],
 })
 
 // Labels / timestamps / system texture — Space Mono
-const spaceMono = Space_Mono({
+// No variable version exists upstream, so these stay two static faces.
+const spaceMono = localFont({
   variable: '--font-mono-face',
-  subsets: ['latin'],
-  weight: ['400', '700'],
+  display: 'swap',
+  src: [
+    { path: './fonts/space-mono-400.woff2', weight: '400', style: 'normal' },
+    { path: './fonts/space-mono-700.woff2', weight: '700', style: 'normal' },
+  ],
 })
 
 export const dynamic = 'force-dynamic'
