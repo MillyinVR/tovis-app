@@ -102,12 +102,24 @@ const CLIENT_ALL_CHANNELS: readonly NotificationChannel[] = [
 ]
 
 // CLIENT_ALL_CHANNELS with the "push later" channel added (see the note on the
-// *_PUSH sets below). Used by AFTERCARE_READY, which has TWO emitters that split
-// the channel set via per-emit requestedChannels: the magic-link delivery owns
-// EMAIL+SMS (secure /client/rebook token link), the inbox notification owns
-// IN_APP+PUSH. PUSH must be in the default set for the inbox emit's requested
-// [IN_APP, PUSH] to survive the channel-policy intersection. PUSH stays inert
-// until APNs is live.
+// *_PUSH sets below).
+//
+// This is the set for anything that happens TO a client's appointment — the
+// reminder itself, a reschedule, a cancellation they did not initiate. Those are
+// the notifications a client expects on their phone; on CLIENT_ALL_CHANNELS they
+// could only ever reach a client who had verified a phone or an email, and never
+// reached the app at all (prod: zero PUSH deliveries for APPOINTMENT_REMINDER,
+// against 22 in-app rows).
+//
+// Also used by AFTERCARE_READY, which has TWO emitters that split the channel set
+// via per-emit requestedChannels: the magic-link delivery owns EMAIL+SMS (secure
+// /client/rebook token link), the inbox notification owns IN_APP+PUSH. PUSH must
+// be in the default set for the inbox emit's requested [IN_APP, PUSH] to survive
+// the channel-policy intersection.
+//
+// PUSH is capability-gated end to end (no provider configured, or no active
+// DeviceToken → the row is suppressed at enqueue, never created un-sendable), so
+// widening a default set is safe for recipients who have no push destination.
 const CLIENT_IN_APP_SMS_EMAIL_PUSH_CHANNELS: readonly NotificationChannel[] = [
   NotificationChannel.IN_APP,
   NotificationChannel.SMS,
@@ -293,7 +305,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     ],
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.PRO]: PRO_ALL_CHANNELS,
-      [NotificationRecipientKind.CLIENT]: CLIENT_ALL_CHANNELS,
+      // The client's appointment moved without them acting — same urgency as the
+      // reminder, so it reaches the phone too.
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_SMS_EMAIL_PUSH_CHANNELS,
     },
   },
 
@@ -328,8 +342,8 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultChannelsByRecipient: {
       // Pro is the actor here → calm in-app + email confirmation.
       [NotificationRecipientKind.PRO]: PRO_IN_APP_EMAIL_CHANNELS,
-      // Client is the affected party → urgent in-app + email + SMS.
-      [NotificationRecipientKind.CLIENT]: CLIENT_ALL_CHANNELS,
+      // Client is the affected party → urgent in-app + email + SMS + push.
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_SMS_EMAIL_PUSH_CHANNELS,
     },
   },
 
@@ -346,7 +360,8 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     ],
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.PRO]: PRO_ALL_CHANNELS,
-      [NotificationRecipientKind.CLIENT]: CLIENT_ALL_CHANNELS,
+      // Client is the affected party → same set as a pro-side cancellation.
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_SMS_EMAIL_PUSH_CHANNELS,
     },
   },
 
@@ -459,7 +474,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     ],
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.PRO]: PRO_IN_APP_ONLY_CHANNELS,
-      [NotificationRecipientKind.CLIENT]: CLIENT_ALL_CHANNELS,
+      // The client's own reminder about their own appointment — the one
+      // notification that most needs to reach the phone, so PUSH is in the set.
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_SMS_EMAIL_PUSH_CHANNELS,
     },
   },
 
