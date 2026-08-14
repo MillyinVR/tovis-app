@@ -9,6 +9,10 @@ type DayScrollerDay = {
   ymd: string
   labelTop: string
   labelBottom: string
+  /** "6 open" / "2 left" — how much of this day is still bookable. */
+  supplyLabel: string
+  /** Down to the last couple of starts: worth drawing the eye to. */
+  supplyScarce: boolean
 }
 
 type DayScrollerProps = {
@@ -70,6 +74,29 @@ const DayButton = memo(function DayButton({
         }}
       >
         {day.labelBottom}
+      </div>
+
+      {/* How much of the day is left, so a scarce day is visible BEFORE it is
+          opened — the frame's per-day supply. */}
+      <div
+        className={
+          active
+            ? 'text-textPrimary/70'
+            : day.supplyScarce
+              ? 'text-toneWarn'
+              : 'text-textPrimary/45'
+        }
+        style={{
+          marginTop: 5,
+          fontSize: 9,
+          fontWeight: 700,
+          lineHeight: 1,
+          letterSpacing: '0.04em',
+          fontFamily: 'var(--font-mono)',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {day.supplyLabel}
       </div>
     </button>
   )

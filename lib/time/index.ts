@@ -113,6 +113,7 @@ export {
 export {
   formatRelativeTimeCompact,
   formatRelativeTimeAgo,
+  formatRelativeDayAgo,
 } from '@/lib/time/relativeTime'
 
 // Fixed elapsed-duration math (not local calendar-day arithmetic).

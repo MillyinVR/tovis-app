@@ -21,6 +21,7 @@ import type {
 } from './types'
 
 import SheetCover from './components/SheetCover'
+import { daySupplyIsScarce, daySupplyLabel } from '@/lib/booking/daySupply'
 import type { BookingErrorCode } from '@/lib/booking/errors'
 import { asTrimmedString, getRecordProp, isRecord } from '@/lib/guards'
 
@@ -382,7 +383,13 @@ function buildDayScrollerModel(
     const top = formatInTimeZone(anchor, appointmentTz, { weekday: 'short' })
     const bottom = formatInTimeZone(anchor, appointmentTz, { day: '2-digit' })
 
-    return { ymd: day.date, labelTop: top, labelBottom: bottom }
+    return {
+      ymd: day.date,
+      labelTop: top,
+      labelBottom: bottom,
+      supplyLabel: daySupplyLabel(day.slotCount),
+      supplyScarce: daySupplyIsScarce(day.slotCount),
+    }
   })
 }
 
@@ -1680,6 +1687,7 @@ export default function AvailabilityDrawer(props: {
             onContinue={onContinue}
             selectedLine={selectedLine}
             continueLabel={continueLabel}
+            testId={AVAILABILITY_HOLD_CONTINUE_BUTTON_TEST_ID}
           />
         }
       >
@@ -1939,26 +1947,6 @@ export default function AvailabilityDrawer(props: {
                       </span>
                     </div>
                   ) : null}
-
-                  <button
-                    type="button"
-                    data-testid={AVAILABILITY_HOLD_CONTINUE_BUTTON_TEST_ID}
-                    onClick={() => {
-                      void onContinue()
-                    }}
-                    disabled={holding || navigatingToAddOns}
-                    aria-busy={navigatingToAddOns}
-                    className="mt-3 flex h-[46px] w-full items-center justify-center gap-2 rounded-full bg-accentPrimary text-[14px] font-black tracking-[0.03em] text-bgPrimary transition hover:bg-accentPrimaryHover disabled:cursor-not-allowed disabled:opacity-70"
-                    style={{ fontFamily: 'var(--font-mono)' }}
-                  >
-                    {navigatingToAddOns ? (
-                      <span
-                        aria-hidden
-                        className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-bgPrimary/30 border-t-bgPrimary"
-                      />
-                    ) : null}
-                    {navigatingToAddOns ? 'Loading add-ons…' : continueLabel}
-                  </button>
                 </div>
               ) : null}
 

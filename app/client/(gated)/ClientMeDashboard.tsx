@@ -9,7 +9,12 @@ import { cn } from '@/lib/utils'
 import type { BoardVisibility } from '@prisma/client'
 import BoardStripCard from '@/app/_components/boards/BoardStripCard'
 import BoardVisibilitySwitch from '@/app/_components/boards/BoardVisibilitySwitch'
-import { formatInTimeZone, getViewerTimeZone, DEFAULT_TIME_ZONE } from '@/lib/time'
+import {
+  formatInTimeZone,
+  formatRelativeDayAgo,
+  getViewerTimeZone,
+  DEFAULT_TIME_ZONE,
+} from '@/lib/time'
 import type { ClientLookRemix } from '@/lib/creator/creatorProfileStats'
 import ToggleSwitch from '@/app/_components/ToggleSwitch'
 import RemoteImage from '@/app/_components/media/RemoteImage'
@@ -467,23 +472,10 @@ function CreatorStatusCard(props: { creator: CreatorInfo }) {
   )
 }
 
-function formatRemixTime(iso: string): string {
-  const then = new Date(iso).getTime()
-  if (Number.isNaN(then)) return ''
-  const days = Math.floor((Date.now() - then) / 86_400_000)
-  if (days < 1) return 'today'
-  if (days < 2) return 'yesterday'
-  if (days < 7) return `${days}d ago`
-  if (days < 35) return `${Math.floor(days / 7)}w ago`
-  return new Date(then).toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-  })
-}
-
 /** "Your looks, remixed" — appointments others booked from this client's looks. */
 function RemixesCard(props: { remixes: ClientLookRemix[] }) {
   const { remixes } = props
+  const viewerTimeZone = getViewerTimeZone() ?? DEFAULT_TIME_ZONE
   return (
     <div className="relative overflow-hidden rounded-[20px] border border-textPrimary/10 bg-bgSecondary p-[18px]">
       <div className="mb-1.5 flex items-center gap-2">
@@ -514,7 +506,8 @@ function RemixesCard(props: { remixes: ClientLookRemix[] }) {
                 </span>
               </div>
               <div className="mt-0.5 text-[11.5px] text-textSecondary">
-                with {remix.proName} · {formatRemixTime(remix.bookedAt)}
+                with {remix.proName} ·{' '}
+                {formatRelativeDayAgo(remix.bookedAt, viewerTimeZone)}
               </div>
             </div>
             <span
