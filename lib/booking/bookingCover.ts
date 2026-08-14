@@ -55,6 +55,13 @@ export async function loadBookingCover(
   })
   if (!media) return null
 
+  // ⚠️ Imported HERE, not at module scope. `lib/media/renderUrls` builds a
+  // Supabase admin client while it is being evaluated, so a static import puts
+  // "Missing env var: NEXT_PUBLIC_SUPABASE_URL" into the import graph of every
+  // module that reaches this one — including the availability bootstrap route,
+  // which several integration tests import directly and which has no reason to
+  // need storage credentials to answer "when is this pro free?". Reached only
+  // once a cover is actually being resolved.
   const rendered = await renderMediaUrls(media)
   const caption = media.lookPostPrimaryFor[0]?.caption ?? null
 

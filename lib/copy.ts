@@ -317,6 +317,23 @@ export const COPY = {
     emptyBoards: 'No shared boards yet.',
   },
 
+  /** The client's OWN boards screen. */
+  boards: {
+    /**
+     * Marks a board anyone with the link can open. Owner surfaces only — on the
+     * public profile every listed board is shared by definition, so the badge
+     * would be true of every row.
+     */
+    sharedBadge: 'SHARED',
+    visibilityShared: 'Shared',
+    visibilityPrivate: 'Private',
+    /** Accessible name for the per-board visibility switch. */
+    visibilityToggleLabel: 'Board visibility',
+    makeSharedHint: 'Anyone with the link can open this board.',
+    makePrivateHint: 'Only you can see this board.',
+    visibilityError: 'Could not change that board’s visibility. Try again.',
+  },
+
   // also auto-approves any aftercare next booking coupled to this payment.
   proBookingCheckout: {
     awaitingConfirmationTitle: 'Confirm payment received',

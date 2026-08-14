@@ -17,7 +17,7 @@ import type {
 import { safeUrl } from '@/lib/media'
 import { pickNumber, pickString } from '@/lib/pick'
 import { prisma } from '@/lib/prisma'
-import { supabaseAdmin } from '@/lib/supabaseAdmin'
+import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
 import { withCacheBuster } from '@/lib/url'
 import { getStorageEnvironmentMismatch } from '@/lib/media/storageEnvironment'
 
@@ -68,7 +68,7 @@ async function cleanupOldServiceDefaultImages(args: {
 }): Promise<void> {
   const base = `service/default/${args.serviceId}/default`
 
-  await supabaseAdmin.storage
+  await getSupabaseAdmin().storage
     .from(args.bucket)
     .remove([`${base}.jpg`, `${base}.jpeg`, `${base}.png`, `${base}.webp`])
     .catch(() => null)
@@ -104,7 +104,7 @@ async function objectExists(args: {
   const file = parts.pop() || ''
   const folder = parts.join('/') || ''
 
-  const { data, error } = await supabaseAdmin.storage
+  const { data, error } = await getSupabaseAdmin().storage
     .from(args.bucket)
     .list(folder, { limit: 1000 })
 
@@ -174,7 +174,7 @@ async function createSignedUploadUrl(args: {
   path: string
 }): Promise<string | null> {
   try {
-    const { data, error } = await supabaseAdmin.storage
+    const { data, error } = await getSupabaseAdmin().storage
       .from(args.bucket)
       .createSignedUploadUrl(args.path, { upsert: true })
 
@@ -182,7 +182,7 @@ async function createSignedUploadUrl(args: {
 
     return data?.token ?? null
   } catch {
-    const { data, error } = await supabaseAdmin.storage
+    const { data, error } = await getSupabaseAdmin().storage
       .from(args.bucket)
       .createSignedUploadUrl(args.path)
 

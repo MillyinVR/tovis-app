@@ -50,5 +50,10 @@ if (!url) throw new Error('Missing env var: NEXT_PUBLIC_SUPABASE_URL (or SUPABAS
  */
 export const STORAGE_BUCKETS = BUCKETS
 
-// Back-compat for: import { supabaseAdmin } from '@/lib/supabaseAdmin'
-export const supabaseAdmin = getSupabaseAdmin()
+// ⚠️ Deliberately NO eager `export const supabaseAdmin = getSupabaseAdmin()`.
+// That alias built the client while this module was being EVALUATED, so merely
+// importing anything from here threw "Missing env var: NEXT_PUBLIC_SUPABASE_URL"
+// in any process without Supabase credentials — including integration tests,
+// which import API routes directly. A route that answers "when is this pro
+// free?" has no business needing storage credentials just to load. Call
+// `getSupabaseAdmin()` at the point of use; it memoises.

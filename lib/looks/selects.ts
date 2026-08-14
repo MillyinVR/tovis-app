@@ -353,7 +353,11 @@ export const looksBoardPreviewSelect =
       orderBy: {
         createdAt: 'desc',
       },
-      take: 3,
+      // FOUR, matching the four tiles a board strip can draw. At three, a board
+      // with four or more looks could never fill its last cell — the 2×2 mosaic
+      // this used to feed drew three tiles and one permanent hole at ANY board
+      // size, which reads as a broken image rather than as a small board.
+      take: 4,
       select: {
         id: true,
         createdAt: true,

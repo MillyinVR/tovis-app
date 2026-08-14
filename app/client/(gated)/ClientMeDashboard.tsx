@@ -6,6 +6,9 @@ import { useMemo, useState } from 'react'
 import { Bell, Settings } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
+import type { BoardVisibility } from '@prisma/client'
+import BoardStripCard from '@/app/_components/boards/BoardStripCard'
+import BoardVisibilitySwitch from '@/app/_components/boards/BoardVisibilitySwitch'
 import { formatInTimeZone, getViewerTimeZone, DEFAULT_TIME_ZONE } from '@/lib/time'
 import type { ClientLookRemix } from '@/lib/creator/creatorProfileStats'
 import ToggleSwitch from '@/app/_components/ToggleSwitch'
@@ -49,6 +52,7 @@ type BoardCardItem = {
   itemCount: number
   href: string
   previewImageUrls: string[]
+  visibility: BoardVisibility
 }
 
 type FollowingItem = {
@@ -294,42 +298,6 @@ function UpcomingCard(props: {
   )
 }
 
-function PrototypeThumb(props: {
-  title: string
-  previewImageUrls: string[]
-}) {
-  const previews = props.previewImageUrls.slice(0, 4)
-
-  if (previews.length === 0) {
-    return (
-      <div className="grid aspect-[1/1] place-items-center rounded-[22px] border border-textPrimary/10 bg-bgSecondary text-[12px] font-bold text-textSecondary">
-        No preview
-      </div>
-    )
-  }
-
-  return (
-    <div className="grid aspect-[1/1] grid-cols-2 gap-[1px] overflow-hidden rounded-[22px] border border-textPrimary/10 bg-bgSecondary">
-      {previews.map((src, index) => (
-        <div key={`${src}-${index}`} className="min-h-0 min-w-0 overflow-hidden">
-          <RemoteImage
-            src={src}
-            alt={props.title}
-            className="h-full w-full object-cover"
-            loading="lazy"
-            width={300}
-            height={300}
-          />
-        </div>
-      ))}
-
-      {Array.from({ length: Math.max(0, 4 - previews.length) }).map((_, index) => (
-        <div key={`empty-${index}`} className="bg-bgSecondary" aria-hidden="true" />
-      ))}
-    </div>
-  )
-}
-
 function CreateBoardRow(props: { href: string }) {
   return (
     <Link
@@ -347,22 +315,25 @@ function CreateBoardRow(props: { href: string }) {
 
 function BoardCard(props: { board: BoardCardItem }) {
   const { board } = props
+  // Local so the badge follows the switch immediately; the switch owns the
+  // request and reverts itself if the server refuses.
+  const [visibility, setVisibility] = useState(board.visibility)
 
   return (
-    <Link href={board.href} className="block">
-      <PrototypeThumb
-        title={board.name}
-        previewImageUrls={board.previewImageUrls}
-      />
-      <div className="mt-3">
-        <div className="truncate text-[14px] font-black text-textPrimary">
-          {board.name}
-        </div>
-        <div className="mt-1 text-[11px] tracking-[0.12em] text-textSecondary">
-          {board.itemCount} SAVED
-        </div>
-      </div>
-    </Link>
+    <BoardStripCard
+      href={board.href}
+      name={board.name}
+      itemCount={board.itemCount}
+      tileImageUrls={board.previewImageUrls}
+      shared={visibility === 'SHARED'}
+      action={
+        <BoardVisibilitySwitch
+          boardId={board.id}
+          initialVisibility={board.visibility}
+          onChanged={setVisibility}
+        />
+      }
+    />
   )
 }
 
@@ -822,7 +793,7 @@ export default function ClientMeDashboard({
             ) : null}
 
             {boards.length > 0 ? (
-              <div className="grid grid-cols-2 gap-x-4 gap-y-6 md:grid-cols-3 lg:grid-cols-4">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                 {boards.map((board) => (
                   <BoardCard key={board.id} board={board} />
                 ))}
