@@ -523,7 +523,106 @@
     "AftercareRebookMode": {
       "$ref": "#/definitions/%24Enums.AftercareRebookMode"
     },
-    "ApiOk<(def-alias-1643606088-3079-3471-1643606088-0-107142041664248&structure-1643606088-10084-10245-1643606088-10058-10245-1643606088-10051-10247-1643606088-10011-10247-1643606088-0-10714)>": {
+    "ApiOk<(def-alias-1643606088-3079-3471-1643606088-0-120962041664248&structure-1643606088-10321-10933-1643606088-10295-10933-1643606088-10288-10935-1643606088-10163-10935-1643606088-0-12096)>": {
+      "properties": {
+        "adjacencyBufferMinutes": {
+          "type": "number"
+        },
+        "availabilityVersion": {
+          "description": "Client-visible freshness token for the exact request context. Exact slots are reusable only when this matches.",
+          "type": "string"
+        },
+        "date": {
+          "type": "string"
+        },
+        "dayEndExclusiveUtc": {
+          "type": "string"
+        },
+        "dayStartUtc": {
+          "type": "string"
+        },
+        "debug": {},
+        "durationMinutes": {
+          "type": "number"
+        },
+        "generatedAt": {
+          "description": "ISO timestamp for when the payload was generated.",
+          "type": "string"
+        },
+        "leadTimeMinutes": {
+          "type": "number"
+        },
+        "locationBufferMinutes": {
+          "type": "number"
+        },
+        "locationId": {
+          "type": "string"
+        },
+        "locationType": {
+          "$ref": "#/definitions/ServiceLocationType"
+        },
+        "maxDaysAhead": {
+          "type": "number"
+        },
+        "mode": {
+          "const": "DAY",
+          "type": "string"
+        },
+        "offering": {
+          "$ref": "#/definitions/AvailabilityOffering"
+        },
+        "ok": {
+          "const": true,
+          "type": "boolean"
+        },
+        "professionalId": {
+          "description": "Transitional duplicate fields. Prefer `request.*` in all new code.",
+          "type": "string"
+        },
+        "request": {
+          "$ref": "#/definitions/AvailabilityDayRequest"
+        },
+        "serviceId": {
+          "type": "string"
+        },
+        "slots": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "stepMinutes": {
+          "type": "number"
+        },
+        "timeZone": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "adjacencyBufferMinutes",
+        "availabilityVersion",
+        "date",
+        "dayEndExclusiveUtc",
+        "dayStartUtc",
+        "durationMinutes",
+        "generatedAt",
+        "leadTimeMinutes",
+        "locationBufferMinutes",
+        "locationId",
+        "locationType",
+        "maxDaysAhead",
+        "mode",
+        "ok",
+        "professionalId",
+        "request",
+        "serviceId",
+        "slots",
+        "stepMinutes",
+        "timeZone"
+      ],
+      "type": "object"
+    },
+    "ApiOk<(def-alias-1643606088-3079-3471-1643606088-0-120962041664248&structure-1643606088-11466-11627-1643606088-11440-11627-1643606088-11433-11629-1643606088-11393-11629-1643606088-0-12096)>": {
       "properties": {
         "alternates": {
           "items": {
@@ -566,7 +665,7 @@
       ],
       "type": "object"
     },
-    "ApiOk<(def-alias-1643606088-3079-3471-1643606088-0-107142041664248&structure-1643606088-6660-8271-1643606088-6634-8271-1643606088-6627-8273-1643606088-6588-8273-1643606088-0-10714)>": {
+    "ApiOk<(def-alias-1643606088-3079-3471-1643606088-0-120962041664248&structure-1643606088-7912-9653-1643606088-7886-9653-1643606088-7879-9655-1643606088-7840-9655-1643606088-0-12096)>": {
       "properties": {
         "adjacencyBufferMinutes": {
           "type": "number"
@@ -676,6 +775,17 @@
           ],
           "description": "Canonical enterprise field. Authoritative for first paint because it belongs to the current bootstrap response."
         },
+        "serviceArea": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AvailabilityServiceArea"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "MOBILE only; null in salon mode and for pros with no published reach."
+        },
         "serviceCategoryName": {
           "type": [
             "string",
@@ -744,105 +854,6 @@
         "waitlistSupported",
         "windowEndDate",
         "windowStartDate"
-      ],
-      "type": "object"
-    },
-    "ApiOk<(def-alias-1643606088-3079-3471-1643606088-0-107142041664248&structure-1643606088-8939-9551-1643606088-8913-9551-1643606088-8906-9553-1643606088-8781-9553-1643606088-0-10714)>": {
-      "properties": {
-        "adjacencyBufferMinutes": {
-          "type": "number"
-        },
-        "availabilityVersion": {
-          "description": "Client-visible freshness token for the exact request context. Exact slots are reusable only when this matches.",
-          "type": "string"
-        },
-        "date": {
-          "type": "string"
-        },
-        "dayEndExclusiveUtc": {
-          "type": "string"
-        },
-        "dayStartUtc": {
-          "type": "string"
-        },
-        "debug": {},
-        "durationMinutes": {
-          "type": "number"
-        },
-        "generatedAt": {
-          "description": "ISO timestamp for when the payload was generated.",
-          "type": "string"
-        },
-        "leadTimeMinutes": {
-          "type": "number"
-        },
-        "locationBufferMinutes": {
-          "type": "number"
-        },
-        "locationId": {
-          "type": "string"
-        },
-        "locationType": {
-          "$ref": "#/definitions/ServiceLocationType"
-        },
-        "maxDaysAhead": {
-          "type": "number"
-        },
-        "mode": {
-          "const": "DAY",
-          "type": "string"
-        },
-        "offering": {
-          "$ref": "#/definitions/AvailabilityOffering"
-        },
-        "ok": {
-          "const": true,
-          "type": "boolean"
-        },
-        "professionalId": {
-          "description": "Transitional duplicate fields. Prefer `request.*` in all new code.",
-          "type": "string"
-        },
-        "request": {
-          "$ref": "#/definitions/AvailabilityDayRequest"
-        },
-        "serviceId": {
-          "type": "string"
-        },
-        "slots": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "stepMinutes": {
-          "type": "number"
-        },
-        "timeZone": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "adjacencyBufferMinutes",
-        "availabilityVersion",
-        "date",
-        "dayEndExclusiveUtc",
-        "dayStartUtc",
-        "durationMinutes",
-        "generatedAt",
-        "leadTimeMinutes",
-        "locationBufferMinutes",
-        "locationId",
-        "locationType",
-        "maxDaysAhead",
-        "mode",
-        "ok",
-        "professionalId",
-        "request",
-        "serviceId",
-        "slots",
-        "stepMinutes",
-        "timeZone"
       ],
       "type": "object"
     },
@@ -1143,7 +1154,7 @@
       "type": "object"
     },
     "AvailabilityAlternatesOk": {
-      "$ref": "#/definitions/ApiOk%3C(def-alias-1643606088-3079-3471-1643606088-0-107142041664248%26structure-1643606088-10084-10245-1643606088-10058-10245-1643606088-10051-10247-1643606088-10011-10247-1643606088-0-10714)%3E"
+      "$ref": "#/definitions/ApiOk%3C(def-alias-1643606088-3079-3471-1643606088-0-120962041664248%26structure-1643606088-11466-11627-1643606088-11440-11627-1643606088-11433-11629-1643606088-11393-11629-1643606088-0-12096)%3E"
     },
     "AvailabilityAlternatesRequest": {
       "properties": {
@@ -1211,7 +1222,7 @@
       "type": "object"
     },
     "AvailabilityBootstrapOk": {
-      "$ref": "#/definitions/ApiOk%3C(def-alias-1643606088-3079-3471-1643606088-0-107142041664248%26structure-1643606088-6660-8271-1643606088-6634-8271-1643606088-6627-8273-1643606088-6588-8273-1643606088-0-10714)%3E"
+      "$ref": "#/definitions/ApiOk%3C(def-alias-1643606088-3079-3471-1643606088-0-120962041664248%26structure-1643606088-7912-9653-1643606088-7886-9653-1643606088-7879-9655-1643606088-7840-9655-1643606088-0-12096)%3E"
     },
     "AvailabilityCover": {
       "properties": {
@@ -1235,7 +1246,7 @@
       "type": "object"
     },
     "AvailabilityDayOk": {
-      "$ref": "#/definitions/ApiOk%3C(def-alias-1643606088-3079-3471-1643606088-0-107142041664248%26structure-1643606088-8939-9551-1643606088-8913-9551-1643606088-8906-9553-1643606088-8781-9553-1643606088-0-10714)%3E",
+      "$ref": "#/definitions/ApiOk%3C(def-alias-1643606088-3079-3471-1643606088-0-120962041664248%26structure-1643606088-10321-10933-1643606088-10295-10933-1643606088-10288-10935-1643606088-10163-10935-1643606088-0-12096)%3E",
       "description": "--------------------------- Availability: DAY mode\n--------------------------"
     },
     "AvailabilityDayRequest": {
@@ -1308,6 +1319,13 @@
     "AvailabilityLocationOption": {
       "description": "One bookable salon/suite option for the primary pro. Present so the client can choose which location to visit when the pro has several. Empty for mobile mode.",
       "properties": {
+        "areaLabel": {
+          "description": "The coarse place (\"Brooklyn, NY\"). Always sent when the location has a city or state, published address or not — this is what lets the booking sheet answer \"where is this pro?\" for every pro without exposing a home address.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "city": {
           "type": [
             "string",
@@ -1315,6 +1333,7 @@
           ]
         },
         "formattedAddress": {
+          "description": "The exact street address — **null unless the pro published it** (`ProfessionalLocation.isAddressPublic`). This endpoint is unauthenticated, and a \"salon\" is often a home studio, so an address arrives here only when the pro chose to publish one. Render `areaLabel` when this is null.",
           "type": [
             "string",
             "null"
@@ -1842,6 +1861,28 @@
       "required": [
         "date",
         "slots"
+      ],
+      "type": "object"
+    },
+    "AvailabilityServiceArea": {
+      "description": "A MOBILE pro's reach: how far they travel, and from where.\n\nThe sheet's answer to \"where is this pro?\" when there is no salon to name. Both halves describe the rule the write boundary actually enforces at booking time (`ProfessionalProfile.mobileRadiusMiles`, measured from the MOBILE_BASE location), so it can't drift into a second, softer promise. Null when the pro has published neither — an absent line beats \"up to null miles around null\".\n\n🔴 Deliberately carries NO address. A mobile base is very often the pro's home.",
+      "properties": {
+        "areaLabel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "radiusMiles": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "radiusMiles",
+        "areaLabel"
       ],
       "type": "object"
     },

@@ -7,6 +7,11 @@ const mocks = vi.hoisted(() => ({
   getScheduleConfigVersion: vi.fn(),
 
   professionalLocationFindMany: vi.fn(),
+  // The MOBILE service-area lookup ("Travels up to N mi around …"). Both halves
+  // are mocked because the route resolves them in EVERY mode, not only mobile —
+  // the sheet needs the pro's reach in hand before the client flips the toggle.
+  professionalLocationFindFirst: vi.fn(),
+  professionalProfileFindUnique: vi.fn(),
 
   buildSummaryCacheKey: vi.fn(),
   withVersionedCache: vi.fn(),
@@ -35,6 +40,10 @@ vi.mock('@/lib/prisma', () => ({
   prismaRead: {
     professionalLocation: {
       findMany: mocks.professionalLocationFindMany,
+      findFirst: mocks.professionalLocationFindFirst,
+    },
+    professionalProfile: {
+      findUnique: mocks.professionalProfileFindUnique,
     },
   },
 }))
@@ -166,6 +175,11 @@ describe('GET /api/v1/availability/bootstrap', () => {
 
     mocks.getScheduleVersion.mockResolvedValue(7)
     mocks.getScheduleConfigVersion.mockResolvedValue(3)
+    // A pro who has published neither a travel radius nor a mobile base: the
+    // route then omits `serviceArea` rather than sending a half-filled promise,
+    // which is the shape every existing assertion here was written against.
+    mocks.professionalProfileFindUnique.mockResolvedValue(null)
+    mocks.professionalLocationFindFirst.mockResolvedValue(null)
     mocks.buildSummaryCacheKey.mockReturnValue('summary-extra')
     mocks.withVersionedCache.mockImplementation(async (_key, loader) => ({
       value: await loader(),
@@ -259,6 +273,92 @@ describe('GET /api/v1/availability/bootstrap', () => {
         }),
       }),
     )
+  })
+
+  it('redacts the street address of a pro who has not published one, but still names the area', async () => {
+    // 🔴 This route is UNAUTHENTICATED and a "salon" is frequently a home
+    // studio, so `isAddressPublic` is the only thing standing between a pro who
+    // never published an address and an anonymous caller reading it. It was not
+    // consulted at all before this test existed.
+    mocks.professionalLocationFindMany.mockResolvedValue([
+      {
+        id: 'published',
+        type: 'SALON',
+        name: 'Downtown Studio',
+        city: 'New York',
+        state: 'NY',
+        formattedAddress: '1 Main St, New York, NY',
+        isAddressPublic: true,
+        isPrimary: true,
+      },
+      {
+        id: 'home-studio',
+        type: 'SUITE',
+        name: 'Mara Vance Beauty',
+        city: 'Brooklyn',
+        state: 'NY',
+        formattedAddress: '2 Side St, Brooklyn, NY',
+        isAddressPublic: false,
+        isPrimary: false,
+      },
+    ])
+
+    const response = await getBootstrap({
+      professionalId: 'pro-1',
+      serviceId: 'service-1',
+    })
+    const body = await response.json()
+
+    expect(body.locationOptions).toEqual([
+      expect.objectContaining({
+        id: 'published',
+        formattedAddress: '1 Main St, New York, NY',
+        areaLabel: 'New York, NY',
+      }),
+      expect.objectContaining({
+        id: 'home-studio',
+        formattedAddress: null,
+        areaLabel: 'Brooklyn, NY',
+      }),
+    ])
+
+    // The address must be absent from the whole payload, not merely from the
+    // field the sheet happens to read.
+    expect(JSON.stringify(body)).not.toContain('2 Side St')
+  })
+
+  it('carries the pro\'s travel reach in SALON mode too, so the toggle has it in hand', async () => {
+    // The client meets this line by flipping to Mobile — at which point
+    // availability refuses until they name an address, so there is no fresh
+    // payload to read it from.
+    mocks.professionalProfileFindUnique.mockResolvedValue({ mobileRadiusMiles: 12 })
+    mocks.professionalLocationFindFirst.mockResolvedValue({
+      city: 'Brooklyn',
+      state: 'NY',
+    })
+
+    const response = await getBootstrap({
+      professionalId: 'pro-1',
+      serviceId: 'service-1',
+    })
+    const body = await response.json()
+
+    expect(body.serviceArea).toEqual({ radiusMiles: 12, areaLabel: 'Brooklyn, NY' })
+  })
+
+  it('omits the service area entirely when the pro has published no reach', async () => {
+    // Half a promise ("up to null miles around null") is worse than none: the
+    // sheet renders no line at all rather than a sentence with a hole in it.
+    mocks.professionalProfileFindUnique.mockResolvedValue({ mobileRadiusMiles: null })
+    mocks.professionalLocationFindFirst.mockResolvedValue(null)
+
+    const response = await getBootstrap({
+      professionalId: 'pro-1',
+      serviceId: 'service-1',
+    })
+    const body = await response.json()
+
+    expect(body.serviceArea ?? null).toBeNull()
   })
 
   it('cache hit: short-circuits the compute and returns the cached payload', async () => {

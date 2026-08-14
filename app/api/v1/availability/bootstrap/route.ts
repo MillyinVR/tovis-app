@@ -5,7 +5,10 @@ import { createHash } from 'node:crypto'
 import { ProfessionalLocationType, ServiceLocationType } from '@prisma/client'
 
 import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
-import type { AvailabilityBootstrapOk } from '@/app/(main)/booking/AvailabilityDrawer/types'
+import type {
+  AvailabilityBootstrapOk,
+  AvailabilityServiceArea,
+} from '@/app/(main)/booking/AvailabilityDrawer/types'
 import { toRecord } from '@/lib/typed'
 import {
   resolveAvailabilityDurationMinutes,
@@ -416,7 +419,10 @@ type SalonLocationOption = {
   name: string | null
   city: string | null
   state: string | null
+  /** Exact street address — null unless the pro published it. */
   formattedAddress: string | null
+  /** Coarse place ("Brooklyn, NY"), always present when the row has one. */
+  areaLabel: string | null
   isPrimary: boolean
 }
 
@@ -425,6 +431,15 @@ type SalonLocationOption = {
  * which one to visit when there is more than one. Mobile mode gets no
  * options — the client supplies their own address and the engine picks
  * the base.
+ *
+ * 🔴 `formattedAddress` is gated on `isAddressPublic`, and this route is
+ * UNAUTHENTICATED. The schema is explicit that publishing an address "is an
+ * act, not a side effect of picking SALON in a dropdown" — a pro whose salon is
+ * really a home studio has the flag off, and Discover/search already honour it.
+ * This route did not, so the exact street address of every bookable location was
+ * on an anonymous wire. `areaLabel` (city + state) always goes out: it is what
+ * lets the sheet answer "where is this pro?" for everyone without publishing a
+ * home address, and it is not derivable from the redacted row otherwise.
  */
 async function loadSalonLocationOptions(args: {
   professionalId: string
@@ -432,7 +447,7 @@ async function loadSalonLocationOptions(args: {
 }): Promise<SalonLocationOption[]> {
   if (args.effectiveLocationType !== ServiceLocationType.SALON) return []
 
-  return prismaRead.professionalLocation.findMany({
+  const rows = await prismaRead.professionalLocation.findMany({
     where: {
       professionalId: args.professionalId,
       isBookable: true,
@@ -447,11 +462,77 @@ async function loadSalonLocationOptions(args: {
       city: true,
       state: true,
       formattedAddress: true,
+      isAddressPublic: true,
       isPrimary: true,
     },
     orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
     take: 20,
   })
+
+  return rows.map((row) => ({
+    id: row.id,
+    type: row.type,
+    name: row.name,
+    city: row.city,
+    state: row.state,
+    formattedAddress: row.isAddressPublic ? row.formattedAddress : null,
+    areaLabel: buildAreaLabel(row.city, row.state),
+    isPrimary: row.isPrimary,
+  }))
+}
+
+/** "Brooklyn, NY" — the coarse place, safe to publish for any pro. */
+function buildAreaLabel(city: string | null, state: string | null): string | null {
+  const parts = [city, state].map((part) => (part ?? '').trim()).filter(Boolean)
+  return parts.length > 0 ? parts.join(', ') : null
+}
+
+/**
+ * How far the pro travels, and from where — the MOBILE half of "where is this
+ * pro?".
+ *
+ * Tori, 2026-08-14: *"if the client doesnt know where the pro is located they
+ * wont book."* A mobile pro has no salon to name, so the sheet's honest answer
+ * is their reach: "Travels up to 15 mi around Brooklyn". Both halves already
+ * exist — `ProfessionalProfile.mobileRadiusMiles` is the radius the write
+ * boundary enforces at booking time, and the MOBILE_BASE location is the point
+ * it measures from, so this describes the rule that will actually be applied
+ * rather than a second, drifting promise.
+ *
+ * No address here at any time: a mobile base is very often the pro's home.
+ */
+async function loadMobileServiceArea(args: {
+  professionalId: string
+}): Promise<AvailabilityServiceArea | null> {
+  const [professional, base] = await Promise.all([
+    prismaRead.professionalProfile.findUnique({
+      where: { id: args.professionalId },
+      select: { mobileRadiusMiles: true },
+    }),
+    prismaRead.professionalLocation.findFirst({
+      where: {
+        professionalId: args.professionalId,
+        type: ProfessionalLocationType.MOBILE_BASE,
+        archivedAt: null,
+      },
+      select: { city: true, state: true },
+      orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+    }),
+  ])
+
+  const radiusMiles =
+    typeof professional?.mobileRadiusMiles === 'number' &&
+    Number.isFinite(professional.mobileRadiusMiles) &&
+    professional.mobileRadiusMiles > 0
+      ? professional.mobileRadiusMiles
+      : null
+  const areaLabel = buildAreaLabel(base?.city ?? null, base?.state ?? null)
+
+  // Nothing to say is better than "Travels up to null miles around null" — the
+  // sheet renders no line at all rather than a half-filled promise.
+  if (radiusMiles == null && !areaLabel) return null
+
+  return { radiusMiles, areaLabel }
 }
 
 export async function GET(req: Request) {
@@ -748,10 +829,18 @@ export async function GET(req: Request) {
         effectiveLocationType,
       })
 
-      const [busy, otherPros, locationOptions] = await Promise.all([
+      // Resolved in BOTH modes, not just mobile. The client meets this line by
+      // toggling to Mobile — at which point availability itself refuses until
+      // they name an address, so the sheet has no fresh payload to read it from.
+      // Carrying it on the salon response means the pro's reach is already in
+      // hand the moment the toggle flips.
+      const serviceAreaPromise = loadMobileServiceArea({ professionalId })
+
+      const [busy, otherPros, locationOptions, serviceArea] = await Promise.all([
         busyPromise,
         otherProsPromise,
         locationOptionsPromise,
+        serviceAreaPromise,
       ])
 
       markTimer(timers, 'slots:start')
@@ -903,6 +992,7 @@ export async function GET(req: Request) {
         selectedDay,
         otherPros,
         locationOptions,
+        serviceArea,
         waitlistSupported: true,
         offering: toAvailabilityOfferingDto(offeringPayload),
 
