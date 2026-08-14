@@ -655,4 +655,145 @@ describe('lib/notifications/clientNotifications', () => {
       },
     })
   })
+
+  // A pro-created client has no User row: no verification, no consent record,
+  // and no login with which to open the in-app inbox this notification is
+  // written to. Before the carve-out, every channel refused and their
+  // appointment reminder reached nobody at all — while the aftercare and deposit
+  // links for the SAME booking texted them fine.
+  describe('a booking notification to a pro-created (unclaimed) client', () => {
+    function mockUnclaimedClient() {
+      mockPrisma.clientProfile.findUnique.mockResolvedValue({
+        id: 'client_1',
+        userId: null,
+        phone: '+15551234567',
+        phoneVerifiedAt: null,
+        email: 'pro-entered@example.com',
+        user: null,
+      })
+    }
+
+    function enqueuedRecipient() {
+      return mockEnqueueDispatch.mock.calls[0]?.[0]?.recipient
+    }
+
+    it('makes the pro-entered phone and email usable for an appointment reminder', async () => {
+      mockUnclaimedClient()
+      mockPrisma.clientNotification.create.mockResolvedValue({ id: 'notif_1' })
+      mockPrisma.booking.findUnique.mockResolvedValue({
+        locationTimeZone: 'America/Los_Angeles',
+        clientTimeZoneAtBooking: null,
+      })
+
+      await createClientNotification({
+        clientId: 'client_1',
+        eventKey: NotificationEventKey.APPOINTMENT_REMINDER,
+        title: 'Appointment tomorrow',
+        bookingId: 'booking_1',
+        href: '/client/bookings/booking_1?step=overview',
+      })
+
+      const recipient = enqueuedRecipient()
+
+      // The address lives on the PROFILE — there is no account to hold one.
+      expect(recipient.email).toBe('pro-entered@example.com')
+      expect(recipient.phone).toBe('+15551234567')
+
+      // Synthetic eligibility on both, so neither channel is suppressed for want
+      // of a verification this client was never asked to complete.
+      expect(recipient.emailVerifiedAt).toBeInstanceOf(Date)
+      expect(recipient.phoneVerifiedAt).toBeInstanceOf(Date)
+      expect(recipient.transactionalSmsConsentAt).toEqual(
+        recipient.phoneVerifiedAt,
+      )
+    })
+
+    // Same recipient, same booking, event that is not part of the appointment
+    // lifecycle → the account-level rules apply again and both channels refuse.
+    it('does not extend the carve-out to an off-list event', async () => {
+      mockUnclaimedClient()
+      mockPrisma.clientNotification.create.mockResolvedValue({ id: 'notif_2' })
+      mockPrisma.booking.findUnique.mockResolvedValue({
+        locationTimeZone: 'America/Los_Angeles',
+        clientTimeZoneAtBooking: null,
+      })
+
+      await createClientNotification({
+        clientId: 'client_1',
+        eventKey: NotificationEventKey.AFTERCARE_READY,
+        title: 'Aftercare ready',
+        bookingId: 'booking_1',
+        href: '/client/bookings/booking_1?step=aftercare',
+      })
+
+      const recipient = enqueuedRecipient()
+
+      expect(recipient.phoneVerifiedAt).toBeNull()
+      expect(recipient.emailVerifiedAt).toBeNull()
+      expect(recipient.transactionalSmsConsentAt).toBeNull()
+    })
+
+    it('refuses a reminder with no booking behind it', async () => {
+      mockUnclaimedClient()
+      mockPrisma.clientNotification.create.mockResolvedValue({ id: 'notif_3' })
+
+      await createClientNotification({
+        clientId: 'client_1',
+        eventKey: NotificationEventKey.APPOINTMENT_REMINDER,
+        title: 'Appointment tomorrow',
+        href: '/client/notifications',
+      })
+
+      const recipient = enqueuedRecipient()
+
+      expect(recipient.phoneVerifiedAt).toBeNull()
+      expect(recipient.emailVerifiedAt).toBeNull()
+      expect(recipient.transactionalSmsConsentAt).toBeNull()
+    })
+  })
+
+  // The carve-out fills a null; it must never speak over an account that has its
+  // own answer — including a client who verified a phone but not an email.
+  it('keeps a claimed client’s own verification and consent on a reminder', async () => {
+    const realPhoneVerified = new Date('2026-04-08T10:00:00.000Z')
+    const realConsent = new Date('2026-04-08T11:00:00.000Z')
+
+    mockPrisma.clientProfile.findUnique.mockResolvedValue({
+      id: 'client_1',
+      userId: 'user_1',
+      phone: '+15550000000',
+      phoneVerifiedAt: realPhoneVerified,
+      email: 'stale-profile-copy@example.com',
+      user: {
+        email: 'account@example.com',
+        emailVerifiedAt: null,
+        phone: null,
+        phoneVerifiedAt: null,
+        transactionalSmsConsentAt: realConsent,
+      },
+    })
+
+    mockPrisma.clientNotification.create.mockResolvedValue({ id: 'notif_1' })
+    mockPrisma.booking.findUnique.mockResolvedValue({
+      locationTimeZone: 'America/Los_Angeles',
+      clientTimeZoneAtBooking: null,
+    })
+
+    await createClientNotification({
+      clientId: 'client_1',
+      eventKey: NotificationEventKey.APPOINTMENT_REMINDER,
+      title: 'Appointment tomorrow',
+      bookingId: 'booking_1',
+      href: '/client/bookings/booking_1?step=overview',
+    })
+
+    const recipient = mockEnqueueDispatch.mock.calls[0]?.[0]?.recipient
+
+    expect(recipient.phoneVerifiedAt).toBe(realPhoneVerified)
+    expect(recipient.transactionalSmsConsentAt).toBe(realConsent)
+    // The account's address wins over the profile's stale copy of it.
+    expect(recipient.email).toBe('account@example.com')
+    // Unverified email + carve-out on → eligible, so the reminder still emails.
+    expect(recipient.emailVerifiedAt).toBeInstanceOf(Date)
+  })
 })

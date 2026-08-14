@@ -11,6 +11,10 @@ import {
 
 import { asTrimmedString } from '@/lib/guards'
 import type { NotificationPreferenceLike } from '@/lib/notifications/channelPolicy'
+// The synthetic-eligibility rule is shared with the booking-notification path
+// (an appointment reminder to a pro-created client needs exactly this carve-out),
+// so it lives in lib/notifications rather than being copied there.
+import { resolveSyntheticVerificationTimestamp } from '@/lib/notifications/clientDestinationEligibility'
 import {
   enqueueDispatch,
   type EnqueueDispatchResult,
@@ -187,34 +191,6 @@ export function resolveAllowUnverifiedDestination(
   }
 
   return UNVERIFIED_DESTINATION_ACTION_TYPES.has(args.plan.definition.type)
-}
-
-function resolveSyntheticVerificationTimestamp(args: {
-  explicitVerifiedAt: Date | null
-  destination: string | null
-  allowUnverifiedDestination: boolean
-  fallbackAt: Date
-}): Date | null {
-  if (args.explicitVerifiedAt) {
-    return args.explicitVerifiedAt
-  }
-
-  if (!args.allowUnverifiedDestination) {
-    return null
-  }
-
-  if (!args.destination) {
-    return null
-  }
-
-  /**
-   * This is an enqueue-time eligibility timestamp, not a user-account claim
-   * about ownership verification.
-   *
-   * We only synthesize it for snapshot-based invite delivery flows where the
-   * business action itself is "send the invite to this destination".
-   */
-  return args.fallbackAt
 }
 
 function resolveInAppTargetId(plan: ClientActionOrchestrationPlan): string | null {

@@ -7,6 +7,7 @@ import {
 } from '@/lib/notifications/notificationFields'
 import { prisma } from '@/lib/prisma'
 import { isUniqueConstraintError } from '@/lib/prismaErrors'
+import { readEncryptedEmailOrFallback } from '@/lib/security/emailPrivacy'
 import { pickTimeZoneOrNull } from '@/lib/timeZone'
 import {
   NotificationChannel,
@@ -15,6 +16,10 @@ import {
   Prisma,
 } from '@prisma/client'
 
+import {
+  allowsProEnteredClientDestination,
+  resolveSyntheticVerificationTimestamp,
+} from './clientDestinationEligibility'
 import { enqueueDispatch } from './dispatch/enqueueDispatch'
 
 export type ClientNotificationDbClient = Prisma.TransactionClient | typeof prisma
@@ -24,6 +29,9 @@ const MAX_TITLE = 160
 const MAX_BODY = 4000
 const MAX_HREF = 2048
 const MAX_DEDUPE_KEY = 256
+// Matches the enqueue layer's own email bound so a value that survives here
+// cannot be silently re-trimmed downstream.
+const MAX_EMAIL = 320
 
 const clientNotificationIdSelect = {
   id: true,
@@ -33,14 +41,23 @@ const scheduledClientNotificationIdSelect = {
   id: true,
 } satisfies Prisma.ScheduledClientNotificationSelect
 
+// Selects the profile's OWN contact columns as well as the account's: a
+// pro-created client has no User row, so an account-only read left every
+// unclaimed recipient unreachable (see resolvePreferredClientEmail). Both the
+// envelope and the plaintext column are selected because the lib/security
+// dual-read boundary prefers the envelope and falls back to plaintext during the
+// expand phase.
 const clientDispatchRecipientSelect = {
   id: true,
   userId: true,
   phone: true,
   phoneVerifiedAt: true,
+  email: true,
+  emailEncrypted: true,
   user: {
     select: {
       email: true,
+      emailEncrypted: true,
       emailVerifiedAt: true,
       phone: true,
       phoneVerifiedAt: true,
@@ -382,6 +399,55 @@ function resolvePreferredClientPhone(
   }
 }
 
+/**
+ * The account's address wins when there is an account — that is the one the
+ * client themselves confirmed, and it carries the only real emailVerifiedAt. The
+ * profile's is the fallback that makes an UNCLAIMED client reachable at all; it
+ * has no verification of its own, so it is only ever usable when the caller
+ * allows a pro-entered destination.
+ *
+ * Mirrors resolvePreferredClientPhone above, in the opposite preference order —
+ * deliberately: a profile PHONE is the pro's more current record for a client
+ * they text, while a profile address on a claimed account is a stale snapshot of
+ * what the account already holds.
+ *
+ * Reads go through the lib/security dual-read boundary rather than the plaintext
+ * column: the envelope is preferred and plaintext is the expand-phase fallback,
+ * so this adds no new plaintext PII read (check:pii-plaintext-reads).
+ */
+function resolvePreferredClientEmail(
+  client: ClientDispatchRecipientRow,
+): {
+  email: string | null
+  emailVerifiedAt: Date | null
+} {
+  const fromAccount = normNullableString(
+    readEncryptedEmailOrFallback(
+      client.user?.emailEncrypted,
+      client.user?.email ?? null, // pii-plaintext-read-ok: expand-phase fallback argument to the lib/security dual-read boundary
+    ),
+    MAX_EMAIL,
+  )
+
+  if (fromAccount) {
+    return {
+      email: fromAccount,
+      emailVerifiedAt: client.user?.emailVerifiedAt ?? null,
+    }
+  }
+
+  return {
+    email: normNullableString(
+      readEncryptedEmailOrFallback(
+        client.emailEncrypted,
+        client.email ?? null, // pii-plaintext-read-ok: expand-phase fallback argument to the lib/security dual-read boundary
+      ),
+      MAX_EMAIL,
+    ),
+    emailVerifiedAt: null,
+  }
+}
+
 function pickFirstValidTimeZone(
   ...candidates: Array<string | null | undefined>
 ): string | null {
@@ -464,12 +530,56 @@ async function enqueueNewClientNotificationDispatch(args: {
   })
 
   const preferredPhone = resolvePreferredClientPhone(recipient.client)
+  const preferredEmail = resolvePreferredClientEmail(recipient.client)
 
   const timeZone = await resolveClientDispatchTimeZone({
     bookingId: args.normalized.bookingId,
     aftercareId: args.normalized.aftercareId,
     tx: args.tx,
   })
+
+  /**
+   * A transactional message about a booking that already exists may reach the
+   * contact details the PRO entered, even with no account behind them — the
+   * same carve-out the client-action magic links have always had. Without it a
+   * pro-created client's appointment reminder is suppressed on every channel and
+   * written to an inbox they cannot sign in to open.
+   *
+   * Real timestamps still win: this only fills a null (see
+   * resolveSyntheticVerificationTimestamp), so a claimed client's own
+   * verification and consent are what get used whenever they exist.
+   */
+  const allowProEnteredDestination = allowsProEnteredClientDestination({
+    eventKey: args.normalized.eventKey,
+    bookingId: args.normalized.bookingId,
+  })
+
+  const eligibilityAt = new Date()
+
+  const phoneVerifiedAt = resolveSyntheticVerificationTimestamp({
+    explicitVerifiedAt: preferredPhone.phoneVerifiedAt,
+    destination: preferredPhone.phone,
+    allowUnverifiedDestination: allowProEnteredDestination,
+    fallbackAt: eligibilityAt,
+  })
+
+  const emailVerifiedAt = resolveSyntheticVerificationTimestamp({
+    explicitVerifiedAt: preferredEmail.emailVerifiedAt,
+    destination: preferredEmail.email,
+    allowUnverifiedDestination: allowProEnteredDestination,
+    fallbackAt: eligibilityAt,
+  })
+
+  /**
+   * Consent is the one gate that is NOT relaxed away from a real answer: an
+   * account that recorded consent uses its own timestamp. Only a recipient with
+   * no account row to hold consent falls back to the same enqueue-time
+   * eligibility as the phone, which is what the client-action flows already do
+   * for exactly this population.
+   */
+  const transactionalSmsConsentAt =
+    recipient.client.user?.transactionalSmsConsentAt ??
+    (allowProEnteredDestination ? phoneVerifiedAt : null)
 
   await enqueueDispatch({
     key: args.normalized.eventKey,
@@ -481,11 +591,10 @@ async function enqueueNewClientNotificationDispatch(args: {
       userId: recipient.client.userId,
       inAppTargetId: recipient.client.id,
       phone: preferredPhone.phone,
-      phoneVerifiedAt: preferredPhone.phoneVerifiedAt,
-      transactionalSmsConsentAt:
-        recipient.client.user?.transactionalSmsConsentAt ?? null,
-      email: recipient.client.user?.email ?? null,
-      emailVerifiedAt: recipient.client.user?.emailVerifiedAt ?? null,
+      phoneVerifiedAt,
+      transactionalSmsConsentAt,
+      email: preferredEmail.email,
+      emailVerifiedAt,
       timeZone,
       preference: recipient.preference,
     },
