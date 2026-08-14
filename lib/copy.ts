@@ -18,6 +18,46 @@ export const COPY = {
     emDash: '—',
   },
 
+  /**
+   * `/booking/[id]` — where "Complete booking" lands. The moment is deliberately
+   * honest: a new booking is PENDING until the pro accepts, so this never says
+   * "Confirmed". The pro's pronouns are unknown, so every sentence uses "they".
+   *
+   * ⚠️ Prices on this screen are STARTING prices (`salonPriceStartingAt` /
+   * `service.minPrice` feed the snapshot, and a consultation can revise the
+   * total), so they are always prefixed "From" — never quoted as settled.
+   */
+  bookingConfirmation: {
+    eyebrow: 'Booking requested',
+    title: 'Request sent',
+    titleSettled: 'You’re booked',
+    pendingPill: 'Pending confirmation',
+    /** Composed as `${proName} ${hasYourRequest}`. */
+    hasYourRequest: 'has your request — nothing’s charged until they confirm.',
+    settledBody: 'This one’s on the books. Everything you need is below.',
+    /**
+     * Terminal / past states (COMPLETED, CANCELLED, NO_SHOW) get the neutral
+     * header instead of the celebratory one — a green check over "You're booked"
+     * on a booking that was cancelled is a lie the old receipt never told.
+     */
+    titleClosed: 'Booking details',
+    closedBody: 'Everything about this booking is below.',
+    whatHappensNext: 'What happens next',
+    /** Composed as `${proName} ${stepReviews}`. */
+    stepReviews: 'reviews within a few hours.',
+    stepNotify: 'We’ll notify you the moment they confirm.',
+    stepNoCharge: 'No charge until they confirm.',
+    whenLabel: 'When',
+    whereLabel: 'Where',
+    addOnsLabel: 'Add-ons',
+    /** Composed as `${priceFrom} ${amount}` — see the ⚠️ above. */
+    priceFrom: 'From',
+    viewBooking: 'View booking',
+    message: 'Message',
+    backToLooks: 'Back to Looks',
+    breakdownHeading: 'Service breakdown',
+  },
+
   bookings: {
     titleFallback: 'Booking',
     backToBookings: '← Back to bookings',
