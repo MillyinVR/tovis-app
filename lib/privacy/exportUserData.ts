@@ -33,6 +33,7 @@ export type ExportedUserData = {
     clientAllergies: unknown[]
     consultSessions: unknown[]
     mediaAssets: unknown[]
+    proPrepItems: unknown[]
     practiceShots: unknown[]
     messages: unknown[]
     notifications: unknown[]
@@ -263,6 +264,21 @@ const mediaAssetExportSelect = {
 // The pro's own out-of-session camera shots. Storage pointers are included
 // here (unlike the API wire DTOs) because this IS the subject's own data
 // export — the point is completeness, not a render surface.
+// The pro's own "Before you go" checklist copy. Theirs, authored by them, and
+// shown verbatim to their clients — so it belongs in their export. The client's
+// ticks against it (BookingPrepCheck) are NOT here: those are the other party's
+// activity on a booking, not the pro's record.
+const proPrepItemExportSelect = {
+  id: true,
+  professionalId: true,
+  offeringId: true,
+  text: true,
+  sortOrder: true,
+  isActive: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Prisma.ProPrepItemSelect
+
 const practiceShotExportSelect = {
   id: true,
   professionalId: true,
@@ -563,6 +579,7 @@ export async function exportUserData(
     clientAllergies,
     consultSessions,
     mediaAssets,
+    proPrepItems,
     practiceShots,
     messages,
     notifications,
@@ -592,6 +609,7 @@ export async function exportUserData(
       clientProfileId,
       professionalProfileId,
     ),
+    findProPrepItems(input.db, professionalProfileId),
     findPracticeShots(input.db, professionalProfileId),
     findMessages(input.db, input.userId, clientProfileId, professionalProfileId),
     findNotifications(input.db, professionalProfileId),
@@ -657,6 +675,7 @@ export async function exportUserData(
       clientAllergies: normalizeJsonArray(clientAllergies),
       consultSessions: normalizeConsultSessions(consultSessions),
       mediaAssets: normalizeJsonArray(mediaAssets),
+      proPrepItems: normalizeJsonArray(proPrepItems),
       practiceShots: normalizeJsonArray(practiceShots),
       messages: normalizeJsonArray(messages),
       notifications: normalizeJsonArray(notifications),
@@ -920,6 +939,19 @@ async function findMediaAssets(
     },
     orderBy: { createdAt: 'asc' },
     select: mediaAssetExportSelect,
+  })
+}
+
+async function findProPrepItems(
+  db: PrismaClient | Prisma.TransactionClient,
+  professionalProfileId: string | null,
+): Promise<unknown[]> {
+  if (!professionalProfileId) return []
+
+  return db.proPrepItem.findMany({
+    where: { professionalId: professionalProfileId },
+    orderBy: [{ offeringId: 'asc' }, { sortOrder: 'asc' }],
+    select: proPrepItemExportSelect,
   })
 }
 

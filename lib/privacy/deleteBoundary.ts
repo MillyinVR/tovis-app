@@ -186,6 +186,29 @@ export const DELETE_BOUNDARY: Readonly<Record<string, DeleteDisposition>> = {
     status: 'DELETE',
     reason: `${R_ENGAGEMENT} Both directions (follower and followed).`,
   },
+  ProPrepItem: {
+    status: 'DELETE',
+    reason:
+      "The pro's own authored checklist copy. Cascading it also clears the clients' ticks that hang off each row, which is right: the rows they ticked no longer exist.",
+  },
+  // 🔴 Booking is RETAIN (financial record), so this does NOT cascade away with
+  // the deleted client's bookings — it needs its own rule, scoped through the
+  // booking's clientId. Without it, a deleted client's ticks would sit on
+  // retained bookings indefinitely.
+  BookingPrepCheck: {
+    status: 'DELETE',
+    reason:
+      "The client's own ticks against their pro's checklist. Booking is RETAIN for financial reasons, so these do not cascade with it; once the account is gone, 'they ticked 3 of 4' is activity about a person who no longer exists and the pro has no need of it.",
+  },
+  // Board is DELETE, so this cascades with the client's boards. It is
+  // dispositioned explicitly anyway because it is the row that WIDENS who can
+  // see a board — a share that outlived its board would be a live disclosure
+  // pointing at nothing.
+  BookingBoardShare: {
+    status: 'DELETE',
+    reason:
+      "The grant letting one pro see one of the client's boards for one booking. Cascades from Board (itself DELETE); named here because it is the only row that widens board visibility.",
+  },
   ClientCreatorStat: {
     status: 'DELETE',
     reason:
