@@ -367,6 +367,88 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
     })
   })
 
+  // The end of the chain for a pro-created client, driven with the recipient
+  // shape lib/notifications/clientNotifications now builds for them: a phone and
+  // an email off the ClientProfile, no account, and the synthetic eligibility
+  // stamps that stand in for verification they were never asked to complete.
+  // Everything upstream of this is unit-tested; this is the half that decides
+  // whether a real text and a real email actually get created.
+  it('creates sendable SMS and EMAIL rows for an appointment reminder to an unclaimed client', async () => {
+    const scheduledFor = new Date('2026-04-12T15:30:00.000Z')
+    const eligibleAt = new Date('2026-04-12T15:29:59.000Z')
+
+    mockPrisma.notificationDispatch.findUnique.mockResolvedValue(null)
+    mockPrisma.notificationDispatch.create.mockResolvedValue(
+      makeDispatchRecord({ scheduledFor }),
+    )
+
+    const result = await enqueueDispatch({
+      key: NotificationEventKey.APPOINTMENT_REMINDER,
+      sourceKey: 'client-notification:reminder_unclaimed',
+      recipient: {
+        kind: NotificationRecipientKind.CLIENT,
+        clientId: 'client_1',
+        // No account: this is the whole point of the population.
+        userId: null,
+        inAppTargetId: 'client_1',
+        phone: '+15551234567',
+        phoneVerifiedAt: eligibleAt,
+        transactionalSmsConsentAt: eligibleAt,
+        email: 'pro-entered@example.com',
+        emailVerifiedAt: eligibleAt,
+        timeZone: 'America/Los_Angeles',
+        preference: null,
+      },
+      title: 'Appointment tomorrow',
+      href: '/client/bookings/booking_1?step=overview',
+      scheduledFor,
+    })
+
+    expect(result.selectedChannels).toEqual([
+      NotificationChannel.IN_APP,
+      NotificationChannel.SMS,
+      NotificationChannel.EMAIL,
+    ])
+
+    const createArg = mockPrisma.notificationDispatch.create.mock.calls[0]?.[0]
+    const createdDeliveries: Array<{
+      channel: NotificationChannel
+      status: NotificationDeliveryStatus
+      destination: string | null
+    }> = createArg?.data?.deliveries?.create ?? []
+
+    expect(
+      createdDeliveries.map((row) => ({
+        channel: row.channel,
+        status: row.status,
+        destination: row.destination,
+      })),
+    ).toEqual([
+      {
+        channel: NotificationChannel.IN_APP,
+        status: NotificationDeliveryStatus.PENDING,
+        destination: 'client_1',
+      },
+      {
+        channel: NotificationChannel.SMS,
+        status: NotificationDeliveryStatus.PENDING,
+        destination: '+15551234567',
+      },
+      {
+        channel: NotificationChannel.EMAIL,
+        status: NotificationDeliveryStatus.PENDING,
+        destination: 'pro-entered@example.com',
+      },
+      // No account means no device tokens, so push is the one channel that
+      // stays suppressed for this recipient.
+      {
+        channel: NotificationChannel.PUSH,
+        status: NotificationDeliveryStatus.SUPPRESSED,
+        destination: null,
+      },
+    ])
+  })
+
   it('suppresses SMS when no Twilio provider is configured (launch gate)', async () => {
     delete process.env.TWILIO_ACCOUNT_SID
     delete process.env.TWILIO_AUTH_TOKEN
