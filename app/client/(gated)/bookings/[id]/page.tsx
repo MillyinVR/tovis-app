@@ -6,6 +6,7 @@ import { notFound, redirect } from 'next/navigation'
 
 import { COPY } from '@/lib/copy'
 import { buildClientBookingDTO } from '@/lib/dto/clientBooking'
+import { mapsHrefFromLocation } from '@/lib/maps'
 import { buildClientAcceptedMethods } from '@/lib/payments/clientPaymentOptions'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import { prisma } from '@/lib/prisma'
@@ -1001,6 +1002,18 @@ export default async function ClientBookingPage(props: {
   const title = booking.display?.title || COPY.bookings.titleFallback
   const locationLine = booking.locationLabel || ''
 
+  // Tori's standing rule: every address on a client surface opens the device's
+  // maps app. The href is built from the DTO's `locationAddress` + coordinates,
+  // never from `locationLabel` — the label can be a salon NAME or a bare city,
+  // which a maps app cannot find.
+  const locationMapsHref = booking.locationAddress
+    ? mapsHrefFromLocation({
+        lat: booking.locationLat,
+        lng: booking.locationLng,
+        formattedAddress: booking.locationAddress,
+      })
+    : null
+
   const proOverrideNote =
     typeof raw.clientVisibleOverrideNote === 'string' &&
     raw.clientVisibleOverrideNote.trim()
@@ -1150,7 +1163,21 @@ export default async function ClientBookingPage(props: {
             <span className="font-black">{whenLabel}</span>
             <span className="text-textSecondary"> · {friendlyTimeZoneLabel(appointmentTimeZone) ?? appointmentTimeZone}</span>
             {locationLine ? (
-              <span className="text-textSecondary"> · {locationLine}</span>
+              <span className="text-textSecondary">
+                {' · '}
+                {locationMapsHref ? (
+                  <a
+                    href={locationMapsHref}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="brand-focus underline underline-offset-2 hover:opacity-80"
+                  >
+                    {locationLine}
+                  </a>
+                ) : (
+                  locationLine
+                )}
+              </span>
             ) : null}
           </div>
 
@@ -1465,7 +1492,23 @@ export default async function ClientBookingPage(props: {
                             <SummaryRow label="Time zone" value={friendlyTimeZoneLabel(appointmentTimeZone) ?? appointmentTimeZone} />
                             <SummaryRow label="Status" value={statusPillLabel} />
                             {locationLine ? (
-                              <SummaryRow label="Location" value={locationLine} />
+                              <SummaryRow
+                                label="Location"
+                                value={
+                                  locationMapsHref ? (
+                                    <a
+                                      href={locationMapsHref}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="brand-focus underline underline-offset-2 hover:opacity-80"
+                                    >
+                                      {locationLine}
+                                    </a>
+                                  ) : (
+                                    locationLine
+                                  )
+                                }
+                              />
                             ) : null}
                           </div>
                         </ClientAftercareCard>
@@ -1503,14 +1546,25 @@ export default async function ClientBookingPage(props: {
                           />
                         ) : null}
 
-                        <ClientAftercareCard>
-                          <ClientAftercareSectionTitle title="Final service breakdown" />
+                        {/*
+                          Guarded on `items` like the Overview tab's copy of this
+                          card three hundred lines up. `ServiceBreakdownCard`
+                          renders null when there is nothing to break down, so
+                          without the guard a booking with no line items — every
+                          booking predating BookingServiceItem, and any row
+                          written outside the finalize path — drew the heading
+                          "Final service breakdown" over empty space.
+                        */}
+                        {booking.items.length > 0 ? (
+                          <ClientAftercareCard>
+                            <ClientAftercareSectionTitle title="Final service breakdown" />
 
-                          <ServiceBreakdownCard
-                            items={booking.items}
-                            addOnCount={booking.display?.addOnCount ?? 0}
-                          />
-                        </ClientAftercareCard>
+                            <ServiceBreakdownCard
+                              items={booking.items}
+                              addOnCount={booking.display?.addOnCount ?? 0}
+                            />
+                          </ClientAftercareCard>
+                        ) : null}
 
                         {booking.productSales.length > 0 ? (
                           <ClientAftercareCard>

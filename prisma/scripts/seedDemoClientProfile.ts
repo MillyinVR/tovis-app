@@ -24,12 +24,15 @@
 //     the mockup's invented 24/15/12/18 — a count that lies is exactly the class
 //     of bug this walkthrough exists to find.
 import {
+  AftercareRebookMode,
   BookingSource,
   BookingStatus,
   BoardVisibility,
+  ClientAddressKind,
   ClientClaimStatus,
   LookPostStatus,
   LookPostVisibility,
+  MediaPhase,
   MediaType,
   MediaVisibility,
   ModerationStatus,
@@ -45,6 +48,7 @@ import {
 
 import { refreshClientCreatorStats } from '@/lib/clients/creatorTier'
 import { normalizeHandle } from '@/lib/handles'
+import { addDaysToYMD, getZonedParts, zonedTimeToUtc } from '@/lib/time'
 
 // ── guard ────────────────────────────────────────────────────────────────────
 // Own hard guard rather than requireSafeScriptRun: this script must NEVER reach
@@ -296,6 +300,99 @@ const BOARDS: {
   },
 ]
 
+/**
+ * The demo creator's OWN appointments — the two states screen 4 is about.
+ *
+ * Every one of the 43 bookings above is a FAN's, attributed to one of Maya's
+ * looks; she had none of her own, so `/client/bookings` and every appointment
+ * screen behind it rendered empty for the very account the walkthrough drives.
+ *
+ * ⚠️ The upcoming one is timed off the REAL clock, not the fixture's frozen
+ * `NOW`. An "in 3 days" appointment pinned to a constant is upcoming for three
+ * days and then quietly becomes a past one, and the prep screen it exists to
+ * populate disappears — a fixture that rots into a passing empty state.
+ */
+const OWN_APPOINTMENTS = {
+  proKey: 'noor',
+  serviceKey: 'balayage',
+  /** Days from today, in the appointment's own zone (not +72h — DST). */
+  upcomingInDays: 3,
+  upcomingHour: 11,
+  /** Long enough ago that the rebook window below is live, not expired. */
+  pastDaysAgo: 38,
+  pastHour: 10,
+  /** The MOBILE one, a different day so it can't collide on the pro's clock. */
+  mobileInDays: 9,
+  mobileHour: 14,
+  priceStartingAt: 250,
+  /** Mobile costs more, as a travelling appointment really does. */
+  mobilePriceStartingAt: 290,
+  durationMinutes: 180,
+} as const
+
+/**
+ * Maya's own service address — where a MOBILE appointment happens. Deliberately
+ * NOT the Brooklyn address every demo pro sits at: if the client's address and
+ * the pro's salon were the same string, a surface that resolved the wrong one
+ * would render identically to one that resolved the right one, and the fixture
+ * would prove nothing.
+ */
+const MAYA_HOME = {
+  formattedAddress: '88 Withers St, Brooklyn, NY 11211',
+  addressLine1: '88 Withers St',
+  city: 'Brooklyn',
+  state: 'NY',
+  postalCode: '11211',
+  countryCode: 'US',
+  lat: 40.7175,
+  lng: -73.9502,
+} as const
+
+/**
+ * The care plan Noor published after the past appointment.
+ *
+ * `notes` is the pro's own free text (the frame's "Noor's note"); the rebook
+ * window is a real RECOMMENDED_WINDOW, dated off the past appointment rather
+ * than typed, so the range the screen prints is the one the product would
+ * compute. Products are the EXTERNAL-link kind — the internal `Product`
+ * catalogue is empty on a dev DB, and a recommendation with a null product is
+ * the row a real pro writes when they link their own shop.
+ */
+const CARE_PLAN = {
+  notes:
+    'Cool water for the first 48 hours and a sulfate-free shampoo will keep ' +
+    'the balayage bright. Book your gloss before the eight-week mark and we ' +
+    'never have to chase brass.',
+  /** Weeks after the appointment that the pro wants her back. */
+  rebookWindowStartWeeks: 7,
+  rebookWindowEndWeeks: 9,
+  // ⚠️ Keys are ORDER-PREFIXED. Both clients read
+  // `recommendedProducts` with `orderBy: { id: 'asc' }`, which on real cuids is
+  // creation order — but on a fixture's hand-written ids it is alphabetical, so
+  // unprefixed keys silently render the pro's list backwards and invite a bug
+  // report against the product for something only the fixture does.
+  products: [
+    {
+      key: '1-shampoo',
+      name: 'Olaplex No. 4 Bond Maintenance Shampoo',
+      url: 'https://example.com/olaplex-no-4',
+      note: 'Twice a week, cool water.',
+    },
+    {
+      key: '2-mask',
+      name: 'K18 Leave-In Molecular Repair Mask',
+      url: 'https://example.com/k18-mask',
+      note: 'Every third wash on the mid-lengths.',
+    },
+    {
+      key: '3-heat',
+      name: 'Color Wow Dream Coat',
+      url: 'https://example.com/dream-coat',
+      note: 'Before any heat over 300°F.',
+    },
+  ],
+} as const
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 const money = (n: number) => new Prisma.Decimal(n.toFixed(2))
 
@@ -381,6 +478,27 @@ async function clean(): Promise<void> {
   // un-cleanable ("Booking_locationId_fkey"). Anything booked against a
   // `demoseed-` pro belongs to this fixture, whoever created it.
   await prisma.review.deleteMany({ where: { professionalId: idPrefix } })
+  // An AftercareSummary cascades from its booking, but ProductRecommendation
+  // does NOT cascade from the summary (a required relation with no onDelete is
+  // Restrict), so deleting the booking would fail on the recommendation rows
+  // and take the whole `--clean` down with it. Keyed on the demo pros for the
+  // same reason as the bookings themselves: a summary the pro writes at runtime
+  // against this fixture carries a cuid, not the prefix, and belongs to it just
+  // the same.
+  const demoSummaryIds = (
+    await prisma.aftercareSummary.findMany({
+      where: { booking: { professionalId: idPrefix } },
+      select: { id: true },
+    })
+  ).map((row) => row.id)
+  if (demoSummaryIds.length > 0) {
+    await prisma.productRecommendation.deleteMany({
+      where: { aftercareSummaryId: { in: demoSummaryIds } },
+    })
+    await prisma.aftercareSummary.deleteMany({
+      where: { id: { in: demoSummaryIds } },
+    })
+  }
   await prisma.booking.deleteMany({ where: { professionalId: idPrefix } })
   await prisma.proNoShowSettings.deleteMany({ where: { id: idPrefix } })
   await prisma.boardItem.deleteMany({ where: { id: idPrefix } })
@@ -399,6 +517,9 @@ async function clean(): Promise<void> {
   await prisma.handleRegistration.deleteMany({
     where: { handleNormalized: { in: [normalizeHandle(CREATOR.handle)] } },
   })
+  // Before the client profile (cascade would take it, but the bookings above
+  // RESTRICT-reference it, so order is load-bearing either way).
+  await prisma.clientAddress.deleteMany({ where: { id: idPrefix } })
   await prisma.clientProfile.deleteMany({ where: { id: idPrefix } })
   await prisma.professionalProfile.deleteMany({ where: { id: idPrefix } })
   await prisma.user.deleteMany({ where: { id: idPrefix } })
@@ -533,7 +654,13 @@ async function main(): Promise<void> {
         name: pro.businessName,
         isPrimary: true,
         isBookable: true,
-        isAddressPublic: true,
+        // 🔴 NOT true for everyone. `isAddressPublic` is what decides whether the
+        // booking sheet may print a street address at all (the route is
+        // unauthenticated, and a "salon" is often a home studio), so a fixture
+        // where every pro published one would only ever exercise the published
+        // branch — and the redaction would look correct while being untested.
+        // Mara is the home-studio case: the sheet must fall back to her CITY.
+        isAddressPublic: pro.key !== 'mara',
         ...brooklynAddress(),
         timeZone: TIME_ZONE,
         workingHours: workingHoursJson(),
@@ -952,6 +1079,196 @@ async function main(): Promise<void> {
     }
   }
   await prisma.booking.createMany({ data: bookingRows })
+
+  // ── the creator's OWN appointments (screen 4) ──────────────────────────────
+  // One upcoming (the prep screen) and one completed with a published care plan
+  // (the aftercare screen). See OWN_APPOINTMENTS for why the upcoming one is
+  // timed off the real clock rather than the frozen NOW.
+  const ownProKey = OWN_APPOINTMENTS.proKey
+  const ownServiceId = serviceId(OWN_APPOINTMENTS.serviceKey)
+  const realNow = new Date()
+  const today = getZonedParts(realNow, TIME_ZONE)
+
+  const atLocalHour = (daysFromToday: number, hour: number): Date => {
+    const { year, month, day } = addDaysToYMD(
+      today.year,
+      today.month,
+      today.day,
+      daysFromToday,
+    )
+    return zonedTimeToUtc({ year, month, day, hour, minute: 0, timeZone: TIME_ZONE })
+  }
+
+  const upcomingAt = atLocalHour(
+    OWN_APPOINTMENTS.upcomingInDays,
+    OWN_APPOINTMENTS.upcomingHour,
+  )
+  const pastAt = atLocalHour(-OWN_APPOINTMENTS.pastDaysAgo, OWN_APPOINTMENTS.pastHour)
+
+  const ownBookingBase = {
+    clientId: creator.id,
+    professionalId: proId(ownProKey),
+    serviceId: ownServiceId,
+    proTenantId: tenantId,
+    clientHomeTenantId: tenantId,
+    source: BookingSource.DISCOVERY,
+    locationType: ServiceLocationType.SALON,
+    locationId: locationId(ownProKey),
+    locationTimeZone: TIME_ZONE,
+    // What the finalize path captures, and what the client DTO's
+    // `locationAddress`/`locationLat`/`locationLng` read: the place as it was
+    // when the appointment was booked, not as the pro's location reads today.
+    // Without them the maps link falls back to searching the address TEXT, so a
+    // fixture that omits them never exercises the coordinate branch.
+    locationAddressSnapshot: { formattedAddress: BROOKLYN.formattedAddress },
+    locationLatSnapshot: BROOKLYN.lat,
+    locationLngSnapshot: BROOKLYN.lng,
+    subtotalSnapshot: money(OWN_APPOINTMENTS.priceStartingAt),
+    totalDurationMinutes: OWN_APPOINTMENTS.durationMinutes,
+  }
+
+  await prisma.booking.create({
+    data: {
+      ...ownBookingBase,
+      id: `${P}booking-own-upcoming`,
+      status: BookingStatus.ACCEPTED,
+      sourceLookPostId: lookId('lived-in-blonde'),
+      // Booked a couple of weeks ahead, like a colour appointment really is.
+      createdAt: new Date(upcomingAt.getTime() - 17 * 24 * 60 * 60 * 1000),
+      scheduledFor: upcomingAt,
+    },
+  })
+
+  // A MOBILE appointment, at MAYA's address rather than Noor's salon. The whole
+  // point of resolving the booked place through `resolveBookingLocationMeta`:
+  // with only a salon fixture, every client surface can print the pro's address
+  // for a booking the pro travels to and still look correct.
+  const clientHome = await prisma.clientAddress.create({
+    data: {
+      id: `${P}address-maya-home`,
+      clientId: creator.id,
+      kind: ClientAddressKind.SERVICE_ADDRESS,
+      isDefault: true,
+      formattedAddress: MAYA_HOME.formattedAddress,
+      addressLine1: MAYA_HOME.addressLine1,
+      city: MAYA_HOME.city,
+      state: MAYA_HOME.state,
+      postalCode: MAYA_HOME.postalCode,
+      countryCode: MAYA_HOME.countryCode,
+      lat: new Prisma.Decimal(MAYA_HOME.lat),
+      lng: new Prisma.Decimal(MAYA_HOME.lng),
+    },
+    select: { id: true },
+  })
+
+  await prisma.booking.create({
+    data: {
+      ...ownBookingBase,
+      id: `${P}booking-own-mobile`,
+      status: BookingStatus.ACCEPTED,
+      locationType: ServiceLocationType.MOBILE,
+      clientAddressId: clientHome.id,
+      clientAddressSnapshot: { formattedAddress: MAYA_HOME.formattedAddress },
+      clientAddressLatSnapshot: MAYA_HOME.lat,
+      clientAddressLngSnapshot: MAYA_HOME.lng,
+      createdAt: new Date(
+        atLocalHour(OWN_APPOINTMENTS.mobileInDays, OWN_APPOINTMENTS.mobileHour).getTime() -
+          9 * 24 * 60 * 60 * 1000,
+      ),
+      scheduledFor: atLocalHour(
+        OWN_APPOINTMENTS.mobileInDays,
+        OWN_APPOINTMENTS.mobileHour,
+      ),
+      subtotalSnapshot: money(OWN_APPOINTMENTS.mobilePriceStartingAt),
+    },
+  })
+
+  const pastBooking = await prisma.booking.create({
+    data: {
+      ...ownBookingBase,
+      id: `${P}booking-own-past`,
+      status: BookingStatus.COMPLETED,
+      sourceLookPostId: lookId('lived-in-blonde'),
+      createdAt: new Date(pastAt.getTime() - 12 * 24 * 60 * 60 * 1000),
+      scheduledFor: pastAt,
+      startedAt: pastAt,
+      finishedAt: new Date(
+        pastAt.getTime() + OWN_APPOINTMENTS.durationMinutes * 60 * 1000,
+      ),
+    },
+    select: { id: true },
+  })
+
+  // The before/after pair. `phase` is what `loadBookingBeforeAfterThumbs` reads;
+  // PRO_CLIENT visibility is the aftercare world (a session photo is not a
+  // portfolio post until the client consents to publish it), and the sentinel
+  // bucket keeps the render on /public like every other image here. Distinct
+  // storagePaths because MediaAsset is @@unique([storageBucket, storagePath]) —
+  // the `url` they resolve to is a real file in public/seed-demo.
+  const sessionPhotos: Array<{
+    key: string
+    phase: MediaPhase
+    file: string
+    minutesAfterStart: number
+  }> = [
+    { key: 'before', phase: MediaPhase.BEFORE, file: 'money-piece-blonde', minutesAfterStart: 5 },
+    { key: 'after', phase: MediaPhase.AFTER, file: 'lived-in-blonde', minutesAfterStart: 175 },
+  ]
+  for (const photo of sessionPhotos) {
+    await prisma.mediaAsset.create({
+      data: {
+        id: `${P}media-own-${photo.key}`,
+        professionalId: proId(ownProKey),
+        proTenantId: tenantId,
+        primaryServiceId: ownServiceId,
+        bookingId: pastBooking.id,
+        phase: photo.phase,
+        storageBucket: DEMO_LOCAL_BUCKET,
+        storagePath: `seed-demo/own-${photo.key}.jpg`,
+        url: `http://localhost:3000/seed-demo/${photo.file}.jpg`,
+        thumbUrl: `http://localhost:3000/seed-demo/${photo.file}.jpg`,
+        mediaType: MediaType.IMAGE,
+        visibility: MediaVisibility.PRO_CLIENT,
+        createdAt: new Date(pastAt.getTime() + photo.minutesAfterStart * 60 * 1000),
+      },
+    })
+  }
+
+  // The care plan itself. `sentToClientAt` is the gate — a DRAFT summary is the
+  // pro's, and `isClientAftercareVisible` is the only thing standing between the
+  // client and an unfinished one.
+  const finalizedAt = new Date(
+    pastAt.getTime() + (OWN_APPOINTMENTS.durationMinutes + 20) * 60 * 1000,
+  )
+  const week = 7 * 24 * 60 * 60 * 1000
+  await prisma.aftercareSummary.create({
+    data: {
+      id: `${P}aftercare-own-past`,
+      bookingId: pastBooking.id,
+      notes: CARE_PLAN.notes,
+      rebookMode: AftercareRebookMode.RECOMMENDED_WINDOW,
+      rebookWindowStart: new Date(
+        pastAt.getTime() + CARE_PLAN.rebookWindowStartWeeks * week,
+      ),
+      rebookWindowEnd: new Date(
+        pastAt.getTime() + CARE_PLAN.rebookWindowEndWeeks * week,
+      ),
+      featuredBeforeAssetId: `${P}media-own-before`,
+      featuredAfterAssetId: `${P}media-own-after`,
+      draftSavedAt: finalizedAt,
+      sentToClientAt: finalizedAt,
+      lastEditedAt: finalizedAt,
+      createdAt: finalizedAt,
+      recommendedProducts: {
+        create: CARE_PLAN.products.map((product) => ({
+          id: `${P}product-rec-${product.key}`,
+          externalName: product.name,
+          externalUrl: product.url,
+          note: product.note,
+        })),
+      },
+    },
+  })
 
   // ── reviews + cancellation policy (the booking sheet's trust row) ──────────
   // The sheet's three chips read `lib/booking/trustSignals`: an approved
