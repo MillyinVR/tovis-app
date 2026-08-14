@@ -206,39 +206,65 @@ function LookCard({ look }: { look: PublicClientLook }) {
   )
 }
 
+/**
+ * A board reads as one wide strip of its looks with the name sitting ON the
+ * artwork — the treatment from the Boards / Prep / Aftercare design frame,
+ * not the 2×2 quadrant mosaic the public-profile frame sketched. The strip
+ * shows up to four looks instead of one cropped square each, and the scrim runs
+ * left-to-right so the label has a dark field to sit on while the right-hand
+ * looks stay bright.
+ */
 function BoardCard({ board }: { board: PublicClientBoard }) {
   return (
-    <Link href={board.href} className="block brand-focus">
-      {/* grid-rows-2 is load-bearing: without an explicit row track the rows are
-          content-sized, the cell has no resolved height for `h-full` to fill,
-          and each tile renders at the image's own aspect ratio inside a square
-          that stays half empty. */}
-      <div className="grid aspect-square grid-cols-2 grid-rows-2 gap-0.5 overflow-hidden rounded-[20px] border border-textPrimary/10 bg-bgSecondary">
-        {/* Always four cells so a part-filled board keeps the mosaic's shape
-            instead of stretching one image across the whole tile. */}
-        {Array.from({ length: 4 }, (_, index) => {
-          const url = board.tileImageUrls[index]
-          return (
-            <div key={index} className="relative overflow-hidden bg-bgPrimary">
-              {url ? (
-                <RemoteImage
-                  src={url}
-                  alt=""
-                  className="absolute inset-0 h-full w-full object-cover"
-                  loading="lazy"
-                  width={220}
-                  height={220}
-                />
-              ) : null}
-            </div>
-          )
-        })}
+    <Link
+      href={board.href}
+      className="group relative block aspect-[2.05/1] overflow-hidden rounded-[18px] border border-textPrimary/10 bg-bgSecondary brand-focus"
+    >
+      {/* One column per look the board ACTUALLY has, capped at four. A fixed
+          four-column strip leaves dead cells on a board with two looks, which
+          reads as a broken image rather than as a small board. The explicit row
+          track is load-bearing: without it the cells have no resolved height for
+          `h-full` to fill and each tile falls back to its own aspect ratio. */}
+      <div
+        className="absolute inset-0 grid grid-rows-1"
+        style={{
+          gridTemplateColumns: `repeat(${Math.max(1, Math.min(4, board.tileImageUrls.length))}, 1fr)`,
+        }}
+      >
+        {board.tileImageUrls.slice(0, 4).map((url, index) => (
+          <div key={index} className="relative overflow-hidden bg-bgPrimary">
+            <RemoteImage
+              src={url}
+              alt=""
+              className="absolute inset-0 h-full w-full object-cover"
+              loading="lazy"
+              width={320}
+              height={320}
+            />
+          </div>
+        ))}
       </div>
-      <div className="mt-2.5 truncate text-[14px] font-bold text-textPrimary">
-        {board.name}
-      </div>
-      <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-textSecondary">
-        {board.itemCount} {COPY.publicProfile.savedSuffix}
+
+      {/* Left-weighted so the name has a dark field to sit on while the
+          right-hand looks stay legible. */}
+      <div
+        aria-hidden="true"
+        className="absolute inset-0 bg-linear-to-r from-bgPrimary/85 from-28% via-bgPrimary/25 via-70% to-transparent"
+      />
+
+      <div className="absolute inset-x-3.5 bottom-3.5">
+        <div className="truncate text-[17px] font-bold tracking-[-0.02em] text-textPrimary">
+          {board.name}
+        </div>
+        {/* No "SHARED" chip: this grid only ever lists SHARED boards, so the
+            badge the source design carries would be true of every row and
+            therefore tell the visitor nothing. */}
+        <div className="mt-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-textSecondary">
+          {board.itemCount}{' '}
+          {board.itemCount === 1
+            ? COPY.publicProfile.boardLooksOne
+            : COPY.publicProfile.boardLooksMany}
+        </div>
       </div>
     </Link>
   )
@@ -401,8 +427,10 @@ export default function PublicProfileView({
           aria-labelledby="public-profile-tab-boards"
           className="mt-5"
         >
+          {/* Wide strips, so two across at most — a board card stretched over a
+              900px column would dwarf the look grid beside it. */}
           {data.boards.length > 0 ? (
-            <div className="grid grid-cols-2 gap-x-4 gap-y-[18px] sm:grid-cols-3 lg:grid-cols-4">
+            <div className="grid grid-cols-1 gap-[18px] sm:grid-cols-2">
               {data.boards.map((board) => (
                 <BoardCard key={board.id} board={board} />
               ))}

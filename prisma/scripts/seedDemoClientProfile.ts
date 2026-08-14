@@ -183,10 +183,21 @@ const LOOKS: DemoLook[] = [
   { key: 'brow-lamination', title: 'Brow lamination', proKey: 'mara', serviceKey: 'brow', priceStartingAt: 70, saveCount: 22, recreated: 3, featured: false },
 ]
 
+// Board covers render as a strip of up to FOUR looks, so the fixture carries
+// boards on both sides of that: two full four-look boards and two smaller ones,
+// which is what proves the strip narrows honestly instead of leaving dead cells.
 const BOARDS: { key: string; name: string; lookKeys: string[] }[] = [
-  { key: 'lived-in-blonde', name: 'Lived-in blonde', lookKeys: ['lived-in-blonde', 'money-piece-blonde'] },
-  { key: 'viral-looks', name: 'Viral looks', lookKeys: ['cherry-cola-balayage', 'lived-in-blonde', 'glazed-almond-set'] },
-  { key: 'wedding-hair', name: 'Wedding hair', lookKeys: ['money-piece-blonde'] },
+  {
+    key: 'lived-in-blonde',
+    name: 'Lived-in blonde',
+    lookKeys: ['lived-in-blonde', 'money-piece-blonde', 'cherry-cola-balayage', 'brow-lamination'],
+  },
+  {
+    key: 'viral-looks',
+    name: 'Viral looks',
+    lookKeys: ['cherry-cola-balayage', 'lived-in-blonde', 'glazed-almond-set', 'lash-lift-tint'],
+  },
+  { key: 'wedding-hair', name: 'Wedding hair', lookKeys: ['money-piece-blonde', 'lived-in-blonde'] },
   { key: 'nails-2025', name: 'Nails 2025', lookKeys: ['glazed-almond-set'] },
 ]
 

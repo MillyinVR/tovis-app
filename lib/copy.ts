@@ -304,8 +304,13 @@ export const COPY = {
     spotlightBadge: 'Spotlight',
     /** Composed as `${count} ${recreatedSuffix}` → "12 recreated this". */
     recreatedSuffix: 'recreated this',
-    /** Composed as `${count} ${savedSuffix}` → "24 saved". */
-    savedSuffix: 'saved',
+    /**
+     * Composed as `${count} ${boardLooks(count)}` → "12 LOOKS" / "1 LOOK" on a
+     * board card. Two forms because a board can genuinely hold one look, and
+     * "1 LOOKS" is the kind of detail that makes a whole screen look unfinished.
+     */
+    boardLooksOne: 'look',
+    boardLooksMany: 'looks',
     savesLabel: 'saves',
     recreateCta: 'Recreate this look',
     emptyLooks: 'No public looks yet.',
