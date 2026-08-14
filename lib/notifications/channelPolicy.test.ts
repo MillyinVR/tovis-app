@@ -324,6 +324,11 @@ describe('lib/notifications/channelPolicy', () => {
           enabled: true,
           reason: null,
         },
+        {
+          channel: NotificationChannel.PUSH,
+          enabled: false,
+          reason: 'CHANNEL_NOT_REQUESTED',
+        },
       ])
     })
 
@@ -334,6 +339,7 @@ describe('lib/notifications/channelPolicy', () => {
         capabilities: makeCapabilities({
           hasSmsDestination: false,
           hasEmailDestination: false,
+          hasPushDestination: false,
         }),
       })
 
@@ -354,6 +360,11 @@ describe('lib/notifications/channelPolicy', () => {
           enabled: false,
           reason: 'MISSING_EMAIL_DESTINATION',
         },
+        {
+          channel: NotificationChannel.PUSH,
+          enabled: false,
+          reason: 'MISSING_PUSH_TOKENS',
+        },
       ])
     })
 
@@ -365,6 +376,7 @@ describe('lib/notifications/channelPolicy', () => {
         preference: makePreference({
           smsEnabled: false,
           emailEnabled: false,
+          pushEnabled: false,
         }),
       })
 
@@ -382,6 +394,11 @@ describe('lib/notifications/channelPolicy', () => {
         },
         {
           channel: NotificationChannel.EMAIL,
+          enabled: false,
+          reason: 'PREFERENCE_DISABLED',
+        },
+        {
+          channel: NotificationChannel.PUSH,
           enabled: false,
           reason: 'PREFERENCE_DISABLED',
         },
@@ -428,7 +445,7 @@ describe('lib/notifications/channelPolicy', () => {
       })
     })
 
-    it('suppresses SMS and EMAIL during quiet hours but keeps IN_APP enabled', () => {
+    it('suppresses SMS, EMAIL and PUSH during quiet hours but keeps IN_APP enabled', () => {
       const result = resolveChannelPolicy({
         key: NotificationEventKey.APPOINTMENT_REMINDER,
         recipientKind: NotificationRecipientKind.CLIENT,
@@ -454,6 +471,11 @@ describe('lib/notifications/channelPolicy', () => {
         },
         {
           channel: NotificationChannel.EMAIL,
+          enabled: false,
+          reason: 'QUIET_HOURS',
+        },
+        {
+          channel: NotificationChannel.PUSH,
           enabled: false,
           reason: 'QUIET_HOURS',
         },
@@ -490,6 +512,11 @@ describe('lib/notifications/channelPolicy', () => {
           enabled: false,
           reason: 'QUIET_HOURS',
         },
+        {
+          channel: NotificationChannel.PUSH,
+          enabled: false,
+          reason: 'QUIET_HOURS',
+        },
       ])
     })
 
@@ -510,6 +537,7 @@ describe('lib/notifications/channelPolicy', () => {
         NotificationChannel.IN_APP,
         NotificationChannel.SMS,
         NotificationChannel.EMAIL,
+        NotificationChannel.PUSH,
       ])
       expect(result.evaluations).toEqual([
         {
@@ -524,6 +552,11 @@ describe('lib/notifications/channelPolicy', () => {
         },
         {
           channel: NotificationChannel.EMAIL,
+          enabled: true,
+          reason: null,
+        },
+        {
+          channel: NotificationChannel.PUSH,
           enabled: true,
           reason: null,
         },
@@ -558,6 +591,11 @@ describe('lib/notifications/channelPolicy', () => {
         },
         {
           channel: NotificationChannel.EMAIL,
+          enabled: false,
+          reason: 'QUIET_HOURS',
+        },
+        {
+          channel: NotificationChannel.PUSH,
           enabled: false,
           reason: 'QUIET_HOURS',
         },
@@ -616,6 +654,7 @@ describe('lib/notifications/channelPolicy', () => {
         NotificationChannel.IN_APP,
         NotificationChannel.SMS,
         NotificationChannel.EMAIL,
+        NotificationChannel.PUSH,
       ])
     })
   })

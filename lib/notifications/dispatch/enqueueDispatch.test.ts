@@ -1012,6 +1012,81 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
       ])
     })
 
+    // The population this exists for: a client on the app who never verified an
+    // email or a phone. Before APPOINTMENT_REMINDER carried PUSH, every off-app
+    // channel it had was one this client cannot use, so their reminder reached
+    // nothing but an inbox row they had to go looking for.
+    it('gives an appointment reminder a sendable PUSH row for a client with no verified email or phone', async () => {
+      configureApns()
+
+      const scheduledFor = new Date('2026-04-12T15:30:00.000Z')
+
+      mockPrisma.deviceToken.findMany.mockResolvedValue([
+        { platform: 'IOS', token: 'apns_reminder_token' },
+      ])
+
+      mockPrisma.notificationDispatch.findUnique.mockResolvedValue(null)
+      mockPrisma.notificationDispatch.create.mockResolvedValue(
+        makeDispatchRecord({ scheduledFor }),
+      )
+
+      const result = await enqueueDispatch({
+        key: NotificationEventKey.APPOINTMENT_REMINDER,
+        sourceKey: 'client-notification:reminder_push',
+        recipient: {
+          kind: NotificationRecipientKind.CLIENT,
+          clientId: 'client_1',
+          userId: 'user_1',
+          inAppTargetId: 'client_1',
+          // Unverified on both off-app channels — neither is a usable destination.
+          phone: '+15551234567',
+          phoneVerifiedAt: null,
+          transactionalSmsConsentAt: null,
+          email: 'client@example.com',
+          emailVerifiedAt: null,
+          timeZone: 'America/Los_Angeles',
+          preference: null,
+        },
+        title: 'Appointment tomorrow',
+        href: '/client/bookings/booking_1?step=overview',
+        scheduledFor,
+      })
+
+      expect(result.selectedChannels).toEqual([
+        NotificationChannel.IN_APP,
+        NotificationChannel.PUSH,
+      ])
+
+      const createArg = mockPrisma.notificationDispatch.create.mock.calls[0]?.[0]
+      const createdDeliveries: Array<{
+        channel: NotificationChannel
+        provider: NotificationProvider
+        destination: string | null
+        status: NotificationDeliveryStatus
+      }> = createArg?.data?.deliveries?.create ?? []
+
+      expect(
+        createdDeliveries
+          .filter((row) => row.status === NotificationDeliveryStatus.PENDING)
+          .map((row) => ({
+            channel: row.channel,
+            provider: row.provider,
+            destination: row.destination,
+          })),
+      ).toEqual([
+        {
+          channel: NotificationChannel.IN_APP,
+          provider: NotificationProvider.INTERNAL_REALTIME,
+          destination: 'client_1',
+        },
+        {
+          channel: NotificationChannel.PUSH,
+          provider: NotificationProvider.APNS,
+          destination: 'apns_reminder_token',
+        },
+      ])
+    })
+
     it('suppresses PUSH (no PENDING rows) when the provider is configured but the user has no active tokens', async () => {
       configureApns()
 
