@@ -30,12 +30,17 @@ import {
   BoardVisibility,
   ClientAddressKind,
   ClientClaimStatus,
+  LastMinuteOfferType,
+  LastMinuteRecipientStatus,
+  LastMinuteTier,
+  LastMinuteVisibilityMode,
   LookPostStatus,
   LookPostVisibility,
   MediaPhase,
   MediaType,
   MediaVisibility,
   ModerationStatus,
+  OpeningStatus,
   PaymentCollectionTiming,
   Prisma,
   PrismaClient,
@@ -45,11 +50,21 @@ import {
   Role,
   ServiceLocationType,
   VerificationStatus,
+  ViralRequestApprovalFanOutStatus,
+  ViralServiceRequestStatus,
+  WaitlistPreferenceType,
+  WaitlistStatus,
+  WaitlistTimeOfDay,
 } from '@prisma/client'
 
 import { refreshClientCreatorStats } from '@/lib/clients/creatorTier'
 import { normalizeHandle } from '@/lib/handles'
-import { addDaysToYMD, getZonedParts, zonedTimeToUtc } from '@/lib/time'
+import {
+  addDaysToYMD,
+  getZonedParts,
+  weekdayInTimeZone,
+  zonedTimeToUtc,
+} from '@/lib/time'
 
 // ── guard ────────────────────────────────────────────────────────────────────
 // Own hard guard rather than requireSafeScriptRun: this script must NEVER reach
@@ -132,6 +147,16 @@ type DemoPro = {
   firstName: string
   lastName: string
   profession: ProfessionType
+  /**
+   * A photograph of their own work, standing in for a portrait.
+   *
+   * Not decoration: the home's favourites rail is picture-led (Tori,
+   * 2026-08-14), and a pro with no `avatarUrl` renders initials on a gradient —
+   * so a fixture without images can only ever prove the fallback. The images
+   * are the same `public/seed-demo/` files the looks use, which is why they
+   * never touch PROD storage (see the MediaAsset note above).
+   */
+  avatarUrl: string
 }
 
 const PROS: DemoPro[] = [
@@ -141,6 +166,7 @@ const PROS: DemoPro[] = [
     firstName: 'Noor',
     lastName: 'Haddad',
     profession: ProfessionType.COSMETOLOGIST,
+    avatarUrl: 'http://localhost:3000/seed-demo/lived-in-blonde.jpg',
   },
   {
     key: 'sasha',
@@ -148,6 +174,7 @@ const PROS: DemoPro[] = [
     firstName: 'Sasha',
     lastName: 'Lim',
     profession: ProfessionType.MANICURIST,
+    avatarUrl: 'http://localhost:3000/seed-demo/glazed-almond-set.jpg',
   },
   {
     key: 'mara',
@@ -155,6 +182,7 @@ const PROS: DemoPro[] = [
     firstName: 'Mara',
     lastName: 'Vance',
     profession: ProfessionType.ESTHETICIAN,
+    avatarUrl: 'http://localhost:3000/seed-demo/lash-lift-tint.jpg',
   },
 ]
 
@@ -425,6 +453,165 @@ const CARE_PLAN = {
   ],
 } as const
 
+/**
+ * The client HOME's five other sections (screen 5).
+ *
+ * Home renders eight sections and five of them had no rows on this fixture, so
+ * the populated half of the screen — the half the frame is mostly about — could
+ * only ever be compared as "empty state vs mockup".
+ *
+ * Favourites are an ODD count on purpose. Both clients lay the pro tiles out
+ * two-up, and an even fixture can never show what the last row does with a
+ * single tile; the mockup's "· 4" is its own invented number, exactly like the
+ * board counts this script already refuses to copy.
+ */
+const FAVORITE_PRO_KEYS = ['noor', 'sasha', 'mara'] as const
+const FAVORITE_SERVICE_KEYS = ['balayage', 'lash', 'brow'] as const
+
+/**
+ * Maya's waitlist places — and, crucially, OTHER clients ahead of her.
+ *
+ * 🔴 `aheadOfMaya` is the whole point of this fixture. Both clients label the row
+ * `#{index + 1} in line`, which is the position in MAYA'S OWN list, while the
+ * pro's waitlist (`app/api/v1/pro/waitlist/route.ts`: *"FIFO: the client who
+ * joined first is rank #1 within their service"*) ranks the same entry against
+ * everyone else waiting. With Maya as the only entry those two numbers agree by
+ * accident and the screen looks correct; seed people ahead of her and they
+ * disagree, which is the only way the bug is visible at all.
+ */
+const WAITLIST: {
+  key: string
+  proKey: string
+  serviceKey: string
+  /** Fans holding an ACTIVE place for the same pro+service, joined earlier. */
+  aheadOfMaya: number
+  preference: WaitlistPreferenceType
+  timeOfDay?: WaitlistTimeOfDay
+}[] = [
+  {
+    key: 'gelx-sasha',
+    proKey: 'sasha',
+    serviceKey: 'gelx',
+    aheadOfMaya: 2,
+    preference: WaitlistPreferenceType.TIME_OF_DAY,
+    timeOfDay: WaitlistTimeOfDay.EVENING,
+  },
+  {
+    key: 'lash-mara',
+    proKey: 'mara',
+    serviceKey: 'lash',
+    aheadOfMaya: 4,
+    preference: WaitlistPreferenceType.ANY_TIME,
+  },
+]
+
+/**
+ * Last-minute openings Maya was notified about.
+ *
+ * ⚠️ These are read through `filterStillOpenRows`, which re-runs the REAL
+ * scheduling gate against the pro's live calendar — so an opening the fixture
+ * writes at a time the pro cannot actually serve is silently dropped and the
+ * strip renders its empty state, indistinguishable from a seed that never ran.
+ * Hence: a service short enough to finish before the 18:00 close, a start on the
+ * hour or half hour so it lands on the slot grid, and `dayOffset` counted in
+ * OPEN days (Sunday is disabled in `workingHoursJson`, and the demo pros' only
+ * bookings are in the past, so nothing else can collide).
+ *
+ * One opening carries a tier incentive and one does not: `incentiveLabel` is
+ * rendered from the matched tier plan, so a fixture where every row had an offer
+ * would never show the plain row, and vice versa.
+ */
+const OPENINGS: {
+  key: string
+  proKey: string
+  serviceKey: string
+  /** Open days from today — 1 is the next working day, never a Sunday. */
+  dayOffset: number
+  hour: number
+  minute: number
+  note: string
+  tier: LastMinuteTier
+  offerType: LastMinuteOfferType
+  percentOff?: number
+}[] = [
+  {
+    key: 'noor-partial',
+    proKey: 'noor',
+    serviceKey: 'partial',
+    dayOffset: 1,
+    // ⚠️ 11:00, not the afternoon: `dayOffset: 1` can land on a SATURDAY, and
+    // Saturday closes at 16:00 in `workingHoursJson` — a 150-minute partial
+    // starting at 14:30 runs past the close, the liveness gate drops the row,
+    // and the strip renders its empty state as if the seed had never run.
+    hour: 11,
+    minute: 0,
+    note: 'Had a cancellation — happy to fit a partial in.',
+    tier: LastMinuteTier.WAITLIST,
+    offerType: LastMinuteOfferType.PERCENT_OFF,
+    percentOff: 15,
+  },
+  {
+    key: 'mara-lash',
+    proKey: 'mara',
+    serviceKey: 'lash',
+    dayOffset: 2,
+    hour: 16,
+    minute: 30,
+    note: 'One lash slot left this week.',
+    tier: LastMinuteTier.DISCOVERY,
+    offerType: LastMinuteOfferType.NONE,
+  },
+]
+
+/**
+ * The Viral Looks band: one look that is LIVE (anyone's — the live list is
+ * global) and one of Maya's own still in review.
+ *
+ * Both counts come from real `ViralRequestApprovalFanOut` rows rather than a
+ * number in the fixture, so "N pros now offer this" and "shared with N pros"
+ * are counting something. There are three demo pros, so the honest count is 3 —
+ * not the mockup's 12.
+ *
+ * The two `sourceUrl`s are on DIFFERENT platforms because the cards print
+ * "via {platform}" from `platformFromUrl`; one host would leave that branch
+ * proven only once.
+ */
+const VIRAL = {
+  /**
+   * More than one, because the band changes shape at exactly that point: one
+   * approved look is a hero, two or more list as board-style strips. A
+   * single-look fixture can only ever prove the hero.
+   */
+  live: [
+    {
+      key: 'glazed-donut-skin',
+      name: 'Glazed Donut Skin',
+      sourceUrl: 'https://www.tiktok.com/@demoseed/video/7300000000000000000',
+      /** Pros who picked it up — the "N pros now offer this" row. */
+      proKeys: ['noor', 'sasha', 'mara'] as const,
+    },
+    {
+      key: 'expensive-brunette',
+      name: 'Expensive Brunette',
+      sourceUrl: 'https://www.instagram.com/p/DemoSeedExpensiveBrunette/',
+      proKeys: ['noor'] as const,
+    },
+    {
+      key: 'milky-nails',
+      name: 'Milky Nails',
+      sourceUrl: 'https://www.tiktok.com/@demoseed/video/7300000000000000001',
+      proKeys: ['sasha', 'mara'] as const,
+    },
+  ],
+  pending: {
+    key: 'cherry-cola-balayage',
+    name: 'Cherry Cola Balayage',
+    sourceUrl: 'https://www.instagram.com/p/DemoSeedCherryCola/',
+    /** Pros it has been shared with while it is IN_REVIEW. */
+    proKeys: ['noor', 'sasha', 'mara'] as const,
+  },
+} as const
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 const money = (n: number) => new Prisma.Decimal(n.toFixed(2))
 
@@ -532,6 +719,33 @@ async function clean(): Promise<void> {
     })
   }
   await prisma.booking.deleteMany({ where: { professionalId: idPrefix } })
+  // Home's other five sections (screen 5). Openings hold RESTRICT references to
+  // the pro's location, offering and service, so they have to go before those —
+  // and they are keyed on the PRO, not the id prefix, for the same reason the
+  // bookings above are: a pro publishing an opening against this fixture at
+  // runtime gets a cuid, and it belongs to the fixture just the same.
+  await prisma.lastMinuteRecipient.deleteMany({
+    where: { opening: { professionalId: idPrefix } },
+  })
+  await prisma.lastMinuteTierPlan.deleteMany({
+    where: { opening: { professionalId: idPrefix } },
+  })
+  await prisma.lastMinuteOpeningService.deleteMany({
+    where: { opening: { professionalId: idPrefix } },
+  })
+  await prisma.lastMinuteOpening.deleteMany({ where: { professionalId: idPrefix } })
+  await prisma.waitlistEntry.deleteMany({ where: { professionalId: idPrefix } })
+  await prisma.viralRequestApprovalFanOut.deleteMany({
+    where: { professionalId: idPrefix },
+  })
+  await prisma.viralServiceRequest.deleteMany({ where: { clientId: idPrefix } })
+  await prisma.professionalFavorite.deleteMany({ where: { professionalId: idPrefix } })
+  // A demo user's favourites, and anyone's favourite of a service this script
+  // introduced — the second half matters because ServiceFavorite RESTRICTs
+  // nothing but would be orphaned data the next run counts.
+  await prisma.serviceFavorite.deleteMany({
+    where: { OR: [{ userId: idPrefix }, { serviceId: idPrefix }] },
+  })
   await prisma.proNoShowSettings.deleteMany({ where: { id: idPrefix } })
   await prisma.professionalPaymentSettings.deleteMany({ where: { id: idPrefix } })
   await prisma.boardItem.deleteMany({ where: { id: idPrefix } })
@@ -672,6 +886,7 @@ async function main(): Promise<void> {
         handleNormalized: `demo-${pro.key}`,
         location: 'Brooklyn, NY',
         timeZone: TIME_ZONE,
+        avatarUrl: pro.avatarUrl,
         professionType: pro.profession,
         // Solo stylists, so the look's pro line reads "Noor Haddad · Balayage"
         // as the frame shows — the default BUSINESS_NAME would render
@@ -1435,6 +1650,213 @@ async function main(): Promise<void> {
     })),
   })
 
+  // ── home's other five sections (screen 5) ─────────────────────────────────
+  //
+  // Favourites, waitlist places, last-minute openings and Viral Looks. See the
+  // consts above for why each one is shaped the way it is.
+
+  await prisma.professionalFavorite.createMany({
+    data: FAVORITE_PRO_KEYS.map((key, i) => ({
+      id: `${P}fav-pro-${key}`,
+      professionalId: proId(key),
+      userId: `${P}user-client-maya`,
+      // Descending createdAt is the read order, so stagger them: identical
+      // timestamps leave the tile order undefined and the grid reshuffles
+      // between renders.
+      createdAt: new Date(realNow.getTime() - (i + 1) * 36 * 60 * 60 * 1000),
+    })),
+  })
+
+  await prisma.serviceFavorite.createMany({
+    data: FAVORITE_SERVICE_KEYS.map((key, i) => ({
+      id: `${P}fav-service-${key}`,
+      serviceId: serviceId(key),
+      userId: `${P}user-client-maya`,
+      createdAt: new Date(realNow.getTime() - (i + 1) * 30 * 60 * 60 * 1000),
+    })),
+  })
+
+  // Waitlist: the fans ahead of Maya first (older `createdAt`), then hers.
+  const waitlistRows: Prisma.WaitlistEntryCreateManyInput[] = []
+  let waitlistFanSeq = 0
+  for (const [entryIndex, entry] of WAITLIST.entries()) {
+    // Staggered per entry: home reads `orderBy: { createdAt: 'desc' }`, so two
+    // entries sharing an instant leave the strip's own row order undefined.
+    const joinedAt = new Date(
+      realNow.getTime() - (6 * 24 + entryIndex * 5) * 60 * 60 * 1000,
+    )
+
+    for (let i = 0; i < entry.aheadOfMaya; i += 1) {
+      waitlistRows.push({
+        id: `${P}waitlist-ahead-${String(waitlistFanSeq).padStart(3, '0')}`,
+        clientId: `${P}fan-${String(waitlistFanSeq % fanCount).padStart(4, '0')}`,
+        professionalId: proId(entry.proKey),
+        serviceId: serviceId(entry.serviceKey),
+        status: WaitlistStatus.ACTIVE,
+        preferenceType: WaitlistPreferenceType.ANY_TIME,
+        // Each one strictly earlier than Maya's, so the FIFO rank is total.
+        createdAt: new Date(joinedAt.getTime() - (entry.aheadOfMaya - i) * 60 * 60 * 1000),
+      })
+      waitlistFanSeq += 1
+    }
+
+    waitlistRows.push({
+      id: `${P}waitlist-${entry.key}`,
+      clientId: creator.id,
+      professionalId: proId(entry.proKey),
+      serviceId: serviceId(entry.serviceKey),
+      status: WaitlistStatus.ACTIVE,
+      preferenceType: entry.preference,
+      timeOfDay: entry.timeOfDay ?? null,
+      createdAt: joinedAt,
+    })
+  }
+  await prisma.waitlistEntry.createMany({ data: waitlistRows })
+
+  // Last-minute openings. `dayOffset` counts OPEN days: Sunday is disabled in
+  // workingHoursJson, so a plain +1 lands the fixture outside working hours one
+  // day in seven and the strip silently empties.
+  const openDayOffsetFromToday = (openDays: number): number => {
+    let calendarDays = 0
+    let found = 0
+    while (found < openDays) {
+      calendarDays += 1
+      const { year, month, day } = addDaysToYMD(
+        today.year,
+        today.month,
+        today.day,
+        calendarDays,
+      )
+      const probe = zonedTimeToUtc({ year, month, day, hour: 12, minute: 0, timeZone: TIME_ZONE })
+      if (weekdayInTimeZone(probe, TIME_ZONE) !== 0) found += 1
+    }
+    return calendarDays
+  }
+
+  for (const opening of OPENINGS) {
+    const { year, month, day } = addDaysToYMD(
+      today.year,
+      today.month,
+      today.day,
+      openDayOffsetFromToday(opening.dayOffset),
+    )
+    const startAt = zonedTimeToUtc({
+      year,
+      month,
+      day,
+      hour: opening.hour,
+      minute: opening.minute,
+      timeZone: TIME_ZONE,
+    })
+    const svc = SERVICES.find((s) => s.key === opening.serviceKey)
+    if (!svc) {
+      throw new Error(`[seedDemoClientProfile] unknown service key "${opening.serviceKey}"`)
+    }
+
+    await prisma.lastMinuteOpening.create({
+      data: {
+        id: `${P}opening-${opening.key}`,
+        professionalId: proId(opening.proKey),
+        locationType: ServiceLocationType.SALON,
+        locationId: locationId(opening.proKey),
+        timeZone: TIME_ZONE,
+        startAt,
+        endAt: new Date(startAt.getTime() + svc.durationMinutes * 60 * 1000),
+        status: OpeningStatus.ACTIVE,
+        visibilityMode: LastMinuteVisibilityMode.PUBLIC_AT_DISCOVERY,
+        note: opening.note,
+        services: {
+          create: [
+            {
+              id: `${P}opening-service-${opening.key}`,
+              serviceId: serviceId(opening.serviceKey),
+              offeringId: `${P}offering-${opening.proKey}-${opening.serviceKey}`,
+              sortOrder: 0,
+            },
+          ],
+        },
+        tierPlans: {
+          create: [
+            {
+              id: `${P}opening-tier-${opening.key}`,
+              tier: opening.tier,
+              // Already dispatched — the recipient below was notified from it.
+              scheduledFor: new Date(realNow.getTime() - 2 * 60 * 60 * 1000),
+              processedAt: new Date(realNow.getTime() - 2 * 60 * 60 * 1000),
+              offerType: opening.offerType,
+              percentOff: opening.percentOff ?? null,
+            },
+          ],
+        },
+        recipients: {
+          create: [
+            {
+              id: `${P}opening-recipient-${opening.key}`,
+              clientId: creator.id,
+              firstMatchedTier: opening.tier,
+              notifiedTier: opening.tier,
+              // The home strip only reads ENQUEUED / OPENED / CLICKED, and only
+              // when `notifiedAt` is set — a PLANNED row is one the fan-out has
+              // not sent yet and must not appear.
+              status: LastMinuteRecipientStatus.ENQUEUED,
+              notifiedAt: new Date(realNow.getTime() - 2 * 60 * 60 * 1000),
+            },
+          ],
+        },
+      },
+    })
+  }
+
+  // Viral Looks — one live (anyone's) and one of Maya's still in review.
+  for (const [index, look] of VIRAL.live.entries()) {
+    // Staggered `approvedAt`: the list is `orderBy: { approvedAt: 'desc' }`, and
+    // a shared instant leaves the strip order undefined between renders.
+    const approvedAt = new Date(realNow.getTime() - (3 + index) * 24 * 60 * 60 * 1000)
+    await prisma.viralServiceRequest.create({
+      data: {
+        id: `${P}viral-${look.key}`,
+        clientId: `${P}fan-0000`,
+        name: look.name,
+        sourceUrl: look.sourceUrl,
+        status: ViralServiceRequestStatus.APPROVED,
+        moderationStatus: ModerationStatus.APPROVED,
+        approvedAt,
+        createdAt: new Date(approvedAt.getTime() - 6 * 24 * 60 * 60 * 1000),
+        approvalFanOuts: {
+          create: look.proKeys.map((key) => ({
+            id: `${P}viral-fanout-${look.key}-${key}`,
+            professionalId: proId(key),
+            status: ViralRequestApprovalFanOutStatus.NOTIFICATION_ENQUEUED,
+            sentAt: approvedAt,
+          })),
+        },
+      },
+    })
+  }
+
+  await prisma.viralServiceRequest.create({
+    data: {
+      id: `${P}viral-${VIRAL.pending.key}`,
+      clientId: creator.id,
+      name: VIRAL.pending.name,
+      sourceUrl: VIRAL.pending.sourceUrl,
+      // IN_REVIEW, not REQUESTED: the pipeline's current node is derived from
+      // the status, and REQUESTED sits on the first step, so a REQUESTED-only
+      // fixture never renders a part-completed pipeline at all.
+      status: ViralServiceRequestStatus.IN_REVIEW,
+      moderationStatus: ModerationStatus.APPROVED,
+      createdAt: new Date(realNow.getTime() - 2 * 24 * 60 * 60 * 1000),
+      approvalFanOuts: {
+        create: VIRAL.pending.proKeys.map((key) => ({
+          id: `${P}viral-fanout-pending-${key}`,
+          professionalId: proId(key),
+          status: ViralRequestApprovalFanOutStatus.NOTIFICATION_ENQUEUED,
+          sentAt: new Date(realNow.getTime() - 1 * 24 * 60 * 60 * 1000),
+        })),
+      },
+    },
+  })
+
   // ── the pro's accepted payment methods + tip config ───────────────────────
   //
   // 🔴 Without this row the fixture could not demo the client checkout at all.
@@ -1489,7 +1911,11 @@ async function main(): Promise<void> {
     `[seedDemoClientProfile] seeded @${CREATOR.handle}: ` +
       `${LOOKS.length} looks, ${BOARDS.length} boards ` +
       `(${BOARDS.filter((b) => b.shared).length} shared), ${ADD_ONS.length} add-ons, ` +
-      `${FOLLOWER_COUNT} followers, ${bookingRows.length} attributed bookings; ` +
+      `${FOLLOWER_COUNT} followers, ${bookingRows.length} attributed bookings, ` +
+      `${FAVORITE_PRO_KEYS.length} favourite pros, ` +
+      `${FAVORITE_SERVICE_KEYS.length} favourited services, ` +
+      `${WAITLIST.length} waitlist places, ${OPENINGS.length} last-minute openings, ` +
+      `${VIRAL.live.length + 1} viral looks; ` +
       `creator tiers: ${stats.ranked} ranked of ${stats.scored} scored.`,
   )
   console.log('  → http://localhost:3000/u/' + CREATOR.handle)

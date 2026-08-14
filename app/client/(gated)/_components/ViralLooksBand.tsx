@@ -17,13 +17,11 @@ function currentStepIndex(status: ClientHomeViralPending['status']): number {
   return status === 'IN_REVIEW' ? 2 : 0
 }
 
-function LiveLookHero({
-  live,
-  moreCount,
-}: {
-  live: ClientHomeViralLive
-  moreCount: number
-}) {
+/**
+ * The single-look treatment. Only reached when there is exactly ONE live look —
+ * two or more list as strips — so it carries no "+N more" line of its own.
+ */
+function LiveLookHero({ live }: { live: ClientHomeViralLive }) {
   const platform = platformFromUrl(live.sourceUrl)
   const proCount = live._count.approvalFanOuts
 
@@ -104,17 +102,74 @@ function LiveLookHero({
             <span className="text-[9px] leading-none text-accentPrimary">✦</span>
             Hard to book? Join a pro&apos;s waitlist →
           </Link>
-          {moreCount > 0 ? (
-            <Link
-              href="/looks"
-              className="mt-2 block text-center font-display text-[12px] font-semibold text-textSecondary transition hover:text-textPrimary"
-            >
-              +{moreCount} more live in the feed →
-            </Link>
-          ) : null}
         </div>
       </div>
     </div>
+  )
+}
+
+/**
+ * One approved viral look as a wide strip — the same object the client already
+ * knows from their boards (`app/_components/boards/BoardStripCard.tsx`): the
+ * 2.05:1 card, the left-weighted scrim, the name over a meta line. Tori,
+ * 2026-08-14: once there is more than one live look, a single hero can only show
+ * one of them, so they list like boards instead.
+ *
+ * The tiles are a gradient rather than photographs because a viral request
+ * carries no media of its own yet — it is a NAME the platform got vetted and
+ * matched, not a portfolio. Same reason the single hero has always been a
+ * gradient.
+ */
+function LiveLookStrip({
+  live,
+  index,
+}: {
+  live: ClientHomeViralLive
+  index: number
+}) {
+  const platform = platformFromUrl(live.sourceUrl)
+  const proCount = live._count.approvalFanOuts
+
+  return (
+    <Link
+      href={`/search?q=${encodeURIComponent(live.name)}`}
+      className="brand-focus group relative block aspect-[2.05/1] overflow-hidden rounded-[18px] border border-textPrimary/10 bg-bgSecondary"
+    >
+      <div
+        aria-hidden="true"
+        className="absolute inset-0"
+        style={{ background: gradientAvatar(index) }}
+      />
+      <div
+        aria-hidden="true"
+        className="absolute inset-0 bg-linear-to-r from-bgPrimary/85 from-28% via-bgPrimary/25 via-70% to-transparent"
+      />
+
+      <div className="absolute inset-x-3.5 top-3.5 flex items-center justify-between">
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-ember/55 bg-bgPrimary/50 px-2.5 py-[5px]">
+          <span className="vl-pulse h-1.5 w-1.5 rounded-full bg-ember" />
+          <span className="font-mono text-[9.5px] font-bold uppercase tracking-[0.14em] text-textPrimary">
+            Live now
+          </span>
+        </span>
+        {platform ? (
+          <span className="rounded-full bg-bgPrimary/50 px-2.5 py-[5px] font-mono text-[9.5px] font-bold uppercase tracking-[0.1em] text-textSecondary">
+            via {platform}
+          </span>
+        ) : null}
+      </div>
+
+      <div className="absolute inset-x-3.5 bottom-3.5">
+        <div className="truncate text-[17px] font-bold tracking-[-0.02em] text-textPrimary">
+          {live.name}
+        </div>
+        <div className="mt-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-textSecondary">
+          {proCount > 0
+            ? `${proCount} ${proCount === 1 ? 'pro' : 'pros'} now offer this`
+            : 'Newly approved'}
+        </div>
+      </div>
+    </Link>
   )
 }
 
@@ -272,6 +327,14 @@ export default function ViralLooksBand({
   const live = viralLive[0] ?? null
   const pending = viralPending[0] ?? null
 
+  /** Board-style rows, used only once there is more than one live look. */
+  const MAX_LIVE_STRIPS = 4
+  const liveStrips = viralLive.length > 1 ? viralLive.slice(0, MAX_LIVE_STRIPS) : []
+  // Zero when there are no strips at all, not "everything" — the count is only
+  // meaningful beside the list it overflows from.
+  const liveOverflow =
+    liveStrips.length > 0 ? viralLive.length - liveStrips.length : 0
+
   return (
     <section className="relative mx-auto max-w-[1040px] px-4 pt-[34px] md:px-8">
       <div className="mb-[18px] border-t border-textPrimary/10 pt-[26px]">
@@ -295,8 +358,28 @@ export default function ViralLooksBand({
       </div>
 
       <div className="grid grid-cols-1 items-stretch gap-3.5 md:grid-cols-2 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)_minmax(0,1fr)]">
-        {live ? (
-          <LiveLookHero live={live} moreCount={Math.max(0, viralLive.length - 1)} />
+        {/*
+          One live look keeps the hero — it is the frame's design and it has room
+          to sell the look. TWO OR MORE list like boards (Tori, 2026-08-14): a
+          hero can only show the first, and "+N more in the feed" sends the
+          client somewhere else to find looks that are already approved for them.
+        */}
+        {liveStrips.length > 0 ? (
+          <div className="flex flex-col gap-3">
+            {liveStrips.map((item, index) => (
+              <LiveLookStrip key={item.id} live={item} index={index} />
+            ))}
+            {liveOverflow > 0 ? (
+              <Link
+                href="/looks"
+                className="text-center font-display text-[12px] font-semibold text-textSecondary transition hover:text-textPrimary"
+              >
+                +{liveOverflow} more live in the feed →
+              </Link>
+            ) : null}
+          </div>
+        ) : live ? (
+          <LiveLookHero live={live} />
         ) : (
           <LiveLookEmpty />
         )}

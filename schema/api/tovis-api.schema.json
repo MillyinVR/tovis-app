@@ -4888,6 +4888,10 @@
         "action": {
           "$ref": "#/definitions/ClientHomeActionDTO"
         },
+        "displayName": {
+          "description": "What the greeting calls this client — their first name, else their email, else \"there\". Resolved server-side so both clients say the same thing; iOS used to derive it from the email's local part and showed \"Welcome back\" on every cold launch.\n\nOPTIONAL on the wire so a client built before this field still decodes.",
+          "type": "string"
+        },
         "favoritePros": {
           "items": {
             "$ref": "#/definitions/ClientHomeFavoriteProDTO"
@@ -4918,6 +4922,29 @@
         },
         "upcomingCount": {
           "type": "number"
+        },
+        "upcomingProRating": {
+          "anyOf": [
+            {
+              "properties": {
+                "average": {
+                  "type": "number"
+                },
+                "count": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "average",
+                "count"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The visible-review aggregate for the pro on the next-booking card, or null when they have no visible reviews. Optional on the wire for the same reason as `displayName`."
         },
         "viralLive": {
           "items": {
@@ -5753,6 +5780,13 @@
             {
               "type": "null"
             }
+          ]
+        },
+        "queuePosition": {
+          "description": "The client's real FIFO place in this pro's queue for this service — the same rank the pro's own waitlist shows. Null when it could not be established; the row then shows no place at all rather than a number that is wrong.\n\nOPTIONAL on the wire so an older client that never decodes it is unaffected — the server always sends it. A client that renders `index + 1` instead is answering a different question: \"which of MY waitlists is this\", not \"who is ahead of me\".",
+          "type": [
+            "number",
+            "null"
           ]
         },
         "service": {

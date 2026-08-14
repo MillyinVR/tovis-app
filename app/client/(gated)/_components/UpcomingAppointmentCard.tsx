@@ -14,10 +14,21 @@ import {
   professionalName,
 } from './homeVisuals'
 
+/**
+ * Where the pro works, under their name — the frame's "Halo Studio · Brooklyn".
+ * The studio and the city are BOTH shown when both exist: the name alone says
+ * nothing to a client deciding whether this is the salon near them, and the city
+ * alone loses the name they booked. Falls back down the chain when there is no
+ * location row to read.
+ */
 function bookingLocation(booking: ClientHomeBooking): string | null {
+  const parts = [booking.location?.name, booking.location?.city]
+    .map((part) => part?.trim() || null)
+    .filter((part): part is string => part !== null)
+
+  if (parts.length > 0) return parts.join(' · ')
+
   return (
-    booking.location?.name ??
-    booking.location?.city ??
     asTrimmedString(booking.locationAddressSnapshot) ??
     booking.professional.location ??
     null
@@ -85,9 +96,12 @@ function EmptyUpcomingCard() {
 export default function UpcomingAppointmentCard({
   booking,
   upcomingCount = 0,
+  proRating = null,
 }: {
   booking: ClientHomeBooking | null
   upcomingCount?: number
+  /** Null when the pro has no visible reviews — no star, rather than "0.0★". */
+  proRating?: { average: number; count: number } | null
 }) {
   if (!booking) return <EmptyUpcomingCard />
 
@@ -134,9 +148,21 @@ export default function UpcomingAppointmentCard({
             underline={false}
             className="block truncate font-display text-[17px] font-semibold tracking-[-0.01em] text-textPrimary transition hover:opacity-80"
           />
-          {location ? (
-            <div className="mt-0.5 truncate text-[12.5px] text-textMuted">
-              {location}
+          {location || proRating ? (
+            <div className="mt-0.5 flex items-center gap-1.5 text-[12.5px] text-textMuted">
+              {location ? <span className="truncate">{location}</span> : null}
+              {location && proRating ? <span aria-hidden>·</span> : null}
+              {proRating ? (
+                <span className="shrink-0 whitespace-nowrap text-textSecondary">
+                  {proRating.average.toFixed(1)}
+                  <span aria-hidden>★</span>
+                  <span className="sr-only">
+                    {' '}
+                    out of 5, from {proRating.count}{' '}
+                    {proRating.count === 1 ? 'review' : 'reviews'}
+                  </span>
+                </span>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -177,9 +203,16 @@ export default function UpcomingAppointmentCard({
         >
           View booking
         </Link>
+        {/*
+          Resolves (or opens) the booking's own message thread and lands in it.
+          It used to point at `/client/bookings/{id}?action=message` — a param
+          the booking page does not read, on a page that has no messaging
+          affordance at all, so "message your pro" dead-ended on the booking
+          overview. `/messages/start` is the resolver the rest of the app uses.
+        */}
         <Link
-          href={`/client/bookings/${encodeURIComponent(booking.id)}?action=message`}
-          aria-label="Message pro"
+          href={`/messages/start?kind=BOOKING&bookingId=${encodeURIComponent(booking.id)}`}
+          aria-label={`Message ${proName}`}
           className={buttonClassName({
             variant: 'ghost',
             size: 'md',

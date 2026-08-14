@@ -21,6 +21,9 @@ const mocks = vi.hoisted(() => ({
   clientHomeShellProps: [] as MockClientHomeShellProps[],
 
   homeData: {
+    // The greeting name is the LOADER's answer now, not something this page
+    // re-derives — so both it and GET /api/v1/client/home say the same thing.
+    displayName: 'Tori',
     upcoming: null,
     action: null,
     invites: [],
@@ -119,15 +122,12 @@ describe('app/client/page.tsx', () => {
     )
   })
 
-  it('uses email as the display name when the client profile has no first name', async () => {
-    mocks.getCurrentUser.mockResolvedValue({
-      id: 'user_1',
-      role: 'CLIENT',
-      email: 'tori@example.com',
-      clientProfile: {
-        id: 'client_1',
-        firstName: '',
-      },
+  // The email fallback itself is the loader's rule and is covered there; what
+  // this page owes is passing through whatever the loader answered, unchanged.
+  it('renders whatever name the loader resolved, including the email fallback', async () => {
+    mocks.getClientHomeData.mockResolvedValue({
+      ...mocks.homeData,
+      displayName: 'tori@example.com',
     })
 
     render(await ClientHomePage())

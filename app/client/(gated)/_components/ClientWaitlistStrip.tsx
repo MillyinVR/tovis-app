@@ -22,6 +22,11 @@ function WaitlistRow({
 }) {
   const proName = professionalName(entry.professional)
   const title = serviceName(entry)
+  // The client's real place in THIS pro's queue for THIS service, counted
+  // server-side. It is not `index + 1`: that was this row's position in the
+  // viewer's own list, so a client on a single waitlist always read "#1 in
+  // line" no matter how many people were actually ahead of them.
+  const position = entry.queuePosition
 
   return (
     <Link
@@ -54,9 +59,11 @@ function WaitlistRow({
           with {proName}
         </div>
       </div>
-      <span className="shrink-0 rounded-full bg-terra/10 px-2.5 py-[5px] font-mono text-[10px] font-bold uppercase tracking-[0.06em] text-terra">
-        #{index + 1} in line
-      </span>
+      {position !== null ? (
+        <span className="shrink-0 rounded-full bg-terra/10 px-2.5 py-[5px] font-mono text-[10px] font-bold uppercase tracking-[0.06em] text-terra">
+          #{position} in line
+        </span>
+      ) : null}
     </Link>
   )
 }

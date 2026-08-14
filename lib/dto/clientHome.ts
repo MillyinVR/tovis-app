@@ -261,6 +261,17 @@ export type ClientHomeWaitlistEntryDTO = {
   timeOfDay: string | null
   windowStartMin: number | null
   windowEndMin: number | null
+  /**
+   * The client's real FIFO place in this pro's queue for this service — the same
+   * rank the pro's own waitlist shows. Null when it could not be established;
+   * the row then shows no place at all rather than a number that is wrong.
+   *
+   * OPTIONAL on the wire so an older client that never decodes it is unaffected
+   * — the server always sends it. A client that renders `index + 1` instead is
+   * answering a different question: "which of MY waitlists is this", not "who is
+   * ahead of me".
+   */
+  queuePosition?: number | null
   service: { id: string; name: string } | null
   professional: {
     id: string
@@ -315,8 +326,23 @@ export type ClientHomeViralPendingDTO = {
 }
 
 export type ClientHomeDTO = {
+  /**
+   * What the greeting calls this client — their first name, else their email,
+   * else "there". Resolved server-side so both clients say the same thing; iOS
+   * used to derive it from the email's local part and showed "Welcome back" on
+   * every cold launch.
+   *
+   * OPTIONAL on the wire so a client built before this field still decodes.
+   */
+  displayName?: string
   upcoming: ClientHomeBookingDTO | null
   upcomingCount: number
+  /**
+   * The visible-review aggregate for the pro on the next-booking card, or null
+   * when they have no visible reviews. Optional on the wire for the same reason
+   * as `displayName`.
+   */
+  upcomingProRating?: { average: number; count: number } | null
   action: ClientHomeActionDTO
   invites: ClientHomeLastMinuteInviteDTO[]
   waitlists: ClientHomeWaitlistEntryDTO[]
@@ -565,6 +591,7 @@ function serializeWaitlist(
     timeOfDay: entry.timeOfDay ?? null,
     windowStartMin: entry.windowStartMin ?? null,
     windowEndMin: entry.windowEndMin ?? null,
+    queuePosition: entry.queuePosition,
     service: entry.service
       ? { id: entry.service.id, name: entry.service.name }
       : null,
@@ -669,8 +696,10 @@ function serializeAction(action: ClientHomeData['action']): ClientHomeActionDTO 
 
 export function serializeClientHomeData(data: ClientHomeData): ClientHomeDTO {
   return {
+    displayName: data.displayName,
     upcoming: data.upcoming ? serializeBooking(data.upcoming) : null,
     upcomingCount: data.upcomingCount,
+    upcomingProRating: data.upcomingProRating,
     action: serializeAction(data.action),
     invites: data.invites.map(serializeInvite),
     waitlists: data.waitlists.map(serializeWaitlist),
