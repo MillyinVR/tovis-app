@@ -71,7 +71,7 @@ export default function SalonLocationSelector(props: Props) {
                 'w-full rounded-card border p-3 text-left transition',
                 active
                   ? 'border-accentPrimary/45 bg-accentPrimary/12'
-                  : 'border-white/10 bg-bgPrimary/25 hover:bg-white/6',
+                  : 'border-textPrimary/10 bg-bgPrimary/25 hover:bg-textPrimary/6',
                 isDisabled ? 'cursor-not-allowed opacity-70' : 'cursor-pointer',
               ].join(' ')}
             >
@@ -90,7 +90,7 @@ export default function SalonLocationSelector(props: Props) {
 
                 <div className="flex shrink-0 items-center gap-2">
                   {option.isPrimary ? (
-                    <span className="rounded-full border border-white/10 bg-bgPrimary/35 px-2 py-1 text-[10px] font-black text-textSecondary">
+                    <span className="rounded-full border border-textPrimary/10 bg-bgPrimary/35 px-2 py-1 text-[10px] font-black text-textSecondary">
                       Main
                     </span>
                   ) : null}
@@ -100,7 +100,7 @@ export default function SalonLocationSelector(props: Props) {
                       'mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full border text-[10px] font-black',
                       active
                         ? 'border-accentPrimary/60 bg-accentPrimary/18 text-textPrimary'
-                        : 'border-white/14 bg-bgPrimary/35 text-transparent',
+                        : 'border-textPrimary/14 bg-bgPrimary/35 text-transparent',
                     ].join(' ')}
                     aria-hidden="true"
                   >

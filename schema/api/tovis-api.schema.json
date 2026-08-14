@@ -523,7 +523,50 @@
     "AftercareRebookMode": {
       "$ref": "#/definitions/%24Enums.AftercareRebookMode"
     },
-    "ApiOk<(def-alias-1643606088-3079-3471-1643606088-0-97872041664248&structure-1643606088-6189-7344-1643606088-6163-7344-1643606088-6156-7346-1643606088-6117-7346-1643606088-0-9787)>": {
+    "ApiOk<(def-alias-1643606088-3079-3471-1643606088-0-107142041664248&structure-1643606088-10084-10245-1643606088-10058-10245-1643606088-10051-10247-1643606088-10011-10247-1643606088-0-10714)>": {
+      "properties": {
+        "alternates": {
+          "items": {
+            "$ref": "#/definitions/AvailabilityAlternateSlots"
+          },
+          "type": "array"
+        },
+        "availabilityVersion": {
+          "description": "Client-visible freshness token for the exact request context. Exact slots are reusable only when this matches.",
+          "type": "string"
+        },
+        "debug": {},
+        "generatedAt": {
+          "description": "ISO timestamp for when the payload was generated.",
+          "type": "string"
+        },
+        "mode": {
+          "const": "ALTERNATES",
+          "type": "string"
+        },
+        "ok": {
+          "const": true,
+          "type": "boolean"
+        },
+        "request": {
+          "$ref": "#/definitions/AvailabilityAlternatesRequest"
+        },
+        "selectedDay": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "alternates",
+        "availabilityVersion",
+        "generatedAt",
+        "mode",
+        "ok",
+        "request",
+        "selectedDay"
+      ],
+      "type": "object"
+    },
+    "ApiOk<(def-alias-1643606088-3079-3471-1643606088-0-107142041664248&structure-1643606088-6660-8271-1643606088-6634-8271-1643606088-6627-8273-1643606088-6588-8273-1643606088-0-10714)>": {
       "properties": {
         "adjacencyBufferMinutes": {
           "type": "number"
@@ -537,6 +580,17 @@
             "$ref": "#/definitions/AvailabilityDaySummary"
           },
           "type": "array"
+        },
+        "cover": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AvailabilityCover"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The look this booking started from — the sheet's cover photo and the add-ons step's context thumbnail. Null when the flow was entered from a pro's profile rather than from a look, which the sheet renders as its cover-less header rather than an empty photo well."
         },
         "debug": {
           "$ref": "#/definitions/AvailabilitySummaryDebug"
@@ -643,6 +697,10 @@
         "timeZone": {
           "type": "string"
         },
+        "trust": {
+          "$ref": "#/definitions/AvailabilityTrust",
+          "description": "Reassurance chips under the service line. See lib/booking/trustSignals."
+        },
         "waitlistSupported": {
           "type": "boolean"
         },
@@ -657,6 +715,7 @@
         "adjacencyBufferMinutes",
         "availabilityVersion",
         "availableDays",
+        "cover",
         "durationMinutes",
         "generatedAt",
         "hasMoreDays",
@@ -681,13 +740,14 @@
         "serviceName",
         "stepMinutes",
         "timeZone",
+        "trust",
         "waitlistSupported",
         "windowEndDate",
         "windowStartDate"
       ],
       "type": "object"
     },
-    "ApiOk<(def-alias-1643606088-3079-3471-1643606088-0-97872041664248&structure-1643606088-8012-8624-1643606088-7986-8624-1643606088-7979-8626-1643606088-7854-8626-1643606088-0-9787)>": {
+    "ApiOk<(def-alias-1643606088-3079-3471-1643606088-0-107142041664248&structure-1643606088-8939-9551-1643606088-8913-9551-1643606088-8906-9553-1643606088-8781-9553-1643606088-0-10714)>": {
       "properties": {
         "adjacencyBufferMinutes": {
           "type": "number"
@@ -783,49 +843,6 @@
         "slots",
         "stepMinutes",
         "timeZone"
-      ],
-      "type": "object"
-    },
-    "ApiOk<(def-alias-1643606088-3079-3471-1643606088-0-97872041664248&structure-1643606088-9157-9318-1643606088-9131-9318-1643606088-9124-9320-1643606088-9084-9320-1643606088-0-9787)>": {
-      "properties": {
-        "alternates": {
-          "items": {
-            "$ref": "#/definitions/AvailabilityAlternateSlots"
-          },
-          "type": "array"
-        },
-        "availabilityVersion": {
-          "description": "Client-visible freshness token for the exact request context. Exact slots are reusable only when this matches.",
-          "type": "string"
-        },
-        "debug": {},
-        "generatedAt": {
-          "description": "ISO timestamp for when the payload was generated.",
-          "type": "string"
-        },
-        "mode": {
-          "const": "ALTERNATES",
-          "type": "string"
-        },
-        "ok": {
-          "const": true,
-          "type": "boolean"
-        },
-        "request": {
-          "$ref": "#/definitions/AvailabilityAlternatesRequest"
-        },
-        "selectedDay": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "alternates",
-        "availabilityVersion",
-        "generatedAt",
-        "mode",
-        "ok",
-        "request",
-        "selectedDay"
       ],
       "type": "object"
     },
@@ -1126,7 +1143,7 @@
       "type": "object"
     },
     "AvailabilityAlternatesOk": {
-      "$ref": "#/definitions/ApiOk%3C(def-alias-1643606088-3079-3471-1643606088-0-97872041664248%26structure-1643606088-9157-9318-1643606088-9131-9318-1643606088-9124-9320-1643606088-9084-9320-1643606088-0-9787)%3E"
+      "$ref": "#/definitions/ApiOk%3C(def-alias-1643606088-3079-3471-1643606088-0-107142041664248%26structure-1643606088-10084-10245-1643606088-10058-10245-1643606088-10051-10247-1643606088-10011-10247-1643606088-0-10714)%3E"
     },
     "AvailabilityAlternatesRequest": {
       "properties": {
@@ -1194,10 +1211,31 @@
       "type": "object"
     },
     "AvailabilityBootstrapOk": {
-      "$ref": "#/definitions/ApiOk%3C(def-alias-1643606088-3079-3471-1643606088-0-97872041664248%26structure-1643606088-6189-7344-1643606088-6163-7344-1643606088-6156-7346-1643606088-6117-7346-1643606088-0-9787)%3E"
+      "$ref": "#/definitions/ApiOk%3C(def-alias-1643606088-3079-3471-1643606088-0-107142041664248%26structure-1643606088-6660-8271-1643606088-6634-8271-1643606088-6627-8273-1643606088-6588-8273-1643606088-0-10714)%3E"
+    },
+    "AvailabilityCover": {
+      "properties": {
+        "imageUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lookName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "imageUrl",
+        "lookName"
+      ],
+      "type": "object"
     },
     "AvailabilityDayOk": {
-      "$ref": "#/definitions/ApiOk%3C(def-alias-1643606088-3079-3471-1643606088-0-97872041664248%26structure-1643606088-8012-8624-1643606088-7986-8624-1643606088-7979-8626-1643606088-7854-8626-1643606088-0-9787)%3E",
+      "$ref": "#/definitions/ApiOk%3C(def-alias-1643606088-3079-3471-1643606088-0-107142041664248%26structure-1643606088-8939-9551-1643606088-8913-9551-1643606088-8906-9553-1643606088-8781-9553-1643606088-0-10714)%3E",
       "description": "--------------------------- Availability: DAY mode\n--------------------------"
     },
     "AvailabilityDayRequest": {
@@ -1866,6 +1904,55 @@
           "type": "boolean"
         }
       },
+      "type": "object"
+    },
+    "AvailabilityTrust": {
+      "description": "Wire twin of `BookingTrustSignals` (lib/booking/trustSignals.ts). Every field is nullable on purpose: a chip whose signal is unknown is not rendered, rather than rendered as a zero.",
+      "properties": {
+        "completedBookings": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "freeCancellationHours": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "rating": {
+          "anyOf": [
+            {
+              "properties": {
+                "average": {
+                  "type": "number"
+                },
+                "count": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "average",
+                "count"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "verified": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "verified",
+        "completedBookings",
+        "rating",
+        "freeCancellationHours"
+      ],
       "type": "object"
     },
     "BadgeTone": {
@@ -10112,6 +10199,10 @@
             "null"
           ]
         },
+        "primaryMediaId": {
+          "description": "The primary MediaAsset's id — NOT the look's (`id` above is the LookPost). The booking flow threads this through as `mediaId`, which is what resolves the sheet's cover photo; without it the drawer opened on the look you tapped and could not say which look that was.",
+          "type": "string"
+        },
         "professional": {
           "anyOf": [
             {
@@ -10207,6 +10298,7 @@
       },
       "required": [
         "id",
+        "primaryMediaId",
         "url",
         "thumbUrl",
         "mediaType",

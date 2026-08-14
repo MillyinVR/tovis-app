@@ -388,6 +388,7 @@ describe('lib/looks/mappers.ts', () => {
 
       expect(result).toEqual({
         id: 'look_1',
+        primaryMediaId: 'media_1',
         url: 'https://cdn.example.com/media.jpg',
         thumbUrl: 'https://cdn.example.com/media-thumb.jpg',
         mediaType: MediaType.IMAGE,
@@ -442,6 +443,7 @@ describe('lib/looks/mappers.ts', () => {
 
       expect(result).toEqual({
         id: 'look_1',
+        primaryMediaId: 'media_1',
         url: 'https://cdn.example.com/media.jpg',
         thumbUrl: 'https://cdn.example.com/media-thumb.jpg',
         mediaType: MediaType.IMAGE,

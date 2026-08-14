@@ -439,6 +439,7 @@ export async function mapLooksFeedMediaToDto(args: {
 
   return {
     id: item.id,
+    primaryMediaId: primaryMedia.id,
     url: rendered.url,
     thumbUrl: rendered.thumbUrl,
     mediaType: primaryMedia.mediaType,

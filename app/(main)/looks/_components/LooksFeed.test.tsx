@@ -265,6 +265,7 @@ function makeFeedItem(
 ): FeedItem {
   return {
     id: 'look_1',
+    primaryMediaId: 'media_1',
     url: 'https://cdn.example.com/look_1.jpg',
     thumbUrl: 'https://cdn.example.com/look_1-thumb.jpg',
     mediaType: 'IMAGE',
@@ -793,7 +794,7 @@ describe('app/(main)/looks/_components/LooksFeed', () => {
     expect(screen.getByTestId('active-category')).toHaveTextContent('Following')
   })
 
-  it('opens availability with discovery context keyed off the post item and leaves legacy mediaId empty', async () => {
+  it('opens availability with discovery context keyed off the post item, carrying the primary media id', async () => {
     installFetchMock({
       feedByCategory: {
         all: [
@@ -830,7 +831,7 @@ describe('app/(main)/looks/_components/LooksFeed', () => {
     expect(drawer).toHaveAttribute('data-professional-id', 'pro_book_1')
     expect(drawer).toHaveAttribute('data-service-id', 'service_book_1')
     expect(drawer).toHaveAttribute('data-source', 'DISCOVERY')
-    expect(drawer).toHaveAttribute('data-media-id', '')
+    expect(drawer).toHaveAttribute('data-media-id', 'media_1')
     expect(drawer).toHaveAttribute('data-viewer-lat', '32.7157')
     expect(drawer).toHaveAttribute('data-viewer-lng', '-117.1611')
     expect(drawer).toHaveAttribute('data-viewer-radius', '15')

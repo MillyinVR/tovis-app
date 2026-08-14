@@ -86,6 +86,13 @@ export type LookBadgeDto = {
 
 export type LooksFeedItemDto = {
   id: string
+  /**
+   * The primary MediaAsset's id — NOT the look's (`id` above is the LookPost).
+   * The booking flow threads this through as `mediaId`, which is what resolves
+   * the sheet's cover photo; without it the drawer opened on the look you tapped
+   * and could not say which look that was.
+   */
+  primaryMediaId: string
   url: string
   thumbUrl: string | null
   mediaType: MediaType

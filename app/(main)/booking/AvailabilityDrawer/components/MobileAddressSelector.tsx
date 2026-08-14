@@ -57,7 +57,7 @@ export default function MobileAddressSelector(props: Props) {
       </div>
 
       {loading ? (
-        <div className="mt-3 rounded-card border border-white/10 bg-bgPrimary/25 px-3 py-3 text-[12px] font-semibold text-textSecondary">
+        <div className="mt-3 rounded-card border border-textPrimary/10 bg-bgPrimary/25 px-3 py-3 text-[12px] font-semibold text-textSecondary">
           Loading saved addresses…
         </div>
       ) : null}
@@ -69,7 +69,7 @@ export default function MobileAddressSelector(props: Props) {
       ) : null}
 
       {!loading && !error && !hasOptions ? (
-        <div data-testid="mobile-address-empty-state" className="mt-3 rounded-card border border-white/10 bg-bgPrimary/20 px-3 py-3">
+        <div data-testid="mobile-address-empty-state" className="mt-3 rounded-card border border-textPrimary/10 bg-bgPrimary/20 px-3 py-3">
           <div className="text-[12px] font-black text-textPrimary">
             No saved addresses yet
           </div>
@@ -115,7 +115,7 @@ export default function MobileAddressSelector(props: Props) {
                   'w-full rounded-card border p-3 text-left transition',
                   active
                     ? 'border-accentPrimary/45 bg-accentPrimary/12'
-                    : 'border-white/10 bg-bgPrimary/25 hover:bg-white/6',
+                    : 'border-textPrimary/10 bg-bgPrimary/25 hover:bg-textPrimary/6',
                   isDisabled
                     ? 'cursor-not-allowed opacity-70'
                     : 'cursor-pointer',
@@ -134,7 +134,7 @@ export default function MobileAddressSelector(props: Props) {
 
                   <div className="flex shrink-0 items-center gap-2">
                     {address.isDefault ? (
-                      <span className="rounded-full border border-white/10 bg-bgPrimary/35 px-2 py-1 text-[10px] font-black text-textSecondary">
+                      <span className="rounded-full border border-textPrimary/10 bg-bgPrimary/35 px-2 py-1 text-[10px] font-black text-textSecondary">
                         Default
                       </span>
                     ) : null}
@@ -144,7 +144,7 @@ export default function MobileAddressSelector(props: Props) {
                         'mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full border text-[10px] font-black',
                         active
                           ? 'border-accentPrimary/60 bg-accentPrimary/18 text-textPrimary'
-                          : 'border-white/14 bg-bgPrimary/35 text-transparent',
+                          : 'border-textPrimary/14 bg-bgPrimary/35 text-transparent',
                       ].join(' ')}
                       aria-hidden="true"
                     >

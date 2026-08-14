@@ -18,6 +18,7 @@ import type { FeedItem } from './lookTypes'
 function makeItem(overrides: Partial<FeedItem> = {}): FeedItem {
   return {
     id: 'look_1',
+    primaryMediaId: 'media_1',
     url: 'https://cdn.example.com/look_1.jpg',
     thumbUrl: null,
     mediaType: 'IMAGE',

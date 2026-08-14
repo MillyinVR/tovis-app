@@ -81,7 +81,7 @@ export default function StickyCTA({
         {pending ? (
           <span
             aria-hidden
-            className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white"
+            className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-textPrimary/30 border-t-white"
           />
         ) : null}
         {buttonLabel}

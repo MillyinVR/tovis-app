@@ -246,6 +246,10 @@ export function parseLooksFeedResponse(raw: unknown): LooksFeedItemDto[] {
 
     parsed.push({
       id,
+      // Falls back to the look id so an older server (which does not send this)
+      // still yields a usable booking context rather than a null cover — the
+      // cover resolver simply finds nothing and the sheet renders cover-less.
+      primaryMediaId: pickString(item.primaryMediaId) ?? id,
       url,
       thumbUrl,
       mediaType,

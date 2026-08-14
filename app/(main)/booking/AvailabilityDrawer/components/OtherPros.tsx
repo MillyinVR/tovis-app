@@ -100,7 +100,7 @@ const OtherProSlotButton = memo(function OtherProSlotButton({
         'h-9 rounded-full border px-3 text-[12px] font-black transition',
         isSelected
           ? 'border-accentPrimary bg-accentPrimary text-bgPrimary'
-          : 'border-white/10 bg-bgPrimary/35 text-textPrimary hover:bg-white/10',
+          : 'border-textPrimary/10 bg-bgPrimary/35 text-textPrimary hover:bg-textPrimary/10',
         disabled
           ? 'cursor-not-allowed opacity-50'
           : 'cursor-pointer',
@@ -155,10 +155,10 @@ function OtherPros({
             return (
               <div
                 key={pro.id}
-                className="rounded-card border border-white/10 bg-bgPrimary/35 p-[14px]"
+                className="rounded-card border border-textPrimary/10 bg-bgPrimary/35 p-[14px]"
               >
                 <div className="flex items-center gap-[10px]">
-                  <div className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-full border border-white/10 bg-bgPrimary/40">
+                  <div className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-full border border-textPrimary/10 bg-bgPrimary/40">
                     {pro.avatarUrl ? (
                       <RemoteImage
                         src={pro.avatarUrl ?? ''}

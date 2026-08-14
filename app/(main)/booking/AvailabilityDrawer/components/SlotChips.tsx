@@ -108,7 +108,7 @@ const PeriodButton = memo(function PeriodButton({
         'font-mono',
         active
           ? 'border-accentPrimary/40 bg-accentPrimary text-bgPrimary'
-          : 'border-white/10 bg-bgPrimary/35 text-textSecondary hover:bg-white/10',
+          : 'border-textPrimary/10 bg-bgPrimary/35 text-textSecondary hover:bg-textPrimary/10',
         disabled
           ? 'cursor-not-allowed opacity-40 hover:bg-bgPrimary/35'
           : 'cursor-pointer',
@@ -159,7 +159,7 @@ const SlotButton = memo(function SlotButton({
         'h-[38px] rounded-full border px-[14px] text-[13px] font-black transition',
         isSelected
           ? 'border-accentPrimary bg-accentPrimary text-bgPrimary'
-          : 'border-white/10 bg-bgPrimary/35 text-textPrimary hover:bg-white/10',
+          : 'border-textPrimary/10 bg-bgPrimary/35 text-textPrimary hover:bg-textPrimary/10',
         disabled
           ? 'cursor-not-allowed opacity-50'
           : 'cursor-pointer',
