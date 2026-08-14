@@ -70,6 +70,13 @@ function makeSummary(overrides: Partial<BootstrapOk> = {}): BootstrapOk {
     generatedAt: new Date().toISOString(),
     request,
     mediaId: null,
+    cover: null,
+    trust: {
+      verified: false,
+      completedBookings: null,
+      rating: null,
+      freeCancellationHours: null,
+    },
     serviceName: 'Haircut',
     serviceCategoryName: 'Hair',
     professionalId: request.professionalId,

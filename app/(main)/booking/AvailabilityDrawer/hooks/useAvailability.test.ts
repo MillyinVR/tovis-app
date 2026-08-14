@@ -78,6 +78,13 @@ function makeSummary(
     availabilityVersion: 'av_v1',
     generatedAt: '2026-03-10T12:00:00.000Z',
     mediaId: null,
+    cover: null,
+    trust: {
+      verified: false,
+      completedBookings: null,
+      rating: null,
+      freeCancellationHours: null,
+    },
     serviceId: request.serviceId,
     professionalId: request.professionalId,
     serviceName: 'Haircut',

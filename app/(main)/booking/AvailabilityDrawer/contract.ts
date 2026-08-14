@@ -15,6 +15,8 @@ import type {
   MoneyString,
   ProCard,
   ServiceLocationType,
+  AvailabilityCover,
+  AvailabilityTrust,
 } from './types'
 import { ProNameDisplay } from '@prisma/client'
 import { isRecord } from '@/lib/guards'
@@ -43,6 +45,45 @@ function pickStringArray(x: unknown): string[] | null {
   if (!Array.isArray(x)) return null
   if (!x.every((v) => typeof v === 'string')) return null
   return x.slice()
+}
+
+/**
+ * The look the sheet opens on. Absent/!record → null, which the sheet renders as
+ * its cover-less header. Deliberately NOT a hard parse failure: a missing cover
+ * must never cost the client an otherwise-valid availability payload.
+ */
+function pickAvailabilityCover(x: unknown): AvailabilityCover | null {
+  if (!isRecord(x)) return null
+  return {
+    imageUrl: pickString(x.imageUrl),
+    lookName: pickString(x.lookName),
+  }
+}
+
+/**
+ * Reassurance chips. Same rule as the cover — an older server that does not send
+ * `trust` yields all-unknown rather than a dropped payload, and every chip is
+ * omitted client-side instead of rendering a zero.
+ */
+function pickAvailabilityTrust(x: unknown): AvailabilityTrust {
+  const empty: AvailabilityTrust = {
+    verified: false,
+    completedBookings: null,
+    rating: null,
+    freeCancellationHours: null,
+  }
+  if (!isRecord(x)) return empty
+
+  const ratingRaw = isRecord(x.rating) ? x.rating : null
+  const average = ratingRaw ? pickNumber(ratingRaw.average) : null
+  const count = ratingRaw ? pickNumber(ratingRaw.count) : null
+
+  return {
+    verified: pickBoolean(x.verified) ?? false,
+    completedBookings: pickNumber(x.completedBookings),
+    rating: average != null && count != null ? { average, count } : null,
+    freeCancellationHours: pickNumber(x.freeCancellationHours),
+  }
 }
 
 function pickServiceLocationType(x: unknown): ServiceLocationType | null {
@@ -568,6 +609,8 @@ export function parseAvailabilityBootstrapResponse(
     mediaId: mediaId ?? null,
     serviceName: serviceName ?? null,
     serviceCategoryName: serviceCategoryName ?? null,
+    cover: pickAvailabilityCover(x.cover),
+    trust: pickAvailabilityTrust(x.trust),
     professionalId: request.professionalId,
     serviceId: request.serviceId,
     locationType: request.locationType,

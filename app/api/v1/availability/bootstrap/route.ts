@@ -53,6 +53,8 @@ import { clampInt } from '@/lib/pick'
 import { prismaRead } from '@/lib/prisma'
 import { toIntParam as toInt } from '@/lib/queryParams'
 import { resolveTenantContextForRequest, tenantCacheScope } from '@/lib/tenant'
+import { loadBookingTrustSignals } from '@/lib/booking/trustSignals'
+import { loadBookingCover } from '@/lib/booking/bookingCover'
 
 export const dynamic = 'force-dynamic'
 
@@ -904,6 +906,12 @@ export async function GET(req: Request) {
         waitlistSupported: true,
         offering: toAvailabilityOfferingDto(offeringPayload),
 
+        // Inside the cached payload deliberately: these four queries then run
+        // only on a cache miss, and every signal here changes far more slowly
+        // than the 120s TTL — a booked count up to two minutes behind is not a
+        // wrong number, and none of them affect what can be booked.
+        trust: await loadBookingTrustSignals(professionalId),
+
         ...(debug
           ? {
               debug: {
@@ -958,6 +966,10 @@ export async function GET(req: Request) {
       // payload here, so pin it back to the literal the contract requires.
       ok: true as const,
       mediaId: mediaId || null,
+      // Outside the cache with `mediaId`: the cache is scoped to the PRO, and
+      // two clients booking the same pro from two different looks must not be
+      // served each other's cover.
+      cover: await loadBookingCover(mediaId),
       availableDays: refreshedAvailableDays,
       selectedDay: refreshedSelectedDay,
     }
