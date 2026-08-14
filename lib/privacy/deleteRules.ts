@@ -531,6 +531,12 @@ export const DELETE_RULES: readonly DeleteRule[] = [
     },
   }),
   deleteRule({
+    model: 'ClientCreatorStat',
+    notes: 'Derived creator standing; keyed 1:1 to the client profile.',
+    delegate: (db) => db.clientCreatorStat,
+    where: (s) => (s.clientProfileId ? { clientId: s.clientProfileId } : null),
+  }),
+  deleteRule({
     model: 'ClientFollow',
     notes: 'Both directions (follower and followed).',
     delegate: (db) => db.clientFollow,

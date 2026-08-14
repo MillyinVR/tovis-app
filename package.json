@@ -52,6 +52,7 @@
     "check:dev-db-drift": "node scripts/check-dev-db-drift.mjs",
     "db:dev:studio": "DATABASE_URL=postgresql://postgres:postgres@localhost:5434/tovis_dev DIRECT_URL=postgresql://postgres:postgres@localhost:5434/tovis_dev prisma studio",
     "db:dev:seed:retention-perf": "DATABASE_URL=postgresql://postgres:postgres@localhost:5434/tovis_dev DIRECT_URL=postgresql://postgres:postgres@localhost:5434/tovis_dev NODE_OPTIONS=\"--import tsx --require ./prisma/scripts/_serverOnlyCjsHook.cjs\" node prisma/scripts/seedRetentionRosterPerf.ts",
+    "db:dev:seed:demo-client": "DATABASE_URL=postgresql://postgres:postgres@localhost:5434/tovis_dev DIRECT_URL=postgresql://postgres:postgres@localhost:5434/tovis_dev NODE_OPTIONS=\"--import tsx --require ./prisma/scripts/_serverOnlyCjsHook.cjs\" node prisma/scripts/seedDemoClientProfile.ts",
     "db:dev:profile:retention-insights": "DATABASE_URL=postgresql://postgres:postgres@localhost:5434/tovis_dev DIRECT_URL=postgresql://postgres:postgres@localhost:5434/tovis_dev NODE_ENV=development NODE_OPTIONS=\"--import tsx --require ./prisma/scripts/_serverOnlyCjsHook.cjs\" node prisma/scripts/profileRetentionInsights.ts",
     "test:integration": "node scripts/with-test-db.mjs npx vitest run --config vitest.integration.config.mts",
     "test:integration:ci": "vitest run --config vitest.integration.config.mts",

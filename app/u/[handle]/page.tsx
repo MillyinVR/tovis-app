@@ -7,7 +7,7 @@ import { getBrandConfig } from '@/lib/brand'
 import { getCurrentUser } from '@/lib/currentUser'
 import { buildLoginHref } from '@/lib/profiles/publicProfileFormatting'
 import { loadPublicClientProfile } from './_data/loadPublicClientProfile'
-import { type FollowMode } from './_components/ProfileStats'
+import { type FollowMode } from './_components/followState'
 import PublicProfileView from './_components/PublicProfileView'
 
 export const dynamic = 'force-dynamic'

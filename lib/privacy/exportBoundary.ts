@@ -299,6 +299,17 @@ export const EXPORT_BOUNDARY: Readonly<Record<string, ExportDisposition>> = {
   BookingRefund: { status: 'PENDING', note: PENDING_NOTE },
   CalendarBlock: { status: 'PENDING', note: PENDING_NOTE },
   CalendarFeedSubscription: { status: 'PENDING', note: PENDING_NOTE },
+  // Wholly DERIVED standing: every field is an aggregate the refresh job
+  // recomputes from rows that are themselves dispositioned (the client's looks,
+  // their saves, the bookings attributed to them). It states nothing about the
+  // person that those rows don't, and a snapshot of a percentile that moves
+  // whenever anyone else publishes would be a misleading thing to hand someone
+  // as "your data". The live tier is shown to the client on their own profile.
+  ClientCreatorStat: {
+    status: 'OMITTED',
+    reason:
+      'Derived aggregate of already-dispositioned rows (the client’s public looks, their saves, and bookings attributed to them); recomputed by a job and surfaced live on the profile rather than stored about the person.',
+  },
   ClientFollow: { status: 'PENDING', note: PENDING_NOTE },
   ClientIntentEvent: { status: 'PENDING', note: PENDING_NOTE },
   ClientNotificationPreference: { status: 'PENDING', note: PENDING_NOTE },

@@ -1,4 +1,4 @@
-// app/u/[handle]/_components/ProfileStats.tsx
+// app/u/[handle]/_components/followState.ts
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -9,27 +9,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 // - guest  → signed out; a Follow CTA that routes to login
 // - hidden → signed in but not as a client (pro/admin); no control
 export type FollowMode = 'own' | 'client' | 'guest' | 'hidden'
-
-type Counts = { followers: number; following: number; looks: number }
-
-type ProfileStatsProps = {
-  handle: string
-  counts: Counts
-  mode: FollowMode
-  initialFollowing: boolean
-  loginHref: string
-}
-
-function Stat({ value, label }: { value: number; label: string }) {
-  return (
-    <div className="flex items-baseline gap-1.5">
-      <span className="text-[15px] font-black text-textPrimary">{value}</span>
-      <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-textSecondary">
-        {label}
-      </span>
-    </div>
-  )
-}
 
 function readBoolean(payload: unknown, key: string): boolean | null {
   if (typeof payload !== 'object' || payload === null) return null
@@ -61,19 +40,32 @@ async function readJsonSafely(response: Response): Promise<unknown> {
   }
 }
 
-const followButtonBase =
-  'mt-3 inline-flex min-w-[112px] items-center justify-center rounded-full px-5 py-2 text-[13px] font-bold transition brand-focus'
+export type ClientFollowState = {
+  following: boolean
+  /** Optimistically nudged, then reconciled with server truth. */
+  followerCount: number
+  loading: boolean
+  error: string | null
+  toggle: () => Promise<void>
+}
 
-export default function ProfileStats({
-  handle,
-  counts,
-  mode,
-  initialFollowing,
-  loginHref,
-}: ProfileStatsProps) {
+/**
+ * The follow toggle's state machine, extracted from the old `ProfileStats` so
+ * the follower COUNT (rendered in the stats row) and the Follow BUTTON can sit
+ * in different parts of the layout — the design frame puts the bio between them
+ * — while still sharing one optimistic state. Two components each owning their
+ * own copy would let the count and the button disagree mid-request.
+ */
+export function useClientFollow(args: {
+  handle: string
+  initialFollowing: boolean
+  initialFollowerCount: number
+}): ClientFollowState {
+  const { handle, initialFollowing, initialFollowerCount } = args
+
   const [following, setFollowing] = useState(Boolean(initialFollowing))
   const [followerCount, setFollowerCount] = useState(
-    Math.max(0, Math.trunc(counts.followers)),
+    Math.max(0, Math.trunc(initialFollowerCount)),
   )
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -145,54 +137,5 @@ export default function ProfileStats({
     }
   }, [flashError, following, handle, loading])
 
-  return (
-    <>
-      <div className="mt-3 flex items-center gap-5">
-        <Stat value={followerCount} label="Followers" />
-        <Stat value={counts.following} label="Following" />
-        <Stat value={counts.looks} label="Looks" />
-      </div>
-
-      {mode === 'client' ? (
-        <div className="mt-0">
-          <button
-            type="button"
-            onClick={toggle}
-            disabled={loading}
-            aria-pressed={following}
-            className={[
-              followButtonBase,
-              following
-                ? 'border border-textPrimary/15 bg-bgSecondary text-textPrimary hover:border-textPrimary/30'
-                : 'bg-accentPrimary text-onAccent hover:opacity-90',
-              loading ? 'cursor-wait opacity-75' : 'cursor-pointer',
-            ].join(' ')}
-          >
-            {following ? 'Following' : 'Follow'}
-          </button>
-
-          {error ? (
-            <div
-              aria-live="polite"
-              className="mt-2 max-w-[220px] text-[11px] font-semibold text-[rgb(var(--tone-danger))]"
-            >
-              {error}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-
-      {mode === 'guest' ? (
-        <a
-          href={loginHref}
-          className={[
-            followButtonBase,
-            'bg-accentPrimary text-onAccent hover:opacity-90',
-          ].join(' ')}
-        >
-          Follow
-        </a>
-      ) : null}
-    </>
-  )
+  return { following, followerCount, loading, error, toggle }
 }

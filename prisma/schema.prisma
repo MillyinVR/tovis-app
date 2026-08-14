@@ -1698,6 +1698,12 @@ model ClientProfile {
   handleNormalized   String?             @unique
   isPublicProfile    Boolean             @default(false)
   publicBio          String?
+  // Free-text city the creator chooses to show beside their tier on the public
+  // profile ("top 5% saver · Brooklyn"). Deliberately its OWN opt-in field and
+  // NOT derived from ClientAddress: a saved address is tier-2 PII that exists
+  // for travel/mobile bookings, and publishing it to strangers because someone
+  // opted into a creator profile would be a silent widening of consent.
+  publicCity         String?
   // See ProfessionalProfile.handleRegistration — the same global-namespace
   // claim, from the client side. A client and a pro render identically as
   // `@handle` in the shared looks feed, so the namespace must be one.
@@ -1774,6 +1780,10 @@ model ClientProfile {
   followedPros    ProFollow[]
   boards          Board[]
   consultSessions ConsultSession[]
+  // Derived creator standing (saves percentile + tier). Absent until the
+  // refresh job has scored this client; absence renders as "no tier", never as
+  // tier zero. See lib/clients/creatorTier.ts.
+  creatorStat     ClientCreatorStat?
 
   // Cards this client has saved on file (card-on-file / no-show protection).
   paymentMethods ClientPaymentMethod[]
@@ -5514,6 +5524,57 @@ model ProFollow {
 // Client→client follow graph (engagement loop). Distinct from ProFollow
 // (client→pro): this is one public-creator client following another. Powers the
 // "FOLLOWERS" count and the activity "started following you" event.
+/// A client-creator's standing among other creators, as shown on the public
+/// profile ("✦ Tastemaker · top 5% saver"). Named for what it measures — how
+/// widely OTHER people save this creator's looks — not for follower count.
+enum ClientCreatorTier {
+  /// Below the RISING cut, or not enough public looks to rank. Renders as no
+  /// badge at all — never as a "tier 0" label, which would read as a demotion.
+  NONE
+  RISING
+  TASTEMAKER
+}
+
+/// Derived, refresh-job-owned creator standing for one client.
+///
+/// Every number here is an AGGREGATE of rows that already exist — saves on the
+/// client's authored LookPosts, bookings attributed to those looks
+/// (Booking.sourceLookPostId), and ClientFollow. Nothing is instrumented for
+/// this table and no request path writes it, so a creator cannot inflate their
+/// own tier by using the app; only the refresh job (lib/clients/creatorTier.ts)
+/// writes here. A client with no row is untiered, which is the correct default
+/// for someone who has never published.
+model ClientCreatorStat {
+  clientId String @id
+
+  /// Sum of saveCount across the client's PUBLISHED + PUBLIC + APPROVED
+  /// authored looks — the quantity `savePercentile` ranks on.
+  totalSaves       Int @default(0)
+  /// Non-cancelled bookings citing one of those looks as their source: how many
+  /// times someone actually went and got the look ("N recreated this").
+  totalRecreations Int @default(0)
+  /// How many of the client's looks are publicly visible. Doubles as the
+  /// eligibility gate — below CREATOR_TIER_MIN_PUBLIC_LOOKS the client is not
+  /// ranked at all, so one lucky look can't mint a Tastemaker.
+  publicLookCount  Int @default(0)
+
+  /// Percentile rank by `totalSaves` among ranked creators, 0–100 inclusive.
+  /// 95 = "top 5%". Null while the client is unranked (too few public looks, or
+  /// never scored) — distinct from 0, which is a real bottom-of-the-pack rank.
+  savePercentile Int?
+  tier           ClientCreatorTier @default(NONE)
+
+  /// When the refresh job last scored this client. Non-null by construction:
+  /// the row only exists because a run created it, so a stale tier can always
+  /// be dated rather than silently trusted.
+  computedAt DateTime
+
+  client ClientProfile @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([tier])
+  @@index([savePercentile])
+}
+
 model ClientFollow {
   id               String   @id @default(cuid())
   followerClientId String

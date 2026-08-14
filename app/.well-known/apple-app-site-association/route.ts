@@ -29,9 +29,11 @@
 // - `/u/<handle>/boards/<slug>` — a shared public board → the native public-board
 //   viewer (PublicBoardView, routed by `PublicBoardLink` in `handleDeepLink`).
 //   `BoardShareSection` emits exactly this URL, so without the association the app
-//   produced share links it could not open. Scoped to `/u/*/boards/*` so it never
-//   catches the bare `/u/<handle>` profile the app does NOT route (which correctly
-//   keeps opening in the browser); there is no `/u/<handle>/boards` index route.
+//   produced share links it could not open.
+// - `/u/<handle>` — a shared creator profile → the native `PublicClientViewerView`
+//   (routed by `PushDeepLink.Target.publicClient`). Associated only once the app
+//   gained that route; before then it was deliberately left out, because an
+//   associated path the app can't handle is the silent no-op described below.
 //
 // Notes:
 // - Must be served with `Content-Type: application/json` and NO redirect. A
@@ -71,12 +73,17 @@ const ASSOCIATED_PATHS = [
   { path: '/looks/*' },
   // A shared public board → the native public-board viewer (PublicBoardView,
   // routed by `PublicBoardLink` in the app's `handleDeepLink`). `BoardShareSection`
-  // emits exactly `/u/<handle>/boards/<slug>`, so without this the app produced
-  // share links it could not open. Scoped to `/u/*/boards/*` on purpose: the app
-  // does NOT route the bare `/u/<handle>` profile, so that stays in the browser
-  // (associating it would be the silent no-op above). There is no `/u/<handle>/
-  // boards` index route, so nothing under this pattern goes unhandled.
+  // emits exactly `/u/<handle>/boards/<slug>`. Listed BEFORE the bare profile
+  // below so the more specific board pattern is the one that matches first.
   { path: '/u/*/boards/*' },
+  // A creator's public profile → the native `PublicClientViewerView`, routed by
+  // `PushDeepLink.Target.publicClient`. This was deliberately NOT associated
+  // while the app had no route for it — an associated path the app can't handle
+  // is the silent no-op described above. The app now routes it, and this is the
+  // link the client Share sheet promises ("a Recreate this look link back to
+  // your profile"), so leaving it in the browser sent every stranger who tapped
+  // a shared profile out of the app.
+  { path: '/u/*' },
 ] as const
 
 const AASA = {

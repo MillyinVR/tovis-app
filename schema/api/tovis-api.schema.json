@@ -88,6 +88,14 @@
       ],
       "type": "string"
     },
+    "$Enums.ClientCreatorTier": {
+      "enum": [
+        "NONE",
+        "RISING",
+        "TASTEMAKER"
+      ],
+      "type": "string"
+    },
     "$Enums.ClientRelationshipLabel": {
       "enum": [
         "UNKNOWN",
@@ -3939,6 +3947,9 @@
     },
     "ClientConsentKind": {
       "$ref": "#/definitions/%24Enums.ClientConsentKind"
+    },
+    "ClientCreatorTier": {
+      "$ref": "#/definitions/%24Enums.ClientCreatorTier"
     },
     "ClientHomeActionDTO": {
       "anyOf": [
@@ -16344,6 +16355,42 @@
       ],
       "type": "object"
     },
+    "PublicClientBoard": {
+      "properties": {
+        "href": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "itemCount": {
+          "description": "REAL number of publicly-visible looks on the board.",
+          "type": "number"
+        },
+        "name": {
+          "type": "string"
+        },
+        "slug": {
+          "type": "string"
+        },
+        "tileImageUrls": {
+          "description": "Up to  {@link  BOARD_TILE_COUNT }  cover images; may be shorter.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "slug",
+        "href",
+        "itemCount",
+        "tileImageUrls"
+      ],
+      "type": "object"
+    },
     "PublicClientLook": {
       "properties": {
         "href": {
@@ -16361,8 +16408,37 @@
         "name": {
           "type": "string"
         },
+        "priceLabel": {
+          "description": "Already composed as \"From $250\". Never a bare figure: a look's price is a STARTING price and a consultation can revise the total (Tori's standing rule). Null when the look carries no price at all.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "proName": {
+          "description": "The pro whose work the look shows — \"Noor Haddad · Balayage\".",
+          "type": "string"
+        },
+        "recreateHref": {
+          "description": "Opens the look with its availability drawer already open.",
+          "type": "string"
+        },
+        "recreatedCount": {
+          "description": "Bookings that cite this look as their source — \"12 recreated this\".",
+          "type": "number"
+        },
         "saveCount": {
           "type": "number"
+        },
+        "serviceName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "spotlighted": {
+          "description": "A SUPER_ADMIN promoted this look into the editorial Spotlight (LookPost.featuredAt). The design frame labels this badge \"Viral\"; we label it \"Spotlight\" because an admin picked it — calling an editorial choice \"Viral\" claims an engagement event that never happened.",
+          "type": "boolean"
         }
       },
       "required": [
@@ -16370,7 +16446,13 @@
         "name",
         "imageUrl",
         "saveCount",
-        "href"
+        "href",
+        "proName",
+        "serviceName",
+        "priceLabel",
+        "recreatedCount",
+        "spotlighted",
+        "recreateHref"
       ],
       "type": "object"
     },
@@ -16387,6 +16469,12 @@
             "string",
             "null"
           ]
+        },
+        "boards": {
+          "items": {
+            "$ref": "#/definitions/PublicClientBoard"
+          },
+          "type": "array"
         },
         "counts": {
           "properties": {
@@ -16419,6 +16507,9 @@
           },
           "type": "array"
         },
+        "standing": {
+          "$ref": "#/definitions/PublicClientProfileStanding"
+        },
         "viewer": {
           "$ref": "#/definitions/PublicClientProfileViewer"
         }
@@ -16428,9 +16519,38 @@
         "displayName",
         "avatarUrl",
         "bio",
+        "standing",
         "counts",
         "looks",
+        "boards",
         "viewer"
+      ],
+      "type": "object"
+    },
+    "PublicClientProfileStanding": {
+      "properties": {
+        "city": {
+          "description": "The creator's own opted-in public city.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tier": {
+          "$ref": "#/definitions/ClientCreatorTier"
+        },
+        "topPercent": {
+          "description": "e.g. 5 for \"top 5% saver\". Null when the creator is unranked.",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "tier",
+        "topPercent",
+        "city"
       ],
       "type": "object"
     },
