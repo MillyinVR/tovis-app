@@ -1,6 +1,5 @@
 # Raw date/time formatting that pre-dates the lib/time single source of truth.
 # Migrate these to @/lib/time helpers and shrink the list; never add entries.
-app/client/(gated)/ClientMeDashboard.tsx|return new Date(then).toLocaleDateString(undefined, {
 app/client/(gated)/_components/ClientLastMinuteInvites.tsx|return new Intl.DateTimeFormat('en-US', {
 app/client/(gated)/_components/homeVisuals.ts|const options: Intl.DateTimeFormatOptions = {
 app/pro/calendar/_utils/date.ts|options: Intl.DateTimeFormatOptions,

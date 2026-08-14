@@ -2,6 +2,7 @@
 'use client'
 
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import { formatCompactCount } from '@/lib/format/compactCount'
 import { formatRoundedDollars } from '@/lib/money'
 import type { AvailabilityCover, AvailabilityTrust } from '../types'
 
@@ -17,13 +18,11 @@ import type { AvailabilityCover, AvailabilityTrust } from '../types'
  */
 
 function formatBookedCount(n: number): string {
-  // "1.2k booked" past a thousand, as the frame shows; exact below that, because
-  // "0.9k" is a worse read than "912".
-  if (n >= 1000) {
-    const k = n / 1000
-    return `${k >= 10 ? Math.round(k) : Math.round(k * 10) / 10}k booked`
-  }
-  return `${n} booked`
+  // "1.2K booked" past a thousand, as the frame shows; exact below that, because
+  // "0.9K" is a worse read than "912" — which is what `formatCompactCount` does,
+  // and it is the app's one abbreviation rule. This used to be a sixth
+  // hand-rolled copy of it, differing only in emitting a lowercase "k".
+  return `${formatCompactCount(n)} booked`
 }
 
 function Chip({
@@ -140,6 +139,11 @@ export default function SheetCover({
                   'linear-gradient(to top, rgb(var(--bg-primary)) 3%, rgb(var(--bg-primary) / 0.05) 58%, rgb(0 0 0 / 0.45) 100%)',
               }}
             />
+            {/* ⚠️ `textPrimary`, not white. The eyebrow sits at the very bottom
+                of the scrim, where the gradient is ~90% `bgPrimary` — i.e. on
+                the SHEET's surface, not on the photo. White there is white on
+                near-white in light mode: legible in the dark theme this was
+                built in, and all but invisible in the other one. */}
             <div className="absolute bottom-[8px] left-4 flex items-center gap-[6px]">
               <span
                 aria-hidden="true"
@@ -147,7 +151,7 @@ export default function SheetCover({
               >
                 ◆
               </span>
-              <span className="text-[10px] font-black uppercase tracking-[0.13em] text-white drop-shadow-[0_1px_6px_rgba(0,0,0,0.85)]">
+              <span className="text-[10px] font-black uppercase tracking-[0.13em] text-textPrimary">
                 Booking this look
               </span>
             </div>

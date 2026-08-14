@@ -11,6 +11,8 @@ export const testIds = {
     retryButton: 'availability-retry-button',
     slotList: 'availability-slot-list',
     slotChip: (slotIso: string) => `availability-slot-${slotIso}`,
+    dayChipPrefix: 'availability-day-',
+    dayChip: (ymd: string) => `availability-day-${ymd}`,
     holdBanner: 'availability-hold-banner',
     continueButton: 'availability-hold-continue-button',
     refreshButton: 'availability-refresh-button',
@@ -69,7 +71,10 @@ mobileAddress: {
 
 export const patterns = {
   availability: {
-    dayButton: /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s*\d{1,2}$/i,
+    // The chip announces "Fri 14, 12 open" — weekday, day-of-month, then the
+    // day's remaining supply. Prefer `availabilityDayButtons` (testid-keyed);
+    // this is only for `chooseDay`, which targets ONE named day.
+    dayButton: /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s*\d{1,2}(?:,\s.+)?$/i,
     slotButton:
       /(?:Sun|Mon|Tue|Wed|Thu|Fri|Sat).*?\d{1,2}(?::\d{2})?\s?(?:AM|PM)/i,
     continueButton: /continue(?:\s+to\s+add-ons)?/i,
@@ -84,10 +89,19 @@ export function availabilityDrawer(scope: Scope): Locator {
   return byTestId(scope, testIds.availability.drawer)
 }
 
+/**
+ * The day scroller's chips.
+ *
+ * ⚠️ Keyed on the TESTID, not on the accessible name. The name is assembled
+ * from the chip's visible lines, so adding the per-day supply line ("12 open")
+ * silently emptied this locator and took nine specs with it — the chips were on
+ * screen the whole time. A locator that breaks when copy changes is a locator
+ * that will break again.
+ */
 export function availabilityDayButtons(scope: Scope): Locator {
-  return availabilityDrawer(scope).getByRole('button', {
-    name: patterns.availability.dayButton,
-  })
+  return availabilityDrawer(scope).locator(
+    `[data-testid^="${testIds.availability.dayChipPrefix}"]`,
+  )
 }
 
 export function availabilitySlotButtons(scope: Scope): Locator {

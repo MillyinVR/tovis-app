@@ -372,9 +372,17 @@ async function clean(): Promise<void> {
   await prisma.bookingHold.deleteMany({
     where: { professionalId: idPrefix },
   })
-  await prisma.review.deleteMany({ where: { id: idPrefix } })
+  // Bookings and their reviews are keyed on the demo pros for the SAME reason —
+  // it is the same defect one step further along. A hold carried through to
+  // "Request to book" becomes a Booking with a runtime cuid, which
+  // `id: demoseed-` cannot match, and it RESTRICT-references the pro's
+  // location. So the first person to actually COMPLETE a booking against this
+  // fixture — the thing the fixture exists to let you do — made it permanently
+  // un-cleanable ("Booking_locationId_fkey"). Anything booked against a
+  // `demoseed-` pro belongs to this fixture, whoever created it.
+  await prisma.review.deleteMany({ where: { professionalId: idPrefix } })
+  await prisma.booking.deleteMany({ where: { professionalId: idPrefix } })
   await prisma.proNoShowSettings.deleteMany({ where: { id: idPrefix } })
-  await prisma.booking.deleteMany({ where: { id: idPrefix } })
   await prisma.boardItem.deleteMany({ where: { id: idPrefix } })
   await prisma.board.deleteMany({ where: { id: idPrefix } })
   await prisma.clientFollow.deleteMany({ where: { id: idPrefix } })

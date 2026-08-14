@@ -1,4 +1,6 @@
 // lib/time/relativeTime.ts
+import { formatInTimeZone } from '@/lib/formatInTimeZone'
+import { daySerialInTimeZone } from '@/lib/timeZone'
 
 type RelativeBucket =
   | { unit: 'now' }
@@ -92,4 +94,42 @@ export function formatRelativeTimeAgo(input: string | Date): string {
         day: 'numeric',
       })
   }
+}
+
+/** Past this many days, {@link formatRelativeDayAgo} shows a calendar date. */
+const RELATIVE_DAY_WEEK_CAP_DAYS = 35
+
+/**
+ * Day-granularity relative timestamp — "today", "yesterday", "3d ago",
+ * "2w ago" — falling back to a short month/day date past five weeks.
+ *
+ * Deliberately *not* built on the elapsed-milliseconds bucketing above:
+ * "today" and "yesterday" are claims about the calendar, so they are decided
+ * by the day boundaries of `timeZone`. Something posted at 11:50pm is
+ * "yesterday" at 12:10am, not "today" for another 23 hours. The month/day
+ * fallback is rendered in the same zone rather than the runtime's, so a server
+ * render can't silently print a UTC date.
+ *
+ * Pass the viewer's zone (`getViewerTimeZone() ?? DEFAULT_TIME_ZONE`) on
+ * client surfaces. Returns '' for unparseable input.
+ */
+export function formatRelativeDayAgo(
+  input: string | Date,
+  timeZone: string,
+): string {
+  const then = input instanceof Date ? input : new Date(input)
+  if (Number.isNaN(then.getTime())) return ''
+
+  const days = Math.max(
+    0,
+    daySerialInTimeZone(new Date(), timeZone) -
+      daySerialInTimeZone(then, timeZone),
+  )
+
+  if (days < 1) return 'today'
+  if (days < 2) return 'yesterday'
+  if (days < 7) return `${days}d ago`
+  if (days < RELATIVE_DAY_WEEK_CAP_DAYS) return `${Math.floor(days / 7)}w ago`
+
+  return formatInTimeZone(then, timeZone, { month: 'short', day: 'numeric' })
 }

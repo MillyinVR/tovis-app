@@ -2,10 +2,43 @@ import { describe, expect, it } from 'vitest'
 
 import {
   enumerateYmdRange,
+  parseSummaryWindowDays,
   parseYYYYMMDD,
   ymdSerial,
   ymdToString,
 } from './summaryWindow'
+
+// An OMITTED `days` used to mean one day, not the default seven: `Number(null)`
+// is 0, which is finite, so an absent param took the "asked for zero" path and
+// clamped to 1. Web always sends the param, so the bug only ever showed up on
+// the native client — as a booking sheet whose day scroller was empty whenever
+// today was booked out.
+describe('parseSummaryWindowDays', () => {
+  const HORIZON = 3650
+
+  it('falls back to the default window when the param is absent', () => {
+    expect(parseSummaryWindowDays(null, HORIZON)).toBe(7)
+    expect(parseSummaryWindowDays('', HORIZON)).toBe(7)
+    expect(parseSummaryWindowDays('   ', HORIZON)).toBe(7)
+    expect(parseSummaryWindowDays('not-a-number', HORIZON)).toBe(7)
+  })
+
+  it('honours an explicit request, clamped to the supported range', () => {
+    expect(parseSummaryWindowDays('14', HORIZON)).toBe(14)
+    expect(parseSummaryWindowDays('1', HORIZON)).toBe(1)
+    // An explicit zero/negative is still a caller asking for nothing — floor it
+    // at one day rather than silently widening it to the default.
+    expect(parseSummaryWindowDays('0', HORIZON)).toBe(1)
+    expect(parseSummaryWindowDays('-3', HORIZON)).toBe(1)
+    expect(parseSummaryWindowDays('999', HORIZON)).toBe(21)
+  })
+
+  it('never offers more days than the booking horizon allows', () => {
+    expect(parseSummaryWindowDays(null, 3)).toBe(3)
+    expect(parseSummaryWindowDays('14', 3)).toBe(3)
+    expect(parseSummaryWindowDays(null, 0)).toBe(1)
+  })
+})
 
 // The parser gates the date params of every availability route (day,
 // alternates, bootstrap, pro busy-days). It was made STRICT in R4 when the

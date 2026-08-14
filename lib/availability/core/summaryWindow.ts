@@ -50,6 +50,17 @@ export function enumerateYmdRange(
   return out
 }
 
+/**
+ * How many days of summary a bootstrap request gets.
+ *
+ * ⚠️ An ABSENT `days` is not a zero. `Number(null)` and `Number('')` are both
+ * `0`, which is finite, so reading the param straight through `Number` sent an
+ * omitted window down the "caller asked for 0 days" path — clamped to 1 — and
+ * `DEFAULT_SUMMARY_WINDOW_DAYS` was unreachable for the one input it exists
+ * for. Web always sends `days`, so the whole default was dead in practice and
+ * the native client (which does not) silently got a ONE-DAY window: an empty
+ * day scroller whenever today happened to be booked out.
+ */
 export function parseSummaryWindowDays(
   value: string | null,
   maxAdvanceDays: number,
@@ -59,7 +70,8 @@ export function parseSummaryWindowDays(
     Math.max(1, maxAdvanceDays),
   )
 
-  const parsed = Number(value)
+  const raw = typeof value === 'string' ? value.trim() : ''
+  const parsed = raw ? Number(raw) : Number.NaN
   const normalized = Number.isFinite(parsed) ? Math.trunc(parsed) : fallback
 
   return clampInt(

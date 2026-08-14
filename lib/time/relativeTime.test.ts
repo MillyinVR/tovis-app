@@ -1,7 +1,11 @@
 // lib/time/relativeTime.test.ts
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { formatRelativeTimeAgo, formatRelativeTimeCompact } from './relativeTime'
+import {
+  formatRelativeDayAgo,
+  formatRelativeTimeAgo,
+  formatRelativeTimeCompact,
+} from './relativeTime'
 
 const MIN = 60_000
 const HOUR = 60 * MIN
@@ -42,5 +46,51 @@ describe('formatRelativeTimeAgo', () => {
 
   it('returns empty string for unparseable input', () => {
     expect(formatRelativeTimeAgo('not-a-date')).toBe('')
+  })
+})
+
+describe('formatRelativeDayAgo', () => {
+  const NY = 'America/New_York'
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  function pinNow(iso: string): void {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(iso))
+  }
+
+  it('buckets by day, then week, then a calendar date', () => {
+    // 2026-03-15T12:00:00Z is 08:00 on Mar 15 in New York.
+    pinNow('2026-03-15T12:00:00Z')
+
+    expect(formatRelativeDayAgo('2026-03-15T05:30:00Z', NY)).toBe('today')
+    expect(formatRelativeDayAgo('2026-03-14T18:00:00Z', NY)).toBe('yesterday')
+    expect(formatRelativeDayAgo('2026-03-12T18:00:00Z', NY)).toBe('3d ago')
+    expect(formatRelativeDayAgo('2026-03-01T18:00:00Z', NY)).toBe('2w ago')
+  })
+
+  it('calls "yesterday" by the calendar day, not by elapsed hours', () => {
+    // 00:10 on Mar 10 in New York — 20 minutes after 23:50 the night before,
+    // which an elapsed-time bucket would still be calling "today".
+    pinNow('2026-03-10T04:10:00Z')
+
+    expect(formatRelativeDayAgo('2026-03-10T03:50:00Z', NY)).toBe('yesterday')
+  })
+
+  it('renders the older-than fallback in the given zone, not UTC', () => {
+    pinNow('2026-03-15T12:00:00Z')
+
+    // 02:00Z on Feb 1 is still 21:00 on Jan 31 in New York.
+    expect(formatRelativeDayAgo('2026-02-01T02:00:00Z', NY)).toBe('Jan 31')
+    expect(formatRelativeDayAgo('2026-02-01T02:00:00Z', 'UTC')).toBe('Feb 1')
+  })
+
+  it('clamps a future instant to today and rejects unparseable input', () => {
+    pinNow('2026-03-15T12:00:00Z')
+
+    expect(formatRelativeDayAgo('2026-03-20T12:00:00Z', NY)).toBe('today')
+    expect(formatRelativeDayAgo('not-a-date', NY)).toBe('')
   })
 })

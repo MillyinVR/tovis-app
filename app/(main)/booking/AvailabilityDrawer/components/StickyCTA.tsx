@@ -8,6 +8,12 @@ type StickyCTAProps = {
   onContinue: () => void
   selectedLine: string | null
   continueLabel: string
+  /**
+   * Test hook for the drawer's single continue button. The held-time banner
+   * used to carry a second copy of this CTA; this footer is now the only one,
+   * so the id lives here.
+   */
+  testId?: string
 }
 
 export default function StickyCTA({
@@ -17,6 +23,7 @@ export default function StickyCTA({
   onContinue,
   selectedLine,
   continueLabel,
+  testId,
 }: StickyCTAProps) {
   const pending = loading || navigating
 
@@ -55,6 +62,7 @@ export default function StickyCTA({
 
       <button
         type="button"
+        data-testid={testId}
         onClick={onContinue}
         disabled={!canContinue || pending}
         aria-busy={pending}
