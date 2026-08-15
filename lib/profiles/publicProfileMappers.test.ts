@@ -13,14 +13,19 @@ vi.mock('@/lib/media/renderUrls', () => ({
 }))
 
 import {
+  formatOfferingPricing,
   mapPairedBeforeToDto,
+  mapPublicOfferingToDto,
   mapPublicProfileHeaderToDto,
   mapPublicPortfolioTileToDto,
   mapPublicProfileStatsToDto,
   mapPublicReviewMediaAssetToDto,
 } from './publicProfileMappers'
-import type { PublicProfessionalProfileRow } from './publicProfileSelects'
-import { ProNameDisplay, VerificationStatus } from '@prisma/client'
+import type {
+  PublicOfferingRow,
+  PublicProfessionalProfileRow,
+} from './publicProfileSelects'
+import { Prisma, ProNameDisplay, VerificationStatus } from '@prisma/client'
 
 function makeProfileRow(
   overrides?: Partial<PublicProfessionalProfileRow>,
@@ -297,5 +302,95 @@ describe('mapPublicProfileStatsToDto looks + followers', () => {
 
     expect(stats.followerCount).toBe(0)
     expect(stats.followersLabel).toBe('0')
+  })
+})
+
+function makeOfferingRow(
+  overrides?: Partial<PublicOfferingRow>,
+): PublicOfferingRow {
+  return {
+    id: 'off_1',
+    professionalId: 'pro_1',
+    serviceId: 'svc_1',
+    title: 'Balayage',
+    description: null,
+    customImageUrl: null,
+    salonPriceStartingAt: new Prisma.Decimal(250),
+    salonDurationMinutes: 180,
+    mobilePriceStartingAt: null,
+    mobileDurationMinutes: null,
+    offersInSalon: true,
+    offersMobile: false,
+    isActive: true,
+    service: { id: 'svc_1', name: 'Balayage', defaultImageUrl: null },
+    ...(overrides ?? {}),
+  }
+}
+
+// 🔴 Tori's standing rule: a price is a STARTING price. These lines are built
+// server-side and rendered VERBATIM by both clients — web's
+// `ServicesBookingOverlay` and iOS's `ServiceCard` — so a bare figure here ships
+// on both platforms at once.
+describe('formatOfferingPricing', () => {
+  it('states the salon price as a starting price, never a bare figure', () => {
+    expect(formatOfferingPricing(makeOfferingRow())).toEqual([
+      'Salon: From $250 · 180 min',
+    ])
+  })
+
+  it('states the mobile price as a starting price too', () => {
+    const lines = formatOfferingPricing(
+      makeOfferingRow({
+        offersInSalon: false,
+        offersMobile: true,
+        salonPriceStartingAt: null,
+        salonDurationMinutes: null,
+        mobilePriceStartingAt: new Prisma.Decimal(310),
+        mobileDurationMinutes: 240,
+      }),
+    )
+
+    expect(lines).toEqual(['Mobile: From $310 · 240 min'])
+  })
+
+  it('still says "From" when the offering has no duration', () => {
+    expect(
+      formatOfferingPricing(makeOfferingRow({ salonDurationMinutes: null })),
+    ).toEqual(['Salon: From $250'])
+  })
+
+  it('never emits a bare "$" figure on any pricing line', () => {
+    const lines = formatOfferingPricing(
+      makeOfferingRow({
+        offersMobile: true,
+        mobilePriceStartingAt: new Prisma.Decimal(310),
+        mobileDurationMinutes: 240,
+      }),
+    )
+
+    expect(lines).toHaveLength(2)
+    for (const line of lines) {
+      expect(line).toMatch(/From \$/)
+    }
+  })
+})
+
+describe('mapPublicOfferingToDto pricing', () => {
+  // The double-"From" guard. `priceFromLabel` is rendered UNDER a "From" label
+  // by both clients — web `<ProfileHeroStat label="From">`, iOS
+  // `statCell("From", …)` — so it must stay the bare figure. Moving the word
+  // into `formatMoneyLabel` would make web's hero stat read "From From $250"
+  // (iOS survives only because `StartingPrice.label` is idempotent).
+  it('leaves priceFromLabel a bare figure so the clients can label it', () => {
+    const dto = mapPublicOfferingToDto(makeOfferingRow())
+
+    expect(dto.priceFromLabel).toBe('$250')
+    expect(dto.priceFromLabel?.toLowerCase()).not.toContain('from')
+  })
+
+  it('carries the "From" pricing lines through to the DTO', () => {
+    expect(mapPublicOfferingToDto(makeOfferingRow()).pricingLines).toEqual([
+      'Salon: From $250 · 180 min',
+    ])
   })
 })

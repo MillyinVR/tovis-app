@@ -276,12 +276,23 @@ function pickLowestPriceCandidate(
   )
 }
 
+/**
+ * 🔴 Tori's standing rule: a price is a STARTING price. The source field is
+ * `salonPriceStartingAt` / `mobilePriceStartingAt` — the pro sets the final
+ * number at the chair — so this line must never render a bare figure.
+ *
+ * The word is added HERE and not in `formatMoneyLabel`, because that helper also
+ * feeds `priceFromLabel`, which both clients render under their own "From"
+ * label (web `<ProfileHeroStat label="From">`, iOS `statCell("From", …)`).
+ * Prefixing there would read "From From $250" on web's hero stat.
+ */
 function formatPricingLine(candidate: OfferingPriceCandidate): string {
   const duration = formatDurationMinutes(candidate.durationMinutes)
+  const price = `From ${candidate.priceLabel}`
 
   return duration
-    ? `${candidate.label}: ${candidate.priceLabel} · ${duration}`
-    : `${candidate.label}: ${candidate.priceLabel}`
+    ? `${candidate.label}: ${price} · ${duration}`
+    : `${candidate.label}: ${price}`
 }
 
 function pickOfferingName(offering: PublicOfferingRow): string {
