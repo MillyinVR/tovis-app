@@ -30,6 +30,9 @@ async function loadOwnedMedia(mediaId: string, professionalId: string) {
       // Consent inputs — a cover renders publicly, so reuse the public-share gate.
       storageBucket: true,
       reviewId: true,
+      // Provenance for the consent gate: a photo taken during a booking is
+      // the client's to release, whatever bucket it sits in.
+      bookingId: true,
       booking: { select: { mediaUseConsentAt: true } },
     },
   })
@@ -64,6 +67,7 @@ export async function POST(_req: NextRequest, ctx: RouteContext) {
     // cover after the client added it to a review or granted aftercare consent.
     if (
       !canProSharePublicly({
+        bookingId: owned.media.bookingId,
         storageBucket: owned.media.storageBucket,
         reviewId: owned.media.reviewId,
         clientUseConsentAt: owned.media.booking?.mediaUseConsentAt ?? null,

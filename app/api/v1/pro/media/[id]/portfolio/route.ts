@@ -112,6 +112,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     // Consent gate: a client's private session photo can only be featured
     // publicly after the client added it to a review (which sets reviewId).
     if (!canProSharePublicly({
+      bookingId: owned.media.bookingId,
       storageBucket: owned.media.storageBucket,
       reviewId: owned.media.reviewId,
       clientUseConsentAt: owned.media.booking?.mediaUseConsentAt ?? null,

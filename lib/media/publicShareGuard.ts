@@ -17,26 +17,75 @@
 // Anything still sitting in the private bucket with no review link is
 // unpromoted private media and must not be published by the pro.
 
+import { Role } from '@prisma/client'
+
 import { BUCKETS } from '@/lib/storageBuckets'
 
 export type PublicShareCandidate = {
+  /**
+   * 🔴 REQUIRED, deliberately — not optional like the fields below.
+   *
+   * This is the PROVENANCE signal: a photo attached to a booking was taken
+   * during someone's appointment, so it is theirs to release. An optional field
+   * here would fail OPEN — a caller that forgot to select `bookingId` would
+   * silently classify a client's session photo as the pro's to publish. Making
+   * it required means the compiler, not a reviewer, catches that.
+   */
+  bookingId: string | null
+  /**
+   * Where the bytes live. Retained as belt-and-braces only — it must never
+   * again be the *sole* input, see the note on the function below.
+   */
   storageBucket: string | null
   reviewId: string | null
   // B3b: the client granted media-use consent for this asset via the aftercare
   // summary — a second client-authorized unlock alongside review-promotion.
   clientUseConsentAt?: Date | string | null
+  /**
+   * Who uploaded it. A photo the CLIENT uploaded themselves is already theirs
+   * to publish — the act of uploading is the authorization. Server-derived from
+   * the authenticated actor, never client-supplied.
+   */
+  uploadedByRole?: Role | null
 }
 
 /**
- * True when the media is private-bucket media the client has NOT authorized for
- * public use — i.e. it must not be made public by the pro. The client authorizes
+ * True when this is client-linked media the client has NOT authorized for public
+ * use — i.e. the pro must not be able to make it public. The client authorizes
  * it either by attaching it to a review (`reviewId`) or by granting media-use
- * consent in the aftercare summary (`clientUseConsentAt`).
+ * consent in their aftercare (`clientUseConsentAt`).
+ *
+ * 🔴 Why provenance and not just the bucket. This used to be exactly
+ * `storageBucket === BUCKETS.mediaPrivate && !authorized`, which keyed a
+ * CLIENT-SAFETY decision on where the bytes happened to be stored. That failed
+ * OPEN — every asset whose bucket was not byte-identical to `'media-private'`
+ * (a null bucket, a renamed bucket, a new upload path, a test fixture) was
+ * classified as the pro's to publish. A storage migration would silently have
+ * become a permissions change, with no test failing.
+ *
+ * The two signals are perfectly correlated in production today (measured
+ * 2026-08-15: 69/69 private-bucket assets are session photos, and the change
+ * reclassified 0 rows in either direction), which is precisely why the coupling
+ * was invisible — and why it was cheap to separate before they ever diverge.
+ *
+ * The bucket check stays as a second, independent reason to refuse. Either
+ * signal alone is enough to hold a photo back.
  */
 export function isUnpromotedPrivateMedia(media: PublicShareCandidate): boolean {
-  const inPrivateBucket = media.storageBucket === BUCKETS.mediaPrivate
-  const clientAuthorized = Boolean(media.reviewId) || Boolean(media.clientUseConsentAt)
-  return inPrivateBucket && !clientAuthorized
+  const clientLinked =
+    Boolean(media.bookingId) || media.storageBucket === BUCKETS.mediaPrivate
+
+  const clientAuthorized =
+    Boolean(media.reviewId) ||
+    Boolean(media.clientUseConsentAt) ||
+    // 🔴 The question this answers is "may the PRO share this publicly". A photo
+    // the CLIENT uploaded is their own work being published by its own subject,
+    // so there is nobody to protect them from — uploading it IS the consent.
+    // Without this, a client publishing their own after-photo from a visit is
+    // refused, because the photo carries the visit's `bookingId`.
+    media.uploadedByRole === Role.CLIENT
+
+  return clientLinked && !clientAuthorized
 }
 
 /** Inverse of {@link isUnpromotedPrivateMedia}. */

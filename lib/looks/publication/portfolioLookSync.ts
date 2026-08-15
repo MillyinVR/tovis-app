@@ -47,6 +47,9 @@ const reconcileMediaSelect = Prisma.validator<Prisma.MediaAssetSelect>()({
   primaryServiceId: true,
   services: { select: { serviceId: true } },
   // B3b: the booking's client media-use consent also authorises public sharing.
+  // Provenance for the consent gate: a photo taken during a booking is
+  // the client's to release, whatever bucket it sits in.
+  bookingId: true,
   booking: { select: { mediaUseConsentAt: true } },
   // The single LookPost for this asset (primaryMediaAssetId is @unique).
   lookPostPrimaryFor: {
@@ -133,6 +136,7 @@ export async function reconcilePortfolioLookForMediaAsset(
       (media.isFeaturedInPortfolio || media.isEligibleForLooks)
 
     const consentOk = !isUnpromotedPrivateMedia({
+      bookingId: media.bookingId,
       storageBucket: media.storageBucket,
       reviewId: media.reviewId,
       clientUseConsentAt: media.booking?.mediaUseConsentAt ?? null,

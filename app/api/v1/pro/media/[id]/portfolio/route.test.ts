@@ -515,7 +515,7 @@ describe('app/api/v1/pro/media/[id]/portfolio/route.ts', () => {
   describe('POST before/after pairing', () => {
     it('auto-pairs a featured after with its booking’s primary before (default-on)', async () => {
       mocks.mediaAssetFindUnique.mockResolvedValueOnce(
-        makeOwnedMedia({ bookingId: 'book_1', phase: MediaPhase.AFTER }),
+        makeOwnedMedia({ bookingId: 'book_1', phase: MediaPhase.AFTER , reviewId: 'review_1'}),
       )
       mocks.loadPrimaryBeforeAssetId.mockResolvedValueOnce('before_1')
       mocks.mediaAssetUpdate.mockResolvedValueOnce(
@@ -542,6 +542,7 @@ describe('app/api/v1/pro/media/[id]/portfolio/route.ts', () => {
           bookingId: 'book_1',
           mediaType: MediaType.VIDEO,
           phase: MediaPhase.OTHER,
+          reviewId: 'review_1',
         }),
       )
 
@@ -558,7 +559,7 @@ describe('app/api/v1/pro/media/[id]/portfolio/route.ts', () => {
 
     it('does not auto-pair when the featured photo is itself a before', async () => {
       mocks.mediaAssetFindUnique.mockResolvedValueOnce(
-        makeOwnedMedia({ bookingId: 'book_1', phase: MediaPhase.BEFORE }),
+        makeOwnedMedia({ bookingId: 'book_1', phase: MediaPhase.BEFORE , reviewId: 'review_1'}),
       )
 
       const res = await POST(makeRequest('POST'), makeCtx())
@@ -574,7 +575,7 @@ describe('app/api/v1/pro/media/[id]/portfolio/route.ts', () => {
 
     it('pairs with an explicit before after validating ownership', async () => {
       mocks.mediaAssetFindUnique
-        .mockResolvedValueOnce(makeOwnedMedia({ bookingId: 'book_1' }))
+        .mockResolvedValueOnce(makeOwnedMedia({ bookingId: 'book_1' , reviewId: 'review_1'}))
         .mockResolvedValueOnce({
           id: 'before_1',
           professionalId: 'pro_1',
@@ -659,7 +660,7 @@ describe('app/api/v1/pro/media/[id]/portfolio/route.ts', () => {
 
     it('unpairs when sent an explicit null before', async () => {
       mocks.mediaAssetFindUnique.mockResolvedValueOnce(
-        makeOwnedMedia({ bookingId: 'book_1' }),
+        makeOwnedMedia({ bookingId: 'book_1' , reviewId: 'review_1'}),
       )
 
       const res = await POST(

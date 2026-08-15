@@ -57,6 +57,9 @@ const mediaAssetPublicationSelect =
     isEligibleForLooks: true,
     mediaType: true,
     createdAt: true,
+    // Provenance for the consent gate: a photo taken during a booking is the
+    // client's to release, whatever bucket it sits in.
+    bookingId: true,
     // B3b: client media-use consent on the booking also authorizes public sharing.
     booking: { select: { mediaUseConsentAt: true } },
     services: {
@@ -109,6 +112,8 @@ const proLookPublicationSelect =
         id: true,
         professionalId: true,
         reviewId: true,
+        // Provenance for the consent gate — see publicShareGuard.
+        bookingId: true,
         storageBucket: true,
         caption: true,
         visibility: true,
@@ -349,7 +354,13 @@ async function getProLookByIdOrThrow(
 function assertMediaAssetCanBackLooks(
   media: Pick<
     MediaAssetPublicationRow,
-    'visibility' | 'isEligibleForLooks' | 'storageBucket' | 'reviewId' | 'booking'
+    | 'visibility'
+    | 'isEligibleForLooks'
+    // Provenance — the consent gate needs it, not just the bucket.
+    | 'bookingId'
+    | 'storageBucket'
+    | 'reviewId'
+    | 'booking'
   >,
 ): void {
   if (media.visibility !== MediaVisibility.PUBLIC) {
@@ -366,6 +377,7 @@ function assertMediaAssetCanBackLooks(
   // back a public Look, even if its flags were somehow set. Only review-promoted
   // or public-bucket media may be published.
   if (isUnpromotedPrivateMedia({
+    bookingId: media.bookingId,
     storageBucket: media.storageBucket,
     reviewId: media.reviewId,
     clientUseConsentAt: media.booking?.mediaUseConsentAt ?? null,

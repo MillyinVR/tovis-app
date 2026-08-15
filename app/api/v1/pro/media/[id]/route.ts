@@ -101,6 +101,7 @@ export async function PATCH(req: Request, ctx: RouteContext) {
     if (
       nextVisibility === MediaVisibility.PUBLIC &&
       !canProSharePublicly({
+        bookingId: existing.bookingId,
         storageBucket: existing.storageBucket,
         reviewId: existing.reviewId,
         clientUseConsentAt: existing.booking?.mediaUseConsentAt ?? null,
