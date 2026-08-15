@@ -23,6 +23,7 @@ import { withCacheBuster } from '@/lib/url'
 import { getStorageEnvironmentMismatch } from '@/lib/media/storageEnvironment'
 import {
   buildViralRequestCoverTargetPath,
+  isViralRequestCoverCandidateUrl,
   setViralRequestCoverImage,
 } from '@/lib/viralRequests'
 
@@ -53,7 +54,11 @@ type FinalizeBody =
   | {
       kind: 'VIRAL_REQUEST_COVER_IMAGE_PUBLIC_FINALIZE'
       requestId: string
-      /** Null clears the reviewer's pick, falling back to the submitter's photo. */
+      /**
+       * Null clears the reviewer's pick, and the look goes back to the gradient.
+       * It does NOT fall back to the submitter's photo — only an admin ever puts
+       * a picture app-wide (see `resolveViralCoverImage`).
+       */
       publicUrl: string | null
       cacheBuster?: number
       path?: string
@@ -299,6 +304,22 @@ export async function POST(req: NextRequest) {
 
       if (finalize.publicUrl !== null && !cleaned) {
         return jsonFail(400, 'Invalid publicUrl')
+      }
+
+      // 🔴 A protocol check is not enough here. This writes the one column every
+      // client surface renders, so the URL has to be an object WE minted for
+      // THIS request — the reviewer's own frame or one of the submitter's
+      // attachments. Otherwise "Use this" on a foreign host publishes bytes the
+      // submitter can swap the moment it is approved.
+      if (
+        cleaned &&
+        !isViralRequestCoverCandidateUrl({
+          supabaseBaseUrl: mustBaseUrl(),
+          requestId: finalize.requestId,
+          url: cleaned,
+        })
+      ) {
+        return jsonFail(400, 'publicUrl is not an upload for this request')
       }
 
       const bucket = 'media-public'

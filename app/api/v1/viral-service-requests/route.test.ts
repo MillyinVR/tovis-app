@@ -285,7 +285,6 @@ describe('app/api/v1/viral-service-requests/route.ts', () => {
           sourceUrl: ' https://example.com/inspo ',
           requestedCategoryId: ' cat_1 ',
           links: [' https://example.com/a ', 'https://example.com/b'],
-          mediaUrls: [' https://example.com/m1 '],
         }),
       )
       const body = await res.json()
@@ -297,7 +296,6 @@ describe('app/api/v1/viral-service-requests/route.ts', () => {
         sourceUrl: 'https://example.com/inspo',
         requestedCategoryId: 'cat_1',
         links: ['https://example.com/a', 'https://example.com/b'],
-        mediaUrls: ['https://example.com/m1'],
       })
 
       expect(mocks.toViralRequestDto).toHaveBeenCalledWith(created)
@@ -307,6 +305,51 @@ describe('app/api/v1/viral-service-requests/route.ts', () => {
         ok: true,
         request: mapped,
       })
+    })
+
+    it('REFUSES a caller-supplied mediaUrls list rather than ignoring it', async () => {
+      mocks.requireClient.mockResolvedValue({
+        ok: true,
+        clientId: 'client_1',
+        user: { id: 'user_1' },
+      })
+
+      const res = await POST(
+        makeJsonRequest('POST', undefined, {
+          name: 'Wolf Cut',
+          mediaUrls: ['https://evil.example/pretty.jpg'],
+        }),
+      )
+      const body = await res.json()
+
+      expect(res.status).toBe(400)
+      expect(body.code).toBe('MEDIA_URLS_NOT_ACCEPTED_ON_CREATE')
+      // The row must not exist at all — a refusal that still created it would
+      // leave the submission on the queue minus its evidence.
+      expect(mocks.createClientViralRequest).not.toHaveBeenCalled()
+    })
+
+    it('still creates when mediaUrls is an empty array (no claim being made)', async () => {
+      const created = { id: 'request_1' }
+
+      mocks.requireClient.mockResolvedValue({
+        ok: true,
+        clientId: 'client_1',
+        user: { id: 'user_1' },
+      })
+
+      mocks.createClientViralRequest.mockResolvedValue(created)
+      mocks.toViralRequestDto.mockReturnValue({ id: 'request_1' })
+
+      const res = await POST(
+        makeJsonRequest('POST', undefined, {
+          name: 'Wolf Cut',
+          mediaUrls: [],
+        }),
+      )
+
+      expect(res.status).toBe(201)
+      expect(mocks.createClientViralRequest).toHaveBeenCalled()
     })
 
     it('passes undefined arrays through when links/mediaUrls are not arrays', async () => {
@@ -339,7 +382,6 @@ describe('app/api/v1/viral-service-requests/route.ts', () => {
         sourceUrl: null,
         requestedCategoryId: null,
         links: undefined,
-        mediaUrls: undefined,
       })
     })
 

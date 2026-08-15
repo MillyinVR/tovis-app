@@ -6502,7 +6502,10 @@ model ViralServiceRequest {
   /// attached, and this is the one a REVIEWER chose to publish. Folding them
   /// into one field would make an admin's replacement fight the submitter's
   /// upload, and there would be no way to keep the original while showing
-  /// something better. Readers take `coverImageUrl ?? mediaUrls[0]`.
+  /// something better.
+  ///
+  /// 🔴 Readers take THIS AND NOTHING ELSE — null renders a gradient, never the
+  /// submitter's photo. Only an admin puts a picture app-wide.
   coverImageUrl String?
 
   requestedCategoryId String?
