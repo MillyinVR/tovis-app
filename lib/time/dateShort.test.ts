@@ -50,8 +50,10 @@ describe('formatDateShortInTimeZone', () => {
 
 describe('formatIsoDateShort', () => {
   // Returns null rather than a placeholder so the caller decides what an
-  // unknown date looks like — several of the wrappers this replaced rendered
-  // the literal string "Invalid date" into the page.
+  // unknown date looks like. The wrappers this replaced disagreed on that:
+  // six returned null, one returned '', and ReferralListClient's passed an
+  // unparseable date straight to formatInTimeZone, which renders the literal
+  // string "Invalid date" into the page.
   it('returns null for an absent date', () => {
     expect(formatIsoDateShort(null)).toBeNull()
     expect(formatIsoDateShort(undefined)).toBeNull()
