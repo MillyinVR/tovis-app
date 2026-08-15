@@ -7,7 +7,7 @@ import Link from 'next/link'
 import ClientProfileLink from '@/app/_components/ClientProfileLink'
 import EmptyState from '@/app/_components/boundaries/EmptyState'
 import Badge from '@/app/_components/ui/Badge'
-import { Card, buttonClassName } from '@/app/_components/ui'
+import { Card, buttonClassName, controlClassName } from '@/app/_components/ui'
 import type { ProClientRequirement } from '@/lib/proClientPolicy/summary'
 
 // One already-visible client, flattened server-side into display + search
@@ -81,9 +81,6 @@ export default function ClientsList({ clients }: { clients: ProClientRow[] }) {
     [clients, trimmedQuery, onlyWithRequirements],
   )
 
-  const field =
-    'w-full rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary/70 focus:outline-none focus:ring-2 focus:ring-accentPrimary/40'
-
   return (
     <section className="grid gap-3">
       <div className="flex items-end justify-between gap-3">
@@ -129,7 +126,7 @@ export default function ClientsList({ clients }: { clients: ProClientRow[] }) {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search by name, email, or phone"
-            className={field}
+            className={controlClassName({ surface: 'solid' })}
             autoComplete="off"
           />
 

@@ -709,9 +709,30 @@
 }
 
 /* Target common Tailwind-heavy descendants gently. This keeps the old clients
-   readable while we peel their markup into dedicated Last Minute components. */
+   readable while we peel their markup into dedicated Last Minute components.
+
+   ⚠️ These selectors match on the Tailwind CLASS NAME, which means a control
+   can fall OUT of the shim by being improved. The pro-field migration turned
+   this page's nine `border-white/10` fields into `border-surfaceGlass/10` —
+   the token the shim was hand-translating them to — and they promptly stopped
+   matching `[class*="border-white"]`, so the generic
+   `.lm-workspace-panel input` rule above took them from 0.10 to 0.14. Measured
+   in a rendered A/B, invisible to typecheck, lint, 21 guards and every test.
+   The control rule below restates the same 0.10 for a control that arrives
+   already carrying the token, and is element-scoped so it can only ever reach
+   the three form elements the generic rule was overriding. The selector spells
+   out the alpha as well as the token, so a control that deliberately asks for
+   a different tint keeps it instead of being silently flattened to 0.1 — and
+   so `check:no-bare-tint-token`, which reads this file as plain text, never
+   sees a tint token standing on its own. */
 
 .lm-workspace-panel [class*="border-white"] {
+  border-color: rgb(var(--surface-glass) / 0.1);
+}
+
+.lm-workspace-panel input[class*="border-surfaceGlass/10"],
+.lm-workspace-panel select[class*="border-surfaceGlass/10"],
+.lm-workspace-panel textarea[class*="border-surfaceGlass/10"] {
   border-color: rgb(var(--surface-glass) / 0.1);
 }
 

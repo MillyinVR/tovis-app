@@ -383,3 +383,90 @@ describe('NewBookingForm repeats step (K19)', () => {
     })
   })
 })
+
+// The pro-field migration put all 23 of this form's controls on the kit's
+// `solid` surface. Nineteen were verified in a browser A/B against pre-migration
+// `main`; these three could not be, and this is what stands in:
+//
+//   · `repeat-interval` / `repeat-count` sit behind ENABLE_RECURRING_APPOINTMENTS,
+//     which is off in local dev, so the Repeats step never renders there.
+//   · `clientAddress` needs an existing client who has a saved address, and no
+//     client in the dev seed has one.
+//
+// That leaves exactly one of the 23 neither rendered nor pinned: the reason box
+// inside BookingOverridePromptCard, which this form reaches by passing `field`
+// down as `fieldClassName` and which only appears behind an override prompt.
+// Its class is `${fieldClassName} min-h-16 resize-y`, so the only link not under
+// test is the single line that hands the constant over.
+//
+// Pinned as the LITERAL shipped string rather than as `controlClassName(...)`:
+// asserting against the helper would compare the helper with itself and stay
+// green on exactly the restyle this exists to catch (the #914 lesson).
+describe('NewBookingForm — the controls a browser pass cannot reach', () => {
+  const SOLID_FIELD =
+    'w-full border px-3 text-textPrimary placeholder:text-textSecondary/70 ' +
+    'outline-none disabled:cursor-not-allowed disabled:opacity-60 rounded-xl ' +
+    'border-surfaceGlass/10 bg-bgPrimary py-3 text-[13px]'
+
+  const expectSolid = (el: Element | null) => {
+    expect(el).toBeTruthy()
+    expect(new Set((el as Element).className.split(/\s+/).filter(Boolean))).toEqual(
+      new Set(SOLID_FIELD.split(' ')),
+    )
+  }
+
+  afterEach(() => {
+    cleanup()
+    vi.unstubAllGlobals()
+  })
+
+  it('puts the repeat interval and count on the solid surface', async () => {
+    const user = userEvent.setup()
+    render(<NewBookingForm {...baseProps} recurringEnabled />)
+
+    await user.click(screen.getByTestId('repeats-toggle'))
+
+    expectSolid(document.querySelector('#repeat-interval'))
+    expectSolid(document.querySelector('#repeat-count'))
+  })
+
+  it('puts the saved-address select on the solid surface', async () => {
+    const user = userEvent.setup()
+    render(
+      <NewBookingForm
+        {...baseProps}
+        defaultLocationType="MOBILE"
+        locations={[
+          {
+            id: 'loc_mobile',
+            label: 'Mobile',
+            // A pro's LOCATION is MOBILE_BASE; the SERVICE location type it
+            // serves is MOBILE. Two enums, two vocabularies.
+            type: 'MOBILE_BASE' as const,
+            isBookable: true,
+            isPrimary: true,
+            timeZone: 'America/New_York',
+          },
+        ]}
+        defaultLocationId="loc_mobile"
+        clientAddressesByClientId={{
+          cli_1: [
+            {
+              id: 'addr_1',
+              label: 'Home',
+              formattedAddress: '1 Test St, Brooklyn NY',
+              isDefault: true,
+            },
+          ],
+        }}
+      />,
+    )
+
+    // Mobile is what reveals the service-address block; the address mode then
+    // defaults to 'new', so the saved-address branch is one more click.
+    await user.click(screen.getByRole('button', { name: /^Mobile/ }))
+    await user.click(screen.getByRole('button', { name: /^Saved address/ }))
+
+    expectSolid(document.querySelector('#clientAddress'))
+  })
+})

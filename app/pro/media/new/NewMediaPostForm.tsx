@@ -13,6 +13,7 @@ import { pickStringOrEmpty } from '@/lib/pick'
 import { safeJsonRecord, readErrorMessage } from '@/lib/http'
 import ImageEditModal from './ImageEditModal'
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import { controlClassName } from '@/app/_components/ui'
 import {
   DEFAULT_IMAGE_EDIT_STATE,
   IMAGE_UPLOAD_MAX_BYTES,
@@ -675,7 +676,7 @@ export default function NewMediaPostForm() {
               placeholder="What did we do here? Hair witchcraft? Nail sorcery?"
               rows={3}
               maxLength={CAPTION_MAX}
-              className="rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary focus:outline-none focus:ring-2 focus:ring-accentPrimary/40"
+              className={controlClassName({ surface: 'solid' })}
             />
             <div className="text-[11px] text-textSecondary">
               {caption.trim().length}/{CAPTION_MAX}
@@ -733,7 +734,14 @@ export default function NewMediaPostForm() {
                 )
                 setError(null)
               }}
-              className="rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary focus:outline-none focus:ring-2 focus:ring-accentPrimary/40"
+              // `w-auto` because this select shares a `flex flex-wrap` row with
+              // the visibility box beside it and never had `w-full`; the kit's
+              // BASE does, and taking it would push its neighbour onto its own
+              // line.
+              className={controlClassName({
+                surface: 'solid',
+                className: 'w-auto',
+              })}
             >
               <option value={MediaType.IMAGE}>Image</option>
               <option value={MediaType.VIDEO}>Video</option>

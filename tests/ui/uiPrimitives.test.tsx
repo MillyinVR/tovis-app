@@ -173,13 +173,20 @@ describe('form controls', () => {
   // `0 0 0 2px bg, 0 0 0 4px accent/.5` with the utility and without it.
   // Asserted as an absence so the dead pair cannot be reintroduced.
   it('leaves the focus RING to the global rule, and shifts the border itself', () => {
+    for (const surface of ['dense', 'soft', 'solid'] as const) {
+      expect(controlClassName({ surface })).not.toContain('focus:ring')
+    }
     for (const surface of ['dense', 'soft'] as const) {
-      const cls = controlClassName({ surface })
-      expect(cls).not.toContain('focus:ring')
       // `focus:border-*` is the half that does paint — the global rule sets no
       // border-color, so nothing overrides it.
-      expect(cls).toContain('focus:border-accentPrimary/')
+      expect(controlClassName({ surface })).toContain(
+        'focus:border-accentPrimary/',
+      )
     }
+    // `solid` is the exception, and deliberately: the pro fields never carried a
+    // focus border, so adding one here would be a restyle of 51 controls rather
+    // than a migration. The global ring is their focus indicator.
+    expect(controlClassName({ surface: 'solid' })).not.toContain('focus:border')
   })
 
   it('renders the right elements and forwards props', () => {
@@ -287,8 +294,53 @@ describe('form controls', () => {
     ])
   })
 
-  it('states the disabled treatment in CSS, for both surfaces', () => {
-    for (const surface of ['dense', 'soft'] as const) {
+  // And the third direction. `solid` shipped in #913 without a literal pin, so
+  // nothing stopped it drifting from the 40 pro controls that came over here
+  // afterwards. This is the string those controls were carrying, verbatim — the
+  // majority copy, the one behind NewBookingForm's and settingsClient's `field`.
+  it('emits exactly the solid token set the pro forms were carrying', () => {
+    const proFieldClasses =
+      'w-full rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 ' +
+      'text-[13px] text-textPrimary placeholder:text-textSecondary/70 ' +
+      'focus:outline-none focus:ring-2 focus:ring-accentPrimary/40 ' +
+      'disabled:opacity-60'
+
+    const emitted = new Set(controlClassName({ surface: 'solid' }).split(' '))
+    const inherited = new Set(proFieldClasses.split(' '))
+
+    expect([...inherited].filter((c) => !emitted.has(c)).sort()).toEqual([
+      // Dead on these elements — the unlayered `:focus-visible` rule owns the
+      // shadow, measured identical with and without the pair.
+      'focus:ring-2',
+      'focus:ring-accentPrimary/40',
+      // `outline-none` unconditionally is a superset of `focus:outline-none`;
+      // no browser paints an outline on a resting text control.
+      'focus:outline-none',
+      // The raw white tint becomes the token. Imperceptible in dark
+      // (255,255,255→242,239,231 at 10%); in light it turns a border that was
+      // invisible over a near-white page into a hairline.
+      'border-white/10',
+    ].sort())
+    expect([...emitted].filter((c) => !inherited.has(c)).sort()).toEqual([
+      'border-surfaceGlass/10',
+      'disabled:cursor-not-allowed',
+      'outline-none',
+    ])
+  })
+
+  // The one thing the copies disagreed on. `solid` used to override BASE with a
+  // full-opacity placeholder, inherited from the two public-profile modals #913
+  // happened to migrate first; 16 of the 17 controls that followed wrote `/70`.
+  // Tori settled it at `/70`, so this asserts the ABSENCE of an override — the
+  // failure mode is a future edit "restoring" the full-opacity rule.
+  it('takes the placeholder alpha from BASE rather than overriding it', () => {
+    const solid = controlClassName({ surface: 'solid' })
+    expect(solid).toContain('placeholder:text-textSecondary/70')
+    expect(solid.split(' ')).not.toContain('placeholder:text-textSecondary')
+  })
+
+  it('states the disabled treatment in CSS, for all three surfaces', () => {
+    for (const surface of ['dense', 'soft', 'solid'] as const) {
       const cls = controlClassName({ surface })
       expect(cls).toContain('disabled:opacity-60')
       expect(cls).toContain('disabled:cursor-not-allowed')

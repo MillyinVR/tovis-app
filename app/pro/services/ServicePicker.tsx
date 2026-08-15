@@ -10,6 +10,7 @@ import { normalizeMoney2, moneyToCentsInt } from '@/lib/money'
 import { safeJson, readErrorMessage } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
 import type { ProLocationCapability } from '@/lib/offerings/locationCapability'
+import { controlClassName } from '@/app/_components/ui'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 
 type ServiceDTO = {
@@ -334,10 +335,10 @@ export default function ServicePicker({
     }
   }
 
-  const inputClass =
-    'w-full rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary/70 focus:outline-none focus:ring-2 focus:ring-accentPrimary/40'
-  const selectClass =
-    'w-full rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary focus:outline-none focus:ring-2 focus:ring-accentPrimary/40'
+  // One string for both: the two copies differed only by a placeholder rule, and
+  // `selectClass` sat on a <select>, which has no placeholder to style.
+  const inputClass = controlClassName({ surface: 'solid' })
+  const selectClass = inputClass
 
   return (
     <div className="rounded-card border border-white/10 bg-bgPrimary p-4">
