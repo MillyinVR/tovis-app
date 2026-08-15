@@ -1,7 +1,7 @@
 // app/pro/portfolio/_components/ProPortfolioScreen.tsx
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 
@@ -26,11 +26,27 @@ export default function ProPortfolioScreen({
   const [openTile, setOpenTile] = useState<ProPortfolioTile | null>(null)
 
   return (
-    <main className="mx-auto w-full max-w-[1180px] px-4 pb-24 pt-6 md:px-12 md:pb-16 md:pt-10">
+    /* 🔴 A <section>, not a <main>. `app/pro/layout` already renders the page's
+       <main>, so this nested a second landmark inside it on every pro route.
+
+       And no two-column grid. `.brand-pro-layout-main > *` caps every child at
+       --mobile-shell-width (430px) unless a screen opts out by name the way
+       Finance and Last Minute do — so `md:grid-cols-[1fr_320px]` resolved to
+       `0px 320px` and the whole library rendered into a zero-width column at
+       every desktop width. Measured 1440/1280/1024/820/768: identical. The side
+       rail was the designer's own first thing to cut if the screen fought
+       itself, and this is the screen fighting itself. */
+    <section
+      aria-labelledby="pro-portfolio-title"
+      className="w-full px-4 pb-24 pt-6"
+    >
       <header className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="brand-cap text-[10px] text-accentPrimary">My work</div>
-          <h1 className="mt-2 font-display text-[27px] font-bold tracking-[-0.035em] text-textPrimary md:text-[38px]">
+          <h1
+            id="pro-portfolio-title"
+            className="mt-2 font-display text-[27px] font-bold tracking-[-0.035em] text-textPrimary"
+          >
             {model.title}
           </h1>
           <p className="mt-[7px] max-w-[520px] text-[13.5px] leading-relaxed text-textMuted">
@@ -38,31 +54,59 @@ export default function ProPortfolioScreen({
           </p>
         </div>
 
-        <Link
-          href={model.routes.uploadNew}
-          className={cn(
-            'brand-focus inline-flex h-10 flex-none items-center gap-2 rounded-[14px] px-[14px]',
-            'border border-textPrimary/10 bg-textPrimary/5 text-[13.5px] font-bold text-textPrimary',
-            'transition hover:border-textPrimary/25',
-          )}
-        >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.2"
-            strokeLinecap="round"
-            aria-hidden="true"
+        <div className="flex flex-none flex-col items-stretch gap-2">
+          <Link
+            href={model.routes.uploadNew}
+            className={cn(
+              'brand-focus inline-flex h-10 items-center justify-center gap-2 rounded-[14px] px-[14px]',
+              'border border-textPrimary/10 bg-textPrimary/5 text-[13.5px] font-bold text-textPrimary',
+              'transition hover:border-textPrimary/25',
+            )}
           >
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-          Upload
-        </Link>
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              aria-hidden="true"
+            >
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            Upload
+          </Link>
+
+          {/* Was rail-only, and the rail never rendered — so on every viewport
+              the pro had no way from here to the page this screen describes. */}
+          {model.publicProfileHref ? (
+            <Link
+              href={model.publicProfileHref}
+              className={cn(
+                'brand-focus inline-flex h-9 items-center justify-center gap-1.5 rounded-[12px] px-3',
+                'text-[12.5px] font-bold text-textSecondary transition hover:text-textPrimary',
+              )}
+            >
+              View profile
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                aria-hidden="true"
+              >
+                <path d="M9 6l6 6-6 6" />
+              </svg>
+            </Link>
+          ) : null}
+        </div>
       </header>
 
-      <div className="mt-[22px] md:grid md:grid-cols-[1fr_320px] md:items-start md:gap-[34px]">
+      <div className="mt-[22px]">
         <div className="min-w-0">
           {model.showSearch ? <SearchBox initial={model.searchQuery} /> : null}
 
@@ -114,15 +158,10 @@ export default function ProPortfolioScreen({
 
           {model.isBlank ? <BlankState uploadHref={model.routes.uploadNew} /> : null}
         </div>
-
-        {/* The rail is desktop-only furniture for two one-time decisions, so it
-            is the first thing to go when the screen is fighting itself. It never
-            renders on a phone, where the grid already says everything it says. */}
-        <SideRail model={model} />
       </div>
 
       <ProPortfolioSheets tile={openTile} onClose={() => setOpenTile(null)} />
-    </main>
+    </section>
   )
 }
 
@@ -133,8 +172,11 @@ function TileGrid({
   tiles: ProPortfolioTile[]
   onOpen: (tile: ProPortfolioTile) => void
 }) {
+  // Three columns at every size. The pro shell is a fixed 430px column, so the
+  // old `md:grid-cols-6` did not widen the grid — it halved the tiles the moment
+  // the viewport crossed 768px, inside a container that never grew.
   return (
-    <div className="grid grid-cols-3 gap-[9px] md:grid-cols-6 md:gap-[14px]">
+    <div className="grid grid-cols-3 gap-[9px]">
       {tiles.map((tile) => (
         <ProPortfolioTileCard key={tile.id} tile={tile} onOpen={onOpen} />
       ))}
@@ -174,9 +216,15 @@ function GroupSection({
 }
 
 /**
- * "Show N more" narrows the page to this zone rather than growing the grid in
- * place — the count is exact (it comes from a `count()`, not the capped page),
- * so this never claims more than exists.
+ * "Show N more" narrows the page to THIS zone, which is what lets the group
+ * render uncapped.
+ *
+ * 🔴 It used to point at `WAITING` (for sessions) or `PRIVATE` (for uploads),
+ * and neither worked. Every view re-caps a group at
+ * `PRO_PORTFOLIO_GROUP_PAGE_SIZE`, so the destination showed the same six tiles
+ * and offered "Show N more" again — a control that could never do the one thing
+ * it named. `WAITING` was wrong twice over: a session zone also holds photos the
+ * client HAS released, so the count and the destination disagreed as well.
  */
 function ShowMoreLink({
   zone,
@@ -185,7 +233,7 @@ function ShowMoreLink({
   zone: ProPortfolioGroup['zone']
   remaining: number
 }) {
-  const filter = zone === 'SESSIONS' ? 'WAITING' : 'PRIVATE'
+  const filter = zone
 
   return (
     <Link
@@ -205,7 +253,12 @@ function FilterRow({ filters }: { filters: ProPortfolioFilter[] }) {
   const router = useRouter()
 
   return (
-    <div className="flex gap-2 overflow-x-auto pb-0.5" role="group" aria-label="Filter photos">
+    /* 🔴 Wraps, never scrolls. In a 430px shell the four chips measured 491px
+       of scrollWidth, so "Waiting" sat entirely outside the viewport in an
+       overflow-x row with no scrollbar and no affordance — and it is the one
+       chip that reveals the consent-held state, which production says is the
+       MAJORITY state (65 of 70 assets). An invisible chip is a missing feature. */
+    <div className="flex flex-wrap gap-2 pb-0.5" role="group" aria-label="Filter photos">
       {filters.map((filter) => (
         <button
           key={filter.key}
@@ -390,133 +443,5 @@ function BlankState({ uploadHref }: { uploadHref: string }) {
         Or finish a booking — session photos arrive on their own.
       </p>
     </section>
-  )
-}
-
-function SideRail({ model }: { model: ProPortfolioPageModel }) {
-  const rows = useMemo(
-    () => [
-      { label: 'Public', value: model.counts.publicCount, gold: false },
-      { label: 'Only you', value: model.counts.privateCount, gold: false },
-      {
-        label: 'Waiting on a client',
-        value: model.counts.heldCount,
-        gold: true,
-      },
-    ],
-    [model.counts],
-  )
-
-  if (model.isBlank) return null
-
-  return (
-    <aside className="hidden rounded-[18px] border border-textPrimary/10 bg-bgSurface p-[18px] md:block">
-      <div className="brand-cap mb-[14px] text-[9.5px] text-textMuted">
-        Your public profile
-      </div>
-
-      {model.coverTile ? (
-        <div className="overflow-hidden rounded-[14px] border border-textPrimary/10">
-          <RemoteImage
-            src={model.coverTile.src}
-            alt=""
-            className="block h-24 w-full object-cover"
-            intrinsic
-          />
-          <div className="px-[13px] py-3">
-            <div className="brand-cap text-[8.5px] text-microAccent">Cover</div>
-            <p className="mt-1.5 text-[12.5px] leading-snug text-textMuted">
-              The banner clients see first.
-            </p>
-          </div>
-        </div>
-      ) : (
-        <RailEmpty label="Cover" hint="No banner yet — clients see a branded one." />
-      )}
-
-      {model.signatureTile ? (
-        <div className="mt-4 flex items-start gap-[11px]">
-          <span className="block h-[74px] w-[56px] flex-none overflow-hidden rounded-[11px]">
-            <RemoteImage
-              src={model.signatureTile.src}
-              alt=""
-              className="h-full w-full object-cover"
-              intrinsic
-            />
-          </span>
-          <div>
-            <div className="brand-cap text-[8.5px] text-microAccent">Signature</div>
-            <p className="mt-1.5 text-[12.5px] leading-snug text-textMuted">
-              Your one best piece of work. Sits at the top of your profile.
-            </p>
-          </div>
-        </div>
-      ) : (
-        <RailEmpty
-          label="Signature"
-          hint="Publish a photo, then mark it as your best work."
-        />
-      )}
-
-      <div className="my-[18px] h-px bg-textPrimary/10" />
-
-      {rows.map((row) => (
-        <div
-          key={row.label}
-          className="mt-[9px] flex items-baseline justify-between first:mt-0"
-        >
-          <span
-            className={cn(
-              'brand-cap text-[9px]',
-              row.gold ? 'text-microAccent' : 'text-textMuted',
-            )}
-          >
-            {row.label}
-          </span>
-          <span
-            className={cn(
-              'font-display text-[18px] font-bold',
-              row.gold ? 'text-microAccent' : 'text-textPrimary',
-            )}
-          >
-            {formatCompactCount(row.value)}
-          </span>
-        </div>
-      ))}
-
-      {model.publicProfileHref ? (
-        <Link
-          href={model.publicProfileHref}
-          className={cn(
-            'brand-focus mt-[18px] flex h-10 w-full items-center justify-center gap-2 rounded-[14px]',
-            'border border-textPrimary/10 bg-textPrimary/5 text-[13px] font-bold text-textPrimary',
-            'transition hover:border-textPrimary/25',
-          )}
-        >
-          View public profile
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.2"
-            strokeLinecap="round"
-            aria-hidden="true"
-          >
-            <path d="M9 6l6 6-6 6" />
-          </svg>
-        </Link>
-      ) : null}
-    </aside>
-  )
-}
-
-function RailEmpty({ label, hint }: { label: string; hint: string }) {
-  return (
-    <div className="mt-4 rounded-[14px] border border-dashed border-textPrimary/15 px-3 py-4">
-      <div className="brand-cap text-[8.5px] text-textMuted">{label}</div>
-      <p className="mt-1.5 text-[12.5px] leading-snug text-textMuted">{hint}</p>
-    </div>
   )
 }

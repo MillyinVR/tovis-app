@@ -46,13 +46,39 @@ async function loadOwnedMedia(mediaId: string, professionalId: string) {
       // Legacy fallbacks
       url: true,
       thumbUrl: true,
+
+      // Who published the look this asset backs, if any (primaryMediaAssetId is
+      // @unique, so there is at most one).
+      lookPostPrimaryFor: { select: { clientAuthorId: true }, take: 1 },
     },
   })
 
   if (!media) return { ok: false as const, status: 404, error: 'Media not found.' }
   if (media.professionalId !== professionalId) return { ok: false as const, status: 403, error: 'Forbidden.' }
+
+  // 🔴 A CLIENT-authored look is not the pro's to publish or to retract, even
+  // though the asset carries their `professionalId` (it depicts their work).
+  //
+  // Without this, DELETE answered 200 and flipped the asset to PRO_CLIENT /
+  // un-featured while `reconcilePortfolioLookForMediaAsset` skipped the retract
+  // (`SKIPPED_CLIENT_LOOK`) — so the look stayed PUBLISHED and live in the feed
+  // and on the client's own grid, the pro was told it had come down, and the
+  // asset was left marked private underneath a public post. Refusing at the
+  // route closes it for every caller, not just for the screen that hides the
+  // button.
+  if (media.lookPostPrimaryFor[0]?.clientAuthorId) {
+    return {
+      ok: false as const,
+      status: 403,
+      error: CLIENT_AUTHORED_LOOK_MESSAGE,
+    }
+  }
+
   return { ok: true as const, media }
 }
+
+export const CLIENT_AUTHORED_LOOK_MESSAGE =
+  'Your client posted this Look, so it is theirs to take down — not yours.'
 
 /**
  * Optional: if you have old rows where storageBucket/path is missing but url exists,

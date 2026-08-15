@@ -10,6 +10,7 @@ import { isNonNull } from '@/lib/guards'
 import { mapPortfolioTileToDto } from '@/lib/looks/mappers'
 import { portfolioTileMediaSelect } from '@/lib/looks/selects'
 import { isUnpromotedPrivateMedia } from '@/lib/media/publicShareGuard'
+import { reachableClientWhere } from '@/lib/notifications/contactMethod'
 import { pickString } from '@/lib/pick'
 import { prisma } from '@/lib/prisma'
 import { isPubliclyApprovedProStatus } from '@/lib/proTrustState'
@@ -61,7 +62,6 @@ const tileSelect = Prisma.validator<Prisma.MediaAssetSelect>()({
   ...portfolioTileMediaSelect,
   bookingId: true,
   reviewId: true,
-  uploadedByRole: true,
   createdAt: true,
   lookPostPrimaryFor: {
     select: {
@@ -78,10 +78,35 @@ const tileSelect = Prisma.validator<Prisma.MediaAssetSelect>()({
     select: {
       id: true,
       mediaUseConsentAt: true,
+      // 🔴 The client's id, not their contact details. Whether they can be
+      // reached is answered by a separate id-only query against
+      // `reachableClientWhere`, so no contact value is ever selected here.
+      clientId: true,
       client: { select: { firstName: true } },
       aftercareSummary: { select: { sentToClientAt: true } },
     },
   },
+})
+
+/**
+ * 🔴 A `LookPost` can be authored by the CLIENT, and one of those is NOT the
+ * pro's to show or to take down.
+ *
+ * `LookPost.primaryMediaAssetId` points at a `MediaAsset` whose
+ * `professionalId` is the pro (it depicts their work), so a naive
+ * "has a published look ⇒ the pro published it" read swept every client's post
+ * into the pro's public zone. Measured on the dev fixture: 54 tiles claimed as
+ * "public", of which 6 were actually on her profile grid — the other 48 were
+ * clients' posts, because the profile grid is `proOwnPublicLooksWhere`
+ * (`clientAuthorId: null`).
+ *
+ * That made three separate things lie: the count, the zone's own copy ("exactly
+ * what a client sees on your profile"), and — worst — the Take-down button,
+ * which returned 200 while `reconcilePortfolioLookForMediaAsset` skipped the
+ * retract (`SKIPPED_CLIENT_LOOK`), leaving the look live and the tile in place.
+ */
+const proOwnMediaWhere = Prisma.validator<Prisma.MediaAssetWhereInput>()({
+  lookPostPrimaryFor: { none: { clientAuthorId: { not: null } } },
 })
 
 type TileRow = Prisma.MediaAssetGetPayload<{ select: typeof tileSelect }>
@@ -117,14 +142,21 @@ export async function loadProPortfolioPage({
   const activeFilter = pickFilter(searchParams?.filter)
   const searchQuery = pickQuery(searchParams?.q)
 
+  const ownedWhere: Prisma.MediaAssetWhereInput = {
+    professionalId: pro.id,
+    ...proOwnMediaWhere,
+  }
+
   const [rows, total] = await Promise.all([
     prisma.mediaAsset.findMany({
-      where: { professionalId: pro.id },
+      where: ownedWhere,
       orderBy: { createdAt: 'desc' },
       take: TILE_HARD_CAP,
       select: tileSelect,
     }),
-    prisma.mediaAsset.count({ where: { professionalId: pro.id } }),
+    // Same `where` as the page read, or the header would count rows the grid
+    // deliberately never shows.
+    prisma.mediaAsset.count({ where: ownedWhere }),
   ])
 
   // Attributed bookings ("N booked from this photo") for every look on screen,
@@ -135,9 +167,11 @@ export async function loadProPortfolioPage({
 
   const bookedByLookId = await countAttributedBookings(lookIds)
 
+  const reachableClientIds = await findReachableClientIds(rows)
+
   const tiles = (
     await Promise.all(
-      rows.map((row) => buildTile(row, pro, bookedByLookId)),
+      rows.map((row) => buildTile(row, pro, bookedByLookId, reachableClientIds)),
     )
   ).filter(isNonNull)
 
@@ -155,8 +189,16 @@ export async function loadProPortfolioPage({
   const privateTiles = matching.filter((tile) => tile.publishedAt === null)
 
   // Grouping lets the consent rule be stated once per group, not per tile.
-  const sessions = privateTiles.filter((tile) => sessionMediaIds.has(tile.id))
-  const uploadTiles = privateTiles.filter((tile) => !sessionMediaIds.has(tile.id))
+  // `UPLOADS`/`SESSIONS` narrow the page to ONE zone, which is where a group's
+  // "Show N more" points — so the other zone drops out entirely there.
+  const sessions =
+    activeFilter === 'UPLOADS'
+      ? []
+      : privateTiles.filter((tile) => sessionMediaIds.has(tile.id))
+  const uploadTiles =
+    activeFilter === 'SESSIONS'
+      ? []
+      : privateTiles.filter((tile) => !sessionMediaIds.has(tile.id))
 
   const counts = buildCounts(tiles, total)
 
@@ -169,6 +211,9 @@ export async function loadProPortfolioPage({
         title: 'Your uploads',
         blurb: 'Shot and posted by you. Yours to publish whenever.',
         tiles: uploadTiles,
+        // 🔴 Uncapped once the page IS this zone, or "Show N more" leads to a
+        // page that shows the same N-capped grid and offers "Show N more" again.
+        expanded: activeFilter === 'UPLOADS',
       }),
     )
   }
@@ -181,12 +226,17 @@ export async function loadProPortfolioPage({
         blurb:
           'Taken at the chair. Private between you and your client until they allow it.',
         tiles: sessions,
+        expanded: activeFilter === 'SESSIONS',
       }),
     )
   }
 
   const isBlank = total === 0
-  const hasPublic = publicTiles.length > 0
+  // 🔴 From the UNFILTERED counts, never from `publicTiles`. The lead card says
+  // "your profile has nothing on it, so nobody can find your work" — derived
+  // from the filtered set, a pro with 53 public photos met that sentence the
+  // moment they tapped "Only you", "Waiting", or typed in the search box.
+  const hasPublic = counts.publicCount > 0
 
   return {
     brandDisplayName: brand.displayName,
@@ -202,14 +252,16 @@ export async function loadProPortfolioPage({
     searchQuery,
 
     publicTiles,
-    lead: hasPublic || isBlank ? null : buildLead(uploadTiles),
+    // Offered from every unpublished tile the pro owns, not just the ones the
+    // active filter happens to show — the card is about the library, not the view.
+    lead:
+      hasPublic || isBlank
+        ? null
+        : buildLead(tiles.filter((tile) => tile.publishedAt === null)),
     groups,
 
     isBlank,
 
-    coverTile: tiles.find((tile) => tile.id === pro.coverMediaAssetId) ?? null,
-    signatureTile:
-      tiles.find((tile) => tile.id === pro.signatureMediaAssetId) ?? null,
     publicProfileHref: isPubliclyApprovedProStatus(pro.verificationStatus)
       ? `/professionals/${encodeURIComponent(pro.id)}`
       : null,
@@ -244,10 +296,34 @@ async function countAttributedBookings(
   return out
 }
 
+/**
+ * Which of this page's clients can be reached at all, as an id-only read.
+ *
+ * 🔴 A filter, not a projection: the reachability rule runs in SQL
+ * (`reachableClientWhere`) and only ids come back, so a screen that needs to
+ * gate one button never selects an email or a phone number. One query for the
+ * whole page rather than a lookup per held tile.
+ */
+async function findReachableClientIds(rows: TileRow[]): Promise<Set<string>> {
+  const clientIds = [
+    ...new Set(rows.map((row) => row.booking?.clientId).filter(isNonNull)),
+  ]
+
+  if (clientIds.length === 0) return new Set()
+
+  const reachable = await prisma.clientProfile.findMany({
+    where: { id: { in: clientIds }, ...reachableClientWhere },
+    select: { id: true },
+  })
+
+  return new Set(reachable.map((client) => client.id))
+}
+
 async function buildTile(
   row: TileRow,
   pro: Prisma.ProfessionalProfileGetPayload<{ select: typeof proSelect }>,
   bookedByLookId: Map<string, number>,
+  reachableClientIds: Set<string>,
 ): Promise<ProPortfolioTile | null> {
   const base = await mapPortfolioTileToDto(row)
   if (!base) return null
@@ -265,7 +341,7 @@ async function buildTile(
     before: base.before,
     mark: resolveMark(row.id, pro),
     engagement: isPublic && look ? buildEngagement(look, bookedByLookId) : null,
-    hold: resolveHold(row),
+    hold: resolveHold(row, reachableClientIds),
     publishedAt: look?.publishedAt?.toISOString() ?? null,
   }
 }
@@ -317,22 +393,55 @@ function buildEngagement(
  * re-deriving it here, so the tile can never disagree with the server that
  * would refuse the publish.
  */
-function resolveHold(row: TileRow): ProPortfolioConsentHold | null {
+function resolveHold(
+  row: TileRow,
+  reachableClientIds: Set<string>,
+): ProPortfolioConsentHold | null {
   const held = isUnpromotedPrivateMedia({
     bookingId: row.bookingId,
     storageBucket: row.storageBucket,
     reviewId: row.reviewId,
     clientUseConsentAt: row.booking?.mediaUseConsentAt ?? null,
-    uploadedByRole: row.uploadedByRole,
+    // 🔴 Deliberately NOT passed, even though the guard accepts it. This call
+    // exists to predict what `POST /api/v1/pro/media/[id]/portfolio` will do,
+    // and that route does not pass it — so passing it here made the tile claim
+    // "ready to publish" on a photo the server answers 403 for. A mirror has to
+    // be fed the same inputs as the thing it mirrors; `uploadedByRole` belongs
+    // to the CREATE-time invariant (a client publishing their own photo), not
+    // to the question "may the PRO publish this".
   })
 
   if (!held) return null
-  if (!row.booking) return null
+
+  // 🔴 A hold with no booking is still a hold. `isUnpromotedPrivateMedia`
+  // refuses on the private bucket as an independent second signal, so returning
+  // null here put a publish `+` on a tile the server refuses.
+  const booking = row.booking
+  if (!booking) {
+    return {
+      clientFirstName: 'your client',
+      bookingId: null,
+      canNudge: false,
+      nudgeBlock: 'NO_BOOKING',
+    }
+  }
+
+  const aftercareSent = Boolean(booking.aftercareSummary?.sentToClientAt)
+  // The delivery boundary needs somewhere to send. Same helper, same fallback
+  // chain — so this cannot drift from what the nudge will actually accept.
+  const contactable = reachableClientIds.has(booking.clientId)
+
+  const nudgeBlock: ProPortfolioConsentHold['nudgeBlock'] = !aftercareSent
+    ? 'NO_AFTERCARE'
+    : !contactable
+      ? 'NO_CONTACT'
+      : null
 
   return {
-    clientFirstName: pickString(row.booking.client?.firstName) ?? 'your client',
-    bookingId: row.booking.id,
-    aftercareSent: Boolean(row.booking.aftercareSummary?.sentToClientAt),
+    clientFirstName: pickString(booking.client?.firstName) ?? 'your client',
+    bookingId: booking.id,
+    canNudge: nudgeBlock === null,
+    nudgeBlock,
   }
 }
 
@@ -341,8 +450,11 @@ function buildGroup(input: {
   title: string
   blurb: string
   tiles: ProPortfolioTile[]
+  expanded: boolean
 }): ProPortfolioGroup {
-  const shown = input.tiles.slice(0, PRO_PORTFOLIO_GROUP_PAGE_SIZE)
+  const shown = input.expanded
+    ? input.tiles
+    : input.tiles.slice(0, PRO_PORTFOLIO_GROUP_PAGE_SIZE)
   const heldCount = input.tiles.filter((tile) => tile.hold !== null).length
 
   return {
@@ -389,6 +501,11 @@ function buildFilters(
   counts: ProPortfolioCounts,
   active: ProPortfolioFilterKey,
 ): ProPortfolioFilter[] {
+  // `UPLOADS`/`SESSIONS` have no chip of their own — they narrow the page to one
+  // private zone, so "Only you" is the chip that stays lit while you're in one.
+  const inPrivateZone =
+    active === 'PRIVATE' || active === 'UPLOADS' || active === 'SESSIONS'
+
   const filters: ProPortfolioFilter[] = [
     { key: 'ALL', label: 'All', count: counts.total, active: active === 'ALL' },
     {
@@ -401,7 +518,7 @@ function buildFilters(
       key: 'PRIVATE',
       label: 'Only you',
       count: counts.privateCount,
-      active: active === 'PRIVATE',
+      active: inPrivateZone,
     },
   ]
 
@@ -440,7 +557,11 @@ function matchesFilter(
   filter: ProPortfolioFilterKey,
 ): boolean {
   if (filter === 'PUBLIC') return tile.publishedAt !== null
-  if (filter === 'PRIVATE') return tile.publishedAt === null
+  // The two zone filters are PRIVATE plus a zone restriction the caller applies
+  // after the split — a tile alone cannot say which zone it lands in.
+  if (filter === 'PRIVATE' || filter === 'UPLOADS' || filter === 'SESSIONS') {
+    return tile.publishedAt === null
+  }
   if (filter === 'WAITING') return tile.hold !== null
   if (filter === 'VIDEO') return tile.mediaType === MediaType.VIDEO
 
@@ -458,14 +579,28 @@ function matchesQuery(tile: ProPortfolioTile, query: string | null): boolean {
   return haystack.includes(query.toLowerCase())
 }
 
+/**
+ * Every key except the `ALL` default. `satisfies` keeps this list honest: add a
+ * member to `ProPortfolioFilterKey` and forget it here and nothing breaks, but
+ * a typo or a removed key fails the build.
+ */
+const FILTER_KEYS = [
+  'PUBLIC',
+  'PRIVATE',
+  'WAITING',
+  'VIDEO',
+  'UPLOADS',
+  'SESSIONS',
+] as const satisfies readonly ProPortfolioFilterKey[]
+
+function isFilterKey(value: string): value is (typeof FILTER_KEYS)[number] {
+  return FILTER_KEYS.some((key) => key === value)
+}
+
 function pickFilter(value: string | string[] | undefined): ProPortfolioFilterKey {
   const raw = Array.isArray(value) ? value[0] : value
 
-  if (raw === 'PUBLIC' || raw === 'PRIVATE' || raw === 'WAITING' || raw === 'VIDEO') {
-    return raw
-  }
-
-  return 'ALL'
+  return typeof raw === 'string' && isFilterKey(raw) ? raw : 'ALL'
 }
 
 function pickQuery(value: string | string[] | undefined): string | null {

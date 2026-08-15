@@ -43,13 +43,37 @@ export type ProPortfolioMark = 'SIGNATURE' | 'COVER' | 'SIGNATURE_COVER'
  * Surfacing it on the tile is the point — today it only exists as a 403 the pro
  * meets after tapping.
  */
+/** Why the one action this sheet offers is not available. */
+export type ProPortfolioNudgeBlock =
+  /** No aftercare has been sent yet, so there is nothing to re-issue. */
+  | 'NO_AFTERCARE'
+  /** The client has no email or phone — the delivery boundary has nowhere to send. */
+  | 'NO_CONTACT'
+  /** The hold came from the bucket alone; there is no booking to nudge against. */
+  | 'NO_BOOKING'
+
 export type ProPortfolioConsentHold = {
   /** The client whose say-so this waits on. First name only — it's their photo. */
   clientFirstName: string
-  /** The booking whose aftercare carries the consent tick, for the nudge action. */
-  bookingId: string
-  /** Whether an aftercare has been sent at all — a nudge re-issues that link. */
-  aftercareSent: boolean
+  /**
+   * The booking whose aftercare carries the consent tick.
+   *
+   * 🔴 Nullable, because the hold is NOT. `isUnpromotedPrivateMedia` refuses on
+   * the private BUCKET as an independent second signal, so a row with no
+   * booking can still be held — and a hold that returned null there would put a
+   * publish affordance on a tile the server refuses.
+   */
+  bookingId: string | null
+  /**
+   * Whether the nudge can actually be issued. 🔴 Gated on everything the write
+   * boundary checks, not just on the aftercare: `nudgeAftercareRebook` throws
+   * AFTERCARE_NOT_COMPLETED without a sent aftercare AND
+   * AFTERCARE_DELIVERY_FAILED when the client has no email or phone — which is
+   * the ordinary shape of a pro-created, unclaimed client.
+   */
+  canNudge: boolean
+  /** Set exactly when `canNudge` is false, so the sheet can say which reason. */
+  nudgeBlock: ProPortfolioNudgeBlock | null
 }
 
 /**
@@ -111,13 +135,23 @@ export type ProPortfolioGroup = {
   remaining: number
 }
 
-/** A filter chip. `count` is null for chips that don't carry one. */
+/**
+ * A filter chip. `count` is null for chips that don't carry one.
+ *
+ * 🔴 `UPLOADS` and `SESSIONS` are NOT chips — they are where a group's
+ * "Show N more" points. Without them that control was a dead end: every view
+ * re-capped each group at `PRO_PORTFOLIO_GROUP_PAGE_SIZE`, so "Show 4 more"
+ * landed on a page showing the same 6 tiles and offering "Show 4 more" again.
+ * Narrowing to a single zone is what lets the group open up.
+ */
 export type ProPortfolioFilterKey =
   | 'ALL'
   | 'PUBLIC'
   | 'PRIVATE'
   | 'WAITING'
   | 'VIDEO'
+  | 'UPLOADS'
+  | 'SESSIONS'
 
 export type ProPortfolioFilter = {
   key: ProPortfolioFilterKey
@@ -169,9 +203,18 @@ export type ProPortfolioPageModel = {
   /** True only when the pro owns no media at all. */
   isBlank: boolean
 
-  /** Desktop side rail. */
-  coverTile: ProPortfolioTile | null
-  signatureTile: ProPortfolioTile | null
+  /**
+   * The pro's own public profile, when they have one.
+   *
+   * 🔴 This lives in the HEADER, not in a desktop rail. The pro app renders
+   * inside `.brand-pro-layout-main`, whose stylesheet caps every child at
+   * `--mobile-shell-width` (430px) unless the screen opts out by name — so a
+   * `md:` two-column layout resolved to `0px 320px` and the entire library was
+   * rendered into a zero-width column at every desktop size. The rail was the
+   * designer's own first thing to cut if the screen fought itself, and it was
+   * also the only place this link had ever appeared, which meant it was
+   * unreachable on every viewport.
+   */
   publicProfileHref: string | null
 }
 

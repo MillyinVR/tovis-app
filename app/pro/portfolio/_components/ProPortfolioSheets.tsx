@@ -13,7 +13,10 @@ import { DEFAULT_TIME_ZONE, formatRelativeDayAgo, getViewerTimeZone } from '@/li
 import { cn } from '@/lib/utils'
 import { zClass } from '@/lib/zIndex'
 
-import type { ProPortfolioTile } from '../_data/proPortfolioTypes'
+import type {
+  ProPortfolioNudgeBlock,
+  ProPortfolioTile,
+} from '../_data/proPortfolioTypes'
 
 type Props = {
   tile: ProPortfolioTile | null
@@ -255,7 +258,7 @@ function ConsentSheet({ tile, onClose }: { tile: ProPortfolioTile; onClose: () =
   if (!hold) return null
 
   const nudge = async () => {
-    if (busy) return
+    if (busy || !hold.bookingId) return
     setBusy(true)
     setError(null)
 
@@ -300,9 +303,13 @@ function ConsentSheet({ tile, onClose }: { tile: ProPortfolioTile; onClose: () =
         </p>
       ) : null}
 
-      {/* Only offered when an aftercare actually exists to re-send. Otherwise
-          the button would promise a message the server has nothing to build. */}
-      {hold.aftercareSent ? (
+      {/* 🔴 Offered only when the write boundary would actually accept it.
+          `nudgeAftercareRebook` refuses for TWO reasons, and this used to check
+          one: no aftercare to re-send (AFTERCARE_NOT_COMPLETED), and no email or
+          phone on the client (AFTERCARE_DELIVERY_FAILED) — which is the ordinary
+          shape of the unclaimed clients a pro creates by hand. `canNudge` is the
+          single gate; `nudgeBlock` says which wall was hit. */}
+      {hold.canNudge ? (
         <button
           type="button"
           onClick={nudge}
@@ -324,8 +331,7 @@ function ConsentSheet({ tile, onClose }: { tile: ProPortfolioTile; onClose: () =
         </button>
       ) : (
         <p className="mt-4 text-[12.5px] leading-relaxed text-textMuted">
-          Send {hold.clientFirstName} their aftercare first — the media-use tick
-          lives there.
+          {nudgeBlockedCopy(hold.nudgeBlock, hold.clientFirstName)}
         </p>
       )}
 
@@ -539,6 +545,26 @@ function Consequence({ tone, text }: { tone: 'danger' | 'muted'; text: string })
       </div>
     </div>
   )
+}
+
+/**
+ * What to say instead of the button. Each line names the thing the pro can
+ * actually go and do — a generic "you can't do that here" would leave them
+ * staring at a dimmed photo with no next step.
+ */
+function nudgeBlockedCopy(
+  block: ProPortfolioNudgeBlock | null,
+  clientFirstName: string,
+): string {
+  if (block === 'NO_CONTACT') {
+    return `${clientFirstName} has no email or phone on file, so their aftercare can't be sent. Add one to their client record first.`
+  }
+
+  if (block === 'NO_BOOKING') {
+    return 'This one is private until your client releases it. There is no appointment attached, so there is nothing to re-send from here.'
+  }
+
+  return `Send ${clientFirstName} their aftercare first — the media-use tick lives there.`
 }
 
 function readError(body: unknown, fallback: string): string {
