@@ -913,6 +913,18 @@ async function clean(): Promise<void> {
   await prisma.handleRegistration.deleteMany({
     where: { handleNormalized: { in: [normalizeHandle(CREATOR.handle)] } },
   })
+  // 🔴 Threads the APP created against demo rows, which this script did not
+  // write and so cannot match by id prefix. `MessageThread.clientId` is a
+  // required relation (RESTRICT), so a single thread opened while driving the
+  // fixture — e.g. the client home's "Message" button — permanently blocks
+  // `--clean` from removing the client. Keyed on the demo client/pro instead of
+  // the row's own id for exactly that reason.
+  // Messages + participants cascade from the thread.
+  await prisma.messageThread.deleteMany({
+    where: {
+      OR: [{ clientId: idPrefix }, { professionalId: idPrefix }],
+    },
+  })
   // Before the client profile (cascade would take it, but the bookings above
   // RESTRICT-reference it, so order is load-bearing either way).
   await prisma.clientAddress.deleteMany({ where: { id: idPrefix } })

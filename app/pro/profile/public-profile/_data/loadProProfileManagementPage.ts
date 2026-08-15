@@ -16,7 +16,6 @@ import { formatCompactCount } from '@/lib/format/compactCount'
 import { isRecord } from '@/lib/guards'
 import { vanityLinkFor } from '@/lib/handles'
 import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
-import { mapPortfolioTileToDto } from '@/lib/looks/mappers'
 import { proOwnPublicLooksWhere } from '@/lib/looks/selects'
 import { loadClientLinkViewer } from '@/lib/clientVisibility'
 import {
@@ -37,7 +36,6 @@ import {
   type ProProfileManagementEditProfileInitial,
   type ProProfileManagementPageModel,
   type ProProfileManagementPaymentSettingsInitial,
-  type ProProfileManagementPortfolio,
   type ProProfileManagementReview,
   type ProProfileManagementReviewMedia,
   type ProProfileManagementSearchParams,
@@ -47,7 +45,6 @@ import {
 } from './proProfileManagementTypes'
 
 const PROFILE_MANAGEMENT_LIMITS = {
-  portfolioAssets: 120,
   services: 500,
   reviews: 200,
 } as const
@@ -98,30 +95,6 @@ const proProfileManagementSelect =
       },
     },
   })
-
-const portfolioMediaAssetSelect = Prisma.validator<Prisma.MediaAssetSelect>()({
-  id: true,
-  caption: true,
-  mediaType: true,
-  visibility: true,
-  isEligibleForLooks: true,
-  isFeaturedInPortfolio: true,
-  storageBucket: true,
-  storagePath: true,
-  thumbBucket: true,
-  thumbPath: true,
-  url: true,
-  thumbUrl: true,
-  // Opt-in before/after pairing → render the comparison slider when present.
-  beforeAsset: {
-    select: pairedBeforeAssetSelect,
-  },
-  services: {
-    select: {
-      serviceId: true,
-    },
-  },
-})
 
 const reviewSelect = Prisma.validator<Prisma.ReviewSelect>()({
   id: true,
@@ -211,7 +184,6 @@ export async function loadProProfileManagementPage({
     publishedLooksCount,
     followersCount,
     unreadNotificationCount,
-    portfolio,
     reviews,
   ] = await Promise.all([
     loadReviewStats(pro.id),
@@ -229,9 +201,6 @@ export async function loadProProfileManagementPage({
         readAt: null,
       },
     }),
-    tab === 'portfolio'
-      ? loadPortfolio(pro.id, pro.coverMediaAssetId, pro.signatureMediaAssetId)
-      : emptyPortfolio(),
     tab === 'reviews'
       ? loadReviews(pro.id, await loadClientLinkViewer(user))
       : Promise.resolve<ProProfileManagementReview[]>([]),
@@ -258,7 +227,6 @@ export async function loadProProfileManagementPage({
     paymentSettingsInitial: buildPaymentSettingsInitial(pro),
     noShowFeatureEnabled: noShowProtectionEnabled(),
 
-    portfolio,
     reviews: {
       items: reviews,
       reviewCount: reviewStats.reviewCount,
@@ -267,6 +235,13 @@ export async function loadProProfileManagementPage({
   }
 }
 
+/**
+ * 🔴 `portfolio` is no longer a tab here — it moved to `/pro/portfolio`, which
+ * merged this grid with "My media" into one library. The page redirects
+ * `?tab=portfolio` there, so this only ever resolves the two remaining tabs.
+ * The default moved from `portfolio` to `services`: leaving it would have made
+ * a bare `/pro/profile/public-profile` resolve to a tab that no longer renders.
+ */
 export function pickProProfileManagementTab(
   searchParams: ProProfileManagementSearchParams | null | undefined,
 ): ProProfileManagementTab {
@@ -278,7 +253,22 @@ export function pickProProfileManagementTab(
         ? rawValue[0]
         : null
 
-  return raw === 'services' || raw === 'reviews' ? raw : 'portfolio'
+  return raw === 'reviews' ? raw : 'services'
+}
+
+/** True when a legacy `?tab=portfolio` link should be sent to the new library. */
+export function isRetiredPortfolioTab(
+  searchParams: ProProfileManagementSearchParams | null | undefined,
+): boolean {
+  const rawValue = searchParams?.tab
+  const raw =
+    typeof rawValue === 'string'
+      ? rawValue
+      : Array.isArray(rawValue)
+        ? rawValue[0]
+        : null
+
+  return raw === 'portfolio'
 }
 
 async function loadReviewStats(
@@ -293,55 +283,6 @@ async function loadReviewStats(
   return {
     reviewCount: normalizeCount(stats._count._all),
     averageRating: stats._avg.rating ?? null,
-  }
-}
-
-async function loadPortfolio(
-  professionalId: string,
-  coverMediaAssetId: string | null,
-  signatureMediaAssetId: string | null,
-): Promise<ProProfileManagementPortfolio> {
-  const [assets, serviceOptions] = await Promise.all([
-    prisma.mediaAsset.findMany({
-      where: {
-        professionalId,
-        isFeaturedInPortfolio: true,
-      },
-      orderBy: { createdAt: 'desc' },
-      take: PROFILE_MANAGEMENT_LIMITS.portfolioAssets,
-      select: portfolioMediaAssetSelect,
-    }),
-    prisma.service.findMany({
-      where: { isActive: true },
-      orderBy: { name: 'asc' },
-      take: PROFILE_MANAGEMENT_LIMITS.services,
-      select: {
-        id: true,
-        name: true,
-      },
-    }),
-  ])
-
-  const mappedTiles = await Promise.all(
-    assets.map((asset) => mapPortfolioTileToDto(asset)),
-  )
-
-  const tiles = mappedTiles.filter(isNonNull)
-
-  return {
-    tiles,
-    serviceOptions,
-    coverMediaAssetId,
-    signatureMediaAssetId,
-  }
-}
-
-async function emptyPortfolio(): Promise<ProProfileManagementPortfolio> {
-  return {
-    tiles: [],
-    serviceOptions: [],
-    coverMediaAssetId: null,
-    signatureMediaAssetId: null,
   }
 }
 

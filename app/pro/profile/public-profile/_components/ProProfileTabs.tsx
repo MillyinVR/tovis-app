@@ -47,14 +47,11 @@ function buildProProfileTabs(
 ): ProProfileTabItem[] {
   return [
     {
-      id: 'portfolio',
-      label: 'portfolio',
-      href: routes.proPublicProfile,
-    },
-    {
+      // Services is the default tab now that portfolio moved to its own screen,
+      // so it points at the bare route rather than carrying a redundant param.
       id: 'services',
       label: 'services',
-      href: `${routes.proPublicProfile}?tab=services`,
+      href: routes.proPublicProfile,
     },
     {
       id: 'reviews',

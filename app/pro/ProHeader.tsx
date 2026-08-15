@@ -62,7 +62,10 @@ const PRO_HEADER_ROUTE_TITLES: ProHeaderRouteTitle[] = [
   { path: '/pro/clients', title: 'Clients' },
   { path: '/pro/profile', title: 'Profile' },
   { path: PRO_PUBLIC_PROFILE_PATH, title: 'Public Profile' },
-  { path: '/pro/media', title: 'Media' },
+  // One library, whose top zone IS the public portfolio. Replaces the old
+  // "Media" entry: `/pro/media` could add but had no sense of the portfolio,
+  // and the profile's Portfolio tab could only remove. Both now redirect here.
+  { path: '/pro/portfolio', title: 'Portfolio' },
   { path: '/pro/locations', title: 'Locations' },
   { path: '/pro/verification', title: 'Verification' },
   { path: '/pro/migrate', title: 'Import' },

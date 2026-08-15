@@ -5,7 +5,6 @@ import type { ProProfileManagementPageModel } from '../_data/proProfileManagemen
 import type { WorkspaceOption } from '@/lib/auth/workspaces'
 
 import ProAccountSection from './ProAccountSection'
-import ProPortfolioGrid from './ProPortfolioGrid'
 import ProProfileActions from './ProProfileActions'
 import ProProfileCard from './ProProfileCard'
 import ProProfileHeader from './ProProfileHeader'
@@ -49,13 +48,6 @@ export default function ProProfileManagementShell({
           <ProProfileActions routes={model.routes} />
 
           <ProProfileTabs activeTab={model.tab} routes={model.routes} />
-
-          {model.tab === 'portfolio' ? (
-            <ProPortfolioGrid
-              routes={model.routes}
-              portfolio={model.portfolio}
-            />
-          ) : null}
 
           {model.tab === 'services' ? <ServicesTab /> : null}
 

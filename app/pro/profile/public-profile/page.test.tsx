@@ -11,9 +11,14 @@ import {
 import type { ProProfileManagementPageModel } from './_data/proProfileManagementTypes'
 
 const mockLoadProProfileManagementPage = vi.hoisted(() => vi.fn())
+const mockIsRetiredPortfolioTab = vi.hoisted(() => vi.fn(() => false))
 
 vi.mock('./_data/loadProProfileManagementPage', () => ({
   loadProProfileManagementPage: mockLoadProProfileManagementPage,
+  // The page consults this BEFORE the loader, to send a bookmarked
+  // `?tab=portfolio` to `/pro/portfolio`. Defaults to false so the existing
+  // cases still exercise the normal render path.
+  isRetiredPortfolioTab: mockIsRetiredPortfolioTab,
 }))
 
 vi.mock('./_components/ProProfileManagementShell', () => ({
@@ -46,7 +51,7 @@ function makeModel(
       proPublicProfile: '/pro/profile/public-profile',
       looks: '/looks',
     },
-    tab: 'portfolio',
+    tab: 'services',
 
     profile: {
       id: 'pro_1',
@@ -140,13 +145,6 @@ function makeModel(
       paymentNote: null,
     },
     noShowFeatureEnabled: false,
-
-    portfolio: {
-      tiles: [],
-      serviceOptions: [],
-      coverMediaAssetId: null,
-      signatureMediaAssetId: null,
-    },
 
     reviews: {
       items: [],

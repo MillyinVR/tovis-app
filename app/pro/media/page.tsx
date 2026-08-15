@@ -1,107 +1,23 @@
 // app/pro/media/page.tsx
-import Link from 'next/link'
-import { redirect } from 'next/navigation'
-import { getCurrentUser } from '@/lib/currentUser'
-import { prisma } from '@/lib/prisma'
-import MediaTile from './MediaTile'
-import { renderMediaUrls } from '@/lib/media/renderUrls'
+import { permanentRedirect } from 'next/navigation'
+
+import { PRO_PORTFOLIO_ROUTES } from '@/app/pro/portfolio/_data/proPortfolioTypes'
 
 export const dynamic = 'force-dynamic'
 
-export default async function ProMediaPage() {
-  const user = await getCurrentUser()
-
-  if (!user || user.role !== 'PRO' || !user.professionalProfile) {
-    redirect('/login?from=/pro/media')
-  }
-
-  const media = await prisma.mediaAsset.findMany({
-    where: { professionalId: user.professionalProfile.id },
-    orderBy: { createdAt: 'desc' },
-    take: 60,
-    select: {
-      id: true,
-      caption: true,
-      isFeaturedInPortfolio: true,
-      reviewId: true,
-
-      // single source of truth inputs
-      storageBucket: true,
-      storagePath: true,
-      thumbBucket: true,
-      thumbPath: true,
-
-      // legacy fallbacks (still allowed)
-      url: true,
-      thumbUrl: true,
-    },
-  })
-
-  const resolved = await Promise.all(
-    media.map(async (m) => {
-      const { renderUrl, renderThumbUrl } = await renderMediaUrls({
-        storageBucket: m.storageBucket,
-        storagePath: m.storagePath,
-        thumbBucket: m.thumbBucket,
-        thumbPath: m.thumbPath,
-        url: m.url,
-        thumbUrl: m.thumbUrl,
-      })
-
-      const src = (renderThumbUrl ?? renderUrl ?? '').trim()
-      if (!src) return null
-
-      return {
-        id: m.id,
-        caption: m.caption ?? null,
-        isFeaturedInPortfolio: Boolean(m.isFeaturedInPortfolio),
-        src,
-      }
-    }),
-  )
-
-  const items = resolved.filter((x): x is NonNullable<typeof x> => x !== null)
-  const brokenCount = media.length - items.length
-
-  return (
-    <main className="mx-auto max-w-5xl px-4 pb-20 pt-20 font-sans">
-      <div className="mb-4 flex items-end justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="text-[20px] font-black text-textPrimary">My media</h1>
-          <p className="mt-1 text-[13px] text-textSecondary">Manage posts and choose what appears in your portfolio.</p>
-        </div>
-
-        <Link
-          href="/pro/media/new"
-          className="rounded-card border border-white/10 bg-bgSecondary px-3 py-2 text-[12px] font-black text-textPrimary hover:border-white/20"
-        >
-          + New post
-        </Link>
-      </div>
-
-      {brokenCount > 0 ? (
-        <div className="mb-3 rounded-card border border-white/10 bg-bgSecondary p-3 text-[12px] text-textSecondary">
-          {brokenCount} item(s) missing a renderable URL and were hidden.
-        </div>
-      ) : null}
-
-      {items.length === 0 ? (
-        <div className="rounded-card border border-white/10 bg-bgSecondary p-4 text-[13px] text-textSecondary">
-          No media yet.
-        </div>
-      ) : (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          {items.map((m) => (
-            <MediaTile
-              key={m.id}
-              id={m.id}
-              src={m.src}
-              caption={m.caption}
-              isFeaturedInPortfolio={m.isFeaturedInPortfolio}
-            />
-          ))}
-        </div>
-      )}
-    </main>
-  )
+/**
+ * "My media" is retired — `/pro/portfolio` is one library whose top zone IS the
+ * public portfolio.
+ *
+ * This page could ADD to the portfolio but had no sense of it as a composition,
+ * while the profile's Portfolio tab could only REMOVE. Splitting one job across
+ * two screens is what made a pro curate their portfolio from every page except
+ * the portfolio page.
+ *
+ * 🔴 Redirect rather than delete. Pros have this URL in muscle memory and in
+ * bookmarks, and `/pro/media/new` (the upload flow) still lives underneath this
+ * segment — it is NOT retired and must keep resolving.
+ */
+export default function ProMediaPage() {
+  permanentRedirect(PRO_PORTFOLIO_ROUTES.portfolio)
 }
