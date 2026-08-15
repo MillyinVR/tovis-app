@@ -2,9 +2,11 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { TextInput } from '@/app/_components/ui'
 import { cn } from '@/lib/utils'
 import { safeJson, readErrorMessage } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
+import FieldLabel from './_components/FieldLabel'
 
 type ClientSettingsProfile = {
   id: string
@@ -16,33 +18,19 @@ type ClientSettingsProfile = {
   dateOfBirth: string | null
 }
 
-function FieldLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="text-xs font-black tracking-[var(--ls-caps)] text-textSecondary">
-      {children}
-    </span>
-  )
-}
-
 function HelpText({ children }: { children: React.ReactNode }) {
   return <span className="text-xs text-textSecondary/80">{children}</span>
 }
 
+/**
+ * The settings field is the auth field — same design, and it had been spelled a
+ * second way here (`border-textPrimary/10` vs `border-surfaceGlass/10`; the same
+ * accent focus written long-hand as `rgb(var(--accent-primary)/0.35)`). Both
+ * tokens resolve to the same triplet in both modes, so this was drift in the
+ * spelling, not in the design. It is one surface now.
+ */
 function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
-  return (
-    <input
-      {...props}
-      className={cn(
-        'w-full rounded-card border px-3 py-2 text-sm outline-none transition',
-        'border-textPrimary/10 bg-bgSecondary/35 text-textPrimary',
-        'placeholder:text-textSecondary/70',
-        'hover:border-textPrimary/15',
-        'focus:border-[rgb(var(--accent-primary)/0.35)] focus:ring-2 focus:ring-[rgb(var(--accent-primary)/0.15)]',
-        props.disabled && 'opacity-70',
-        props.className ?? '',
-      )}
-    />
-  )
+  return <TextInput surface="soft" {...props} />
 }
 
 function pickProfile(raw: unknown): ClientSettingsProfile | null {

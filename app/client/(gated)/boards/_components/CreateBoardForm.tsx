@@ -7,6 +7,7 @@ import { useFormStatus } from 'react-dom'
 import { BoardType } from '@prisma/client'
 
 import { cn } from '@/lib/utils'
+import { ToggleChip } from '@/app/_components/ui'
 import {
   BOARD_QUESTION_SETS,
   BOARD_TYPE_LABELS,
@@ -36,37 +37,6 @@ function SubmitButton() {
       )}
     >
       {pending ? 'Saving…' : 'Save board'}
-    </button>
-  )
-}
-
-const CHIP_BASE_CLASS = cn(
-  'inline-flex min-h-9 items-center rounded-full border px-3 py-1.5',
-  'text-[12px] font-bold transition',
-)
-
-function Chip({
-  selected,
-  onClick,
-  children,
-}: {
-  selected: boolean
-  onClick: () => void
-  children: React.ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      aria-pressed={selected}
-      onClick={onClick}
-      className={cn(
-        CHIP_BASE_CLASS,
-        selected
-          ? 'border-textPrimary/40 bg-bgPrimary text-textPrimary'
-          : 'border-textPrimary/10 bg-bgPrimary/60 text-textSecondary hover:border-textPrimary/20 hover:text-textPrimary',
-      )}
-    >
-      {children}
     </button>
   )
 }
@@ -158,13 +128,13 @@ export default function CreateBoardForm({
           </div>
           <div className="flex flex-wrap gap-2">
             {BOARD_TYPE_VALUES.map((type) => (
-              <Chip
+              <ToggleChip
                 key={type}
                 selected={boardType === type}
                 onClick={() => selectBoardType(type)}
               >
                 {BOARD_TYPE_LABELS[type]}
-              </Chip>
+              </ToggleChip>
             ))}
           </div>
           <input type="hidden" name="type" value={boardType} />
@@ -210,13 +180,13 @@ export default function CreateBoardForm({
             </div>
             <div className="flex flex-wrap gap-2">
               {question.options.map((option) => (
-                <Chip
+                <ToggleChip
                   key={option.value}
                   selected={answers[question.key] === option.value}
                   onClick={() => toggleAnswer(question.key, option.value)}
                 >
                   {option.label}
-                </Chip>
+                </ToggleChip>
               ))}
             </div>
             {answers[question.key] ? (
@@ -231,12 +201,12 @@ export default function CreateBoardForm({
 
         {hasWriteThroughAnswers ? (
           <div>
-            <Chip
+            <ToggleChip
               selected={writeThrough}
               onClick={() => setWriteThrough((current) => !current)}
             >
               Save these details to my profile
-            </Chip>
+            </ToggleChip>
             <p className="mt-2 text-[12px] leading-5 text-textSecondary">
               Answers about you (like hair length or skin type) can be saved to
               your profile so every board gets better matches. Optional — you

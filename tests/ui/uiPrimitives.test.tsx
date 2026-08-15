@@ -11,6 +11,9 @@ import Badge, { badgeClassName } from '@/app/_components/ui/Badge'
 import Button, { buttonClassName } from '@/app/_components/ui/Button'
 import Card from '@/app/_components/ui/Card'
 import FieldLabel from '@/app/_components/ui/FieldLabel'
+import ToggleChip, {
+  toggleChipClassName,
+} from '@/app/_components/ui/ToggleChip'
 import {
   Select,
   Textarea,
@@ -269,6 +272,40 @@ describe('form controls', () => {
       expect(cls).toContain('disabled:opacity-60')
       expect(cls).toContain('disabled:cursor-not-allowed')
     }
+  })
+})
+
+describe('ToggleChip', () => {
+  // Two screens had declared this with byte-identical class strings. Pinned as a
+  // set so consolidating them cannot quietly restyle either picker.
+  const CHIP_CLASSES_BEFORE = {
+    base: 'inline-flex min-h-9 items-center rounded-full border px-3 py-1.5 text-[12px] font-bold transition',
+    on: 'border-textPrimary/40 bg-bgPrimary text-textPrimary',
+    off: 'border-textPrimary/10 bg-bgPrimary/60 text-textSecondary hover:border-textPrimary/20 hover:text-textPrimary',
+  }
+
+  it('reproduces both states the two pickers were carrying', () => {
+    for (const [selected, state] of [
+      [true, CHIP_CLASSES_BEFORE.on],
+      [false, CHIP_CLASSES_BEFORE.off],
+    ] as const) {
+      expect(new Set(toggleChipClassName({ selected }).split(' '))).toEqual(
+        new Set(`${CHIP_CLASSES_BEFORE.base} ${state}`.split(' ')),
+      )
+    }
+  })
+
+  it('announces its state as a toggle, which a hand-rolled chip can forget', () => {
+    const { getByRole, rerender } = render(<ToggleChip selected>Curly</ToggleChip>)
+    expect(getByRole('button', { pressed: true })).toBeTruthy()
+
+    rerender(<ToggleChip selected={false}>Curly</ToggleChip>)
+    expect(getByRole('button', { pressed: false })).toBeTruthy()
+  })
+
+  it('defaults to type=button so a chip inside a form cannot submit it', () => {
+    const { container } = render(<ToggleChip>Curly</ToggleChip>)
+    expect(container.querySelector('button')?.type).toBe('button')
   })
 })
 

@@ -3,7 +3,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
-import { cn } from '@/lib/utils'
+import { ToggleChip } from '@/app/_components/ui'
 import { isRecord } from '@/lib/guards'
 import { readErrorMessage, safeJson } from '@/lib/http'
 import {
@@ -44,32 +44,6 @@ function draftsEqual(a: DraftState, b: DraftState): boolean {
 function pickSelfProfile(raw: unknown): ClientSelfProfile | null {
   if (!isRecord(raw)) return null
   return normalizeSelfProfile(raw.selfProfile)
-}
-
-function Chip({
-  selected,
-  onClick,
-  children,
-}: {
-  selected: boolean
-  onClick: () => void
-  children: React.ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      aria-pressed={selected}
-      onClick={onClick}
-      className={cn(
-        'inline-flex min-h-9 items-center rounded-full border px-3 py-1.5 text-[12px] font-bold transition',
-        selected
-          ? 'border-textPrimary/40 bg-bgPrimary text-textPrimary'
-          : 'border-textPrimary/10 bg-bgPrimary/60 text-textSecondary hover:border-textPrimary/20 hover:text-textPrimary',
-      )}
-    >
-      {children}
-    </button>
-  )
 }
 
 export default function ClientSelfProfileSettings() {
@@ -181,13 +155,13 @@ export default function ClientSelfProfileSettings() {
             </div>
             <div className="flex flex-wrap gap-2">
               {SELF_PROFILE_INTEREST_OPTIONS.map((option) => (
-                <Chip
+                <ToggleChip
                   key={option.value}
                   selected={draft.interests.includes(option.value)}
                   onClick={() => toggleInterest(option.value)}
                 >
                   {option.label}
-                </Chip>
+                </ToggleChip>
               ))}
             </div>
           </div>
@@ -199,13 +173,13 @@ export default function ClientSelfProfileSettings() {
               </div>
               <div className="flex flex-wrap gap-2">
                 {question.options.map((option) => (
-                  <Chip
+                  <ToggleChip
                     key={option.value}
                     selected={draft.fields[question.key] === option.value}
                     onClick={() => toggleField(question.key, option.value)}
                   >
                     {option.label}
-                  </Chip>
+                  </ToggleChip>
                 ))}
               </div>
             </div>
