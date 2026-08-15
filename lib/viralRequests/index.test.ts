@@ -19,8 +19,13 @@ vi.mock('@/lib/notifications/social', () => ({
 }))
 
 import {
+  attachClientViralRequestMedia,
+  buildViralRequestUploadPublicUrl,
   buildViralRequestUploadTargetPath,
   createClientViralRequest,
+  isViralRequestUploadPublicUrl,
+  loadClientOwnedViralRequestForWrite,
+  VIRAL_REQUEST_MEDIA_LIMIT,
   createViralRequestApprovalFanOutRows,
   deleteClientViralRequest,
   enqueueViralRequestApprovalNotifications,
@@ -842,6 +847,306 @@ describe('lib/viralRequests/index.ts', () => {
           fileName: ' ..\\Wolf Cut Inspo.PNG ',
         }),
       ).toBe('viral-requests/request_1/uploads/wolf-cut-inspo.png')
+    })
+  })
+
+  describe('isViralRequestUploadPublicUrl', () => {
+    const supabaseBaseUrl = 'https://project.supabase.co'
+    const minted = buildViralRequestUploadPublicUrl({
+      supabaseBaseUrl,
+      path: buildViralRequestUploadTargetPath({
+        requestId: 'request_1',
+        fileName: 'inspo.jpg',
+      }),
+    })
+
+    it('accepts a URL this server minted for that request', () => {
+      expect(minted).toBe(
+        'https://project.supabase.co/storage/v1/object/public/media-public/viral-requests/request_1/uploads/inspo.jpg',
+      )
+      expect(
+        isViralRequestUploadPublicUrl({
+          supabaseBaseUrl,
+          requestId: 'request_1',
+          url: minted,
+        }),
+      ).toBe(true)
+    })
+
+    it('ignores a trailing slash on the configured base', () => {
+      expect(
+        isViralRequestUploadPublicUrl({
+          supabaseBaseUrl: 'https://project.supabase.co/',
+          requestId: 'request_1',
+          url: minted,
+        }),
+      ).toBe(true)
+    })
+
+    it.each([
+      [
+        'another host serving the same path',
+        'https://evil.example.com/storage/v1/object/public/media-public/viral-requests/request_1/uploads/inspo.jpg',
+      ],
+      [
+        'another request’s folder',
+        'https://project.supabase.co/storage/v1/object/public/media-public/viral-requests/request_2/uploads/inspo.jpg',
+      ],
+      [
+        'the private bucket',
+        'https://project.supabase.co/storage/v1/object/public/media-private/viral-requests/request_1/uploads/inspo.jpg',
+      ],
+      [
+        'a traversal out of the folder',
+        'https://project.supabase.co/storage/v1/object/public/media-public/viral-requests/request_1/uploads/../../other.jpg',
+      ],
+      [
+        'a nested path',
+        'https://project.supabase.co/storage/v1/object/public/media-public/viral-requests/request_1/uploads/sub/inspo.jpg',
+      ],
+      [
+        'a query string bolted on',
+        'https://project.supabase.co/storage/v1/object/public/media-public/viral-requests/request_1/uploads/inspo.jpg?x=1',
+      ],
+      [
+        'the folder itself',
+        'https://project.supabase.co/storage/v1/object/public/media-public/viral-requests/request_1/uploads/',
+      ],
+    ])('refuses %s', (_label, url) => {
+      expect(
+        isViralRequestUploadPublicUrl({
+          supabaseBaseUrl,
+          requestId: 'request_1',
+          url,
+        }),
+      ).toBe(false)
+    })
+
+    it('refuses everything when the base URL is missing', () => {
+      expect(
+        isViralRequestUploadPublicUrl({
+          supabaseBaseUrl: '   ',
+          requestId: 'request_1',
+          url: minted,
+        }),
+      ).toBe(false)
+    })
+  })
+
+  describe('loadClientOwnedViralRequestForWrite', () => {
+    it('refuses a request that belongs to someone else', async () => {
+      const db = makeDb()
+      const tx = asTransactionClient(db)
+
+      db.viralServiceRequest.findUnique.mockResolvedValue({
+        id: 'request_1',
+        clientId: 'client_2',
+        status: ViralServiceRequestStatus.REQUESTED,
+        mediaUrlsJson: null,
+      })
+
+      await expect(
+        loadClientOwnedViralRequestForWrite(tx, {
+          clientId: 'client_1',
+          requestId: 'request_1',
+        }),
+      ).resolves.toEqual({ ok: false, reason: 'FORBIDDEN' })
+    })
+
+    it.each([
+      ViralServiceRequestStatus.APPROVED,
+      ViralServiceRequestStatus.REJECTED,
+    ])('refuses a %s request', async (status) => {
+      const db = makeDb()
+      const tx = asTransactionClient(db)
+
+      db.viralServiceRequest.findUnique.mockResolvedValue({
+        id: 'request_1',
+        clientId: 'client_1',
+        status,
+        mediaUrlsJson: null,
+      })
+
+      await expect(
+        loadClientOwnedViralRequestForWrite(tx, {
+          clientId: 'client_1',
+          requestId: 'request_1',
+        }),
+      ).resolves.toEqual({ ok: false, reason: 'FINALIZED' })
+    })
+
+    it('reports a missing request', async () => {
+      const db = makeDb()
+      const tx = asTransactionClient(db)
+
+      db.viralServiceRequest.findUnique.mockResolvedValue(null)
+
+      await expect(
+        loadClientOwnedViralRequestForWrite(tx, {
+          clientId: 'client_1',
+          requestId: 'request_1',
+        }),
+      ).resolves.toEqual({ ok: false, reason: 'NOT_FOUND' })
+    })
+  })
+
+  describe('attachClientViralRequestMedia', () => {
+    const supabaseBaseUrl = 'https://project.supabase.co'
+    const mediaUrl = buildViralRequestUploadPublicUrl({
+      supabaseBaseUrl,
+      path: 'viral-requests/request_1/uploads/inspo.jpg',
+    })
+
+    function mockOwnedRequest(
+      db: ReturnType<typeof makeDb>,
+      mediaUrlsJson: unknown = null,
+    ) {
+      db.viralServiceRequest.findUnique.mockResolvedValue({
+        id: 'request_1',
+        clientId: 'client_1',
+        status: ViralServiceRequestStatus.REQUESTED,
+        mediaUrlsJson,
+      })
+    }
+
+    it('appends the URL to the submitter’s media', async () => {
+      const db = makeDb()
+      const tx = asTransactionClient(db)
+
+      mockOwnedRequest(db, ['https://project.supabase.co/first.jpg'])
+      db.viralServiceRequest.update.mockResolvedValue(
+        makeViralRequestRow({ mediaUrlsJson: ['x'] }),
+      )
+
+      const result = await attachClientViralRequestMedia(tx, {
+        clientId: 'client_1',
+        requestId: 'request_1',
+        mediaUrl,
+        supabaseBaseUrl,
+      })
+
+      expect(result.ok).toBe(true)
+      expect(db.viralServiceRequest.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'request_1' },
+          data: {
+            mediaUrlsJson: ['https://project.supabase.co/first.jpg', mediaUrl],
+          },
+        }),
+      )
+    })
+
+    it('refuses a URL this server never minted for the request', async () => {
+      const db = makeDb()
+      const tx = asTransactionClient(db)
+
+      mockOwnedRequest(db)
+
+      await expect(
+        attachClientViralRequestMedia(tx, {
+          clientId: 'client_1',
+          requestId: 'request_1',
+          mediaUrl: 'https://evil.example.com/photo.jpg',
+          supabaseBaseUrl,
+        }),
+      ).resolves.toEqual({ ok: false, reason: 'INVALID_MEDIA_URL' })
+
+      // Refused before the row is even read, so it can't be told apart from an
+      // unknown request.
+      expect(db.viralServiceRequest.findUnique).not.toHaveBeenCalled()
+      expect(db.viralServiceRequest.update).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      ['a string that is not a URL at all', 'not a url'],
+      ['a javascript: href', 'javascript:alert(1)'],
+      ['an empty string', '   '],
+    ])('refuses %s with a refusal, never a throw', async (_label, value) => {
+      const db = makeDb()
+      const tx = asTransactionClient(db)
+
+      await expect(
+        attachClientViralRequestMedia(tx, {
+          clientId: 'client_1',
+          requestId: 'request_1',
+          mediaUrl: value,
+          supabaseBaseUrl,
+        }),
+      ).resolves.toEqual({ ok: false, reason: 'INVALID_MEDIA_URL' })
+
+      expect(db.viralServiceRequest.findUnique).not.toHaveBeenCalled()
+    })
+
+    it('treats a re-attach of the same URL as a no-op', async () => {
+      const db = makeDb()
+      const tx = asTransactionClient(db)
+
+      db.viralServiceRequest.findUnique
+        .mockResolvedValueOnce({
+          id: 'request_1',
+          clientId: 'client_1',
+          status: ViralServiceRequestStatus.REQUESTED,
+          mediaUrlsJson: [mediaUrl],
+        })
+        .mockResolvedValueOnce(makeViralRequestRow({ mediaUrlsJson: [mediaUrl] }))
+
+      const result = await attachClientViralRequestMedia(tx, {
+        clientId: 'client_1',
+        requestId: 'request_1',
+        mediaUrl,
+        supabaseBaseUrl,
+      })
+
+      expect(result.ok).toBe(true)
+      expect(db.viralServiceRequest.update).not.toHaveBeenCalled()
+    })
+
+    it('refuses once the attachment limit is reached', async () => {
+      const db = makeDb()
+      const tx = asTransactionClient(db)
+
+      mockOwnedRequest(
+        db,
+        Array.from(
+          { length: VIRAL_REQUEST_MEDIA_LIMIT },
+          (_value, index) =>
+            `https://project.supabase.co/storage/v1/object/public/media-public/viral-requests/request_1/uploads/inspo-${index}.jpg`,
+        ),
+      )
+
+      await expect(
+        attachClientViralRequestMedia(tx, {
+          clientId: 'client_1',
+          requestId: 'request_1',
+          mediaUrl,
+          supabaseBaseUrl,
+        }),
+      ).resolves.toEqual({ ok: false, reason: 'MEDIA_LIMIT' })
+
+      expect(db.viralServiceRequest.update).not.toHaveBeenCalled()
+    })
+
+    it('refuses to write onto a finalized request', async () => {
+      const db = makeDb()
+      const tx = asTransactionClient(db)
+
+      db.viralServiceRequest.findUnique.mockResolvedValue({
+        id: 'request_1',
+        clientId: 'client_1',
+        status: ViralServiceRequestStatus.APPROVED,
+        mediaUrlsJson: null,
+      })
+
+      await expect(
+        attachClientViralRequestMedia(tx, {
+          clientId: 'client_1',
+          requestId: 'request_1',
+          mediaUrl,
+          supabaseBaseUrl,
+        }),
+      ).resolves.toEqual({ ok: false, reason: 'FINALIZED' })
+
+      expect(db.viralServiceRequest.update).not.toHaveBeenCalled()
     })
   })
 

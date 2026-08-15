@@ -11,11 +11,16 @@ import {
 
 import { notifyMatchedProsAboutApprovedViralRequest } from '@/lib/notifications/social'
 import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
+import { BUCKETS } from '@/lib/storageBuckets'
 import { platformCrossTenantProVisibilityFilter } from '@/lib/tenant'
+import { readViralSubmitterMedia } from '@/lib/viralRequests/contracts'
 import { canTransitionViralRequestStatus } from '@/lib/viralRequests/status'
 import { asTrimmedString, normalizeRequiredId } from '@/lib/guards'
 
 export type ViralRequestsDb = PrismaClient | Prisma.TransactionClient
+
+/** Submitter uploads are public-intent: a reviewer has to be able to see them. */
+const VIRAL_REQUEST_UPLOAD_BUCKET = BUCKETS.mediaPublic
 
 export const viralRequestListSelect =
   Prisma.validator<Prisma.ViralServiceRequestSelect>()({
@@ -189,8 +194,45 @@ export type BuildViralRequestUploadTargetPathArgs = {
   fileName: string
 }
 
+/** Why a client's write against their own viral request was refused. */
+export type ViralRequestWriteRefusal = 'NOT_FOUND' | 'FORBIDDEN' | 'FINALIZED'
+
+export type ClientOwnedViralRequestForWrite = {
+  id: string
+  clientId: string
+  status: ViralServiceRequestStatus
+  mediaUrlsJson: ViralRequestListRow['mediaUrlsJson']
+}
+
+export type LoadClientOwnedViralRequestResult =
+  | { ok: true; request: ClientOwnedViralRequestForWrite }
+  | { ok: false; reason: ViralRequestWriteRefusal }
+
+export type AttachClientViralRequestMediaArgs = {
+  clientId: string
+  requestId: string
+  /** The public URL the upload route returned for THIS request. */
+  mediaUrl: string
+  /** `NEXT_PUBLIC_SUPABASE_URL` — the project whose bucket we will accept. */
+  supabaseBaseUrl: string
+}
+
+export type AttachClientViralRequestMediaResult =
+  | { ok: true; request: ViralRequestListRow }
+  | {
+      ok: false
+      reason: ViralRequestWriteRefusal | 'INVALID_MEDIA_URL' | 'MEDIA_LIMIT'
+    }
+
 const DEFAULT_TAKE = 20
 const MAX_TAKE = 100
+
+/**
+ * How many attachments one submission may carry. The forms attach one, so this
+ * is a backstop against a caller looping the PATCH, not a product limit — the
+ * reviewer's queue renders every one of them.
+ */
+export const VIRAL_REQUEST_MEDIA_LIMIT = 4
 
 function pickDispatchTx(
   db: ViralRequestsDb,
@@ -866,8 +908,9 @@ export async function markViralRequestApprovalFanOutRowsFailed(
  * status-less status change or no way to fix a cover on an already-approved
  * look.
  *
- * Passing null clears it, which falls the readers back to the submitter's own
- * attachment (`resolveViralCoverImage`) rather than to nothing.
+ * Passing null clears it, and clearing means the look has NO picture again —
+ * every surface falls back to its own gradient, never to the submitter's
+ * attachment (`resolveViralCoverImage`). Only what a reviewer set is published.
  */
 export async function setViralRequestCoverImage(
   db: ViralRequestsDb,
@@ -942,13 +985,170 @@ export function buildViralRequestCoverTargetPath(args: {
   return `viral-requests/${requestId}/cover.${extension || 'jpg'}`
 }
 
+/** Every object a SUBMITTER uploads for one request lives under this folder. */
+function viralRequestUploadPathPrefix(requestId: string): string {
+  return `viral-requests/${normalizeRequiredId('requestId', requestId)}/uploads/`
+}
+
 export function buildViralRequestUploadTargetPath(
   args: BuildViralRequestUploadTargetPathArgs,
 ): string {
-  const requestId = normalizeRequiredId('requestId', args.requestId)
   const fileName = normalizeUploadFileName(args.fileName)
 
-  return `viral-requests/${requestId}/uploads/${fileName}`
+  return `${viralRequestUploadPathPrefix(args.requestId)}${fileName}`
+}
+
+/**
+ * The public URL of a storage object — the one the upload route hands back and
+ * the only shape the persist route will accept, built in one place so the two
+ * cannot drift.
+ */
+export function buildViralRequestUploadPublicUrl(args: {
+  supabaseBaseUrl: string
+  path: string
+}): string {
+  const base = args.supabaseBaseUrl.trim().replace(/\/+$/, '')
+
+  return `${base}/storage/v1/object/public/${VIRAL_REQUEST_UPLOAD_BUCKET}/${args.path}`
+}
+
+/**
+ * True only for a URL this server itself minted for THIS request.
+ *
+ * 🔴 The gate that keeps the review queue honest. Without it a client could
+ * PATCH any `https://…` they like onto their submission, and a reviewer's "Use
+ * this" would publish a stranger's server platform-wide — one that can swap the
+ * bytes for something else the moment it is approved. Our own object cannot: the
+ * path is derived from the request id, only the ownership-checked upload route
+ * signs a write into it, and it is signed `upsert: false`.
+ */
+export function isViralRequestUploadPublicUrl(args: {
+  supabaseBaseUrl: string
+  requestId: string
+  url: string
+}): boolean {
+  const base = args.supabaseBaseUrl.trim()
+  if (!base) return false
+
+  const prefix = buildViralRequestUploadPublicUrl({
+    supabaseBaseUrl: base,
+    path: viralRequestUploadPathPrefix(args.requestId),
+  })
+
+  if (!args.url.startsWith(prefix)) return false
+
+  // Equality against the sanitizer, not just "no slashes": it also refuses the
+  // query string, the encoded traversal and the empty name in one comparison.
+  const fileName = args.url.slice(prefix.length)
+
+  return fileName.length > 0 && fileName === normalizeUploadFileName(fileName)
+}
+
+/**
+ * The gate every client WRITE against their own viral request passes through.
+ *
+ * One helper rather than a copy per route because minting the signed upload and
+ * persisting the URL it produced are two halves of one act: if they could
+ * disagree, media would land on a request the upload route would have refused.
+ */
+export async function loadClientOwnedViralRequestForWrite(
+  db: ViralRequestsDb,
+  args: { clientId: string; requestId: string },
+): Promise<LoadClientOwnedViralRequestResult> {
+  const clientId = normalizeRequiredId('clientId', args.clientId)
+  const requestId = normalizeRequiredId('requestId', args.requestId)
+
+  const request = await db.viralServiceRequest.findUnique({
+    where: { id: requestId },
+    select: {
+      id: true,
+      clientId: true,
+      status: true,
+      mediaUrlsJson: true,
+    },
+  })
+
+  if (!request) return { ok: false, reason: 'NOT_FOUND' }
+  if (request.clientId !== clientId) return { ok: false, reason: 'FORBIDDEN' }
+
+  if (
+    request.status === ViralServiceRequestStatus.APPROVED ||
+    request.status === ViralServiceRequestStatus.REJECTED
+  ) {
+    return { ok: false, reason: 'FINALIZED' }
+  }
+
+  return { ok: true, request }
+}
+
+/**
+ * Persists an upload the submitter just made onto their own request — the write
+ * the upload route never had.
+ *
+ * Append-only, and deliberately so: this column is the EVIDENCE a reviewer
+ * decides on, so a submitter must not be able to swap it for something else
+ * after it has been looked at. Removing an attachment is a reviewer's call.
+ *
+ * Re-attaching the same URL is a no-op rather than an error, which is what a
+ * double-tapped submit produces (the path is derived from the file name, so the
+ * retry mints the same URL).
+ */
+export async function attachClientViralRequestMedia(
+  db: ViralRequestsDb,
+  args: AttachClientViralRequestMediaArgs,
+): Promise<AttachClientViralRequestMediaResult> {
+  const requestId = normalizeRequiredId('requestId', args.requestId)
+
+  // `normalizeHttpUrl` THROWS on junk rather than returning null, and a client
+  // typing nonsense into this field is a 400, not a 500 — so catch it here and
+  // let it join the other refusals.
+  let mediaUrl: string | null
+  try {
+    mediaUrl = normalizeHttpUrl(args.mediaUrl, 'mediaUrl')
+  } catch {
+    return { ok: false, reason: 'INVALID_MEDIA_URL' }
+  }
+
+  // Checked before the row is read so an unacceptable URL cannot be told apart
+  // from an unknown request by timing or by which error comes back.
+  if (
+    !mediaUrl ||
+    !isViralRequestUploadPublicUrl({
+      supabaseBaseUrl: args.supabaseBaseUrl,
+      requestId,
+      url: mediaUrl,
+    })
+  ) {
+    return { ok: false, reason: 'INVALID_MEDIA_URL' }
+  }
+
+  const loaded = await loadClientOwnedViralRequestForWrite(db, {
+    clientId: args.clientId,
+    requestId,
+  })
+
+  if (!loaded.ok) return loaded
+
+  const existing = readViralSubmitterMedia(loaded.request)
+
+  if (existing.includes(mediaUrl)) {
+    return { ok: true, request: await getViralRequestByIdOrThrow(db, requestId) }
+  }
+
+  if (existing.length >= VIRAL_REQUEST_MEDIA_LIMIT) {
+    return { ok: false, reason: 'MEDIA_LIMIT' }
+  }
+
+  // Read-modify-write: jsonb has no Prisma append. Two attaches racing could
+  // drop one, which the one-file-per-submit forms cannot produce — and the case
+  // they CAN produce (the same file twice) is the no-op above.
+  const updated = await db.viralServiceRequest.update({
+    where: { id: requestId },
+    data: { mediaUrlsJson: [...existing, mediaUrl] },
+    select: viralRequestListSelect,
+  })
+
+  return { ok: true, request: updated }
 }
 
 /**

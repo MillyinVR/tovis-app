@@ -367,10 +367,11 @@ export const clientHomeViralLiveSelect =
     name: true,
     sourceUrl: true,
     approvedAt: true,
-    // Both halves of the picture: the reviewer's pick and the submitter's own
-    // attachment. `resolveViralCoverImage` decides between them in one place.
+    // The reviewer's pick, and only that — `resolveViralCoverImage` publishes
+    // nothing else. The submitter's own `mediaUrlsJson` is deliberately NOT
+    // selected here: this query returns every client's approved look, so it has
+    // no business loading someone's unvetted attachment onto a client surface.
     coverImageUrl: true,
-    mediaUrlsJson: true,
     _count: {
       select: {
         approvalFanOuts: true,
@@ -386,7 +387,6 @@ export const clientHomeViralPendingSelect =
     status: true,
     createdAt: true,
     coverImageUrl: true,
-    mediaUrlsJson: true,
     _count: {
       select: {
         approvalFanOuts: true,

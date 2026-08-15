@@ -617,6 +617,15 @@ const VIRAL = {
     sourceUrl: 'https://www.instagram.com/p/DemoSeedCherryCola/',
     /** Pros it has been shared with while it is IN_REVIEW. */
     proKeys: ['noor', 'sasha', 'mara'] as const,
+    /**
+     * What the submitter attached — the evidence half of the review queue.
+     *
+     * 🔴 NOT a cover. `coverImageUrl` stays null on this row on purpose: this
+     * is what makes `/admin/viral-requests` render "Sent by the client · not
+     * published" with its "Use this" button, while the client's own surfaces
+     * still draw their gradient. Without it a shipped panel looks unbuilt.
+     */
+    submitterMedia: ['http://localhost:3000/seed-demo/cherry-cola-balayage.jpg'],
   },
 } as const
 
@@ -1849,6 +1858,7 @@ async function main(): Promise<void> {
       clientId: creator.id,
       name: VIRAL.pending.name,
       sourceUrl: VIRAL.pending.sourceUrl,
+      mediaUrlsJson: [...VIRAL.pending.submitterMedia],
       // IN_REVIEW, not REQUESTED: the pipeline's current node is derived from
       // the status, and REQUESTED sits on the first step, so a REQUESTED-only
       // fixture never renders a part-completed pipeline at all.

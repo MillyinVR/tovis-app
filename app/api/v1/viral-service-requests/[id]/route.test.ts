@@ -1,5 +1,5 @@
 // app/api/v1/viral-service-requests/[id]/route.test.ts
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AdminPermissionRole, Role } from '@prisma/client'
 
 const mocks = vi.hoisted(() => {
@@ -28,7 +28,9 @@ const mocks = vi.hoisted(() => {
       },
     ),
     requireUser: vi.fn(),
+    requireClient: vi.fn(),
     requireAdminPermission: vi.fn(),
+    attachClientViralRequestMedia: vi.fn(),
     prisma: {
       viralServiceRequest: {
         findUnique: vi.fn(),
@@ -52,22 +54,50 @@ vi.mock('@/app/api/_utils/auth/requireAdminPermission', () => ({
   requireAdminPermission: mocks.requireAdminPermission,
 }))
 
+vi.mock('@/app/api/_utils/auth/requireClient', () => ({
+  requireClient: mocks.requireClient,
+}))
+
 vi.mock('@/lib/prisma', () => ({
   prisma: mocks.prisma,
 }))
 
 vi.mock('@/lib/viralRequests', () => ({
   viralRequestListSelect: mocks.viralRequestListSelect,
+  attachClientViralRequestMedia: mocks.attachClientViralRequestMedia,
+  VIRAL_REQUEST_MEDIA_LIMIT: 4,
 }))
 
 vi.mock('@/lib/viralRequests/contracts', () => ({
   toViralRequestDto: mocks.toViralRequestDto,
 }))
 
-import { GET } from './route'
+import { GET, PATCH } from './route'
 
 function makeRequest(id = 'request_1') {
   return new Request(`http://localhost/api/v1/viral-service-requests/${id}`)
+}
+
+const SUPABASE_URL = 'https://project.supabase.co'
+const MINTED_URL = `${SUPABASE_URL}/storage/v1/object/public/media-public/viral-requests/request_1/uploads/inspo.jpg`
+
+function makePatchRequest(
+  body: unknown,
+  init?: { contentType?: string | null; id?: string },
+) {
+  const headers: Record<string, string> = {}
+  const contentType =
+    init && 'contentType' in init ? init.contentType : 'application/json'
+  if (contentType) headers['content-type'] = contentType
+
+  return new Request(
+    `http://localhost/api/v1/viral-service-requests/${init?.id ?? 'request_1'}`,
+    {
+      method: 'PATCH',
+      headers,
+      body: typeof body === 'string' ? body : JSON.stringify(body),
+    },
+  )
 }
 
 function makeCtx(id: string) {
@@ -348,5 +378,116 @@ describe('app/api/v1/viral-service-requests/[id]/route.ts', () => {
 
     expect(body.request).not.toHaveProperty('clientId')
     expect(mocks.toViralRequestDto).toHaveBeenCalledWith(requestRow)
+  })
+
+  describe('PATCH — the submitter records their upload', () => {
+    beforeEach(() => {
+      vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', SUPABASE_URL)
+      mocks.requireClient.mockResolvedValue({
+        ok: true,
+        user: makeUser(),
+        clientId: 'client_1',
+      })
+    })
+
+    afterEach(() => {
+      vi.unstubAllEnvs()
+    })
+
+    it('passes through failed auth responses unchanged', async () => {
+      const authRes = Response.json(
+        { ok: false, error: 'Unauthorized' },
+        { status: 401 },
+      )
+
+      mocks.requireClient.mockResolvedValue({ ok: false, res: authRes })
+
+      const res = await PATCH(
+        makePatchRequest({ mediaUrl: MINTED_URL }),
+        makeCtx('request_1'),
+      )
+
+      expect(res).toBe(authRes)
+      expect(mocks.attachClientViralRequestMedia).not.toHaveBeenCalled()
+    })
+
+    it('refuses a non-JSON body', async () => {
+      const res = await PATCH(
+        makePatchRequest('mediaUrl=' + MINTED_URL, {
+          contentType: 'application/x-www-form-urlencoded',
+        }),
+        makeCtx('request_1'),
+      )
+
+      expect(res.status).toBe(415)
+      expect(mocks.attachClientViralRequestMedia).not.toHaveBeenCalled()
+    })
+
+    it('refuses a body with no mediaUrl', async () => {
+      const res = await PATCH(makePatchRequest({}), makeCtx('request_1'))
+      const body = await res.json()
+
+      expect(res.status).toBe(400)
+      expect(body).toEqual({
+        ok: false,
+        error: 'Missing mediaUrl.',
+        code: 'MISSING_MEDIA_URL',
+      })
+      expect(mocks.attachClientViralRequestMedia).not.toHaveBeenCalled()
+    })
+
+    it('attaches the URL to the caller’s own request and answers with the DTO', async () => {
+      const row = { id: 'request_1' }
+      const mapped = { id: 'request_1', mediaUrls: [MINTED_URL] }
+
+      mocks.attachClientViralRequestMedia.mockResolvedValue({
+        ok: true,
+        request: row,
+      })
+      mocks.toViralRequestDto.mockReturnValue(mapped)
+
+      const res = await PATCH(
+        makePatchRequest({ mediaUrl: ` ${MINTED_URL} ` }),
+        makeCtx('request_1'),
+      )
+      const body = await res.json()
+
+      expect(res.status).toBe(200)
+      expect(body).toEqual({ ok: true, request: mapped })
+
+      // The clientId comes from the session, never the body — the writer is what
+      // proves the row is the caller's.
+      expect(mocks.attachClientViralRequestMedia).toHaveBeenCalledWith(
+        mocks.prisma,
+        {
+          clientId: 'client_1',
+          requestId: 'request_1',
+          mediaUrl: MINTED_URL,
+          supabaseBaseUrl: SUPABASE_URL,
+        },
+      )
+    })
+
+    it.each([
+      ['NOT_FOUND', 404, 'VIRAL_REQUEST_NOT_FOUND'],
+      ['FORBIDDEN', 403, 'FORBIDDEN'],
+      ['FINALIZED', 409, 'VIRAL_REQUEST_FINALIZED'],
+      ['MEDIA_LIMIT', 409, 'VIRAL_REQUEST_MEDIA_LIMIT'],
+      ['INVALID_MEDIA_URL', 400, 'INVALID_VIRAL_REQUEST_MEDIA_URL'],
+    ])('maps a %s refusal to %i', async (reason, status, code) => {
+      mocks.attachClientViralRequestMedia.mockResolvedValue({
+        ok: false,
+        reason,
+      })
+
+      const res = await PATCH(
+        makePatchRequest({ mediaUrl: MINTED_URL }),
+        makeCtx('request_1'),
+      )
+      const body = await res.json()
+
+      expect(res.status).toBe(status)
+      expect(body.code).toBe(code)
+    })
   })
 })

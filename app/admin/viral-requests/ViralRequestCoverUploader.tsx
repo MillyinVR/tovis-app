@@ -133,9 +133,9 @@ export default function ViralRequestCoverUploader({
     setErr(null)
     try {
       // An empty publicUrl is refused by the route's own validator, so clearing
-      // goes through the same finalize with an explicit null — see
-      // setViralRequestCoverImage, which falls readers back to the submitter's
-      // own attachment rather than to nothing.
+      // goes through the same finalize with an explicit null. Clearing leaves
+      // the look with NO picture — the submitter's attachment is evidence in
+      // this queue and is never published in its place.
       await commit({
         kind: 'VIRAL_REQUEST_COVER_IMAGE_PUBLIC_FINALIZE',
         requestId,

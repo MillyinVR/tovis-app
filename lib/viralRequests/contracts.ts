@@ -38,9 +38,10 @@ export type ViralRequestDto = {
   links: string[]
   mediaUrls: string[]
   /**
-   * The picture this look is shown by. `coverImageUrl` is the REVIEWER's pick
-   * and wins; `mediaUrls[0]` is what the submitter attached. Null when there is
-   * neither — the surfaces then draw their own gradient.
+   * The picture this look is shown by: the REVIEWER's `coverImageUrl`, and only
+   * that. Null until someone sets one — the surfaces then draw their own
+   * gradient. `mediaUrls` (what the submitter attached) is never a substitute;
+   * see `resolveViralCoverImage`.
    */
   coverImage: string | null
   requestedCategoryId: string | null
