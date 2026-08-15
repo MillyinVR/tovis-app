@@ -5,6 +5,7 @@ import {
   ProfessionalLocationType,
   Role,
 } from '@prisma/client'
+import type { ServiceLocationType } from '@prisma/client'
 
 import {
   depositProCreatedLeadHours,
@@ -48,7 +49,6 @@ type BookableLocationOption = {
   timeZone: string | null
 }
 
-type ServiceLocationType = 'SALON' | 'MOBILE'
 
 function normalizeSearchParam(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined

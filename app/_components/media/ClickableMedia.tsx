@@ -6,8 +6,8 @@ import MediaFill from '@/app/_components/media/MediaFill'
 import MediaFullscreenViewer from '@/app/_components/media/MediaFullscreenViewer'
 import { type FocalPoint } from '@/lib/media/focalPoint'
 import { cn } from '@/lib/utils'
+import type { MediaType } from '@prisma/client'
 
-type MediaType = 'IMAGE' | 'VIDEO'
 
 type Props = {
   /** Thumbnail URL (falls back to `fullSrc`). */

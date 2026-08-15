@@ -5,8 +5,8 @@ import React, { useEffect } from 'react'
 import { cn } from '@/lib/utils'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import { zClass } from '@/lib/zIndex'
+import type { MediaType } from '@prisma/client'
 
-type MediaType = 'IMAGE' | 'VIDEO'
 
 type Props = {
   src: string

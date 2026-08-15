@@ -10,13 +10,8 @@ import { useEffect, useState, useTransition } from 'react'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import { formatIsoDateShort } from '@/lib/time'
 import { readResponseErrorMessage } from '@/lib/http'
+import type { ModerationStatus } from '@prisma/client'
 
-type ModerationStatus =
-  | 'PENDING_REVIEW'
-  | 'APPROVED'
-  | 'REJECTED'
-  | 'REMOVED'
-  | 'AUTO_FLAGGED'
 
 type LookStatus = 'DRAFT' | 'PUBLISHED' | 'ARCHIVED' | 'REMOVED'
 

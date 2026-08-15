@@ -2,13 +2,16 @@
 
 // app/api/v1/pro/payment-settings/route.ts
 import { Prisma } from '@prisma/client'
+import type {
+  DepositScope,
+  DepositType,
+  PaymentCollectionTiming,
+} from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { isRecord } from '@/lib/guards'
 
 export const dynamic = 'force-dynamic'
-
-type PaymentCollectionTiming = 'AT_BOOKING' | 'AFTER_SERVICE'
 
 type TipSuggestion = {
   label: string
@@ -43,8 +46,6 @@ function normalizeCollectPaymentAt(
   return undefined
 }
 
-type DepositType = 'FLAT' | 'PERCENT'
-type DepositScope = 'NEW_DISCOVERY_ONLY' | 'ALL_NEW_CLIENTS' | 'ALL_CLIENTS'
 
 function normalizeDepositType(v: unknown): DepositType {
   return typeof v === 'string' && v.trim().toUpperCase() === 'PERCENT'

@@ -14,7 +14,7 @@ import { useRouter } from 'next/navigation'
 import type {
   AvailabilityBootstrapResponse,
   AvailabilityOffering,
-  BookingSource,
+  ClientBookingSource,
   DrawerContext,
   SelectedHold,
   ServiceLocationType,
@@ -104,7 +104,7 @@ type ConfirmHoldSelection = {
   offeringId: string
   locationType: ServiceLocationType
   slotISO: string
-  bookingSource: BookingSource
+  bookingSource: ClientBookingSource
   mediaId: string | null
   lookPostId: string | null
 }
@@ -142,7 +142,7 @@ type AvailabilityTelemetryPayload = {
   offeringId?: string | null
   selectedDayYMD?: string | null
   locationType?: ServiceLocationType | null
-  bookingSource?: BookingSource
+  bookingSource?: ClientBookingSource
   hasOtherPros?: boolean
   dayCount?: number
   slotCount?: number
@@ -179,7 +179,7 @@ function getDiscoveryContextIds(context: DrawerContext): DiscoveryContextIds {
   }
 }
 
-function resolveBookingSource(context: DrawerContext): BookingSource {
+function resolveBookingSource(context: DrawerContext): ClientBookingSource {
   if (context.source) return context.source
 
   const discoveryIds = getDiscoveryContextIds(context)

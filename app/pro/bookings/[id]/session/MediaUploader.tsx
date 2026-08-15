@@ -18,9 +18,9 @@ import {
 } from '@/lib/media/processImageForUpload'
 import { UPLOAD_MAX_BYTES, UPLOAD_MAX_MB } from '@/lib/media/uploadLimits'
 import { uploadWithProgress } from '@/lib/media/uploadWithProgress'
+import type { MediaType } from '@prisma/client'
 
 type Phase = 'BEFORE' | 'AFTER' | 'OTHER'
-type MediaType = 'IMAGE' | 'VIDEO'
 type UploadState = 'IDLE' | 'COMPRESSING' | 'UPLOADING' | 'SAVING'
 
 // The signing route (app/api/v1/pro/uploads) hard-caps any single upload at

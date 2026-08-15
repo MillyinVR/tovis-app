@@ -40,6 +40,7 @@ import {
   supportsOnlineVerification,
 } from '@/lib/licensing/licenseRequirement'
 import { PASSWORD_MIN_LEN } from '@/lib/passwordPolicyConstants'
+import type { ProfessionType } from '@prisma/client'
 import {
   compactPhoneInputForSubmit,
   formatPhoneInputValue,
@@ -104,7 +105,6 @@ function stepOfField(field: ProField): number {
   return index === -1 ? 0 : index
 }
 
-
 function readVerificationSendState(
   data: Record<string, unknown> | null,
   key: string,
@@ -134,20 +134,6 @@ function isUsZip(raw: string) {
   const s = raw.trim()
   return /^\d{5}(-\d{4})?$/.test(s)
 }
-
-
-type ProfessionType =
-  | 'COSMETOLOGIST'
-  | 'BARBER'
-  | 'ESTHETICIAN'
-  | 'MANICURIST'
-  | 'HAIRSTYLIST'
-  | 'ELECTROLOGIST'
-  | 'MASSAGE_THERAPIST'
-  | 'MAKEUP_ARTIST'
-  | 'LASH_TECHNICIAN'
-  | 'HAIR_BRAIDER'
-  | 'PERMANENT_MAKEUP_ARTIST'
 
 type GooglePrediction = {
   placeId: string

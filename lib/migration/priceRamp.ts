@@ -1,3 +1,7 @@
+import type { RaiseStepMode } from '@prisma/client'
+
+// serviceImportServer imports this off priceRamp rather than @prisma/client.
+export type { RaiseStepMode }
 // lib/migration/priceRamp.ts
 //
 // Canonical price-grace ramp math — the single source for the per-step formula,
@@ -6,7 +10,6 @@
 // both build on the exact same rules. Works in whole-number money (the DB
 // stores Decimal; callers convert at the boundary).
 
-export type RaiseStepMode = 'PCT' | 'USD'
 
 // Policy floor (contract: 10% every 10 weeks — not a per-pro setting). A pro may
 // go faster (bigger step / shorter cadence), never gentler.

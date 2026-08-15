@@ -8,6 +8,10 @@ import type { DrawerContext } from '../types'
 import { safeJson } from '../utils/safeJson'
 import { redirectToLogin } from '../utils/authRedirect'
 import { isRecord, asTrimmedString, getRecordProp } from '@/lib/guards'
+import type {
+  WaitlistPreferenceType,
+  WaitlistTimeOfDay,
+} from '@prisma/client'
 import {
   addDaysToYMD,
   getZonedParts,
@@ -15,8 +19,13 @@ import {
   ymdToString,
 } from '@/lib/time'
 
-type WaitlistPreferenceType = 'ANY_TIME' | 'TIME_OF_DAY' | 'SPECIFIC_DATE'
-type WaitlistTimeOfDay = 'MORNING' | 'AFTERNOON' | 'EVENING'
+/**
+ * The three preference kinds THIS panel offers. The schema also has
+ * `TIME_RANGE`, which this UI neither creates nor renders — `parsePreferenceType`
+ * below returns null for it and the entry is dropped. Narrowed from the enum
+ * rather than re-typed, so adding a kind to the schema surfaces here.
+ */
+type PanelWaitlistPreferenceType = Exclude<WaitlistPreferenceType, 'TIME_RANGE'>
 
 type WaitlistEntryDTO = {
   id: string
@@ -25,7 +34,7 @@ type WaitlistEntryDTO = {
   serviceId: string
   mediaId: string | null
   notes: string | null
-  preferenceType: WaitlistPreferenceType
+  preferenceType: PanelWaitlistPreferenceType
   specificDate: string | null
   timeOfDay: WaitlistTimeOfDay | null
   windowStartMin: number | null
@@ -33,14 +42,14 @@ type WaitlistEntryDTO = {
 }
 
 type SavedPrefs = {
-  preferenceType: WaitlistPreferenceType
+  preferenceType: PanelWaitlistPreferenceType
   specificDate: string
   timeOfDay: WaitlistTimeOfDay | null
   notes: string
 }
 
 type WaitlistFormState = {
-  preferenceType: WaitlistPreferenceType
+  preferenceType: PanelWaitlistPreferenceType
   specificDate: string
   timeOfDay: WaitlistTimeOfDay | null
   notes: string
@@ -87,7 +96,7 @@ function parseNullableNumberProp(
   return typeof raw === 'number' && Number.isFinite(raw) ? raw : undefined
 }
 
-function parsePreferenceType(value: string | null): WaitlistPreferenceType | null {
+function parsePreferenceType(value: string | null): PanelWaitlistPreferenceType | null {
   if (
     value === 'ANY_TIME' ||
     value === 'TIME_OF_DAY' ||

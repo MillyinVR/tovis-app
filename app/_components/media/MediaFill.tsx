@@ -6,8 +6,8 @@ import Image from 'next/image'
 import MediaLoading from '@/app/_components/media/MediaLoading'
 import { focalObjectPosition, type FocalPoint } from '@/lib/media/focalPoint'
 import { cn } from '@/lib/utils'
+import type { MediaType } from '@prisma/client'
 
-type MediaType = 'IMAGE' | 'VIDEO'
 type Fit = 'cover' | 'contain'
 
 type MediaUrlResponse = {
