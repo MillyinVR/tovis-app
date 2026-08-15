@@ -175,8 +175,100 @@ describe('form controls', () => {
   })
 
   it('merges caller classes (last wins)', () => {
-    expect(controlClassName('rounded-full')).toContain('rounded-full')
-    expect(controlClassName('rounded-full')).not.toContain('rounded-xl')
+    expect(controlClassName({ className: 'rounded-full' })).toContain(
+      'rounded-full',
+    )
+    expect(controlClassName({ className: 'rounded-full' })).not.toContain(
+      'rounded-xl',
+    )
+  })
+
+  it('keeps the dense surface as the default', () => {
+    expect(controlClassName()).toBe(controlClassName({ surface: 'dense' }))
+  })
+
+  it('gives `soft` the card radius and raised fill the auth forms use', () => {
+    const soft = controlClassName({ surface: 'soft' })
+    expect(soft).toContain('rounded-card')
+    expect(soft).toContain('bg-bgSecondary/35')
+    expect(soft).toContain('hover:border-surfaceGlass/16')
+    // The softer focus pair belongs to this surface, not the dense one.
+    expect(soft).toContain('focus:ring-accentPrimary/15')
+    expect(soft).not.toContain('focus:ring-accentPrimary/20')
+  })
+
+  it('leaves the dense surface free of the soft surface`s additions', () => {
+    const dense = controlClassName()
+    expect(dense).toContain('rounded-xl')
+    expect(dense).toContain('bg-bgPrimary/40')
+    // `transition` rides with `soft` only — the admin forms never had one, and
+    // this is what stops the variant leaking into them.
+    expect(dense).not.toContain('transition')
+    expect(dense).not.toContain('hover:')
+  })
+
+  it('applies the surface through the components too, not just the helper', () => {
+    const { container } = render(
+      <>
+        <TextInput surface="soft" />
+        <Select surface="soft" />
+        <Textarea surface="soft" />
+      </>,
+    )
+    const classes = Array.from(container.children).map((el) => el.className)
+    expect(new Set(classes).size).toBe(1)
+    expect(classes[0]).toBe(controlClassName({ surface: 'soft' }))
+  })
+
+  // Splitting one string into BASE + SURFACES is only safe if the dense surface
+  // comes out the other side identical — 11 admin files were migrated onto it in
+  // the phase-6 admin PR and none of them asked to be restyled. Pinned as a SET,
+  // because the split legitimately reorders the tokens and CSS does not care
+  // about the order of a class attribute.
+  it('emits exactly the dense token set the admin screens were migrated onto', () => {
+    expect(new Set(controlClassName().split(' '))).toEqual(
+      new Set(
+        [
+          'w-full rounded-xl border border-surfaceGlass/15 bg-bgPrimary/40 px-3 py-2 text-sm text-textPrimary',
+          'placeholder:text-textSecondary/70 outline-none',
+          'focus:border-accentPrimary/50 focus:ring-2 focus:ring-accentPrimary/20',
+          'disabled:cursor-not-allowed disabled:opacity-60',
+        ]
+          .join(' ')
+          .split(' '),
+      ),
+    )
+  })
+
+  // Same pin for the other direction: `soft` has to reproduce the string the
+  // auth forms had been carrying, or promoting them into the kit restyles every
+  // login/signup/reset field. The ONE intended difference is the disabled
+  // treatment, which becomes a CSS pseudo-class instead of a JS-computed
+  // `opacity-70` — asserted explicitly rather than left to the reader.
+  it('emits exactly the soft token set the auth forms were carrying', () => {
+    const authFieldClasses =
+      'w-full rounded-card border px-3 py-2 text-sm outline-none transition ' +
+      'border-surfaceGlass/10 bg-bgSecondary/35 text-textPrimary ' +
+      'placeholder:text-textSecondary/70 ' +
+      'hover:border-surfaceGlass/16 ' +
+      'focus:border-accentPrimary/35 focus:ring-2 focus:ring-accentPrimary/15'
+
+    const emitted = new Set(controlClassName({ surface: 'soft' }).split(' '))
+    const inherited = new Set(authFieldClasses.split(' '))
+
+    expect([...inherited].filter((c) => !emitted.has(c))).toEqual([])
+    expect([...emitted].filter((c) => !inherited.has(c))).toEqual([
+      'disabled:cursor-not-allowed',
+      'disabled:opacity-60',
+    ])
+  })
+
+  it('states the disabled treatment in CSS, for both surfaces', () => {
+    for (const surface of ['dense', 'soft'] as const) {
+      const cls = controlClassName({ surface })
+      expect(cls).toContain('disabled:opacity-60')
+      expect(cls).toContain('disabled:cursor-not-allowed')
+    }
   })
 })
 

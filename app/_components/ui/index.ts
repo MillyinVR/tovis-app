@@ -39,4 +39,10 @@ export { default as FieldLabel } from './FieldLabel'
 export type { FieldLabelProps } from './FieldLabel'
 
 export { TextInput, Select, Textarea, controlClassName } from './controls'
-export type { TextInputProps, SelectProps, TextareaProps } from './controls'
+export type {
+  TextInputProps,
+  SelectProps,
+  TextareaProps,
+  ControlSurface,
+  ControlStyleOptions,
+} from './controls'

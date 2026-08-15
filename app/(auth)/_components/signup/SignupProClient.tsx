@@ -13,6 +13,7 @@ import Input from '../Input'
 import PasswordInput from '../PasswordInput'
 import PrimaryButton from '../PrimaryButton'
 import SecondaryLinkButton from '../SecondaryLinkButton'
+import Select from '../Select'
 import { cn } from '@/lib/utils'
 import { isRecord } from '@/lib/guards'
 import { sanitizeHandleInput } from '@/lib/handles'
@@ -112,22 +113,6 @@ function readVerificationSendState(
   const value = data?.[key]
   if (value === 'pending') return 'pending'
   return value === true
-}
-
-function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
-  return (
-    <select
-      {...props}
-      className={cn(
-        'w-full rounded-card border px-3 py-2 text-sm outline-none transition',
-        'border-surfaceGlass/10 bg-bgSecondary/35 text-textPrimary',
-        'hover:border-surfaceGlass/16',
-        'focus:border-accentPrimary/35 focus:ring-2 focus:ring-accentPrimary/15',
-        props.disabled && 'opacity-70',
-        props.className ?? '',
-      )}
-    />
-  )
 }
 
 function isUsZip(raw: string) {
