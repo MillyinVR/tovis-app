@@ -3,7 +3,11 @@
 // always renders even when a stored avatar/look URL is unavailable.
 import { ImageResponse } from 'next/og'
 
-import { svgToDataUrl, TOVIS_EYE_SVG } from '@/lib/brand/eyeSvg'
+import {
+  rgbTripletToHex,
+  svgToDataUrl,
+  TOVIS_EYE_SVG,
+} from '@/lib/brand/eyeSvg'
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import { loadPublicClientProfile } from './_data/loadPublicClientProfile'
 import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
@@ -15,15 +19,18 @@ export const alt = 'Creator profile'
 export default async function ProfileOpengraphImage({
   params,
 }: {
-  params: { handle: string }
+  params: Promise<{ handle: string }>
 }) {
+  const { handle: handleParam } = await params
+
   const [brand, profile] = await Promise.all([
     getBrandForTenantContext(await resolveTenantContextForLayout()),
-    loadPublicClientProfile(params.handle),
+    loadPublicClientProfile(handleParam),
   ])
   const markDataUrl = svgToDataUrl(brand.assets.mark.svg ?? TOVIS_EYE_SVG)
+  const dark = brand.tokensByMode.dark.colors
 
-  const handle = profile?.handle ?? params.handle
+  const handle = profile?.handle ?? handleParam
   const bio = profile?.bio ?? null
   const lookCount = profile?.counts.looks ?? 0
   const followerCount = profile?.counts.followers ?? 0
@@ -43,13 +50,13 @@ export default async function ProfileOpengraphImage({
           flexDirection: 'column',
           justifyContent: 'space-between',
           padding: 72,
-          background: '#0A1413',
-          color: '#F2EFE7',
+          background: rgbTripletToHex(dark.bgPrimary),
+          color: rgbTripletToHex(dark.textPrimary),
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <img src={markDataUrl} width={64} height={64} alt="" />
-          <div style={{ fontSize: 30, fontWeight: 700, color: '#8FA39E' }}>
+          <div style={{ fontSize: 30, fontWeight: 700, color: rgbTripletToHex(dark.textMuted) }}>
             {brand.assets.wordmark.text}
           </div>
         </div>
@@ -63,13 +70,13 @@ export default async function ProfileOpengraphImage({
               lineHeight: 1.02,
             }}
           >
-            @{handle}
+            {`@${handle}`}
           </div>
           {bio ? (
             <div
               style={{
                 fontSize: 34,
-                color: '#C9D3D0',
+                color: rgbTripletToHex(dark.textSecondary),
                 maxWidth: 900,
                 lineHeight: 1.25,
               }}
@@ -77,7 +84,7 @@ export default async function ProfileOpengraphImage({
               {bio.length > 120 ? `${bio.slice(0, 117)}…` : bio}
             </div>
           ) : null}
-          <div style={{ fontSize: 30, color: '#8FA39E' }}>{stats}</div>
+          <div style={{ fontSize: 30, color: rgbTripletToHex(dark.textMuted) }}>{stats}</div>
         </div>
 
         <div
@@ -85,7 +92,9 @@ export default async function ProfileOpengraphImage({
             width: 120,
             height: 6,
             borderRadius: 999,
-            background: 'linear-gradient(100deg,#F2B43E,#15C9A8)',
+            background: `linear-gradient(100deg,${rgbTripletToHex(
+              dark.microAccent,
+            )},${rgbTripletToHex(dark.accentPrimary)})`,
           }}
         />
       </div>

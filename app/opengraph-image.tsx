@@ -1,7 +1,7 @@
 // app/opengraph-image.tsx — branded social share card, generated from The Eye
 // + the tenant-resolved brand name/tagline. Also serves as the Twitter image.
 import { ImageResponse } from 'next/og'
-import { svgToDataUrl, TOVIS_EYE_SVG } from '@/lib/brand/eyeSvg'
+import { rgbTripletToHex, svgToDataUrl, TOVIS_EYE_SVG } from '@/lib/brand/eyeSvg'
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 
@@ -12,6 +12,7 @@ export const alt = 'tovis'
 export default async function OpengraphImage() {
   const brand = getBrandForTenantContext(await resolveTenantContextForLayout())
   const markDataUrl = svgToDataUrl(brand.assets.mark.svg ?? TOVIS_EYE_SVG)
+  const dark = brand.tokensByMode.dark.colors
 
   return new ImageResponse(
     (
@@ -24,8 +25,8 @@ export default async function OpengraphImage() {
           alignItems: 'center',
           justifyContent: 'center',
           gap: 24,
-          background: '#0A1413',
-          color: '#F2EFE7',
+          background: rgbTripletToHex(dark.bgPrimary),
+          color: rgbTripletToHex(dark.textPrimary),
         }}
       >
         <img src={markDataUrl} width={172} height={172} alt="" />
@@ -33,7 +34,9 @@ export default async function OpengraphImage() {
           {brand.assets.wordmark.text}
         </div>
         {brand.tagline ? (
-          <div style={{ fontSize: 30, color: '#8FA39E' }}>{brand.tagline}</div>
+          <div style={{ fontSize: 30, color: rgbTripletToHex(dark.textMuted) }}>
+            {brand.tagline}
+          </div>
         ) : null}
         <div
           style={{
@@ -41,7 +44,9 @@ export default async function OpengraphImage() {
             width: 96,
             height: 5,
             borderRadius: 999,
-            background: 'linear-gradient(100deg,#F2B43E,#15C9A8)',
+            background: `linear-gradient(100deg,${rgbTripletToHex(
+              dark.microAccent,
+            )},${rgbTripletToHex(dark.accentPrimary)})`,
           }}
         />
       </div>

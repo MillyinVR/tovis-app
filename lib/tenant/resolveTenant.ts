@@ -22,7 +22,7 @@ import { prisma } from '@/lib/prisma'
 import { TOVIS_ROOT_TENANT_NAME, TOVIS_ROOT_TENANT_SLUG } from './constants'
 import {
   rootTenantContext,
-  whiteLabelTenantContext,
+  tenantContextFor,
   type TenantContext,
 } from './context'
 
@@ -131,8 +131,13 @@ export async function resolveTenantByHost(
   if (normalized) {
     const tenant = await lookupTenantByCustomDomain(normalized)
 
-    if (tenant && tenant.slug !== TOVIS_ROOT_TENANT_SLUG) {
-      return whiteLabelTenantContext({ tenantId: tenant.id, slug: tenant.slug })
+    if (tenant) {
+      const ctx = tenantContextFor({ tenantId: tenant.id, slug: tenant.slug })
+
+      // A custom domain pointing at the root tenant is not a white-label
+      // context — fall through so the root id comes from getRootTenantId(),
+      // the one resolver that guarantees the reserved row exists.
+      if (!ctx.isRoot) return ctx
     }
   }
 

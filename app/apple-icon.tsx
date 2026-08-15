@@ -1,6 +1,6 @@
 // app/apple-icon.tsx — iOS home-screen icons (PNG), from the tenant brand mark.
 import { ImageResponse } from 'next/og'
-import { svgToDataUrl, TOVIS_EYE_SVG } from '@/lib/brand/eyeSvg'
+import { rgbTripletToHex, svgToDataUrl, TOVIS_EYE_SVG } from '@/lib/brand/eyeSvg'
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 
@@ -27,6 +27,7 @@ export default async function AppleIcon({ id }: { id: Promise<string> }) {
 
   const brand = getBrandForTenantContext(await resolveTenantContextForLayout())
   const markDataUrl = svgToDataUrl(brand.assets.mark.svg ?? TOVIS_EYE_SVG)
+  const dark = brand.tokensByMode.dark.colors
 
   return new ImageResponse(
     (
@@ -37,7 +38,7 @@ export default async function AppleIcon({ id }: { id: Promise<string> }) {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          background: '#0A1413',
+          background: rgbTripletToHex(dark.bgPrimary),
         }}
       >
         <img src={markDataUrl} width={markPx} height={markPx} alt="" />

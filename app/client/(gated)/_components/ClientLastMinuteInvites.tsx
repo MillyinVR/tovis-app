@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { initialsForName } from '@/lib/initials'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import ProProfileLink from '@/app/_components/ProProfileLink'
-import { formatInTimeZone } from '@/lib/time'
+import { daySerialInTimeZone, formatInTimeZone } from '@/lib/time'
 import { incentiveLabel } from '@/lib/lastMinute/openingDto'
 import { pickRecipientTierPlan } from '@/lib/lastMinute/pickTierPlan'
 
@@ -43,20 +43,24 @@ function inviteHref(invite: ClientHomeLastMinuteInvite): string | null {
   )}&source=DISCOVERY&openingId=${encodeURIComponent(invite.opening.id)}`
 }
 
-function relativeDay(date: Date): string {
-  const now = new Date()
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  const target = new Date(date.getFullYear(), date.getMonth(), date.getDate())
-  const diff = Math.round(
-    (target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
-  )
+// "today" / "tomorrow" is a claim about the OPENING's day, so it has to be
+// counted in the opening's zone — the same one formatTime renders the clock in,
+// or the label and the time can disagree across a midnight boundary. The old
+// version used the runtime's local calendar (`new Date(y, m, d)`), which on
+// Vercel is UTC, so an evening appointment could read "tomorrow".
+function relativeDay(date: Date, timeZone?: string | null): string {
+  const tz = timeZone ?? 'UTC'
+  const diff = daySerialInTimeZone(date, tz) - daySerialInTimeZone(new Date(), tz)
+
   if (diff === 0) return 'today'
   if (diff === 1) return 'tomorrow'
-  return new Intl.DateTimeFormat('en-US', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-  }).format(date)
+
+  return formatInTimeZone(
+    date,
+    tz,
+    { weekday: 'short', month: 'short', day: 'numeric' },
+    'en-US',
+  )
 }
 
 function formatTime(date: Date, timeZone?: string | null): string {
@@ -74,7 +78,7 @@ function formatTime(date: Date, timeZone?: string | null): string {
 }
 
 function hasToday(invites: ClientHomeLastMinuteInvite[]): boolean {
-  return invites.some((invite) => relativeDay(invite.opening.startAt) === 'today')
+  return invites.some((invite) => relativeDay(invite.opening.startAt, invite.opening.timeZone) === 'today')
 }
 
 function InviteRow({
@@ -91,7 +95,7 @@ function InviteRow({
   const proFirst = firstWord(proName)
   const proId = invite.opening.professional.id
   const time = formatTime(invite.opening.startAt, invite.opening.timeZone)
-  const day = relativeDay(invite.opening.startAt)
+  const day = relativeDay(invite.opening.startAt, invite.opening.timeZone)
   const title = inviteTitle(invite)
   const price = invitePrice(invite)
   const place = invite.opening.professional.location?.trim() || null

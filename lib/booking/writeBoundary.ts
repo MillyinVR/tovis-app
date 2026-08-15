@@ -59,6 +59,8 @@ import {
   resolveBookingTenantAttribution,
   resolveProTenantId,
 } from '@/lib/tenant/bookingAttribution'
+import { tenantContextFor } from '@/lib/tenant'
+import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import { upper } from '@/lib/booking/guards'
 import { deriveClientRelationshipLabel } from '@/lib/booking/relationshipLabel'
 import { isFinalizeConsultAttributionOwned } from '@/lib/booking/consultAttribution'
@@ -2269,6 +2271,14 @@ const CLIENT_STRIPE_CHECKOUT_BOOKING_SELECT = {
   service: {
     select: {
       name: true,
+    },
+  },
+  // The tenant whose brand the client sees on the Stripe checkout page and on
+  // their card statement (buildStripeLineItemDescription).
+  proTenant: {
+    select: {
+      id: true,
+      slug: true,
     },
   },
   professional: {
@@ -18857,12 +18867,31 @@ function decimalToCents(value: Prisma.Decimal | null | undefined): number {
   return Math.round(amount * 100)
 }
 
+/**
+ * The Stripe line-item description — it reaches the client's checkout page AND
+ * their card statement, so it is the most externally visible string the booking
+ * boundary produces. It must carry the brand of the tenant the booking belongs
+ * to, never the platform's.
+ *
+ * Resolution goes through `getBrandForTenantContext`, which is an exact registry
+ * lookup: an unregistered white-label slug falls back to the platform brand
+ * explicitly. Do NOT swap this for `getBrandConfig()` — that walks a host ->
+ * NEXT_PUBLIC_BRAND chain, which would show one tenant's client whatever brand
+ * the deployment happens to be configured with.
+ */
 function buildStripeLineItemDescription(args: {
   bookingId: string
   serviceName: string | null
+  proTenant: { id: string; slug: string }
 }): string {
+  const brandName = getBrandForTenantContext(
+    tenantContextFor({ tenantId: args.proTenant.id, slug: args.proTenant.slug }),
+  ).displayName
+
   const trimmed = args.serviceName?.trim() ?? ''
-  return trimmed ? `TOVIS booking: ${trimmed}` : `TOVIS booking ${args.bookingId}`
+  return trimmed
+    ? `${brandName} booking: ${trimmed}`
+    : `${brandName} booking ${args.bookingId}`
 }
 
 function assertProSettingsAcceptStripeCard(
@@ -19103,6 +19132,7 @@ async function performLockedPrepareClientStripeCheckoutSession(args: {
       lineItemDescription: buildStripeLineItemDescription({
         bookingId: booking.id,
         serviceName: booking.service?.name ?? null,
+        proTenant: booking.proTenant,
       }),
       connectedAccountId: paymentSettings.stripeAccountId,
     },
@@ -19515,6 +19545,8 @@ export async function prepareClientDepositCheckout(args: {
           proDiscoveryFeeAmount: true,
           depositPaidAt: true,
           service: { select: { name: true } },
+          // Brand shown on the client's checkout page and card statement.
+          proTenant: { select: { id: true, slug: true } },
           professional: {
             select: {
               paymentSettings: {
@@ -19590,6 +19622,7 @@ export async function prepareClientDepositCheckout(args: {
           lineItemDescription: buildStripeLineItemDescription({
             bookingId: booking.id,
             serviceName: booking.service?.name ?? null,
+            proTenant: booking.proTenant,
           }),
         },
         meta: buildMeta(false),
