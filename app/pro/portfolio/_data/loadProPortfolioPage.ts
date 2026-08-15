@@ -118,13 +118,18 @@ export type ProPortfolioSearchParams = {
   q?: string | string[]
 }
 
+/**
+ * The RSC entry point: authenticate, then build. `redirect()` throws, so it
+ * belongs here and NOT in {@link buildProPortfolioModel} — an API route calling
+ * a loader that redirects would answer a native client with a 307 to /login
+ * instead of a 401.
+ */
 export async function loadProPortfolioPage({
   searchParams,
 }: {
   searchParams?: ProPortfolioSearchParams | null
 }): Promise<ProPortfolioPageModel> {
   const user = await getCurrentUser()
-  const brand = getBrandConfig()
 
   if (!user || user.role !== Role.PRO || !user.professionalProfile) {
     redirect(
@@ -132,12 +137,41 @@ export async function loadProPortfolioPage({
     )
   }
 
+  const model = await buildProPortfolioModel({
+    professionalId: user.professionalProfile.id,
+    searchParams,
+  })
+
+  if (!model) redirect(PRO_PORTFOLIO_ROUTES.proHome)
+
+  return model
+}
+
+/**
+ * Everything the screen shows, for one pro.
+ *
+ * 🔴 Shared with `GET /api/v1/pro/portfolio` — that route exists for NATIVE
+ * parity, not for the web page, and sharing this function is what stops the two
+ * from drifting. iOS previously rendered a different screen entirely
+ * (`/api/v1/pro/media`, a two-toggle "My media"), which is exactly the drift
+ * this shape prevents. Returns null when the professional row is gone, so the
+ * caller decides between a redirect and a 404.
+ */
+export async function buildProPortfolioModel({
+  professionalId,
+  searchParams,
+}: {
+  professionalId: string
+  searchParams?: ProPortfolioSearchParams | null
+}): Promise<ProPortfolioPageModel | null> {
+  const brand = getBrandConfig()
+
   const pro = await prisma.professionalProfile.findUnique({
-    where: { id: user.professionalProfile.id },
+    where: { id: professionalId },
     select: proSelect,
   })
 
-  if (!pro) redirect(PRO_PORTFOLIO_ROUTES.proHome)
+  if (!pro) return null
 
   const activeFilter = pickFilter(searchParams?.filter)
   const searchQuery = pickQuery(searchParams?.q)
