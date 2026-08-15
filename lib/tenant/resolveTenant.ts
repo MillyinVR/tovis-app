@@ -22,7 +22,7 @@ import { prisma } from '@/lib/prisma'
 import { TOVIS_ROOT_TENANT_NAME, TOVIS_ROOT_TENANT_SLUG } from './constants'
 import {
   rootTenantContext,
-  whiteLabelTenantContext,
+  tenantContextFor,
   type TenantContext,
 } from './context'
 
@@ -132,7 +132,7 @@ export async function resolveTenantByHost(
     const tenant = await lookupTenantByCustomDomain(normalized)
 
     if (tenant && tenant.slug !== TOVIS_ROOT_TENANT_SLUG) {
-      return whiteLabelTenantContext({ tenantId: tenant.id, slug: tenant.slug })
+      return tenantContextFor({ tenantId: tenant.id, slug: tenant.slug })
     }
   }
 

@@ -49,7 +49,11 @@ function stripIgnoredTokens(line) {
 
 const ALLOWED_PATH_PREFIXES = ['lib/brand/', 'lib/tenant/constants.ts']
 
-const SCAN_DIRS = ['app', 'lib']
+// `app` and `lib` are where user-facing copy lives, but they are not the only
+// places it can reach a user: `scripts/` and `prisma/` produce operator output
+// and seed rows, and a brand string added there was previously invisible to this
+// check. Scanning them costs nothing and closes the blind spot.
+const SCAN_DIRS = ['app', 'lib', 'scripts', 'prisma']
 
 const IGNORE_DIRS = new Set([
   '.git',
@@ -148,9 +152,23 @@ function findViolations() {
 
 function writeBaseline(violations) {
   const keys = violations.map(makeKey).sort()
+  // The header is regenerated on every --update-baseline, so it is the only
+  // durable place to record WHY an entry is still here. Both remaining entries
+  // are deliberate; this list is not expected to reach zero.
   const header = [
     '# Hardcoded brand copy that pre-dates tenant-resolved branding (WS-6).',
     '# Migrate these to lib/brand and shrink the list; never add entries.',
+    '#',
+    '# The two entries below are DELIBERATE — reviewed 2026-08-15, keep them:',
+    '#',
+    '#   sentry-test/route.ts — an internal debug route. The string is an alert',
+    '#     IDENTIFIER that ops greps for, not user-facing copy; making it',
+    '#     tenant-specific would break the thing it exists for.',
+    '#',
+    '#   seedRetentionRosterPerf.ts — a local perf-seed fixture that names the',
+    '#     tenant row it creates. Never rendered to a user.',
+    '#',
+    '# So this baseline is at its floor. A NEW entry is still a failure.',
   ]
 
   fs.mkdirSync(path.dirname(BASELINE_PATH), { recursive: true })

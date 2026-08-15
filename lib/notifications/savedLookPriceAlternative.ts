@@ -71,10 +71,8 @@ import {
 } from '@/lib/privacy/professionalDisplayName'
 import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
 import {
-  TOVIS_ROOT_TENANT_SLUG,
   proDiscoveryVisibilityFilter,
-  rootTenantContext,
-  whiteLabelTenantContext,
+  tenantContextFor,
   type TenantContext,
 } from '@/lib/tenant'
 
@@ -411,13 +409,6 @@ export type SavedLookPriceAlternativeSummary = {
   computedAt: Date
 }
 
-/** Build the tenant context for a client's home tenant (root vs white-label). */
-function tenantContextFor(tenantId: string, tenantSlug: string): TenantContext {
-  return tenantSlug === TOVIS_ROOT_TENANT_SLUG
-    ? rootTenantContext(tenantId)
-    : whiteLabelTenantContext({ tenantId, slug: tenantSlug })
-}
-
 type LoadedPricedSaves = {
   saves: PricedSaveRow[]
   capped: boolean
@@ -487,7 +478,10 @@ async function loadAgingPricedSaves(
     if (!categorySlug || price === null || !(price > 0)) continue
 
     if (!tenantContexts.has(tenantId)) {
-      tenantContexts.set(tenantId, tenantContextFor(tenantId, tenantSlug))
+      tenantContexts.set(
+        tenantId,
+        tenantContextFor({ tenantId, slug: tenantSlug }),
+      )
     }
     saves.push({
       clientId: row.board.clientId,

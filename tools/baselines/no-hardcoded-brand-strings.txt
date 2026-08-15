@@ -1,4 +1,15 @@
 # Hardcoded brand copy that pre-dates tenant-resolved branding (WS-6).
 # Migrate these to lib/brand and shrink the list; never add entries.
+#
+# The two entries below are DELIBERATE — reviewed 2026-08-15, keep them:
+#
+#   sentry-test/route.ts — an internal debug route. The string is an alert
+#     IDENTIFIER that ops greps for, not user-facing copy; making it
+#     tenant-specific would break the thing it exists for.
+#
+#   seedRetentionRosterPerf.ts — a local perf-seed fixture that names the
+#     tenant row it creates. Never rendered to a user.
+#
+# So this baseline is at its floor. A NEW entry is still a failure.
 app/api/internal/debug/sentry-test/route.ts|const SYNTHETIC_ALERT_MESSAGE = 'TOVIS production-safe synthetic Sentry alert v2'
-lib/booking/writeBoundary.ts|return trimmed ? `TOVIS booking: ${trimmed}` : `TOVIS booking ${args.bookingId}`
+prisma/scripts/seedRetentionRosterPerf.ts|create: { slug: TENANT_SLUG, name: 'TOVIS', isActive: true },

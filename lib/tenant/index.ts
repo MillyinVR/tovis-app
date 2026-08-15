@@ -4,6 +4,7 @@ export { tenantCacheScope } from './cacheScope'
 export { TOVIS_ROOT_TENANT_NAME, TOVIS_ROOT_TENANT_SLUG } from './constants'
 export {
   rootTenantContext,
+  tenantContextFor,
   whiteLabelTenantContext,
   type TenantContext,
 } from './context'
