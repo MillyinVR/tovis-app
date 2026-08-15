@@ -7,12 +7,15 @@ import {
   useMemo,
   useState,
   type FormEvent,
-  type InputHTMLAttributes,
   type ReactNode,
 } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 
 import AuthShell from '../_components/AuthShell'
+import Input from '../_components/Input'
+import PrimaryButton, {
+  primaryButtonClassName,
+} from '../_components/PrimaryButton'
 import {
   RESEND_COOLDOWN_SECONDS,
   formatCooldown,
@@ -46,55 +49,6 @@ const EMPTY_STATUS: VerificationStatus = {
   role: null,
   email: null,
   phone: null,
-}
-
-function Input(props: InputHTMLAttributes<HTMLInputElement>) {
-  return (
-    <input
-      {...props}
-      className={cn(
-        'w-full rounded-card border px-3 py-2 text-sm outline-none transition',
-        'border-surfaceGlass/10 bg-bgSecondary/35 text-textPrimary',
-        'placeholder:text-textSecondary/70',
-        'hover:border-surfaceGlass/16',
-        'focus:border-accentPrimary/35 focus:ring-2 focus:ring-accentPrimary/15',
-        props.disabled && 'opacity-70',
-        props.className ?? '',
-      )}
-    />
-  )
-}
-
-function PrimaryButton({
-  children,
-  loading,
-  disabled,
-}: {
-  children: ReactNode
-  loading: boolean
-  disabled?: boolean
-}) {
-  return (
-    <button
-      type="submit"
-      disabled={disabled || loading}
-      className={cn(
-        'relative inline-flex w-full items-center justify-center overflow-hidden rounded-full px-4 py-2.5 text-sm font-black transition',
-        'border border-accentPrimary/35',
-        'bg-accentPrimary/26 text-textPrimary',
-        'before:pointer-events-none before:absolute before:inset-0 before:bg-[linear-gradient(110deg,transparent,rgba(255,255,255,0.10),transparent)] before:opacity-0 before:transition',
-        'hover:bg-accentPrimary/30 hover:border-accentPrimary/45 hover:before:opacity-100',
-        'focus:outline-none focus:ring-2 focus:ring-accentPrimary/20',
-        loading ? 'cursor-not-allowed opacity-65' : 'cursor-pointer',
-      )}
-    >
-      <span
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(255,255,255,0.22),transparent)]"
-      />
-      <span className="relative">{children}</span>
-    </button>
-  )
 }
 
 function TinyButton({
@@ -814,22 +768,14 @@ export default function VerifyPhonePage() {
 
         {!status.isPhoneVerified ? (
           <PrimaryButton
+            withArrow
             loading={loading}
             disabled={loading || sendingPhone || correctingPhone}
           >
             {loading ? 'Verifying…' : 'Verify phone'}
           </PrimaryButton>
         ) : status.isFullyVerified ? (
-          <Link
-            href={resolvedNextUrl}
-            className={cn(
-              'relative inline-flex w-full items-center justify-center overflow-hidden rounded-full px-4 py-2.5 text-sm font-black transition',
-              'border border-accentPrimary/35',
-              'bg-accentPrimary/26 text-textPrimary',
-              'hover:bg-accentPrimary/30 hover:border-accentPrimary/45',
-              'focus:outline-none focus:ring-2 focus:ring-accentPrimary/20',
-            )}
-          >
+          <Link href={resolvedNextUrl} className={primaryButtonClassName()}>
             Continue
           </Link>
         ) : null}

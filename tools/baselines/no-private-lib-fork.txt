@@ -148,12 +148,17 @@ lib/pro/proBookingsList.ts|sumDecimal
 lib/supabaseAdmin.ts|mustGetEnv
 
 # ── UI-kit forks, added at phase 6 ──────────────────────────────────────────
-# app/admin was migrated in the phase-6 admin PR and is deliberately absent.
-# These are the remaining areas, one PR each: pro session/aftercare Cards,
-# the (auth) + client settings FieldLabels, pro calendar's Select and its two
-# buttonClassName copies, EditPaymentSettingsButton's TextInput, and the
-# public-profile Avatar. Shrink this block to zero as those land.
-app/(auth)/_components/signup/SignupProClient.tsx|Select
+# app/admin was migrated in the phase-6 admin PR and is deliberately absent;
+# (auth) followed. These are the remaining areas, one PR each: pro
+# session/aftercare Cards, the client settings FieldLabels, pro calendar's
+# Select and its two buttonClassName copies, EditPaymentSettingsButton's
+# TextInput, and the public-profile Avatar. Shrink this block to zero as those
+# land.
+#
+# ⚠️ This guard only sees PRIVATE declarations, so an EXPORTED fork is invisible
+# to it — `app/(auth)/_components/{Input,FieldLabel,PrimaryButton}.tsx` were each
+# a full copy of a kit primitive and never appeared on this list. The baseline is
+# a floor, not the work-list.
 app/client/(gated)/looks/share/[bookingId]/ShareLookSheet.tsx|FieldLabel
 app/client/(gated)/settings/ClientProfileSettings.tsx|FieldLabel
 app/client/(gated)/settings/ClientPublicProfileSettings.tsx|FieldLabel
