@@ -1,7 +1,11 @@
 // app/u/[handle]/boards/[slug]/opengraph-image.tsx — share card for a public board
 import { ImageResponse } from 'next/og'
 
-import { svgToDataUrl, TOVIS_EYE_SVG } from '@/lib/brand/eyeSvg'
+import {
+  rgbTripletToHex,
+  svgToDataUrl,
+  TOVIS_EYE_SVG,
+} from '@/lib/brand/eyeSvg'
 import { loadPublicBoard } from '@/lib/boards/publicBoard'
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
@@ -13,16 +17,19 @@ export const alt = 'Board'
 export default async function BoardOpengraphImage({
   params,
 }: {
-  params: { handle: string; slug: string }
+  params: Promise<{ handle: string; slug: string }>
 }) {
+  const { handle: handleParam, slug } = await params
+
   const [brand, board] = await Promise.all([
     getBrandForTenantContext(await resolveTenantContextForLayout()),
-    loadPublicBoard(params.handle, params.slug),
+    loadPublicBoard(handleParam, slug),
   ])
   const markDataUrl = svgToDataUrl(brand.assets.mark.svg ?? TOVIS_EYE_SVG)
+  const dark = brand.tokensByMode.dark.colors
 
   const boardName = board?.boardName ?? 'Board'
-  const handle = board?.handle ?? params.handle
+  const handle = board?.handle ?? handleParam
   const lookCount = board?.looks.length ?? 0
 
   return new ImageResponse(
@@ -35,13 +42,13 @@ export default async function BoardOpengraphImage({
           flexDirection: 'column',
           justifyContent: 'space-between',
           padding: 72,
-          background: '#0A1413',
-          color: '#F2EFE7',
+          background: rgbTripletToHex(dark.bgPrimary),
+          color: rgbTripletToHex(dark.textPrimary),
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <img src={markDataUrl} width={64} height={64} alt="" />
-          <div style={{ fontSize: 30, fontWeight: 700, color: '#8FA39E' }}>
+          <div style={{ fontSize: 30, fontWeight: 700, color: rgbTripletToHex(dark.textMuted) }}>
             {brand.assets.wordmark.text}
           </div>
         </div>
@@ -52,10 +59,10 @@ export default async function BoardOpengraphImage({
               fontSize: 24,
               letterSpacing: '0.14em',
               textTransform: 'uppercase',
-              color: '#8FA39E',
+              color: rgbTripletToHex(dark.textMuted),
             }}
           >
-            Board · @{handle}
+            {`Board · @${handle}`}
           </div>
           <div
             style={{
@@ -68,8 +75,8 @@ export default async function BoardOpengraphImage({
             {boardName}
           </div>
           {lookCount > 0 ? (
-            <div style={{ fontSize: 30, color: '#8FA39E' }}>
-              {lookCount} {lookCount === 1 ? 'look' : 'looks'} to book
+            <div style={{ fontSize: 30, color: rgbTripletToHex(dark.textMuted) }}>
+              {`${lookCount} ${lookCount === 1 ? 'look' : 'looks'} to book`}
             </div>
           ) : null}
         </div>
@@ -79,7 +86,9 @@ export default async function BoardOpengraphImage({
             width: 120,
             height: 6,
             borderRadius: 999,
-            background: 'linear-gradient(100deg,#F2B43E,#15C9A8)',
+            background: `linear-gradient(100deg,${rgbTripletToHex(
+              dark.microAccent,
+            )},${rgbTripletToHex(dark.accentPrimary)})`,
           }}
         />
       </div>
