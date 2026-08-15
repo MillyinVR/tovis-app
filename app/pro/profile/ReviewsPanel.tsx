@@ -411,11 +411,14 @@ function ReviewsPanelInner({
                   </div>
                 ) : null}
 
+                {/* The reply is NOT a card of its own — it is an accent
+                    hairline INSIDE the review, so the two are read together and
+                    the reply can't be mistaken for a second opinion. */}
                 {review.proReply ? (
                   <div
                     style={{
                       marginTop: 8,
-                      borderLeft: '2px solid rgb(var(--text-primary) / 0.15)',
+                      borderLeft: '2px solid rgb(var(--accent-primary))',
                       paddingLeft: 10,
                     }}
                   >
@@ -423,7 +426,7 @@ function ReviewsPanelInner({
                       style={{
                         fontSize: 11,
                         fontWeight: 650,
-                        color: 'rgb(var(--text-muted))',
+                        color: 'rgb(var(--accent-primary))',
                       }}
                     >
                       Response from the pro ·{' '}

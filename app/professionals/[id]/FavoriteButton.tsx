@@ -3,11 +3,17 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+// 'row' is the screen-6 profile's three-up social action — a full-width labelled
+// cell matching the Message link and Share button beside it. 'stack' is the
+// original icon-over-count treatment.
+type FavoriteButtonVariant = 'stack' | 'row'
+
 type FavoriteButtonProps = {
   professionalId: string
   initialFavorited: boolean
   initialCount?: number | null
   disabledReason?: string
+  variant?: FavoriteButtonVariant
 }
 
 type FavoritePatch = {
@@ -80,6 +86,7 @@ export default function FavoriteButton({
   initialFavorited,
   initialCount,
   disabledReason,
+  variant = 'stack',
 }: FavoriteButtonProps) {
   const [favorited, setFavorited] = useState(Boolean(initialFavorited))
   const [count, setCount] = useState(normalizeCount(initialCount))
@@ -186,6 +193,37 @@ export default function FavoriteButton({
     : favorited
       ? 'Unfavorite'
       : 'Favorite'
+
+  if (variant === 'row') {
+    return (
+      <div className="grid gap-1">
+        <button
+          type="button"
+          onClick={toggle}
+          disabled={loading}
+          aria-pressed={favorited}
+          aria-label={title}
+          title={title}
+          className={[
+            'brand-pp-social-action brand-focus w-full',
+            loading ? 'cursor-wait opacity-75' : 'cursor-pointer',
+          ].join(' ')}
+        >
+          <span aria-hidden="true">{favorited ? '♥' : '♡'}</span>
+          <span>{favorited ? 'Saved' : 'Save'}</span>
+        </button>
+
+        {error ? (
+          <div
+            aria-live="polite"
+            className="text-[11px] font-semibold text-[rgb(var(--tone-danger))]"
+          >
+            {error}
+          </div>
+        ) : null}
+      </div>
+    )
+  }
 
   return (
     <div className="grid justify-items-center gap-1">

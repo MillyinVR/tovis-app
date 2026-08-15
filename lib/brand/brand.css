@@ -1356,6 +1356,524 @@ button {
 }
 
 /* ──────────────────────────────────────────────────────────────────
+   Public professional profile — screen 6 redesign
+
+   "A profile you scroll, not a listing you scan." The four-stat card and the
+   urgency chips are gone; trust is carried by the licence chip, the verified
+   tick, the grid itself and the reviews. Nothing floats and nothing follows the
+   scroll — booking lives in exactly two quiet places (the Signature post's
+   outline action, and a slim bar between the end of the scroll and the footer).
+────────────────────────────────────────────────────────────────── */
+
+.brand-pp-page {
+  --pp-pad: 16px;
+  --pp-cols: repeat(3, minmax(0, 1fr));
+  --pp-gap: 2px;
+  /* The grid runs edge to edge by cancelling the page's own padding. Sized to
+     THIS container, never 100vw — a viewport-width escape overshoots inside the
+     desktop rail and reintroduces a horizontal scrollbar. */
+  --pp-bleed: calc(var(--pp-pad) * -1);
+  /* minmax(0,…) not 1fr: a grid track's default `min-width: auto` lets a
+     wide child (the nowrap tab row) push the column past its share, which is
+     what made the whole work column overflow the page by 8px. */
+  --pp-rail: minmax(0, 1fr);
+  --pp-rail-gap: 0px;
+  --pp-shell: var(--mobile-shell-width);
+  --pp-name: 27px;
+  --pp-panel-cols: minmax(0, 1fr);
+
+  background: rgb(var(--bg-primary));
+  color: rgb(var(--text-primary));
+}
+
+@media (min-width: 768px) {
+  .brand-pp-page {
+    --pp-pad: 26px;
+    --pp-gap: 3px;
+    --pp-shell: 900px;
+    --pp-name: 34px;
+    --pp-panel-cols: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1100px) {
+  .brand-pp-page {
+    --pp-pad: 40px;
+    --pp-cols: repeat(4, minmax(0, 1fr));
+    --pp-gap: 4px;
+    /* At width the grid sits inside the content column, so it no longer needs
+       to escape the page padding. */
+    --pp-bleed: 0px;
+    --pp-rail: 352px minmax(0, 1fr);
+    --pp-rail-gap: 44px;
+    --pp-shell: 1180px;
+    --pp-name: 40px;
+  }
+}
+
+.brand-pp-shell {
+  margin-inline: auto;
+  max-width: var(--pp-shell);
+  background: rgb(var(--bg-primary));
+}
+
+/* The header is always a brand band, never a photograph. That dissolves the
+   no-cover state instead of solving it, and keeps the first picture on the page
+   the Signature post — the one that books. `coverUrl` still feeds share cards
+   and search results; it just doesn't compete here. */
+.brand-pp-band {
+  position: relative;
+  height: 132px;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(
+      520px circle at 20% 0%,
+      rgb(var(--accent-primary) / 0.16),
+      transparent 60%
+    ),
+    rgb(var(--bg-secondary));
+}
+
+.brand-pp-band-actions {
+  position: absolute;
+  top: 14px;
+  left: var(--pp-pad);
+  right: var(--pp-pad);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.brand-pp-body {
+  display: grid;
+  grid-template-columns: var(--pp-rail);
+  gap: var(--pp-rail-gap);
+  align-items: start;
+  padding: 0 var(--pp-pad) 28px;
+}
+
+/* Its OWN class, not `.brand-profile-avatar`: that one is `width:100%;
+   height:100%` for the retired hero's fixed-size wrapper, and reusing it here
+   let the avatar fill the whole flex row and shove the Follow pill out of the
+   rail entirely. */
+.brand-pp-avatar {
+  width: 80px;
+  height: 80px;
+  flex: none;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  border: 3px solid rgb(var(--bg-primary));
+  background: rgb(var(--bg-secondary));
+  box-shadow: var(--shadow-soft);
+}
+
+@media (min-width: 1100px) {
+  .brand-pp-avatar {
+    width: 104px;
+    height: 104px;
+  }
+}
+
+.brand-pp-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.brand-pp-avatar-fallback {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  background: linear-gradient(
+    135deg,
+    rgb(var(--bg-secondary)),
+    rgb(var(--bg-surface))
+  );
+  color: rgb(var(--text-primary));
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 650;
+}
+
+.brand-pp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 27px;
+  padding: 0 11px;
+  border-radius: var(--radius-pill);
+  border: 1px solid rgb(var(--accent-primary) / 0.4);
+  background: rgb(var(--accent-primary) / 0.12);
+  color: rgb(var(--accent-primary));
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.brand-pp-chip[data-tone='pending'] {
+  border-color: rgb(var(--tone-warn) / 0.45);
+  background: rgb(var(--tone-warn) / 0.14);
+  color: rgb(var(--tone-warn));
+}
+
+.brand-pp-social-action {
+  display: flex;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-radius: 12px;
+  border: 1px solid rgb(var(--surface-glass) / 0.16);
+  background: rgb(var(--surface-glass) / 0.04);
+  color: rgb(var(--text-primary));
+  font-family: var(--font-display);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.brand-pp-social-action:hover {
+  background: rgb(var(--surface-glass) / 0.09);
+}
+
+/* Sticky only as a marker for orientation — the panels below switch in place,
+   so the bar never scrolls away from the content it labels. */
+.brand-pp-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  gap: 22px;
+  border-bottom: 1px solid rgb(var(--surface-glass) / 0.12);
+  background: rgb(var(--bg-primary));
+  /* The labels carry counts and must not fold, so at a narrow width the BAR
+     scrolls rather than the page. Without this the row's min-content width wins
+     and the whole column overflows. */
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.brand-pp-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.brand-pp-tab {
+  padding: 12px 0 11px;
+  /* "Portfolio · 200" must not fold onto two lines at phone width. */
+  white-space: nowrap;
+  border-bottom: 2px solid transparent;
+  color: rgb(var(--text-muted));
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.brand-pp-tab[data-active='true'] {
+  border-bottom-color: rgb(var(--accent-primary));
+  color: rgb(var(--text-primary));
+}
+
+/* Feed grid — edge to edge, hairline gaps, no rounded tiles. */
+.brand-pp-grid {
+  display: grid;
+  grid-template-columns: var(--pp-cols);
+  gap: var(--pp-gap);
+  margin: var(--pp-gap) var(--pp-bleed) 0;
+}
+
+.brand-pp-tile {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+  background: rgb(var(--bg-secondary));
+}
+
+/* 🔴 Absolutely positioned, not `height: 100%`. The tile's height comes from its
+   own `aspect-ratio`, and an in-flow child asking for 100% of a height that is
+   itself being derived from the child is circular — the browser falls back to
+   the image's natural ratio and the "square" grid comes out landscape. Taking
+   the image out of flow makes the aspect-ratio the only thing sizing the cell.
+   Same failure the board mosaic hit with `aspect-square` + `h-full`. */
+.brand-pp-tile-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Top-and-bottom scrim so the counts stay legible on a bright photo without
+   greying out the middle of the work.
+
+   🔴 The scrim follows the THEME (`--bg-primary`), and so must everything drawn
+   on it. A fixed cream label over a scrim that goes pale in light mode is the
+   exact pairing that shipped an invisible "BOOKING THIS LOOK" on both
+   platforms — dark scrim + cream text in dark mode, pale scrim + ink text in
+   light, never one of each. */
+.brand-pp-tile-scrim {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    rgb(var(--bg-primary) / 0.22) 0%,
+    transparent 34%,
+    transparent 48%,
+    rgb(var(--bg-primary) / 0.82) 100%
+  );
+}
+
+.brand-pp-tile-counts {
+  position: absolute;
+  left: 7px;
+  right: 7px;
+  bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  overflow: hidden;
+  white-space: nowrap;
+  color: rgb(var(--text-primary));
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.brand-pp-tile-flag {
+  position: absolute;
+  top: 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 19px;
+  padding: 0 7px;
+  border-radius: var(--radius-pill);
+  background: rgb(var(--bg-primary) / 0.72);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+.brand-pp-tile-flag[data-side='left'] {
+  left: 7px;
+  color: rgb(var(--tone-warn));
+}
+
+.brand-pp-tile-flag[data-side='right'] {
+  right: 7px;
+  color: rgb(var(--text-primary));
+}
+
+/* The Signature post: the pro's own pick, promoted out of the grid. */
+.brand-pp-signature {
+  margin-top: 16px;
+  overflow: hidden;
+  border: 1px solid rgb(var(--surface-glass) / 0.12);
+  border-radius: var(--radius-panel);
+  background: rgb(var(--bg-surface));
+}
+
+.brand-pp-signature-media {
+  position: relative;
+  height: 290px;
+  overflow: hidden;
+  background: rgb(var(--bg-secondary));
+}
+
+@media (min-width: 768px) {
+  .brand-pp-signature-media {
+    height: 360px;
+  }
+}
+
+@media (min-width: 1100px) {
+  .brand-pp-signature-media {
+    height: 420px;
+  }
+}
+
+.brand-pp-signature-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.brand-pp-signature-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: rgb(var(--tone-warn));
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.brand-pp-signature-book {
+  display: inline-flex;
+  height: 38px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 15px;
+  border-radius: var(--radius-pill);
+  border: 1px solid rgb(var(--accent-primary));
+  color: rgb(var(--accent-primary));
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.brand-pp-signature-book:hover {
+  background: rgb(var(--accent-primary) / 0.1);
+}
+
+.brand-pp-tag {
+  border: 1px solid rgb(var(--accent-primary) / 0.35);
+  border-radius: var(--radius-pill);
+  padding: 4px 10px;
+  color: rgb(var(--accent-primary));
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+}
+
+.brand-pp-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: rgb(var(--text-muted));
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+/* The book bar STICKS to the bottom of the viewport.
+   
+   ⚠️ This is a deliberate departure from the design frame, which says "nothing
+   floats and nothing follows the scroll". Tori's call (2026-08-15), and the
+   reason is concrete: at 200 looks the grid is long enough that a bar sitting
+   only at the very end is a bar nobody finds. It still comes to rest above the
+   footer at the end of the scroll — it is pinned, not floating over the work. */
+.brand-pp-bookbar {
+  position: sticky;
+  /* Clears the app shell's FIXED session footer, so the nav never covers the
+     one CTA on the page. */
+  bottom: calc(84px + env(safe-area-inset-bottom));
+  z-index: 15;
+  border-top: 1px solid rgb(var(--surface-glass) / 0.12);
+  border-bottom: 1px solid rgb(var(--surface-glass) / 0.12);
+  background: rgb(var(--bg-secondary));
+  backdrop-filter: blur(var(--glass-blur));
+}
+
+/* The scroll has to be able to END below the pinned bar, or the last row of the
+   grid sits under it permanently. */
+.brand-pp-page {
+  padding-bottom: calc(96px + env(safe-area-inset-bottom));
+}
+
+.brand-pp-bookbar-inner {
+  margin-inline: auto;
+  max-width: var(--pp-shell);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px var(--pp-pad);
+}
+
+.brand-pp-bookbar-cta {
+  display: flex;
+  height: 40px;
+  flex: none;
+  align-items: center;
+  padding: 0 20px;
+  border-radius: var(--radius-pill);
+  background: rgb(var(--accent-primary));
+  color: rgb(var(--on-accent));
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.brand-pp-bookbar-cta[data-inert='true'] {
+  background: rgb(var(--surface-glass) / 0.08);
+  color: rgb(var(--text-muted));
+  font-family: var(--font-mono);
+  font-weight: 400;
+}
+
+.brand-pp-panel-grid {
+  display: grid;
+  grid-template-columns: var(--pp-panel-cols);
+  gap: 10px;
+  align-items: start;
+}
+
+.brand-pp-card {
+  border: 1px solid rgb(var(--surface-glass) / 0.12);
+  border-radius: var(--radius-panel);
+  background: rgb(var(--bg-surface));
+}
+
+.brand-pp-filter {
+  display: inline-flex;
+  height: 34px;
+  align-items: center;
+  gap: 9px;
+  padding: 0 13px;
+  border-radius: var(--radius-pill);
+  border: 1px solid rgb(var(--surface-glass) / 0.16);
+  background: rgb(var(--surface-glass) / 0.04);
+  color: rgb(var(--text-primary));
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.brand-pp-filter-menu {
+  position: absolute;
+  top: 40px;
+  left: 0;
+  z-index: 30;
+  min-width: 220px;
+  overflow: hidden;
+  border: 1px solid rgb(var(--surface-glass) / 0.16);
+  border-radius: 14px;
+  background: rgb(var(--bg-surface));
+  box-shadow: var(--shadow-soft);
+}
+
+.brand-pp-filter-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 14px;
+  border-bottom: 1px solid rgb(var(--surface-glass) / 0.12);
+  color: rgb(var(--text-primary));
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.brand-pp-filter-row:last-child {
+  border-bottom: 0;
+}
+
+.brand-pp-filter-row[data-active='true'] {
+  background: rgb(var(--accent-primary) / 0.12);
+  color: rgb(var(--accent-primary));
+}
+
+/* ──────────────────────────────────────────────────────────────────
    Reduced motion
 ────────────────────────────────────────────────────────────────── */
 

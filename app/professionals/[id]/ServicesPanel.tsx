@@ -15,11 +15,13 @@ export default function ServicesPanel({
   emptyMessage,
 }: ServicesPanelProps) {
   return (
-    <section className="grid gap-3 px-4 py-4">
-      <div className="brand-cap">Services</div>
+    <section className="grid gap-3 py-5">
+      <div className="font-mono text-[10.5px] uppercase tracking-[0.2em] text-textMuted">
+        Services
+      </div>
 
       {offerings.length === 0 ? (
-        <div className="brand-profile-card p-4 text-[13px] text-textSecondary">
+        <div className="brand-pp-card p-4 text-[13px] text-textSecondary">
           {emptyMessage}
         </div>
       ) : (

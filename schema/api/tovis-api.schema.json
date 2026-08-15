@@ -15681,6 +15681,49 @@
       ],
       "type": "object"
     },
+    "ProProfileChipDto": {
+      "properties": {
+        "kind": {
+          "description": "Stable key for the client render; also what a test asserts on.",
+          "enum": [
+            "AVAILABLE_SOON",
+            "NEW_TO_PLATFORM"
+          ],
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "label"
+      ],
+      "type": "object"
+    },
+    "ProProfileSignalsDto": {
+      "properties": {
+        "availabilityLine": {
+          "description": "The book bar's small-caps headline — \"Available tomorrow\", or null when the pro has no fresh opening inside the badge engine's horizon (the bar then prints its neutral fallback rather than inventing availability).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "chips": {
+          "description": "Identity chips. EMPTY for an established pro — that is the design, not a missing read. Populated only when the pro is new to the platform.",
+          "items": {
+            "$ref": "#/definitions/ProProfileChipDto"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "chips",
+        "availabilityLine"
+      ],
+      "type": "object"
+    },
     "ProPublicProfileDto": {
       "properties": {
         "acceptedPayments": {
@@ -15716,6 +15759,19 @@
           },
           "type": "array"
         },
+        "signals": {
+          "$ref": "#/definitions/ProProfileSignalsDto"
+        },
+        "signature": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PublicProfileSignatureDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "stats": {
           "$ref": "#/definitions/PublicProfileStatsDto"
         }
@@ -15726,9 +15782,11 @@
         "stats",
         "offerings",
         "acceptedPayments",
+        "signature",
         "portfolioTiles",
         "reviews",
-        "isFavoritedByMe"
+        "isFavoritedByMe",
+        "signals"
       ],
       "type": "object"
     },
@@ -17044,6 +17102,10 @@
             "null"
           ]
         },
+        "engagement": {
+          "$ref": "#/definitions/PublicPortfolioTileEngagement",
+          "description": "Likes, comments and \"N recreated this\" for the backing look. Always present (zeroed when the tile has no look); a caller renders a zero as NOTHING, never as a literal \"0\" — an empty grid tile is quieter than one advertising no engagement."
+        },
         "id": {
           "type": "string"
         },
@@ -17104,7 +17166,28 @@
         "isFeaturedInPortfolio",
         "serviceIds",
         "serviceNames",
-        "before"
+        "before",
+        "engagement"
+      ],
+      "type": "object"
+    },
+    "PublicPortfolioTileEngagement": {
+      "description": "The three engagement numbers a redesigned grid tile prints. `likeCount` and `commentCount` are the denormalized counters on `LookPost` (the same ones the looks feed renders via `LooksCountsDto`); `recreatedCount` is non-cancelled bookings citing the look as their source — the loader reads all of them for the whole grid in one grouped query, never per tile.",
+      "properties": {
+        "commentCount": {
+          "type": "number"
+        },
+        "likeCount": {
+          "type": "number"
+        },
+        "recreatedCount": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "likeCount",
+        "commentCount",
+        "recreatedCount"
       ],
       "type": "object"
     },
@@ -17244,6 +17327,34 @@
         "instagramHandle",
         "tiktokHandle",
         "websiteUrl"
+      ],
+      "type": "object"
+    },
+    "PublicProfileSignatureDto": {
+      "description": "The pro's SIGNATURE post — one optional, pro-chosen piece of their own work, promoted above the grid (client walkthrough screen 6). It is the SAME tile the grid would have rendered plus the two things the promoted treatment adds: the starting price for the service it shows, and a way to book that exact look.\n\n🔴 Never label this \"Spotlight\" or \"Featured\" on any surface — see the `signatureMediaAssetId` comment in prisma/schema.prisma. `LookPost.featuredAt` is a SUPER_ADMIN editorial pick and must keep the word to itself.",
+      "properties": {
+        "bookHref": {
+          "description": "Opens the look with its availability drawer already open; null with no look.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "priceLine": {
+          "description": "Already composed as \"Salon: From $250 · 180 min\" by `formatPricingLine`, so it can never render a bare figure (Tori's standing rule). Null when the look carries no service, or the pro has no active offering for it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tile": {
+          "$ref": "#/definitions/PublicPortfolioTileDto"
+        }
+      },
+      "required": [
+        "tile",
+        "priceLine",
+        "bookHref"
       ],
       "type": "object"
     },

@@ -47,6 +47,7 @@ function makeProfileRow(
     licenseState: null,
     licenseVerified: false,
     licenseExpiry: null,
+    signatureMediaAssetId: null,
     location: '',
     timeZone: null,
     instagramHandle: null,

@@ -36,6 +36,17 @@ type Props = {
    * only, so the action is hidden for videos.
    */
   isCover?: boolean
+  /**
+   * Whether this media is the pro's current SIGNATURE post — their own chosen
+   * highlight, promoted above the public profile's grid. Drives the
+   * "Set as Signature" ↔ "Remove Signature" action.
+   *
+   * 🔴 Never label it "Featured" or "Spotlight": `isFeaturedInPortfolio` and
+   * `LookPost.featuredAt` already own those words, and the second of them means
+   * an ADMIN picked you. Signature is the pro's own claim about their own work.
+   * Photos only, like the cover.
+   */
+  isSignature?: boolean
 }
 
 type JsonObject = Record<string, unknown>
@@ -78,7 +89,7 @@ function visibilityFromFlags(flags: { isEligibleForLooks: boolean; isFeaturedInP
   return flags.isEligibleForLooks || flags.isFeaturedInPortfolio ? MediaVisibility.PUBLIC : MediaVisibility.PRO_CLIENT
 }
 
-export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVideo = false, isCover = false }: Props) {
+export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVideo = false, isCover = false, isSignature = false }: Props) {
   const router = useRouter()
 
   const [openMenu, setOpenMenu] = useState(false)
@@ -89,6 +100,9 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
 
   // §18d — creator-page cover banner. Optimistic so the menu label flips instantly.
   const [cover, setCover] = useState(Boolean(isCover))
+
+  // The pro's own Signature post. Same optimistic treatment as the cover.
+  const [signature, setSignature] = useState(Boolean(isSignature))
 
   // Edit state
   const [caption, setCaption] = useState(initial.caption ?? '')
@@ -314,6 +328,35 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
     }
   }
 
+  async function toggleSignature() {
+    if (saving) return
+    setError(null)
+    setSaving(true)
+
+    const nextSignature = !signature
+    try {
+      const res = await fetch(
+        `/api/v1/pro/media/${encodeURIComponent(mediaId)}/signature`,
+        { method: nextSignature ? 'POST' : 'DELETE' },
+      )
+      const data = await safeJsonObject(res)
+      if (!res.ok) {
+        // The route refuses a photo that isn't a published, approved look — the
+        // message says which, rather than the control claiming success and the
+        // profile quietly showing nothing.
+        throw new Error(pickErrorMessage(data, `Request failed (${res.status})`))
+      }
+
+      setSignature(nextSignature)
+      setOpenMenu(false)
+      router.refresh()
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to update Signature.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const canSave = !busy && mustHaveService
 
   return (
@@ -368,6 +411,21 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
               )}
             >
               {cover ? 'Remove cover photo' : 'Set as cover photo'}
+            </button>
+          ) : null}
+
+          {/* The pro's own Signature post (photos only, like the cover). */}
+          {!isVideo ? (
+            <button
+              type="button"
+              onClick={toggleSignature}
+              disabled={saving}
+              className={cn(
+                'block w-full px-4 py-3 text-left text-[13px] font-black text-textPrimary hover:bg-white/10',
+                saving ? 'cursor-not-allowed opacity-70' : '',
+              )}
+            >
+              {signature ? 'Remove Signature' : 'Set as Signature'}
             </button>
           ) : null}
 

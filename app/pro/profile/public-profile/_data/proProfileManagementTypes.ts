@@ -147,6 +147,15 @@ export type ProProfileManagementPortfolio = {
   // (null when unset → branded fallback). Drives the per-tile "Cover" badge +
   // the OwnerMediaMenu "Set/Remove cover" action.
   coverMediaAssetId: string | null
+  // The media id set as the pro's SIGNATURE post — their own chosen highlight,
+  // promoted above the grid on the public profile. Drives the per-tile
+  // "Signature" badge + the OwnerMediaMenu "Set/Remove Signature" action.
+  //
+  // 🔴 This REPLACED a "Featured" badge that was pure fiction: it was drawn from
+  // `index === 0` over an `orderBy: { createdAt: 'desc' }` list, so it crowned
+  // whatever the pro uploaded most recently and dressed it as a curated choice.
+  // No such field existed on MediaAsset. This one is a real FK the pro sets.
+  signatureMediaAssetId: string | null
 }
 
 export type ProProfileManagementReviews = {

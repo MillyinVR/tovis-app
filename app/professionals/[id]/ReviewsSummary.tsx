@@ -18,57 +18,36 @@ export default function ReviewsSummary({
   reviews,
   emptyMessage,
 }: ReviewsSummaryProps) {
+  // A single mono line replaces the old three-row stats card: on a page whose
+  // whole argument is the work, a second summary of the same two numbers was
+  // furniture. The rating and the count still lead the section.
+  const summary = [
+    stats.averageRatingLabel ? `★ ${stats.averageRatingLabel}` : null,
+    `${stats.reviewCountLabel} reviews`,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+
   return (
-    <section className="grid gap-3 px-4 py-4">
-      <ReviewStatsCard stats={stats} />
+    <section className="grid gap-3 py-5">
+      <div className="flex items-baseline justify-between gap-3">
+        <div className="font-mono text-[10.5px] uppercase tracking-[0.2em] text-textMuted">
+          Reviews
+        </div>
+        <div className="font-mono text-[11px] tracking-[0.1em] text-textSecondary">
+          {summary}
+        </div>
+      </div>
 
       {reviews.length === 0 ? (
-        <div className="brand-profile-card p-4 text-[13px] text-textSecondary">
+        <div className="brand-pp-card p-4 text-[13px] text-textSecondary">
           {emptyMessage}
         </div>
       ) : (
-        <div className="brand-profile-card p-3 sm:p-4">
+        <div className="brand-pp-card p-3 sm:p-4">
           <ReviewsPanel reviews={reviews} professionalId={professionalId} />
         </div>
       )}
     </section>
-  )
-}
-
-function ReviewStatsCard({ stats }: { stats: PublicProfileStatsDto }) {
-  return (
-    <div className="brand-profile-card p-4">
-      <div className="grid grid-cols-[72px_minmax(0,1fr)] items-center gap-4">
-        <div className="text-center">
-          <div className="brand-profile-rating-large">
-            {stats.averageRatingLabel ?? '—'}
-          </div>
-          <div className="brand-cap mt-1">
-            {stats.reviewCountLabel} reviews
-          </div>
-        </div>
-
-        <div className="grid gap-2">
-          <ReviewSummaryLine label="Reviews" value={stats.reviewCountLabel} />
-          <ReviewSummaryLine label="Rating" value={stats.averageRatingLabel ?? '—'} />
-          <ReviewSummaryLine label="Saved" value={stats.favoritesLabel} />
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function ReviewSummaryLine({
-  label,
-  value,
-}: {
-  label: string
-  value: string
-}) {
-  return (
-    <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-2 last:border-b-0 last:pb-0">
-      <span className="brand-cap">{label}</span>
-      <span className="text-[13px] font-black text-textPrimary">{value}</span>
-    </div>
   )
 }

@@ -145,6 +145,7 @@ function makeModel(
       tiles: [],
       serviceOptions: [],
       coverMediaAssetId: null,
+      signatureMediaAssetId: null,
     },
 
     reviews: {

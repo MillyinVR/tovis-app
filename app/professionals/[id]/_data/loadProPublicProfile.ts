@@ -28,15 +28,19 @@ import { getProEntitlements } from '@/lib/pro/entitlements'
 import type { ClientLinkViewer } from '@/lib/profiles/profileHrefs'
 import { canViewerSeeProPublicSurface } from '@/lib/proTrustState'
 import {
+  formatOfferingLowestPricingLine,
   mapPublicOfferingsToDtos,
   mapPublicPortfolioTilesToDtos,
   mapPublicProfileHeaderToDto,
+  mapPublicProfileSignatureToDto,
   mapPublicProfileStatsToDto,
   mapPublicReviewsToDtos,
   renderPublicProfileCoverUrl,
   type PublicOfferingDto,
   type PublicPortfolioTileDto,
+  type PublicPortfolioTileEngagement,
   type PublicProfileHeaderDto,
+  type PublicProfileSignatureDto,
   type PublicProfileStatsDto,
   type PublicReviewDto,
 } from '@/lib/profiles/publicProfileMappers'
@@ -46,7 +50,13 @@ import {
   publicPortfolioLookSelect,
   publicProfessionalProfileSelect,
   publicReviewSelect,
+  publicSignatureLookSelect,
+  type PublicOfferingRow,
 } from '@/lib/profiles/publicProfileSelects'
+import {
+  loadProProfileSignals,
+  type ProProfileSignalsDto,
+} from '@/lib/profiles/proProfileSignals'
 import { visibleReviewsWhere } from '@/lib/reviews/visibility'
 
 type Viewer = {
@@ -64,6 +74,16 @@ export type ProPublicProfileBase = {
   acceptedPayments: PublicAcceptedMethod[]
   isFavoritedByMe: boolean
   viewerUserId: string | null
+  /** Availability line + the brand-new-pro chips. See lib/profiles/proProfileSignals. */
+  signals: ProProfileSignalsDto
+  /** The pro's chosen Signature asset id; the work loader resolves it to a post. */
+  signatureMediaAssetId: string | null
+  /**
+   * The raw offering rows, kept so the Signature block can resolve its own price
+   * line from the SAME rows the services list renders — a second read could
+   * disagree about which offerings are active.
+   */
+  offeringRows: PublicOfferingRow[]
 }
 
 /**
@@ -83,6 +103,15 @@ export type ProPublicProfileBaseResult =
 export async function loadProPublicProfileBase(args: {
   professionalId: string
   viewer: Viewer
+  /**
+   * Tenant brand display name, for the "New to {brand}" chip. REQUIRED rather
+   * than resolved in here: tenant context comes from `next/headers`, and a data
+   * loader that reaches for a request scope of its own can only be called from
+   * inside one — which is a dependency neither caller can see, and which a unit
+   * test cannot satisfy. Both callers resolve it the way their own context
+   * allows and hand it down.
+   */
+  brandName: string
 }): Promise<ProPublicProfileBaseResult> {
   const { professionalId, viewer } = args
 
@@ -115,6 +144,7 @@ export async function loadProPublicProfileBase(args: {
     paymentSettingsRow,
     coverUrl,
     entitlements,
+    signals,
   ] = await Promise.all([
     prisma.review.aggregate({
       where: { professionalId: profileRow.id, ...visibleReviewsWhere },
@@ -179,6 +209,15 @@ export async function loadProPublicProfileBase(args: {
     // /pro/membership/status without a client-facing caller ever needing the
     // pro-authed endpoint.
     getProEntitlements(profileRow.id),
+
+    // Availability line + brand-new-pro chips. Resolved in the shared base (not
+    // per caller) so the page and the native endpoint can never disagree about
+    // whether a pro reads as new.
+    loadProProfileSignals({
+      professionalId: profileRow.id,
+      userId: profileRow.userId,
+      brandName: args.brandName,
+    }),
   ])
 
   const reviewCount = reviewStats._count._all
@@ -219,46 +258,170 @@ export async function loadProPublicProfileBase(args: {
       }),
       isFavoritedByMe: Boolean(favoriteRow),
       viewerUserId,
+      signals,
+      signatureMediaAssetId: profileRow.signatureMediaAssetId,
+      offeringRows,
     },
   }
 }
 
-export async function loadPortfolioTiles(
-  professionalId: string,
-): Promise<PublicPortfolioTileDto[]> {
-  // §19c — the grid now reads the pro's own `LookPost`s (the unified public-content
+export type ProPublicProfileWork = {
+  /**
+   * The pro's chosen Signature post, or null when they haven't picked one (or
+   * the look they picked is no longer publicly visible). The grid below EXCLUDES
+   * it — the frame promotes that post out of the grid rather than showing it
+   * twice.
+   */
+  signature: PublicProfileSignatureDto | null
+  portfolioTiles: PublicPortfolioTileDto[]
+}
+
+/**
+ * The portfolio grid + the Signature block, in one pass so the two share their
+ * "N recreated this" read. Every count on this surface — likes, comments,
+ * recreates — comes from at most ONE extra query for the whole grid, never one
+ * per tile.
+ */
+export async function loadProProfileWork(args: {
+  professionalId: string
+  signatureMediaAssetId: string | null
+  offerings: PublicOfferingRow[]
+}): Promise<ProPublicProfileWork> {
+  const { professionalId, signatureMediaAssetId } = args
+
+  // §19c — the grid reads the pro's own `LookPost`s (the unified public-content
   // atom the feed/search/boards also read), not `MediaAsset.isFeaturedInPortfolio`.
   // Since §19b featuring publishes a look and un-featuring retracts it, this yields
   // the same set of tiles — except the moderation gate below now (correctly) hides
   // anything not yet APPROVED, so nothing renders public pre-approval (§19 divergence
-  // a). Each tile still renders from the look's `primaryMediaAsset`, so the tile DTO
-  // is unchanged.
+  // a). Each tile still renders from the look's `primaryMediaAsset`.
   //
   // Read the looks through the owner relation (`professionalProfile.lookPosts`), not
   // a top-level looks discovery query, so it's an owner-scoped read (this one pro's
   // rows) — not cross-tenant looks discovery — and mirrors the `/u/[handle]` client
   // grid's `clientProfile.authoredLooks` shape (§19c). See the tenant-aware-discovery
   // guard: owner-relation reads are tenant-safe by construction.
-  const row = await prisma.professionalProfile.findUnique({
-    where: { id: professionalId },
-    select: {
-      lookPosts: {
-        where: proOwnPublicLooksWhere,
-        orderBy: { publishedAt: 'desc' },
-        take: PUBLIC_PROFILE_LIMITS.portfolioTiles,
-        select: publicPortfolioLookSelect,
+  //
+  // The Signature is read as a LookPost under the SAME publicity clause, and
+  // scoped to this pro — so a pro who picks a look and then unpublishes it (or
+  // whose chosen asset never belonged to them) simply loses the block. A stale
+  // FK can never resurrect a retracted post.
+  const [row, signatureLook] = await Promise.all([
+    prisma.professionalProfile.findUnique({
+      where: { id: professionalId },
+      select: {
+        lookPosts: {
+          where: proOwnPublicLooksWhere,
+          orderBy: { publishedAt: 'desc' },
+          take: PUBLIC_PROFILE_LIMITS.portfolioTiles,
+          select: publicPortfolioLookSelect,
+        },
       },
-    },
+    }),
+    signatureMediaAssetId
+      ? prisma.lookPost.findFirst({
+          where: {
+            professionalId,
+            primaryMediaAssetId: signatureMediaAssetId,
+            ...proOwnPublicLooksWhere,
+          },
+          select: publicSignatureLookSelect,
+        })
+      : Promise.resolve(null),
+  ])
+
+  const gridLooks = (row?.lookPosts ?? []).filter(
+    // The promoted post leaves the grid; it is already the largest thing on the
+    // page. Without this it renders twice — once big, once small.
+    (look) => look.id !== signatureLook?.id,
+  )
+
+  const recreationsByLook = await countRecreationsByLook([
+    ...gridLooks.map((look) => look.id),
+    ...(signatureLook ? [signatureLook.id] : []),
+  ])
+
+  const engagementFor = (look: {
+    id: string
+    likeCount: number
+    commentCount: number
+  }): PublicPortfolioTileEngagement => ({
+    likeCount: look.likeCount,
+    commentCount: look.commentCount,
+    recreatedCount: recreationsByLook.get(look.id) ?? 0,
   })
 
-  if (!row) return []
+  const [portfolioTiles, signature] = await Promise.all([
+    mapPublicPortfolioTilesToDtos(
+      gridLooks.map((look) => ({
+        lookId: look.id,
+        asset: look.primaryMediaAsset,
+        engagement: engagementFor(look),
+      })),
+    ),
+    signatureLook
+      ? mapPublicProfileSignatureToDto({
+          lookId: signatureLook.id,
+          asset: signatureLook.primaryMediaAsset,
+          engagement: engagementFor(signatureLook),
+          priceLine: resolveSignaturePriceLine(
+            signatureLook.serviceId,
+            args.offerings,
+          ),
+        })
+      : Promise.resolve(null),
+  ])
 
-  return mapPublicPortfolioTilesToDtos(
-    row.lookPosts.map((look) => ({
-      lookId: look.id,
-      asset: look.primaryMediaAsset,
-    })),
+  return { signature, portfolioTiles }
+}
+
+/**
+ * "N recreated this" for a set of looks — ONE grouped read for the whole grid.
+ * Same attribution rule as the creator-tier job, the pro's own analytics and the
+ * `/u/[handle]` client grid: a non-cancelled booking citing the look as its
+ * source. Look-id keyed, so it works unchanged for a pro's own looks.
+ */
+async function countRecreationsByLook(
+  lookIds: string[],
+): Promise<Map<string, number>> {
+  const byLook = new Map<string, number>()
+  if (lookIds.length === 0) return byLook
+
+  const grouped = await prisma.booking.groupBy({
+    by: ['sourceLookPostId'],
+    where: {
+      sourceLookPostId: { in: lookIds },
+      status: { not: BookingStatus.CANCELLED },
+    },
+    _count: { _all: true },
+  })
+
+  for (const group of grouped) {
+    if (group.sourceLookPostId) {
+      byLook.set(group.sourceLookPostId, group._count._all)
+    }
+  }
+
+  return byLook
+}
+
+/**
+ * The Signature block's price line: the pro's own ACTIVE offering for the
+ * service the look shows, rendered as "Salon: From $250 · 180 min". Null when
+ * the look carries no service or the pro doesn't currently offer it — the block
+ * then prints no price rather than one it can't stand behind.
+ */
+function resolveSignaturePriceLine(
+  serviceId: string | null,
+  offerings: PublicOfferingRow[],
+): string | null {
+  if (!serviceId) return null
+
+  const offering = offerings.find(
+    (row) => row.isActive && row.serviceId === serviceId,
   )
+
+  return offering ? formatOfferingLowestPricingLine(offering) : null
 }
 
 export async function loadReviewsForUi(args: {
@@ -305,9 +468,15 @@ export type ProPublicProfileDto = {
   // Handle-free payment method labels the pro accepts (e.g. "Cash", "Venmo").
   // Empty when the pro has no saved payment settings.
   acceptedPayments: string[]
+  // The pro's chosen Signature post, promoted above the grid. Null when unset —
+  // the page is then pure feed, which is the ordinary state.
+  signature: PublicProfileSignatureDto | null
   portfolioTiles: PublicPortfolioTileDto[]
   reviews: PublicReviewDto[]
   isFavoritedByMe: boolean
+  // Availability line for the book bar + the brand-new-pro chips. `chips` is
+  // empty for an established pro BY DESIGN, not for want of data.
+  signals: ProProfileSignalsDto
 }
 
 /**
@@ -318,14 +487,19 @@ export type ProPublicProfileDto = {
 export async function loadProPublicProfile(args: {
   professionalId: string
   viewer: Viewer
+  brandName: string
 }): Promise<ProPublicProfileDto | null> {
   const result = await loadProPublicProfileBase(args)
   if (result.kind !== 'ok') return null
 
   const { base } = result
 
-  const [portfolioTiles, reviews] = await Promise.all([
-    loadPortfolioTiles(base.professionalId),
+  const [work, reviews] = await Promise.all([
+    loadProProfileWork({
+      professionalId: base.professionalId,
+      signatureMediaAssetId: base.signatureMediaAssetId,
+      offerings: base.offeringRows,
+    }),
     loadReviewsForUi({
       professionalId: base.professionalId,
       viewerUserId: base.viewerUserId,
@@ -339,8 +513,10 @@ export async function loadProPublicProfile(args: {
     stats: base.stats,
     offerings: base.offerings,
     acceptedPayments: base.acceptedPayments.map((method) => method.label),
-    portfolioTiles,
+    signature: work.signature,
+    portfolioTiles: work.portfolioTiles,
     reviews,
     isFavoritedByMe: base.isFavoritedByMe,
+    signals: base.signals,
   }
 }

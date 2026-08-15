@@ -1923,6 +1923,24 @@ model ProfessionalProfile {
   coverMediaAssetId String?
   coverMediaAsset   MediaAsset? @relation("ProfessionalCoverMedia", fields: [coverMediaAssetId], references: [id], onDelete: SetNull)
 
+  // The pro's SIGNATURE post: one optional, pro-chosen piece of their own work —
+  // "the work they specialize in or what they consider their best work" (Tori,
+  // 2026-08-14) — promoted above the portfolio grid on the public profile.
+  //
+  // 🔴 It is deliberately NOT called "Spotlight" (LookPost.featuredAt, a
+  // SUPER_ADMIN editorial pick) and NOT "Featured" (MediaAsset.isFeaturedInPortfolio
+  // / LookPost.featuredAt / AftercareSummary.featuredBefore-AfterAssetId already
+  // carry that word). A pro-applied badge must not wear a name that claims the
+  // platform chose them.
+  //
+  // Same shape as coverMediaAssetId above: a nullable soft link to one of the
+  // pro's own MediaAssets, onDelete SetNull so deleting the photo just clears the
+  // choice. Keyed on the ASSET (not the LookPost) because LookPost.primaryMediaAssetId
+  // is @unique, so the backing look is one relation hop away and the picker reads
+  // the same tiles the grid does.
+  signatureMediaAssetId String?
+  signatureMediaAsset   MediaAsset? @relation("ProfessionalSignatureMedia", fields: [signatureMediaAssetId], references: [id], onDelete: SetNull)
+
   // Public social presence (display-only deep links; normalized without "@").
   // Instagram is the industry's #2 discovery channel — pros link their
   // portfolio identity here and the profile links back out.
@@ -2059,6 +2077,7 @@ model ProfessionalProfile {
   @@index([verificationStatus])
   @@index([homeTenantId])
   @@index([coverMediaAssetId])
+  @@index([signatureMediaAssetId])
 }
 
 model ProfessionalMonthlyAnalytics {
@@ -5086,6 +5105,9 @@ model MediaAsset {
   // Back-relation for the pro-profile cover banner (§18): which pro profiles use
   // this asset as their cover. onDelete SetNull on the owning side clears it.
   coverForProfiles          ProfessionalProfile[] @relation("ProfessionalCoverMedia")
+  // Back-relation for the pro-chosen SIGNATURE post: which pro profiles promote
+  // this asset above their grid. onDelete SetNull on the owning side clears it.
+  signatureForProfiles      ProfessionalProfile[] @relation("ProfessionalSignatureMedia")
   primaryService            Service               @relation("MediaPrimaryService", fields: [primaryServiceId], references: [id])
   phase                     MediaPhase            @default(OTHER)
   uploadedByUser            User?                 @relation("UploadedMedia", fields: [uploadedByUserId], references: [id])

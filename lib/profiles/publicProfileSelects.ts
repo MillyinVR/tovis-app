@@ -44,6 +44,11 @@ export const publicProfessionalProfileSelect =
     tiktokHandle: true,
     websiteUrl: true,
 
+    // The pro's chosen SIGNATURE post. Only the id: the block above the grid is
+    // rendered from the backing LookPost (so it inherits the same publicity gate
+    // the grid applies), which the loader reads separately by this asset id.
+    signatureMediaAssetId: true,
+
     // Creator-page cover banner (§18). Just the render pointers so the mapper can
     // resolve a display URL; null when the pro hasn't set a cover (branded
     // fallback). Public-bucket covers render as permanent URLs, private ones sign.
@@ -156,9 +161,28 @@ export const publicPortfolioLookSelect =
   Prisma.validator<Prisma.LookPostSelect>()({
     id: true,
     publishedAt: true,
+    // Denormalized engagement counters maintained on LookPost itself (the same
+    // numbers the looks feed renders through LooksCountsDto) — the redesigned
+    // grid prints them under every tile, so reading them here costs nothing
+    // beyond two more columns on a query the grid already runs.
+    likeCount: true,
+    commentCount: true,
     primaryMediaAsset: {
       select: publicPortfolioMediaAssetSelect,
     },
+  })
+
+/**
+ * The pro's SIGNATURE post, read as a LookPost so it inherits the grid's own
+ * publicity gate (`proOwnPublicLooksWhere`) — a pro who picks a signature and
+ * then unpublishes that look must lose the block, not keep a stale one.
+ * Extends the grid select with `serviceId`, which resolves the "From $X" line
+ * the block prints against the pro's own offering for that service.
+ */
+export const publicSignatureLookSelect =
+  Prisma.validator<Prisma.LookPostSelect>()({
+    ...publicPortfolioLookSelect,
+    serviceId: true,
   })
 
 export const publicReviewClientSelect =
@@ -251,6 +275,10 @@ export type PublicPortfolioMediaAssetRow =
 
 export type PublicPortfolioLookRow = Prisma.LookPostGetPayload<{
   select: typeof publicPortfolioLookSelect
+}>
+
+export type PublicSignatureLookRow = Prisma.LookPostGetPayload<{
+  select: typeof publicSignatureLookSelect
 }>
 
 export type PublicReviewClientRow = Prisma.ClientProfileGetPayload<{

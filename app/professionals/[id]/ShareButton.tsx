@@ -5,7 +5,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { useBrand } from '@/lib/brand/BrandProvider'
 
-type ShareButtonVariant = 'pill' | 'icon'
+// 'row' is the screen-6 profile's three-up social action — a full-width cell
+// that has to match the Message link and the Save button beside it.
+type ShareButtonVariant = 'pill' | 'icon' | 'row'
 
 type ShareButtonProps = {
   /**
@@ -113,7 +115,11 @@ export default function ShareButton({
   }, [flash, resolvedTitle, shareUrl, text])
 
   return (
-    <div className="grid justify-items-center gap-1">
+    <div
+      className={
+        variant === 'row' ? 'grid gap-1' : 'grid justify-items-center gap-1'
+      }
+    >
       <button
         type="button"
         title="Share"
@@ -124,7 +130,7 @@ export default function ShareButton({
         aria-label="Share profile"
       >
         <span aria-hidden="true">↗</span>
-        {variant === 'pill' ? <span>Share</span> : null}
+        {variant === 'icon' ? null : <span>Share</span>}
       </button>
 
       {status ? (
@@ -140,6 +146,10 @@ export default function ShareButton({
 }
 
 function buttonClassNameForVariant(variant: ShareButtonVariant): string {
+  if (variant === 'row') {
+    return 'brand-pp-social-action brand-focus w-full'
+  }
+
   if (variant === 'icon') {
     return [
       'brand-button-ghost brand-focus tap-target',

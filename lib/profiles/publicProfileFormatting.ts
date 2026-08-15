@@ -5,6 +5,7 @@ import type { ProfessionType, ProNameDisplay } from '@prisma/client'
 // Compact counts live in lib/format/compactCount — the single source of truth
 // shared with the looks rail, the comments drawer and the pro-profile manager.
 // Imported (not re-exported) so there is exactly one path to it.
+import { COPY } from '@/lib/copy'
 import { formatCompactCount } from '@/lib/format/compactCount'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
@@ -311,4 +312,90 @@ export function getPublicProfileTabLabel(tab: PublicProfileTab): string {
   const match = PUBLIC_PROFILE_TABS.find((item) => item.id === tab)
 
   return match?.label ?? 'Portfolio'
+}
+
+/**
+ * Tab labels carrying their own counts — "Portfolio · 200", "Reviews · 87".
+ * A count is only appended when there is one to show; "Portfolio · 0" would
+ * label an empty tab with the emptiness twice.
+ */
+export function buildPublicProfileTabLabels(counts: {
+  portfolio: number
+  services: number
+  reviews: number
+}): Record<PublicProfileTab, string> {
+  const withCount = (tab: PublicProfileTab, count: number): string => {
+    const label = getPublicProfileTabLabel(tab)
+    return count > 0 ? `${label} · ${formatCompactCount(count)}` : label
+  }
+
+  return {
+    portfolio: withCount('portfolio', counts.portfolio),
+    services: withCount('services', counts.services),
+    reviews: withCount('reviews', counts.reviews),
+  }
+}
+
+export type PublicProfileBookBar = {
+  headline: string
+  subline: string
+  ctaLabel: string
+  inert: boolean
+  footnote: string | null
+}
+
+/**
+ * The book bar's copy. Pure so the pending / signed-out / priced branches are
+ * unit-testable without a page render.
+ *
+ * 🔴 The CTA composes as "Book · From $85". `priceFromLabel` is a bare "$85"
+ * (the "From" lives here, and in `formatPricingLine` for the stacked service
+ * lines) — Tori's standing rule is that a price is a STARTING price, and the
+ * one place the word must NOT be added is `formatMoneyLabel`, which feeds this
+ * label and would then read "From From $85".
+ */
+export function buildPublicProfileBookBar(args: {
+  isPendingVerification: boolean
+  isSignedIn: boolean
+  availabilityLine: string | null
+  priceFromLabel: string | null
+  cheapestServiceName: string | null
+  serviceCount: number
+}): PublicProfileBookBar {
+  const copy = COPY.publicProfile
+
+  if (args.isPendingVerification) {
+    return {
+      headline: copy.bookBarHeadlinePending,
+      subline: copy.bookBarSublinePending,
+      ctaLabel: copy.bookBarCtaPending,
+      inert: true,
+      footnote: copy.bookBarFootnotePending,
+    }
+  }
+
+  const servicesWord =
+    args.serviceCount === 1 ? copy.bookBarServicesOne : copy.bookBarServicesMany
+
+  const priced =
+    args.cheapestServiceName && args.priceFromLabel
+      ? `${args.cheapestServiceName} ${copy.bookBarSublineFrom} ${args.priceFromLabel}`
+      : null
+
+  const subline =
+    priced && args.serviceCount > 0
+      ? `${priced} · ${args.serviceCount} ${servicesWord}`
+      : (priced ?? copy.bookBarSublineNoPrice)
+
+  return {
+    // Availability leads when the pro has a fresh opening; otherwise the bar
+    // says what it is rather than inventing urgency it can't evidence.
+    headline: args.availabilityLine ?? copy.bookBarHeadlineFallback,
+    subline,
+    ctaLabel: args.priceFromLabel
+      ? `${copy.bookBarCta}${copy.bookBarCtaPriceJoin}${args.priceFromLabel}`
+      : copy.bookBarCta,
+    inert: false,
+    footnote: args.isSignedIn ? null : copy.bookBarFootnoteSignedOut,
+  }
 }
