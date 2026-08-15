@@ -220,8 +220,16 @@ select {
   font: inherit;
 }
 
-button {
-  color: inherit;
+/* In @layer base so Tailwind text-color utilities (which live in the higher
+   `utilities` layer) can override button color — without the layer, this
+   unlayered reset wins over utilities under v4's cascade-layer model, and
+   EVERY `text-*` class on a <button> is silently ignored. globals.css already
+   does this for `a`; this is the same reset, and it needs the same treatment.
+   The rule still beats the UA sheet's `buttontext`, which is its whole job. */
+@layer base {
+  button {
+    color: inherit;
+  }
 }
 
 ::selection {
