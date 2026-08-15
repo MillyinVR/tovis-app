@@ -6,11 +6,8 @@
 
 import { useEffect, useState, useTransition } from 'react'
 
-import {
-  DEFAULT_TIME_ZONE,
-  formatInTimeZone,
-  getViewerTimeZone,
-} from '@/lib/time'
+import { formatIsoDateShort } from '@/lib/time'
+import { readResponseErrorMessage } from '@/lib/http'
 
 type SaveToBook = {
   savedPairs: number
@@ -78,23 +75,6 @@ function formatDays(days: number | null): string {
   return `${days.toFixed(1)}d`
 }
 
-function formatDate(iso: string | null): string | null {
-  if (!iso) return null
-  const d = new Date(iso)
-  return Number.isNaN(d.getTime())
-    ? null
-    : formatInTimeZone(d, getViewerTimeZone() ?? DEFAULT_TIME_ZONE, {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-      })
-}
-
-async function readError(res: Response): Promise<string> {
-  const data = (await res.json().catch(() => null)) as { error?: string } | null
-  return data?.error || 'Request failed.'
-}
-
 export default function MetricsClient() {
   const [windowDays, setWindowDays] = useState(30)
   const [data, setData] = useState<MetricsResponse | null>(null)
@@ -109,7 +89,7 @@ export default function MetricsClient() {
       const res = await fetch(
         `/api/v1/admin/looks/personalization-metrics?windowDays=${nextWindow}`,
       )
-      if (!res.ok) throw new Error(await readError(res))
+      if (!res.ok) throw new Error(await readResponseErrorMessage(res))
       const body = (await res.json()) as MetricsResponse
       setData(body)
       setLoaded(true)
@@ -123,7 +103,7 @@ export default function MetricsClient() {
     startTransition(() => load(30))
   }, [])
 
-  const generatedLabel = data ? formatDate(data.generatedAt) : null
+  const generatedLabel = data ? formatIsoDateShort(data.generatedAt) : null
 
   return (
     <div>

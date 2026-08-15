@@ -8,11 +8,8 @@
 
 import { useEffect, useState, useTransition } from 'react'
 
-import {
-  DEFAULT_TIME_ZONE,
-  formatInTimeZone,
-  getViewerTimeZone,
-} from '@/lib/time'
+import { formatIsoDateShort } from '@/lib/time'
+import { readResponseErrorMessage } from '@/lib/http'
 
 type AnomalyReason = 'RATE_ANOMALY' | 'HISTORICAL_SPIKE'
 
@@ -56,23 +53,6 @@ const REASON_LABELS: Record<AnomalyReason, string> = {
 
 const SPIKE_CAP = 999
 
-function formatDate(iso: string | null): string | null {
-  if (!iso) return null
-  const d = new Date(iso)
-  return Number.isNaN(d.getTime())
-    ? null
-    : formatInTimeZone(d, getViewerTimeZone() ?? DEFAULT_TIME_ZONE, {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-      })
-}
-
-async function readError(res: Response): Promise<string> {
-  const data = (await res.json().catch(() => null)) as { error?: string } | null
-  return data?.error || 'Request failed.'
-}
-
 export default function AnomaliesClient() {
   const [windowDays, setWindowDays] = useState(7)
   const [rows, setRows] = useState<AnomalyRow[]>([])
@@ -89,7 +69,7 @@ export default function AnomaliesClient() {
       const res = await fetch(
         `/api/v1/admin/looks/velocity-anomalies?windowDays=${nextWindow}`,
       )
-      if (!res.ok) throw new Error(await readError(res))
+      if (!res.ok) throw new Error(await readResponseErrorMessage(res))
       const data = (await res.json()) as AnomalyResponse
       setRows(data.anomalies)
       setScannedCount(data.scannedCount)
@@ -105,7 +85,7 @@ export default function AnomaliesClient() {
     startTransition(() => load(7))
   }, [])
 
-  const generatedLabel = formatDate(generatedAt)
+  const generatedLabel = formatIsoDateShort(generatedAt)
 
   return (
     <div>
@@ -182,7 +162,7 @@ function AnomalyCard({
   row: AnomalyRow
   windowDays: number
 }) {
-  const dateLabel = formatDate(row.createdAt)
+  const dateLabel = formatIsoDateShort(row.createdAt)
   const spikeLabel =
     row.spikeMultiple >= SPIKE_CAP
       ? 'from dormant'

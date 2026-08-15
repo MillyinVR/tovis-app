@@ -29,6 +29,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
+import { pad2 } from '@/lib/format/pad2'
 import { formatInTimeZone, parseYYYYMMDD } from '@/lib/time'
 import {
   addDaysToYmd,
@@ -113,10 +114,6 @@ const JUMP_CHIPS: { days: number; label: string; aria: string }[] = [
 ]
 
 const YMD_RE = /^\d{4}-\d{2}-\d{2}$/
-
-function pad2(n: number): string {
-  return String(n).padStart(2, '0')
-}
 
 function firstOfMonth(ymd: string): string {
   const p = parseYYYYMMDD(ymd)

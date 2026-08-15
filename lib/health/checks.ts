@@ -7,6 +7,7 @@ import { buildHealthResponse, buildLiveHealthResponse } from './summary'
 import { checkStorageHealth } from './storage'
 import { checkStripeHealth } from './stripe'
 import { checkTwilioHealth } from './twilio'
+import { errorMessageFromUnknown } from '@/lib/http'
 import {
   DEFAULT_HEALTH_TIMEOUT_MS,
   DEFAULT_PROVIDER_HEALTH_TIMEOUT_MS,
@@ -38,14 +39,6 @@ function readBooleanEnv(name: string, defaultValue = false): boolean {
   }
 
   return value === 'true' || value === '1' || value === 'yes'
-}
-
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message
-  }
-
-  return 'Unknown health check failure.'
 }
 
 function fallbackStatusForCheck(
@@ -80,7 +73,7 @@ async function runSafeReadyProbe({
       status: fallbackStatusForCheck(name),
       latencyMs: Math.max(0, Date.now() - startedAt),
       checkedAt: new Date().toISOString(),
-      message: getErrorMessage(error),
+      message: errorMessageFromUnknown(error, 'Unknown health check failure.'),
       details: {
         timeoutMs,
       },

@@ -12,7 +12,6 @@ import {
   BookingSource,
   BookingStatus,
   PaymentProvider,
-  Prisma,
   StripePaymentStatus,
 } from '@prisma/client'
 import { COPY } from '@/lib/copy'
@@ -171,13 +170,6 @@ function CardIcon({ className }: { className?: string }) {
       <path d="M2.5 10h19" />
     </svg>
   )
-}
-
-function formatMoney(
-  v: Prisma.Decimal | null | undefined,
-): string | null {
-  if (v == null) return null
-  return moneyToString(v)
 }
 
 function MoneyRow({
@@ -407,12 +399,12 @@ export default async function ProBookingDetailPage(props: {
     warn: { box: 'border-toneWarn/30 bg-toneWarn/10', icon: 'text-toneWarn' },
     muted: { box: 'border-white/10 bg-bgPrimary', icon: 'text-textMuted' },
   }[paymentView.tone]
-  const servicesAmount = formatMoney(
+  const servicesAmount = moneyToString(
     booking.serviceSubtotalSnapshot ?? booking.subtotalSnapshot,
   )
-  const tipStr = formatMoney(booking.tipAmount)
-  const taxStr = formatMoney(booking.taxAmount)
-  const discountStr = formatMoney(booking.discountAmount)
+  const tipStr = moneyToString(booking.tipAmount)
+  const taxStr = moneyToString(booking.taxAmount)
+  const discountStr = moneyToString(booking.discountAmount)
 
   // Aftercare snapshot (already loaded).
   const aftercare = booking.aftercareSummary

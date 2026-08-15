@@ -18,6 +18,7 @@ import {
   DUMMY_PASSWORD_HASH,
   verifyPassword,
 } from '@/lib/auth'
+import { setSessionCookie } from '@/app/api/_utils/auth/sessionCookie'
 import { consumeTapIntent } from '@/lib/tapIntentConsume'
 import { captureAuthException } from '@/lib/observability/authEvents'
 import { isTransientPrismaError } from '@/lib/prismaErrors'
@@ -106,51 +107,6 @@ function normalizeExpectedRole(raw: unknown): Role | null {
   return null
 }
 
-function hostToHostname(hostHeader: string | null): string | null {
-  if (!hostHeader) return null
-
-  const first = hostHeader.split(',')[0]?.trim().toLowerCase() ?? ''
-  if (!first) return null
-
-  if (first.startsWith('[')) {
-    const end = first.indexOf(']')
-    if (end === -1) return null
-    return first.slice(1, end)
-  }
-
-  const portIndex = first.indexOf(':')
-  return portIndex >= 0 ? first.slice(0, portIndex) : first
-}
-
-function resolveCookieDomain(hostname: string | null): string | undefined {
-  if (!hostname) return undefined
-
-  if (hostname === 'tovis.app' || hostname.endsWith('.tovis.app')) {
-    return '.tovis.app'
-  }
-
-  if (hostname === 'tovis.me' || hostname.endsWith('.tovis.me')) {
-    return '.tovis.me'
-  }
-
-  return undefined
-}
-
-function resolveIsHttps(request: Request): boolean {
-  const forwardedProto = request.headers
-    .get('x-forwarded-proto')
-    ?.trim()
-    .toLowerCase()
-
-  if (forwardedProto === 'https') return true
-  if (forwardedProto === 'http') return false
-
-  try {
-    return new URL(request.url).protocol === 'https:'
-  } catch {
-    return false
-  }
-}
 
 function buildLoginLookupWhereConditions(
   email: string,
@@ -410,20 +366,7 @@ export async function POST(request: Request) {
       200,
     )
 
-    const hostname = hostToHostname(
-      request.headers.get('x-forwarded-host') ?? request.headers.get('host'),
-    )
-    const cookieDomain = resolveCookieDomain(hostname)
-    const isHttps = resolveIsHttps(request)
-
-    response.cookies.set('tovis_token', token, {
-      httpOnly: true,
-      secure: isHttps,
-      sameSite: 'lax',
-      path: '/',
-      maxAge: 60 * 60 * 24 * 7,
-      ...(cookieDomain ? { domain: cookieDomain } : {}),
-    })
+    setSessionCookie({ response, request, token })
 
     return response
   } catch (error: unknown) {

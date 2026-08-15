@@ -7,7 +7,7 @@ import { uploadWithProgress } from '@/lib/media/uploadWithProgress'
 import { compressImageForUpload } from '@/lib/media/processImageForUpload'
 import { normalizeMoney2, moneyToCentsInt } from '@/lib/money'
 import { cn } from '@/lib/utils'
-import { safeJson } from '@/lib/http'
+import { errorMessageFromUnknown, readErrorMessage, safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import CalendarSwatchPicker from '@/app/pro/services/CalendarSwatchPicker'
@@ -148,12 +148,6 @@ function isOkTrue(v: unknown): v is Record<string, unknown> & { ok: true } {
   return isRecord(v) && v.ok === true
 }
 
-function readErrorMessage(v: unknown): string | null {
-  if (!isRecord(v)) return null
-  const e = v.error
-  return typeof e === 'string' && e.trim() ? e : null
-}
-
 function pickString(v: unknown) {
   return typeof v === 'string' ? v.trim() : ''
 }
@@ -192,12 +186,6 @@ function formatMinutes(min: number) {
   const h = Math.floor(min / 60)
   const m = min % 60
   return m ? `${h}h ${m}m` : `${h}h`
-}
-
-function errorMessageFromUnknown(e: unknown): string {
-  if (e instanceof Error && e.message.trim()) return e.message
-  if (isRecord(e) && typeof e.message === 'string' && e.message.trim()) return e.message
-  return 'Something went wrong.'
 }
 
 type UploadInitOk = {

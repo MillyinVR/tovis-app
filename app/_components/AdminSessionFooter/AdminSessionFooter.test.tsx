@@ -23,7 +23,7 @@ vi.mock('next/link', () => ({
   ),
 }))
 
-vi.mock('@/lib/hardNavigate', () => ({
+vi.mock('@/lib/clientNavigation', () => ({
   hardNavigate: vi.fn(),
 }))
 

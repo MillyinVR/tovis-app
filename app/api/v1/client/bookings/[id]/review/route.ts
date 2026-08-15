@@ -54,6 +54,7 @@ import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { prisma } from '@/lib/prisma'
 import { formatClientName } from '@/lib/profiles/publicProfileFormatting'
 import { resolveProTenantId } from '@/lib/tenant/bookingAttribution'
+import { errorMessageFromUnknown } from '@/lib/http'
 
 export const dynamic = 'force-dynamic'
 
@@ -266,14 +267,6 @@ function buildIdempotencyRequestBody(args: {
     attachedMediaIds: [...args.attachedMediaIds].sort(),
     uploadSessionIds: [...args.uploadSessionIds].sort(),
   })
-}
-
-function extractErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message
-  if (!isRecord(error)) return ''
-
-  const message = error.message
-  return typeof message === 'string' ? message : ''
 }
 
 async function failReviewIdempotency(
@@ -687,7 +680,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   } catch (error: unknown) {
     await failReviewIdempotency(idempotencyRecordId)
 
-    const message = extractErrorMessage(error)
+    const message = errorMessageFromUnknown(error)
 
     if (message === 'ATTACH_INVALID') {
       return jsonFail(

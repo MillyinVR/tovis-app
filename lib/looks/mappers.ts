@@ -9,6 +9,7 @@ import {
   type PairedBeforeAssetInput,
   type PairedBeforeDto,
 } from '@/lib/media/pairedBefore'
+import { isNonNull } from '@/lib/guards'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import {
   resolveLookPrimaryService,
@@ -183,10 +184,6 @@ export type LooksRenderableDetailMedia = Omit<
       mediaAsset: RenderableStoredMedia<LooksDetailAssetRow['mediaAsset']>
     }
   >
-}
-
-function isNonNull<T>(value: T | null): value is T {
-  return value !== null
 }
 
 // Non-banned tags are already filtered + ordered by the shared select; this just

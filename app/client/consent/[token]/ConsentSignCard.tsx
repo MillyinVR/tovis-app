@@ -16,7 +16,7 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 
-import { isRecord } from '@/lib/guards'
+import { readErrorMessageOr } from '@/lib/http'
 import {
   CONSENT_SIGNATURE_NAME_MAX,
   parseConsentSignatureName,
@@ -26,12 +26,6 @@ type Props = {
   token: string
   formTitle: string
   professionalLabel: string
-}
-
-function readErrorMessage(payload: unknown, fallback: string): string {
-  return isRecord(payload) && typeof payload.error === 'string'
-    ? payload.error
-    : fallback
 }
 
 export function ConsentSignCard(props: Props) {
@@ -69,7 +63,7 @@ export function ConsentSignCard(props: Props) {
 
       if (!res.ok) {
         setError(
-          readErrorMessage(payload, 'We could not record your signature.'),
+          readErrorMessageOr(payload, 'We could not record your signature.'),
         )
         return
       }

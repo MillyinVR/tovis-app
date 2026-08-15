@@ -13,6 +13,7 @@ import CommentsDrawer from './CommentsDrawer'
 import RightActionRail from './RightActionRail'
 import EmptyState from '@/app/_components/boundaries/EmptyState'
 import { safeJson } from '@/lib/http'
+import { loginHrefFromHere } from '@/lib/clientNavigation'
 import { parseLooksFeedEnvelope } from '@/lib/looks/parsers'
 import { trackLookView } from '../_lib/viewTracker'
 import type { DrawerContext as AvailabilityDrawerContext } from '../../booking/AvailabilityDrawer/types'
@@ -73,19 +74,6 @@ function applyFeedScopeParams(qs: URLSearchParams, slug: string) {
   } else if (slug && slug !== ALL_TAB.slug) {
     qs.set('category', slug)
   }
-}
-
-function currentPathWithQuery() {
-  if (typeof window === 'undefined') return '/looks'
-  return window.location.pathname + window.location.search + window.location.hash
-}
-
-function sanitizeFrom(from: string) {
-  const trimmed = from.trim()
-  if (!trimmed) return '/looks'
-  if (!trimmed.startsWith('/')) return '/looks'
-  if (trimmed.startsWith('//')) return '/looks'
-  return trimmed
 }
 
 function parseCategories(raw: unknown): UiCategory[] {
@@ -219,9 +207,7 @@ export default function LooksFeed() {
 
   const redirectToLogin = useCallback(
     (reason: string) => {
-      const from = sanitizeFrom(currentPathWithQuery())
-      const qs = new URLSearchParams({ from, reason })
-      router.push(`/login?${qs.toString()}`)
+      router.push(loginHrefFromHere('/looks', reason))
     },
     [router],
   )

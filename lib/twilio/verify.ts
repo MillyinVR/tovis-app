@@ -3,6 +3,7 @@ import Twilio from 'twilio'
 
 import { readOptionalEnv as readEnv } from '@/lib/env'
 import { asTrimmedString } from '@/lib/guards'
+import { errorMessageFromUnknown } from '@/lib/http'
 import {
   LOAD_TEST_SUPPRESSED_STATUS,
   realDeliverySuppressed,
@@ -55,12 +56,6 @@ function readTwilioVerifyConfig(): TwilioVerifyConfig | null {
   }
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error && error.message.trim()
-    ? error.message
-    : 'Unknown Twilio Verify error.'
-}
-
 export async function startTwilioVerifyPhoneVerification(args: {
   to: string
 }): Promise<TwilioVerifyStartResult> {
@@ -98,7 +93,7 @@ export async function startTwilioVerifyPhoneVerification(args: {
     return {
       ok: false,
       code: 'TWILIO_VERIFY_SEND_FAILED',
-      message: errorMessage(error),
+      message: errorMessageFromUnknown(error, 'Unknown Twilio Verify error.'),
     }
   }
 }
@@ -140,7 +135,7 @@ export async function checkTwilioVerifyPhoneCode(args: {
     return {
       ok: false,
       code: 'TWILIO_VERIFY_CHECK_FAILED',
-      message: errorMessage(error),
+      message: errorMessageFromUnknown(error, 'Unknown Twilio Verify error.'),
     }
   }
 }

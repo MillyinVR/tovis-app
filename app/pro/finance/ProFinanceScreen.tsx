@@ -19,6 +19,7 @@ import FinanceExportPanel from './_components/FinanceExportPanel'
 import FinanceOverviewPanel from './_components/FinanceOverviewPanel'
 import FinanceWriteOffsPanel from './_components/FinanceWriteOffsPanel'
 import { ChevronLeftIcon, ChevronRightIcon } from './_components/icons'
+import { readErrorMessage } from '@/lib/http'
 
 type FinanceTab = 'overview' | 'expenses' | 'writeoffs' | 'export'
 
@@ -36,14 +37,6 @@ function shiftMonthKey(key: string, delta: number): string {
   // Date used purely for calendar arithmetic (not formatting) — guard-safe.
   const date = new Date(Date.UTC(year, month - 1 + delta, 1, 12, 0, 0))
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`
-}
-
-function readError(raw: unknown): string | undefined {
-  if (raw && typeof raw === 'object' && 'error' in raw) {
-    const value = (raw as { error?: unknown }).error
-    if (typeof value === 'string') return value
-  }
-  return undefined
 }
 
 export default function ProFinanceScreen({
@@ -105,7 +98,7 @@ export default function ProFinanceScreen({
       return { ok: true }
     }
     const raw: unknown = res ? await res.json().catch(() => null) : null
-    return { ok: false, error: readError(raw) }
+    return { ok: false, error: readErrorMessage(raw) ?? undefined }
   }
 
   async function updateExpense(
@@ -126,7 +119,7 @@ export default function ProFinanceScreen({
       return { ok: true }
     }
     const raw: unknown = res ? await res.json().catch(() => null) : null
-    return { ok: false, error: readError(raw) }
+    return { ok: false, error: readErrorMessage(raw) ?? undefined }
   }
 
   async function deleteExpense(id: string) {
@@ -159,7 +152,7 @@ export default function ProFinanceScreen({
       return { ok: true }
     }
     const raw: unknown = res ? await res.json().catch(() => null) : null
-    return { ok: false, error: readError(raw) }
+    return { ok: false, error: readErrorMessage(raw) ?? undefined }
   }
 
   async function dismissReceipt(id: string) {

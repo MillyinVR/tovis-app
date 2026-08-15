@@ -20,6 +20,8 @@ import {
 import { parseHHMM } from '@/lib/scheduling/workingHours'
 import { formatSlotFullLabel } from '@/lib/time'
 import { isRecord } from '@/lib/guards'
+import { clamp } from '@/lib/pick'
+import { loginHrefFromHere } from '@/lib/clientNavigation'
 import type { ProStrandedBookingDTO } from '@/lib/dto/proWorkingHours'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -200,20 +202,12 @@ const PERIOD_OPTIONS: ReadonlyArray<Period> = ['AM', 'PM']
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value))
-}
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
-
 async function safeJsonObject(
   response: Response,
 ): Promise<Record<string, unknown>> {
   const data: unknown = await safeJson(response)
 
-  return isObject(data) ? data : {}
+  return isRecord(data) ? data : {}
 }
 
 function normalizeHHMM(value: unknown): string | null {
@@ -228,7 +222,7 @@ function normalizeHHMM(value: unknown): string | null {
 }
 
 function looksLikeApiDay(value: unknown): value is ApiDayConfig {
-  if (!isObject(value)) return false
+  if (!isRecord(value)) return false
 
   return (
     typeof value.enabled === 'boolean' &&
@@ -238,7 +232,7 @@ function looksLikeApiDay(value: unknown): value is ApiDayConfig {
 }
 
 function looksLikeApiHours(value: unknown): value is ApiWorkingHours {
-  if (!isObject(value)) return false
+  if (!isRecord(value)) return false
 
   for (const day of DAY_KEYS) {
     if (!looksLikeApiDay(value[day])) return false
@@ -468,33 +462,11 @@ function parsePeriodSelection(value: string): Period {
   return value === 'PM' ? 'PM' : 'AM'
 }
 
-function currentPathWithQuery(): string {
-  if (typeof window === 'undefined') return '/pro/calendar'
-
-  return window.location.pathname + window.location.search + window.location.hash
-}
-
-function sanitizeFrom(from: string): string {
-  const trimmed = from.trim()
-
-  if (!trimmed) return '/pro'
-  if (!trimmed.startsWith('/')) return '/pro'
-  if (trimmed.startsWith('//')) return '/pro'
-
-  return trimmed
-}
-
 function redirectToLogin(
   router: ReturnType<typeof useRouter>,
   reason?: string,
 ): void {
-  const params = new URLSearchParams({
-    from: sanitizeFrom(currentPathWithQuery()),
-  })
-
-  if (reason) params.set('reason', reason)
-
-  router.push(`/login?${params.toString()}`)
+  router.push(loginHrefFromHere('/pro/calendar', reason))
 }
 
 function workingHoursEndpoint(
@@ -518,7 +490,7 @@ function errorFromResponse(args: {
 
   if (message) return message
 
-  if (isObject(data)) {
+  if (isRecord(data)) {
     const rawMessage = data.message
 
     if (typeof rawMessage === 'string' && rawMessage.trim()) {

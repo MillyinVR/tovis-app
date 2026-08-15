@@ -36,6 +36,7 @@ import {
   timeZoneOffsetMinutes,
   zonedPartsToUtcStrict,
 } from '@/lib/time'
+import { pad2 } from '@/lib/format/pad2'
 
 /**
  * How many occurrences one materialization pass creates.
@@ -99,10 +100,6 @@ export type SeriesRecurrence = {
   timeZone: string
   /** Cadence in calendar weeks (1 = weekly, 2 = fortnightly, …). */
   intervalWeeks: number
-}
-
-function pad2(value: number): string {
-  return String(value).padStart(2, '0')
 }
 
 function formatWallTime(parts: {

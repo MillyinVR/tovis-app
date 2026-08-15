@@ -18,6 +18,7 @@
 
 import { Prisma, ProfessionalLocationType, ServiceLocationType } from '@prisma/client'
 
+import { isRecord } from '@/lib/guards'
 import { bumpScheduleVersion } from '@/lib/booking/cacheVersion'
 import { logBookingConflict } from '@/lib/booking/conflictLogging'
 import { getTimeRangeConflict } from '@/lib/booking/conflictQueries'
@@ -732,10 +733,6 @@ export async function reconcileRemovedImportedEvents(args: {
 }
 
 // ── request parsing (shared by the preview + commit routes; no casts) ─────────
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}
 
 export type CalendarImportRequest = {
   icsText: string

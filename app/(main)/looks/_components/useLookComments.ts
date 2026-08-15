@@ -3,8 +3,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { asTrimmedString, isRecord } from '@/lib/guards'
-import { safeJson } from '@/lib/http'
+import { isRecord } from '@/lib/guards'
+import { readErrorMessageOr, safeJson } from '@/lib/http'
 import {
   parseLooksComment,
   parseLooksCommentRepliesResponse,
@@ -37,10 +37,6 @@ const EMPTY_THREAD: CommentThread = {
 
 function isGuestBlocked(status: number) {
   return status === 401
-}
-
-function errorMessage(raw: unknown, fallback: string): string {
-  return asTrimmedString(isRecord(raw) ? raw.error : null) ?? fallback
 }
 
 export function useLookComments(args: {
@@ -108,7 +104,7 @@ export function useLookComments(args: {
         }
 
         if (!res.ok) {
-          throw new Error(errorMessage(raw, 'Failed to load comments'))
+          throw new Error(readErrorMessageOr(raw, 'Failed to load comments'))
         }
 
         setComments(parseLooksCommentsResponse(raw))
@@ -170,7 +166,7 @@ export function useLookComments(args: {
         }
 
         if (!res.ok) {
-          throw new Error(errorMessage(raw, 'Failed to load replies'))
+          throw new Error(readErrorMessageOr(raw, 'Failed to load replies'))
         }
 
         setThreads((prev) => ({
@@ -227,7 +223,7 @@ export function useLookComments(args: {
       }
 
       if (!res.ok) {
-        setError(errorMessage(raw, 'Failed to post comment'))
+        setError(readErrorMessageOr(raw, 'Failed to post comment'))
         return
       }
 
@@ -398,7 +394,7 @@ export function useLookComments(args: {
         if (!res.ok) {
           setComments(prevComments)
           setThreads(prevThreads)
-          setError(errorMessage(raw, 'Failed to delete comment'))
+          setError(readErrorMessageOr(raw, 'Failed to delete comment'))
           return
         }
 

@@ -5,7 +5,7 @@ import { useState } from 'react'
 import { LayoutDashboard, LogOut, Scissors, User } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { Role } from '@prisma/client'
-import { hardNavigate } from '@/lib/hardNavigate'
+import { hardNavigate } from '@/lib/clientNavigation'
 import type { WorkspaceOption } from '@/lib/auth/workspaces'
 import { Z } from '@/lib/zIndex'
 

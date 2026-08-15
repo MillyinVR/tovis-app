@@ -26,7 +26,7 @@ import {
   snapMinutes,
 } from '../_utils/calendarMath'
 
-import { clamp } from '../_utils/date'
+import { clamp } from '@/lib/pick'
 
 import {
   DEFAULT_TIME_ZONE,

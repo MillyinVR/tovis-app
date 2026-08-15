@@ -28,6 +28,7 @@
 import { AftercareRebookMode, BookingCheckoutStatus } from '@prisma/client'
 
 import { formatInTimeZone, getZonedParts } from '@/lib/time'
+import { initialsForName } from '@/lib/initials'
 
 export type ProAftercareCardStatus = 'draft' | 'sent' | 'finished'
 export type ProAftercareRebookKind = 'recommended' | 'overdue' | 'next'
@@ -100,16 +101,6 @@ const HREF_SUFFIX = '/aftercare'
 
 export function proAftercareHref(bookingId: string): string {
   return `${HREF_PREFIX}${encodeURIComponent(bookingId)}${HREF_SUFFIX}`
-}
-
-function initialsFor(name: string): string {
-  const words = name
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-  if (words.length === 0) return '—'
-  return words.map((w) => w[0]?.toUpperCase() ?? '').join('') || '—'
 }
 
 function formatDay(date: Date, timeZone: string): string {
@@ -214,7 +205,7 @@ export function deriveProAftercareCard(
     href: proAftercareHref(row.bookingId),
     serviceName,
     clientName,
-    initials: initialsFor(clientName),
+    initials: initialsForName(clientName, '—'),
     status,
     bookingDateLabel: row.scheduledFor ? formatDay(row.scheduledFor, row.timeZone) : null,
     rebook,

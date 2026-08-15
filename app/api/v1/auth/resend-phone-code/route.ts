@@ -2,10 +2,8 @@
 
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import type { AuthResendPhoneCodeResponseDTO } from '@/lib/dto/auth'
-import {
-  getVerificationPhoneLookupValue,
-  isRecord,
-} from '@/lib/auth/verification'
+import { getVerificationPhoneLookupValue } from '@/lib/auth/verification'
+import { isRecord } from '@/lib/guards'
 import { sendPhoneVerificationCode } from '@/lib/auth/phoneVerification'
 
 export const dynamic = 'force-dynamic'

@@ -2,6 +2,7 @@
 
 import { readPostmarkEmailConfig } from '@/lib/notifications/config'
 
+import { errorMessageFromUnknown } from '@/lib/http'
 import {
   DEFAULT_PROVIDER_HEALTH_TIMEOUT_MS,
   type HealthCheckResult,
@@ -15,14 +16,6 @@ type PostmarkHealthOptions = Readonly<{
   timeoutMs?: number
   liveCheckEnabled?: boolean
 }>
-
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message
-  }
-
-  return 'Unknown Postmark health check failure.'
-}
 
 function isLiveProviderCheckEnabled(): boolean {
   return process.env[LIVE_PROVIDER_CHECK_ENV]?.trim().toLowerCase() === 'true'
@@ -132,7 +125,7 @@ export async function checkPostmarkHealth(
       status: 'degraded',
       latencyMs: Math.max(0, Date.now() - startedAt),
       checkedAt: new Date().toISOString(),
-      message: getErrorMessage(error),
+      message: errorMessageFromUnknown(error, 'Unknown Postmark health check failure.'),
       details: {
         timeoutMs,
         liveCheckEnabled,

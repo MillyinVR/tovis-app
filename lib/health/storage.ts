@@ -2,6 +2,7 @@
 
 import { getSupabaseAdmin, STORAGE_BUCKETS } from '@/lib/supabaseAdmin'
 
+import { errorMessageFromUnknown } from '@/lib/http'
 import {
   DEFAULT_HEALTH_TIMEOUT_MS,
   type HealthCheckResult,
@@ -14,14 +15,6 @@ type BucketCheckResult = Readonly<{
   ok: boolean
   message?: string
 }>
-
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message
-  }
-
-  return 'Unknown Supabase Storage health check failure.'
-}
 
 function withTimeout<T>(
   promise: Promise<T>,
@@ -124,7 +117,7 @@ export async function checkStorageHealth(
       status: 'degraded',
       latencyMs: Math.max(0, Date.now() - startedAt),
       checkedAt: new Date().toISOString(),
-      message: getErrorMessage(error),
+      message: errorMessageFromUnknown(error, 'Unknown Supabase Storage health check failure.'),
       details: {
         timeoutMs,
       },

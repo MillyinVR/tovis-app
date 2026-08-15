@@ -5,6 +5,9 @@ import { useMemo, useState } from 'react'
 import Link from 'next/link'
 
 import { isRecord } from '@/lib/guards'
+import { pickStringOrEmpty } from '@/lib/pick'
+import { errorMessageFromUnknown } from '@/lib/http'
+import { hardNavigate, loginHrefFromHere } from '@/lib/clientNavigation'
 import BeforeAfterReveal from '@/app/_components/media/BeforeAfterReveal'
 import ClientMediaExportButton from '@/app/_components/media/ClientMediaExportButton'
 import RemoteImage from '@/app/_components/media/RemoteImage'
@@ -65,38 +68,12 @@ function parseHelpfulResponse(value: unknown): HelpfulResponse {
   }
 }
 
-function errorMessageFromUnknown(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) return error.message
-  if (isRecord(error) && typeof error.message === 'string') {
-    const message = error.message.trim()
-    if (message) return message
-  }
-  return 'Failed to update portfolio.'
-}
-
-function pickNonEmptyString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : ''
-}
-
 function mediaSrc(media: { url: string; thumbUrl: string | null }): string | null {
-  const thumbUrl = pickNonEmptyString(media.thumbUrl)
+  const thumbUrl = pickStringOrEmpty(media.thumbUrl)
   if (thumbUrl) return thumbUrl
 
-  const url = pickNonEmptyString(media.url)
+  const url = pickStringOrEmpty(media.url)
   return url || null
-}
-
-function currentPathWithQuery(): string {
-  if (typeof window === 'undefined') return '/looks'
-  return window.location.pathname + window.location.search + window.location.hash
-}
-
-function sanitizeFrom(from: string): string {
-  const trimmed = from.trim()
-  if (!trimmed) return '/looks'
-  if (!trimmed.startsWith('/')) return '/looks'
-  if (trimmed.startsWith('//')) return '/looks'
-  return trimmed
 }
 
 function reviewListKey(reviews: ReviewForPanel[]): string {
@@ -144,12 +121,7 @@ function ReviewsPanelInner({
   }
 
   function redirectToLogin(reason: string): void {
-    if (typeof window === 'undefined') return
-
-    const from = sanitizeFrom(currentPathWithQuery())
-    const qs = new URLSearchParams({ from, reason })
-
-    window.location.href = `/login?${qs.toString()}`
+    hardNavigate(loginHrefFromHere('/looks', reason))
   }
 
   async function setPortfolio(mediaId: string, value: boolean): Promise<void> {
@@ -184,7 +156,7 @@ function ReviewsPanelInner({
       )
     } catch (error: unknown) {
       console.error(error)
-      alert(errorMessageFromUnknown(error))
+      alert(errorMessageFromUnknown(error, 'Failed to update portfolio.'))
     } finally {
       setBusyMediaId(null)
     }

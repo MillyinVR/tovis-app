@@ -13,7 +13,8 @@ import {
   MINUTES_PER_HOUR,
 } from '../_constants'
 
-import { addDays, clamp, startOfDay } from './date'
+import { addDays, startOfDay } from './date'
+import { clamp } from '@/lib/pick'
 
 import {
   DEFAULT_BLOCK_CLIENT_NAME,

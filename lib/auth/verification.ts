@@ -2,16 +2,9 @@
 import 'server-only'
 
 import { normalizePhoneForVerification } from '@/lib/security/contactNormalization'
+import { pickStringOrEmpty } from '@/lib/pick'
 
 export type PhoneVerificationChannel = 'sms' | 'call'
-
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-export function pickString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : ''
-}
 
 /**
  * Returns the canonical phone value used by verification flows.
@@ -26,7 +19,7 @@ export function getVerificationPhoneLookupValue(value: unknown): string {
 export function parsePhoneVerificationChannel(
   value: unknown,
 ): PhoneVerificationChannel {
-  const raw = pickString(value).toLowerCase()
+  const raw = pickStringOrEmpty(value).toLowerCase()
   if (raw === 'call') return 'call'
   return 'sms'
 }

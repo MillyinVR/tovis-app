@@ -14,6 +14,8 @@
 import Papa from 'papaparse'
 import * as XLSX from 'xlsx'
 
+import { isRecord } from '@/lib/guards'
+
 // Caps keep a hostile/degenerate upload from ballooning memory: the base64
 // request body is bounded by the route, and these bound the parsed output.
 export const MAX_TABLE_FILE_BYTES = 8 * 1024 * 1024 // 8 MB decoded
@@ -135,10 +137,6 @@ export function parseSpreadsheet(buf: Buffer): TableParseResult {
 }
 
 // ── request parsing (route-level; no casts) ──────────────────────────────────
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}
 
 // Base64 of MAX_TABLE_FILE_BYTES plus padding slack.
 const MAX_BASE64_LENGTH = Math.ceil((MAX_TABLE_FILE_BYTES * 4) / 3) + 8

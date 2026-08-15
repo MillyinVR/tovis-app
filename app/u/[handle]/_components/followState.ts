@@ -2,6 +2,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { readErrorMessage } from '@/lib/http'
 
 // Who is looking, and what they're allowed to do:
 // - own    → it's their profile; no follow control
@@ -23,13 +24,6 @@ function readCount(payload: unknown, key: string): number | null {
   const value = (payload as Record<string, unknown>)[key]
   if (typeof value !== 'number' || !Number.isFinite(value)) return null
   return Math.max(0, Math.trunc(value))
-}
-
-function readError(payload: unknown): string | null {
-  if (typeof payload !== 'object' || payload === null) return null
-  if (!('error' in payload)) return null
-  const value = (payload as Record<string, unknown>).error
-  return typeof value === 'string' ? value : null
 }
 
 async function readJsonSafely(response: Response): Promise<unknown> {
@@ -110,7 +104,7 @@ export function useClientFollow(args: {
       const payload = await readJsonSafely(response)
 
       if (!response.ok) {
-        const serverError = readError(payload)
+        const serverError = readErrorMessage(payload)
         throw new Error(
           serverError ?? `Failed to update follow (${response.status})`,
         )

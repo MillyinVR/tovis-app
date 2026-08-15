@@ -35,6 +35,44 @@ export function readErrorMessage(data: unknown): string | null {
   return typeof e === 'string' && e.trim() ? e.trim() : null
 }
 
+/** `readErrorMessage` with a fallback, for callers that must render something. */
+export function readErrorMessageOr(data: unknown, fallback: string): string {
+  return readErrorMessage(data) ?? fallback
+}
+
+/**
+ * Any error-ish string on the payload: `error` first, then `message`.
+ *
+ * `error` is the USER-facing copy every API failure carries; `message` is the
+ * internal one ("Requested opening is no longer available."). Prefer the string
+ * written for a human, and only fall back to the internal one when there is
+ * nothing else to show.
+ */
+export function readAnyErrorMessage(data: unknown): string | null {
+  const error = readErrorMessage(data)
+  if (error) return error
+
+  if (!isRecord(data)) return null
+  const message = data.message
+  return typeof message === 'string' && message.trim() ? message.trim() : null
+}
+
+/** `readAnyErrorMessage` with a fallback. */
+export function readAnyErrorMessageOr(data: unknown, fallback: string): string {
+  return readAnyErrorMessage(data) ?? fallback
+}
+
+/**
+ * Read a failed Response's `error` field, falling back when the body is absent
+ * or unparseable. Consumes the body, so call it once per response.
+ */
+export async function readResponseErrorMessage(
+  res: Response,
+  fallback = 'Request failed.',
+): Promise<string> {
+  return readErrorMessage(await safeJson(res)) ?? fallback
+}
+
 export function errorMessageFromUnknown(e: unknown, fallback = 'Something went wrong.'): string {
   if (e instanceof Error && e.message.trim()) return e.message.trim()
   if (isRecord(e)) {

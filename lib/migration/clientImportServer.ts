@@ -6,6 +6,7 @@
 // reuses the exact predicate upsertProClient uses, so "existing" here means the
 // same thing a commit will merge into.
 
+import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 import {
   buildClientProfileLookupOrConditions,
@@ -21,10 +22,6 @@ import {
 } from './clientImport'
 
 const CLIENT_IMPORT_FIELDS = ['firstName', 'lastName', 'email', 'phone', 'fullName'] as const
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}
 
 function toStringRecord(value: unknown): RawCsvRow {
   const out: RawCsvRow = {}

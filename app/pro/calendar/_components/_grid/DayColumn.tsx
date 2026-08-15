@@ -11,10 +11,10 @@ import type { BrandProCalendarCopy } from '@/lib/brand/types'
 import type { CalendarEvent, EntityType, WorkingHoursJson } from '../../_types'
 
 import {
-  clamp,
   minutesSinceMidnightInTimeZone,
   ymdInTimeZone,
 } from '../../_utils/date'
+import { clamp } from '@/lib/pick'
 
 import {
   PX_PER_MINUTE,

@@ -17,6 +17,8 @@
 
 import ical from 'node-ical'
 
+import { isRecord } from '@/lib/guards'
+
 import type {
   CalendarEventDate,
   CalendarEventTime,
@@ -53,10 +55,6 @@ function validDate<T extends Date>(value: T | null | undefined): T | null {
   return value instanceof Date && Number.isFinite(value.getTime())
     ? value
     : null
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
 }
 
 // One attendee → { name, email }. node-ical gives `string | { val, params:{CN} }`

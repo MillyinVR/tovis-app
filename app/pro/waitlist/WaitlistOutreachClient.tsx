@@ -4,6 +4,7 @@
 import * as React from 'react'
 import Link from 'next/link'
 
+import { isRecord } from '@/lib/guards'
 import { initialsForName } from '@/lib/initials'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import ClientProfileLink from '@/app/_components/ClientProfileLink'
@@ -89,10 +90,6 @@ function formatOfferedAt(iso: string): string | null {
     hour: 'numeric',
     minute: '2-digit',
   })
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
 }
 
 function parseEntry(raw: unknown): OutreachEntry | null {

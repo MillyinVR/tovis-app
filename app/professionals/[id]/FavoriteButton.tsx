@@ -2,6 +2,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { errorMessageFromUnknown } from '@/lib/http'
 
 // 'row' is the screen-6 profile's three-up social action — a full-width labelled
 // cell matching the Message link and Share button beside it. 'stack' is the
@@ -71,14 +72,6 @@ function rollbackPatch(nextFavorited: boolean): FavoritePatch {
     favorited: !nextFavorited,
     countDelta: nextFavorited ? -1 : 1,
   }
-}
-
-function errorMessageFromUnknown(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message
-  }
-
-  return 'Could not update favorite.'
 }
 
 export default function FavoriteButton({

@@ -1,8 +1,14 @@
 // app/api/_utils/auth/sessionCookie.ts
 //
-// Shared session-cookie attribute logic for auth routes that mint or upgrade
-// tovis_token. Mirrors the behavior in register/phone-verify/email-verify
-// (host-derived domain, protocol-derived secure flag).
+// Shared session-cookie attribute logic for every auth route that mints,
+// upgrades or clears tovis_token: host-derived cookie domain, protocol-derived
+// secure flag.
+//
+// This is the ONLY place the cookie's attributes are written. Login, register,
+// logout, phone-verify and email-verify each carried their own copy of this
+// file's four functions; a cookie whose Domain or Secure flag differs between
+// the route that sets it and the route that clears it leaves a session the
+// user cannot log out of, and nothing in the type system connects them.
 
 type CookieWritableResponse = {
   cookies: {
@@ -71,21 +77,41 @@ export function resolveIsHttps(request: Request): boolean {
   }
 }
 
+const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 7
+
+function writeSessionCookie(
+  args: { response: CookieWritableResponse; request: Request },
+  value: string,
+  maxAge: number,
+): void {
+  const cookieDomain = resolveCookieDomain(getRequestHostname(args.request))
+
+  args.response.cookies.set('tovis_token', value, {
+    httpOnly: true,
+    secure: resolveIsHttps(args.request),
+    sameSite: 'lax',
+    path: '/',
+    maxAge,
+    ...(cookieDomain ? { domain: cookieDomain } : {}),
+  })
+}
+
 export function setSessionCookie(args: {
   response: CookieWritableResponse
   request: Request
   token: string
 }): void {
-  const hostname = getRequestHostname(args.request)
-  const cookieDomain = resolveCookieDomain(hostname)
-  const isHttps = resolveIsHttps(args.request)
+  writeSessionCookie(args, args.token, SESSION_MAX_AGE_SECONDS)
+}
 
-  args.response.cookies.set('tovis_token', args.token, {
-    httpOnly: true,
-    secure: isHttps,
-    sameSite: 'lax',
-    path: '/',
-    maxAge: 60 * 60 * 24 * 7,
-    ...(cookieDomain ? { domain: cookieDomain } : {}),
-  })
+/**
+ * Expire tovis_token. The attributes must match `setSessionCookie` exactly —
+ * a browser treats a cookie with a different Domain as a different cookie, so
+ * clearing with the wrong one leaves the session live.
+ */
+export function clearSessionCookie(args: {
+  response: CookieWritableResponse
+  request: Request
+}): void {
+  writeSessionCookie(args, '', 0)
 }

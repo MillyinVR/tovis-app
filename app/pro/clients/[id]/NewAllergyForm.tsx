@@ -4,46 +4,20 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
-import { isAbortError, safeJson } from '@/lib/http'
-import { isRecord } from '@/lib/guards'
+import { isAbortError, readErrorMessage, safeJson } from '@/lib/http'
+import { loginHrefFromHere } from '@/lib/clientNavigation'
 
 type Props = { clientId: string }
 
 const SEVERITIES = ['LOW', 'MODERATE', 'HIGH', 'CRITICAL'] as const
 type Severity = (typeof SEVERITIES)[number]
 
-function getErrorMessage(data: unknown): string | null {
-  if (!isRecord(data)) return null
-
-  const error = data.error
-  if (typeof error !== 'string') return null
-
-  const trimmed = error.trim()
-  return trimmed ? trimmed : null
-}
-
-function currentPathWithQuery() {
-  if (typeof window === 'undefined') return '/pro'
-  return window.location.pathname + window.location.search + window.location.hash
-}
-
-function sanitizeFrom(from: string) {
-  const trimmed = from.trim()
-  if (!trimmed) return '/pro'
-  if (!trimmed.startsWith('/')) return '/pro'
-  if (trimmed.startsWith('//')) return '/pro'
-  return trimmed
-}
-
 function redirectToLogin(router: ReturnType<typeof useRouter>, reason?: string) {
-  const from = sanitizeFrom(currentPathWithQuery())
-  const qs = new URLSearchParams({ from })
-  if (reason) qs.set('reason', reason)
-  router.push(`/login?${qs.toString()}`)
+  router.push(loginHrefFromHere('/pro', reason))
 }
 
 function errorFromResponse(res: Response, data: unknown) {
-  const apiError = getErrorMessage(data)
+  const apiError = readErrorMessage(data)
   if (apiError) return apiError
 
   if (res.status === 401) return 'Please log in to continue.'

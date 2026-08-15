@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
+import { clamp } from '@/lib/pick'
 import { getAdminUiPerms } from '@/lib/adminUiPermissions'
 import ServiceHeroGrid from './_components/ServiceHeroGrid'
 import ServicesBrowseBar from './_components/ServicesBrowseBar'
@@ -105,10 +106,6 @@ function asPosInt(v: string | string[] | undefined, fallback: number) {
   const s = String(firstStr(v)).trim()
   const n = Number.parseInt(s, 10)
   return Number.isFinite(n) && n > 0 ? n : fallback
-}
-
-function clamp(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, n))
 }
 
 function buildCategoryIndex(categories: CategoryRow[]) {

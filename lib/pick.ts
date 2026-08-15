@@ -12,6 +12,11 @@ export function pickStringOrEmpty(v: unknown): string {
   return typeof v === 'string' ? v.trim() : ''
 }
 
+/** `pickString` with a caller-supplied fallback instead of `null`. */
+export function pickStringOr(v: unknown, fallback: string): string {
+  return pickString(v) ?? fallback
+}
+
 export function pickNonEmptyString(v: unknown): string | null {
   return pickString(v)
 }
@@ -47,6 +52,14 @@ export function pickNumber(v: unknown): number | null {
 export function pickInt(v: unknown): number | null {
   const n = pickNumber(v)
   return n == null ? null : Math.trunc(n)
+}
+
+/**
+ * Clamp a number that is already a number. For an unknown/JSON value that
+ * needs coercing and truncating first, use `clampInt` below.
+ */
+export function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max)
 }
 
 /**

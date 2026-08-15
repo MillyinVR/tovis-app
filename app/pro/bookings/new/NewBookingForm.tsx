@@ -22,6 +22,8 @@ import type {
 } from '@/lib/dto/proBookingNew'
 import type { OfferingAddOnItemDTO } from '@/lib/dto/offeringAddOns'
 import { isRecord } from '@/lib/guards'
+import { loginHrefFromHere } from '@/lib/clientNavigation'
+import { pad2 } from '@/lib/format/pad2'
 import {
   makePlacesSessionToken,
   parsePlaceDetails,
@@ -186,24 +188,8 @@ function readSeriesId(data: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
-function currentPathWithQuery() {
-  if (typeof window === 'undefined') return '/pro'
-  return window.location.pathname + window.location.search + window.location.hash
-}
-
-function sanitizeFrom(from: string) {
-  const trimmed = from.trim()
-  if (!trimmed) return '/pro'
-  if (!trimmed.startsWith('/')) return '/pro'
-  if (trimmed.startsWith('//')) return '/pro'
-  return trimmed
-}
-
 function redirectToLogin(router: ReturnType<typeof useRouter>, reason?: string) {
-  const from = sanitizeFrom(currentPathWithQuery())
-  const qs = new URLSearchParams({ from })
-  if (reason) qs.set('reason', reason)
-  router.push(`/login?${qs.toString()}`)
+  router.push(loginHrefFromHere('/pro', reason))
 }
 
 function readBookingId(data: unknown): string | null {
@@ -236,10 +222,6 @@ function errorFromResponse(res: Response, data: unknown) {
   if (res.status === 401) return 'Please log in to continue.'
   if (res.status === 403) return 'You do not have access to do that.'
   return `Request failed (${res.status}).`
-}
-
-function pad2(n: number) {
-  return String(n).padStart(2, '0')
 }
 
 function defaultDatetimeLocal(): string {

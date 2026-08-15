@@ -11,6 +11,7 @@ import {
   loadViewerLocation,
   viewerLocationToDrawerContextFields,
 } from '@/lib/viewerLocation'
+import { hardNavigate, loginHrefFromHere } from '@/lib/clientNavigation'
 
 type UiOffering = {
   id: string
@@ -32,21 +33,6 @@ type FavoriteStatePatch = {
   favorited: boolean
 }
 
-function currentPathWithQuery(): string {
-  if (typeof window === 'undefined') return '/looks'
-
-  return window.location.pathname + window.location.search + window.location.hash
-}
-
-function sanitizeLocalPath(value: string): string {
-  const trimmed = value.trim()
-
-  if (!trimmed) return '/looks'
-  if (!trimmed.startsWith('/')) return '/looks'
-  if (trimmed.startsWith('//')) return '/looks'
-
-  return trimmed
-}
 
 function favoriteSetFromServiceIds(serviceIds: string[] | undefined): Set<string> {
   return new Set((serviceIds ?? []).filter(Boolean))
@@ -120,12 +106,7 @@ export default function ServicesBookingOverlay({
   )
 
   const redirectToLogin = React.useCallback((reason: string) => {
-    if (typeof window === 'undefined') return
-
-    const from = sanitizeLocalPath(currentPathWithQuery())
-    const params = new URLSearchParams({ from, reason })
-
-    window.location.href = `/login?${params.toString()}`
+    hardNavigate(loginHrefFromHere('/looks', reason))
   }, [])
 
   const markFavoriteBusy = React.useCallback(

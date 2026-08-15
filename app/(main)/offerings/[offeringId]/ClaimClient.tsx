@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation'
 import { buildClientIdempotencyKey, idempotencyHeaders } from '@/lib/idempotency/client'
 import { isRecord } from '@/lib/guards'
 import { isOpeningGoneCode } from '@/lib/booking/errors'
+import { readAnyErrorMessageOr } from '@/lib/http'
 
 type Props = {
   offeringId: string
@@ -26,17 +27,6 @@ function readBookingId(raw: unknown): string | null {
   const booking = raw.booking
   if (isRecord(booking) && typeof booking.id === 'string') return booking.id
   return null
-}
-
-function readError(raw: unknown, fallback: string): string {
-  if (isRecord(raw)) {
-    // `error` is the USER-facing copy every booking error carries; `message` is
-    // the internal one ("Requested opening is no longer available."). Prefer the
-    // one written for a human.
-    if (typeof raw.error === 'string' && raw.error.trim()) return raw.error
-    if (typeof raw.message === 'string' && raw.message.trim()) return raw.message
-  }
-  return fallback
 }
 
 /**
@@ -59,7 +49,7 @@ function classifyClaimFailure(
 
   return {
     taken: false,
-    message: readError(
+    message: readAnyErrorMessageOr(
       raw,
       status === 409
         ? 'That time is no longer available. Please try another opening.'

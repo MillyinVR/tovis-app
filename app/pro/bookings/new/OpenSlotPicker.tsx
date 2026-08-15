@@ -18,7 +18,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 import AvailabilityCalendar from '@/app/pro/_components/AvailabilityCalendar'
-import { safeJson } from '@/lib/http'
+import { readErrorMessage, safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
 import { formatInTimeZone, sanitizeTimeZone, ymdInTimeZone } from '@/lib/time'
 
@@ -51,13 +51,6 @@ function parseSlots(raw: unknown): { slots: string[]; timeZone: string | null } 
     : []
   const timeZone = typeof raw.timeZone === 'string' ? raw.timeZone : null
   return { slots, timeZone }
-}
-
-function readError(raw: unknown): string | null {
-  if (isRecord(raw) && typeof raw.error === 'string' && raw.error.trim()) {
-    return raw.error
-  }
-  return null
 }
 
 export default function OpenSlotPicker({
@@ -141,7 +134,7 @@ export default function OpenSlotPicker({
 
         if (!res.ok) {
           setSlots([])
-          setSlotError(readError(raw) ?? 'Couldn’t load open times.')
+          setSlotError(readErrorMessage(raw) ?? 'Couldn’t load open times.')
           return
         }
 

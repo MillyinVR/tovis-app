@@ -124,12 +124,6 @@ async function markReminderRetryableFailureIfPending(args: {
 
 const GENERIC_REMINDER_PROCESS_ERROR = 'Failed to process scheduled reminder'
 
-function getErrorMessage(err: unknown): string {
-  return err instanceof Error && err.message
-    ? err.message
-    : GENERIC_REMINDER_PROCESS_ERROR
-}
-
 function getSafeReminderProcessError(): string {
   return GENERIC_REMINDER_PROCESS_ERROR
 }

@@ -109,6 +109,12 @@ export {
   formatUtcInViewerTz,
 } from '@/lib/bookingDateTimeClient'
 
+// The app's short calendar date — "Aug 9, 2026"
+export {
+  formatDateShortInTimeZone,
+  formatIsoDateShort,
+} from '@/lib/time/dateShort'
+
 // Relative ("5m", "3h", "2d") timestamps for social/feed surfaces
 export {
   formatRelativeTimeCompact,
