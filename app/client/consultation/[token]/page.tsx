@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { use, useEffect, useMemo, useState } from 'react'
 import { formatMoneyFromUnknown as formatMoney } from '@/lib/money'
 
+import SectionCard from '@/app/client/_components/SectionCard'
 import { CreateAccountInviteCard } from '@/app/client/_public/CreateAccountInviteCard'
 import { isRecord } from '@/lib/guards'
 import {
@@ -329,30 +330,6 @@ function actionSummary(state: ActionState, approval: ApprovalDto): string {
   return 'Review the consultation details below and choose approve or decline.'
 }
 
-function SectionCard(props: {
-  title: string
-  subtitle?: string | null
-  right?: React.ReactNode
-  children: React.ReactNode
-}) {
-  return (
-    <section className="rounded-card border border-textPrimary/10 p-4 shadow-[0_14px_48px_rgb(var(--shadow-color)/0.18)] tovis-glass">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-[13px] font-black text-textPrimary">{props.title}</div>
-          {props.subtitle ? (
-            <div className="mt-0.5 text-[12px] font-semibold text-textSecondary">
-              {props.subtitle}
-            </div>
-          ) : null}
-        </div>
-        {props.right ? <div className="shrink-0">{props.right}</div> : null}
-      </div>
-
-      <div className="mt-4">{props.children}</div>
-    </section>
-  )
-}
 function readStringOrNull(value: unknown): string | null {
   return typeof value === 'string' ? value : null
 }
@@ -903,6 +880,7 @@ export default function PublicConsultationPage({ params }: PageProps) {
 
       <div className="mt-4 grid gap-4">
         <SectionCard
+          gap="roomy"
           title="Proposal"
           subtitle="Review the recommended services and pricing"
           right={
@@ -943,7 +921,11 @@ export default function PublicConsultationPage({ params }: PageProps) {
           </div>
         </SectionCard>
 
-        <SectionCard title="Proof and link details" subtitle="Audit-friendly consultation context">
+        <SectionCard
+          gap="roomy"
+          title="Proof and link details"
+          subtitle="Audit-friendly consultation context"
+        >
           <div className="grid gap-2 text-sm text-textSecondary">
             <div>
               <span className="font-black text-textPrimary">Proposal created:</span>{' '}
@@ -979,7 +961,11 @@ export default function PublicConsultationPage({ params }: PageProps) {
           </div>
         </SectionCard>
 
-        <SectionCard title="Decision" subtitle="Approve or decline this consultation">
+        <SectionCard
+          gap="roomy"
+          title="Decision"
+          subtitle="Approve or decline this consultation"
+        >
           {data.actionState.canApproveOrReject ? (
             <>
               <div className="text-sm text-textSecondary">

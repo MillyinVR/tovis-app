@@ -19,6 +19,7 @@ import { isPrepWritableStatus } from '@/lib/booking/prep'
 import { NotificationEventKey } from '@prisma/client'
 import ProProfileLink from '@/app/_components/ProProfileLink'
 import ClientPage from '../../_components/ClientPage'
+import SectionCard from '@/app/client/_components/SectionCard'
 import ClickableMedia from '@/app/_components/media/ClickableMedia'
 import AftercareBeforeAfter from '@/app/_components/aftercare/AftercareBeforeAfter'
 import { orderMediaByFeatured } from '@/lib/media/bookingBeforeAfter'
@@ -420,41 +421,6 @@ function toSafeExistingReview(
         isEligibleForLooks: mediaItem.isEligibleForLooks,
       })),
   }
-}
-
-function SectionCard(props: {
-  title: string
-  subtitle?: string | null
-  right?: ReactNode
-  children: ReactNode
-  className?: string
-}) {
-  return (
-    <section
-      className={cn(
-        'rounded-card border border-textPrimary/10 p-4 shadow-[0_14px_48px_rgb(var(--shadow-color)/0.18)]',
-        'tovis-glass',
-        props.className,
-      )}
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-[13px] font-black text-textPrimary">
-            {props.title}
-          </div>
-          {props.subtitle ? (
-            <div className="mt-0.5 text-[12px] font-semibold text-textSecondary">
-              {props.subtitle}
-            </div>
-          ) : null}
-        </div>
-
-        {props.right ? <div className="shrink-0">{props.right}</div> : null}
-      </div>
-
-      <div className="mt-3">{props.children}</div>
-    </section>
-  )
 }
 
 function TinyMetaPill({ children }: { children: ReactNode }) {
