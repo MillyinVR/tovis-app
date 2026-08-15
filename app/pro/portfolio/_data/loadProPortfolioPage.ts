@@ -236,34 +236,48 @@ export async function buildProPortfolioModel({
 
   const counts = buildCounts(tiles, total)
 
-  const groups: ProPortfolioGroup[] = []
+  const candidates: Array<{
+    zone: ProPortfolioGroup['zone']
+    title: string
+    blurb: string
+    tiles: ProPortfolioTile[]
+  }> = []
 
   if (uploadTiles.length > 0) {
-    groups.push(
-      buildGroup({
-        zone: 'UPLOADS',
-        title: 'Your uploads',
-        blurb: 'Shot and posted by you. Yours to publish whenever.',
-        tiles: uploadTiles,
-        // 🔴 Uncapped once the page IS this zone, or "Show N more" leads to a
-        // page that shows the same N-capped grid and offers "Show N more" again.
-        expanded: activeFilter === 'UPLOADS',
-      }),
-    )
+    candidates.push({
+      zone: 'UPLOADS',
+      title: 'Your uploads',
+      blurb: 'Shot and posted by you. Yours to publish whenever.',
+      tiles: uploadTiles,
+    })
   }
 
   if (sessions.length > 0) {
-    groups.push(
-      buildGroup({
-        zone: 'SESSIONS',
-        title: 'From sessions',
-        blurb:
-          'Taken at the chair. Private between you and your client until they allow it.',
-        tiles: sessions,
-        expanded: activeFilter === 'SESSIONS',
-      }),
-    )
+    candidates.push({
+      zone: 'SESSIONS',
+      title: 'From sessions',
+      blurb:
+        'Taken at the chair. Private between you and your client until they allow it.',
+      tiles: sessions,
+    })
   }
+
+  /**
+   * 🔴 A group renders UNCAPPED whenever the page is already showing only that
+   * group — not merely when the filter is named after its zone.
+   *
+   * Keyed on "one group and a narrowed page" rather than on `activeFilter ===
+   * zone` because the narrowing filter is often named after something else.
+   * Under `WAITING` the sessions group holds 8 held tiles, showed 6, and offered
+   * "Show 2 more" — which pointed at `SESSIONS`, a BROADER set of 10. The count
+   * was honest about the wrong list, so the control under-promised by exactly
+   * the tiles the current filter had excluded.
+   */
+  const expandAll = activeFilter !== 'ALL' && candidates.length === 1
+
+  const groups: ProPortfolioGroup[] = candidates.map((candidate) =>
+    buildGroup({ ...candidate, expanded: expandAll }),
+  )
 
   const isBlank = total === 0
   // 🔴 From the UNFILTERED counts, never from `publicTiles`. The lead card says
