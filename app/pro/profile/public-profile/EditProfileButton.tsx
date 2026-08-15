@@ -21,6 +21,7 @@ import { uploadWithProgress } from '@/lib/media/uploadWithProgress'
 import { compressImageForUpload } from '@/lib/media/processImageForUpload'
 import { withCacheBuster } from '@/lib/url'
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import { FieldLabel, TextInput, Textarea } from '@/app/_components/ui'
 
 type Props = {
   canEditHandle: boolean
@@ -538,10 +539,11 @@ export default function EditProfileButton({ canEditHandle, initial }: Props) {
             <div className="mt-4 grid gap-3">
               <Field label="Handle (vanity link)">
                 <div className="grid gap-2">
-                  <input
+                  <TextInput
                     value={handle}
                     onChange={(event) => setHandle(event.target.value)}
-                    className="w-full rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary focus:outline-none focus:ring-2 focus:ring-accentPrimary/40 disabled:cursor-not-allowed disabled:opacity-70"
+                    className="disabled:cursor-not-allowed disabled:opacity-70"
+                    surface="solid"
                     placeholder="e.g. tori"
                     disabled={busy || !canEditHandle}
                     autoCapitalize="none"
@@ -650,10 +652,10 @@ export default function EditProfileButton({ canEditHandle, initial }: Props) {
               </Field>
 
               <Field label="Business name">
-                <input
+                <TextInput
                   value={businessName}
                   onChange={(event) => setBusinessName(event.target.value)}
-                  className="w-full rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary focus:outline-none focus:ring-2 focus:ring-accentPrimary/40"
+                  surface="solid"
                   placeholder="e.g. Lumara Beauty"
                   disabled={busy}
                 />
@@ -693,20 +695,20 @@ export default function EditProfileButton({ canEditHandle, initial }: Props) {
               </Field>
 
               <Field label="Profession type">
-                <input
+                <TextInput
                   value={professionType}
                   onChange={(event) => setProfessionType(event.target.value)}
-                  className="w-full rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary focus:outline-none focus:ring-2 focus:ring-accentPrimary/40"
+                  surface="solid"
                   placeholder="e.g. MAKEUP_ARTIST"
                   disabled={busy}
                 />
               </Field>
 
               <Field label="Location">
-                <input
+                <TextInput
                   value={location}
                   onChange={(event) => setLocation(event.target.value)}
-                  className="w-full rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary focus:outline-none focus:ring-2 focus:ring-accentPrimary/40"
+                  surface="solid"
                   placeholder="e.g. San Diego, CA"
                   disabled={busy}
                 />
@@ -749,10 +751,10 @@ export default function EditProfileButton({ canEditHandle, initial }: Props) {
                     <span className="font-black text-textPrimary">Save</span>.
                   </div>
 
-                  <input
+                  <TextInput
                     value={avatarUrl}
                     onChange={(event) => setAvatarUrl(event.target.value)}
-                    className="w-full rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary focus:outline-none focus:ring-2 focus:ring-accentPrimary/40"
+                    surface="solid"
                     placeholder="Avatar URL (fallback)"
                     disabled={busy}
                   />
@@ -760,41 +762,42 @@ export default function EditProfileButton({ canEditHandle, initial }: Props) {
               </Field>
 
               <Field label="Bio">
-                <textarea
+                <Textarea
                   value={bio}
                   onChange={(event) => setBio(event.target.value)}
                   rows={4}
-                  className="w-full resize-y rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary focus:outline-none focus:ring-2 focus:ring-accentPrimary/40"
+                  className="resize-y"
+                  surface="solid"
                   placeholder="Short, confident, clear."
                   disabled={busy}
                 />
               </Field>
 
               <Field label="Instagram">
-                <input
+                <TextInput
                   value={instagramHandle}
                   onChange={(event) => setInstagramHandle(event.target.value)}
-                  className="w-full rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary focus:outline-none focus:ring-2 focus:ring-accentPrimary/40"
+                  surface="solid"
                   placeholder="@yourhandle"
                   disabled={busy}
                 />
               </Field>
 
               <Field label="TikTok">
-                <input
+                <TextInput
                   value={tiktokHandle}
                   onChange={(event) => setTiktokHandle(event.target.value)}
-                  className="w-full rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary focus:outline-none focus:ring-2 focus:ring-accentPrimary/40"
+                  surface="solid"
                   placeholder="@yourhandle"
                   disabled={busy}
                 />
               </Field>
 
               <Field label="Website">
-                <input
+                <TextInput
                   value={websiteUrl}
                   onChange={(event) => setWebsiteUrl(event.target.value)}
-                  className="w-full rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary focus:outline-none focus:ring-2 focus:ring-accentPrimary/40"
+                  surface="solid"
                   placeholder="yoursite.com"
                   disabled={busy}
                   inputMode="url"
@@ -857,7 +860,7 @@ function Field({
 }) {
   return (
     <label className="grid gap-2">
-      <div className="text-[12px] font-black text-textSecondary">{label}</div>
+      <FieldLabel as="span">{label}</FieldLabel>
       {children}
     </label>
   )
