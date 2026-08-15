@@ -29,6 +29,7 @@ import {
 } from '@/lib/proSession/sessionFlow'
 import { DEFAULT_TIME_ZONE, friendlyTimeZoneLabel, sanitizeTimeZone } from '@/lib/timeZone'
 import { fullName } from '@/lib/names'
+import SessionCard from '../../_components/SessionCard'
 
 export const dynamic = 'force-dynamic'
 
@@ -101,26 +102,6 @@ function PageShell({ children }: { children: ReactNode }) {
   return <main className="brand-pro-session-page">{children}</main>
 }
 
-function Card({
-  children,
-  accent = false,
-  tone,
-}: {
-  children: ReactNode
-  accent?: boolean
-  tone?: 'success' | 'danger'
-}) {
-  return (
-    <section
-      className="brand-pro-session-card"
-      data-accent={accent}
-      data-tone={tone}
-    >
-      {children}
-    </section>
-  )
-}
-
 function SessionHeader({
   bookingId,
   serviceName,
@@ -176,7 +157,7 @@ function SessionHeader({
 // aftercare step via its own "Continue to aftercare" action.
 function LockedStatusCard({ timeZone }: { timeZone: string }) {
   return (
-    <Card accent>
+    <SessionCard accent>
       <div className="brand-pro-session-card-heading">
         <span className="brand-pro-session-card-dot" />
         Add at least one after photo
@@ -196,7 +177,7 @@ function LockedStatusCard({ timeZone }: { timeZone: string }) {
       <div className="brand-pro-session-help-text">
         Times shown in <strong>{friendlyTimeZoneLabel(timeZone) ?? timeZone}</strong>
       </div>
-    </Card>
+    </SessionCard>
   )
 }
 

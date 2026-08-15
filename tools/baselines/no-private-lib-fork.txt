@@ -149,20 +149,21 @@ lib/supabaseAdmin.ts|mustGetEnv
 
 # ── UI-kit forks, added at phase 6 ──────────────────────────────────────────
 # app/admin was migrated in the phase-6 admin PR and is deliberately absent;
-# (auth) and the client forms followed. What remains, one PR each: the pro
-# session/aftercare Cards, pro calendar's Select and its two buttonClassName
-# copies, EditPaymentSettingsButton's TextInput, and the public-profile Avatar.
-# Shrink this block to zero as those land.
+# (auth), the client forms and the pro session Cards followed. What remains, one
+# PR each: pro calendar's Select and its two buttonClassName copies,
+# EditPaymentSettingsButton's TextInput, ShareLookSheet's caps-eyebrow label, and
+# the public-profile Avatar. Shrink this block to zero as those land.
+#
+# ⚠️ Each of those four is a REAL visual delta, not a rename — the pro labels are
+# `text-[12px]` where the kit is `text-xs` (same size, but `text-xs` also sets a
+# line-height), and EditPaymentSettingsButton's field is py-3/13px where the kit
+# is py-2/14px. They need measuring, not a sed.
 #
 # ⚠️ This guard only sees PRIVATE declarations, so an EXPORTED fork is invisible
 # to it — `app/(auth)/_components/{Input,FieldLabel,PrimaryButton}.tsx` were each
 # a full copy of a kit primitive and never appeared on this list. The baseline is
 # a floor, not the work-list.
 app/client/(gated)/looks/share/[bookingId]/ShareLookSheet.tsx|FieldLabel
-app/pro/bookings/[id]/aftercare/page.tsx|Card
-app/pro/bookings/[id]/session/after-photos/page.tsx|Card
-app/pro/bookings/[id]/session/before-photos/page.tsx|Card
-app/pro/bookings/[id]/session/page.tsx|Card
 app/pro/calendar/_components/BookingOverrideConfirmModal.tsx|buttonClassName
 app/pro/calendar/_components/ConfirmChangeModal.tsx|buttonClassName
 app/pro/calendar/_components/WorkingHoursForm.tsx|Select
