@@ -167,7 +167,9 @@ export default function FavoriteButton({
       applyServerTruth(payload)
     } catch (caughtError) {
       applyPatch(rollbackPatch(nextFavorited))
-      flashError(errorMessageFromUnknown(caughtError))
+      flashError(
+        errorMessageFromUnknown(caughtError, 'Could not update favorite.'),
+      )
     } finally {
       setLoading(false)
     }
