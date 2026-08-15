@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
+import { pad2 } from '@/lib/format/pad2'
 
 import {
   DEFAULT_TIME_ZONE,
@@ -261,10 +262,6 @@ function parseBlockDto(
     note: typeof raw.note === 'string' ? raw.note : null,
     locationId: typeof raw.locationId === 'string' ? raw.locationId : null,
   }
-}
-
-function pad2(value: number): string {
-  return String(value).padStart(2, '0')
 }
 
 function timeInputFromMinutes(minutes: number): string {

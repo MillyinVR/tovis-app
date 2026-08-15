@@ -3,6 +3,7 @@ import { requireEnv } from '@/lib/env'
 import { isRecord } from '@/lib/guards'
 import { getCurrentUser } from '@/lib/currentUser'
 import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
+import { pickStringOr, pickStringOrEmpty } from '@/lib/pick'
 import {
   dcaLicenseQueryNumber,
   isCurrentStatusCode,
@@ -53,14 +54,6 @@ type DcaLicenseSearchResponse = {
   licenseDetails?: unknown
 }
 
-function stringFromUnknown(value: unknown): string {
-  return typeof value === 'string' ? value : ''
-}
-
-function errorMessageFromUnknown(value: unknown, fallback: string): string {
-  return typeof value === 'string' && value.trim() ? value : fallback
-}
-
 function isDcaLicenseTypeGroup(value: unknown): value is DcaLicenseTypeGroup {
   return isRecord(value)
 }
@@ -95,9 +88,9 @@ async function getBreezeTypeMap(): Promise<Record<Profession, string>> {
 
   if (!res.ok) {
     throw new Error(
-      errorMessageFromUnknown(
+      pickStringOr(
         data.message,
-        errorMessageFromUnknown(data.error, 'DCA license types lookup failed'),
+        pickStringOr(data.error, 'DCA license types lookup failed'),
       ),
     )
   }
@@ -114,11 +107,11 @@ async function getBreezeTypeMap(): Promise<Record<Profession, string>> {
 
   const pick = (needle: string): string | null => {
     const hit = allTypes.find((type) => {
-      const licenseLongName = stringFromUnknown(
+      const licenseLongName = pickStringOrEmpty(
         type.licenseLongName,
       ).toUpperCase()
 
-      const publicNameDesc = stringFromUnknown(
+      const publicNameDesc = pickStringOrEmpty(
         type.publicNameDesc,
       ).toUpperCase()
 
@@ -265,7 +258,7 @@ export async function POST(req: Request) {
       return NextResponse.json(
         {
           ok: false,
-          error: errorMessageFromUnknown(data.error, 'License lookup failed.'),
+          error: pickStringOr(data.error, 'License lookup failed.'),
         },
         { status: res.status },
       )

@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 
 import { getRedis } from '@/lib/redis'
 
+import { errorMessageFromUnknown } from '@/lib/http'
 import {
   DEFAULT_HEALTH_TIMEOUT_MS,
   type HealthCheckResult,
@@ -11,14 +12,6 @@ import {
 
 const REDIS_CHECK_NAME = 'redis' as const
 const REDIS_HEALTH_KEY_PREFIX = 'health:ready:redis'
-
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message
-  }
-
-  return 'Unknown Redis health check failure.'
-}
 
 function withTimeout<T>(
   promise: Promise<T>,
@@ -88,7 +81,7 @@ export async function checkRedisHealth(
       status: 'degraded',
       latencyMs: Math.max(0, Date.now() - startedAt),
       checkedAt: new Date().toISOString(),
-      message: getErrorMessage(error),
+      message: errorMessageFromUnknown(error, 'Unknown Redis health check failure.'),
       details: {
         keyPrefix: REDIS_HEALTH_KEY_PREFIX,
         timeoutMs,

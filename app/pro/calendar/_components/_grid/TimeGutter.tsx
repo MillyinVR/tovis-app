@@ -7,7 +7,7 @@ import type { CSSProperties } from 'react'
 import { friendlyTimeZoneLabel } from '@/lib/timeZone'
 
 import { PX_PER_MINUTE } from '../../_utils/calendarMath'
-import { clamp } from '../../_utils/date'
+import { clamp } from '@/lib/pick'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

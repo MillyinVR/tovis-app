@@ -6,6 +6,7 @@ import type { AuthPhoneVerifyResponseDTO } from '@/lib/dto/auth'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { enforceVerificationVerifyThrottle } from '@/app/api/_utils/auth/verificationThrottle'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
+import { setSessionCookie } from '@/app/api/_utils/auth/sessionCookie'
 import { createActiveToken, createVerificationToken } from '@/lib/auth'
 import { checkTwilioVerifyPhoneCode } from '@/lib/twilio/verify'
 import {
@@ -16,59 +17,6 @@ import {
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
-function hostToHostname(hostHeader: string | null): string | null {
-  if (!hostHeader) return null
-
-  const first = hostHeader.split(',')[0]?.trim().toLowerCase() ?? ''
-  if (!first) return null
-
-  if (first.startsWith('[')) {
-    const end = first.indexOf(']')
-    if (end === -1) return null
-    return first.slice(1, end)
-  }
-
-  const idx = first.indexOf(':')
-  return idx >= 0 ? first.slice(0, idx) : first
-}
-
-function resolveCookieDomain(hostname: string | null): string | undefined {
-  if (!hostname) return undefined
-
-  if (hostname === 'tovis.app' || hostname.endsWith('.tovis.app')) {
-    return '.tovis.app'
-  }
-
-  if (hostname === 'tovis.me' || hostname.endsWith('.tovis.me')) {
-    return '.tovis.me'
-  }
-
-  return undefined
-}
-
-function resolveIsHttps(request: Request): boolean {
-  const forwardedProto = request.headers
-    .get('x-forwarded-proto')
-    ?.trim()
-    .toLowerCase()
-
-  if (forwardedProto === 'https') return true
-  if (forwardedProto === 'http') return false
-
-  try {
-    return new URL(request.url).protocol === 'https:'
-  } catch {
-    return false
-  }
-}
-
-function getRequestHostname(request: Request): string | null {
-  const host =
-    request.headers.get('x-forwarded-host') ?? request.headers.get('host')
-
-  return hostToHostname(host)
-}
-
 function normalizeVerificationCode(value: unknown): string | null {
   const code = pickString(value)?.trim()
   if (!code) return null
@@ -77,27 +25,6 @@ function normalizeVerificationCode(value: unknown): string | null {
 
 function isSixDigitCode(code: string): boolean {
   return /^\d{6}$/.test(code)
-}
-
-type CookieWritableResponse = ReturnType<typeof jsonOk>
-
-function setSessionCookie(args: {
-  response: CookieWritableResponse
-  request: Request
-  token: string
-}): void {
-  const hostname = getRequestHostname(args.request)
-  const cookieDomain = resolveCookieDomain(hostname)
-  const isHttps = resolveIsHttps(args.request)
-
-  args.response.cookies.set('tovis_token', args.token, {
-    httpOnly: true,
-    secure: isHttps,
-    sameSite: 'lax',
-    path: '/',
-    maxAge: 60 * 60 * 24 * 7,
-    ...(cookieDomain ? { domain: cookieDomain } : {}),
-  })
 }
 
 export async function POST(request: Request) {

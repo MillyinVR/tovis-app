@@ -3,7 +3,7 @@
 
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
-import { hardNavigate } from '@/lib/hardNavigate'
+import { hardNavigate } from '@/lib/clientNavigation'
 
 export default function LogoutButton({ className }: { className?: string }) {
   const [loading, setLoading] = useState(false)

@@ -6,37 +6,18 @@ import type { FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { isAbortError, safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
+import { loginHrefFromHere } from '@/lib/clientNavigation'
 import { Button } from '@/app/_components/ui'
 
 type ApiErrorPayload = {
   error?: unknown
 }
 
-function currentPathWithQuery(): string {
-  if (typeof window === 'undefined') return '/pro'
-  return window.location.pathname + window.location.search + window.location.hash
-}
-
-function sanitizeFrom(from: string): string {
-  const trimmed = from.trim()
-  if (!trimmed) return '/pro'
-  if (!trimmed.startsWith('/')) return '/pro'
-  if (trimmed.startsWith('//')) return '/pro'
-  return trimmed
-}
-
 function redirectToLogin(
   router: ReturnType<typeof useRouter>,
   reason?: string,
 ): void {
-  const from = sanitizeFrom(currentPathWithQuery())
-  const qs = new URLSearchParams({ from })
-
-  if (reason) {
-    qs.set('reason', reason)
-  }
-
-  router.push(`/login?${qs.toString()}`)
+  router.push(loginHrefFromHere('/pro', reason))
 }
 
 function errorFromResponse(res: Response, data: unknown): string {

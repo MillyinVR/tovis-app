@@ -3,6 +3,8 @@
 // Compression TARGET for images (distinct from the hard per-object upload cap,
 // UPLOAD_MAX_BYTES in lib/media/uploadLimits.ts — validate uploads against
 // that, not this).
+import { clamp } from '@/lib/pick'
+
 export const IMAGE_UPLOAD_MAX_BYTES = 25 * 1024 * 1024
 
 const DEFAULT_OUTPUT_MIME_TYPE = 'image/jpeg'
@@ -60,10 +62,6 @@ export const IMAGE_CROP_PRESET_OPTIONS: Array<{
   { value: 'TALL_9_16', label: 'Tall 9:16' },
   { value: 'SQUARE_1_1', label: 'Square 1:1' },
 ]
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(Math.max(value, min), max)
-}
 
 function getFileBaseName(fileName: string): string {
   const trimmed = fileName.trim()

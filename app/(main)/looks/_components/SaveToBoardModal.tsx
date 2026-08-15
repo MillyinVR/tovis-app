@@ -18,6 +18,7 @@ import type {
 import { cn } from '@/lib/utils'
 import { isRecord } from '@/lib/guards'
 import { zClass } from '@/lib/zIndex'
+import { readErrorMessageOr } from '@/lib/http'
 
 type SaveToBoardModalProps = {
   isOpen: boolean
@@ -110,13 +111,6 @@ function parseBoardsList(value: unknown): ModalBoard[] | null {
 function parseCreatedBoard(value: unknown): ModalBoard | null {
   if (!isRecord(value)) return null
   return parseModalBoard(value.board)
-}
-
-function readErrorMessage(value: unknown, fallback: string): string {
-  if (isRecord(value) && typeof value.error === 'string' && value.error.trim()) {
-    return value.error
-  }
-  return fallback
 }
 
 function normalizeSaveState(
@@ -229,12 +223,12 @@ export default function SaveToBoardModal({
         .catch(() => null)
 
       if (!boardsResponse.ok) {
-        throw new Error(readErrorMessage(boardsPayload, 'Couldn’t load boards.'))
+        throw new Error(readErrorMessageOr(boardsPayload, 'Couldn’t load boards.'))
       }
 
       if (!saveStateResponse.ok) {
         throw new Error(
-          readErrorMessage(saveStatePayload, 'Couldn’t load save state.'),
+          readErrorMessageOr(saveStatePayload, 'Couldn’t load save state.'),
         )
       }
 
@@ -281,7 +275,7 @@ export default function SaveToBoardModal({
         const payload: unknown = await response.json().catch(() => null)
 
         if (!response.ok) {
-          throw new Error(readErrorMessage(payload, 'Couldn’t update board.'))
+          throw new Error(readErrorMessageOr(payload, 'Couldn’t update board.'))
         }
 
         if (!isBoardItemMutationResponseDto(payload)) {
@@ -325,7 +319,7 @@ export default function SaveToBoardModal({
         const payload: unknown = await response.json().catch(() => null)
 
         if (!response.ok) {
-          throw new Error(readErrorMessage(payload, 'Couldn’t create board.'))
+          throw new Error(readErrorMessageOr(payload, 'Couldn’t create board.'))
         }
 
         const createdBoard = parseCreatedBoard(payload)

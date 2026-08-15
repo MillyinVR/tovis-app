@@ -12,6 +12,7 @@ import type {
 } from '@/lib/proSession/types'
 import { isRecord } from '@/lib/guards'
 import { safeJson } from '@/lib/http'
+import { currentPathWithQuery, loginHrefFromHere } from '@/lib/clientNavigation'
 import {
   buildClientIdempotencyKey,
   idempotencyHeaders,
@@ -52,19 +53,6 @@ function getBoolProp(obj: unknown, key: string): boolean | null {
   return typeof v === 'boolean' ? v : null
 }
 
-function currentPathWithQuery(): string {
-  if (typeof window === 'undefined') return '/'
-  return window.location.pathname + window.location.search + window.location.hash
-}
-
-function sanitizeFrom(from: string): string {
-  const trimmed = from.trim()
-  if (!trimmed) return '/'
-  if (!trimmed.startsWith('/')) return '/'
-  if (trimmed.startsWith('//')) return '/'
-  return trimmed
-}
-
 function isSafeInternalHref(href: unknown): href is string {
   return (
     typeof href === 'string' &&
@@ -74,12 +62,7 @@ function isSafeInternalHref(href: unknown): href is string {
 }
 
 function redirectToLogin(router: ReturnType<typeof useRouter>, reason?: string): void {
-  const from = sanitizeFrom(currentPathWithQuery())
-  const qs = new URLSearchParams({ from })
-
-  if (reason) qs.set('reason', reason)
-
-  router.push(`/login?${qs.toString()}`)
+  router.push(loginHrefFromHere('/', reason))
 }
 
 function errorFromResponse(res: Response, data: unknown): string {
@@ -551,7 +534,7 @@ export function useProSession() {
 
         const target = nextHref ?? freshHref ?? fallbackHub
 
-        if (target === currentPathWithQuery()) {
+        if (target === currentPathWithQuery('/')) {
           router.refresh()
         } else {
           router.push(target)
@@ -616,7 +599,7 @@ export function useProSession() {
 
         const target = nextHref ?? freshHref ?? fallbackHub
 
-        if (target === currentPathWithQuery()) {
+        if (target === currentPathWithQuery('/')) {
           router.refresh()
         } else {
           router.push(target)
@@ -662,7 +645,7 @@ export function useProSession() {
 
         const target = nextHref ?? freshHref ?? fallbackHub
 
-        if (target === currentPathWithQuery()) {
+        if (target === currentPathWithQuery('/')) {
           router.refresh()
         } else {
           router.push(target)
@@ -682,7 +665,7 @@ export function useProSession() {
           ? center.href
           : fallbackHub
 
-        if (target === currentPathWithQuery()) {
+        if (target === currentPathWithQuery('/')) {
           router.refresh()
         } else {
           router.push(target)

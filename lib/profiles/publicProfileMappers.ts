@@ -4,6 +4,7 @@ import 'server-only'
 import { MediaType, VerificationStatus } from '@prisma/client'
 import type { MediaVisibility, ProfessionType } from '@prisma/client'
 
+import { isNonNull } from '@/lib/guards'
 import { moneyToString } from '@/lib/money'
 import { isProCurrentlyLicensed } from '@/lib/licensing/currentlyLicensed'
 import {
@@ -253,10 +254,6 @@ export type PublicProfileStatsDto = {
   // the Follow button, which is a different surface with live mutation.
   looksLabel: string
   followersLabel: string
-}
-
-function isNonNull<T>(value: T | null): value is T {
-  return value !== null
 }
 
 function hasStoragePointers(

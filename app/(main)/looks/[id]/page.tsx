@@ -9,26 +9,12 @@ import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import LookDetailClient from './LookDetailClient'
-import { isRecord } from '@/lib/guards'
+import { pickString } from '@/lib/pick'
+import { readErrorMessageOr } from '@/lib/http'
 
 export const dynamic = 'force-dynamic'
 
 type Params = { id: string }
-
-function pickString(value: unknown): string | null {
-  return typeof value === 'string' && value.trim().length > 0
-    ? value.trim()
-    : null
-}
-
-function readErrorMessage(raw: unknown): string {
-  if (isRecord(raw)) {
-    const error = pickString(raw.error)
-    if (error) return error
-  }
-
-  return 'Couldn’t load that look. Try again.'
-}
 
 async function getBaseUrl(): Promise<string> {
   const h = await headers()
@@ -62,7 +48,9 @@ async function fetchLookDetail(lookPostId: string) {
   const raw: unknown = await res.json().catch(() => null)
 
   if (!res.ok) {
-    throw new Error(readErrorMessage(raw))
+    throw new Error(
+      readErrorMessageOr(raw, 'Couldn’t load that look. Try again.'),
+    )
   }
 
   const item = parseLooksDetailResponse(raw)

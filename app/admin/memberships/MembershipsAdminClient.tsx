@@ -6,11 +6,8 @@
 
 import { useEffect, useState, useTransition } from 'react'
 
-import {
-  DEFAULT_TIME_ZONE,
-  formatInTimeZone,
-  getViewerTimeZone,
-} from '@/lib/time'
+import { formatIsoDateShort } from '@/lib/time'
+import { readResponseErrorMessage } from '@/lib/http'
 
 type DirectoryRow = {
   professionalId: string
@@ -41,25 +38,6 @@ type CameraUsage = {
 const COMP_PLANS = ['pro', 'premium', 'studio'] as const
 const COMP_MONTHS = [1, 3, 6, 12] as const
 
-function formatDate(iso: string | null): string | null {
-  if (!iso) return null
-  const d = new Date(iso)
-  return Number.isNaN(d.getTime())
-    ? null
-    : formatInTimeZone(d, getViewerTimeZone() ?? DEFAULT_TIME_ZONE, {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-      })
-}
-
-async function readError(res: Response): Promise<string> {
-  const data = (await res.json().catch(() => null)) as {
-    error?: string
-  } | null
-  return data?.error || 'Request failed.'
-}
-
 export default function MembershipsAdminClient() {
   const [query, setQuery] = useState('')
   const [items, setItems] = useState<DirectoryRow[]>([])
@@ -73,7 +51,7 @@ export default function MembershipsAdminClient() {
       const res = await fetch(
         `/api/v1/admin/memberships?q=${encodeURIComponent(q)}`,
       )
-      if (!res.ok) throw new Error(await readError(res))
+      if (!res.ok) throw new Error(await readResponseErrorMessage(res))
       const data = (await res.json()) as { items: DirectoryRow[] }
       setItems(data.items)
       setSearched(true)
@@ -98,7 +76,7 @@ export default function MembershipsAdminClient() {
           body: JSON.stringify({ planKey, months, note: note || undefined }),
         },
       )
-      if (!res.ok) throw new Error(await readError(res))
+      if (!res.ok) throw new Error(await readResponseErrorMessage(res))
       await search(query)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Grant failed.')
@@ -112,7 +90,7 @@ export default function MembershipsAdminClient() {
         `/api/v1/admin/memberships/${professionalId}/comp`,
         { method: 'DELETE' },
       )
-      if (!res.ok) throw new Error(await readError(res))
+      if (!res.ok) throw new Error(await readResponseErrorMessage(res))
       await search(query)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Revoke failed.')
@@ -231,7 +209,7 @@ function MembershipRow({
         },
       )
       if (!res.ok) {
-        setCameraError(await readError(res))
+        setCameraError(await readResponseErrorMessage(res))
         return
       }
       const data = (await res.json()) as { usage: CameraUsage }
@@ -244,8 +222,8 @@ function MembershipRow({
     }
   }
 
-  const compLabel = formatDate(item.compUntil)
-  const renewLabel = formatDate(item.currentPeriodEnd)
+  const compLabel = formatIsoDateShort(item.compUntil)
+  const renewLabel = formatIsoDateShort(item.currentPeriodEnd)
 
   return (
     <div className="rounded-card border border-white/10 bg-bgPrimary/40 p-4">

@@ -6,11 +6,7 @@ import type { SubscriptionStatus } from '@prisma/client'
 import type { Entitlement, PlanKey } from '@/lib/pro/entitlements'
 import { useBrand } from '@/lib/brand/BrandProvider'
 import { formatRoundedDollars } from '@/lib/money'
-import {
-  DEFAULT_TIME_ZONE,
-  formatInTimeZone,
-  getViewerTimeZone,
-} from '@/lib/time'
+import { formatIsoDateShort } from '@/lib/time'
 import { advertisedEntitlements, feePitchBody } from './entitlementCopy'
 
 type PlanPrice = {
@@ -48,18 +44,6 @@ type Props = {
 
 function dollars(cents: number): string {
   return formatRoundedDollars(cents / 100) ?? `$${Math.round(cents / 100)}`
-}
-
-function formatDate(iso: string | null): string | null {
-  if (!iso) return null
-  const d = new Date(iso)
-  return Number.isNaN(d.getTime())
-    ? null
-    : formatInTimeZone(d, getViewerTimeZone() ?? DEFAULT_TIME_ZONE, {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-      })
 }
 
 export default function MembershipClient(props: Props) {
@@ -133,9 +117,9 @@ export default function MembershipClient(props: Props) {
 
   // Only entitlements we are willing to stand behind get named — see entitlementCopy.
   const advertised = advertisedEntitlements(props.entitlements, brand.displayName)
-  const renewLabel = formatDate(props.currentPeriodEnd)
-  const trialLabel = formatDate(props.trialEndsAt)
-  const compLabel = formatDate(props.compUntil)
+  const renewLabel = formatIsoDateShort(props.currentPeriodEnd)
+  const trialLabel = formatIsoDateShort(props.trialEndsAt)
+  const compLabel = formatIsoDateShort(props.compUntil)
 
   return (
     <section className="mx-auto mt-16 w-full max-w-2xl px-4 pb-12 text-textPrimary">

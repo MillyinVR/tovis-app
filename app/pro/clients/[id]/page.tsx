@@ -44,7 +44,7 @@ import {
   type ConsentView,
   type TechnicalRecordData,
 } from '@/lib/clients/technicalRecordLoader'
-import { formatInTimeZone } from '@/lib/time'
+import { formatDateShortInTimeZone, formatInTimeZone } from '@/lib/time'
 import { resolveProScheduleTimeZone } from '@/lib/proLocations/resolveProScheduleTimeZone'
 import { resolveAppointmentDisplayTimeZone } from '@/lib/booking/appointmentDisplayTimeZone'
 import { formatProfessionalPublicSearchText } from '@/lib/privacy/professionalDisplayName'
@@ -314,16 +314,6 @@ function decimalToNumber(value: Prisma.Decimal | null): number | null {
   return value === null ? null : Number(value)
 }
 
-function formatDate(value: Date | string, tz: string): string {
-  const date = typeof value === 'string' ? new Date(value) : value
-
-  return formatInTimeZone(date, tz, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  })
-}
-
 function formatShortDate(value: Date, tz: string): string {
   return formatInTimeZone(value, tz, { month: 'short', day: 'numeric' })
 }
@@ -419,7 +409,7 @@ function buildBookingSearchIndex(booking: BookingRow, tz: string): string {
     String(booking.totalDurationMinutes ?? ''),
     String(booking.totalAmount ?? booking.subtotalSnapshot ?? ''),
     booking.scheduledFor
-      ? formatDate(
+      ? formatDateShortInTimeZone(
           booking.scheduledFor,
           resolveAppointmentDisplayTimeZone(booking.locationTimeZone, tz),
         )
@@ -602,7 +592,7 @@ function NoteCard({ note, tz }: { note: ClientNoteRow; tz: string }) {
         </div>
 
         <div className="shrink-0 text-[11px] font-semibold text-textSecondary">
-          {formatDate(note.createdAt, tz)}
+          {formatDateShortInTimeZone(note.createdAt, tz)}
         </div>
       </div>
 
@@ -688,7 +678,7 @@ function ClientAllergiesList({
           ) : null}
 
           <div className="mt-2 text-[11px] font-semibold text-textSecondary/80">
-            Recorded {formatDate(allergy.createdAt, tz)}
+            Recorded {formatDateShortInTimeZone(allergy.createdAt, tz)}
             {allergy.recordedBy
               ? ` • by ${formatPublicProfileDisplayName({
                   businessName: allergy.recordedBy.businessName,
@@ -816,7 +806,7 @@ function ServiceHistoryList({
         const total =
           moneyToString(booking.totalAmount ?? booking.subtotalSnapshot) ??
           '0.00'
-        const when = formatDate(
+        const when = formatDateShortInTimeZone(
           booking.scheduledFor,
           resolveAppointmentDisplayTimeZone(booking.locationTimeZone, tz),
         )
@@ -935,7 +925,7 @@ function ProductRecommendationsList({
             </div>
 
             <div className="shrink-0 text-[12px] font-semibold text-textSecondary">
-              {formatDate(
+              {formatDateShortInTimeZone(
                 recommendation.aftercareSummary.booking.scheduledFor,
                 resolveAppointmentDisplayTimeZone(
                   recommendation.aftercareSummary.booking.locationTimeZone,
@@ -999,7 +989,7 @@ function ClientLeftReviewsList({
               </div>
 
               <div className="shrink-0 text-[11px] font-semibold text-textSecondary">
-                {formatDate(review.createdAt, tz)}
+                {formatDateShortInTimeZone(review.createdAt, tz)}
               </div>
             </div>
 
@@ -1060,7 +1050,7 @@ function ProFeedbackList({
               </div>
 
               <div className="shrink-0 text-[11px] font-semibold text-textSecondary">
-                {formatDate(note.createdAt, tz)}
+                {formatDateShortInTimeZone(note.createdAt, tz)}
               </div>
             </div>
 
@@ -1112,7 +1102,7 @@ function PhotoTimeline({
               )}
               <span className="text-[11px] font-semibold text-textSecondary">
                 {visit.when
-                  ? formatDate(
+                  ? formatDateShortInTimeZone(
                       visit.when,
                       resolveAppointmentDisplayTimeZone(
                         visit.whenLocationTimeZone,
@@ -1219,7 +1209,7 @@ function FormulaList({
               </div>
               <div className="shrink-0 text-[11px] font-semibold text-textSecondary">
                 {entry.when
-                  ? formatDate(
+                  ? formatDateShortInTimeZone(
                       entry.when,
                       resolveAppointmentDisplayTimeZone(
                         entry.whenLocationTimeZone,
@@ -1294,7 +1284,7 @@ function ConsentList({
               </div>
               <div className="shrink-0 text-[11px] font-semibold text-textSecondary">
                 {record.when
-                  ? formatDate(
+                  ? formatDateShortInTimeZone(
                       record.when,
                       resolveAppointmentDisplayTimeZone(
                         record.whenLocationTimeZone,
@@ -1313,7 +1303,7 @@ function ConsentList({
 
             {isPatch && record.validUntil ? (
               <div className="mt-1 text-[12px] font-semibold text-textSecondary">
-                Valid until {formatDate(record.validUntil, tz)}{' '}
+                Valid until {formatDateShortInTimeZone(record.validUntil, tz)}{' '}
                 <Badge tone={current ? 'success' : 'warn'} size="sm">
                   {current ? 'current' : 'expired'}
                 </Badge>
@@ -1325,7 +1315,7 @@ function ConsentList({
                 {record.proofMethod
                   ? `Proof: ${record.proofMethod.replace(/_/g, ' ').toLowerCase()}`
                   : ''}
-                {record.signedAt ? ` • signed ${formatDate(record.signedAt, tz)}` : ''}
+                {record.signedAt ? ` • signed ${formatDateShortInTimeZone(record.signedAt, tz)}` : ''}
                 {record.proofRef ? ` • ref ${record.proofRef}` : ''}
               </div>
             ) : null}
@@ -2182,7 +2172,7 @@ export default async function ClientDetailPage(props: {
                 <div>
                   Last booking:{' '}
                   <span className="font-black text-textPrimary">
-                    {formatDate(
+                    {formatDateShortInTimeZone(
                       lastVisit.scheduledFor,
                       resolveAppointmentDisplayTimeZone(
                         lastVisit.locationTimeZone,
@@ -2197,7 +2187,7 @@ export default async function ClientDetailPage(props: {
                 <div>
                   Next booking:{' '}
                   <span className="font-black text-textPrimary">
-                    {formatDate(
+                    {formatDateShortInTimeZone(
                       upcoming.scheduledFor,
                       resolveAppointmentDisplayTimeZone(
                         upcoming.locationTimeZone,

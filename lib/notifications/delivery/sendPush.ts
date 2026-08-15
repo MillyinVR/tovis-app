@@ -32,6 +32,7 @@ import {
 } from '@/lib/notifications/config'
 import { invalidateDeviceToken } from '@/lib/notifications/devices/deviceTokens'
 import { mapProviderSendFailureToDeliveryTransition } from '@/lib/notifications/providerStatus'
+import { errorMessageFromUnknown } from '@/lib/http'
 
 import {
   type NotificationDeliveryProvider,
@@ -104,14 +105,6 @@ function buildPushFailure(args: {
       eventType: transition.eventType,
     },
   }
-}
-
-function readErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message.trim()
-  }
-
-  return fallback
 }
 
 // ---------------------------------------------------------------------------
@@ -248,7 +241,7 @@ export class ApnsDeliveryProvider
     } catch (error) {
       return buildPushConfigurationFailure(
         APNS_SOURCE,
-        readErrorMessage(error, 'sendPush.apns: provider is not configured'),
+        errorMessageFromUnknown(error, 'sendPush.apns: provider is not configured'),
       )
     }
 
@@ -283,7 +276,7 @@ export class ApnsDeliveryProvider
             source: APNS_SOURCE,
             kind: 'FAILED_FINAL',
             code: reason,
-            message: readErrorMessage(error, reason),
+            message: errorMessageFromUnknown(error, reason),
             extraMeta: {
               reason,
               statusCode: error.statusCode,
@@ -300,7 +293,7 @@ export class ApnsDeliveryProvider
           source: APNS_SOURCE,
           kind,
           code: reason,
-          message: readErrorMessage(error, reason),
+          message: errorMessageFromUnknown(error, reason),
           extraMeta: { reason, statusCode: error.statusCode },
         })
       }
@@ -310,7 +303,7 @@ export class ApnsDeliveryProvider
         source: APNS_SOURCE,
         kind: 'FAILED_RETRYABLE',
         code: 'APNS_TRANSPORT_ERROR',
-        message: readErrorMessage(error, 'APNs transport error.'),
+        message: errorMessageFromUnknown(error, 'APNs transport error.'),
         extraMeta: {
           errorName: error instanceof Error ? error.name : 'UnknownError',
         },
@@ -555,7 +548,7 @@ export class FcmDeliveryProvider
     } catch (error) {
       return buildPushConfigurationFailure(
         FCM_SOURCE,
-        readErrorMessage(error, 'sendPush.fcm: provider is not configured'),
+        errorMessageFromUnknown(error, 'sendPush.fcm: provider is not configured'),
       )
     }
 
@@ -639,7 +632,7 @@ export class FcmDeliveryProvider
         source: FCM_SOURCE,
         kind: 'FAILED_RETRYABLE',
         code: 'FCM_TRANSPORT_ERROR',
-        message: readErrorMessage(error, 'FCM transport error.'),
+        message: errorMessageFromUnknown(error, 'FCM transport error.'),
         extraMeta: {
           errorName: error instanceof Error ? error.name : 'UnknownError',
         },

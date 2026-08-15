@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { clamp } from '@/lib/pick'
 import {
   IMAGE_CROP_PRESET_OPTIONS,
   IMAGE_UPLOAD_MAX_BYTES,
@@ -34,10 +35,6 @@ const LOOKS_DEFAULT_EDIT_STATE: ImageEditState = {
   zoom: 1,
   offsetX: 0,
   offsetY: 0,
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(Math.max(value, min), max)
 }
 
 function parseCropPreset(value: string): ImageCropPreset {

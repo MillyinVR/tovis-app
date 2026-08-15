@@ -26,6 +26,13 @@ import {
   phoneRateLimitIdentity,
 } from '@/app/api/_utils'
 import type { AuthRegisterResponseDTO } from '@/lib/dto/auth'
+import { sanitizeInternalPath } from '@/lib/clientNavigation'
+import {
+  getRequestHostname,
+  resolveCookieDomain,
+  resolveIsHttps,
+  setSessionCookie,
+} from '@/app/api/_utils/auth/sessionCookie'
 import {
   normalizeEmail,
   normalizePhone,
@@ -168,14 +175,6 @@ function asArray(v: unknown): unknown[] {
 
 function pickUpper(v: unknown) {
   return typeof v === 'string' ? v.trim().toUpperCase() : ''
-}
-
-function sanitizeInternalPath(raw: string | null | undefined): string | null {
-  const value = (raw ?? '').trim()
-  if (!value) return null
-  if (!value.startsWith('/')) return null
-  if (value.startsWith('//')) return null
-  return value
 }
 
 function sanitizeOptionalText(raw: string | null | undefined): string | null {
@@ -345,61 +344,6 @@ function targetsContainHandle(targets: string[]): boolean {
   return targets.some((target) => target.toLowerCase().includes('handle'))
 }
 
-function hostToHostname(hostHeader: string | null): string | null {
-  if (!hostHeader) return null
-
-  // In some proxy setups headers can be a comma-separated list; take first
-  const first = hostHeader.split(',')[0]?.trim().toLowerCase() ?? ''
-  if (!first) return null
-
-  // Handle IPv6 like "[::1]:3000"
-  if (first.startsWith('[')) {
-    const end = first.indexOf(']')
-    if (end === -1) return null
-    return first.slice(1, end)
-  }
-
-  // Strip port if present: "localhost:3000" -> "localhost"
-  const idx = first.indexOf(':')
-  return idx >= 0 ? first.slice(0, idx) : first
-}
-
-function resolveCookieDomain(hostname: string | null): string | undefined {
-  if (!hostname) return undefined
-
-  if (hostname === 'tovis.app' || hostname.endsWith('.tovis.app')) {
-    return '.tovis.app'
-  }
-  if (hostname === 'tovis.me' || hostname.endsWith('.tovis.me')) {
-    return '.tovis.me'
-  }
-
-  // localhost / unknown hosts: host-only cookie (no Domain attribute)
-  return undefined
-}
-
-function resolveIsHttps(request: Request): boolean {
-  // Prefer proxy headers (Vercel / reverse proxies)
-  const xfProto = request.headers
-    .get('x-forwarded-proto')
-    ?.trim()
-    .toLowerCase()
-  if (xfProto === 'https') return true
-  if (xfProto === 'http') return false
-
-  // Fallback to request.url
-  try {
-    return new URL(request.url).protocol === 'https:'
-  } catch {
-    return false
-  }
-}
-
-function getRequestHostname(request: Request): string | null {
-  const host =
-    request.headers.get('x-forwarded-host') ?? request.headers.get('host')
-  return hostToHostname(host)
-}
 
 /* =========================================================
    Profession rules
@@ -1508,23 +1452,17 @@ export async function POST(request: Request) {
       201,
     )
 
-    const hostname = getRequestHostname(request)
-    const cookieDomain = resolveCookieDomain(hostname)
-    const isHttps = resolveIsHttps(request)
-
-    res.cookies.set('tovis_token', token, {
-      httpOnly: true,
-      secure: isHttps, // ✅ based on actual protocol, not NODE_ENV
-      sameSite: 'lax',
-      path: '/',
-      maxAge: 60 * 60 * 24 * 7,
-      ...(cookieDomain ? { domain: cookieDomain } : {}),
-    })
+    setSessionCookie({ response: res, request, token })
 
     if (signupLocation.kind === 'CLIENT_ZIP') {
+      // Not the session cookie: readable by the client and far longer-lived,
+      // so it sets its own attributes — but the domain and secure flag are
+      // derived by the same helpers, so it scopes identically.
+      const cookieDomain = resolveCookieDomain(getRequestHostname(request))
+
       res.cookies.set('tovis_client_zip', signupLocation.postalCode, {
         httpOnly: false,
-        secure: isHttps, // ✅ based on actual protocol, not NODE_ENV
+        secure: resolveIsHttps(request), // actual protocol, not NODE_ENV
         sameSite: 'lax',
         path: '/',
         maxAge: 60 * 60 * 24 * 90,

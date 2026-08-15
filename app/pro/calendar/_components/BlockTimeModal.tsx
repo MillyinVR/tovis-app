@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
+import { pad2 } from '@/lib/format/pad2'
 
 import {
   DEFAULT_TIME_ZONE,
@@ -208,10 +209,6 @@ function resolveCopy(
     ...DEFAULT_COPY,
     ...copy,
   }
-}
-
-function pad2(value: number): string {
-  return String(value).padStart(2, '0')
 }
 
 function dateInputFromParts(parts: DateParts): string {

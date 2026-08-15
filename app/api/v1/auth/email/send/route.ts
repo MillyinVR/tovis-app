@@ -4,6 +4,7 @@ import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { enforceVerificationSendThrottle } from '@/app/api/_utils/auth/verificationThrottle'
 import { isEmailNotConfiguredError } from '@/lib/auth/emailProviderEnv'
+import { sanitizeInternalPath } from '@/lib/clientNavigation'
 import {
   getAppUrlFromRequest,
   issueAndSendEmailVerification,
@@ -28,16 +29,6 @@ function normalizeRequiredEmailValue(value: string | null): string | null {
 
   const normalized = value.trim()
   return normalized.length > 0 ? normalized : null
-}
-
-function sanitizeInternalPath(raw: string | null | undefined): string | null {
-  const value = (raw ?? '').trim()
-
-  if (!value) return null
-  if (!value.startsWith('/')) return null
-  if (value.startsWith('//')) return null
-
-  return value
 }
 
 function sanitizeOptionalText(raw: string | null | undefined): string | null {

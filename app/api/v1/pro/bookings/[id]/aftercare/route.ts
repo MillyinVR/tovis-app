@@ -9,6 +9,7 @@ import {
 import { prisma } from '@/lib/prisma'
 import { loadBookingBeforeAfterThumbsFor } from '@/lib/media/bookingBeforeAfter'
 import { isRecord } from '@/lib/guards'
+import { clamp } from '@/lib/pick'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import {
@@ -254,10 +255,6 @@ function toInt(value: unknown, fallback: number): number {
         : Number.NaN
 
   return Number.isFinite(parsed) ? parsed : fallback
-}
-
-function clamp(n: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, n))
 }
 
 function parseOptionalISODate(value: unknown): Date | null | 'invalid' {

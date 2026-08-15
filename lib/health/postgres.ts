@@ -2,20 +2,13 @@
 
 import { prisma } from '@/lib/prisma'
 
+import { errorMessageFromUnknown } from '@/lib/http'
 import {
   DEFAULT_HEALTH_TIMEOUT_MS,
   type HealthCheckResult,
 } from './types'
 
 const POSTGRES_CHECK_NAME = 'postgres' as const
-
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message
-  }
-
-  return 'Unknown Postgres health check failure.'
-}
 
 function withTimeout<T>(
   promise: Promise<T>,
@@ -66,7 +59,7 @@ export async function checkPostgresHealth(
       status: 'down',
       latencyMs: Math.max(0, Date.now() - startedAt),
       checkedAt: new Date().toISOString(),
-      message: getErrorMessage(error),
+      message: errorMessageFromUnknown(error, 'Unknown Postgres health check failure.'),
       details: {
         query: 'SELECT 1',
         timeoutMs,

@@ -1,6 +1,7 @@
 // app/pro/calendar/_utils/date.ts
 
 import type { WeekdayKey } from '../_types'
+import { pad2 } from '@/lib/format/pad2'
 
 import {
   getZonedParts,
@@ -65,10 +66,6 @@ function isFiniteDate(date: Date): boolean {
 
 function safeDate(date: Date): Date {
   return isFiniteDate(date) ? new Date(date.getTime()) : new Date(0)
-}
-
-function pad2(value: number): string {
-  return String(value).padStart(2, '0')
 }
 
 function validYmdParts(parts: YmdParts): boolean {
@@ -453,10 +450,6 @@ export function roundUpToNext15(date: Date): Date {
   next.setMinutes(roundedMinutes)
 
   return next
-}
-
-export function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value))
 }
 
 // ─── Re-export timezone helpers ───────────────────────────────────────────────

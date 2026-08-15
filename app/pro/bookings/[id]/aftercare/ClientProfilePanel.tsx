@@ -14,13 +14,8 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
-import { safeJson } from '@/lib/http'
-import { isRecord } from '@/lib/guards'
-import {
-  DEFAULT_TIME_ZONE,
-  formatInTimeZone,
-  getViewerTimeZone,
-} from '@/lib/time'
+import { readErrorMessage, safeJson } from '@/lib/http'
+import { formatIsoDateShort } from '@/lib/time'
 
 const SEVERITIES = ['LOW', 'MODERATE', 'HIGH', 'CRITICAL'] as const
 type Severity = (typeof SEVERITIES)[number]
@@ -44,29 +39,9 @@ export type ClientNoteItem = {
   createdAt: string
 }
 
-function formatDate(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return ''
-  try {
-    return formatInTimeZone(
-      d,
-      getViewerTimeZone() ?? DEFAULT_TIME_ZONE,
-      {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-      },
-      'en-US',
-    )
-  } catch {
-    return ''
-  }
-}
-
 function errorFromResponse(res: Response, data: unknown): string {
-  if (isRecord(data) && typeof data.error === 'string' && data.error.trim()) {
-    return data.error.trim()
-  }
+  const message = readErrorMessage(data)
+  if (message) return message
   if (res.status === 401) return 'Please log in to continue.'
   if (res.status === 403) return 'You don’t have access to do that.'
   return `Request failed (${res.status}).`
@@ -341,7 +316,7 @@ export default function ClientProfilePanel({
                   </div>
                 ) : null}
                 <div className="mt-2 text-[11px] font-semibold text-textSecondary/80">
-                  Recorded {formatDate(a.createdAt)}
+                  Recorded {formatIsoDateShort(a.createdAt)}
                   {a.recordedByName ? ` • by ${a.recordedByName}` : ''}
                 </div>
               </div>
@@ -369,7 +344,7 @@ export default function ClientProfilePanel({
                     {n.title || 'Note'}
                   </div>
                   <div className="shrink-0 text-[11px] font-semibold text-textSecondary">
-                    {formatDate(n.createdAt)}
+                    {formatIsoDateShort(n.createdAt)}
                   </div>
                 </div>
                 <div className="mt-2 whitespace-pre-wrap text-xs font-semibold text-textSecondary">

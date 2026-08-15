@@ -8,11 +8,8 @@
 import { useEffect, useState, useTransition } from 'react'
 
 import RemoteImage from '@/app/_components/media/RemoteImage'
-import {
-  DEFAULT_TIME_ZONE,
-  formatInTimeZone,
-  getViewerTimeZone,
-} from '@/lib/time'
+import { formatIsoDateShort } from '@/lib/time'
+import { readResponseErrorMessage } from '@/lib/http'
 
 type ModerationStatus =
   | 'PENDING_REVIEW'
@@ -150,25 +147,6 @@ function reasonLabel(reason: ReportReason): string {
   return REASON_LABELS[reason] ?? reason
 }
 
-function formatDate(iso: string | null): string | null {
-  if (!iso) return null
-  const d = new Date(iso)
-  return Number.isNaN(d.getTime())
-    ? null
-    : formatInTimeZone(d, getViewerTimeZone() ?? DEFAULT_TIME_ZONE, {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-      })
-}
-
-async function readError(res: Response): Promise<string> {
-  const data = (await res.json().catch(() => null)) as {
-    error?: string
-  } | null
-  return data?.error || 'Request failed.'
-}
-
 function moderationBadgeClass(status: ModerationStatus): string {
   if (status === 'APPROVED')
     return 'border-toneSuccess/50 text-toneSuccess'
@@ -205,7 +183,7 @@ export default function LooksAdminClient() {
         const res = await fetch(
           `/api/v1/admin/look-tags?banned=${nextBanned}&q=${encodeURIComponent(q)}`,
         )
-        if (!res.ok) throw new Error(await readError(res))
+        if (!res.ok) throw new Error(await readResponseErrorMessage(res))
         const data = (await res.json()) as { items: TagRow[] }
         setTags(data.items)
         setLoaded(true)
@@ -216,7 +194,7 @@ export default function LooksAdminClient() {
         const res = await fetch(
           `/api/v1/admin/boards?visibility=${nextBoard}&q=${encodeURIComponent(q)}`,
         )
-        if (!res.ok) throw new Error(await readError(res))
+        if (!res.ok) throw new Error(await readResponseErrorMessage(res))
         const data = (await res.json()) as { items: BoardRow[] }
         setBoards(data.items)
         setLoaded(true)
@@ -227,7 +205,7 @@ export default function LooksAdminClient() {
       const res = await fetch(
         `${base}?status=${nextStatus}&q=${encodeURIComponent(q)}`,
       )
-      if (!res.ok) throw new Error(await readError(res))
+      if (!res.ok) throw new Error(await readResponseErrorMessage(res))
       if (nextTab === 'LOOK') {
         const data = (await res.json()) as { items: LookRow[] }
         setLooks(data.items)
@@ -255,7 +233,7 @@ export default function LooksAdminClient() {
     setError(null)
     try {
       const res = await run()
-      if (!res.ok) throw new Error(await readError(res))
+      if (!res.ok) throw new Error(await readResponseErrorMessage(res))
       await load(tab, status, bannedFilter, boardFilter, query)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : failMsg)
@@ -647,7 +625,7 @@ function LookCard({
   onDismiss: () => void
   onFeature: () => void
 }) {
-  const dateLabel = formatDate(item.createdAt)
+  const dateLabel = formatIsoDateShort(item.createdAt)
   const hidden =
     item.status === 'REMOVED' ||
     item.moderationStatus === 'REJECTED' ||
@@ -780,7 +758,7 @@ function CommentCard({
   onRemove: () => void
   onDismiss: () => void
 }) {
-  const dateLabel = formatDate(item.createdAt)
+  const dateLabel = formatIsoDateShort(item.createdAt)
   const removed =
     item.moderationStatus === 'REMOVED' ||
     item.moderationStatus === 'REJECTED' ||
@@ -880,7 +858,7 @@ function TagCard({
   onRename: () => void
   onMerge: () => void
 }) {
-  const createdLabel = formatDate(item.createdAt)
+  const createdLabel = formatIsoDateShort(item.createdAt)
 
   return (
     <div
@@ -951,7 +929,7 @@ function BoardCard({
   busy: boolean
   onToggleHide: () => void
 }) {
-  const createdLabel = formatDate(item.createdAt)
+  const createdLabel = formatIsoDateShort(item.createdAt)
 
   return (
     <div

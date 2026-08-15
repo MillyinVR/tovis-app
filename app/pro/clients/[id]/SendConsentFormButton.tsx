@@ -14,18 +14,12 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 
-import { isRecord } from '@/lib/guards'
 import type { ConsentFormOption } from '@/lib/consentForms/loader'
+import { readErrorMessageOr } from '@/lib/http'
 
 type Props = {
   clientId: string
   forms: ConsentFormOption[]
-}
-
-function readErrorMessage(payload: unknown, fallback: string): string {
-  return isRecord(payload) && typeof payload.error === 'string'
-    ? payload.error
-    : fallback
 }
 
 export default function SendConsentFormButton({ clientId, forms }: Props) {
@@ -57,7 +51,7 @@ export default function SendConsentFormButton({ clientId, forms }: Props) {
       const payload: unknown = await res.json().catch(() => ({}))
 
       if (!res.ok) {
-        setError(readErrorMessage(payload, 'Could not send the form.'))
+        setError(readErrorMessageOr(payload, 'Could not send the form.'))
         return
       }
 

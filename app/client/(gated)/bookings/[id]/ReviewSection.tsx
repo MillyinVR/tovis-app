@@ -9,6 +9,7 @@ import { zClass } from '@/lib/zIndex'
 import { isRecord } from '@/lib/guards'
 import { pickStringOrEmpty } from '@/lib/pick'
 import { safeJsonRecord, readErrorMessage, errorMessageFromUnknown } from '@/lib/http'
+import { loginHrefFromHere } from '@/lib/clientNavigation'
 import {
   buildClientIdempotencyKey,
   idempotencyHeaders,
@@ -72,15 +73,8 @@ const MAX_IMAGES = 6
 const MAX_VIDEOS = 1
 const APPT_SELECT_MAX = 6 // appointment media attached to review
 
-function currentPathWithQuery() {
-  if (typeof window === 'undefined') return '/'
-  return window.location.pathname + window.location.search + window.location.hash
-}
-
 function redirectToLogin(router: ReturnType<typeof useRouter>, reason?: string) {
-  const from = currentPathWithQuery()
-  const url = `/login?from=${encodeURIComponent(from)}` + (reason ? `&reason=${encodeURIComponent(reason)}` : '')
-  router.push(url)
+  router.push(loginHrefFromHere('/', reason))
 }
 
 function errorFromResponse(res: Response, data: unknown) {

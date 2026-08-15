@@ -6,6 +6,7 @@ import {
   sanitizeTimeZone,
   startOfLocalDayUtc,
 } from '@/lib/timeZone'
+import { pad2 } from '@/lib/format/pad2'
 
 type DateParts = {
   year: number
@@ -25,10 +26,6 @@ function assertValidTimeZone(timeZone: string): string {
     throw new Error(`Invalid IANA timezone: ${String(timeZone)}`)
   }
   return tz
-}
-
-function pad2(value: number): string {
-  return String(value).padStart(2, '0')
 }
 
 function parseYmd(ymd: string): { year: number; month: number; day: number } {

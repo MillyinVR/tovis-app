@@ -10,6 +10,7 @@ import { writeAdminAuditLog } from '@/lib/admin/auditLog'
 import { hasAdminPermission } from '@/lib/adminPermissions'
 import { prisma } from '@/lib/prisma'
 import { platformCrossTenantProVisibilityFilter } from '@/lib/tenant'
+import { errorMessageFromUnknown } from '@/lib/http'
 
 export const dynamic = 'force-dynamic'
 
@@ -34,24 +35,6 @@ function normalizeRole(value: string | null): AdminPermissionRole | null {
 function trimOrNull(value: string | null): string | null {
   const text = (value ?? '').trim()
   return text || null
-}
-
-function errorMessageFromUnknown(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message
-  }
-
-  if (
-    typeof error === 'object' &&
-    error !== null &&
-    'message' in error &&
-    typeof error.message === 'string' &&
-    error.message.trim()
-  ) {
-    return error.message
-  }
-
-  return 'Internal server error'
 }
 
 async function requireSuperAdmin() {

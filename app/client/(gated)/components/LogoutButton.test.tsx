@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockHardNavigate = vi.hoisted(() => vi.fn())
 
-vi.mock('@/lib/hardNavigate', () => ({
+vi.mock('@/lib/clientNavigation', () => ({
   hardNavigate: mockHardNavigate,
 }))
 

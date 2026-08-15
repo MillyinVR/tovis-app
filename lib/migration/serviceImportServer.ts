@@ -8,6 +8,7 @@
 
 import { Prisma, ServiceLocationType } from '@prisma/client'
 
+import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 import {
   OfferingAlreadyActiveError,
@@ -288,10 +289,6 @@ export async function commitServiceImport(args: {
 }
 
 // ── request parsing (shared by the preview + commit routes; no casts) ─────────
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}
 
 function asNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null

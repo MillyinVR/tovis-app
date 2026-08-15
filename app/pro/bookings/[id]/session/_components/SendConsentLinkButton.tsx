@@ -9,19 +9,13 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 
-import { isRecord } from '@/lib/guards'
+import { readErrorMessageOr } from '@/lib/http'
 
 type Props = {
   clientId: string
   bookingId: string
   formId: string
   formTitle: string
-}
-
-function readErrorMessage(payload: unknown, fallback: string): string {
-  return isRecord(payload) && typeof payload.error === 'string'
-    ? payload.error
-    : fallback
 }
 
 export function SendConsentLinkButton(props: Props) {
@@ -58,7 +52,7 @@ export function SendConsentLinkButton(props: Props) {
       if (!res.ok) {
         setMessage({
           tone: 'bad',
-          text: readErrorMessage(payload, 'Could not send the form.'),
+          text: readErrorMessageOr(payload, 'Could not send the form.'),
         })
         return
       }

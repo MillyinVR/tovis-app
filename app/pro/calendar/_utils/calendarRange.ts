@@ -4,6 +4,7 @@
 // Zero React dependency.
 
 import type { ViewMode } from '../_types'
+import { pad2 } from '@/lib/format/pad2'
 
 import {
   DAY_VIEW_VISIBLE_DAY_COUNT,
@@ -40,10 +41,6 @@ type LocalDateParts = {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
-
-function pad2(value: number): string {
-  return String(value).padStart(2, '0')
-}
 
 function safeTimeZone(timeZone: string): string {
   return sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)

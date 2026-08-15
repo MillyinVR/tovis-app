@@ -6,9 +6,7 @@ import { useRouter } from 'next/navigation'
 
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import { formatCompactCount } from '@/lib/format/compactCount'
-import { isRecord } from '@/lib/guards'
-import { safeJson } from '@/lib/http'
-import { pickString } from '@/lib/pick'
+import { readAnyErrorMessageOr, safeJson } from '@/lib/http'
 import { DEFAULT_TIME_ZONE, formatRelativeDayAgo, getViewerTimeZone } from '@/lib/time'
 import { cn } from '@/lib/utils'
 import { zClass } from '@/lib/zIndex'
@@ -163,7 +161,7 @@ function PublishSheet({ tile, onClose }: { tile: ProPortfolioTile; onClose: () =
         { method: 'POST' },
       )
       const body = await safeJson(res)
-      if (!res.ok) throw new Error(readError(body, 'Could not publish this photo.'))
+      if (!res.ok) throw new Error(readAnyErrorMessageOr(body, 'Could not publish this photo.'))
 
       onClose()
       router.refresh()
@@ -268,7 +266,7 @@ function ConsentSheet({ tile, onClose }: { tile: ProPortfolioTile; onClose: () =
         { method: 'POST' },
       )
       const body = await safeJson(res)
-      if (!res.ok) throw new Error(readError(body, 'Could not send that just now.'))
+      if (!res.ok) throw new Error(readAnyErrorMessageOr(body, 'Could not send that just now.'))
 
       setSent(true)
     } catch (cause: unknown) {
@@ -456,7 +454,7 @@ function RetractSheet({
         { method: 'DELETE' },
       )
       const body = await safeJson(res)
-      if (!res.ok) throw new Error(readError(body, 'Could not take this down.'))
+      if (!res.ok) throw new Error(readAnyErrorMessageOr(body, 'Could not take this down.'))
 
       onClose()
       router.refresh()
@@ -565,9 +563,4 @@ function nudgeBlockedCopy(
   }
 
   return `Send ${clientFirstName} their aftercare first — the media-use tick lives there.`
-}
-
-function readError(body: unknown, fallback: string): string {
-  if (!isRecord(body)) return fallback
-  return pickString(body.error) ?? pickString(body.message) ?? fallback
 }

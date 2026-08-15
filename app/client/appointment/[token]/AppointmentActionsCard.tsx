@@ -18,6 +18,7 @@ import {
   idempotencyHeaders,
 } from '@/lib/idempotency/client'
 import { formatInTimeZone } from '@/lib/time'
+import { readErrorMessageOr } from '@/lib/http'
 
 type RescheduleContext = {
   professionalId: string
@@ -60,12 +61,6 @@ type SlotsState =
   | { kind: 'loading' }
   | { kind: 'loaded'; slots: string[] }
   | { kind: 'error'; message: string }
-
-function readErrorMessage(payload: unknown, fallback: string): string {
-  return isRecord(payload) && typeof payload.error === 'string'
-    ? payload.error
-    : fallback
-}
 
 async function postJson(args: {
   url: string
@@ -121,7 +116,7 @@ export function AppointmentActionsCard(props: Props) {
 
       if (!ok) {
         setError(
-          readErrorMessage(payload, 'Something went wrong. Please try again.'),
+          readErrorMessageOr(payload, 'Something went wrong. Please try again.'),
         )
         return
       }
@@ -154,7 +149,7 @@ export function AppointmentActionsCard(props: Props) {
 
     if (!ok) {
       setError(
-        readErrorMessage(payload, 'Could not cancel. Please try again.'),
+        readErrorMessageOr(payload, 'Could not cancel. Please try again.'),
       )
       return
     }
@@ -195,7 +190,7 @@ export function AppointmentActionsCard(props: Props) {
         if (!res.ok) {
           setSlotsState({
             kind: 'error',
-            message: readErrorMessage(
+            message: readErrorMessageOr(
               payload,
               'Could not load available times for this day.',
             ),
@@ -243,7 +238,7 @@ export function AppointmentActionsCard(props: Props) {
 
       if (!ok) {
         setError(
-          readErrorMessage(
+          readErrorMessageOr(
             payload,
             'That time isn’t available anymore. Please pick another.',
           ),
@@ -292,7 +287,7 @@ export function AppointmentActionsCard(props: Props) {
 
       if (!ok) {
         setError(
-          readErrorMessage(
+          readErrorMessageOr(
             payload,
             'Could not move the appointment. Please pick another time.',
           ),

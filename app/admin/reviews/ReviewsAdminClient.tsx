@@ -6,11 +6,8 @@
 
 import { useEffect, useState, useTransition } from 'react'
 
-import {
-  DEFAULT_TIME_ZONE,
-  formatInTimeZone,
-  getViewerTimeZone,
-} from '@/lib/time'
+import { formatIsoDateShort } from '@/lib/time'
+import { readResponseErrorMessage } from '@/lib/http'
 
 type ModerationRow = {
   reviewId: string
@@ -29,25 +26,6 @@ type ModerationRow = {
   proReplyAt: string | null
 }
 
-function formatDate(iso: string | null): string | null {
-  if (!iso) return null
-  const d = new Date(iso)
-  return Number.isNaN(d.getTime())
-    ? null
-    : formatInTimeZone(d, getViewerTimeZone() ?? DEFAULT_TIME_ZONE, {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-      })
-}
-
-async function readError(res: Response): Promise<string> {
-  const data = (await res.json().catch(() => null)) as {
-    error?: string
-  } | null
-  return data?.error || 'Request failed.'
-}
-
 export default function ReviewsAdminClient() {
   const [query, setQuery] = useState('')
   const [items, setItems] = useState<ModerationRow[]>([])
@@ -61,7 +39,7 @@ export default function ReviewsAdminClient() {
       const res = await fetch(
         `/api/v1/admin/reviews?q=${encodeURIComponent(q)}`,
       )
-      if (!res.ok) throw new Error(await readError(res))
+      if (!res.ok) throw new Error(await readResponseErrorMessage(res))
       const data = (await res.json()) as { items: ModerationRow[] }
       setItems(data.items)
       setLoaded(true)
@@ -84,7 +62,7 @@ export default function ReviewsAdminClient() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason: reason || undefined }),
       })
-      if (!res.ok) throw new Error(await readError(res))
+      if (!res.ok) throw new Error(await readResponseErrorMessage(res))
       await load(query)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Hide failed.')
@@ -97,7 +75,7 @@ export default function ReviewsAdminClient() {
       const res = await fetch(`/api/v1/admin/reviews/${reviewId}/hidden`, {
         method: 'DELETE',
       })
-      if (!res.ok) throw new Error(await readError(res))
+      if (!res.ok) throw new Error(await readResponseErrorMessage(res))
       await load(query)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Unhide failed.')
@@ -110,7 +88,7 @@ export default function ReviewsAdminClient() {
       const res = await fetch(`/api/v1/admin/reviews/${reviewId}/reply`, {
         method: 'DELETE',
       })
-      if (!res.ok) throw new Error(await readError(res))
+      if (!res.ok) throw new Error(await readResponseErrorMessage(res))
       await load(query)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Removing the reply failed.')
@@ -185,8 +163,8 @@ function ReviewRow({
 }) {
   const [reason, setReason] = useState('')
 
-  const dateLabel = formatDate(item.createdAt)
-  const replyDateLabel = formatDate(item.proReplyAt)
+  const dateLabel = formatIsoDateShort(item.createdAt)
+  const replyDateLabel = formatIsoDateShort(item.proReplyAt)
 
   return (
     <div

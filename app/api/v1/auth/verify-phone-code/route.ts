@@ -1,11 +1,9 @@
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import type { AuthVerifyPhoneCodeResponseDTO } from '@/lib/dto/auth'
 import { checkPhoneVerificationCode } from '@/lib/auth/phoneVerification'
-import {
-  isRecord,
-  getVerificationPhoneLookupValue,
-  pickString,
-} from '@/lib/auth/verification'
+import { getVerificationPhoneLookupValue } from '@/lib/auth/verification'
+import { isRecord } from '@/lib/guards'
+import { pickStringOrEmpty } from '@/lib/pick'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,7 +19,7 @@ export async function POST(req: Request) {
       raw.phone, // pii-plaintext-read-ok: verification route must canonicalize submitted phone before comparing SMS verification target
     )
     
-    const code = pickString(raw.code)
+    const code = pickStringOrEmpty(raw.code)
 
     if (!phone) {
       return jsonFail(400, 'Missing phone number.')

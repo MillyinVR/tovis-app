@@ -18,10 +18,10 @@ import type {
 } from '../_types'
 
 import {
-  clamp,
   minutesSinceMidnightInTimeZone,
   ymdInTimeZone,
 } from '../_utils/date'
+import { clamp } from '@/lib/pick'
 
 import { PX_PER_MINUTE } from '../_utils/calendarMath'
 import { DEFAULT_TIME_ZONE, isValidIanaTimeZone } from '@/lib/timeZone'

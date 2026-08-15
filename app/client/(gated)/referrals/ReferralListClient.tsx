@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import EmptyState from '@/app/_components/boundaries/EmptyState'
 import { safeJson } from '@/lib/http'
-import { formatInTimeZone, getViewerTimeZone, DEFAULT_TIME_ZONE } from '@/lib/time'
+import { formatIsoDateShort } from '@/lib/time'
 
 type Referral = {
   id: string
@@ -39,16 +39,6 @@ const STATUS_COLORS: Record<string, string> = {
   REWARDED: 'bg-accentPrimary/20 text-accentPrimary',
   DECLINED: 'bg-surfaceGlass/10 text-textMuted',
   EXPIRED: 'bg-surfaceGlass/10 text-textMuted',
-}
-
-function formatDate(iso: string): string {
-  // Referral "Tapped" date — not an appointment, so there's no booking tz.
-  // Preserve the prior no-tz behavior (client component → viewer's zone).
-  return formatInTimeZone(new Date(iso), getViewerTimeZone() ?? DEFAULT_TIME_ZONE, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  })
 }
 
 function rewardDescription(r: Referral): string | null {
@@ -182,7 +172,7 @@ export default function ReferralListClient() {
                   </div>
 
                   <p className="mt-1 text-sm text-textMuted">
-                    Tapped {formatDate(r.createdAt)}
+                    Tapped {formatIsoDateShort(r.createdAt)}
                     {r.proName ? (
                       <>
                         {' · Booked with '}

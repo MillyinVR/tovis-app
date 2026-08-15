@@ -9,19 +9,11 @@ import type {
   ProReferralActivity,
   ProReferralActivityRow,
 } from '@/lib/referral/proReferralActivity'
-import { formatInTimeZone } from '@/lib/time'
+import { formatDateShortInTimeZone } from '@/lib/time'
 
 type ProReferralActivitySectionProps = {
   activity: ProReferralActivity
   timeZone: string | null
-}
-
-function formatDate(value: Date, timeZone: string | null): string {
-  return formatInTimeZone(value, timeZone ?? '', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  })
 }
 
 function statusLabel(status: ReferralStatus): string {
@@ -123,8 +115,8 @@ export default function ProReferralActivitySection({
                     </p>
                     <p className="mt-0.5 text-xs text-textMuted">
                       {row.convertedAt
-                        ? `Booked ${formatDate(row.convertedAt, timeZone)}`
-                        : `Created ${formatDate(row.createdAt, timeZone)}`}
+                        ? `Booked ${formatDateShortInTimeZone(row.convertedAt, timeZone)}`
+                        : `Created ${formatDateShortInTimeZone(row.createdAt, timeZone)}`}
                       {row.cardShortCode ? ` · Card ${row.cardShortCode}` : ''}
                     </p>
                   </div>

@@ -13,7 +13,7 @@ import { getBrandConfig } from '@/lib/brand'
 import { getCurrentUser } from '@/lib/currentUser'
 import { countFollowers } from '@/lib/follows'
 import { formatCompactCount } from '@/lib/format/compactCount'
-import { isRecord } from '@/lib/guards'
+import { isNonNull, isRecord } from '@/lib/guards'
 import { vanityLinkFor } from '@/lib/handles'
 import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
 import { proOwnPublicLooksWhere } from '@/lib/looks/selects'
@@ -566,8 +566,4 @@ function formatClientName(input: {
   const fullName = [firstName, lastName].filter(isNonNull).join(' ').trim()
 
   return fullName || 'Client'
-}
-
-function isNonNull<T>(value: T | null): value is T {
-  return value !== null
 }
