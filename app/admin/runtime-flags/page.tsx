@@ -2,6 +2,7 @@
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 
+import { Badge } from '@/app/_components/ui'
 import { getAdminUiPerms } from '@/lib/adminUiPermissions'
 import {
   getRuntimeFlags,
@@ -82,21 +83,6 @@ async function updateRuntimeFlag(formData: FormData) {
   revalidatePath('/admin/runtime-flags')
 }
 
-function StatusPill({ enabled }: { enabled: boolean }) {
-  return (
-    <span
-      className={[
-        'inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-black',
-        enabled
-          ? 'border-toneDanger/30 bg-toneDanger/10 text-toneDanger'
-          : 'border-toneSuccess/30 bg-toneSuccess/10 text-toneSuccess',
-      ].join(' ')}
-    >
-      {enabled ? 'Enabled' : 'Disabled'}
-    </span>
-  )
-}
-
 export default async function AdminRuntimeFlagsPage() {
   const info = await requireRuntimeFlagAdmin()
   const flags = await getRuntimeFlags()
@@ -138,7 +124,9 @@ export default async function AdminRuntimeFlagsPage() {
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <h2 className="text-[15px] font-black">{meta.title}</h2>
-                    <StatusPill enabled={enabled} />
+                    <Badge tone={enabled ? 'danger' : 'success'} fill="soft">
+                      {enabled ? 'Enabled' : 'Disabled'}
+                    </Badge>
                   </div>
 
                   <p className="mt-2 text-[13px] text-textSecondary">

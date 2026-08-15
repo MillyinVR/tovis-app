@@ -10,13 +10,14 @@ import {
   useRef,
   useState,
 } from 'react'
-import type { ReactNode, RefObject } from 'react'
+import type { RefObject } from 'react'
 import { useRouter } from 'next/navigation'
 import { AnimatePresence, motion } from 'framer-motion'
 import { uploadWithProgress } from '@/lib/media/uploadWithProgress'
 import { zClass } from '@/lib/zIndex'
 import { compressImageForUpload } from '@/lib/media/processImageForUpload'
 
+import { Badge } from '@/app/_components/ui'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import { cn } from '@/lib/utils'
 import {
@@ -111,33 +112,21 @@ function haptic(ms = 8): void {
   }
 }
 
-function Chip({ children }: { children: ReactNode }) {
-  return (
-    <span className="inline-flex items-center rounded-full border border-surfaceGlass/12 bg-bgPrimary/25 px-2 py-0.5 text-[11px] font-extrabold text-textSecondary">
-      {children}
-    </span>
-  )
-}
+// Save state for a hero tile, as a tone. This used to re-author its own class
+// strings, and two of its three states wrote `border-[rgb(var(--micro-accent))/0.35]`
+// — the alpha inside the bracket makes the whole declaration invalid, so the
+// browser dropped it and the pill rendered with no border and no fill at all.
+function SaveStateBadge({ dirty, saving }: { dirty: boolean; saving: boolean }) {
+  if (saving) return <Badge fill="soft">Saving…</Badge>
 
-function StatusPill(props: { dirty: boolean; saving: boolean }) {
-  const { dirty, saving } = props
-  const label = saving ? 'Saving…' : dirty ? 'Unsaved' : 'Saved'
-
-  const tone = saving
-    ? 'border-white/12 bg-bgPrimary/25 text-textSecondary'
-    : dirty
-      ? 'border-[rgb(var(--micro-accent))/0.35] bg-[rgb(var(--micro-accent))/0.12] text-textPrimary'
-      : 'border-[rgb(var(--tone-success))/0.25] bg-[rgb(var(--tone-success))/0.10] text-textPrimary'
-
-  return (
-    <span
-      className={cn(
-        'inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-black',
-        tone,
-      )}
-    >
-      {label}
-    </span>
+  return dirty ? (
+    <Badge tone="warn" fill="soft">
+      Unsaved
+    </Badge>
+  ) : (
+    <Badge tone="success" fill="soft">
+      Saved
+    </Badge>
   )
 }
 
@@ -713,7 +702,7 @@ export default function ServiceHeroGrid(props: {
                     </div>
                   </div>
 
-                  <Chip>{service.isActive ? 'Active' : 'Disabled'}</Chip>
+                  <Badge fill="soft">{service.isActive ? 'Active' : 'Disabled'}</Badge>
                 </div>
 
                 <div className="text-[12px] text-textSecondary">
@@ -723,13 +712,13 @@ export default function ServiceHeroGrid(props: {
                 </div>
 
                 <div className="flex flex-wrap gap-2 pt-1">
-                  <Chip>Min {fmtMoney(service.minPrice)}</Chip>
-                  <Chip>Default {fmtMinutes(service.defaultDurationMinutes)}</Chip>
-                  {service.allowMobile ? <Chip>Mobile</Chip> : <Chip>Salon-only</Chip>}
+                  <Badge fill="soft">Min {fmtMoney(service.minPrice)}</Badge>
+                  <Badge fill="soft">Default {fmtMinutes(service.defaultDurationMinutes)}</Badge>
+                  {service.allowMobile ? <Badge fill="soft">Mobile</Badge> : <Badge fill="soft">Salon-only</Badge>}
                   {service.isAddOnEligible ? (
-                    <Chip>
+                    <Badge fill="soft">
                       Add-on{service.addOnGroup ? ` • ${service.addOnGroup}` : ''}
-                    </Chip>
+                    </Badge>
                   ) : null}
                 </div>
               </div>
@@ -798,7 +787,7 @@ export default function ServiceHeroGrid(props: {
                       <div className="text-[14px] font-black tracking-[0.04em] text-textPrimary">
                         Edit service
                       </div>
-                      <StatusPill dirty={meta.dirty} saving={busy} />
+                      <SaveStateBadge dirty={meta.dirty} saving={busy} />
                     </div>
                     <div className="mt-0.5 truncate text-[12px] text-textSecondary">
                       {current.name}

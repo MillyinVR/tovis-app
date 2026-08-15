@@ -2,77 +2,10 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
+import { Button, FieldLabel, Select, TextInput } from '@/app/_components/ui'
 import { getAdminUiPerms } from '@/lib/adminUiPermissions'
 
 export const dynamic = 'force-dynamic'
-
-function FieldLabel({ children }: { children: React.ReactNode }) {
-  return <div className="text-xs font-black text-textSecondary">{children}</div>
-}
-
-function TextInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
-  const { className, ...rest } = props
-  return (
-    <input
-      {...rest}
-      className={[
-        'w-full rounded-card border border-surfaceGlass/12 bg-bgPrimary px-3 py-2 text-sm text-textPrimary outline-none',
-        'placeholder:text-textSecondary/70',
-        'focus:border-accentPrimary/50 focus:ring-2 focus:ring-accentPrimary/20',
-        className ?? '',
-      ].join(' ')}
-    />
-  )
-}
-
-function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
-  const { className, children, ...rest } = props
-  return (
-    <select
-      {...rest}
-      className={[
-        'w-full rounded-card border border-surfaceGlass/12 bg-bgPrimary px-3 py-2 text-sm text-textPrimary outline-none',
-        'focus:border-accentPrimary/50 focus:ring-2 focus:ring-accentPrimary/20',
-        className ?? '',
-      ].join(' ')}
-    >
-      {children}
-    </select>
-  )
-}
-
-function PrimaryButton(props: React.ButtonHTMLAttributes<HTMLButtonElement>) {
-  const { className, children, ...rest } = props
-  return (
-    <button
-      {...rest}
-      className={[
-        'inline-flex items-center justify-center rounded-full border border-accentPrimary/45 bg-accentPrimary/15 px-4 py-2 text-xs font-black text-accentPrimary',
-        'hover:bg-accentPrimary/20 hover:border-accentPrimary/60',
-        'disabled:cursor-not-allowed disabled:opacity-60',
-        className ?? '',
-      ].join(' ')}
-    >
-      {children}
-    </button>
-  )
-}
-
-function GhostPillButton(props: React.ButtonHTMLAttributes<HTMLButtonElement>) {
-  const { className, children, ...rest } = props
-  return (
-    <button
-      {...rest}
-      className={[
-        'inline-flex items-center justify-center rounded-full border border-surfaceGlass/14 bg-bgSecondary px-3 py-1.5 text-xs font-black text-textPrimary',
-        'hover:bg-surfaceGlass/6',
-        className ?? '',
-      ].join(' ')}
-    >
-      {children}
-    </button>
-  )
-}
 
 export default async function AdminCategoriesPage() {
   const info = await getAdminUiPerms()
@@ -138,7 +71,7 @@ export default async function AdminCategoriesPage() {
           </Select>
 
           <div className="flex justify-end">
-            <PrimaryButton type="submit">Create</PrimaryButton>
+            <Button type="submit" variant="accent" fill="soft" size="sm">Create</Button>
           </div>
         </form>
 
@@ -161,9 +94,9 @@ export default async function AdminCategoriesPage() {
                   <form action={`/api/v1/admin/categories/${encodeURIComponent(c.id)}`} method="post">
                     <input type="hidden" name="_method" value="PATCH" />
                     <input type="hidden" name="isActive" value={String(!c.isActive)} />
-                    <GhostPillButton type="submit">
+                    <Button type="submit" variant="neutral" fill="soft" size="xs">
                       {c.isActive ? 'Disable' : 'Enable'}
-                    </GhostPillButton>
+                    </Button>
                   </form>
                 </div>
 
@@ -179,9 +112,9 @@ export default async function AdminCategoriesPage() {
                         <form action={`/api/v1/admin/categories/${encodeURIComponent(k.id)}`} method="post">
                           <input type="hidden" name="_method" value="PATCH" />
                           <input type="hidden" name="isActive" value={String(!k.isActive)} />
-                          <GhostPillButton type="submit">
+                          <Button type="submit" variant="neutral" fill="soft" size="xs">
                             {k.isActive ? 'Disable' : 'Enable'}
-                          </GhostPillButton>
+                          </Button>
                         </form>
                       </div>
                     ))}

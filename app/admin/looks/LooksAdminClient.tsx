@@ -7,6 +7,8 @@
 
 import { useEffect, useState, useTransition } from 'react'
 
+import { Button } from '@/app/_components/ui'
+import type { ButtonVariant } from '@/app/_components/ui'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import { formatIsoDateShort } from '@/lib/time'
 import { readResponseErrorMessage } from '@/lib/http'
@@ -574,6 +576,18 @@ function StatusBadges({
   )
 }
 
+// Moderation action, as a tone. Keeps the label/busy API the queue rows call
+// with; the styling is the canonical <Button>. Its own class strings used raw
+// `border-white/15`, which is invisible to [data-mode] and only ever looked
+// right in dark.
+const MODERATION_VARIANT: Record<ModerationTone, ButtonVariant> = {
+  primary: 'accent',
+  danger: 'danger',
+  neutral: 'neutral',
+}
+
+type ModerationTone = 'primary' | 'danger' | 'neutral'
+
 function ActionButton({
   label,
   tone,
@@ -581,25 +595,21 @@ function ActionButton({
   onClick,
 }: {
   label: string
-  tone: 'primary' | 'danger' | 'neutral'
+  tone: ModerationTone
   busy: boolean
   onClick: () => void
 }) {
-  const toneClass =
-    tone === 'primary'
-      ? 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover'
-      : tone === 'danger'
-        ? 'border-white/15 bg-bgPrimary text-toneDanger hover:border-white/30'
-        : 'border-white/15 bg-bgPrimary text-textPrimary hover:border-white/30'
   return (
-    <button
-      type="button"
+    <Button
+      variant={MODERATION_VARIANT[tone]}
+      fill="soft"
+      size="sm"
+      shape="soft"
       disabled={busy}
       onClick={onClick}
-      className={`rounded-card border px-3 py-1.5 text-[12px] font-black transition disabled:cursor-not-allowed disabled:opacity-60 ${toneClass}`}
     >
       {label}
-    </button>
+    </Button>
   )
 }
 
