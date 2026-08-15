@@ -20,6 +20,7 @@ import ToggleSwitch from '@/app/_components/ToggleSwitch'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import ProProfileLink from '@/app/_components/ProProfileLink'
 import { CardLinkOverlay } from '@/app/_components/ui'
+import EmptyState from '@/app/_components/boundaries/EmptyState'
 import LogoutButton from './components/LogoutButton'
 import FollowSuggestionsRail from './_components/FollowSuggestionsRail'
 import WorkspaceSwitcher from '@/app/_components/WorkspaceSwitcher'
@@ -592,31 +593,6 @@ function MyLookCard(props: { look: MyLook }) {
   )
 }
 
-function EmptyState(props: {
-  title: string
-  body: string
-  actionHref?: string | null
-  actionLabel?: string
-}) {
-  return (
-    <div className="mx-auto max-w-[640px] rounded-[24px] border border-textPrimary/10 px-4 py-8 text-center">
-      <div className="text-[15px] font-black text-textPrimary">{props.title}</div>
-      <div className="mt-2 text-[13px] text-textSecondary">{props.body}</div>
-
-      {props.actionHref && props.actionLabel ? (
-        <div className="mt-4">
-          <Link
-            href={props.actionHref}
-            className="inline-flex min-h-11 items-center rounded-full border border-textPrimary/10 px-4 py-2 text-[12px] font-black text-textPrimary transition hover:border-textPrimary/20"
-          >
-            {props.actionLabel}
-          </Link>
-        </div>
-      ) : null}
-    </div>
-  )
-}
-
 export default function ClientMeDashboard({
   displayName,
   handle,
@@ -793,10 +769,14 @@ export default function ClientMeDashboard({
               </div>
             ) : (
               <EmptyState
+                className="mx-auto max-w-[640px]"
                 title="No boards yet"
-                body="Save looks from the feed to start building boards."
-                actionHref={createBoardHref}
-                actionLabel="Create board"
+                description="Save looks from the feed to start building boards."
+                action={
+                  createBoardHref
+                    ? { label: 'Create board', href: createBoardHref }
+                    : undefined
+                }
               />
             )}
           </section>
@@ -813,8 +793,9 @@ export default function ClientMeDashboard({
               </div>
             ) : (
               <EmptyState
+                className="mx-auto max-w-[640px]"
                 title="No follows yet"
-                body="When you follow a pro, they’ll show up here."
+                description="When you follow a pro, they’ll show up here."
               />
             )}
           </section>
@@ -835,8 +816,9 @@ export default function ClientMeDashboard({
               </div>
             ) : (
               <EmptyState
+                className="mx-auto max-w-[640px]"
                 title="No history yet"
-                body="Your upcoming and past bookings will appear here."
+                description="Your upcoming and past bookings will appear here."
               />
             )}
           </section>
