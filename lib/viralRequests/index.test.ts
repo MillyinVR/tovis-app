@@ -20,9 +20,11 @@ vi.mock('@/lib/notifications/social', () => ({
 
 import {
   attachClientViralRequestMedia,
+  buildViralRequestCoverTargetPath,
   buildViralRequestUploadPublicUrl,
   buildViralRequestUploadTargetPath,
   createClientViralRequest,
+  isViralRequestCoverCandidateUrl,
   isViralRequestUploadPublicUrl,
   loadClientOwnedViralRequestForWrite,
   VIRAL_REQUEST_MEDIA_LIMIT,
@@ -206,12 +208,11 @@ describe('lib/viralRequests/index.ts', () => {
         sourceUrl: ' https://example.com/inspo ',
         requestedCategoryId: ' cat_1 ',
         links: [' https://example.com/a ', 'https://example.com/a'],
-        mediaUrls: [
-          ' https://example.com/media-1 ',
-          'https://example.com/media-1',
-        ],
       })
 
+      // 🔴 No `mediaUrlsJson` in the write. Media only ever arrives through
+      // `attachClientViralRequestMedia`, which refuses a URL this server did not
+      // mint — creating it here would route around that gate.
       expect(db.viralServiceRequest.create).toHaveBeenCalledWith({
         data: {
           clientId: 'client_1',
@@ -221,7 +222,6 @@ describe('lib/viralRequests/index.ts', () => {
           requestedCategoryId: 'cat_1',
           status: ViralServiceRequestStatus.REQUESTED,
           linksJson: ['https://example.com/a'],
-          mediaUrlsJson: ['https://example.com/media-1'],
         },
         select: { id: true },
       })
@@ -928,6 +928,106 @@ describe('lib/viralRequests/index.ts', () => {
           supabaseBaseUrl: '   ',
           requestId: 'request_1',
           url: minted,
+        }),
+      ).toBe(false)
+    })
+  })
+
+  describe('isViralRequestCoverCandidateUrl', () => {
+    const supabaseBaseUrl = 'https://project.supabase.co'
+    const publicRoot =
+      'https://project.supabase.co/storage/v1/object/public/media-public/viral-requests'
+
+    const submitterAttachment = buildViralRequestUploadPublicUrl({
+      supabaseBaseUrl,
+      path: buildViralRequestUploadTargetPath({
+        requestId: 'request_1',
+        fileName: 'inspo.jpg',
+      }),
+    })
+
+    const reviewerFrame = buildViralRequestUploadPublicUrl({
+      supabaseBaseUrl,
+      path: buildViralRequestCoverTargetPath({
+        requestId: 'request_1',
+        extension: 'jpg',
+      }),
+    })
+
+    it('accepts the reviewer’s own uploaded frame', () => {
+      expect(reviewerFrame).toBe(`${publicRoot}/request_1/cover.jpg`)
+      expect(
+        isViralRequestCoverCandidateUrl({
+          supabaseBaseUrl,
+          requestId: 'request_1',
+          url: reviewerFrame,
+        }),
+      ).toBe(true)
+    })
+
+    it('accepts a submitter attachment being promoted by "Use this"', () => {
+      expect(
+        isViralRequestCoverCandidateUrl({
+          supabaseBaseUrl,
+          requestId: 'request_1',
+          url: submitterAttachment,
+        }),
+      ).toBe(true)
+    })
+
+    it.each([
+      [
+        'a host the submitter controls',
+        'https://evil.example/pretty.jpg',
+      ],
+      [
+        'a foreign host wearing our path',
+        'https://evil.example/storage/v1/object/public/media-public/viral-requests/request_1/cover.jpg',
+      ],
+      [
+        'another request’s cover',
+        'https://project.supabase.co/storage/v1/object/public/media-public/viral-requests/request_2/cover.jpg',
+      ],
+      [
+        'the private bucket',
+        'https://project.supabase.co/storage/v1/object/public/media-private/viral-requests/request_1/cover.jpg',
+      ],
+      [
+        'a traversal out of the request folder',
+        'https://project.supabase.co/storage/v1/object/public/media-public/viral-requests/request_1/../request_2/cover.jpg',
+      ],
+      [
+        'a query string bolted on',
+        'https://project.supabase.co/storage/v1/object/public/media-public/viral-requests/request_1/cover.jpg?x=1',
+      ],
+      [
+        'a nested object under the request folder',
+        'https://project.supabase.co/storage/v1/object/public/media-public/viral-requests/request_1/uploads/sub/inspo.jpg',
+      ],
+      [
+        'something else parked in the request folder',
+        'https://project.supabase.co/storage/v1/object/public/media-public/viral-requests/request_1/anything.jpg',
+      ],
+      [
+        'the request folder itself',
+        'https://project.supabase.co/storage/v1/object/public/media-public/viral-requests/request_1/',
+      ],
+    ])('refuses %s', (_label, url) => {
+      expect(
+        isViralRequestCoverCandidateUrl({
+          supabaseBaseUrl,
+          requestId: 'request_1',
+          url,
+        }),
+      ).toBe(false)
+    })
+
+    it('refuses everything when the base URL is missing', () => {
+      expect(
+        isViralRequestCoverCandidateUrl({
+          supabaseBaseUrl: '   ',
+          requestId: 'request_1',
+          url: reviewerFrame,
         }),
       ).toBe(false)
     })

@@ -109,6 +109,15 @@ export type ViralRequestListOptions = {
   skip?: number
 }
 
+/**
+ * 🔴 No `mediaUrls` here, deliberately. Submitter media arrives ONLY through
+ * `attachClientViralRequestMedia`, which refuses any URL this server did not
+ * mint for that request. Accepting a caller-supplied list at create time was a
+ * hole around that gate: a reviewer's "Use this" would publish a host the
+ * submitter controls, free to swap the bytes after approval. Creating the row
+ * is what produces the id the upload path is derived from, so there is no
+ * minted URL to accept at this point anyway.
+ */
 export type CreateClientViralRequestArgs = {
   clientId: string
   name: string
@@ -116,7 +125,6 @@ export type CreateClientViralRequestArgs = {
   sourceUrl?: string | null
   requestedCategoryId?: string | null
   links?: readonly string[] | null
-  mediaUrls?: readonly string[] | null
 }
 
 export type DeleteClientViralRequestArgs = {
@@ -499,9 +507,7 @@ export async function createClientViralRequest(
   const sourceUrl = normalizeHttpUrl(args.sourceUrl, 'sourceUrl')
   const requestedCategoryId = asTrimmedString(args.requestedCategoryId)
   const links = normalizeUrlList(args.links, 'links')
-  const mediaUrls = normalizeUrlList(args.mediaUrls, 'mediaUrls')
   const linksJson = toOptionalJsonArray(links)
-  const mediaUrlsJson = toOptionalJsonArray(mediaUrls)
 
   const created = await db.viralServiceRequest.create({
     data: {
@@ -512,7 +518,6 @@ export async function createClientViralRequest(
       requestedCategoryId,
       status: ViralServiceRequestStatus.REQUESTED,
       ...(linksJson !== undefined ? { linksJson } : {}),
-      ...(mediaUrlsJson !== undefined ? { mediaUrlsJson } : {}),
     },
     select: { id: true },
   })
@@ -980,14 +985,25 @@ export function buildViralRequestCoverTargetPath(args: {
   requestId: string
   extension: string
 }): string {
-  const requestId = normalizeRequiredId('requestId', args.requestId)
   const extension = args.extension.replace(/[^a-z0-9]/gi, '').toLowerCase()
-  return `viral-requests/${requestId}/cover.${extension || 'jpg'}`
+  return `${viralRequestRootPath(args.requestId)}cover.${extension || 'jpg'}`
+}
+
+/** The sub-folder a SUBMITTER's own attachments live in, under the root below. */
+const VIRAL_REQUEST_UPLOADS_SEGMENT = 'uploads/'
+
+/**
+ * Everything stored for one request hangs off this folder — the reviewer's cover
+ * beside the submitter's uploads. Derived in ONE place so the builders and the
+ * validator that has to recognise them cannot drift apart.
+ */
+function viralRequestRootPath(requestId: string): string {
+  return `viral-requests/${normalizeRequiredId('requestId', requestId)}/`
 }
 
 /** Every object a SUBMITTER uploads for one request lives under this folder. */
 function viralRequestUploadPathPrefix(requestId: string): string {
-  return `viral-requests/${normalizeRequiredId('requestId', requestId)}/uploads/`
+  return `${viralRequestRootPath(requestId)}${VIRAL_REQUEST_UPLOADS_SEGMENT}`
 }
 
 export function buildViralRequestUploadTargetPath(
@@ -1042,6 +1058,49 @@ export function isViralRequestUploadPublicUrl(args: {
   const fileName = args.url.slice(prefix.length)
 
   return fileName.length > 0 && fileName === normalizeUploadFileName(fileName)
+}
+
+/**
+ * True only for a URL this server minted for THIS request, in either of the two
+ * shapes a cover may legitimately come from: the reviewer's own uploaded frame
+ * (`…/cover.ext`) or one of the submitter's attachments (`…/uploads/name`).
+ *
+ * 🔴 The gate on the PROMOTE side. `isViralRequestUploadPublicUrl` guards what a
+ * client may attach; this guards what a reviewer may publish. Without it "Use
+ * this" writes whatever URL the finalize body carried onto the one column every
+ * client surface renders — including a host the submitter controls, free to swap
+ * the bytes the moment it is approved. A human still has to click, so this is
+ * not an authorization check; it is what stops that click from being abusable.
+ */
+export function isViralRequestCoverCandidateUrl(args: {
+  supabaseBaseUrl: string
+  requestId: string
+  url: string
+}): boolean {
+  const base = args.supabaseBaseUrl.trim()
+  if (!base) return false
+
+  const prefix = buildViralRequestUploadPublicUrl({
+    supabaseBaseUrl: base,
+    path: viralRequestRootPath(args.requestId),
+  })
+
+  if (!args.url.startsWith(prefix)) return false
+
+  const rest = args.url.slice(prefix.length)
+
+  // The reviewer's own frame, exactly as buildViralRequestCoverTargetPath spells
+  // it: one object per request, extension already stripped to [a-z0-9].
+  if (/^cover\.[a-z0-9]+$/.test(rest)) return true
+
+  // A submitter attachment — same sanitizer the upload route wrote it with.
+  if (rest.startsWith(VIRAL_REQUEST_UPLOADS_SEGMENT)) {
+    const fileName = rest.slice(VIRAL_REQUEST_UPLOADS_SEGMENT.length)
+
+    return fileName.length > 0 && fileName === normalizeUploadFileName(fileName)
+  }
+
+  return false
 }
 
 /**

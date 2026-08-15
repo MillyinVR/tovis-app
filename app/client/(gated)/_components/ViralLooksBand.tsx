@@ -129,8 +129,9 @@ function LiveLookHero({ live }: { live: ClientHomeViralLive }) {
  * 2026-08-14: once there is more than one live look, a single hero can only show
  * one of them, so they list like boards instead.
  *
- * The picture is the reviewer's cover (or the submitter's own photo) when there
- * is one, and a gradient when there is not — a viral look is a NAME the platform
+ * The picture is the reviewer's cover when there is one, and a gradient when
+ * there is not — never the submitter's own photo, which stays evidence in the
+ * queue until an admin promotes it. A viral look is a NAME the platform
  * got vetted and matched, and it can be published before anyone has a shot of
  * it. Set in /admin/viral-requests.
  */

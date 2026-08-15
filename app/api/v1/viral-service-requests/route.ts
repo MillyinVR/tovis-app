@@ -52,8 +52,6 @@ function isInputError(message: string): boolean {
     message === 'sourceUrl must use http or https.' ||
     message === 'links must be a valid URL.' ||
     message === 'links must use http or https.' ||
-    message === 'mediaUrls must be a valid URL.' ||
-    message === 'mediaUrls must use http or https.' ||
     message.startsWith('Text must be ')
   )
 }
@@ -93,6 +91,17 @@ export async function POST(req: Request) {
       })
     }
 
+    // 🔴 Refuse rather than ignore. Media may only arrive through the PATCH,
+    // which accepts a URL this server minted for this request; accepting a list
+    // here handed a submitter a foreign host that a reviewer's "Use this" would
+    // then publish app-wide. Silently dropping it would leave the caller
+    // believing their evidence was attached — see the refuse-the-claim rule.
+    if ((pickStringArray(body.mediaUrls)?.length ?? 0) > 0) {
+      return jsonFail(400, 'Attach media with PATCH after the upload.', {
+        code: 'MEDIA_URLS_NOT_ACCEPTED_ON_CREATE',
+      })
+    }
+
     const requestedCategoryId = pickTrimmedString(body.requestedCategoryId)
 
     if (requestedCategoryId) {
@@ -115,7 +124,6 @@ export async function POST(req: Request) {
       sourceUrl: pickTrimmedString(body.sourceUrl),
       requestedCategoryId,
       links: pickStringArray(body.links),
-      mediaUrls: pickStringArray(body.mediaUrls),
     })
 
     // Best-effort admin alert — must never fail the client's request.
