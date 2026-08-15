@@ -21,8 +21,8 @@ import AvailabilityCalendar from '@/app/pro/_components/AvailabilityCalendar'
 import { readErrorMessage, safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
 import { formatInTimeZone, sanitizeTimeZone, ymdInTimeZone } from '@/lib/time'
+import type { ServiceLocationType } from '@prisma/client'
 
-type ServiceLocationType = 'SALON' | 'MOBILE'
 
 type Props = {
   professionalId: string

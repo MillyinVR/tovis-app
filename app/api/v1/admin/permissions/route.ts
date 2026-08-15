@@ -208,7 +208,7 @@ export async function POST(req: NextRequest): Promise<Response> {
       status: 303,
     })
   } catch (error: unknown) {
-    const message = errorMessageFromUnknown(error)
+    const message = errorMessageFromUnknown(error, 'Internal server error')
 
     console.error('POST /api/v1/admin/permissions error', error)
 

@@ -1,12 +1,28 @@
 // app/(main)/booking/AvailabilityDrawer/types.ts
-import type { ProNameDisplay } from '@prisma/client'
+import type {
+  BookingSource,
+  ClientAddressKind,
+  ProNameDisplay,
+  ServiceLocationType,
+} from '@prisma/client'
+
+// hold.ts and AppointmentTypeToggle read this off the drawer's own types.
+export type { ServiceLocationType }
 
 export type EmptyObject = Record<string, never>
 
 export type ApiOk<T extends object> = { ok: true } & T
 export type ApiFail<T extends object = EmptyObject> = { ok: false; error: string } & T
 
-export type BookingSource = 'REQUESTED' | 'DISCOVERY' | 'AFTERCARE'
+/**
+ * The sources a CLIENT-side booking flow can produce. Derived from the schema
+ * enum minus `IMPORTED`, which only a competitor-calendar migration writes —
+ * no drawer can create one, and the finalize route rejects it.
+ *
+ * Deliberately not named `BookingSource`: shadowing the enum's name with a
+ * narrower type is how a reader ends up believing they have the full set.
+ */
+export type ClientBookingSource = Exclude<BookingSource, 'IMPORTED'>
 
 export type DrawerContext = {
   professionalId: string
@@ -25,7 +41,7 @@ export type DrawerContext = {
 
   serviceId?: string | null
   offeringId?: string | null
-  source?: BookingSource
+  source?: ClientBookingSource
 
   /**
    * Optional YMD (pro-timezone) to anchor the initial availability window to.
@@ -51,10 +67,6 @@ export type DrawerContext = {
   viewerPlaceId?: string | null
   viewerLocationLabel?: string | null
 }
-
-export type ServiceLocationType = 'SALON' | 'MOBILE'
-
-export type ClientAddressKind = 'SEARCH_AREA' | 'SERVICE_ADDRESS'
 
 export type MobileAddressOption = {
   id: string

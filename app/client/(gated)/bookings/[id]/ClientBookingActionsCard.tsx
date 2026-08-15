@@ -13,7 +13,7 @@ import {
 } from '@/lib/idempotency/client'
 
 import type {
-  BookingSource,
+  ClientBookingSource,
   DrawerContext,
   ServiceLocationType,
 } from '@/app/(main)/booking/AvailabilityDrawer/types'
@@ -25,7 +25,7 @@ type HoldSelection = {
   offeringId: string
   locationType: ServiceLocationType
   slotISO: string
-  bookingSource: BookingSource
+  bookingSource: ClientBookingSource
   mediaId: string | null
 }
 

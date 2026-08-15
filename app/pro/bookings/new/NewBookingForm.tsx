@@ -31,7 +31,11 @@ import {
   type PlacePrediction,
 } from '@/lib/clientAddresses/placesAutocomplete'
 import { moneyToString } from '@/lib/money'
-import type { DepositType } from '@prisma/client'
+import type {
+  DepositType,
+  ProfessionalLocationType,
+  ServiceLocationType,
+} from '@prisma/client'
 import {
   STRIPE_MIN_CHARGE_CENTS,
 } from '@/lib/booking/discoveryDepositPlan'
@@ -57,8 +61,6 @@ import {
 import OpenSlotPicker from './OpenSlotPicker'
 import BookingOverridePromptCard from '@/app/pro/_components/BookingOverridePromptCard'
 
-type ServiceLocationType = 'SALON' | 'MOBILE'
-type ProfessionalLocationType = 'SALON' | 'SUITE' | 'MOBILE_BASE'
 type CancelMode = 'href' | 'back'
 type ClientMode = 'existing' | 'new'
 type AddressMode = 'existing' | 'new'
@@ -232,7 +234,6 @@ function defaultDatetimeLocal(): string {
     d.getDate(),
   )}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`
 }
-
 
 function pickDisplayPrice(
   offering: ProBookingNewOfferingDTO,

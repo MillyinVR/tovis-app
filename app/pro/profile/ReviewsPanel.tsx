@@ -12,13 +12,13 @@ import BeforeAfterReveal from '@/app/_components/media/BeforeAfterReveal'
 import ClientMediaExportButton from '@/app/_components/media/ClientMediaExportButton'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import { Z } from '@/lib/zIndex'
+import type { MediaType } from '@prisma/client'
 import {
   DEFAULT_TIME_ZONE,
   formatInTimeZone,
   getViewerTimeZone,
 } from '@/lib/time'
 
-type MediaType = 'IMAGE' | 'VIDEO'
 
 export type ReviewForPanel = {
   id: string

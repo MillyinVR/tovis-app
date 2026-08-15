@@ -11,11 +11,12 @@ import { cancellationPolicyDisclosure } from '@/lib/noShowProtection/policyDiscl
 // the add-on shape (web + native). The `id` is the OfferingAddOn link id.
 import type { OfferingAddOnItemDTO as AddOnDTO } from '@/lib/dto'
 import { loadAddOnsContext } from '@/lib/booking/addOnsContext'
+import type { BookingSource, ServiceLocationType } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
-type ServiceLocationType = 'SALON' | 'MOBILE'
-type BookingSource = 'REQUESTED' | 'DISCOVERY' | 'AFTERCARE'
+/** Client-side sources only — `IMPORTED` is written by calendar migration. */
+type ClientBookingSource = Exclude<BookingSource, 'IMPORTED'>
 
 type AddOnsApiOk = {
   ok: true
@@ -50,7 +51,7 @@ function normalizeLocationType(v: string | null): ServiceLocationType {
   return s === 'MOBILE' ? 'MOBILE' : 'SALON'
 }
 
-function normalizeSource(v: string | null): BookingSource {
+function normalizeSource(v: string | null): ClientBookingSource {
   const s = (v || '').trim().toUpperCase()
   if (s === 'DISCOVERY') return 'DISCOVERY'
   if (s === 'AFTERCARE') return 'AFTERCARE'

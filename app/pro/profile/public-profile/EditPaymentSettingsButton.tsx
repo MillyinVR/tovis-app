@@ -3,7 +3,12 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import type { NoShowFeeType } from '@prisma/client'
+import type {
+  DepositScope,
+  DepositType,
+  NoShowFeeType,
+  PaymentCollectionTiming,
+} from '@prisma/client'
 import { isRecord } from '@/lib/guards'
 import { safeJson, readErrorMessage, errorMessageFromUnknown } from '@/lib/http'
 import { zClass } from '@/lib/zIndex'
@@ -12,12 +17,6 @@ import type {
   ProNoShowSettingsUpdateRequestDTO,
 } from '@/lib/dto/noShowSettings'
 
-export type PaymentCollectionTiming = 'AT_BOOKING' | 'AFTER_SERVICE'
-export type DepositType = 'FLAT' | 'PERCENT'
-export type DepositScope =
-  | 'NEW_DISCOVERY_ONLY'
-  | 'ALL_NEW_CLIENTS'
-  | 'ALL_CLIENTS'
 
 type TipSuggestionInput = {
   label: string

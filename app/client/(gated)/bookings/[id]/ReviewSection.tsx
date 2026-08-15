@@ -15,8 +15,8 @@ import {
   idempotencyHeaders,
 } from '@/lib/idempotency/client'
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import type { MediaType } from '@prisma/client'
 
-type MediaType = 'IMAGE' | 'VIDEO'
 
 type ExistingReview = {
   id: string
@@ -189,7 +189,6 @@ function parseReviewMediaOptionsPayload(data: unknown): AppointmentMediaOption[]
 
   return itemsRaw.map(coerceApptMediaOption).filter(isAppointmentMediaOption)
 }
-
 
 type SignedUploadInit = {
   bucket: string

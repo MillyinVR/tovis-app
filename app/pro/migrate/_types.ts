@@ -1,3 +1,5 @@
+import type { RaiseStepMode } from '@prisma/client'
+export type { RaiseStepMode }
 // app/pro/migrate/_types.ts
 //
 // View-model types for the pro migration / import flow. These are the agreed
@@ -27,7 +29,6 @@ export type CanonicalService = {
   licensedForPro: boolean // false => disabled option (pro not licensed)
 }
 
-export type RaiseStepMode = 'PCT' | 'USD'
 
 // Below-minimum price → grandfathered + ramped (never blocked). New clients pay the
 // platform minimum immediately; existing clients ramp up gently to it.

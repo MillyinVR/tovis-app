@@ -38,11 +38,8 @@ import {
   type BookingOverridePrompt,
 } from '@/lib/booking/overridePrompts'
 import { disabledWeekdayIndexes } from '@/lib/scheduling/workingHours'
+import type { MediaPhase, MediaType, MediaVisibility, Role } from '@prisma/client'
 
-type MediaType = 'IMAGE' | 'VIDEO'
-type MediaVisibility = 'PUBLIC' | 'PRO_CLIENT'
-type Role = 'CLIENT' | 'PRO' | 'ADMIN'
-type MediaPhase = 'BEFORE' | 'AFTER' | 'OTHER'
 
 type MediaItem = {
   id: string

@@ -10,7 +10,7 @@ import RemoteImage from '@/app/_components/media/RemoteImage'
 import type { AddOnsContext } from '@/lib/booking/addOnsContext'
 import { zClass } from '@/lib/zIndex'
 import type {
-  BookingSource,
+  ClientBookingSource,
   ServiceLocationType,
 } from '../../AvailabilityDrawer/types'
 import {
@@ -29,7 +29,7 @@ type Props = {
   holdId: string | null
   offeringId: string | null
   locationType: ServiceLocationType
-  source: BookingSource
+  source: ClientBookingSource
   mediaId: string | null
   lookPostId: string | null
   addOns: AddOnDTO[]
