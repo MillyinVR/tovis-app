@@ -748,6 +748,109 @@ const VIRAL = {
   },
 } as const
 
+// ── the pro Portfolio library (/pro/portfolio) ───────────────────────────────
+// Everything above this line is built from work that is already PUBLISHED,
+// because screens 1–6 are client-facing. The pro's library is about the states
+// publishing leaves behind, and before this block every one of them was
+// unreachable: three demo pros, all 100% public, so the screen rendered a
+// single zone and four of its five states could not be looked at at all.
+//
+// 🔴 A held photo is only expressible because the consent gate now keys on
+// PROVENANCE (`bookingId`) rather than on `storageBucket`. Under the old rule a
+// fixture photo was renderable or held, never both — the sentinel bucket that
+// keeps these images off PROD storage also read as "not a session photo".
+
+/**
+ * Session photos the CLIENT has not released. These are the majority state in
+ * production (65 of 70 assets), not an edge case.
+ *
+ * 🔴 Every name is DIFFERENT. The tile renders "Waiting on {name}" from the
+ * booking's own client, so a fixture where all six say "Maya" would render
+ * identically whether the mapping is right or joined to the wrong booking.
+ */
+const PORTFOLIO_HELD: Array<{
+  key: string
+  clientFirstName: string
+  image: string
+  phase: MediaPhase
+  /**
+   * 🔴 The consent sheet can only offer a nudge when there is an aftercare to
+   * RE-send; otherwise it tells the pro to send the first one. Both branches
+   * need a row, or only one of them is ever looked at.
+   */
+  aftercareSent: boolean
+  /**
+   * 🔴 The SECOND reason a nudge is refused, and the one no gate on this screen
+   * checks. `maybeCreateAftercareAccessDeliveryInBoundary` throws
+   * AFTERCARE_DELIVERY_FAILED when the client has neither email nor phone — and
+   * a pro-created UNCLAIMED client (most of a real book) has neither. A fixture
+   * where every client is contactable would never reach it.
+   */
+  contactable: boolean
+}> = [
+  { key: 'priya', clientFirstName: 'Priya', image: 'lived-in-blonde', phase: MediaPhase.AFTER, aftercareSent: true, contactable: true },
+  { key: 'danielle', clientFirstName: 'Danielle', image: 'cherry-cola-balayage', phase: MediaPhase.AFTER, aftercareSent: true, contactable: true },
+  { key: 'renee', clientFirstName: 'Renee', image: 'money-piece-blonde', phase: MediaPhase.BEFORE, aftercareSent: true, contactable: true },
+  // Aftercare sent, but nowhere to send it again.
+  { key: 'yusuf', clientFirstName: 'Yusuf', image: 'lived-in-blonde', phase: MediaPhase.AFTER, aftercareSent: true, contactable: false },
+  // The two no-aftercare rows: the sheet must fall back to "send the aftercare
+  // first" rather than offering a button the write boundary would refuse
+  // (`nudgeAftercareRebook` throws AFTERCARE_NOT_COMPLETED without one).
+  { key: 'camille', clientFirstName: 'Camille', image: 'brow-lamination', phase: MediaPhase.AFTER, aftercareSent: false, contactable: true },
+  { key: 'adaeze', clientFirstName: 'Adaeze', image: 'glazed-almond-set', phase: MediaPhase.AFTER, aftercareSent: false, contactable: true },
+]
+
+/**
+ * Session photos the client HAS released, still unpublished by the pro.
+ *
+ * 🔴 These are the reason "From sessions" and "Waiting" must not be treated as
+ * the same set. A fixture where every session photo is held makes the two
+ * indistinguishable, and any code that conflates them looks correct.
+ */
+const PORTFOLIO_RELEASED: Array<{ key: string; clientFirstName: string; image: string }> = [
+  { key: 'imani', clientFirstName: 'Imani', image: 'cherry-cola-balayage' },
+  { key: 'theo', clientFirstName: 'Theo', image: 'lash-lift-tint' },
+]
+
+/**
+ * The pro's own uploads, never published. These drive the "Your uploads" zone,
+ * the tile's `+` affordance and the publish sheet — none of which any existing
+ * fixture row could reach, since every seeded upload was already public.
+ */
+const PORTFOLIO_UPLOADS: Array<{ key: string; image: string; caption: string; video?: boolean }> = [
+  { key: 'balcony-gloss', image: 'cherry-cola-balayage', caption: 'Gloss refresh in the window light.' },
+  { key: 'root-shadow', image: 'lived-in-blonde', caption: 'Root shadow melt, shot on the way out.' },
+  { key: 'face-frame-two', image: 'money-piece-blonde', caption: 'Face-frame variation I want to try again.' },
+  { key: 'brow-detail', image: 'brow-lamination', caption: 'Brow detail — good light, bad angle.' },
+  { key: 'chrome-study', image: 'glazed-almond-set', caption: '' },
+  { key: 'lash-macro', image: 'lash-lift-tint', caption: 'Macro on the lash line.' },
+  // The one VIDEO. `MediaAsset` stores no duration, so the tile draws a play
+  // GLYPH where the frame stamped "0:14" — a fixture with no video at all would
+  // have let that decision go unlooked-at.
+  { key: 'blowout-clip', image: 'lived-in-blonde', caption: 'Finish shot, 4 seconds.', video: true },
+]
+
+/**
+ * A pro whose library is entirely private — the LAUNCH state, and the only way
+ * to reach the lead card. Separate pros rather than a demotion of noor's set,
+ * because screens 1–6 are built against those public fixtures.
+ */
+const PORTFOLIO_LAUNCH_PRO = {
+  key: 'imogen',
+  firstName: 'Imogen',
+  lastName: 'Bassey',
+  businessName: 'Imogen Bassey Hair',
+  uploads: ['lived-in-blonde', 'cherry-cola-balayage', 'money-piece-blonde', 'brow-lamination'],
+} as const
+
+/** A pro with no media at all — the blank state. */
+const PORTFOLIO_BLANK_PRO = {
+  key: 'wren',
+  firstName: 'Wren',
+  lastName: 'Okafor',
+  businessName: 'Wren Okafor Studio',
+} as const
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 const money = (n: number) => new Prisma.Decimal(n.toFixed(2))
 
@@ -912,6 +1015,18 @@ async function clean(): Promise<void> {
   })
   await prisma.handleRegistration.deleteMany({
     where: { handleNormalized: { in: [normalizeHandle(CREATOR.handle)] } },
+  })
+  // 🔴 Threads the APP created against demo rows, which this script did not
+  // write and so cannot match by id prefix. `MessageThread.clientId` is a
+  // required relation (RESTRICT), so a single thread opened while driving the
+  // fixture — e.g. the client home's "Message" button — permanently blocks
+  // `--clean` from removing the client. Keyed on the demo client/pro instead of
+  // the row's own id for exactly that reason.
+  // Messages + participants cascade from the thread.
+  await prisma.messageThread.deleteMany({
+    where: {
+      OR: [{ clientId: idPrefix }, { professionalId: idPrefix }],
+    },
   })
   // Before the client profile (cascade would take it, but the bookings above
   // RESTRICT-reference it, so order is load-bearing either way).
@@ -2206,6 +2321,266 @@ async function main(): Promise<void> {
       chargeNoShow: true,
       chargeLateCancel: true,
     },
+  })
+
+  // ── the pro Portfolio library's states (/pro/portfolio) ────────────────────
+  // See PORTFOLIO_HELD above for why each of these exists. Everything here is
+  // ADDITIVE — no existing public asset is demoted, because screens 1–6 render
+  // from those.
+  const libraryProId = proId('noor')
+  const libraryServiceId = serviceId('balayage')
+  const libraryLocationId = locationId('noor')
+
+  // 🔴 300+ days back, one day apart. `Booking` carries an exclusion constraint
+  // on overlapping (pro, time-range) pairs, and the attributed bookings above
+  // already occupy the last ~75 days at 06:00 — so a fixture appended anywhere
+  // near NOW collides and the whole seed aborts.
+  const libraryBookingAt = (index: number): Date =>
+    new Date(NOW.getTime() - (300 + index) * DAY_MS)
+
+  const libraryClients = [
+    ...PORTFOLIO_HELD.map((row) => ({
+      key: row.key,
+      firstName: row.clientFirstName,
+      contactable: row.contactable,
+    })),
+    ...PORTFOLIO_RELEASED.map((row) => ({
+      key: row.key,
+      firstName: row.clientFirstName,
+      contactable: true,
+    })),
+  ]
+
+  await prisma.clientProfile.createMany({
+    data: libraryClients.map((client) => ({
+      id: `${P}libclient-${client.key}`,
+      homeTenantId: tenantId,
+      firstName: client.firstName,
+      lastName: 'Demo',
+      // Unclaimed, like the pro-created clients a real book is full of — the
+      // tile only ever needs their first name.
+      claimStatus: ClientClaimStatus.UNCLAIMED,
+      // Plaintext is still the source of truth for these columns during the
+      // encryption burn-in, so the fixture sets them directly like the demo
+      // client above. Contactless clients get NOTHING, which is the point.
+      ...(client.contactable ? { email: `demo-${client.key}@tovis.app` } : {}),
+    })),
+  })
+
+  await prisma.booking.createMany({
+    data: libraryClients.map((client, index) => {
+      const scheduledFor = libraryBookingAt(index)
+
+      return {
+        id: `${P}libbooking-${client.key}`,
+        clientId: `${P}libclient-${client.key}`,
+        professionalId: libraryProId,
+        serviceId: libraryServiceId,
+        proTenantId: tenantId,
+        clientHomeTenantId: tenantId,
+        source: BookingSource.REQUESTED,
+        status: BookingStatus.COMPLETED,
+        createdAt: new Date(scheduledFor.getTime() - 3 * DAY_MS),
+        scheduledFor,
+        locationType: ServiceLocationType.SALON,
+        locationId: libraryLocationId,
+        locationTimeZone: TIME_ZONE,
+        subtotalSnapshot: money(250),
+        totalDurationMinutes: 180,
+        // 🔴 The consent tick itself, and the ONLY difference between the held
+        // rows and the released ones. Null here is what makes the tile dim,
+        // name the client and refuse to publish.
+        mediaUseConsentAt: PORTFOLIO_HELD.some((held) => held.key === client.key)
+          ? null
+          : new Date(scheduledFor.getTime() + 2 * DAY_MS),
+      }
+    }),
+  })
+
+  // The aftercare each nudge would re-issue. Only for the rows that carry one:
+  // `nudgeAftercareRebook` throws AFTERCARE_NOT_COMPLETED without a
+  // `sentToClientAt`, so seeding one for every booking would make the sheet's
+  // other branch unreachable AND hide a button that 500s.
+  await prisma.aftercareSummary.createMany({
+    data: libraryClients
+      // 🔴 The booking index comes from the ORIGINAL position, not the filtered
+      // one — `.filter().map((_, i) => …)` would re-number the survivors and
+      // stamp an aftercare hours BEFORE the appointment it belongs to.
+      .map((client, index) => ({ client, index }))
+      .filter(
+        ({ client }) =>
+          !PORTFOLIO_HELD.some((held) => held.key === client.key && !held.aftercareSent),
+      )
+      .map(({ client, index }) => {
+        const sentAt = new Date(libraryBookingAt(index).getTime() + 4 * 60 * 60 * 1000)
+
+        return {
+          id: `${P}libaftercare-${client.key}`,
+          bookingId: `${P}libbooking-${client.key}`,
+          notes: 'Sulphate-free shampoo, and book the gloss at six weeks.',
+          rebookMode: AftercareRebookMode.NONE,
+          draftSavedAt: sentAt,
+          sentToClientAt: sentAt,
+          lastEditedAt: sentAt,
+          createdAt: sentAt,
+        }
+      }),
+  })
+
+  await prisma.mediaAsset.createMany({
+    data: [
+      ...PORTFOLIO_HELD.map((row, index) => ({
+        id: `${P}media-held-${row.key}`,
+        professionalId: libraryProId,
+        proTenantId: tenantId,
+        primaryServiceId: libraryServiceId,
+        bookingId: `${P}libbooking-${row.key}`,
+        phase: row.phase,
+        storageBucket: DEMO_LOCAL_BUCKET,
+        storagePath: `seed-demo/held-${row.key}.jpg`,
+        url: `http://localhost:3000/seed-demo/${row.image}.jpg`,
+        mediaType: MediaType.IMAGE,
+        visibility: MediaVisibility.PRO_CLIENT,
+        // 🔴 The PRO shot it at the chair. A CLIENT-uploaded photo is already
+        // theirs to publish (the upload is the consent), so seeding these as
+        // CLIENT would silently release every one of them.
+        uploadedByRole: Role.PRO,
+        createdAt: new Date(libraryBookingAt(index).getTime() + 3 * 60 * 60 * 1000),
+      })),
+      ...PORTFOLIO_RELEASED.map((row, index) => ({
+        id: `${P}media-released-${row.key}`,
+        professionalId: libraryProId,
+        proTenantId: tenantId,
+        primaryServiceId: libraryServiceId,
+        bookingId: `${P}libbooking-${row.key}`,
+        phase: MediaPhase.AFTER,
+        storageBucket: DEMO_LOCAL_BUCKET,
+        storagePath: `seed-demo/released-${row.key}.jpg`,
+        url: `http://localhost:3000/seed-demo/${row.image}.jpg`,
+        mediaType: MediaType.IMAGE,
+        visibility: MediaVisibility.PRO_CLIENT,
+        uploadedByRole: Role.PRO,
+        createdAt: new Date(
+          libraryBookingAt(PORTFOLIO_HELD.length + index).getTime() + 3 * 60 * 60 * 1000,
+        ),
+      })),
+      ...PORTFOLIO_UPLOADS.map((row, index) => ({
+        id: `${P}media-upload-${row.key}`,
+        professionalId: libraryProId,
+        proTenantId: tenantId,
+        primaryServiceId: libraryServiceId,
+        storageBucket: DEMO_LOCAL_BUCKET,
+        storagePath: `seed-demo/upload-${row.key}.jpg`,
+        url: `http://localhost:3000/seed-demo/${row.image}.jpg`,
+        mediaType: row.video ? MediaType.VIDEO : MediaType.IMAGE,
+        // Not public and not featured: the pro shot it and has not decided yet.
+        visibility: MediaVisibility.PRO_CLIENT,
+        isEligibleForLooks: false,
+        isFeaturedInPortfolio: false,
+        caption: row.caption || null,
+        uploadedByRole: Role.PRO,
+        createdAt: new Date(NOW.getTime() - (index + 1) * 60 * 60 * 1000),
+      })),
+    ],
+  })
+
+  // The desktop side rail's Cover slot. Signature is already set on
+  // `pro-root-melt`; pointing Cover at a DIFFERENT asset is what renders the
+  // two single marks as distinct chips rather than collapsing to one.
+  await prisma.professionalProfile.update({
+    where: { id: libraryProId },
+    data: { coverMediaAssetId: `${P}media-pro-copper-gloss` },
+  })
+
+  // The two extra pros: one at launch (photos, none public → the lead card) and
+  // one with nothing at all (the blank state). Minimal but VALID pros — no
+  // offerings or availability, because neither screen reads them.
+  for (const [index, extra] of [PORTFOLIO_LAUNCH_PRO, PORTFOLIO_BLANK_PRO].entries()) {
+    await prisma.user.create({
+      data: {
+        id: `${P}user-pro-${extra.key}`,
+        email: `${extra.key}@demo.tovis.local`,
+        password: 'demo-seed-no-login',
+        role: Role.PRO,
+        emailVerifiedAt: NOW,
+        phoneVerifiedAt: NOW,
+        createdAt: new Date(NOW.getTime() - (40 + index) * DAY_MS),
+      },
+    })
+
+    await prisma.professionalProfile.create({
+      data: {
+        id: `${P}pro-${extra.key}`,
+        userId: `${P}user-pro-${extra.key}`,
+        homeTenantId: tenantId,
+        firstName: extra.firstName,
+        lastName: extra.lastName,
+        businessName: extra.businessName,
+        handle: `demo-${extra.key}`,
+        handleNormalized: `demo-${extra.key}`,
+        location: 'Brooklyn, NY',
+        timeZone: TIME_ZONE,
+        professionType: ProfessionType.COSMETOLOGIST,
+        nameDisplay: ProNameDisplay.REAL_NAME,
+        licenseState: 'NY',
+        licenseVerified: true,
+        // APPROVED so the side rail's "View public profile" link renders — that
+        // href is gated on `isPubliclyApprovedProStatus`, and an unapproved
+        // fixture would leave the rail's own CTA permanently unlooked-at.
+        verificationStatus: VerificationStatus.APPROVED,
+      },
+    })
+
+    await prisma.professionalLocation.create({
+      data: {
+        id: `${P}location-${extra.key}`,
+        professionalId: `${P}pro-${extra.key}`,
+        type: ProfessionalLocationType.SALON,
+        name: extra.businessName,
+        isPrimary: true,
+        isBookable: true,
+        isAddressPublic: true,
+        ...brooklynAddress(),
+        timeZone: TIME_ZONE,
+        workingHours: workingHoursJson(),
+      },
+    })
+
+    // 🔴 Load-bearing, not decoration. `app/pro/layout` runs
+    // `checkProReadiness` on EVERY pro route and redirects a pro with no active
+    // offering to onboarding — so without this the two fixture pros never reach
+    // /pro/portfolio at all, and a screenshot of them is a screenshot of
+    // "My services". Which is exactly what the first pass captured.
+    await prisma.professionalServiceOffering.create({
+      data: {
+        id: `${P}offering-${extra.key}-balayage`,
+        professionalId: `${P}pro-${extra.key}`,
+        serviceId: libraryServiceId,
+        salonPriceStartingAt: money(200),
+        salonDurationMinutes: 180,
+        offersInSalon: true,
+        offersMobile: false,
+        isActive: true,
+      },
+    })
+  }
+
+  await prisma.mediaAsset.createMany({
+    data: PORTFOLIO_LAUNCH_PRO.uploads.map((image, index) => ({
+      id: `${P}media-launch-${index}`,
+      professionalId: `${P}pro-${PORTFOLIO_LAUNCH_PRO.key}`,
+      proTenantId: tenantId,
+      primaryServiceId: libraryServiceId,
+      storageBucket: DEMO_LOCAL_BUCKET,
+      storagePath: `seed-demo/launch-${index}.jpg`,
+      url: `http://localhost:3000/seed-demo/${image}.jpg`,
+      mediaType: MediaType.IMAGE,
+      visibility: MediaVisibility.PRO_CLIENT,
+      isEligibleForLooks: false,
+      isFeaturedInPortfolio: false,
+      uploadedByRole: Role.PRO,
+      createdAt: new Date(NOW.getTime() - (index + 1) * 60 * 60 * 1000),
+    })),
   })
 
   // Score the creator tier from the rows just written, using the SAME job the

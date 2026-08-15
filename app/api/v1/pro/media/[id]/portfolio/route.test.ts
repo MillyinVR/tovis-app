@@ -124,6 +124,7 @@ function makeOwnedMedia(
     thumbPath: string | null
     url: string | null
     thumbUrl: string | null
+    lookPostPrimaryFor: Array<{ clientAuthorId: string | null }>
   }>,
 ) {
   return {
@@ -142,6 +143,10 @@ function makeOwnedMedia(
     thumbPath: null,
     url: 'https://cdn.example.com/media_1.jpg',
     thumbUrl: null,
+    // The look this asset backs, if any. Empty by default: an asset with no
+    // LookPost is the ordinary case, and `clientAuthorId: null` (a PRO-authored
+    // look) is the other allowed one.
+    lookPostPrimaryFor: [],
     ...(overrides ?? {}),
   }
 }
@@ -296,6 +301,43 @@ describe('app/api/v1/pro/media/[id]/portfolio/route.ts', () => {
       expect(mocks.mediaAssetUpdate).not.toHaveBeenCalled()
     })
 
+    // 🔴 Regression: found by driving the real endpoint, not by a test.
+    // `reconcilePortfolioLookForMediaAsset` returns SKIPPED_CLIENT_LOOK for a
+    // client-authored look, so DELETE used to answer 200, flip the asset to
+    // PRO_CLIENT and leave the LookPost PUBLISHED — the pro was told their
+    // client's live post had come down while it stayed in the feed.
+    it('returns 403 and does not update when the look was authored by the client', async () => {
+      mocks.mediaAssetFindUnique.mockResolvedValueOnce(
+        makeOwnedMedia({
+          isFeaturedInPortfolio: true,
+          visibility: MediaVisibility.PUBLIC,
+          lookPostPrimaryFor: [{ clientAuthorId: 'client_1' }],
+        }),
+      )
+
+      const res = await POST(makeRequest('POST'), makeCtx())
+
+      expect(res.status).toBe(403)
+      await expect(res.json()).resolves.toEqual({
+        ok: false,
+        error:
+          'Your client posted this Look, so it is theirs to take down — not yours.',
+      })
+      expect(mocks.mediaAssetUpdate).not.toHaveBeenCalled()
+      expect(mocks.reconcilePortfolioLookForMediaAsset).not.toHaveBeenCalled()
+    })
+
+    it('still allows a PRO-authored look to be published', async () => {
+      mocks.mediaAssetFindUnique.mockResolvedValueOnce(
+        makeOwnedMedia({ lookPostPrimaryFor: [{ clientAuthorId: null }] }),
+      )
+
+      const res = await POST(makeRequest('POST'), makeCtx())
+
+      expect(res.status).toBe(200)
+      expect(mocks.mediaAssetUpdate).toHaveBeenCalled()
+    })
+
     it('allows featuring a private session photo once it has been promoted via a review', async () => {
       mocks.mediaAssetFindUnique.mockResolvedValueOnce(
         makeOwnedMedia({
@@ -341,6 +383,7 @@ describe('app/api/v1/pro/media/[id]/portfolio/route.ts', () => {
           thumbPath: true,
           url: true,
           thumbUrl: true,
+          lookPostPrimaryFor: { select: { clientAuthorId: true }, take: 1 },
         },
       })
 

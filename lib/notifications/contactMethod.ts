@@ -12,7 +12,7 @@
 // consolidating it would change what a pro-created client's claim invite picks
 // ([[drifted-duplicate-is-a-bug-report]]).
 
-import { ContactMethod } from '@prisma/client'
+import { ContactMethod, type Prisma } from '@prisma/client'
 
 /**
  * The client's own stored preference wins. Failing that, a client we can only
@@ -32,6 +32,31 @@ export function inferPreferredContactMethod(args: {
   if (args.phone && !args.email) return ContactMethod.SMS // pii-plaintext-read-ok: presence check only
   return null
 }
+
+/**
+ * Clients we can reach AT ALL — expressed as a WHERE, so a caller can gate a
+ * control on reachability without ever selecting a contact value.
+ *
+ * This is the precondition every client-action delivery shares: with neither an
+ * email nor a phone, `maybeCreateAftercareAccessDeliveryInBoundary` throws
+ * AFTERCARE_DELIVERY_FAILED — and an unclaimed client a pro created by hand
+ * (most of a real book) has neither.
+ *
+ * 🔴 The `user` legs are not optional. The boundary falls back from the
+ * profile's contact to the linked user's, so checking only the profile would
+ * report a CLAIMED client as unreachable and hide a control that works. Blank
+ * strings are excluded because the boundary trims before it decides.
+ */
+export const reachableClientWhere = {
+  OR: [
+    { AND: [{ email: { not: null } }, { NOT: { email: '' } }] },
+    { AND: [{ phone: { not: null } }, { NOT: { phone: '' } }] },
+    // `User.email` is a REQUIRED column, so a linked user is reachable unless
+    // that column is blank; `User.phone` is nullable and needs the null leg.
+    { user: { NOT: { email: '' } } },
+    { user: { AND: [{ phone: { not: null } }, { NOT: { phone: '' } }] } },
+  ],
+} satisfies Prisma.ClientProfileWhereInput
 
 /** The first value that is a non-blank string, trimmed. */
 export function pickFirstNonEmptyContact(

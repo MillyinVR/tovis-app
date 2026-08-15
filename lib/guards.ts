@@ -9,6 +9,15 @@ export function isArray(v: unknown): v is unknown[] {
   return Array.isArray(v)
 }
 
+/**
+ * Narrowing predicate for `.filter()` over a list that may hold nulls — the
+ * shape mappers produce when a row can't be rendered. Lived as a private copy
+ * in several loaders and mappers before this; new call sites use this one.
+ */
+export function isNonNull<T>(v: T | null | undefined): v is T {
+  return v !== null && v !== undefined
+}
+
 export function isNonEmptyString(v: unknown): v is string {
   return typeof v === 'string' && v.trim().length > 0
 }

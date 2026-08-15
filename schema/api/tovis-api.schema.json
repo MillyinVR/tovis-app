@@ -15564,6 +15564,445 @@
       ],
       "type": "string"
     },
+    "ProPortfolioConsentHold": {
+      "properties": {
+        "bookingId": {
+          "description": "The booking whose aftercare carries the consent tick.\n\n🔴 Nullable, because the hold is NOT. `isUnpromotedPrivateMedia` refuses on the private BUCKET as an independent second signal, so a row with no booking can still be held — and a hold that returned null there would put a publish affordance on a tile the server refuses.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "canNudge": {
+          "description": "Whether the nudge can actually be issued. 🔴 Gated on everything the write boundary checks, not just on the aftercare: `nudgeAftercareRebook` throws AFTERCARE_NOT_COMPLETED without a sent aftercare AND AFTERCARE_DELIVERY_FAILED when the client has no email or phone — which is the ordinary shape of a pro-created, unclaimed client.",
+          "type": "boolean"
+        },
+        "clientFirstName": {
+          "description": "The client whose say-so this waits on. First name only — it's their photo.",
+          "type": "string"
+        },
+        "nudgeBlock": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProPortfolioNudgeBlock"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set exactly when `canNudge` is false, so the sheet can say which reason."
+        }
+      },
+      "required": [
+        "clientFirstName",
+        "bookingId",
+        "canNudge",
+        "nudgeBlock"
+      ],
+      "type": "object"
+    },
+    "ProPortfolioCounts": {
+      "properties": {
+        "heldCount": {
+          "type": "number"
+        },
+        "privateCount": {
+          "type": "number"
+        },
+        "publicCount": {
+          "type": "number"
+        },
+        "total": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "total",
+        "publicCount",
+        "privateCount",
+        "heldCount"
+      ],
+      "type": "object"
+    },
+    "ProPortfolioEngagement": {
+      "description": "Live engagement for a PUBLIC photo. Null for anything private, because a photo that has never been public has no numbers rather than zeroed ones — rendering 0s would read as failure instead of absence.\n\nAll six ride `LookPost`, which is 1:1 with the asset (`LookPost.primaryMediaAssetId` is `@unique`). ⚠️ `views` is incremented by a JOB (`lib/jobs/looksSocial/applyLookViews`), not at read time — it lags. Keep any copy coarse enough to survive that.",
+      "properties": {
+        "booked": {
+          "description": "Bookings attributed to this look (`Booking.sourceLookPostId`).",
+          "type": "number"
+        },
+        "comments": {
+          "type": "number"
+        },
+        "likes": {
+          "type": "number"
+        },
+        "saves": {
+          "type": "number"
+        },
+        "shares": {
+          "type": "number"
+        },
+        "views": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "views",
+        "likes",
+        "saves",
+        "comments",
+        "shares",
+        "booked"
+      ],
+      "type": "object"
+    },
+    "ProPortfolioFilter": {
+      "properties": {
+        "active": {
+          "type": "boolean"
+        },
+        "count": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "key": {
+          "$ref": "#/definitions/ProPortfolioFilterKey"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "label",
+        "count",
+        "active"
+      ],
+      "type": "object"
+    },
+    "ProPortfolioFilterKey": {
+      "description": "A filter chip. `count` is null for chips that don't carry one.\n\n🔴 `UPLOADS` and `SESSIONS` are NOT chips — they are where a group's \"Show N more\" points. Without them that control was a dead end: every view re-capped each group at `PRO_PORTFOLIO_GROUP_PAGE_SIZE`, so \"Show 4 more\" landed on a page showing the same 6 tiles and offering \"Show 4 more\" again. Narrowing to a single zone is what lets the group open up.",
+      "enum": [
+        "ALL",
+        "PUBLIC",
+        "PRIVATE",
+        "WAITING",
+        "VIDEO",
+        "UPLOADS",
+        "SESSIONS"
+      ],
+      "type": "string"
+    },
+    "ProPortfolioGroup": {
+      "description": "A private zone, grouped by where the photo CAME FROM. Grouping carries the consent rule once as a group blurb instead of repeating it per tile, and an empty source simply does not render — so nothing looks broken at launch, which matters because review/aftercare photos are real in schema and have zero rows in production today.",
+      "properties": {
+        "blurb": {
+          "type": "string"
+        },
+        "count": {
+          "description": "Total in this group, which may exceed `tiles.length` (see `remaining`).",
+          "type": "number"
+        },
+        "note": {
+          "description": "Gold note, e.g. \"4 waiting\". Null when nothing is held.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "remaining": {
+          "description": "How many more exist beyond the page shown. 0 → no \"Show more\".",
+          "type": "number"
+        },
+        "tiles": {
+          "items": {
+            "$ref": "#/definitions/ProPortfolioTile"
+          },
+          "type": "array"
+        },
+        "title": {
+          "type": "string"
+        },
+        "zone": {
+          "description": "The zone a photo sits in. This carries public-vs-private INSTEAD of a badge — the old grid drew a `Portfolio` chip that was true of every tile (it was the query's own `where` clause) beside an `Only you` chip that could never be true (publishing derives `visibility: PUBLIC`). Both are gone; position says it.",
+          "enum": [
+            "UPLOADS",
+            "SESSIONS"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "zone",
+        "title",
+        "blurb",
+        "count",
+        "note",
+        "tiles",
+        "remaining"
+      ],
+      "type": "object"
+    },
+    "ProPortfolioLead": {
+      "description": "The launch-state nudge: photos exist, none are public. Named after what it costs the pro (\"nobody can find your work\"), and offering only photos that need no client permission — an invitation that can't dead-end in a refusal.",
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "ctaLabel": {
+          "type": "string"
+        },
+        "shots": {
+          "description": "Up to three ready-to-publish tiles, all consent-free.",
+          "items": {
+            "$ref": "#/definitions/ProPortfolioTile"
+          },
+          "type": "array"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "body",
+        "ctaLabel",
+        "shots"
+      ],
+      "type": "object"
+    },
+    "ProPortfolioMark": {
+      "description": "The one mark a tile may carry. A badge appears ONLY where the pro decided something — never for a list position, and never for a fact the zone already states. `SIGNATURE_COVER` is one chip, not two.",
+      "enum": [
+        "SIGNATURE",
+        "COVER",
+        "SIGNATURE_COVER"
+      ],
+      "type": "string"
+    },
+    "ProPortfolioNudgeBlock": {
+      "description": "Why the one action this sheet offers is not available.",
+      "enum": [
+        "NO_AFTERCARE",
+        "NO_CONTACT",
+        "NO_BOOKING"
+      ],
+      "type": "string"
+    },
+    "ProPortfolioPageModel": {
+      "properties": {
+        "activeFilter": {
+          "$ref": "#/definitions/ProPortfolioFilterKey"
+        },
+        "brandDisplayName": {
+          "type": "string"
+        },
+        "counts": {
+          "$ref": "#/definitions/ProPortfolioCounts"
+        },
+        "filters": {
+          "items": {
+            "$ref": "#/definitions/ProPortfolioFilter"
+          },
+          "type": "array"
+        },
+        "groups": {
+          "items": {
+            "$ref": "#/definitions/ProPortfolioGroup"
+          },
+          "type": "array"
+        },
+        "isBlank": {
+          "description": "True only when the pro owns no media at all.",
+          "type": "boolean"
+        },
+        "lead": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProPortfolioLead"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "publicProfileHref": {
+          "description": "The pro's own public profile, when they have one.\n\n🔴 This lives in the HEADER, not in a desktop rail. The pro app renders inside `.brand-pro-layout-main`, whose stylesheet caps every child at `--mobile-shell-width` (430px) unless the screen opts out by name — so a `md:` two-column layout resolved to `0px 320px` and the entire library was rendered into a zero-width column at every desktop size. The rail was the designer's own first thing to cut if the screen fought itself, and it was also the only place this link had ever appeared, which meant it was unreachable on every viewport.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "publicTiles": {
+          "description": "Absent (not empty) when nothing is public — the lead card takes its place.",
+          "items": {
+            "$ref": "#/definitions/ProPortfolioTile"
+          },
+          "type": "array"
+        },
+        "routes": {
+          "$ref": "#/definitions/ProPortfolioRoutes"
+        },
+        "searchQuery": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "showSearch": {
+          "description": "Search only earns its place once the library is large.",
+          "type": "boolean"
+        },
+        "subtitle": {
+          "description": "e.g. \"69 photos here. None of them public yet.\" Derived, never invented.",
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "brandDisplayName",
+        "routes",
+        "title",
+        "subtitle",
+        "counts",
+        "filters",
+        "showSearch",
+        "activeFilter",
+        "searchQuery",
+        "publicTiles",
+        "lead",
+        "groups",
+        "isBlank",
+        "publicProfileHref"
+      ],
+      "type": "object"
+    },
+    "ProPortfolioRoutes": {
+      "properties": {
+        "portfolio": {
+          "type": "string"
+        },
+        "proHome": {
+          "type": "string"
+        },
+        "uploadNew": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "portfolio",
+        "uploadNew",
+        "proHome"
+      ],
+      "type": "object"
+    },
+    "ProPortfolioTile": {
+      "properties": {
+        "before": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PairedBeforeDto"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opt-in before/after pairing → the tile renders a comparison slider."
+        },
+        "caption": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "engagement": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProPortfolioEngagement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set only on PUBLIC tiles."
+        },
+        "hold": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProPortfolioConsentHold"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set only on tiles the client has not released. Publishing is refused."
+        },
+        "id": {
+          "type": "string"
+        },
+        "isVideo": {
+          "type": "boolean"
+        },
+        "mark": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProPortfolioMark"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The pro's own decision, if any. At most one chip."
+        },
+        "mediaType": {
+          "$ref": "#/definitions/MediaType"
+        },
+        "publishedAt": {
+          "description": "ISO — when this went public. Null while private.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "serviceIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "src": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "src",
+        "caption",
+        "isVideo",
+        "mediaType",
+        "serviceIds",
+        "before",
+        "mark",
+        "engagement",
+        "hold",
+        "publishedAt"
+      ],
+      "type": "object"
+    },
+    "ProPortfolioZone": {
+      "description": "The zone a photo sits in. This carries public-vs-private INSTEAD of a badge — the old grid drew a `Portfolio` chip that was true of every tile (it was the query's own `where` clause) beside an `Only you` chip that could never be true (publishing derives `visibility: PUBLIC`). Both are gone; position says it.",
+      "enum": [
+        "PUBLIC",
+        "UPLOADS",
+        "SESSIONS"
+      ],
+      "type": "string"
+    },
     "ProPracticeAttachResponseDTO": {
       "properties": {
         "bookingMedia": {

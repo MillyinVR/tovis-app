@@ -285,6 +285,26 @@ export type {
 // ── Pro AI-camera monthly image usage (GET /api/v1/pro/camera/usage) ──────────
 export type { ProCameraUsage } from '@/lib/pro/cameraQuota'
 
+// ── The pro's ONE media library (GET /api/v1/pro/portfolio) ──────────────────
+// Whose top zone IS the public portfolio. Shares `buildProPortfolioModel` with
+// the web RSC page, so native and web resolve zones, holds and counts through
+// the same code.
+export type {
+  ProPortfolioConsentHold,
+  ProPortfolioCounts,
+  ProPortfolioEngagement,
+  ProPortfolioFilter,
+  ProPortfolioFilterKey,
+  ProPortfolioGroup,
+  ProPortfolioLead,
+  ProPortfolioMark,
+  ProPortfolioNudgeBlock,
+  ProPortfolioPageModel,
+  ProPortfolioRoutes,
+  ProPortfolioTile,
+  ProPortfolioZone,
+} from '@/app/pro/portfolio/_data/proPortfolioTypes'
+
 // ── Client "Me" aggregate (GET /api/v1/me) ───────────────────────────────────
 export type {
   ClientMeUserDTO,

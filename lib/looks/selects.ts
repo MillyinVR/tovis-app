@@ -8,6 +8,38 @@ import {
 
 import { pairedBeforeAssetSelect } from '@/lib/profiles/publicProfileSelects'
 
+/**
+ * The exact `MediaAsset` columns `mapPortfolioTileToDto` consumes — the ONE
+ * place the raw `url` / `thumbUrl` columns are named for a portfolio tile.
+ *
+ * 🔴 Rows selected with this must be passed through `mapPortfolioTileToDto`
+ * (`lib/looks/mappers.ts`) and never rendered directly: booking media is stored
+ * with null URL fields and storage pointers only, so a raw `.url` read renders
+ * a broken image. The mapper owns that resolution.
+ *
+ * Both pro-facing portfolio reads previously hand-declared this select
+ * separately, which is how the two grids drifted apart in the first place.
+ * Spread it and add per-screen extras rather than restating the media columns.
+ */
+export const portfolioTileMediaSelect =
+  Prisma.validator<Prisma.MediaAssetSelect>()({
+    id: true,
+    caption: true,
+    mediaType: true,
+    visibility: true,
+    isEligibleForLooks: true,
+    isFeaturedInPortfolio: true,
+    storageBucket: true,
+    storagePath: true,
+    thumbBucket: true,
+    thumbPath: true,
+    url: true,
+    thumbUrl: true,
+    // Opt-in before/after pairing → the comparison slider on surfaces that draw it.
+    beforeAsset: { select: pairedBeforeAssetSelect },
+    services: { select: { serviceId: true } },
+  })
+
 // §19e — a BoardItem is renderable only when its saved look is still publicly
 // visible: PUBLISHED + APPROVED + PUBLIC + not removed. Owner board views
 // (detail + preview) previously fetched every BoardItem and over-counted, so a

@@ -11,7 +11,10 @@ import type {
 import type { LooksPortfolioTileDto } from '@/lib/looks/types'
 import type { PairedBeforeDto } from '@/lib/media/pairedBefore'
 
-export type ProProfileManagementTab = 'portfolio' | 'services' | 'reviews'
+// 🔴 `portfolio` was a third tab here until the library merge. It now lives at
+// `/pro/portfolio` together with what used to be "My media"; this page keeps the
+// two tabs that are genuinely about the profile itself.
+export type ProProfileManagementTab = 'services' | 'reviews'
 
 export type ProProfileManagementSearchParams = Record<
   string,
@@ -181,6 +184,5 @@ export type ProProfileManagementPageModel = {
    */
   noShowFeatureEnabled: boolean
 
-  portfolio: ProProfileManagementPortfolio
   reviews: ProProfileManagementReviews
 }
