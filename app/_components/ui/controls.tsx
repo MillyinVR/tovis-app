@@ -24,20 +24,25 @@
 // as a token utility and once long-hand as `rgb(var(--accent-primary)/0.35)`).
 //
 // A THIRD turned up the same way: the pro forms. `w-full rounded-xl border
-// border-white/10 bg-bgPrimary px-3 py-3 text-[13px] …` is written out by hand on
-// 20 controls across 9 files under `app/pro`, and it is a real style rather than
+// border-white/10 bg-bgPrimary px-3 py-3 text-[13px] …` is written out by hand
+// **20 times across 9 files** under `app/pro`, and it is a real style rather than
 // drift: a solid (not translucent) fill and a roomier 12px vertical padding, for a
 // modal form on top of the page rather than a cell in a table. Flattening it onto
 // `dense` would have taken 4px of height and 1px of type off every pro field.
 // One name for the style, three surfaces, no fourth copy.
 //
-// ⚠️ The 20 are not quite identical, and the difference is the placeholder: the
-// public-profile modals write `placeholder:text-textSecondary`, while the five
-// hoisted-constant copies (ClientsList, OpenSlotPicker, NewBookingForm,
-// settingsClient ×2, ServicePicker) write `/70` — which is what BASE already says.
-// `solid` keeps the full-opacity one, because those are the call sites migrated
-// with it. Migrating the rest therefore lifts their placeholder from 70% to 100%:
-// small, real, and worth measuring rather than assuming when that PR lands.
+// ⚠️ 20 is the number of written COPIES, not of controls. Seven of them are
+// hoisted `const field = …` strings shared across many call sites, so the reach is
+// ~51 controls: the 13 inline copies (11 of which this surface has taken) plus 38
+// behind those constants — NewBookingForm 21, settingsClient 9, ServicePicker 6,
+// OpenSlotPicker 1, ClientsList 1.
+//
+// ⚠️ The copies are not quite identical, and the difference is the placeholder.
+// The public-profile modals write `placeholder:text-textSecondary` and `solid`
+// therefore ships that; five of the remaining copies write `/70` — which is what
+// BASE already says — and two write no placeholder rule at all. Migrating those
+// lifts their placeholder alpha. Preserve it per call site, or change it once and
+// deliberately; do not let it happen as a side effect of the migration.
 //
 // All three take a `ref` as an ordinary prop (React 19), so callers that need one
 // no longer have to reach for forwardRef.
