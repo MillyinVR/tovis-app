@@ -153,9 +153,9 @@ lib/supabaseAdmin.ts|mustGetEnv
 # the pro public-profile forms followed.
 #
 # 🔴 This block does NOT go to zero, and the earlier note telling you to shrink it
-# to zero was wrong. Every remaining entry was classified BY BODY, and four of the
-# six are not forks of anything — they only share a NAME with a kit export, which
-# is the only thing this guard can see:
+# to zero was wrong. Every remaining entry was classified BY BODY, and NONE of the
+# four is a fork of anything — they only share a NAME with a kit export, which is
+# the only thing this guard can see:
 #
 #   ShareLookSheet|FieldLabel      a 10px uppercase caps eyebrow. Overriding the
 #                                  kit on size, weight, transform AND tracking is
@@ -169,17 +169,19 @@ lib/supabaseAdmin.ts|mustGetEnv
 #   OpeningsClient|FieldLabel      a <span class="lm-opening-field-label">, same
 #                                  CSS design system.
 #
-# The two `buttonClassName` copies ARE real: byte-identical, `ButtonTone` type
-# included, and in the calendar's own mono/uppercase language rather than the
-# kit's. They want consolidating with each other, not migrating onto the kit.
+# The two `buttonClassName` copies that used to sit here WERE real — byte-identical
+# to each other, `ButtonTone` type included — but in the calendar's own
+# mono/uppercase language rather than the kit's, so they wanted consolidating with
+# each other, not migrating onto the kit. They now live in
+# `app/pro/calendar/_components/modalControls.ts` as `calendarModal…ClassName`:
+# named away from the kit's export on purpose, so the distinct system reads as
+# distinct to this guard and to the next person.
 #
 # ⚠️ This guard only sees PRIVATE declarations, so an EXPORTED fork is invisible
 # to it — `app/(auth)/_components/{Input,FieldLabel,PrimaryButton}.tsx` were each
 # a full copy of a kit primitive and never appeared on this list. The baseline is
 # a floor, not the work-list.
 app/client/(gated)/looks/share/[bookingId]/ShareLookSheet.tsx|FieldLabel
-app/pro/calendar/_components/BookingOverrideConfirmModal.tsx|buttonClassName
-app/pro/calendar/_components/ConfirmChangeModal.tsx|buttonClassName
 app/pro/calendar/_components/WorkingHoursForm.tsx|Select
 app/pro/last-minute/OpeningsClient.tsx|FieldLabel
 app/u/[handle]/_components/PublicProfileView.tsx|Avatar
