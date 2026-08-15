@@ -1,4 +1,4 @@
-// app/client/(gated)/_components/clientHomeInviteFixture.ts
+// app/client/(gated)/_components/clientHomeInvite.fixtures.ts
 //
 // Test fixture for a last-minute invite on client home. Typed as the real
 // Prisma payload (never cast), so if the select gains a field this stops

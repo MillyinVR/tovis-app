@@ -29,7 +29,7 @@ vi.mock('@/app/_components/ProProfileLink', () => ({
 }))
 
 import ClientLastMinuteInvites from './ClientLastMinuteInvites'
-import { lastMinuteInviteFixture } from './clientHomeInviteFixture'
+import { lastMinuteInviteFixture } from './clientHomeInvite.fixtures'
 
 describe('ClientLastMinuteInvites', () => {
   // The empty case is the load-bearing one: no invites is precisely when a
