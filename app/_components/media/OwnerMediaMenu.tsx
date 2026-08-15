@@ -11,6 +11,7 @@ import { safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
 import { pickString } from '@/lib/pick'
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import { FieldLabel } from '@/app/_components/ui'
 
 type Visibility = MediaVisibility
 type ServiceOption = { id: string; name: string }
@@ -734,7 +735,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
               style={{ paddingBottom: actionSafePaddingBottom }}
             >
               <div className="flex items-center justify-between gap-2">
-                <div className="text-[11px] font-semibold text-white/55">
+                <div className="text-[11px] font-semibold text-textPrimary/55">
                   {computedVisibility === MediaVisibility.PRO_CLIENT ? 'Private to client + you.' : 'Public visibility enabled.'}
                 </div>
 
@@ -792,8 +793,8 @@ function Field({
     <div className="grid gap-2">
       <div className="flex items-end justify-between gap-2">
         <div className="grid">
-          <div className="text-[12px] font-black text-textSecondary">{label}</div>
-          {hint ? <div className="mt-0.5 text-[11px] font-semibold text-white/55">{hint}</div> : null}
+          <FieldLabel>{label}</FieldLabel>
+          {hint ? <div className="mt-0.5 text-[11px] font-semibold text-textPrimary/55">{hint}</div> : null}
         </div>
         {right ? <div>{right}</div> : null}
       </div>

@@ -9,6 +9,7 @@ import type {
   NoShowFeeType,
   PaymentCollectionTiming,
 } from '@prisma/client'
+import { Card, FieldLabel, TextInput, Textarea } from '@/app/_components/ui'
 import { isRecord } from '@/lib/guards'
 import { safeJson, readErrorMessage, errorMessageFromUnknown } from '@/lib/http'
 import { zClass } from '@/lib/zIndex'
@@ -593,9 +594,7 @@ export default function EditPaymentSettingsButton({
                   {depositEnabled ? (
                     <>
                       <div className="grid gap-2">
-                        <div className="text-[12px] font-black text-textSecondary">
-                          Deposit amount
-                        </div>
+                        <FieldLabel>Deposit amount</FieldLabel>
                         <div className="grid gap-2 md:grid-cols-2">
                           <RadioRow
                             checked={depositType === 'FLAT'}
@@ -617,7 +616,7 @@ export default function EditPaymentSettingsButton({
                       </div>
 
                       {depositType === 'FLAT' ? (
-                        <TextInput
+                        <LabeledInput
                           label="Deposit amount ($)"
                           value={depositFlatAmount}
                           onChange={setDepositFlatAmount}
@@ -625,7 +624,7 @@ export default function EditPaymentSettingsButton({
                           disabled={busy}
                         />
                       ) : (
-                        <TextInput
+                        <LabeledInput
                           label="Deposit percent (1–100)"
                           value={depositPercent}
                           onChange={setDepositPercent}
@@ -635,9 +634,7 @@ export default function EditPaymentSettingsButton({
                       )}
 
                       <div className="grid gap-2">
-                        <div className="text-[12px] font-black text-textSecondary">
-                          Who leaves a deposit
-                        </div>
+                        <FieldLabel>Who leaves a deposit</FieldLabel>
                         <RadioRow
                           checked={depositScope === 'NEW_DISCOVERY_ONLY'}
                           onChange={() => setDepositScope('NEW_DISCOVERY_ONLY')}
@@ -691,9 +688,7 @@ export default function EditPaymentSettingsButton({
                     {noShowEnabled ? (
                       <>
                         <div className="grid gap-2">
-                          <div className="text-[12px] font-black text-textSecondary">
-                            Fee amount
-                          </div>
+                          <FieldLabel>Fee amount</FieldLabel>
                           <div className="grid gap-2 md:grid-cols-2">
                             <RadioRow
                               checked={noShowFeeType === 'FLAT'}
@@ -715,7 +710,7 @@ export default function EditPaymentSettingsButton({
                         </div>
 
                         {noShowFeeType === 'FLAT' ? (
-                          <TextInput
+                          <LabeledInput
                             label="Fee amount ($)"
                             value={noShowFeeFlatAmount}
                             onChange={setNoShowFeeFlatAmount}
@@ -723,7 +718,7 @@ export default function EditPaymentSettingsButton({
                             disabled={busy}
                           />
                         ) : (
-                          <TextInput
+                          <LabeledInput
                             label="Fee percent (1–100)"
                             value={noShowFeePercent}
                             onChange={setNoShowFeePercent}
@@ -733,9 +728,7 @@ export default function EditPaymentSettingsButton({
                         )}
 
                         <div className="grid gap-3">
-                          <div className="text-[12px] font-black text-textSecondary">
-                            When the fee applies
-                          </div>
+                          <FieldLabel>When the fee applies</FieldLabel>
                           <ToggleRow
                             checked={chargeNoShow}
                             onChange={setChargeNoShow}
@@ -801,7 +794,7 @@ export default function EditPaymentSettingsButton({
                   />
 
                   {acceptVenmo ? (
-                    <TextInput
+                    <LabeledInput
                       label="Venmo handle"
                       value={venmoHandle}
                       onChange={setVenmoHandle}
@@ -819,7 +812,7 @@ export default function EditPaymentSettingsButton({
                   />
 
                   {acceptZelle ? (
-                    <TextInput
+                    <LabeledInput
                       label="Zelle handle or contact"
                       value={zelleHandle}
                       onChange={setZelleHandle}
@@ -837,7 +830,7 @@ export default function EditPaymentSettingsButton({
                   />
 
                   {acceptAppleCash ? (
-                    <TextInput
+                    <LabeledInput
                       label="Apple Cash handle or contact"
                       value={appleCashHandle}
                       onChange={setAppleCashHandle}
@@ -855,7 +848,7 @@ export default function EditPaymentSettingsButton({
                   />
 
                   {acceptPaypal ? (
-                    <TextInput
+                    <LabeledInput
                       label="PayPal link or handle"
                       value={paypalHandle}
                       onChange={setPaypalHandle}
@@ -898,9 +891,7 @@ export default function EditPaymentSettingsButton({
                       />
 
                       <div className="grid gap-2">
-                        <div className="text-[12px] font-black text-textSecondary">
-                          Suggested tip options
-                        </div>
+                        <FieldLabel>Suggested tip options</FieldLabel>
 
                         {tipSuggestions.map((row) => (
                           <div
@@ -987,11 +978,12 @@ export default function EditPaymentSettingsButton({
                 title="Client note"
                 subtitle="Optional note shown with payment methods during checkout."
               >
-                <textarea
+                <Textarea
                   value={paymentNote}
                   onChange={(e) => setPaymentNote(e.target.value)}
                   rows={4}
-                  className="w-full resize-y rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary focus:outline-none focus:ring-2 focus:ring-accentPrimary/40"
+                  className="resize-y"
+                  surface="solid"
                   placeholder="Example: Please have payment ready after your booking."
                   disabled={busy}
                 />
@@ -1049,8 +1041,10 @@ function SectionCard(props: {
   subtitle?: string
   children: React.ReactNode
 }) {
+  // `bg-bgPrimary/40` overrides Card's `bg-bgSurface`: this card sits inside the
+  // modal's own surface, and the tint is what separates it from the sheet behind.
   return (
-    <section className="rounded-card border border-white/10 bg-bgPrimary/40 p-4">
+    <Card as="section" className="bg-bgPrimary/40">
       <div className="min-w-0">
         <div className="text-[12px] font-black text-textPrimary">
           {props.title}
@@ -1063,7 +1057,7 @@ function SectionCard(props: {
       </div>
 
       <div className="mt-3">{props.children}</div>
-    </section>
+    </Card>
   )
 }
 
@@ -1131,7 +1125,7 @@ function RadioRow(props: {
   )
 }
 
-function TextInput(props: {
+function LabeledInput(props: {
   label: string
   value: string
   onChange: (next: string) => void
@@ -1140,13 +1134,11 @@ function TextInput(props: {
 }) {
   return (
     <label className="grid gap-2">
-      <div className="text-[12px] font-black text-textSecondary">
-        {props.label}
-      </div>
-      <input
+      <FieldLabel as="span">{props.label}</FieldLabel>
+      <TextInput
         value={props.value}
         onChange={(e) => props.onChange(e.target.value)}
-        className="w-full rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary focus:outline-none focus:ring-2 focus:ring-accentPrimary/40"
+        surface="solid"
         placeholder={props.placeholder}
         disabled={props.disabled}
       />
