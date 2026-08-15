@@ -145,7 +145,10 @@ function makeExistingMedia(
   return {
     id: 'media_1',
     professionalId: 'pro_1',
-    reviewId: null,
+    // A SESSION photo (bookingId below) that the client released via a review —
+    // the only state in which a pro may legitimately feature one. Tests that
+    // assert the refusal override reviewId back to null explicitly.
+    reviewId: 'review_1',
     storageBucket: 'media-public',
     caption: 'Before caption',
     isEligibleForLooks: false,

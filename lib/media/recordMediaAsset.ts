@@ -116,7 +116,12 @@ export function assertMediaAssetInvariant(input: MediaAssetWriteInput): void {
   }
 
   // visibility === PUBLIC
-  if (!canProSharePublicly({ storageBucket: input.storageBucket, reviewId: input.reviewId ?? null })) {
+  if (!canProSharePublicly({
+      bookingId: input.bookingId ?? null,
+      storageBucket: input.storageBucket,
+      reviewId: input.reviewId ?? null,
+      uploadedByRole: input.uploadedByRole ?? null,
+    })) {
     throw new MediaAssetInvariantError(UNPROMOTED_MEDIA_MESSAGE)
   }
 }

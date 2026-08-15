@@ -53,6 +53,9 @@ export async function POST(_req: NextRequest, ctx: RouteContext) {
         // public-share gate the cover and portfolio-feature routes apply.
         storageBucket: true,
         reviewId: true,
+        // Provenance for the consent gate: a photo taken during a booking is
+        // the client's to release, whatever bucket it sits in.
+        bookingId: true,
         booking: { select: { mediaUseConsentAt: true } },
       },
     })
@@ -70,6 +73,7 @@ export async function POST(_req: NextRequest, ctx: RouteContext) {
 
     if (
       !canProSharePublicly({
+        bookingId: media.bookingId,
         storageBucket: media.storageBucket,
         reviewId: media.reviewId,
         clientUseConsentAt: media.booking?.mediaUseConsentAt ?? null,
