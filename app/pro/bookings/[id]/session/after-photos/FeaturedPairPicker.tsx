@@ -6,6 +6,7 @@ import Link from 'next/link'
 
 import ClickableMedia from '@/app/_components/media/ClickableMedia'
 import { buildFeaturedPairQuery } from '@/lib/aftercare/featuredPairParams'
+import SessionCard from '../../_components/SessionCard'
 
 export type FeaturedPickerItem = {
   id: string
@@ -164,7 +165,7 @@ export default function FeaturedPairPicker({
   )}`
 
   return (
-    <section className="brand-pro-session-card" data-tone="success">
+    <SessionCard tone="success">
       <div className="brand-pro-session-card-heading">
         <span className="brand-pro-session-card-dot" />
         Feature the before/after
@@ -212,6 +213,6 @@ export default function FeaturedPairPicker({
           Continue to aftercare <ArrowRightIcon />
         </Link>
       </div>
-    </section>
+    </SessionCard>
   )
 }

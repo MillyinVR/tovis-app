@@ -23,6 +23,7 @@ import {
   sessionHubHref,
 } from '@/lib/proSession/sessionFlow'
 import { fullName } from '@/lib/names'
+import SessionCard from '../../_components/SessionCard'
 
 export const dynamic = 'force-dynamic'
 
@@ -190,26 +191,6 @@ function SessionHeader({
   )
 }
 
-function Card({
-  children,
-  accent = false,
-  tone,
-}: {
-  children: ReactNode
-  accent?: boolean
-  tone?: 'success' | 'danger'
-}) {
-  return (
-    <section
-      className="brand-pro-session-card"
-      data-accent={accent}
-      data-tone={tone}
-    >
-      {children}
-    </section>
-  )
-}
-
 function StatusCard({
   hasBefore,
   consultApproved,
@@ -225,7 +206,7 @@ function StatusCard({
 }) {
   if (!hasBefore) {
     return (
-      <Card accent>
+      <SessionCard accent>
         <div className="brand-pro-session-card-heading">
           <span className="brand-pro-session-card-dot" />
           Add at least one before photo
@@ -235,13 +216,13 @@ function StatusCard({
           These are saved <strong>privately</strong> for you and the client.
           They will be used for after-photo comparison later.
         </div>
-      </Card>
+      </SessionCard>
     )
   }
 
   if (!consultApproved) {
     return (
-      <Card>
+      <SessionCard>
         <div className="brand-pro-session-card-heading">
           <span className="brand-pro-session-card-dot" />
           Before photos saved
@@ -257,12 +238,12 @@ function StatusCard({
             Waiting: {labelForConsultationStatus(approvalStatus)}
           </span>
         </div>
-      </Card>
+      </SessionCard>
     )
   }
 
   return (
-    <Card tone="success">
+    <SessionCard tone="success">
       <div className="brand-pro-session-card-heading">
         <span className="brand-pro-session-card-dot" />
         Before photos saved
@@ -284,7 +265,7 @@ function StatusCard({
           Continue to service <ArrowRightIcon />
         </button>
       </form>
-    </Card>
+    </SessionCard>
   )
 }
 

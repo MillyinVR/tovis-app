@@ -66,6 +66,8 @@ import {
   listManualCollectablePaymentMethods,
   type ManualCollectablePaymentMethod,
 } from '@/lib/payments/acceptedMethods'
+import SessionCard from '../_components/SessionCard'
+import SessionPill from '../_components/SessionPill'
 
 export const dynamic = 'force-dynamic'
 
@@ -497,7 +499,7 @@ function SessionHeader({
       {pills.length > 0 ? (
         <div className="brand-pro-session-header-pills">
           {pills.map((pill) => (
-            <Pill
+            <SessionPill
               key={pill.label}
               label={pill.label}
               state={pill.state}
@@ -507,46 +509,6 @@ function SessionHeader({
         </div>
       ) : null}
     </header>
-  )
-}
-
-function Pill({
-  label,
-  state,
-  tone,
-}: {
-  label: string
-  state?: 'active' | 'done'
-  tone?: 'success' | 'pending' | 'danger'
-}) {
-  return (
-    <span
-      className="brand-pro-session-pill"
-      data-state={state}
-      data-tone={tone}
-    >
-      {label}
-    </span>
-  )
-}
-
-function Card({
-  children,
-  accent = false,
-  tone,
-}: {
-  children: ReactNode
-  accent?: boolean
-  tone?: 'success' | 'danger'
-}) {
-  return (
-    <section
-      className="brand-pro-session-card"
-      data-accent={accent}
-      data-tone={tone}
-    >
-      {children}
-    </section>
   )
 }
 
@@ -678,7 +640,7 @@ function ProofCard({
   recordedByUserId: string | null
 }) {
   return (
-    <Card>
+    <SessionCard>
       <div className="brand-pro-session-section-title">
         Consultation proof recorded
       </div>
@@ -714,7 +676,7 @@ function ProofCard({
           </div>
         ) : null}
       </div>
-    </Card>
+    </SessionCard>
   )
 }
 
@@ -774,7 +736,7 @@ function ConsultationView({
         <StepRows effectiveStep={effectiveStep} />
 
         <div className="mt-4">
-          <Card accent>
+          <SessionCard accent>
             <div className="brand-pro-session-card-heading">
               <span className="brand-pro-session-card-dot" />
               Step 1 · Consultation
@@ -790,7 +752,7 @@ function ConsultationView({
                 Open Consultation Form <ArrowRightIcon />
               </ActionLink>
             </div>
-          </Card>
+          </SessionCard>
         </div>
 
         <div className="brand-pro-session-stat-grid">
@@ -810,7 +772,7 @@ function ConsultationView({
         <section id="consultation-form" className="pb-4">
           {consultRejected ? (
             <div className="mb-3">
-              <Card tone="danger">
+              <SessionCard tone="danger">
                 <div className="brand-pro-session-section-title">
                   Consultation needs changes
                 </div>
@@ -825,7 +787,7 @@ function ConsultationView({
                   ) : null}
                   . Update the proposal and resend it when ready.
                 </div>
-              </Card>
+              </SessionCard>
             </div>
           ) : null}
 
@@ -949,9 +911,9 @@ function WaitingBeforePhotosView({
       <div className="brand-pro-session-scroll no-scroll">
         <StepRows effectiveStep={effectiveStep} />
 
-        <Card tone={approved ? 'success' : undefined}>
+        <SessionCard tone={approved ? 'success' : undefined}>
           <div className="brand-pro-session-chip-row mb-2">
-            <Pill
+            <SessionPill
               label={labelForConsultationStatus(approvalStatus)}
               tone={approved ? 'success' : 'pending'}
             />
@@ -965,7 +927,7 @@ function WaitingBeforePhotosView({
               ? 'You’re approved. Finish your before photos, then continue to service.'
               : 'Secure approval is required before you can start the service. While you wait, take BEFORE photos now.'}
           </div>
-        </Card>
+        </SessionCard>
 
         <section className="mt-4 mb-4">
           <div className="brand-pro-session-photo-header">
@@ -1012,7 +974,7 @@ function WaitingBeforePhotosView({
         ) : null}
 
         {!approved && canUseInPersonFallback ? (
-          <Card>
+          <SessionCard>
             <div className="brand-pro-session-section-title">
               In-person fallback
             </div>
@@ -1035,7 +997,7 @@ function WaitingBeforePhotosView({
                 <PendingActionButton variant="danger" pendingLabel="Recording…">Record decline</PendingActionButton>
               </form>
             </div>
-          </Card>
+          </SessionCard>
         ) : null}
 
         {!approved ? (
@@ -1106,7 +1068,7 @@ function ServiceInProgressView({
           </div>
         </section>
 
-        <Card>
+        <SessionCard>
           <div className="brand-pro-session-mini-media-row">
             <div className="brand-pro-session-mini-grid">
               <div className="brand-pro-session-mini-photo" />
@@ -1123,10 +1085,10 @@ function ServiceInProgressView({
             </div>
 
             <span className="ml-auto">
-              <Pill label="SAVED" tone="success" />
+              <SessionPill label="SAVED" tone="success" />
             </span>
           </div>
-        </Card>
+        </SessionCard>
 
         {changeService}
 
@@ -1223,7 +1185,7 @@ function WrapUpView({
       <div className="brand-pro-session-scroll no-scroll">
         <StepRows effectiveStep={effectiveStep} />
 
-        <Card>
+        <SessionCard>
           <div className="brand-pro-session-section-title mb-3">
             Wrap-up checklist
           </div>
@@ -1242,7 +1204,7 @@ function WrapUpView({
               </div>
             </div>
 
-            <Pill
+            <SessionPill
               label={hasAfterPhoto ? 'Done' : 'To do'}
               tone={hasAfterPhoto ? 'success' : 'pending'}
             />
@@ -1265,7 +1227,7 @@ function WrapUpView({
               </div>
             </div>
 
-            <Pill
+            <SessionPill
               label={hasFinalizedAftercare ? 'Done' : 'To do'}
               tone={hasFinalizedAftercare ? 'success' : 'pending'}
             />
@@ -1312,7 +1274,7 @@ function WrapUpView({
               ) : null}
             </div>
 
-            <Pill
+            <SessionPill
               label={hasPaymentCollected ? 'Done' : 'To do'}
               tone={hasPaymentCollected ? 'success' : 'pending'}
             />
@@ -1332,7 +1294,7 @@ function WrapUpView({
               </div>
             </div>
 
-            <Pill
+            <SessionPill
               label={hasCheckoutClosed ? 'Done' : 'To do'}
               tone={hasCheckoutClosed ? 'success' : 'pending'}
             />
@@ -1352,12 +1314,12 @@ function WrapUpView({
               </div>
             </div>
 
-            <Pill
+            <SessionPill
               label={hasConsultationApproved ? 'Done' : 'To do'}
               tone={hasConsultationApproved ? 'success' : 'pending'}
             />
           </div>
-        </Card>
+        </SessionCard>
 
         <div className="mt-3 brand-pro-session-photo-grid">
           <div className="brand-pro-session-photo-tile">
@@ -1428,7 +1390,7 @@ function DoneView({
       />
 
       <div className="brand-pro-session-scroll no-scroll">
-        <Card tone="success">
+        <SessionCard tone="success">
           <div className="brand-pro-session-card-heading">
             <span className="brand-pro-session-card-dot" />
             All set
@@ -1444,7 +1406,7 @@ function DoneView({
               Open aftercare
             </ActionLink>
           </div>
-        </Card>
+        </SessionCard>
       </div>
     </PageShell>
   )
@@ -1474,7 +1436,7 @@ function TerminalView({
       />
 
       <div className="brand-pro-session-scroll no-scroll">
-        <Card tone={isCancelled ? 'danger' : 'success'}>
+        <SessionCard tone={isCancelled ? 'danger' : 'success'}>
           <div className="brand-pro-session-section-title">
             {isCancelled ? 'This booking is cancelled.' : 'This booking is completed.'}
           </div>
@@ -1501,7 +1463,7 @@ function TerminalView({
               </ActionLink>
             </div>
           ) : null}
-        </Card>
+        </SessionCard>
       </div>
     </PageShell>
   )
@@ -1528,7 +1490,7 @@ function UnmappedStateView({
       />
 
       <div className="brand-pro-session-scroll no-scroll">
-        <Card tone="danger">
+        <SessionCard tone="danger">
           <div className="brand-pro-session-section-title">
             We couldn’t map this session state cleanly.
           </div>
@@ -1540,7 +1502,7 @@ function UnmappedStateView({
           <form action={toConsult} className="mt-3">
             <PendingActionButton pendingLabel="Going back…">Back to consult</PendingActionButton>
           </form>
-        </Card>
+        </SessionCard>
 
         <div className="brand-pro-session-help-text">
           Booking: {bookingId}

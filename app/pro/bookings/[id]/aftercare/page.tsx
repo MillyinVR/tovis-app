@@ -40,6 +40,8 @@ import {
   resolveAftercareEditWindow,
 } from '@/lib/aftercare/aftercareEditWindow'
 import { resolveAftercareRebookSeed } from '@/lib/aftercare/aftercareRebookSeed'
+import SessionCard from '../_components/SessionCard'
+import SessionPill from '../_components/SessionPill'
 
 export const dynamic = 'force-dynamic'
 
@@ -240,7 +242,7 @@ function AllergyAlert({ allergies }: { allergies: AftercareAllergy[] }) {
   )
 
   return (
-    <section className="brand-pro-session-card" data-tone="danger">
+    <SessionCard tone="danger">
       <div className="brand-pro-session-allergy-head">
         <span className="brand-pro-session-allergy-icon">
           <AlertTriangleIcon />
@@ -275,41 +277,7 @@ function AllergyAlert({ allergies }: { allergies: AftercareAllergy[] }) {
           </div>
         ))}
       </div>
-    </section>
-  )
-}
-
-function Card({
-  children,
-  accent = false,
-  tone,
-}: {
-  children: ReactNode
-  accent?: boolean
-  tone?: 'success' | 'danger'
-}) {
-  return (
-    <section
-      className="brand-pro-session-card"
-      data-accent={accent}
-      data-tone={tone}
-    >
-      {children}
-    </section>
-  )
-}
-
-function StatusPill({
-  label,
-  tone,
-}: {
-  label: string
-  tone?: 'success' | 'pending' | 'danger'
-}) {
-  return (
-    <span className="brand-pro-session-pill" data-tone={tone}>
-      {label}
-    </span>
+    </SessionCard>
   )
 }
 
@@ -353,7 +321,7 @@ function Header({
       </div>
 
       <div className="brand-pro-session-header-pills">
-        <StatusPill
+        <SessionPill
           label={
             isFinalized
               ? 'FINALIZED'
@@ -364,7 +332,7 @@ function Header({
           tone={isFinalized ? 'success' : hasDraft ? 'pending' : 'danger'}
         />
 
-        <StatusPill
+        <SessionPill
           label={isFinalized ? 'CLIENT ACCESS LIVE' : 'CLIENT ACCESS LOCKED'}
           tone={isFinalized ? 'success' : 'pending'}
         />
@@ -397,7 +365,7 @@ function SummaryCard({
   const sentToClientLabel = toDisplayDateTime(sentToClientAt, timeZone)
 
   return (
-    <Card accent>
+    <SessionCard accent>
       <div className="brand-pro-session-card-heading">
         <span className="brand-pro-session-card-dot" />
         Aftercare + after photos are a wrap-up pair
@@ -427,7 +395,7 @@ function SummaryCard({
           </div>
         </div>
 
-        <StatusPill
+        <SessionPill
           label={isFinalized ? 'Done' : hasDraft ? 'Draft' : 'To do'}
           tone={isFinalized ? 'success' : hasDraft ? 'pending' : 'danger'}
         />
@@ -445,7 +413,7 @@ function SummaryCard({
           </div>
         </div>
 
-        <StatusPill label={publicAccess.tone.toUpperCase()} tone={publicAccess.tone} />
+        <SessionPill label={publicAccess.tone.toUpperCase()} tone={publicAccess.tone} />
       </div>
 
       <div className="brand-pro-session-card-body mt-3">
@@ -495,7 +463,7 @@ function SummaryCard({
           </div>
         ) : null}
       </div>
-    </Card>
+    </SessionCard>
   )
 }
 
@@ -904,7 +872,7 @@ export default async function ProAftercarePage({
         ) : null}
 
         {editWindow.isPostCompletion ? (
-          <Card tone={readOnly ? 'success' : undefined} accent={!readOnly}>
+          <SessionCard tone={readOnly ? 'success' : undefined} accent={!readOnly}>
             <div className="brand-pro-session-section-title">
               This booking is completed.
             </div>
@@ -966,7 +934,7 @@ export default async function ProAftercarePage({
                 Aftercare tab
               </Link>
             </div>
-          </Card>
+          </SessionCard>
         ) : null}
 
         <div className={editWindow.isPostCompletion ? 'mt-4' : undefined}>
