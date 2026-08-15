@@ -38,6 +38,9 @@ export type {
 export { default as FieldLabel } from './FieldLabel'
 export type { FieldLabelProps } from './FieldLabel'
 
+export { default as ToggleChip, toggleChipClassName } from './ToggleChip'
+export type { ToggleChipProps, ToggleChipStyleOptions } from './ToggleChip'
+
 export { TextInput, Select, Textarea, controlClassName } from './controls'
 export type {
   TextInputProps,

@@ -5,9 +5,11 @@ import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import ToggleSwitch from '@/app/_components/ToggleSwitch'
+import { controlClassName } from '@/app/_components/ui'
 import { isRecord } from '@/lib/guards'
 import { readErrorMessage, safeJson } from '@/lib/http'
 import { sanitizeHandleInput } from '@/lib/handles'
+import FieldLabel from './_components/FieldLabel'
 
 type PublicProfile = {
   handle: string
@@ -16,14 +18,6 @@ type PublicProfile = {
 }
 
 const BIO_MAX = 280
-
-function FieldLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="text-xs font-black tracking-[var(--ls-caps)] text-textSecondary">
-      {children}
-    </span>
-  )
-}
 
 function pickProfile(raw: unknown): PublicProfile | null {
   if (!isRecord(raw)) return null
@@ -140,7 +134,26 @@ export default function ClientPublicProfileSettings() {
         <div className="flex flex-col gap-4">
           <label className="flex flex-col gap-1.5">
             <FieldLabel>Handle</FieldLabel>
-            <div className="flex items-center gap-1 rounded-card border border-textPrimary/10 bg-bgSecondary/35 px-3 py-2">
+            {/* The `@` prefix means the box is the wrapper, not the <input>, so
+                this takes the surface as a class string — the case
+                `controlClassName` is exported for.
+                `text-base` PINS the 16px this field renders at: the wrapper's
+                bare <input> has no size of its own and inherits, so the
+                primitive's `text-sm` would silently shrink it 16px → 14px.
+                Measured, not assumed — the A/B caught exactly that.
+                ⚠️ 16px here vs 14px in the bio field below is a real
+                inconsistency, preserved rather than endorsed. A design call.
+                No focus treatment is added here. A `focus-within:border-*` was
+                tried and MEASURED not to paint — see the bio field below; the
+                kit's own `focus:border-*`/`focus:ring-*` do not paint either.
+                Shipping a declaration that renders nothing is the thing this
+                phase keeps finding, so it is left out rather than left in. */}
+            <div
+              className={controlClassName({
+                surface: 'soft',
+                className: 'flex items-center gap-1 text-base',
+              })}
+            >
               <span className="text-sm text-textSecondary">@</span>
               <input
                 value={handle}
@@ -156,6 +169,24 @@ export default function ClientPublicProfileSettings() {
 
           <label className="flex flex-col gap-1.5">
             <FieldLabel>Bio</FieldLabel>
+            {/* ⚠️ DELIBERATELY NOT migrated to <Textarea surface="soft">, even
+                though it is hand-copying the surface. Measured on the running
+                app: this field currently paints the app's global
+                `:focus-visible` brand ring, and taking the primitive REMOVES it
+                —
+                  before  rgb(243,240,231) 0 0 0 2px, rgba(14,155,134,.5) 0 0 0 4px
+                  after   none
+                because `controlClassName` carries `focus:ring-2`, whose
+                box-shadow displaces the global rule while painting nothing
+                itself. Measured on a real auth input, the kit's
+                `focus:border-accentPrimary/35` does not paint either — the
+                global `:focus-visible` rule is UNLAYERED and beats the whole
+                utilities layer, the same cascade trap as #907's button reset.
+                So every kit control's focus declarations are dead today; admin
+                and auth inherited them in #906/#908, and the global ring is all
+                that actually shows. Fixing it is a change in the kit with an
+                app-wide blast radius, so it is split out rather than smuggled in
+                here — the same call #907 made. That PR migrates this field. */}
             <textarea
               value={bio}
               onChange={(e) => setBio(e.target.value.slice(0, BIO_MAX))}
