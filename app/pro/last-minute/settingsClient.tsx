@@ -18,6 +18,7 @@ import {
 } from '@/lib/time'
 import { safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
+import { controlClassName } from '@/app/_components/ui'
 
 type VisibilityMode = 'TARGETED_ONLY' | 'PUBLIC_AT_DISCOVERY' | 'PUBLIC_IMMEDIATE'
 
@@ -421,8 +422,7 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
   const card = 'tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4'
   const label = 'text-[12px] font-black text-textPrimary'
   const hint = 'text-[12px] font-semibold text-textSecondary'
-  const field =
-    'w-full rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary/70 focus:outline-none focus:ring-2 focus:ring-accentPrimary/40 disabled:opacity-60'
+  const field = controlClassName({ surface: 'solid' })
   const btnPrimary =
     'rounded-full border border-accentPrimary/60 bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary hover:bg-accentPrimaryHover disabled:opacity-60'
   const btnDanger =
@@ -769,8 +769,7 @@ function ServiceRuleRow({
   const [minCollectedSubtotal, setMinCollectedSubtotal] = useState(initialMinCollectedSubtotal)
 
   const hint = 'text-[12px] font-semibold text-textSecondary'
-  const field =
-    'w-full rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary/70 focus:outline-none focus:ring-2 focus:ring-accentPrimary/40 disabled:opacity-60'
+  const field = controlClassName({ surface: 'solid' })
 
   return (
     <div className="rounded-card border border-white/10 bg-bgPrimary p-3">

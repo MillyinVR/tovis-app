@@ -17,6 +17,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 
+import { controlClassName } from '@/app/_components/ui'
 import AvailabilityCalendar from '@/app/pro/_components/AvailabilityCalendar'
 import { readErrorMessage, safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
@@ -156,8 +157,7 @@ export default function OpenSlotPicker({
 
   const displayTz = sanitizeTimeZone(slotTimeZone ?? locationTimeZone, 'UTC')
 
-  const fieldClass =
-    'w-full rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary focus:outline-none focus:ring-2 focus:ring-accentPrimary/40 disabled:opacity-60'
+  const fieldClass = controlClassName({ surface: 'solid' })
 
   return (
     <div className="grid gap-3">

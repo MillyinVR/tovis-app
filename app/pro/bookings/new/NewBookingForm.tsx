@@ -60,6 +60,7 @@ import {
 
 import OpenSlotPicker from './OpenSlotPicker'
 import BookingOverridePromptCard from '@/app/pro/_components/BookingOverridePromptCard'
+import { controlClassName } from '@/app/_components/ui'
 
 type CancelMode = 'href' | 'back'
 type ClientMode = 'existing' | 'new'
@@ -1642,8 +1643,7 @@ export default function NewBookingForm({
 }
   }
 
-  const field =
-    'w-full rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary/70 focus:outline-none focus:ring-2 focus:ring-accentPrimary/40 disabled:opacity-60'
+  const field = controlClassName({ surface: 'solid' })
   const label = 'text-[12px] font-black text-textPrimary'
   const helper = 'mt-2 text-[12px] text-textSecondary'
   const toggleBtn =
