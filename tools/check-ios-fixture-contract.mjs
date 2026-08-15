@@ -121,10 +121,38 @@ function definitionsForbiddingExtras(schemaText) {
   return found
 }
 
+/**
+ * `process.env` with git's repo-redirecting variables stripped.
+ *
+ * 🔴 Load-bearing under a HOOK. Git exports `GIT_DIR` (and friends) to the
+ * hooks it runs, and `GIT_DIR` OVERRIDES `git -C <dir>` — so every call below
+ * silently read the repo the hook fired in (this one) instead of the iOS
+ * checkout, and `git archive` died with
+ * `pathspec 'TovisKit/Tests/TovisKitTests/Fixtures' did not match any files`.
+ * The guard passed standalone and crashed on `git push`, which is the worst
+ * possible way for it to be wrong.
+ */
+function gitEnvForOtherRepo() {
+  const env = { ...process.env }
+  for (const key of [
+    'GIT_DIR',
+    'GIT_WORK_TREE',
+    'GIT_INDEX_FILE',
+    'GIT_OBJECT_DIRECTORY',
+    'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+    'GIT_COMMON_DIR',
+    'GIT_PREFIX',
+  ]) {
+    delete env[key]
+  }
+  return env
+}
+
 function shortSha(iosDir, ref) {
   try {
     return execFileSync('git', ['-C', iosDir, 'rev-parse', '--short', ref], {
       encoding: 'utf8',
+      env: gitEnvForOtherRepo(),
     }).trim()
   } catch {
     return ref
@@ -141,7 +169,7 @@ function materializeRef(iosDir, ref) {
   const tar = execFileSync(
     'git',
     ['-C', iosDir, 'archive', '--format=tar', ref, '--', FIXTURES_PATH, CONTRACT_PATH],
-    { maxBuffer: 64 * 1024 * 1024 },
+    { maxBuffer: 64 * 1024 * 1024, env: gitEnvForOtherRepo() },
   )
   const dir = mkdtempSync(join(tmpdir(), 'ios-fixture-contract-'))
   try {
