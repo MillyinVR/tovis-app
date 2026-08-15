@@ -7,6 +7,10 @@ import type { ReactNode } from 'react'
 import type { PendingChange } from '../_types'
 import { zClass } from '@/lib/zIndex'
 import { DEFAULT_TIME_ZONE, formatInTimeZone, getViewerTimeZone } from '@/lib/time'
+import {
+  calendarModalButtonClassName,
+  calendarModalTextareaClassName,
+} from './modalControls'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -30,8 +34,6 @@ type ChangeSummary = {
   primaryValue: string
   confirmLabel: string
 }
-
-type ButtonTone = 'primary' | 'ghost'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -102,36 +104,6 @@ function buildChangeSummary(args: {
         ? 'Save anyway'
         : 'Confirm move',
   }
-}
-
-function buttonClassName(tone: ButtonTone = 'ghost') {
-  const base = [
-    'rounded-full px-4 py-2 font-mono text-[11px] font-black uppercase tracking-[0.08em]',
-    'transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
-    'disabled:cursor-not-allowed disabled:opacity-60',
-  ].join(' ')
-
-  if (tone === 'primary') {
-    return [
-      base,
-      'border border-accentPrimary/30 bg-accentPrimary text-ink hover:bg-accentPrimaryHover',
-    ].join(' ')
-  }
-
-  return [
-    base,
-    'border border-[var(--line)] bg-transparent text-paperMute',
-    'hover:bg-paper/5 hover:text-paper',
-  ].join(' ')
-}
-
-function textareaClassName() {
-  return [
-    'w-full resize-none rounded-2xl border border-[var(--line)] bg-ink2 px-3 py-2',
-    'text-sm font-semibold text-paper placeholder:text-paperMute',
-    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
-    'disabled:cursor-not-allowed disabled:opacity-60',
-  ].join(' ')
 }
 
 function lockBodyScroll(open: boolean) {
@@ -252,7 +224,7 @@ export function ConfirmChangeModal(props: ConfirmChangeModalProps) {
               type="button"
               onClick={cancel}
               disabled={applying}
-              className={buttonClassName('ghost')}
+              className={calendarModalButtonClassName('ghost')}
             >
               Close
             </button>
@@ -307,7 +279,7 @@ export function ConfirmChangeModal(props: ConfirmChangeModalProps) {
                   rows={4}
                   maxLength={MAX_OVERRIDE_REASON_LENGTH}
                   placeholder="Explain why this booking needs to be scheduled outside working hours."
-                  className={textareaClassName()}
+                  className={calendarModalTextareaClassName()}
                   disabled={applying}
                 />
               </label>
@@ -328,7 +300,7 @@ export function ConfirmChangeModal(props: ConfirmChangeModalProps) {
               type="button"
               onClick={cancel}
               disabled={applying}
-              className={buttonClassName('ghost')}
+              className={calendarModalButtonClassName('ghost')}
             >
               Cancel
             </button>
@@ -337,7 +309,7 @@ export function ConfirmChangeModal(props: ConfirmChangeModalProps) {
               type="button"
               onClick={onConfirm}
               disabled={confirmDisabled}
-              className={buttonClassName('primary')}
+              className={calendarModalButtonClassName('primary')}
             >
               {applying ? 'Applying…' : summary.confirmLabel}
             </button>

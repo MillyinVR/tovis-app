@@ -8,6 +8,10 @@ import type {
   BookingOverridePromptIntent,
 } from '@/lib/booking/overridePrompts'
 import { zClass } from '@/lib/zIndex'
+import {
+  calendarModalButtonClassName,
+  calendarModalTextareaClassName,
+} from './modalControls'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -21,8 +25,6 @@ type BookingOverrideConfirmModalProps = {
   onCancel: () => void
   onConfirm: () => void
 }
-
-type ButtonTone = 'primary' | 'ghost'
 
 type ModalCopy = {
   title: string
@@ -57,36 +59,6 @@ const MODAL_COPY: Record<BookingOverridePromptIntent, ModalCopy> = {
 }
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
-
-function buttonClassName(tone: ButtonTone = 'ghost') {
-  const base = [
-    'rounded-full px-4 py-2 font-mono text-[11px] font-black uppercase tracking-[0.08em]',
-    'transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
-    'disabled:cursor-not-allowed disabled:opacity-60',
-  ].join(' ')
-
-  if (tone === 'primary') {
-    return [
-      base,
-      'border border-accentPrimary/30 bg-accentPrimary text-ink hover:bg-accentPrimaryHover',
-    ].join(' ')
-  }
-
-  return [
-    base,
-    'border border-[var(--line)] bg-transparent text-paperMute',
-    'hover:bg-paper/5 hover:text-paper',
-  ].join(' ')
-}
-
-function textareaClassName() {
-  return [
-    'w-full resize-none rounded-2xl border border-[var(--line)] bg-ink2 px-3 py-2',
-    'text-sm font-semibold text-paper placeholder:text-paperMute',
-    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
-    'disabled:cursor-not-allowed disabled:opacity-60',
-  ].join(' ')
-}
 
 function lockBodyScroll(open: boolean) {
   if (!open) return
@@ -200,7 +172,7 @@ export function BookingOverrideConfirmModal(
               type="button"
               onClick={cancel}
               disabled={busy}
-              className={buttonClassName('ghost')}
+              className={calendarModalButtonClassName('ghost')}
             >
               Close
             </button>
@@ -231,7 +203,7 @@ export function BookingOverrideConfirmModal(
                 rows={4}
                 maxLength={MAX_OVERRIDE_REASON_LENGTH}
                 placeholder={prompt.reasonPlaceholder}
-                className={textareaClassName()}
+                className={calendarModalTextareaClassName()}
                 disabled={busy}
               />
             </label>
@@ -251,7 +223,7 @@ export function BookingOverrideConfirmModal(
               type="button"
               onClick={cancel}
               disabled={busy}
-              className={buttonClassName('ghost')}
+              className={calendarModalButtonClassName('ghost')}
             >
               Cancel
             </button>
@@ -260,7 +232,7 @@ export function BookingOverrideConfirmModal(
               type="button"
               onClick={onConfirm}
               disabled={confirmDisabled}
-              className={buttonClassName('primary')}
+              className={calendarModalButtonClassName('primary')}
             >
               {busy ? copy.busyLabel : copy.confirmLabel}
             </button>
