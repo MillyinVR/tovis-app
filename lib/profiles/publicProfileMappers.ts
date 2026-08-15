@@ -127,6 +127,30 @@ export type PublicOfferingDto = {
 export { mapPairedBeforeToDto }
 export type { PairedBeforeDto }
 
+/**
+ * The three engagement numbers a redesigned grid tile prints. `likeCount` and
+ * `commentCount` are the denormalized counters on `LookPost` (the same ones the
+ * looks feed renders via `LooksCountsDto`); `recreatedCount` is non-cancelled
+ * bookings citing the look as their source — the loader reads all of them for
+ * the whole grid in one grouped query, never per tile.
+ */
+export type PublicPortfolioTileEngagement = {
+  likeCount: number
+  commentCount: number
+  recreatedCount: number
+}
+
+const EMPTY_TILE_ENGAGEMENT: PublicPortfolioTileEngagement = {
+  likeCount: 0,
+  commentCount: 0,
+  recreatedCount: 0,
+}
+
+function normalizeCount(value: number | null | undefined): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 0
+  return Math.max(0, Math.trunc(value))
+}
+
 export type PublicPortfolioTileDto = {
   id: string
   // §19f — the backing `LookPost` id (the grid reads LookPosts since §19c), so the
@@ -150,6 +174,35 @@ export type PublicPortfolioTileDto = {
    */
   serviceNames: string[]
   before: PairedBeforeDto | null
+  /**
+   * Likes, comments and "N recreated this" for the backing look. Always present
+   * (zeroed when the tile has no look); a caller renders a zero as NOTHING, never
+   * as a literal "0" — an empty grid tile is quieter than one advertising no
+   * engagement.
+   */
+  engagement: PublicPortfolioTileEngagement
+}
+
+/**
+ * The pro's SIGNATURE post — one optional, pro-chosen piece of their own work,
+ * promoted above the grid (client walkthrough screen 6). It is the SAME tile the
+ * grid would have rendered plus the two things the promoted treatment adds: the
+ * starting price for the service it shows, and a way to book that exact look.
+ *
+ * 🔴 Never label this "Spotlight" or "Featured" on any surface — see the
+ * `signatureMediaAssetId` comment in prisma/schema.prisma. `LookPost.featuredAt`
+ * is a SUPER_ADMIN editorial pick and must keep the word to itself.
+ */
+export type PublicProfileSignatureDto = {
+  tile: PublicPortfolioTileDto
+  /**
+   * Already composed as "Salon: From $250 · 180 min" by `formatPricingLine`, so
+   * it can never render a bare figure (Tori's standing rule). Null when the look
+   * carries no service, or the pro has no active offering for it.
+   */
+  priceLine: string | null
+  /** Opens the look with its availability drawer already open; null with no look. */
+  bookHref: string | null
 }
 
 export type PublicReviewMediaDto = {
@@ -438,6 +491,21 @@ export function formatOfferingPricing(offering: PublicOfferingRow): string[] {
   return getOfferingPriceCandidates(offering).map(formatPricingLine)
 }
 
+/**
+ * The single pricing line for an offering's CHEAPEST mode — the same candidate
+ * `priceFromLabel` reports, rendered in the full "Salon: From $250 · 180 min"
+ * form. For surfaces where one line has to stand for the whole offering (the
+ * Signature block), so the promoted price can never disagree with the "From"
+ * figure elsewhere on the page.
+ */
+export function formatOfferingLowestPricingLine(
+  offering: PublicOfferingRow,
+): string | null {
+  const lowest = pickLowestPriceCandidate(offering)
+
+  return lowest ? formatPricingLine(lowest) : null
+}
+
 export function mapPublicOfferingToDto(
   offering: PublicOfferingRow,
   favoritedServiceIds?: ReadonlySet<string>,
@@ -490,6 +558,7 @@ export function getPublicProfilePriceFromLabel(
 export async function mapPublicPortfolioTileToDto(
   asset: PublicPortfolioMediaAssetRow,
   lookId: string | null = null,
+  engagement: PublicPortfolioTileEngagement = EMPTY_TILE_ENGAGEMENT,
 ): Promise<PublicPortfolioTileDto | null> {
   const rendered = await renderAssetUrls({
     storageBucket: asset.storageBucket,
@@ -524,21 +593,61 @@ export async function mapPublicPortfolioTileToDto(
     serviceIds: pickServiceIds(asset.services),
     serviceNames: pickServiceTagNames(asset.services),
     before,
+    engagement: {
+      likeCount: normalizeCount(engagement.likeCount),
+      commentCount: normalizeCount(engagement.commentCount),
+      recreatedCount: normalizeCount(engagement.recreatedCount),
+    },
   }
 }
 
 /**
  * Maps portfolio tiles from the pro's `LookPost`s (§19c read path). Each entry
- * carries the look id so the tile can link to `/looks/[lookId]` (§19f).
+ * carries the look id so the tile can link to `/looks/[lookId]` (§19f), and its
+ * engagement counts so the grid can print them without a per-tile read.
  */
 export async function mapPublicPortfolioTilesToDtos(
-  looks: Array<{ lookId: string | null; asset: PublicPortfolioMediaAssetRow }>,
+  looks: Array<{
+    lookId: string | null
+    asset: PublicPortfolioMediaAssetRow
+    engagement?: PublicPortfolioTileEngagement
+  }>,
 ): Promise<PublicPortfolioTileDto[]> {
   const tiles = await Promise.all(
-    looks.map((look) => mapPublicPortfolioTileToDto(look.asset, look.lookId)),
+    looks.map((look) =>
+      mapPublicPortfolioTileToDto(look.asset, look.lookId, look.engagement),
+    ),
   )
 
   return tiles.filter(isNonNull)
+}
+
+/**
+ * Maps the pro's chosen SIGNATURE post. Returns null when the tile itself can't
+ * render (no usable image), so the caller simply omits the block rather than
+ * drawing an empty promoted card.
+ */
+export async function mapPublicProfileSignatureToDto(args: {
+  lookId: string
+  asset: PublicPortfolioMediaAssetRow
+  engagement: PublicPortfolioTileEngagement
+  priceLine: string | null
+}): Promise<PublicProfileSignatureDto | null> {
+  const tile = await mapPublicPortfolioTileToDto(
+    args.asset,
+    args.lookId,
+    args.engagement,
+  )
+
+  if (!tile) return null
+
+  return {
+    tile,
+    priceLine: args.priceLine,
+    // The same `?book=1` contract screen 2's "Recreate this look" uses, so the
+    // appointment inherits the picture that prompted it on both platforms.
+    bookHref: `/looks/${encodeURIComponent(args.lookId)}?book=1`,
+  }
 }
 
 export async function mapPublicReviewMediaAssetToDto(

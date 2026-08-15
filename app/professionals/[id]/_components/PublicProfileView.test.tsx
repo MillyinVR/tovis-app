@@ -44,12 +44,23 @@ const mocks = vi.hoisted(() => ({
     },
     booking: {
       count: vi.fn(),
+      groupBy: vi.fn(),
+      // Reviews now load on EVERY profile view (one payload), so the reviewer
+      // link-visibility read runs for a PRO viewer too.
+      findMany: vi.fn(),
+    },
+    professionalAvailabilityStat: {
+      findUnique: vi.fn(),
+    },
+    user: {
+      findUnique: vi.fn(),
     },
     proFollow: {
       count: vi.fn(),
     },
     lookPost: {
       count: vi.fn(),
+      findFirst: vi.fn(),
     },
     professionalServiceOffering: {
       findMany: vi.fn(),
@@ -71,34 +82,25 @@ type LinkMockProps = React.AnchorHTMLAttributes<HTMLAnchorElement> & {
   children: React.ReactNode
 }
 
-type ProfileHeroMockProps = {
+type IdentityRailMockProps = {
   header: {
     id: string
     displayName: string
     displayHandle: string | null
   }
-  stats: {
-    averageRatingLabel: string | null
-    priceFromLabel: string | null
-  }
   isClientViewer: boolean
   isFavoritedByMe: boolean
   messageHref: string
-  servicesHref: string
+  signals: { chips: Array<{ kind: string; label: string }> }
 }
 
-type ProfileTabsMockProps = {
-  tabs: Array<{
-    id: string
-    label: string
-    href: string
-  }>
-  activeTab: string
-}
-
-type PortfolioGridMockProps = {
+type PortfolioFeedMockProps = {
   tiles: Array<{ id: string }>
   emptyMessage: string
+}
+
+type SignatureCardMockProps = {
+  signature: { tile: { lookId: string | null }; priceLine: string | null }
 }
 
 type ServicesPanelMockProps = {
@@ -140,46 +142,42 @@ vi.mock('@/lib/timeZone', () => ({
   isValidIanaTimeZone: vi.fn(() => true),
 }))
 
-vi.mock('../ProfileHero', () => ({
+// The identity rail pulls in the follow/favorite/share client components and
+// the maps helper; the surface under test here is the page's composition, so it
+// is mocked down to the props that composition decides.
+vi.mock('./ProfileIdentityRail', () => ({
   default: ({
     header,
-    stats,
     isClientViewer,
     isFavoritedByMe,
     messageHref,
-    servicesHref,
-  }: ProfileHeroMockProps) => (
-    <section data-testid="profile-hero">
+    signals,
+  }: IdentityRailMockProps) => (
+    <section data-testid="identity-rail">
       <div>{header.displayName}</div>
       {header.displayHandle ? <div>{header.displayHandle}</div> : null}
-      <div>rating:{stats.averageRatingLabel ?? 'none'}</div>
-      <div>from:{stats.priceFromLabel ?? 'none'}</div>
       <div>client-viewer:{String(isClientViewer)}</div>
       <div>favorited:{String(isFavoritedByMe)}</div>
+      <div>chips:{signals.chips.map((chip) => chip.label).join('|') || 'none'}</div>
       <a href={messageHref}>Message</a>
-      <a href={servicesHref}>Book now</a>
     </section>
   ),
 }))
 
-vi.mock('../ProfileTabs', () => ({
-  default: ({ tabs, activeTab }: ProfileTabsMockProps) => (
-    <nav data-testid="profile-tabs">
-      <div>active-tab:{activeTab}</div>
-      {tabs.map((tab) => (
-        <a key={tab.id} href={tab.href}>
-          {tab.label}
-        </a>
-      ))}
-    </nav>
-  ),
-}))
-
-vi.mock('../PortfolioGrid', () => ({
-  default: ({ tiles, emptyMessage }: PortfolioGridMockProps) => (
+vi.mock('./PortfolioFeed', () => ({
+  default: ({ tiles, emptyMessage }: PortfolioFeedMockProps) => (
     <section data-testid="portfolio-grid">
       <div>portfolio-count:{tiles.length}</div>
       {tiles.length === 0 ? <div>{emptyMessage}</div> : null}
+    </section>
+  ),
+}))
+
+vi.mock('./SignatureCard', () => ({
+  default: ({ signature }: SignatureCardMockProps) => (
+    <section data-testid="signature-card">
+      <div>signature-look:{signature.tile.lookId ?? 'none'}</div>
+      <div>signature-price:{signature.priceLine ?? 'none'}</div>
     </section>
   ),
 }))
@@ -208,6 +206,13 @@ vi.mock('../ReviewsSummary', () => ({
       {reviews.length === 0 ? <div>{emptyMessage}</div> : null}
     </section>
   ),
+}))
+
+vi.mock('@/lib/tenant/layoutContext', () => ({
+  resolveTenantContextForLayout: vi.fn(async () => ({
+    kind: 'ROOT',
+    tenantId: 'tenant_root',
+  })),
 }))
 
 vi.mock('@/lib/media/renderUrls', () => ({
@@ -363,6 +368,19 @@ async function renderView(args?: {
   return render(ui)
 }
 
+/** Which tab the real (unmocked) ProfileBody has selected. */
+function activeTabName(): string | null {
+  const selected = document.querySelector('[role="tab"][aria-selected="true"]')
+  return selected?.id.replace('pp-tab-', '') ?? null
+}
+
+/** Whether a panel is present-but-hidden (the in-place switch) vs rendered. */
+function panelHidden(tab: string): boolean {
+  const panel = document.getElementById(`pp-panel-${tab}`)
+  if (!panel) throw new Error(`panel ${tab} not rendered`)
+  return panel.hasAttribute('hidden')
+}
+
 describe('app/professionals/[id] PublicProfileView', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -390,6 +408,15 @@ describe('app/professionals/[id] PublicProfileView', () => {
     mocks.prisma.mediaAsset.findMany.mockResolvedValue([])
     mocks.prisma.review.findMany.mockResolvedValue([])
     mocks.prisma.reviewHelpful.findMany.mockResolvedValue([])
+    mocks.prisma.lookPost.findFirst.mockResolvedValue(null)
+    mocks.prisma.booking.groupBy.mockResolvedValue([])
+    mocks.prisma.booking.findMany.mockResolvedValue([])
+    // No availability row = the pro is booked out over the scan horizon, and an
+    // account created long ago = not new. Both signals off by default.
+    mocks.prisma.professionalAvailabilityStat.findUnique.mockResolvedValue(null)
+    mocks.prisma.user.findUnique.mockResolvedValue({
+      createdAt: new Date('2020-01-01T00:00:00.000Z'),
+    })
   })
 
   it('shows the pending verification surface to non-owners when the pro is not approved', async () => {
@@ -439,11 +466,9 @@ describe('app/professionals/[id] PublicProfileView', () => {
       screen.queryByText('This profile is pending verification'),
     ).not.toBeInTheDocument()
 
-    expect(screen.getByTestId('profile-hero')).toHaveTextContent('TOVIS Studio')
-    expect(screen.getByText('@tovisstudio')).toBeInTheDocument()
-    expect(screen.getByTestId('profile-tabs')).toHaveTextContent(
-      'active-tab:portfolio',
-    )
+    expect(screen.getByTestId('identity-rail')).toHaveTextContent('TOVIS Studio')
+    expect(screen.getAllByText('@tovisstudio').length).toBeGreaterThan(0)
+    expect(activeTabName()).toBe('portfolio')
     expect(screen.getByTestId('portfolio-grid')).toHaveTextContent(
       'portfolio-count:0',
     )
@@ -476,15 +501,53 @@ describe('app/professionals/[id] PublicProfileView', () => {
       screen.queryByText('This profile is pending verification'),
     ).not.toBeInTheDocument()
 
-    expect(screen.getByTestId('profile-hero')).toHaveTextContent('TOVIS Studio')
+    expect(screen.getByTestId('identity-rail')).toHaveTextContent('TOVIS Studio')
     expect(screen.getByRole('link', { name: 'Message' })).toHaveAttribute(
       'href',
       '/login?from=%2Fprofessionals%2Fpro_1',
     )
-    expect(screen.getByRole('link', { name: 'Book now' })).toHaveAttribute(
-      'href',
-      '/professionals/pro_1?tab=services',
-    )
+
+    // 🔴 The hero "Book now" is GONE. Booking lives in exactly two quiet
+    // places, and the top of the identity rail is not one of them.
+    expect(screen.queryByRole('link', { name: 'Book now' })).toBeNull()
+
+    // A signed-out viewer keeps the time-slot promise on the bar.
+    expect(
+      screen.getByText('You can pick a time before signing in'),
+    ).toBeInTheDocument()
+  })
+
+  it('renders all three panels in ONE payload and shows only the active one', async () => {
+    mocks.prisma.professionalServiceOffering.findMany.mockResolvedValue([
+      makeOffering(),
+    ])
+
+    await renderView()
+
+    // Every panel is in the tree — the tabs switch in place, they do not fetch.
+    expect(screen.getByTestId('portfolio-grid')).toBeInTheDocument()
+    expect(screen.getByTestId('services-panel')).toBeInTheDocument()
+    expect(screen.getByTestId('reviews-summary')).toBeInTheDocument()
+
+    expect(panelHidden('portfolio')).toBe(false)
+    expect(panelHidden('services')).toBe(true)
+    expect(panelHidden('reviews')).toBe(true)
+
+    // ...and the reviews read happened up front rather than on a tab visit.
+    expect(mocks.prisma.review.findMany).toHaveBeenCalled()
+  })
+
+  it('renders no Signature block when the pro has not chosen one', async () => {
+    await renderView()
+
+    expect(screen.queryByTestId('signature-card')).toBeNull()
+    expect(mocks.prisma.lookPost.findFirst).not.toHaveBeenCalled()
+  })
+
+  it('shows the brand-new-pro chips ONLY for a pro new to the platform', async () => {
+    // Established pro (default fixture): no chips at all, by design.
+    await renderView()
+    expect(screen.getByTestId('identity-rail')).toHaveTextContent('chips:none')
   })
 
   it('checks whether a client viewer has favorited the professional', async () => {
@@ -506,10 +569,10 @@ describe('app/professionals/[id] PublicProfileView', () => {
       select: { id: true },
     })
 
-    expect(screen.getByTestId('profile-hero')).toHaveTextContent(
+    expect(screen.getByTestId('identity-rail')).toHaveTextContent(
       'client-viewer:true',
     )
-    expect(screen.getByTestId('profile-hero')).toHaveTextContent(
+    expect(screen.getByTestId('identity-rail')).toHaveTextContent(
       'favorited:true',
     )
   })
@@ -547,8 +610,9 @@ describe('app/professionals/[id] PublicProfileView', () => {
     expect(screen.getByTestId('portfolio-grid')).toHaveTextContent(
       'portfolio-count:1',
     )
-    expect(screen.queryByTestId('services-panel')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('reviews-summary')).not.toBeInTheDocument()
+    // The other panels are rendered too (one payload) — just not shown.
+    expect(panelHidden('services')).toBe(true)
+    expect(panelHidden('reviews')).toBe(true)
   })
 
   it('renders services tab with active offerings and does not load portfolio media', async () => {
@@ -560,17 +624,14 @@ describe('app/professionals/[id] PublicProfileView', () => {
       searchParams: { tab: 'services' },
     })
 
-    expect(screen.getByTestId('profile-tabs')).toHaveTextContent(
-      'active-tab:services',
-    )
+    // `?tab=` still picks the INITIAL tab, so every existing shared link lands
+    // where it always did — it just no longer decides what gets fetched.
+    expect(activeTabName()).toBe('services')
     expect(screen.getByTestId('services-panel')).toHaveTextContent(
       'services-count:1',
     )
     expect(screen.getByText('Signature Cut')).toBeInTheDocument()
-
-    // §19c — the portfolio grid (pro LookPosts) is only rendered on the portfolio tab.
-    expect(screen.queryByTestId('portfolio-grid')).not.toBeInTheDocument()
-    expect(mocks.prisma.review.findMany).not.toHaveBeenCalled()
+    expect(panelHidden('portfolio')).toBe(true)
   })
 
   it('renders reviews tab and loads helpful state for client viewers', async () => {
@@ -589,9 +650,7 @@ describe('app/professionals/[id] PublicProfileView', () => {
       searchParams: { tab: 'reviews' },
     })
 
-    expect(screen.getByTestId('profile-tabs')).toHaveTextContent(
-      'active-tab:reviews',
-    )
+    expect(activeTabName()).toBe('reviews')
     expect(mocks.prisma.review.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { professionalId: 'pro_1', hiddenAt: null },

@@ -1,13 +1,15 @@
 // app/api/v1/professionals/[id]/route.ts
 import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
 import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
+import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import { getCurrentUser } from '@/lib/currentUser'
 import { safeError } from '@/lib/security/logging'
+import { resolveTenantContextForRequest } from '@/lib/tenant'
 import { loadProPublicProfile } from '@/app/professionals/[id]/_data/loadProPublicProfile'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET(_req: Request, ctx: RouteContext<{ id: string }>) {
+export async function GET(req: Request, ctx: RouteContext<{ id: string }>) {
   try {
     const { id } = await resolveRouteParams(ctx)
     if (!id) return jsonFail(404, 'Professional not found.')
@@ -29,9 +31,14 @@ export async function GET(_req: Request, ctx: RouteContext<{ id: string }>) {
     // Returns null when the profile is missing OR not viewable (pending
     // verification) — both collapse to a uniform 404, matching the page's
     // notFound() / pending gate (no leak of which case it is).
+    // Same brand the page resolves, by the route's own means — the "New to
+    // {brand}" chip must read identically on web and native.
+    const tenant = await resolveTenantContextForRequest(req)
+
     const profile = await loadProPublicProfile({
       professionalId: id,
       viewer: viewerContext,
+      brandName: getBrandForTenantContext(tenant).displayName,
     })
 
     if (!profile) {

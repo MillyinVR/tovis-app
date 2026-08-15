@@ -2,6 +2,8 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  buildPublicProfileBookBar,
+  buildPublicProfileTabLabels,
   formatPublicProfileDisplayName,
   formatPublicReviewerName,
 } from '@/lib/profiles/publicProfileFormatting'
@@ -113,5 +115,87 @@ describe('formatPublicProfileDisplayName', () => {
     expect(formatPublicProfileDisplayName({ businessName: null })).toBe(
       'Professional',
     )
+  })
+})
+
+describe('buildPublicProfileBookBar', () => {
+  it('composes the CTA as "Book · From $X" — never a bare figure', () => {
+    const bar = buildPublicProfileBookBar({
+      isPendingVerification: false,
+      isSignedIn: true,
+      availabilityLine: 'Available tomorrow',
+      priceFromLabel: '$85',
+      cheapestServiceName: 'Cut & style',
+      serviceCount: 5,
+    })
+
+    // 🔴 `priceFromLabel` is a bare "$85" on purpose — the word "From" is added
+    // HERE and in formatPricingLine, never in formatMoneyLabel, which would
+    // make this read "From From $85".
+    expect(bar.ctaLabel).toBe('Book · From $85')
+    expect(bar.headline).toBe('Available tomorrow')
+    expect(bar.subline).toBe('Cut & style from $85 · 5 services')
+    expect(bar.inert).toBe(false)
+    expect(bar.footnote).toBeNull()
+  })
+
+  it('goes inert and explains itself for a pending pro', () => {
+    const bar = buildPublicProfileBookBar({
+      isPendingVerification: true,
+      isSignedIn: true,
+      availabilityLine: 'Available today',
+      priceFromLabel: '$85',
+      cheapestServiceName: 'Cut & style',
+      serviceCount: 5,
+    })
+
+    expect(bar.inert).toBe(true)
+    expect(bar.ctaLabel).toBe('Unavailable')
+    expect(bar.headline).toBe('Not bookable yet')
+    // A pending pro never advertises availability, even when the stat exists.
+    expect(bar.subline).toBe('Profile is live, booking opens after review')
+    expect(bar.footnote).toBe('Verification usually takes 2 business days')
+  })
+
+  it('keeps the time-slot promise for a signed-out viewer', () => {
+    const bar = buildPublicProfileBookBar({
+      isPendingVerification: false,
+      isSignedIn: false,
+      availabilityLine: null,
+      priceFromLabel: '$85',
+      cheapestServiceName: 'Cut & style',
+      serviceCount: 1,
+    })
+
+    expect(bar.footnote).toBe('You can pick a time before signing in')
+    expect(bar.subline).toBe('Cut & style from $85 · 1 service')
+  })
+
+  it('invents no urgency when there is no fresh opening', () => {
+    const bar = buildPublicProfileBookBar({
+      isPendingVerification: false,
+      isSignedIn: true,
+      availabilityLine: null,
+      priceFromLabel: null,
+      cheapestServiceName: null,
+      serviceCount: 0,
+    })
+
+    expect(bar.headline).toBe('Book with this pro')
+    expect(bar.subline).toBe('See services and availability')
+    expect(bar.ctaLabel).toBe('Book')
+  })
+})
+
+describe('buildPublicProfileTabLabels', () => {
+  it('appends a count only when there is one to show', () => {
+    expect(
+      buildPublicProfileTabLabels({ portfolio: 200, services: 5, reviews: 0 }),
+    ).toEqual({
+      portfolio: 'Portfolio · 200',
+      services: 'Services · 5',
+      // "Reviews · 0" would label the emptiness twice.
+      reviews: 'Reviews',
+    })
   })
 })

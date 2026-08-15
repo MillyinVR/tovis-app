@@ -7,6 +7,13 @@ const mocks = vi.hoisted(() => ({
   getCurrentUser: vi.fn(),
   loadProPublicProfile: vi.fn(),
   safeError: vi.fn(),
+  resolveTenantContextForRequest: vi.fn(),
+}))
+
+// The route resolves the tenant so the loader can compose the "New to {brand}"
+// chip. Mocked here: unmocked it reaches prisma and every case fails as a 500.
+vi.mock('@/lib/tenant', () => ({
+  resolveTenantContextForRequest: mocks.resolveTenantContextForRequest,
 }))
 
 vi.mock('@/app/api/_utils/responses', () => ({
@@ -57,6 +64,10 @@ describe('GET /api/v1/professionals/[id]', () => {
     }))
 
     mocks.getCurrentUser.mockResolvedValue(null)
+    mocks.resolveTenantContextForRequest.mockResolvedValue({
+      kind: 'ROOT',
+      tenantId: 'tenant_root',
+    })
 
     mocks.jsonOk.mockImplementation(
       (data: Record<string, unknown>, status = 200) =>
@@ -90,6 +101,7 @@ describe('GET /api/v1/professionals/[id]', () => {
     expect(mocks.loadProPublicProfile).toHaveBeenCalledWith({
       professionalId: 'pro_1',
       viewer: null,
+      brandName: expect.any(String),
     })
     expect(response.status).toBe(200)
     expect(json).toEqual({ ok: true, professional: profile })
@@ -120,6 +132,7 @@ describe('GET /api/v1/professionals/[id]', () => {
     expect(mocks.loadProPublicProfile).toHaveBeenCalledWith({
       professionalId: 'pro_1',
       viewer: { id: 'user_2', role: Role.CLIENT, professionalProfile: null },
+      brandName: expect.any(String),
     })
   })
 

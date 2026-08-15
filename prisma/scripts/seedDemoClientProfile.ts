@@ -125,6 +125,28 @@ const publicFanIndices = (attributedBookings: number): number[] =>
     (i) => i % PUBLIC_FAN_EVERY === 0,
   )
 
+const DAY_MS = 24 * 60 * 60 * 1000
+
+/**
+ * Shifts every attributed ("recreated this") booking back to 06:00 from NOW's
+ * 12:00 — see the exclusion-constraint note where it is used.
+ */
+const ATTRIBUTED_BOOKING_HOUR_OFFSET_MS = 6 * 60 * 60 * 1000
+
+/**
+ * Start of the CURRENT real UTC day.
+ *
+ * `ProfessionalAvailabilityStat.nextOpeningDate` stores a start-of-local-day
+ * instant and the badge engine reads it against the real clock, so it is one of
+ * the few fixture values that must not be frozen to {@link NOW}.
+ */
+function startOfRealDayUtc(): Date {
+  const now = new Date()
+  return new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  )
+}
+
 const FOLLOWER_COUNT = 312
 const FOLLOWING_COUNT = 18
 
@@ -157,6 +179,30 @@ type DemoPro = {
    * never touch PROD storage (see the MediaAsset note above).
    */
   avatarUrl: string
+  /**
+   * The pro's public bio. Screen 6's identity rail leads on it, and every demo
+   * pro used to have none — so the block the redesign is largely about had
+   * never been looked at with words in it.
+   */
+  bio: string
+  /**
+   * How long ago this pro joined, in days.
+   *
+   * 🔴 Not decoration. `User.createdAt` is what decides whether a pro reads as
+   * NEW (`LOOK_BADGE_THRESHOLDS.newToPlatformMaxDays`, 60 days), and the
+   * brand-new-pro chips render for them and for nobody else. Left to the
+   * default the seed stamps `now()` on every pro, so EVERY demo pro would wear
+   * the chips and the established state — the one almost every real profile is
+   * in — could never be looked at.
+   */
+  joinedDaysAgo: number
+  /**
+   * Days until this pro's next opening, or null for "booked out over the scan
+   * horizon" (no `ProfessionalAvailabilityStat` row at all, which is how the
+   * real hourly job represents it). Drives the book bar's availability line and,
+   * on a new pro, the `Available today` chip.
+   */
+  nextOpeningInDays: number | null
 }
 
 const PROS: DemoPro[] = [
@@ -167,6 +213,12 @@ const PROS: DemoPro[] = [
     lastName: 'Haddad',
     profession: ProfessionType.COSMETOLOGIST,
     avatarUrl: 'http://localhost:3000/seed-demo/lived-in-blonde.jpg',
+    bio:
+      'Fifteen years behind the chair. I do lived-in colour that grows out like ' +
+      'it was always yours — and I will tell you honestly if the photo you ' +
+      'brought takes two visits.',
+    joinedDaysAgo: 900,
+    nextOpeningInDays: 1,
   },
   {
     key: 'sasha',
@@ -175,6 +227,11 @@ const PROS: DemoPro[] = [
     lastName: 'Lim',
     profession: ProfessionType.MANICURIST,
     avatarUrl: 'http://localhost:3000/seed-demo/glazed-almond-set.jpg',
+    bio: 'Gel-X and structured manicures. Nail health first, length second.',
+    joinedDaysAgo: 430,
+    // Booked out across the horizon: the book bar must fall back to its neutral
+    // headline rather than inventing an opening.
+    nextOpeningInDays: null,
   },
   {
     key: 'mara',
@@ -183,6 +240,14 @@ const PROS: DemoPro[] = [
     lastName: 'Vance',
     profession: ProfessionType.ESTHETICIAN,
     avatarUrl: 'http://localhost:3000/seed-demo/lash-lift-tint.jpg',
+    // Deliberately short: a brand-new pro's page has to hold up with almost
+    // nothing on it, and "no bio" is part of that state.
+    bio: '',
+    // The BRAND-NEW pro — inside the 60-day window, so this is the one profile
+    // that wears `Available today` + `New to {brand}`. Every other demo pro
+    // shows the established state (no chips at all), which is the point.
+    joinedDaysAgo: 5,
+    nextOpeningInDays: 0,
   },
 ]
 
@@ -284,6 +349,60 @@ const LOOKS: DemoLook[] = [
   { key: 'money-piece-blonde', title: 'Money-piece blonde', proKey: 'noor', serviceKey: 'partial', priceStartingAt: 180, saveCount: 63, recreated: 9, featured: false },
   { key: 'lash-lift-tint', title: 'Lash lift + tint', proKey: 'mara', serviceKey: 'lash', priceStartingAt: 90, saveCount: 37, recreated: 5, featured: false },
   { key: 'brow-lamination', title: 'Brow lamination', proKey: 'mara', serviceKey: 'brow', priceStartingAt: 70, saveCount: 22, recreated: 3, featured: false },
+]
+
+/**
+ * The PRO's own portfolio posts — screen 6's grid.
+ *
+ * 🔴 These are separate from `LOOKS` above and they have to be. Every entry in
+ * `LOOKS` carries `clientAuthorId: creator.id`, and `proOwnPublicLooksWhere`
+ * filters `clientAuthorId: null` — so none of them reach a pro's portfolio, and
+ * the demo pro's public profile grid was EMPTY. The half of the screen the
+ * redesign is mostly about had never been looked at with rows in it.
+ *
+ * `likeCount`/`commentCount` are the denormalized counters the tiles print, and
+ * `recreated` becomes real attributed bookings below (a count with no rows
+ * behind it is the kind of fixture that flatters the product).
+ */
+type DemoProLook = {
+  key: string
+  /**
+   * Which file under `public/seed-demo/` this look renders. Reused across looks
+   * on purpose: the fixture must not reference an image that does not exist —
+   * a 404 tile reads as a broken grid, not a broken fixture.
+   */
+  image: string
+  title: string
+  proKey: string
+  serviceKey: string
+  priceStartingAt: number
+  likeCount: number
+  commentCount: number
+  recreated: number
+  /** Renders as a before/after comparison — and only a PAIRED look can. */
+  paired: boolean
+  /** The pro's chosen Signature. Exactly one per pro, or none. */
+  signature: boolean
+}
+
+const PRO_LOOKS: DemoProLook[] = [
+  // Noor's Signature: paired, so the promoted block renders its comparison
+  // slider, and the one look with recreates so the gold line has a number.
+  { key: 'pro-root-melt', image: 'lived-in-blonde', title: 'Grown-out root, hand-painted so she can go 4 months between visits.', proKey: 'noor', serviceKey: 'balayage', priceStartingAt: 250, likeCount: 214, commentCount: 18, recreated: 12, paired: true, signature: true },
+  { key: 'pro-copper-gloss', image: 'cherry-cola-balayage', title: 'Copper on a natural level 5 — no lift, all gloss.', proKey: 'noor', serviceKey: 'balayage', priceStartingAt: 210, likeCount: 168, commentCount: 9, recreated: 7, paired: false, signature: false },
+  // Zero recreates ON PURPOSE: the tile must render NOTHING there, not a "0".
+  { key: 'pro-face-frame', image: 'money-piece-blonde', title: 'Soft money-piece around the face.', proKey: 'noor', serviceKey: 'partial', priceStartingAt: 180, likeCount: 96, commentCount: 4, recreated: 0, paired: false, signature: false },
+  { key: 'pro-colour-correction', image: 'cherry-cola-balayage', title: 'Two sessions from box black to this.', proKey: 'noor', serviceKey: 'balayage', priceStartingAt: 320, likeCount: 331, commentCount: 41, recreated: 5, paired: true, signature: false },
+  { key: 'pro-lived-in', image: 'lived-in-blonde', title: 'Lived-in blonde, six weeks after the first pass.', proKey: 'noor', serviceKey: 'balayage', priceStartingAt: 250, likeCount: 142, commentCount: 6, recreated: 3, paired: false, signature: false },
+  // Sasha: a pro with a grid but NO Signature — the ordinary state, and the one
+  // that proves the page is still whole without the promoted block.
+  { key: 'pro-almond-set', image: 'glazed-almond-set', title: 'Glazed almond set, structured.', proKey: 'sasha', serviceKey: 'gelx', priceStartingAt: 90, likeCount: 77, commentCount: 3, recreated: 0, paired: false, signature: false },
+  { key: 'pro-chrome-tips', image: 'glazed-almond-set', title: 'Chrome tips over a milky base.', proKey: 'sasha', serviceKey: 'gelx', priceStartingAt: 110, likeCount: 121, commentCount: 8, recreated: 4, paired: false, signature: false },
+  // Mara is the brand-new pro: three looks, no reviews, no Signature. Three good
+  // photographs are more persuasive than any empty block would have been.
+  { key: 'pro-lash-set', image: 'lash-lift-tint', title: 'Lash lift with a soft tint.', proKey: 'mara', serviceKey: 'lash', priceStartingAt: 90, likeCount: 6, commentCount: 1, recreated: 0, paired: false, signature: false },
+  { key: 'pro-brow-lam', image: 'brow-lamination', title: 'Brow lamination, brushed up.', proKey: 'mara', serviceKey: 'brow', priceStartingAt: 70, likeCount: 4, commentCount: 0, recreated: 0, paired: false, signature: false },
+  { key: 'pro-glass-skin', image: 'lash-lift-tint', title: 'Dewy finish after a gentle peel.', proKey: 'mara', serviceKey: 'lash', priceStartingAt: 120, likeCount: 9, commentCount: 2, recreated: 0, paired: false, signature: false },
 ]
 
 // Board covers render as a strip of up to FOUR looks, so the fixture carries
@@ -785,6 +904,12 @@ async function clean(): Promise<void> {
   await prisma.offeringAddOn.deleteMany({ where: { id: idPrefix } })
   await prisma.professionalServiceOffering.deleteMany({ where: { id: idPrefix } })
   await prisma.professionalLocation.deleteMany({ where: { id: idPrefix } })
+  // Cascades from the pro below, but removed explicitly so `--clean` stays
+  // honest about everything this script writes. Its @id IS the professionalId,
+  // so the prefix matches directly.
+  await prisma.professionalAvailabilityStat.deleteMany({
+    where: { professionalId: idPrefix },
+  })
   await prisma.handleRegistration.deleteMany({
     where: { handleNormalized: { in: [normalizeHandle(CREATOR.handle)] } },
   })
@@ -888,6 +1013,11 @@ async function main(): Promise<void> {
         // fixture undemoable. A real approved pro has both of these.
         emailVerifiedAt: NOW,
         phoneVerifiedAt: NOW,
+        // 🔴 Explicit, not defaulted. This is the ONLY input to the "New to
+        // {brand}" rule, so leaving it at `now()` would badge every demo pro as
+        // new and make the established state — what nearly every real profile
+        // is — impossible to look at.
+        createdAt: new Date(NOW.getTime() - pro.joinedDaysAgo * DAY_MS),
       },
     })
 
@@ -904,6 +1034,7 @@ async function main(): Promise<void> {
         location: 'Brooklyn, NY',
         timeZone: TIME_ZONE,
         avatarUrl: pro.avatarUrl,
+        bio: pro.bio || null,
         professionType: pro.profession,
         // Solo stylists, so the look's pro line reads "Noor Haddad · Balayage"
         // as the frame shows — the default BUSINESS_NAME would render
@@ -966,6 +1097,32 @@ async function main(): Promise<void> {
           ...brooklynAddress(),
           timeZone: TIME_ZONE,
           workingHours: workingHoursJson(),
+        },
+      })
+    }
+
+    // The precomputed availability row the badge engine reads. The real hourly
+    // job DROPS a pro with no opening in the horizon rather than storing a null,
+    // so "booked out" is modelled here as no row at all — which is what makes
+    // the book bar's neutral fallback reachable.
+    if (pro.nextOpeningInDays !== null) {
+      await prisma.professionalAvailabilityStat.create({
+        data: {
+          professionalId: professional.id,
+          // 🔴 Off the REAL clock, not the fixture's frozen NOW. The badge
+          // engine buckets this against `new Date()`, so an opening pinned to
+          // NOW + 1 day reads "Available tomorrow" only on the day the fixture
+          // was written and collapses to "Available today" every day after.
+          nextOpeningDate: new Date(
+            startOfRealDayUtc().getTime() + pro.nextOpeningInDays * DAY_MS,
+          ),
+          openDayCount14d: 6,
+          fullness14d: 0.42,
+          capacityMinutes14d: 4800,
+          // Fresh: the availability badges DISQUALIFY on a stale row rather than
+          // rendering old urgency, so a fixture stamped in the past would render
+          // no line and look like a bug.
+          computedAt: new Date(),
         },
       })
     }
@@ -1181,6 +1338,98 @@ async function main(): Promise<void> {
     return id
   }
 
+
+  // ── the pros' OWN portfolio posts (screen 6) ───────────────────────────────
+  // Pro-authored: `clientAuthorId` stays NULL, which is the whole difference
+  // between a look on the CLIENT's /u/[handle] grid and one on the PRO's
+  // portfolio (`proOwnPublicLooksWhere`).
+  const proLookIdByKey = new Map<string, string>()
+  for (const [index, look] of PRO_LOOKS.entries()) {
+    // A paired look needs a SECOND asset to be the "before". Without it
+    // `beforeAsset` is null and the tile renders as a plain image — so the
+    // comparison slider, on the promoted Signature block and the B/A grid flag
+    // alike, would look implemented and never appear.
+    if (look.paired) {
+      await prisma.mediaAsset.create({
+        data: {
+          id: `${P}media-${look.key}-before`,
+          professionalId: proId(look.proKey),
+          proTenantId: tenantId,
+          primaryServiceId: serviceId(look.serviceKey),
+          storageBucket: DEMO_LOCAL_BUCKET,
+          // MediaAsset is @@unique([storageBucket, storagePath]) — per-row paths.
+          storagePath: `seed-demo/${look.key}-before.jpg`,
+          url: `http://localhost:3000/seed-demo/${look.image}.jpg`,
+          mediaType: MediaType.IMAGE,
+          visibility: MediaVisibility.PUBLIC,
+          isEligibleForLooks: false,
+          isFeaturedInPortfolio: false,
+        },
+      })
+    }
+
+    await prisma.mediaAsset.create({
+      data: {
+        id: `${P}media-${look.key}`,
+        professionalId: proId(look.proKey),
+        proTenantId: tenantId,
+        primaryServiceId: serviceId(look.serviceKey),
+        storageBucket: DEMO_LOCAL_BUCKET,
+        storagePath: `seed-demo/${look.key}.jpg`,
+        url: `http://localhost:3000/seed-demo/${look.image}.jpg`,
+        mediaType: MediaType.IMAGE,
+        visibility: MediaVisibility.PUBLIC,
+        isEligibleForLooks: true,
+        isFeaturedInPortfolio: true,
+        caption: look.title,
+        ...(look.paired ? { beforeAssetId: `${P}media-${look.key}-before` } : {}),
+        // Service TAGS, not just primaryServiceId: the tile's chips and the
+        // Signature block's tags read `services`, and the portfolio filter's
+        // rows are derived from them. Without these the filter would collapse to
+        // "All" and the promoted block would carry no tags.
+        services: {
+          create: [{ serviceId: serviceId(look.serviceKey) }],
+        },
+      },
+    })
+
+    const created = await prisma.lookPost.create({
+      data: {
+        id: `${P}prolook-${look.key}`,
+        professionalId: proId(look.proKey),
+        // 🔴 NULL — this is what makes it the PRO's portfolio post.
+        clientAuthorId: null,
+        primaryMediaAssetId: `${P}media-${look.key}`,
+        serviceId: serviceId(look.serviceKey),
+        caption: look.title,
+        priceStartingAt: money(look.priceStartingAt),
+        status: LookPostStatus.PUBLISHED,
+        visibility: LookPostVisibility.PUBLIC,
+        moderationStatus: ModerationStatus.APPROVED,
+        // Staggered so `orderBy: { publishedAt: 'desc' }` is a total order and
+        // the grid isn't shuffled by the planner.
+        publishedAt: new Date(NOW.getTime() - index * 3 * 60 * 60 * 1000),
+        likeCount: look.likeCount,
+        commentCount: look.commentCount,
+      },
+      select: { id: true },
+    })
+    proLookIdByKey.set(look.key, created.id)
+
+    if (look.signature) {
+      await prisma.professionalProfile.update({
+        where: { id: proId(look.proKey) },
+        data: { signatureMediaAssetId: `${P}media-${look.key}` },
+      })
+    }
+  }
+
+  const proLookId = (key: string): string => {
+    const id = proLookIdByKey.get(key)
+    if (!id) throw new Error(`[seedDemoClientProfile] unknown pro look key "${key}"`)
+    return id
+  }
+
   // ── boards ─────────────────────────────────────────────────────────────────
   for (const board of BOARDS) {
     await prisma.board.create({
@@ -1315,45 +1564,83 @@ async function main(): Promise<void> {
   // Real Booking rows citing the look as their source, so the count on the card
   // is derived from the same data the pro's creator analytics reads — not a
   // number typed into a fixture.
+  //
+  // Both grids are attributed the same way: the CLIENT creator's looks (`LOOKS`)
+  // and the PROS' own portfolio posts (`PRO_LOOKS`, screen 6). They share one
+  // `bookingSeq` because Booking is @@unique([professionalId, scheduledFor]) —
+  // two independent counters would collide the moment two looks share a pro.
   let bookingSeq = 0
   const bookingRows: Prisma.BookingCreateManyInput[] = []
-  for (const look of LOOKS) {
-    const svc = SERVICES.find((s) => s.key === look.serviceKey)
-    if (!svc) throw new Error(`[seedDemoClientProfile] unknown service key "${look.serviceKey}"`)
 
-    for (let i = 0; i < look.recreated; i += 1) {
-      // Booking is @@unique([professionalId, scheduledFor]) — a pro can't be in
-      // two places at once. Spacing off the GLOBAL sequence (not the per-look
-      // index) keeps every instant distinct across looks that share a pro.
+  const pushAttributedBookings = (args: {
+    proKey: string
+    serviceKey: string
+    priceStartingAt: number
+    recreated: number
+    sourceLookPostId: string
+  }): void => {
+    const svc = SERVICES.find((s) => s.key === args.serviceKey)
+    if (!svc) throw new Error(`[seedDemoClientProfile] unknown service key "${args.serviceKey}"`)
+
+    for (let i = 0; i < args.recreated; i += 1) {
+      // 🔴 Booking is not merely @@unique([professionalId, scheduledFor]) — it
+      // also carries the `Booking_no_active_professional_overlap` EXCLUSION
+      // constraint, so two of a pro's bookings may not overlap as RANGES
+      // (duration + buffer included). One a day is not enough on its own: these
+      // ran at NOW's 12:00, and the creator's own fixed appointment at 14:00
+      // that day is a 180-minute service, so the two ranges collided the moment
+      // the pro-look rows below pushed this sequence far enough back to reach
+      // it. Pinned to an early morning hour no fixed fixture appointment uses.
       const scheduledFor = new Date(
-        NOW.getTime() - (bookingSeq + 1) * 24 * 60 * 60 * 1000,
+        NOW.getTime() -
+          (bookingSeq + 1) * 24 * 60 * 60 * 1000 -
+          ATTRIBUTED_BOOKING_HOUR_OFFSET_MS,
       )
 
       bookingRows.push({
         id: `${P}booking-${String(bookingSeq).padStart(4, '0')}`,
         clientId: `${P}fan-${String(bookingSeq % fanCount).padStart(4, '0')}`,
-        professionalId: proId(look.proKey),
-        serviceId: serviceId(look.serviceKey),
+        professionalId: proId(args.proKey),
+        serviceId: serviceId(args.serviceKey),
         proTenantId: tenantId,
         clientHomeTenantId: tenantId,
-        sourceLookPostId: lookId(look.key),
+        sourceLookPostId: args.sourceLookPostId,
         source: BookingSource.DISCOVERY,
         status: BookingStatus.COMPLETED,
         // "Your looks, remixed" times each row off `createdAt` — when the
         // booking was MADE, not when it was served. Left to default it is
-        // `now()` for all 43 rows and every line in the card reads "today",
-        // which is the one thing a recency list must not do. Booked a few days
-        // before the appointment, like a real one.
+        // `now()` for every row and every line reads "today", which is the one
+        // thing a recency list must not do.
         createdAt: new Date(scheduledFor.getTime() - 3 * 24 * 60 * 60 * 1000),
         scheduledFor,
         locationType: ServiceLocationType.SALON,
-        locationId: locationId(look.proKey),
+        locationId: locationId(args.proKey),
         locationTimeZone: TIME_ZONE,
-        subtotalSnapshot: money(look.priceStartingAt),
+        subtotalSnapshot: money(args.priceStartingAt),
         totalDurationMinutes: svc.durationMinutes,
       })
       bookingSeq += 1
     }
+  }
+
+  for (const look of PRO_LOOKS) {
+    pushAttributedBookings({
+      proKey: look.proKey,
+      serviceKey: look.serviceKey,
+      priceStartingAt: look.priceStartingAt,
+      recreated: look.recreated,
+      sourceLookPostId: proLookId(look.key),
+    })
+  }
+
+  for (const look of LOOKS) {
+    pushAttributedBookings({
+      proKey: look.proKey,
+      serviceKey: look.serviceKey,
+      priceStartingAt: look.priceStartingAt,
+      recreated: look.recreated,
+      sourceLookPostId: lookId(look.key),
+    })
   }
   await prisma.booking.createMany({ data: bookingRows })
 

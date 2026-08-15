@@ -310,11 +310,18 @@ export type {
   PublicProfileHeaderDto,
   PublicOfferingDto,
   PublicPortfolioTileDto,
+  PublicPortfolioTileEngagement,
+  PublicProfileSignatureDto,
   PublicReviewMediaDto,
   PublicReviewDto,
   PublicReviewProReplyDto,
   PublicProfileStatsDto,
 } from '@/lib/profiles/publicProfileMappers'
+
+export type {
+  ProProfileChipDto,
+  ProProfileSignalsDto,
+} from '@/lib/profiles/proProfileSignals'
 
 // ── Pro review reply (PUT/DELETE /api/v1/pro/reviews/[id]/reply) ─────────────
 export type {

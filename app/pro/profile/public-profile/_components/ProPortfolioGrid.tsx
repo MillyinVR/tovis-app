@@ -5,6 +5,7 @@ import { MediaVisibility } from '@prisma/client'
 import BeforeAfterReveal from '@/app/_components/media/BeforeAfterReveal'
 import OwnerMediaMenu from '@/app/_components/media/OwnerMediaMenu'
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import { COPY } from '@/lib/copy'
 
 import type {
   ProProfileManagementPortfolio,
@@ -27,12 +28,18 @@ export default function ProPortfolioGrid({
       <div className="brand-pro-profile-media-grid">
         <UploadTile uploadHref={routes.proMediaNew} />
 
-        {portfolio.tiles.map((tile, index) => (
+        {/* 🔴 There is no `featured={index === 0}` here any more. The old
+            "Featured" badge was drawn from the tile's POSITION in an
+            `orderBy: { createdAt: 'desc' }` list — no such field exists on
+            MediaAsset — so it crowned whatever the pro uploaded most recently
+            and styled it as a curated choice. `Signature` below is the honest
+            version: a real, pro-set FK. */}
+        {portfolio.tiles.map((tile) => (
           <PortfolioMediaTile
             key={tile.id}
             tile={tile}
-            featured={index === 0}
             isCover={tile.id === portfolio.coverMediaAssetId}
+            isSignature={tile.id === portfolio.signatureMediaAssetId}
             serviceOptions={portfolio.serviceOptions}
           />
         ))}
@@ -66,13 +73,13 @@ function UploadTile({ uploadHref }: { uploadHref: string }) {
 
 function PortfolioMediaTile({
   tile,
-  featured,
   isCover,
+  isSignature,
   serviceOptions,
 }: {
   tile: PortfolioTile
-  featured: boolean
   isCover: boolean
+  isSignature: boolean
   serviceOptions: ProProfileManagementPortfolio['serviceOptions']
 }) {
   const title = tile.caption ?? 'Open portfolio media'
@@ -111,6 +118,7 @@ function PortfolioMediaTile({
           serviceOptions={serviceOptions}
           isVideo={tile.isVideo}
           isCover={isCover}
+          isSignature={isSignature}
           initial={{
             caption: tile.caption ?? null,
             visibility: tile.visibility,
@@ -123,6 +131,12 @@ function PortfolioMediaTile({
       </div>
 
       <div className="brand-pro-profile-media-badges">
+        {isSignature ? (
+          <span className="brand-pro-profile-portfolio-badge">
+            {COPY.publicProfile.signatureLabel}
+          </span>
+        ) : null}
+
         {isCover ? (
           <span className="brand-pro-profile-portfolio-badge">Cover</span>
         ) : null}
@@ -137,10 +151,6 @@ function PortfolioMediaTile({
           </span>
         ) : null}
       </div>
-
-      {featured ? (
-        <span className="brand-pro-profile-featured-badge">Featured</span>
-      ) : null}
 
       {tile.isVideo ? (
         <span className="brand-pro-profile-video-badge">Video</span>

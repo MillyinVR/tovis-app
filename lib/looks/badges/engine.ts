@@ -198,7 +198,7 @@ export type LookBadgeDecision = {
   holdout: boolean
 }
 
-type EvaluatedBadge = {
+export type EvaluatedBadge = {
   kind: LookBadgeKind
   badgeClass: LookBadgeClass
   label: string
@@ -307,7 +307,13 @@ function evaluateRebookRate(
   }
 }
 
-function evaluateNewToPlatform(
+/**
+ * Exported because the pro's public profile shows the same chip on a brand-new
+ * pro (client walkthrough screen 6, Tori 2026-08-15: chips on a new pro ONLY).
+ * "New" must mean the same thing on both surfaces, so the profile calls this
+ * rather than re-deriving an account-age rule of its own.
+ */
+export function evaluateNewToPlatform(
   signals: ProBadgeSignals | null,
   now: Date,
   brandName: string,
@@ -402,7 +408,13 @@ function isAvailabilityFresh(
  * "today / tomorrow / in N days" rather than an exact hour. Beyond the
  * availableSoonMaxDays horizon it stays silent (BOOKING_OUT may still fire).
  */
-function evaluateAvailableSoon(
+/**
+ * Exported for the pro's public profile, which prints the same coarse wording in
+ * its book bar and (on a brand-new pro) as a chip. The ±1-day drift and the
+ * §5.7.4 staleness TTL are the whole point of sharing this: a second
+ * implementation would eventually disagree with the feed about the same pro.
+ */
+export function evaluateAvailableSoon(
   signals: ProBadgeSignals | null,
   now: Date,
 ): EvaluatedBadge | null {

@@ -205,7 +205,9 @@ export default function ServicesBookingOverlay({
 
   return (
     <>
-      <div className="grid gap-3">
+      {/* Two columns from tablet up, so a tab switch never leaves a
+          half-empty screen (screen 6 frame). */}
+      <div className="brand-pp-panel-grid">
         {offerings.map((offering) => (
           <ServiceOfferingCard
             key={offering.id}

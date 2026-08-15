@@ -302,6 +302,18 @@ export const COPY = {
     tierTastemaker: 'Tastemaker',
     tierRising: 'Rising',
     spotlightBadge: 'Spotlight',
+    /**
+     * The pro's own chosen highlight post on their public profile
+     * (`ProfessionalProfile.signatureMediaAssetId`).
+     *
+     * 🔴 It must never be called "Spotlight" — that is `spotlightBadge` above,
+     * an editorial pick by a SUPER_ADMIN, and the whole point of that word here
+     * is that the PLATFORM chose you. Nor "Featured": four other things in this
+     * schema already answer to it. The design frame's mock labels this block
+     * "Spotlight service"; the shipped label is Signature.
+     */
+    signatureLabel: 'Signature',
+    signatureBookCta: 'Book this look',
     /** Composed as `${count} ${recreatedSuffix}` → "12 recreated this". */
     recreatedSuffix: 'recreated this',
     /**
@@ -315,6 +327,31 @@ export const COPY = {
     recreateCta: 'Recreate this look',
     emptyLooks: 'No public looks yet.',
     emptyBoards: 'No shared boards yet.',
+
+    /**
+     * The pro profile's book bar — the slim row between the end of the scroll
+     * and the footer. It does not float and does not follow the scroll.
+     *
+     * ⚠️ There is deliberately NO "free to hold · cancel up to 24h before"
+     * footnote here, which is what the design mock shows. Cancellation windows
+     * are per-pro in this product, so a flat 24h claim on every profile would be
+     * wrong on some of them.
+     */
+    bookBarHeadlineFallback: 'Book with this pro',
+    bookBarHeadlinePending: 'Not bookable yet',
+    bookBarSublinePending: 'Profile is live, booking opens after review',
+    bookBarSublineNoPrice: 'See services and availability',
+    bookBarCta: 'Book',
+    bookBarCtaPending: 'Unavailable',
+    /** Composed as `${bookBarCta} · From $85`. */
+    bookBarCtaPriceJoin: ' · From ',
+    bookBarFootnotePending:
+      'Verification usually takes 2 business days',
+    bookBarFootnoteSignedOut: 'You can pick a time before signing in',
+    /** Composed as `Balayage from $250 · 5 services`. */
+    bookBarSublineFrom: 'from',
+    bookBarServicesOne: 'service',
+    bookBarServicesMany: 'services',
   },
 
   /** The client's OWN boards screen. */

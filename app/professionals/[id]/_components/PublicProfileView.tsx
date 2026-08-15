@@ -6,10 +6,22 @@
 // rewrites to, and what NFC-card taps hand out for premium pros). Keeping the
 // render in one place means the vanity link lands on the full profile instead
 // of a stripped link-in-bio card.
+//
+// Screen 6 redesign — "a profile you scroll, not a listing you scan":
+//   - The header is a brand BAND, never a photograph. No cover behind the
+//     avatar on any profile; that dissolves the no-cover state rather than
+//     solving it, and keeps the first picture on the page the Signature post.
+//     `header.coverUrl` still feeds share cards and search — just not here.
+//   - Portfolio / Services / Reviews now switch IN PLACE. All three arrive in
+//     ONE payload (what iOS has always done) instead of a `?tab=` round-trip.
+//   - Booking lives in exactly two quiet places: an outline action on the
+//     Signature post, and a slim bar between the end of the scroll and the
+//     footer. Nothing floats and nothing follows the scroll.
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 
 import JsonLdScript from '@/app/_components/seo/JsonLdScript'
+import BrandWordmark from '@/lib/brand/BrandWordmark'
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import { loadClientLinkViewer } from '@/lib/clientVisibility'
 import { getCurrentUser } from '@/lib/currentUser'
@@ -18,11 +30,12 @@ import { loadProProfileSeoById } from '@/lib/profiles/proProfileSeo'
 import { absoluteUrl } from '@/lib/seo/absoluteUrl'
 import { buildProProfileJsonLd } from '@/lib/seo/proProfileJsonLd'
 import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
+import { VerificationStatus } from '@prisma/client'
 import {
   buildLoginHref,
-  buildProfessionalProfileHref,
+  buildPublicProfileBookBar,
   buildPublicProfileFromPath,
-  buildPublicProfileTabs,
+  buildPublicProfileTabLabels,
   formatPortfolioEmptyMessage,
   formatReviewsEmptyMessage,
   formatServicesEmptyMessage,
@@ -31,17 +44,18 @@ import {
 } from '@/lib/profiles/publicProfileFormatting'
 
 import {
-  loadPortfolioTiles,
+  loadProProfileWork,
   loadProPublicProfileBase,
   loadReviewsForUi,
 } from '../_data/loadProPublicProfile'
 
-import AcceptedPayments from '../AcceptedPayments'
-import PortfolioGrid from '../PortfolioGrid'
-import ProfileHero from '../ProfileHero'
-import ProfileTabs from '../ProfileTabs'
 import ReviewsSummary from '../ReviewsSummary'
 import ServicesPanel from '../ServicesPanel'
+
+import PortfolioFeed from './PortfolioFeed'
+import ProfileBody from './ProfileBody'
+import ProfileIdentityRail from './ProfileIdentityRail'
+import SignatureCard from './SignatureCard'
 
 export default async function PublicProfileView({
   id,
@@ -54,9 +68,14 @@ export default async function PublicProfileView({
 
   const viewer = await getCurrentUser().catch(() => null)
 
+  // One tenant resolution for the whole render — React-cached, and it fails soft
+  // to root branding rather than 500-ing the page.
+  const brand = getBrandForTenantContext(await resolveTenantContextForLayout())
+
   const baseResult = await loadProPublicProfileBase({
     professionalId: id,
     viewer,
+    brandName: brand.displayName,
   })
 
   if (baseResult.kind === 'not-found') notFound()
@@ -64,22 +83,33 @@ export default async function PublicProfileView({
     return <PendingVerificationSurface />
   }
 
-  const { header, stats, offerings, acceptedPayments, isFavoritedByMe, viewerUserId } =
-    baseResult.base
+  const {
+    header,
+    stats,
+    offerings,
+    acceptedPayments,
+    isFavoritedByMe,
+    viewerUserId,
+    signals,
+  } = baseResult.base
   const professionalId = baseResult.base.professionalId
   const isClientViewer = viewerUserId !== null
 
-  const portfolioTiles =
-    activeTab === 'portfolio' ? await loadPortfolioTiles(professionalId) : []
-
-  const reviewsForUI =
-    activeTab === 'reviews'
-      ? await loadReviewsForUi({
-          professionalId,
-          viewerUserId,
-          clientLinkViewer: await loadClientLinkViewer(viewer),
-        })
-      : []
+  // ONE payload: every tab's content loads up front and the tabs switch in
+  // place. The reviews read still depends on the viewer (their own "helpful"
+  // marks), so it can't be hoisted out of the request.
+  const [work, reviewsForUI] = await Promise.all([
+    loadProProfileWork({
+      professionalId,
+      signatureMediaAssetId: baseResult.base.signatureMediaAssetId,
+      offerings: baseResult.base.offeringRows,
+    }),
+    loadReviewsForUi({
+      professionalId,
+      viewerUserId,
+      clientLinkViewer: await loadClientLinkViewer(viewer),
+    }),
+  ])
 
   const fromPath = buildPublicProfileFromPath({
     professionalId,
@@ -93,12 +123,37 @@ export default async function PublicProfileView({
       })
     : buildLoginHref(fromPath)
 
-  const servicesHref = buildProfessionalProfileHref({
-    professionalId,
-    tab: 'services',
+  // The pro's own view of a still-pending profile: the page renders in full (it
+  // is worth reading) but the bar goes inert rather than offering a booking the
+  // server would refuse.
+  const isPendingVerification =
+    baseResult.base.verificationStatus !== VerificationStatus.APPROVED
+
+  const cheapestOffering = offerings.reduce<(typeof offerings)[number] | null>(
+    (best, offering) => {
+      if (offering.priceFromNumber === null) return best
+      if (!best || best.priceFromNumber === null) return offering
+      return offering.priceFromNumber < best.priceFromNumber ? offering : best
+    },
+    null,
+  )
+
+  const bookBar = buildPublicProfileBookBar({
+    isPendingVerification,
+    isSignedIn: Boolean(viewer),
+    availabilityLine: signals.availabilityLine,
+    priceFromLabel: stats.priceFromLabel,
+    cheapestServiceName: cheapestOffering?.name ?? null,
+    serviceCount: offerings.length,
   })
 
-  const tabs = buildPublicProfileTabs(professionalId)
+  const tabLabels = buildPublicProfileTabLabels({
+    // The Signature post left the grid, so it has to be counted back in — the
+    // tab label reports the pro's work, not the grid's row count.
+    portfolio: work.portfolioTiles.length + (work.signature ? 1 : 0),
+    services: offerings.length,
+    reviews: reviewsForUI.length,
+  })
 
   // Crawler-facing structured data; cache() dedupes with generateMetadata.
   // Fail-soft: SEO decoration must never break the page render.
@@ -106,9 +161,6 @@ export default async function PublicProfileView({
   try {
     const seo = await loadProProfileSeoById(professionalId)
     if (seo) {
-      const brand = getBrandForTenantContext(
-        await resolveTenantContextForLayout(),
-      )
       jsonLd = buildProProfileJsonLd({
         seo,
         canonicalUrl: absoluteUrl(`/professionals/${professionalId}`),
@@ -120,47 +172,80 @@ export default async function PublicProfileView({
   }
 
   return (
-    <main className="brand-profile-page min-h-screen pb-28">
+    <main className="brand-pp-page min-h-screen">
       {jsonLd ? <JsonLdScript data={jsonLd} /> : null}
-      <div className="brand-profile-shell">
-        <ProfileHero
-          header={header}
-          stats={stats}
-          isClientViewer={isClientViewer}
-          canFollow={isClientViewer || !viewer}
-          isFavoritedByMe={isFavoritedByMe}
-          messageHref={messageHref}
-          servicesHref={servicesHref}
-          fromPath={fromPath}
+
+      <div className="brand-pp-shell">
+        {/* The header band. No photograph sits behind the avatar on any
+            profile — the band carries the brand mark and the handle in mono. */}
+        <section className="brand-pp-band">
+          <div className="brand-pp-band-actions">
+            <Link
+              href="/looks"
+              className="brand-button-ghost brand-focus tap-target grid h-9 w-9 place-items-center text-[18px] font-black"
+              aria-label="Back to Looks"
+              title="Back to Looks"
+            >
+              ←
+            </Link>
+          </div>
+
+          <div className="grid justify-items-center gap-2.5 opacity-90">
+            <BrandWordmark size={22} />
+            {header.displayHandle ? (
+              <div className="font-mono text-[10.5px] uppercase tracking-[0.22em] text-textMuted">
+                {header.displayHandle}
+              </div>
+            ) : null}
+          </div>
+        </section>
+
+        <ProfileBody
+          initialTab={activeTab}
+          labels={tabLabels}
+          identityRail={
+            <ProfileIdentityRail
+              header={header}
+              followerCount={stats.followerCount}
+              isClientViewer={isClientViewer}
+              canFollow={isClientViewer || !viewer}
+              isFavoritedByMe={isFavoritedByMe}
+              isPendingVerification={isPendingVerification}
+              messageHref={messageHref}
+              fromPath={fromPath}
+              acceptedPayments={acceptedPayments}
+              signals={signals}
+            />
+          }
+          portfolio={
+            <>
+              {work.signature ? (
+                <SignatureCard signature={work.signature} />
+              ) : null}
+
+              <PortfolioFeed
+                tiles={work.portfolioTiles}
+                emptyMessage={formatPortfolioEmptyMessage()}
+              />
+            </>
+          }
+          services={
+            <ServicesPanel
+              professionalId={professionalId}
+              offerings={offerings}
+              emptyMessage={formatServicesEmptyMessage()}
+            />
+          }
+          reviews={
+            <ReviewsSummary
+              professionalId={professionalId}
+              stats={stats}
+              reviews={reviewsForUI}
+              emptyMessage={formatReviewsEmptyMessage()}
+            />
+          }
+          bookBar={bookBar}
         />
-
-        <AcceptedPayments methods={acceptedPayments} />
-
-        <ProfileTabs tabs={tabs} activeTab={activeTab} />
-
-        {activeTab === 'portfolio' ? (
-          <PortfolioGrid
-            tiles={portfolioTiles}
-            emptyMessage={formatPortfolioEmptyMessage()}
-          />
-        ) : null}
-
-        {activeTab === 'services' ? (
-          <ServicesPanel
-            professionalId={professionalId}
-            offerings={offerings}
-            emptyMessage={formatServicesEmptyMessage()}
-          />
-        ) : null}
-
-        {activeTab === 'reviews' ? (
-          <ReviewsSummary
-            professionalId={professionalId}
-            stats={stats}
-            reviews={reviewsForUI}
-            emptyMessage={formatReviewsEmptyMessage()}
-          />
-        ) : null}
       </div>
     </main>
   )
@@ -168,7 +253,7 @@ export default async function PublicProfileView({
 
 function PendingVerificationSurface() {
   return (
-    <main className="brand-profile-page min-h-screen px-4 py-10">
+    <main className="brand-pp-page min-h-screen px-4 py-10">
       <div className="mx-auto max-w-180">
         <Link
           href="/looks"
@@ -177,7 +262,7 @@ function PendingVerificationSurface() {
           ← Back to Looks
         </Link>
 
-        <div className="brand-profile-card mt-4 p-4">
+        <div className="brand-pp-card mt-4 p-4">
           <div className="text-[16px] font-black text-textPrimary">
             This profile is pending verification
           </div>
