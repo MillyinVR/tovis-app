@@ -2,6 +2,7 @@
 //
 // Outbound social-presence chips for a pro's public surfaces (full profile
 // hero + vanity page). Handles are stored without "@" (lib/profiles/socialLinks).
+import { buttonClassName } from '@/app/_components/ui'
 import { instagramUrl, tiktokUrl } from '@/lib/profiles/socialLinks'
 
 export default function SocialLinkChips({
@@ -41,6 +42,17 @@ export default function SocialLinkChips({
   )
 }
 
+// The kit's `ghost` button at `xs` already IS this chip: same pill, same
+// `border-textPrimary/16`, same `text-[11px]`, same `font-bold`, same
+// `text-textSecondary`. Only the two hover steps differed — a /30 border rather
+// than the variant's /25, plus a text lift the variant has no equivalent for —
+// so they ride along as a className instead of being dropped.
+const CHIP_CLASS = buttonClassName({
+  variant: 'ghost',
+  size: 'xs',
+  className: 'hover:border-textPrimary/30 hover:text-textPrimary',
+})
+
 function Chip({
   href,
   label,
@@ -56,7 +68,7 @@ function Chip({
       target="_blank"
       rel="noopener noreferrer"
       aria-label={label}
-      className="inline-flex items-center rounded-full border border-textPrimary/16 px-3 py-1.5 text-[11px] font-bold text-textSecondary transition hover:border-textPrimary/30 hover:text-textPrimary"
+      className={CHIP_CLASS}
     >
       {children}
     </a>
