@@ -34,8 +34,16 @@ const BASELINE_PATH = path.join(
 // Always-flag patterns: these never format numbers.
 //  - Intl.DateTimeFormat(...)            (formatting AND resolvedOptions().timeZone)
 //  - .toLocaleDateString( / .toLocaleTimeString(
+//
+// `Intl.DateTimeFormatOptions` is EXCLUDED. It is a TypeScript type, erased at
+// compile time — it formats nothing and skips no timezone sanitization. It is in
+// fact what a COMPLIANT caller writes when passing options to
+// `formatInTimeZone`, so flagging it put three already-correct files on the
+// baseline and told the next reader to "migrate" code that was already migrated.
+// `Intl.DateTimeFormat` and `Intl.DateTimeFormatOptions` are the only two forms
+// that appear in this repo, so the single negative lookahead is sufficient.
 const ALWAYS_FLAG_PATTERN =
-  /Intl\.DateTimeFormat|\.toLocaleDateString\(|\.toLocaleTimeString\(/
+  /Intl\.DateTimeFormat(?!Options\b)|\.toLocaleDateString\(|\.toLocaleTimeString\(/
 
 // `.toLocaleString(` is ambiguous (numbers vs dates). Only flag it when the
 // call-site is date-shaped — see isDateShapedToLocaleString below.
