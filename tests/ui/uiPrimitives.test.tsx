@@ -165,9 +165,21 @@ describe('form controls', () => {
     expect(classes[0]).toBe(controlClassName())
   })
 
-  it('carries an accent focus ring, not just a border shift', () => {
-    expect(controlClassName()).toContain('focus:ring-2')
-    expect(controlClassName()).toContain('focus:ring-accentPrimary/20')
+  // These three elements are <input>/<select>/<textarea>, which match
+  // `:focus-visible` on EVERY focus (mouse included — the spec carves out text
+  // entry). The unlayered `:focus-visible` rule in globals.css therefore always
+  // wins the box-shadow here, so a ring utility on this surface can never paint.
+  // Measured on a real auth field: the focused box-shadow is the global
+  // `0 0 0 2px bg, 0 0 0 4px accent/.5` with the utility and without it.
+  // Asserted as an absence so the dead pair cannot be reintroduced.
+  it('leaves the focus RING to the global rule, and shifts the border itself', () => {
+    for (const surface of ['dense', 'soft'] as const) {
+      const cls = controlClassName({ surface })
+      expect(cls).not.toContain('focus:ring')
+      // `focus:border-*` is the half that does paint — the global rule sets no
+      // border-color, so nothing overrides it.
+      expect(cls).toContain('focus:border-accentPrimary/')
+    }
   })
 
   it('renders the right elements and forwards props', () => {
@@ -195,9 +207,9 @@ describe('form controls', () => {
     expect(soft).toContain('rounded-card')
     expect(soft).toContain('bg-bgSecondary/35')
     expect(soft).toContain('hover:border-surfaceGlass/16')
-    // The softer focus pair belongs to this surface, not the dense one.
-    expect(soft).toContain('focus:ring-accentPrimary/15')
-    expect(soft).not.toContain('focus:ring-accentPrimary/20')
+    // The softer focus border belongs to this surface, not the dense one.
+    expect(soft).toContain('focus:border-accentPrimary/35')
+    expect(soft).not.toContain('focus:border-accentPrimary/50')
   })
 
   it('leaves the dense surface free of the soft surface`s additions', () => {
@@ -229,18 +241,23 @@ describe('form controls', () => {
   // because the split legitimately reorders the tokens and CSS does not care
   // about the order of a class attribute.
   it('emits exactly the dense token set the admin screens were migrated onto', () => {
-    expect(new Set(controlClassName().split(' '))).toEqual(
-      new Set(
-        [
-          'w-full rounded-xl border border-surfaceGlass/15 bg-bgPrimary/40 px-3 py-2 text-sm text-textPrimary',
-          'placeholder:text-textSecondary/70 outline-none',
-          'focus:border-accentPrimary/50 focus:ring-2 focus:ring-accentPrimary/20',
-          'disabled:cursor-not-allowed disabled:opacity-60',
-        ]
-          .join(' ')
-          .split(' '),
-      ),
-    )
+    const denseBefore =
+      'w-full rounded-xl border border-surfaceGlass/15 bg-bgPrimary/40 px-3 py-2 text-sm text-textPrimary ' +
+      'placeholder:text-textSecondary/70 outline-none ' +
+      'focus:border-accentPrimary/50 focus:ring-2 focus:ring-accentPrimary/20 ' +
+      'disabled:cursor-not-allowed disabled:opacity-60'
+
+    const emitted = new Set(controlClassName().split(' '))
+    const inherited = new Set(denseBefore.split(' '))
+
+    // Nothing is added.
+    expect([...emitted].filter((c) => !inherited.has(c))).toEqual([])
+    // The ONLY subtraction is the ring pair, which was measured never to paint
+    // on these elements — the unlayered `:focus-visible` rule owns the shadow.
+    expect([...inherited].filter((c) => !emitted.has(c)).sort()).toEqual([
+      'focus:ring-2',
+      'focus:ring-accentPrimary/20',
+    ])
   })
 
   // Same pin for the other direction: `soft` has to reproduce the string the
@@ -259,7 +276,11 @@ describe('form controls', () => {
     const emitted = new Set(controlClassName({ surface: 'soft' }).split(' '))
     const inherited = new Set(authFieldClasses.split(' '))
 
-    expect([...inherited].filter((c) => !emitted.has(c))).toEqual([])
+    // The only subtraction is the ring pair — measured never to paint here.
+    expect([...inherited].filter((c) => !emitted.has(c)).sort()).toEqual([
+      'focus:ring-2',
+      'focus:ring-accentPrimary/15',
+    ])
     expect([...emitted].filter((c) => !inherited.has(c))).toEqual([
       'disabled:cursor-not-allowed',
       'disabled:opacity-60',

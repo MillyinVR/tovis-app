@@ -71,13 +71,25 @@ body {
   }
 }
 
-/* Focus ring using accent color */
+/* Focus ring using accent color.
+   ⚠️ DELIBERATELY UNLAYERED — do not "fix" this the way #907 fixed the button
+   reset. Unlayered beats the whole `utilities` layer, which is what makes this
+   the focus indicator app-wide even on the 51 sites that also carry a
+   `focus:ring-*` utility. Layering it into `base` would hand those sites their
+   own ring instead — and theirs is a 2px ring at 15–40% alpha, where this one is
+   4px of accent at 50% over a 2px page-colored separator. That is an
+   accessibility downgrade, not a cleanup. The utilities are the redundant half
+   of that pair; this rule is the load-bearing half.
+   No `border-radius` here: a box-shadow already follows the element's own
+   border-radius, so the ring hugs a pill or an 18px card field on its own.
+   Setting one RESHAPED the control while focused — measured, a rounded-full
+   button went 3.4e7px → 8px and a `rounded-card` input 18px → 8px the moment
+   it was tabbed to. */
 :focus-visible {
   outline: none;
   box-shadow:
     0 0 0 2px rgb(var(--bg-primary)),
     0 0 0 4px rgb(var(--accent-primary) / 0.50);
-  border-radius: var(--radius-inner);
 }
 
 /* Respect reduced motion */

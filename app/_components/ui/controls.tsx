@@ -50,15 +50,24 @@ export type ControlStyleOptions = {
 
 // Shared by both surfaces: the box, the type scale, and the states every control
 // owes a user regardless of which surface it is painted on.
+//
+// No `focus:ring-*` here, and that is deliberate. These three elements are
+// <input>/<select>/<textarea>, which match `:focus-visible` on EVERY focus —
+// mouse included, per the spec's carve-out for text entry — so the unlayered
+// global `:focus-visible` rule in globals.css always wins the box-shadow and a
+// ring utility on this surface can never paint. Measured on a real auth field:
+// focused box-shadow is the global `0 0 0 2px bg, 0 0 0 4px accent/.5`, with or
+// without `focus:ring-2`. `focus:border-*` DOES paint (the global rule sets no
+// border-color), so it stays.
 const BASE =
-  'w-full border px-3 py-2 text-sm text-textPrimary placeholder:text-textSecondary/70 outline-none focus:ring-2 disabled:cursor-not-allowed disabled:opacity-60'
+  'w-full border px-3 py-2 text-sm text-textPrimary placeholder:text-textSecondary/70 outline-none disabled:cursor-not-allowed disabled:opacity-60'
 
 const SURFACES: Record<ControlSurface, string> = {
   dense:
-    'rounded-xl border-surfaceGlass/15 bg-bgPrimary/40 focus:border-accentPrimary/50 focus:ring-accentPrimary/20',
+    'rounded-xl border-surfaceGlass/15 bg-bgPrimary/40 focus:border-accentPrimary/50',
   // `transition` rides with `soft` only — the dense field never had one, and
   // adding it here would have been an unrequested change to every admin form.
-  soft: 'rounded-card border-surfaceGlass/10 bg-bgSecondary/35 transition hover:border-surfaceGlass/16 focus:border-accentPrimary/35 focus:ring-accentPrimary/15',
+  soft: 'rounded-card border-surfaceGlass/10 bg-bgSecondary/35 transition hover:border-surfaceGlass/16 focus:border-accentPrimary/35',
 }
 
 /** The one control surface. Brand tokens only — no raw colors. */

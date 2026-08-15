@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import ToggleSwitch from '@/app/_components/ToggleSwitch'
-import { controlClassName } from '@/app/_components/ui'
+import { Textarea, controlClassName } from '@/app/_components/ui'
 import { isRecord } from '@/lib/guards'
 import { readErrorMessage, safeJson } from '@/lib/http'
 import { sanitizeHandleInput } from '@/lib/handles'
@@ -143,11 +143,10 @@ export default function ClientPublicProfileSettings() {
                 Measured, not assumed — the A/B caught exactly that.
                 ⚠️ 16px here vs 14px in the bio field below is a real
                 inconsistency, preserved rather than endorsed. A design call.
-                No focus treatment is added here. A `focus-within:border-*` was
-                tried and MEASURED not to paint — see the bio field below; the
-                kit's own `focus:border-*`/`focus:ring-*` do not paint either.
-                Shipping a declaration that renders nothing is the thing this
-                phase keeps finding, so it is left out rather than left in. */}
+                No focus treatment is added here, and this one really is a
+                wrapper: the box is a <div>, so it is never itself focused and
+                the primitive's `focus:*` states cannot fire on it. The inner
+                <input> keeps the global `:focus-visible` ring. */}
             <div
               className={controlClassName({
                 surface: 'soft',
@@ -169,30 +168,18 @@ export default function ClientPublicProfileSettings() {
 
           <label className="flex flex-col gap-1.5">
             <FieldLabel>Bio</FieldLabel>
-            {/* ⚠️ DELIBERATELY NOT migrated to <Textarea surface="soft">, even
-                though it is hand-copying the surface. Measured on the running
-                app: this field currently paints the app's global
-                `:focus-visible` brand ring, and taking the primitive REMOVES it
-                —
-                  before  rgb(243,240,231) 0 0 0 2px, rgba(14,155,134,.5) 0 0 0 4px
-                  after   none
-                because `controlClassName` carries `focus:ring-2`, whose
-                box-shadow displaces the global rule while painting nothing
-                itself. Measured on a real auth input, the kit's
-                `focus:border-accentPrimary/35` does not paint either — the
-                global `:focus-visible` rule is UNLAYERED and beats the whole
-                utilities layer, the same cascade trap as #907's button reset.
-                So every kit control's focus declarations are dead today; admin
-                and auth inherited them in #906/#908, and the global ring is all
-                that actually shows. Fixing it is a change in the kit with an
-                app-wide blast radius, so it is split out rather than smuggled in
-                here — the same call #907 made. That PR migrates this field. */}
-            <textarea
+            {/* `resize-none` is this field's own — the primitive owns the rest.
+                The hand-written copy said `border-textPrimary/10` where the kit
+                says `border-surfaceGlass/10`; those two tokens are byte-identical
+                in BOTH modes (`242 239 231` / `10 20 19`), so that is a rename,
+                not a restyle. */}
+            <Textarea
+              surface="soft"
               value={bio}
               onChange={(e) => setBio(e.target.value.slice(0, BIO_MAX))}
               rows={3}
               placeholder="What looks are you known for?"
-              className="w-full resize-none rounded-card border border-textPrimary/10 bg-bgSecondary/35 px-3 py-2 text-sm text-textPrimary outline-none placeholder:text-textSecondary/70"
+              className="resize-none"
             />
             <span className="text-xs text-textSecondary/80">
               {bio.length}/{BIO_MAX}
