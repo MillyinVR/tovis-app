@@ -1,12 +1,16 @@
 // app/api/v1/viral-service-requests/upload/route.ts
 import { NextRequest } from 'next/server'
-import { ViralServiceRequestStatus } from '@prisma/client'
 
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { requireClient } from '@/app/api/_utils/auth/requireClient'
 import { prisma } from '@/lib/prisma'
-import { buildViralRequestUploadTargetPath } from '@/lib/viralRequests'
+import {
+  buildViralRequestUploadPublicUrl,
+  buildViralRequestUploadTargetPath,
+  loadClientOwnedViralRequestForWrite,
+} from '@/lib/viralRequests'
 import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
+import { BUCKETS } from '@/lib/storageBuckets'
 import { isRecord, type UnknownRecord } from '@/lib/guards'
 import { UPLOAD_MAX_BYTES, UPLOAD_MAX_LABEL } from '@/lib/media/uploadLimits'
 import { getStorageEnvironmentMismatch } from '@/lib/media/storageEnvironment'
@@ -79,22 +83,18 @@ export async function POST(req: NextRequest) {
       return jsonFail(400, `File too large (max ${UPLOAD_MAX_LABEL})`)
     }
 
-    const requestRow = await prisma.viralServiceRequest.findUnique({
-      where: { id: requestId },
-      select: {
-        id: true,
-        clientId: true,
-        status: true,
-      },
+    // The same gate the persist route runs — signing a write and recording what
+    // it produced must never be able to disagree about who may do it.
+    const loaded = await loadClientOwnedViralRequestForWrite(prisma, {
+      clientId: auth.clientId,
+      requestId,
     })
 
-    if (!requestRow) return jsonFail(404, 'Viral request not found.')
-    if (requestRow.clientId !== auth.clientId) return jsonFail(403, 'Forbidden')
-
-    if (
-      requestRow.status === ViralServiceRequestStatus.APPROVED ||
-      requestRow.status === ViralServiceRequestStatus.REJECTED
-    ) {
+    if (!loaded.ok) {
+      if (loaded.reason === 'NOT_FOUND') {
+        return jsonFail(404, 'Viral request not found.')
+      }
+      if (loaded.reason === 'FORBIDDEN') return jsonFail(403, 'Forbidden')
       return jsonFail(409, 'Cannot prepare uploads for a finalized viral request.')
     }
 
@@ -109,7 +109,7 @@ export async function POST(req: NextRequest) {
       return jsonFail(400, message)
     }
 
-    const bucket = 'media-public'
+    const bucket = BUCKETS.mediaPublic
     const admin = getSupabaseAdmin()
     const { data, error } = await admin.storage
       .from(bucket)
@@ -124,7 +124,12 @@ export async function POST(req: NextRequest) {
     }
 
     const signedUrl = readSignedUrl(data)
-    const publicUrl = `${base}/storage/v1/object/public/${bucket}/${path}`
+    // Built by the same helper the persist route validates against, so a URL we
+    // hand out here is always one it will accept.
+    const publicUrl = buildViralRequestUploadPublicUrl({
+      supabaseBaseUrl: base,
+      path,
+    })
 
     return jsonOk({
       requestId,

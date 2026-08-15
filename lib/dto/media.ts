@@ -46,7 +46,7 @@ export type MediaAdminUploadFinalizeDTO = {
 // would let a caller read `defaultImageUrl` off a viral response and get
 // undefined.
 export type MediaAdminViralCoverFinalizeDTO = {
-  /** Null when the reviewer cleared their pick — readers fall back to the
-   *  submitter's own attachment, not to nothing. */
+  /** Null when the reviewer cleared their pick — the look then has no picture
+   *  at all, since the submitter's attachment is never published. */
   coverImageUrl: string | null
 }

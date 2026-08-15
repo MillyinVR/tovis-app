@@ -315,10 +315,11 @@ export type ClientHomeViralLiveDTO = {
   sourceUrl: string | null
   approvedAt: string | null
   /**
-   * The picture this look is shown by — the reviewer's cover, else the photo the
-   * submitter attached, else null and the client draws its own gradient.
-   * Resolved server-side so the phone, the web and the admin queue cannot each
-   * pick a different one. Optional on the wire for older clients.
+   * The picture this look is shown by — the cover a REVIEWER set, else null and
+   * the client draws its own gradient. Never the submitter's own attachment;
+   * that is evidence in the admin queue until someone promotes it. Resolved
+   * server-side so the phone, the web and the admin queue cannot each pick a
+   * different one. Optional on the wire for older clients.
    */
   coverImage?: string | null
   _count: { approvalFanOuts: number }

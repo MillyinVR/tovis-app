@@ -38,6 +38,10 @@ const mocks = vi.hoisted(() => {
       },
     },
     buildViralRequestUploadTargetPath: vi.fn(),
+    buildViralRequestUploadPublicUrl: vi.fn(
+      () => 'https://project.supabase.co/public/wolf.png',
+    ),
+    loadClientOwnedViralRequestForWrite: vi.fn(),
     createSignedUploadUrl,
     from,
     getSupabaseAdmin: vi.fn(() => ({
@@ -63,6 +67,9 @@ vi.mock('@/lib/prisma', () => ({
 
 vi.mock('@/lib/viralRequests', () => ({
   buildViralRequestUploadTargetPath: mocks.buildViralRequestUploadTargetPath,
+  buildViralRequestUploadPublicUrl: mocks.buildViralRequestUploadPublicUrl,
+  loadClientOwnedViralRequestForWrite:
+    mocks.loadClientOwnedViralRequestForWrite,
 }))
 
 vi.mock('@/lib/supabaseAdmin', () => ({
@@ -119,7 +126,7 @@ describe('app/api/v1/viral-service-requests/upload/route.ts', () => {
     const res = await POST(makeJsonRequest({}))
 
     expect(res).toBe(authRes)
-    expect(mocks.prisma.viralServiceRequest.findUnique).not.toHaveBeenCalled()
+    expect(mocks.loadClientOwnedViralRequestForWrite).not.toHaveBeenCalled()
   })
 
   it('returns 500 when NEXT_PUBLIC_SUPABASE_URL is missing', async () => {
@@ -278,7 +285,10 @@ describe('app/api/v1/viral-service-requests/upload/route.ts', () => {
       user: { id: 'user_1' },
     })
 
-    mocks.prisma.viralServiceRequest.findUnique.mockResolvedValue(null)
+    mocks.loadClientOwnedViralRequestForWrite.mockResolvedValue({
+      ok: false,
+      reason: 'NOT_FOUND',
+    })
 
     const res = await POST(
       makeJsonRequest({
@@ -289,14 +299,11 @@ describe('app/api/v1/viral-service-requests/upload/route.ts', () => {
     )
     const body = await res.json()
 
-    expect(mocks.prisma.viralServiceRequest.findUnique).toHaveBeenCalledWith({
-      where: { id: 'request_404' },
-      select: {
-        id: true,
-        clientId: true,
-        status: true,
-      },
-    })
+    // The same gate the persist route runs, given the session's client id.
+    expect(mocks.loadClientOwnedViralRequestForWrite).toHaveBeenCalledWith(
+      mocks.prisma,
+      { clientId: 'client_1', requestId: 'request_404' },
+    )
 
     expect(res.status).toBe(404)
     expect(body).toEqual({
@@ -312,10 +319,9 @@ describe('app/api/v1/viral-service-requests/upload/route.ts', () => {
       user: { id: 'user_1' },
     })
 
-    mocks.prisma.viralServiceRequest.findUnique.mockResolvedValue({
-      id: 'request_1',
-      clientId: 'client_2',
-      status: ViralServiceRequestStatus.REQUESTED,
+    mocks.loadClientOwnedViralRequestForWrite.mockResolvedValue({
+      ok: false,
+      reason: 'FORBIDDEN',
     })
 
     const res = await POST(
@@ -341,10 +347,9 @@ describe('app/api/v1/viral-service-requests/upload/route.ts', () => {
       user: { id: 'user_1' },
     })
 
-    mocks.prisma.viralServiceRequest.findUnique.mockResolvedValue({
-      id: 'request_1',
-      clientId: 'client_1',
-      status: ViralServiceRequestStatus.APPROVED,
+    mocks.loadClientOwnedViralRequestForWrite.mockResolvedValue({
+      ok: false,
+      reason: 'FINALIZED',
     })
 
     const res = await POST(
@@ -370,10 +375,14 @@ describe('app/api/v1/viral-service-requests/upload/route.ts', () => {
       user: { id: 'user_1' },
     })
 
-    mocks.prisma.viralServiceRequest.findUnique.mockResolvedValue({
-      id: 'request_1',
-      clientId: 'client_1',
-      status: ViralServiceRequestStatus.REQUESTED,
+    mocks.loadClientOwnedViralRequestForWrite.mockResolvedValue({
+      ok: true,
+      request: {
+        id: 'request_1',
+        clientId: 'client_1',
+        status: ViralServiceRequestStatus.REQUESTED,
+        mediaUrlsJson: null,
+      },
     })
 
     mocks.buildViralRequestUploadTargetPath.mockImplementation(() => {
@@ -403,10 +412,14 @@ describe('app/api/v1/viral-service-requests/upload/route.ts', () => {
       user: { id: 'user_1' },
     })
 
-    mocks.prisma.viralServiceRequest.findUnique.mockResolvedValue({
-      id: 'request_1',
-      clientId: 'client_1',
-      status: ViralServiceRequestStatus.REQUESTED,
+    mocks.loadClientOwnedViralRequestForWrite.mockResolvedValue({
+      ok: true,
+      request: {
+        id: 'request_1',
+        clientId: 'client_1',
+        status: ViralServiceRequestStatus.REQUESTED,
+        mediaUrlsJson: null,
+      },
     })
 
     mocks.buildViralRequestUploadTargetPath.mockReturnValue(
@@ -446,10 +459,14 @@ describe('app/api/v1/viral-service-requests/upload/route.ts', () => {
       user: { id: 'user_1' },
     })
 
-    mocks.prisma.viralServiceRequest.findUnique.mockResolvedValue({
-      id: 'request_1',
-      clientId: 'client_1',
-      status: ViralServiceRequestStatus.REQUESTED,
+    mocks.loadClientOwnedViralRequestForWrite.mockResolvedValue({
+      ok: true,
+      request: {
+        id: 'request_1',
+        clientId: 'client_1',
+        status: ViralServiceRequestStatus.REQUESTED,
+        mediaUrlsJson: null,
+      },
     })
 
     mocks.buildViralRequestUploadTargetPath.mockReturnValue(
@@ -484,10 +501,14 @@ describe('app/api/v1/viral-service-requests/upload/route.ts', () => {
       user: { id: 'user_1' },
     })
 
-    mocks.prisma.viralServiceRequest.findUnique.mockResolvedValue({
-      id: 'request_1',
-      clientId: 'client_1',
-      status: ViralServiceRequestStatus.REQUESTED,
+    mocks.loadClientOwnedViralRequestForWrite.mockResolvedValue({
+      ok: true,
+      request: {
+        id: 'request_1',
+        clientId: 'client_1',
+        status: ViralServiceRequestStatus.REQUESTED,
+        mediaUrlsJson: null,
+      },
     })
 
     mocks.buildViralRequestUploadTargetPath.mockReturnValue(
@@ -523,6 +544,13 @@ describe('app/api/v1/viral-service-requests/upload/route.ts', () => {
       { upsert: false },
     )
 
+    // The URL handed back is built by the same helper the persist route
+    // validates against — never assembled here, or the two could drift.
+    expect(mocks.buildViralRequestUploadPublicUrl).toHaveBeenCalledWith({
+      supabaseBaseUrl: 'https://example.supabase.co',
+      path: 'viral-requests/request_1/uploads/wolf.png',
+    })
+
     expect(res.status).toBe(200)
     expect(body).toEqual({
       ok: true,
@@ -531,8 +559,7 @@ describe('app/api/v1/viral-service-requests/upload/route.ts', () => {
       path: 'viral-requests/request_1/uploads/wolf.png',
       token: 'token_123',
       signedUrl: 'https://signed.example/upload',
-      publicUrl:
-        'https://example.supabase.co/storage/v1/object/public/media-public/viral-requests/request_1/uploads/wolf.png',
+      publicUrl: 'https://project.supabase.co/public/wolf.png',
       isPublic: true,
     })
   })
