@@ -1,7 +1,7 @@
 // app/admin/services/_components/ServicesCreateWizard.tsx
 'use client'
 
-import React, { forwardRef, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { uploadWithProgress } from '@/lib/media/uploadWithProgress'
 import { compressImageForUpload } from '@/lib/media/processImageForUpload'
@@ -10,6 +10,7 @@ import { isRecord, asNumber, asTrimmedString } from '@/lib/guards'
 import { cn } from '@/lib/utils'
 import { safeJson, readErrorMessage, errorMessageFromUnknown, isOkTrue } from '@/lib/http'
 import { withCacheBuster } from '@/lib/url'
+import { FieldLabel, Select, TextInput } from '@/app/_components/ui'
 
 type CategoryDTO = { id: string; name: string; parentId: string | null }
 
@@ -28,41 +29,6 @@ function readString(v: unknown): string {
 
 function readNumber(v: unknown): number | null {
   return asNumber(v)
-}
-
-function FieldLabel({ children }: { children: React.ReactNode }) {
-  return <div className="text-xs font-extrabold text-textSecondary">{children}</div>
-}
-
-const Input = forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(function Input(props, ref) {
-  const { className, ...rest } = props
-  return (
-    <input
-      ref={ref}
-      {...rest}
-      className={cn(
-        'w-full rounded-xl border border-surfaceGlass/15 bg-bgPrimary/40 px-3 py-2 text-sm text-textPrimary',
-        'placeholder:text-textSecondary/70 outline-none',
-        'focus:border-surfaceGlass/30',
-        className,
-      )}
-    />
-  )
-})
-Input.displayName = 'Input'
-
-function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
-  const { className, ...rest } = props
-  return (
-    <select
-      {...rest}
-      className={cn(
-        'w-full rounded-xl border border-surfaceGlass/15 bg-bgPrimary/40 px-3 py-2 text-sm text-textPrimary',
-        'outline-none focus:border-surfaceGlass/30',
-        className,
-      )}
-    />
-  )
 }
 
 function fmtCatLabel(cat: CategoryDTO, byId: Map<string, CategoryDTO>) {
@@ -339,7 +305,7 @@ export default function ServicesCreateWizard(props: { categories: CategoryDTO[] 
           <div className="grid gap-3 rounded-2xl border border-surfaceGlass/10 bg-bgPrimary/25 p-3">
             <FieldLabel>Step 1 — Pick a category</FieldLabel>
 
-            <Input
+            <TextInput
               value={catSearch}
               onChange={(e) => setCatSearch(e.target.value)}
               placeholder="Search categories…"
@@ -413,7 +379,7 @@ export default function ServicesCreateWizard(props: { categories: CategoryDTO[] 
 
             <label className="grid gap-1">
               <div className="text-xs font-extrabold text-textSecondary">Service name</div>
-              <Input
+              <TextInput
                 ref={nameRef}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -426,7 +392,7 @@ export default function ServicesCreateWizard(props: { categories: CategoryDTO[] 
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="grid gap-1">
                 <div className="text-xs font-extrabold text-textSecondary">Min price</div>
-                <Input
+                <TextInput
                   value={minPrice}
                   onChange={(e) => setMinPrice(e.target.value)}
                   inputMode="decimal"
@@ -441,7 +407,7 @@ export default function ServicesCreateWizard(props: { categories: CategoryDTO[] 
 
               <label className="grid gap-1">
                 <div className="text-xs font-extrabold text-textSecondary">Default minutes</div>
-                <Input
+                <TextInput
                   value={defaultDurationMinutes}
                   onChange={(e) => setDefaultDurationMinutes(e.target.value)}
                   inputMode="numeric"

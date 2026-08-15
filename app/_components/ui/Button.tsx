@@ -13,14 +13,27 @@ import type { ButtonHTMLAttributes } from 'react'
 
 import { cn } from '@/lib/utils'
 
-export type ButtonVariant = 'primary' | 'ghost' | 'danger' | 'success'
+export type ButtonVariant =
+  | 'primary'
+  | 'accent'
+  | 'neutral'
+  | 'ghost'
+  | 'danger'
+  | 'success'
 export type ButtonSize = 'xs' | 'sm' | 'md' | 'lg'
 export type ButtonShape = 'pill' | 'soft'
+/**
+ * `none` is the outlined button this file shipped with. `soft` adds the resting
+ * tinted fill the admin buttons had re-authored by hand — mirrors Badge's `fill`,
+ * and without it those forks would have lost their background on migration.
+ */
+export type ButtonFill = 'none' | 'soft'
 
 export type ButtonStyleOptions = {
   variant?: ButtonVariant
   size?: ButtonSize
   shape?: ButtonShape
+  fill?: ButtonFill
   fullWidth?: boolean
   className?: string
 }
@@ -47,6 +60,13 @@ const VARIANTS: Record<ButtonVariant, string> = {
   // Brand gradient CTA on ink text, with the canonical accent glow.
   primary:
     'bg-cta text-onCta shadow-[0_6px_20px_rgb(var(--accent-primary)/0.24)] hover:opacity-95',
+  // Accent-toned action — the admin "Save"/"Grant" weight: reads as the primary
+  // action of a form without competing with the page's gradient CTA.
+  accent:
+    'border border-accentPrimary/45 text-accentPrimary hover:border-accentPrimary/60',
+  // Secondary action on a raised surface — the admin "Cancel"/"Edit" weight.
+  neutral:
+    'border border-surfaceGlass/14 text-textPrimary hover:border-surfaceGlass/25',
   // Quiet, bordered action — the "Find a pro" / discover style.
   ghost:
     'border border-textPrimary/16 text-textSecondary hover:border-textPrimary/25',
@@ -58,11 +78,22 @@ const VARIANTS: Record<ButtonVariant, string> = {
     'border border-toneSuccess/40 text-toneSuccess hover:bg-toneSuccess/10',
 }
 
+// Resting fills. `primary` is already filled, so `soft` is a no-op there.
+const FILLS: Record<ButtonVariant, string> = {
+  primary: '',
+  accent: 'bg-accentPrimary/15 hover:bg-accentPrimary/20',
+  neutral: 'bg-bgSecondary hover:bg-surfaceGlass/6',
+  ghost: 'bg-bgSecondary',
+  danger: 'bg-toneDanger/10 hover:bg-toneDanger/15',
+  success: 'bg-toneSuccess/10 hover:bg-toneSuccess/15',
+}
+
 /** Canonical button class string — for <Link>/<a> CTAs that can't be a <button>. */
 export function buttonClassName({
   variant = 'primary',
   size = 'md',
   shape = 'pill',
+  fill = 'none',
   fullWidth = false,
   className,
 }: ButtonStyleOptions = {}): string {
@@ -71,6 +102,7 @@ export function buttonClassName({
     SIZES[size],
     SHAPES[shape],
     VARIANTS[variant],
+    fill === 'soft' && FILLS[variant],
     fullWidth && 'w-full',
     className,
   )
@@ -84,6 +116,7 @@ export default function Button({
   variant,
   size,
   shape,
+  fill,
   fullWidth,
   className,
   type = 'button',
@@ -92,7 +125,14 @@ export default function Button({
   return (
     <button
       type={type}
-      className={buttonClassName({ variant, size, shape, fullWidth, className })}
+      className={buttonClassName({
+        variant,
+        size,
+        shape,
+        fill,
+        fullWidth,
+        className,
+      })}
       {...rest}
     />
   )

@@ -2,11 +2,12 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { getAdminUiPerms } from '@/lib/adminUiPermissions'
+import { Badge } from '@/app/_components/ui'
 import { cn } from '@/lib/utils'
 export const dynamic = 'force-dynamic'
 
 
-function Card({
+function ToolCard({
   title,
   desc,
   href,
@@ -32,17 +33,14 @@ function Card({
     >
       <div className="flex items-start justify-between gap-3">
         <div className="text-sm font-extrabold">{title}</div>
-        <span
-          aria-hidden="true"
-          className={cn(
-            'mt-0.5 inline-flex h-6 items-center justify-center rounded-full border px-2 text-[11px] font-black',
-            tone === 'highlight'
-              ? 'border-accentPrimary/25 bg-accentPrimary/10 text-accentPrimary'
-              : 'border-surfaceGlass/14 bg-bgPrimary/20 text-textSecondary',
-          )}
+        <Badge
+          aria-hidden
+          tone={tone === 'highlight' ? 'accent' : 'neutral'}
+          fill="soft"
+          className="mt-0.5"
         >
           Tool
-        </span>
+        </Badge>
       </div>
 
       <div className="text-sm text-textSecondary">{desc}</div>
@@ -102,7 +100,7 @@ export default async function AdminHomePage() {
 
       <Section title="Operations" subtitle="The stuff that makes the real world work: cards, attribution, and onboarding flows.">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <Card
+          <ToolCard
             title="NFC Cards"
             desc="Generate cards + short codes, copy tap URLs, and ship physical cards without chaos."
             href="/admin/nfc"
@@ -116,20 +114,20 @@ export default async function AdminHomePage() {
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {perms.canReviewPros ? (
             <>
-              <Card
+              <ToolCard
                 title="Professionals queue"
                 desc="Review applications, approve/decline, flag for changes, suspend if needed."
                 href="/admin/professionals"
                 cta="Open queue"
               />
-              <Card
+              <ToolCard
                 title="License review"
                 desc="Manually verify out-of-state & specialty credentials we couldn’t auto-check."
                 href="/admin/license-review"
                 cta="Open queue"
                 tone="highlight"
               />
-              <Card
+              <ToolCard
                 title="Viral looks"
                 desc="Name, vet and publish the looks clients spotted — set the cover, then approve to fan it out."
                 href="/admin/viral-requests"
@@ -140,8 +138,8 @@ export default async function AdminHomePage() {
 
           {perms.canManageCatalog ? (
             <>
-              <Card title="Services" desc="Curate service definitions and guardrails." href="/admin/services" cta="Manage services" />
-              <Card
+              <ToolCard title="Services" desc="Curate service definitions and guardrails." href="/admin/services" cta="Manage services" />
+              <ToolCard
                 title="Categories"
                 desc="Control taxonomy so discovery stays sane."
                 href="/admin/categories"
@@ -152,46 +150,46 @@ export default async function AdminHomePage() {
 
           {perms.canManagePermissions ? (
             <>
-              <Card
+              <ToolCard
                 title="Memberships"
                 desc="Look up a pro's plan and grant or revoke complimentary months."
                 href="/admin/memberships"
                 cta="Manage memberships"
                 tone="highlight"
               />
-              <Card
+              <ToolCard
                 title="Review moderation"
                 desc="Hide abusive reviews or remove a pro's reply; hidden reviews stop counting toward ratings."
                 href="/admin/reviews"
                 cta="Moderate reviews"
                 tone="highlight"
               />
-              <Card
+              <ToolCard
                 title="Looks moderation"
                 desc="Reported, pending, and flagged looks & comments across tenants; approve/reject/remove, dismiss reports, or feature into Spotlight."
                 href="/admin/looks"
                 cta="Moderate looks"
                 tone="highlight"
               />
-              <Card
+              <ToolCard
                 title="Engagement anomalies"
                 desc="Anti-gaming review queue: looks whose recent saves & likes outrun their impressions, or spike far above the look's own history — a lead to review, not an auto-penalty."
                 href="/admin/looks/anomalies"
                 cta="Review anomalies"
               />
-              <Card
+              <ToolCard
                 title="Personalization metrics"
                 desc="Funnel + health rollup: save→book conversion, the saved-not-booked gap, board→booking, hide rate, per-trigger notification opt-out, and lifetime rebook rate."
                 href="/admin/looks/metrics"
                 cta="View metrics"
               />
-              <Card
+              <ToolCard
                 title="Permissions"
                 desc="Scope what admins can do."
                 href="/admin/permissions"
                 cta="Manage permissions"
               />
-              <Card
+              <ToolCard
                 title="Runtime flags"
                 desc="Temporarily disable signup or verification SMS without a deploy."
                 href="/admin/runtime-flags"
@@ -201,7 +199,7 @@ export default async function AdminHomePage() {
           ) : null}
 
           {perms.canViewLogs ? (
-            <Card title="Logs" desc="Audit trail for admin actions." href="/admin/logs" cta="View logs" />
+            <ToolCard title="Logs" desc="Audit trail for admin actions." href="/admin/logs" cta="View logs" />
           ) : null}
 
           {!canSeeAny ? (

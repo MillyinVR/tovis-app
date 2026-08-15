@@ -9,6 +9,7 @@ export type {
   ButtonVariant,
   ButtonSize,
   ButtonShape,
+  ButtonFill,
 } from './Button'
 
 export { default as Card } from './Card'
@@ -31,4 +32,11 @@ export type {
   BadgeStyleOptions,
   BadgeTone,
   BadgeSize,
+  BadgeFill,
 } from './Badge'
+
+export { default as FieldLabel } from './FieldLabel'
+export type { FieldLabelProps } from './FieldLabel'
+
+export { TextInput, Select, Textarea, controlClassName } from './controls'
+export type { TextInputProps, SelectProps, TextareaProps } from './controls'

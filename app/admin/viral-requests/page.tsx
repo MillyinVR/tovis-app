@@ -31,37 +31,13 @@ import {
   resolveViralCoverImage,
 } from '@/lib/viralRequests/contracts'
 
+import { Badge } from '@/app/_components/ui'
 import AdminGuard from '../_components/AdminGuard'
 import ViralRequestActions from './ViralRequestActions'
 import ViralRequestCoverUploader from './ViralRequestCoverUploader'
 import ViralRequestSubmitterMedia from './ViralRequestSubmitterMedia'
 
 export const dynamic = 'force-dynamic'
-
-function Pill({
-  children,
-  tone = 'neutral',
-}: {
-  children: React.ReactNode
-  tone?: 'neutral' | 'warn' | 'success' | 'danger'
-}) {
-  const toneClass =
-    tone === 'warn'
-      ? 'border-toneWarn/40 text-toneWarn'
-      : tone === 'success'
-        ? 'border-toneSuccess/40 text-toneSuccess'
-        : tone === 'danger'
-          ? 'border-toneDanger/40 text-toneDanger'
-          : 'border-surfaceGlass/12 text-textPrimary'
-
-  return (
-    <span
-      className={`inline-flex items-center rounded-full border bg-bgSecondary px-3 py-1 text-[11px] font-black ${toneClass}`}
-    >
-      {children}
-    </span>
-  )
-}
 
 function statusTone(status: string): 'neutral' | 'warn' | 'success' | 'danger' {
   if (status === 'APPROVED') return 'success'
@@ -89,9 +65,9 @@ export default async function AdminViralRequestsPage() {
               on that row is half-hidden behind it. */}
           <h1 className="text-xl font-extrabold text-textPrimary">Viral looks</h1>
           <div>
-            <Pill tone={awaiting.length > 0 ? 'warn' : 'neutral'}>
+            <Badge fill="soft" tone={awaiting.length > 0 ? 'warn' : 'neutral'}>
               {awaiting.length} awaiting review
-            </Pill>
+            </Badge>
           </div>
           <p className="text-sm text-textSecondary">
             Looks clients have spotted and asked us to name. Approving one fans
@@ -124,9 +100,9 @@ export default async function AdminViralRequestsPage() {
                         <span className="text-sm font-extrabold text-textPrimary">
                           {row.name}
                         </span>
-                        <Pill tone={statusTone(row.status)}>{row.status}</Pill>
+                        <Badge fill="soft" tone={statusTone(row.status)}>{row.status}</Badge>
                         {row.reportCount > 0 ? (
-                          <Pill tone="danger">{row.reportCount} reported</Pill>
+                          <Badge fill="soft" tone="danger">{row.reportCount} reported</Badge>
                         ) : null}
                       </div>
 

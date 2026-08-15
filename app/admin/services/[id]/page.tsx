@@ -1,10 +1,18 @@
 // app/admin/services/[id]/page.tsx
-import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react'
+import type { ReactNode } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { notFound } from 'next/navigation'
 import { AdminPermissionRole, ProfessionType } from '@prisma/client'
 
+import {
+  Badge,
+  Button,
+  FieldLabel,
+  Select,
+  Textarea,
+  TextInput,
+} from '@/app/_components/ui'
 import AdminGuard from '../../_components/AdminGuard'
 import { prisma } from '@/lib/prisma'
 import { moneyToString } from '@/lib/money'
@@ -13,9 +21,6 @@ export const dynamic = 'force-dynamic'
 
 type Params = { id: string }
 type Props = { params: Params | Promise<Params> }
-
-type AdminChipTone = 'neutral' | 'gold' | 'danger' | 'success'
-type AdminBadgeTone = 'neutral' | 'gold'
 
 function formatUsd(value: Parameters<typeof moneyToString>[0]): string {
   const money = moneyToString(value)
@@ -29,46 +34,6 @@ function formatUsd(value: Parameters<typeof moneyToString>[0]): string {
     style: 'currency',
     currency: 'USD',
   }).format(numeric)
-}
-
-function Chip({
-  children,
-  tone = 'neutral',
-}: {
-  children: ReactNode
-  tone?: AdminChipTone
-}) {
-  const base =
-    'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-extrabold'
-
-  const tones: Record<AdminChipTone, string> = {
-    neutral: 'border-surfaceGlass/10 bg-bgPrimary/25 text-textPrimary',
-    gold: 'border-accentPrimary/25 bg-accentPrimary/10 text-textPrimary',
-    success:
-      'border-[rgb(var(--tone-success))/0.25] bg-[rgb(var(--tone-success))/0.10] text-textPrimary',
-    danger:
-      'border-[rgb(var(--tone-danger))/0.25] bg-[rgb(var(--tone-danger))/0.10] text-textPrimary',
-  }
-
-  return <span className={`${base} ${tones[tone]}`}>{children}</span>
-}
-
-function Badge({
-  children,
-  tone = 'neutral',
-}: {
-  children: ReactNode
-  tone?: AdminBadgeTone
-}) {
-  const base =
-    'inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-extrabold'
-
-  const tones: Record<AdminBadgeTone, string> = {
-    neutral: 'border-surfaceGlass/10 bg-bgSecondary text-textPrimary',
-    gold: 'border-accentPrimary/25 bg-accentPrimary/10 text-textPrimary',
-  }
-
-  return <span className={`${base} ${tones[tone]}`}>{children}</span>
 }
 
 function CardShell({
@@ -95,73 +60,6 @@ function CardShell({
 
       <div className="mt-3">{children}</div>
     </section>
-  )
-}
-
-function FieldLabel({ children }: { children: ReactNode }) {
-  return <div className="text-xs font-extrabold text-textSecondary">{children}</div>
-}
-
-function Input(props: InputHTMLAttributes<HTMLInputElement>) {
-  return (
-    <input
-      {...props}
-      className={[
-        'w-full rounded-xl border border-surfaceGlass/15 bg-bgPrimary/40 px-3 py-2 text-sm text-textPrimary',
-        'placeholder:text-textSecondary/70 outline-none',
-        'focus:border-surfaceGlass/30',
-        props.className ?? '',
-      ].join(' ')}
-    />
-  )
-}
-
-function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
-  return (
-    <select
-      {...props}
-      className={[
-        'w-full rounded-xl border border-surfaceGlass/15 bg-bgPrimary/40 px-3 py-2 text-sm text-textPrimary',
-        'outline-none focus:border-surfaceGlass/30',
-        props.className ?? '',
-      ].join(' ')}
-    />
-  )
-}
-
-function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  return (
-    <textarea
-      {...props}
-      className={[
-        'w-full rounded-xl border border-surfaceGlass/15 bg-bgPrimary/40 px-3 py-2 text-sm text-textPrimary',
-        'placeholder:text-textSecondary/70 outline-none',
-        'focus:border-surfaceGlass/30',
-        props.className ?? '',
-      ].join(' ')}
-    />
-  )
-}
-
-function Button({
-  children,
-  variant = 'primary',
-  ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: 'primary' | 'ghost'
-}) {
-  const base =
-    'inline-flex items-center justify-center rounded-xl px-3 py-2 text-xs font-extrabold transition-colors'
-
-  const styles =
-    variant === 'primary'
-      ? 'bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover'
-      : 'border border-surfaceGlass/15 bg-bgSecondary text-textPrimary hover:border-surfaceGlass/25'
-
-  return (
-    <button {...props} className={[base, styles, props.className ?? ''].join(' ')}>
-      {children}
-    </button>
   )
 }
 
@@ -255,23 +153,23 @@ export default async function AdminServiceDetailPage({ params }: Props) {
 
   const headerChips = (
     <>
-      <Chip tone={service.isActive ? 'success' : 'danger'}>
+      <Badge tone={service.isActive ? 'success' : 'danger'} fill="soft">
         {service.isActive ? 'Active' : 'Disabled'}
-      </Chip>
+      </Badge>
 
-      {service.allowMobile ? <Chip tone="gold">Mobile</Chip> : <Chip>Salon-only</Chip>}
+      {service.allowMobile ? <Badge tone="accent" fill="soft">Mobile</Badge> : <Badge fill="soft">Salon-only</Badge>}
 
-      <Chip>{service.defaultDurationMinutes ?? '—'}m</Chip>
-      <Chip tone="gold">{formatUsd(service.minPrice)}</Chip>
-      <Chip>{service.category?.name || '— Category'}</Chip>
+      <Badge fill="soft">{service.defaultDurationMinutes ?? '—'}m</Badge>
+      <Badge tone="accent" fill="soft">{formatUsd(service.minPrice)}</Badge>
+      <Badge fill="soft">{service.category?.name || '— Category'}</Badge>
 
       {service.isAddOnEligible ? (
-        <Chip tone="gold">Add-on eligible</Chip>
+        <Badge tone="accent" fill="soft">Add-on eligible</Badge>
       ) : (
-        <Chip>Not add-on</Chip>
+        <Badge fill="soft">Not add-on</Badge>
       )}
 
-      {service.addOnGroup ? <Chip>Group: {service.addOnGroup}</Chip> : null}
+      {service.addOnGroup ? <Badge fill="soft">Group: {service.addOnGroup}</Badge> : null}
     </>
   )
 
@@ -307,7 +205,7 @@ export default async function AdminServiceDetailPage({ params }: Props) {
           <CardShell
             title="Default media"
             subtitle="Used as a fallback image when pros don’t upload one."
-            right={service.defaultImageUrl ? <Badge tone="gold">Has image</Badge> : <Badge>None</Badge>}
+            right={service.defaultImageUrl ? <Badge tone="accent" size="sm" fill="soft">Has image</Badge> : <Badge size="sm" fill="soft">None</Badge>}
           >
             {service.defaultImageUrl ? (
               <div className="grid gap-3">
@@ -341,7 +239,7 @@ export default async function AdminServiceDetailPage({ params }: Props) {
 
               <label className="grid gap-2">
                 <FieldLabel>Name</FieldLabel>
-                <Input name="name" defaultValue={service.name} required />
+                <TextInput name="name" defaultValue={service.name} required />
               </label>
 
               <label className="grid gap-2">
@@ -359,7 +257,7 @@ export default async function AdminServiceDetailPage({ params }: Props) {
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="grid gap-2">
                   <FieldLabel>Default duration (minutes)</FieldLabel>
-                  <Input
+                  <TextInput
                     name="defaultDurationMinutes"
                     type="number"
                     min={5}
@@ -371,7 +269,7 @@ export default async function AdminServiceDetailPage({ params }: Props) {
 
                 <label className="grid gap-2">
                   <FieldLabel>Min price</FieldLabel>
-                  <Input
+                  <TextInput
                     name="minPrice"
                     type="text"
                     inputMode="decimal"
@@ -392,7 +290,7 @@ export default async function AdminServiceDetailPage({ params }: Props) {
 
                 <label className="grid gap-2">
                   <FieldLabel>Add-on group (optional)</FieldLabel>
-                  <Input
+                  <TextInput
                     name="addOnGroup"
                     defaultValue={service.addOnGroup ?? ''}
                     placeholder="Finish, Treatment, Upgrade, etc."
@@ -419,7 +317,7 @@ export default async function AdminServiceDetailPage({ params }: Props) {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <Button type="submit">Save</Button>
+                  <Button type="submit" variant="accent" fill="soft" size="sm">Save</Button>
                 </div>
               </div>
 
@@ -434,7 +332,7 @@ export default async function AdminServiceDetailPage({ params }: Props) {
           title="Permissions"
           subtitle="Choose which professions can offer this service. Optional: limit to a state (2-letter code). Leaving blank = all states."
           right={
-            <Badge tone="gold">
+            <Badge tone="accent" size="sm" fill="soft">
               {service.permissions.length ? `${service.permissions.length} rules` : '0 rules'}
             </Badge>
           }
@@ -446,7 +344,7 @@ export default async function AdminServiceDetailPage({ params }: Props) {
           >
             <label className="grid gap-2">
               <FieldLabel>State code filter (optional)</FieldLabel>
-              <Input name="stateCode" placeholder="CA" maxLength={2} />
+              <TextInput name="stateCode" placeholder="CA" maxLength={2} />
             </label>
 
             <div className="grid gap-2 rounded-2xl border border-surfaceGlass/10 bg-bgPrimary/20 p-3">
@@ -473,7 +371,7 @@ export default async function AdminServiceDetailPage({ params }: Props) {
             </div>
 
             <div className="flex justify-end">
-              <Button type="submit">Replace permissions</Button>
+              <Button type="submit" variant="accent" fill="soft" size="sm">Replace permissions</Button>
             </div>
           </form>
 
@@ -491,8 +389,8 @@ export default async function AdminServiceDetailPage({ params }: Props) {
                     className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-surfaceGlass/10 bg-bgPrimary/20 p-3"
                   >
                     <div className="flex flex-wrap items-center gap-2">
-                      <Badge tone="gold">{permission.professionType}</Badge>
-                      <Badge>{permission.stateCode ? permission.stateCode : 'All states'}</Badge>
+                      <Badge tone="accent" size="sm" fill="soft">{permission.professionType}</Badge>
+                      <Badge size="sm" fill="soft">{permission.stateCode ? permission.stateCode : 'All states'}</Badge>
                     </div>
 
                     <div className="text-xs text-textSecondary">Rule ID: {permission.id}</div>

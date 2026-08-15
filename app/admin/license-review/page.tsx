@@ -20,6 +20,7 @@ import {
   VerificationDocumentType,
   VerificationStatus,
 } from '@prisma/client'
+import { Badge } from '@/app/_components/ui'
 import AdminGuard from '../_components/AdminGuard'
 import LicenseReviewActions from './LicenseReviewActions'
 
@@ -29,14 +30,6 @@ const QUEUE_STATUSES = [
   VerificationStatus.PENDING,
   VerificationStatus.NEEDS_INFO,
 ] as const
-
-function Pill({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="inline-flex items-center rounded-full border border-surfaceGlass/12 bg-bgSecondary px-3 py-1 text-[11px] font-black text-textPrimary">
-      {children}
-    </span>
-  )
-}
 
 // The register flow stores a context note on licenseRawJson (e.g. "Out-of-state
 // /specialty credential; manual review required", "DCA timeout at signup").
@@ -138,7 +131,7 @@ export default async function AdminLicenseReviewPage() {
         <div className="grid gap-1">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <h1 className="text-xl font-extrabold text-textPrimary">License review</h1>
-            <Pill>{rows.length} awaiting review</Pill>
+            <Badge fill="soft">{rows.length} awaiting review</Badge>
           </div>
           <p className="text-sm text-textSecondary">
             Credentials we couldn’t auto-verify — out-of-state and specialty
@@ -216,8 +209,8 @@ export default async function AdminLicenseReviewPage() {
 
                     <div className="flex flex-col items-end gap-2">
                       <div className="flex flex-wrap items-center justify-end gap-2">
-                        <Pill>{String(pro.verificationStatus)}</Pill>
-                        {pro.licenseReviewPending ? <Pill>Re-review</Pill> : null}
+                        <Badge fill="soft">{String(pro.verificationStatus)}</Badge>
+                        {pro.licenseReviewPending ? <Badge fill="soft">Re-review</Badge> : null}
                       </div>
 
                       {latestDoc ? (

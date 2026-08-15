@@ -4,20 +4,13 @@ import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { formatInTimeZone } from '@/lib/time'
 import { platformCrossTenantProVisibilityFilter } from '@/lib/tenant'
+import { Badge } from '@/app/_components/ui'
 import AdminGuard from '../_components/AdminGuard'
 import { getAdminUiPerms } from '@/lib/adminUiPermissions'
 import { formatPublicProfileDisplayName } from '@/lib/profiles/publicProfileFormatting'
 import { ProfessionalLocationType, VerificationStatus } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
-
-function Pill({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="inline-flex items-center rounded-full border border-surfaceGlass/12 bg-bgSecondary px-3 py-1 text-[11px] font-black text-textPrimary">
-      {children}
-    </span>
-  )
-}
 
 function Tab({ href, label, active }: { href: string; label: string; active: boolean }) {
   return (
@@ -201,9 +194,9 @@ export default async function AdminProfessionalsPage({
                       </div>
 
                       <div className="flex flex-wrap items-center gap-2">
-                        <Pill>Status: {String(p.verificationStatus)}</Pill>
-                        <Pill>{p.licenseVerified ? 'License Verified' : 'License NOT Verified'}</Pill>
-                        <Pill>Docs: {p.verificationDocs.length}</Pill>
+                        <Badge fill="soft">Status: {String(p.verificationStatus)}</Badge>
+                        <Badge fill="soft">{p.licenseVerified ? 'License Verified' : 'License NOT Verified'}</Badge>
+                        <Badge fill="soft">Docs: {p.verificationDocs.length}</Badge>
                       </div>
                     </div>
 

@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { platformCrossTenantProVisibilityFilter } from '@/lib/tenant'
 import { getCurrentUser } from '@/lib/currentUser'
+import { Badge, Button, FieldLabel, Select } from '@/app/_components/ui'
 import { AdminPermissionRole, ProfessionalLocationType } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
@@ -12,67 +13,6 @@ function roleLabel(role: AdminPermissionRole) {
   if (role === AdminPermissionRole.SUPER_ADMIN) return 'SUPER_ADMIN'
   if (role === AdminPermissionRole.REVIEWER) return 'REVIEWER'
   return 'SUPPORT'
-}
-
-function Badge({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="inline-flex items-center rounded-full border border-surfaceGlass/12 bg-bgSecondary px-2 py-1 text-[11px] font-black text-textPrimary">
-      {children}
-    </span>
-  )
-}
-
-function FieldLabel({ children }: { children: React.ReactNode }) {
-  return <div className="text-xs font-black text-textSecondary">{children}</div>
-}
-
-function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
-  const { className, children, ...rest } = props
-  return (
-    <select
-      {...rest}
-      className={[
-        'w-full rounded-card border border-surfaceGlass/12 bg-bgPrimary px-3 py-2 text-sm text-textPrimary outline-none',
-        'focus:border-accentPrimary/50 focus:ring-2 focus:ring-accentPrimary/20',
-        className ?? '',
-      ].join(' ')}
-    >
-      {children}
-    </select>
-  )
-}
-
-function PrimaryButton(props: React.ButtonHTMLAttributes<HTMLButtonElement>) {
-  const { className, children, ...rest } = props
-  return (
-    <button
-      {...rest}
-      className={[
-        'inline-flex h-10 items-center justify-center rounded-full border border-accentPrimary/45 bg-accentPrimary/15 px-4 text-xs font-black text-accentPrimary',
-        'hover:bg-accentPrimary/20 hover:border-accentPrimary/60',
-        'disabled:cursor-not-allowed disabled:opacity-60',
-        className ?? '',
-      ].join(' ')}
-    >
-      {children}
-    </button>
-  )
-}
-
-function DangerButton(props: React.ButtonHTMLAttributes<HTMLButtonElement>) {
-  const { className, children, ...rest } = props
-  return (
-    <button
-      {...rest}
-      className={[
-        'inline-flex items-center justify-center rounded-full border border-toneDanger/40 bg-toneDanger/10 px-3 py-2 text-xs font-black text-toneDanger',
-        'hover:bg-toneDanger/15 hover:border-toneDanger/55',
-        className ?? '',
-      ].join(' ')}
-    >
-      {children}
-    </button>
-  )
 }
 
 export default async function AdminPermissionsPage() {
@@ -165,7 +105,6 @@ export default async function AdminPermissionsPage() {
         : loc?.type
           ? String(loc.type)
           : null
-
 
     const whereText =
       loc?.formattedAddress?.trim() ||
@@ -277,9 +216,9 @@ export default async function AdminPermissionsPage() {
           </label>
 
           <div className="flex items-end">
-            <PrimaryButton type="submit" className="w-full md:w-auto">
+            <Button type="submit" variant="accent" fill="soft" size="sm" className="w-full md:w-auto">
               Add permission
-            </PrimaryButton>
+            </Button>
           </div>
         </form>
 
@@ -301,7 +240,7 @@ export default async function AdminPermissionsPage() {
               return (
                 <div key={p.id} className="rounded-card border border-surfaceGlass/10 bg-bgPrimary/40 p-4">
                   <div className="flex flex-wrap items-center gap-2">
-                    <Badge>{roleLabel(p.role)}</Badge>
+                    <Badge fill="soft">{roleLabel(p.role)}</Badge>
                     <div className="text-sm font-extrabold">{u?.email ?? p.adminUserId}</div>
                   </div>
 
@@ -322,7 +261,7 @@ export default async function AdminPermissionsPage() {
 
                   <form className="mt-3" action={`/api/v1/admin/permissions/${encodeURIComponent(p.id)}`} method="post">
                     <input type="hidden" name="_method" value="DELETE" />
-                    <DangerButton type="submit">Remove</DangerButton>
+                    <Button type="submit" variant="danger" fill="soft" size="sm">Remove</Button>
                   </form>
                 </div>
               )

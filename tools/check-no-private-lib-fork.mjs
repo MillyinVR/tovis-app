@@ -10,15 +10,27 @@
 // copy from landing.
 //
 // The rule: a file may not declare a PRIVATE top-level `function`/`const` whose
-// name `lib/` already exports as a value. Import the canonical instead — or, if
-// the two genuinely mean different things, give yours a different name, because
-// two same-named helpers with different behaviour is the more expensive bug.
-// (`lib/auth/verification.ts` exported a `pickString` returning `''` while
+// name a CANONICAL DIR already exports as a value. Import the canonical instead
+// — or, if the two genuinely mean different things, give yours a different name,
+// because two same-named helpers with different behaviour is the more expensive
+// bug. (`lib/auth/verification.ts` exported a `pickString` returning `''` while
 // `lib/pick.ts` exported one returning `null`. Both compiled; `if (!x)` hid the
 // difference at every call site.)
 //
-// The export list is DERIVED from lib/ on every run, so a helper promoted into
-// lib/ starts being enforced the moment it is exported — no list to update here.
+// Phase 6 added the UI kit (`app/_components/ui`) as a second canonical dir. The
+// same rot had happened there in visual form: `FieldLabel` ×10, `Select` ×7,
+// `Card` ×5 re-authored per screen, each with its own class strings — and those
+// class strings are where most of the app's raw colors live. Two of them wrote
+// `border-[rgb(var(--micro-accent))/0.35]`, where the alpha inside the bracket
+// makes the declaration invalid CSS, so the browser dropped it and the element
+// rendered unstyled. Nothing caught that for as long as it existed.
+//
+// The export list is DERIVED from those dirs on every run, so a helper promoted
+// into one starts being enforced the moment it is exported — no list to update
+// here. Both export FORMS are read: direct (`export function X`) and barrel
+// re-export (`export { default as X } from './X'`), because the UI kit exposes
+// everything through the second and a matcher that knows only the first would
+// see an empty kit and pass vacuously.
 //
 // NOT flagged: exported declarations (a second module deliberately exposing a
 // name is a different smell, and re-exports are legitimate), types/interfaces
@@ -35,6 +47,11 @@ const ROOT = process.cwd()
 const BASELINE_PATH = path.join(ROOT, 'tools/baselines/no-private-lib-fork.txt')
 
 const SCAN_DIRS = ['app', 'lib']
+
+// Where canonical VALUES live. `lib/` is the helper layer; `app/_components/ui`
+// is the UI kit — Button/Card/Badge/Avatar and the form controls. Both were
+// being re-typed per screen, and until phase 6 only the first half was checked.
+const CANONICAL_DIRS = ['lib', 'app/_components/ui']
 const TARGET_EXTENSIONS = new Set(['.ts', '.tsx'])
 const IGNORE_DIRS = new Set([
   'node_modules',
@@ -78,10 +95,35 @@ function walk(dir) {
 }
 
 /**
- * Every VALUE name `lib/` exports, mapped to the module that exports it.
+ * Names re-exported by a barrel: `export { A, default as B, C as D } from './x'`.
+ * The UI kit's index.ts exposes EVERYTHING this way, so a matcher that only knows
+ * `export function`/`export const` sees an empty kit and passes vacuously — which
+ * is exactly what widening SCAN_DIRS alone would have shipped.
+ *
+ * Only the LOCAL name matters (what a fork would collide with): in
+ * `default as Button` that is `Button`, in `buttonClassName` it is itself. Type
+ * re-exports (`export type { … }`) are skipped, same as the rest of the guard.
+ */
+function readReExportedNames(source) {
+  const names = []
+
+  const re = /^export\s+\{([^}]*)\}\s*from\s*['"]/gm
+  for (const match of source.matchAll(re)) {
+    for (const clause of match[1].split(',')) {
+      const parts = clause.trim().split(/\s+as\s+/)
+      const local = (parts.length > 1 ? parts[1] : parts[0])?.trim()
+      if (local && /^[A-Za-z_$][\w$]*$/.test(local)) names.push(local)
+    }
+  }
+
+  return names
+}
+
+/**
+ * Every VALUE name the canonical dirs export, mapped to the module exporting it.
  * Types and interfaces are deliberately excluded — see the header.
  */
-function readLibExports() {
+function readCanonicalExports() {
   const exports = new Map()
 
   const patterns = [
@@ -89,24 +131,60 @@ function readLibExports() {
     /^export\s+(?:const|let)\s+([A-Za-z_$][\w$]*)/,
   ]
 
-  for (const file of walk(path.join(ROOT, 'lib'))) {
-    const rel = normalize(path.relative(ROOT, file))
-    if (isTestFile(rel)) continue
+  const perDir = new Map()
 
-    for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
-      for (const pattern of patterns) {
-        const name = line.match(pattern)?.[1]
-        if (name && !exports.has(name)) exports.set(name, rel)
+  for (const dir of CANONICAL_DIRS) {
+    const tally = { direct: 0, reExport: 0, barrels: 0 }
+
+    for (const file of walk(path.join(ROOT, dir))) {
+      const rel = normalize(path.relative(ROOT, file))
+      if (isTestFile(rel)) continue
+
+      const source = fs.readFileSync(file, 'utf8')
+
+      for (const line of source.split('\n')) {
+        for (const pattern of patterns) {
+          const name = line.match(pattern)?.[1]
+          if (!name) continue
+          tally.direct += 1
+          if (!exports.has(name)) exports.set(name, rel)
+        }
+      }
+
+      // Counted independently of the parser's result, so a parser that returns
+      // nothing cannot also hide the fact that there was something to find.
+      if (/^export\s+\{[^}]*\}\s*from\s*['"]/m.test(source)) tally.barrels += 1
+
+      for (const name of readReExportedNames(source)) {
+        tally.reExport += 1
+        if (!exports.has(name)) exports.set(name, rel)
       }
     }
+
+    perDir.set(dir, tally)
   }
 
-  if (exports.size === 0) {
-    throw new Error(
-      'check-no-private-lib-fork: found no value exports under lib/. Either the ' +
-        'scan is broken or the export syntax changed — fix one or the other ' +
-        'rather than leaving the guard passing vacuously.',
-    )
+  // Assert PER DIRECTORY and PER FORM. lib/ alone exports hundreds, so a
+  // total-only check would stay green while the kit half found nothing; and a
+  // direct-only check would stay green if the re-export matcher regressed, which
+  // is the exact failure this guard was widened to avoid.
+  for (const [dir, tally] of perDir) {
+    if (tally.direct + tally.reExport === 0) {
+      throw new Error(
+        `check-no-private-lib-fork: found no value exports under ${dir}/. Either ` +
+          'the scan is broken or the export syntax changed — fix one or the ' +
+          'other rather than leaving the guard passing vacuously.',
+      )
+    }
+
+    if (tally.barrels > 0 && tally.reExport === 0) {
+      throw new Error(
+        `check-no-private-lib-fork: ${dir}/ has ${tally.barrels} barrel file(s) ` +
+          'using `export { … } from`, but the re-export matcher extracted no ' +
+          'names from them. Fix the matcher rather than leaving those exports ' +
+          'unenforced.',
+      )
+    }
   }
 
   return exports
@@ -118,7 +196,7 @@ const PRIVATE_DECL = [
   /^(?:const|let)\s+([A-Za-z_$][\w$]*)\s*[=:]/,
 ]
 
-function findViolations(libExports) {
+function findViolations(canonicalExports) {
   const violations = []
 
   for (const scanDir of SCAN_DIRS) {
@@ -134,7 +212,7 @@ function findViolations(libExports) {
           if (!name) continue
           if (IGNORED_NAMES.has(name)) continue
 
-          const owner = libExports.get(name)
+          const owner = canonicalExports.get(name)
           if (!owner) continue
           if (owner === rel) continue
 
@@ -172,17 +250,17 @@ function makeKey(violation) {
 }
 
 function main() {
-  let libExports
+  let canonicalExports
 
   try {
-    libExports = readLibExports()
+    canonicalExports = readCanonicalExports()
   } catch (error) {
     console.error(`\n${error.message}\n`)
     process.exit(1)
   }
 
   const baseline = readBaseline()
-  const violations = findViolations(libExports)
+  const violations = findViolations(canonicalExports)
 
   const fresh = violations.filter((v) => !baseline.has(makeKey(v)))
   const seen = new Set(violations.map(makeKey))
@@ -191,8 +269,8 @@ function main() {
   if (fresh.length > 0) {
     console.error('\ncheck-no-private-lib-fork: failed\n')
     console.error(
-      'These re-declare a helper lib/ already exports. Import the canonical —\n' +
-        'or rename yours, if it does something different.\n',
+      'These re-declare something lib/ or the UI kit already exports. Import the\n' +
+        'canonical — or rename yours, if it does something different.\n',
     )
 
     for (const v of fresh) {
@@ -217,7 +295,7 @@ function main() {
 
   console.log(
     `check-no-private-lib-fork: passed ` +
-      `(${libExports.size} lib exports checked, ${baseline.size} baselined)`,
+      `(${canonicalExports.size} canonical exports checked, ${baseline.size} baselined)`,
   )
 }
 

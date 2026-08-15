@@ -19,10 +19,17 @@ export type BadgeTone =
   | 'info'
   | 'pending'
 export type BadgeSize = 'sm' | 'md'
+/**
+ * `none` is the border-only chip this file shipped with. `soft` adds the tinted
+ * fill that every admin pill had re-authored by hand — without it, migrating
+ * those forks would have silently dropped their background.
+ */
+export type BadgeFill = 'none' | 'soft'
 
 export type BadgeStyleOptions = {
   tone?: BadgeTone
   size?: BadgeSize
+  fill?: BadgeFill
   className?: string
 }
 
@@ -45,13 +52,32 @@ const TONES: Record<BadgeTone, string> = {
   pending: 'border-tonePending/30 text-tonePending',
 }
 
+// Soft fills, per tone. Neutral fills with the raised surface (what the admin
+// pills used); every other tone fills with its own tint at 10%.
+const FILLS: Record<BadgeTone, string> = {
+  neutral: 'bg-bgSecondary',
+  accent: 'bg-accentPrimary/10',
+  danger: 'bg-toneDanger/10',
+  success: 'bg-toneSuccess/10',
+  warn: 'bg-toneWarn/10',
+  info: 'bg-toneInfo/10',
+  pending: 'bg-tonePending/10',
+}
+
 /** Canonical badge class string — for cases that can't render the <Badge> span. */
 export function badgeClassName({
   tone = 'neutral',
   size = 'md',
+  fill = 'none',
   className,
 }: BadgeStyleOptions = {}): string {
-  return cn(BASE, SIZES[size], TONES[tone], className)
+  return cn(
+    BASE,
+    SIZES[size],
+    TONES[tone],
+    fill === 'soft' && FILLS[tone],
+    className,
+  )
 }
 
 export type BadgeProps = BadgeStyleOptions & HTMLAttributes<HTMLSpanElement>
@@ -60,8 +86,11 @@ export type BadgeProps = BadgeStyleOptions & HTMLAttributes<HTMLSpanElement>
 export default function Badge({
   tone,
   size,
+  fill,
   className,
   ...rest
 }: BadgeProps) {
-  return <span className={badgeClassName({ tone, size, className })} {...rest} />
+  return (
+    <span className={badgeClassName({ tone, size, fill, className })} {...rest} />
+  )
 }

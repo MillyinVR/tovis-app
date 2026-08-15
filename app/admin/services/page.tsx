@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { clamp } from '@/lib/pick'
 import { getAdminUiPerms } from '@/lib/adminUiPermissions'
+import { FieldLabel, Select, TextInput } from '@/app/_components/ui'
 import ServiceHeroGrid from './_components/ServiceHeroGrid'
 import ServicesBrowseBar from './_components/ServicesBrowseBar'
 import ServicesCreateWizard from './_components/ServicesCreateWizard'
@@ -57,37 +58,6 @@ function CardShell({
       </div>
       <div className="mt-3">{children}</div>
     </section>
-  )
-}
-
-function FieldLabel({ children }: { children: React.ReactNode }) {
-  return <div className="text-xs font-extrabold text-textSecondary">{children}</div>
-}
-
-function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
-  return (
-    <input
-      {...props}
-      className={[
-        'w-full rounded-xl border border-surfaceGlass/15 bg-bgPrimary/40 px-3 py-2 text-sm text-textPrimary',
-        'placeholder:text-textSecondary/70 outline-none',
-        'focus:border-surfaceGlass/30',
-        props.className ?? '',
-      ].join(' ')}
-    />
-  )
-}
-
-function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
-  return (
-    <select
-      {...props}
-      className={[
-        'w-full rounded-xl border border-surfaceGlass/15 bg-bgPrimary/40 px-3 py-2 text-sm text-textPrimary',
-        'outline-none focus:border-surfaceGlass/30',
-        props.className ?? '',
-      ].join(' ')}
-    />
   )
 }
 
@@ -284,8 +254,8 @@ export default async function AdminServicesPage(props: { searchParams?: SearchPa
             <FieldLabel>Create category</FieldLabel>
 
             <div className="grid gap-3 sm:grid-cols-2">
-              <Input name="name" placeholder="Name (ex: Hair)" required />
-              <Input name="slug" placeholder="Slug (ex: hair)" required />
+              <TextInput name="name" placeholder="Name (ex: Hair)" required />
+              <TextInput name="slug" placeholder="Slug (ex: hair)" required />
             </div>
 
             <Select name="parentId" defaultValue="">
@@ -366,7 +336,6 @@ export default async function AdminServicesPage(props: { searchParams?: SearchPa
         {/* Services */}
         <CardShell title="Services" subtitle={`${total} total • ordered by category`}>
           <ServicesCreateWizard categories={categoryPayload} />
-
 
           {/* Browse + pagination */}
           <div className="mt-4">
