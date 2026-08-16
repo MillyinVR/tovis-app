@@ -132,7 +132,7 @@ export function BookingOverrideConfirmModal(
 
   return (
     <div
-      className={`fixed inset-0 ${zClass.modal} flex items-end justify-center bg-black/75 p-0 backdrop-blur-md sm:items-center sm:p-4`}
+      className={`fixed inset-0 ${zClass.modal} flex items-end justify-center bg-overlay/75 p-0 backdrop-blur-md sm:items-center sm:p-4`}
       role="dialog"
       aria-modal="true"
       aria-labelledby="booking-override-title"

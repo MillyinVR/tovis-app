@@ -495,7 +495,7 @@ export default function EditProfileButton({ canEditHandle, initial }: Props) {
           className={[
             'fixed inset-0 grid place-items-center p-4',
             zClass.modal,
-            'bg-black/70 backdrop-blur-sm',
+            'bg-overlay/70 backdrop-blur-sm',
             'transition-opacity duration-150 ease-out',
             mounted && !closing ? 'opacity-100' : 'opacity-0',
           ].join(' ')}

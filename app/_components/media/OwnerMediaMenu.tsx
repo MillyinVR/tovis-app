@@ -442,7 +442,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
 
       {/* Edit modal */}
       {openEdit ? (
-        <div className={`fixed inset-0 ${zClass.modal} bg-black/60`} onClick={closeEdit}>
+        <div className={`fixed inset-0 ${zClass.modal} bg-overlay/60`} onClick={closeEdit}>
           <div
             className={cn(
               'mx-auto mt-4 w-full max-w-[560px] overflow-hidden rounded-[18px]',
