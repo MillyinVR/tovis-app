@@ -2172,7 +2172,7 @@ export default function NewBookingForm({
                         type="button"
                         disabled={loading}
                         onClick={() => void chooseServicePrediction(prediction)}
-                        className="rounded-xl border border-surfaceGlass/10 bg-bgPrimary/40 p-2 text-left hover:bg-white/5 disabled:opacity-60"
+                        className="rounded-xl border border-surfaceGlass/10 bg-bgPrimary/40 p-2 text-left hover:bg-surfaceGlass/5 disabled:opacity-60"
                       >
                         <div className="text-[13px] font-black text-textPrimary">
                           {prediction.mainText || prediction.description}

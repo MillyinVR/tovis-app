@@ -215,7 +215,7 @@ function ServiceDropdown({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={copy.dropdownSearch}
-            className="mb-2 w-full rounded-[10px] border border-surfaceGlass/10 bg-white/[0.03] px-3 py-2 text-[13px] text-textPrimary outline-none placeholder:text-textMuted focus:border-surfaceGlass/25"
+            className="mb-2 w-full rounded-[10px] border border-surfaceGlass/10 bg-surfaceGlass/[0.03] px-3 py-2 text-[13px] text-textPrimary outline-none placeholder:text-textMuted focus:border-surfaceGlass/25"
           />
           {groups.map(([cat, services]) => (
             <div key={cat} className="mb-1">
@@ -238,7 +238,7 @@ function ServiceDropdown({
                     className={[
                       'flex w-full items-center justify-between gap-2 rounded-[8px] px-2 py-1.5 text-left text-[13px] transition',
                       svc.licensedForPro
-                        ? 'hover:bg-white/5'
+                        ? 'hover:bg-surfaceGlass/5'
                         : 'cursor-not-allowed opacity-40',
                       selected ? 'text-accentPrimary' : 'text-textSecondary',
                     ].join(' ')}
@@ -259,13 +259,13 @@ function ServiceDropdown({
           <div className="mt-1 border-t border-surfaceGlass/10 pt-1">
             <button
               type="button"
-              className="flex w-full rounded-[8px] px-2 py-1.5 text-left text-[13px] text-amber hover:bg-white/5"
+              className="flex w-full rounded-[8px] px-2 py-1.5 text-left text-[13px] text-amber hover:bg-surfaceGlass/5"
             >
               {copy.requestNew}
             </button>
             <button
               type="button"
-              className="flex w-full rounded-[8px] px-2 py-1.5 text-left text-[13px] text-textMuted hover:bg-white/5"
+              className="flex w-full rounded-[8px] px-2 py-1.5 text-left text-[13px] text-textMuted hover:bg-surfaceGlass/5"
             >
               {copy.skip}
             </button>
@@ -328,7 +328,7 @@ function RightColumn({
 
 function Pill({ children }: { children: React.ReactNode }) {
   return (
-    <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] uppercase tracking-[0.08em] text-textMuted">
+    <span className="rounded-full bg-surfaceGlass/5 px-2 py-0.5 text-[10px] uppercase tracking-[0.08em] text-textMuted">
       {children}
     </span>
   )

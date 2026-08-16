@@ -93,7 +93,7 @@ export default async function ProVerificationPage() {
           </div>
         </div>
 
-        <div className="mt-5 h-px w-full bg-white/10" />
+        <div className="mt-5 h-px w-full bg-surfaceGlass/10" />
 
         {/* One "Your license" section: details + photo together, so renewing
             pros update the date AND re-upload in the same place. */}
@@ -122,7 +122,7 @@ export default async function ProVerificationPage() {
           </div>
         </div>
 
-        <div className="mt-6 h-px w-full bg-white/10" />
+        <div className="mt-6 h-px w-full bg-surfaceGlass/10" />
 
         <div className="mt-5">
           <div className="text-sm font-black text-textPrimary">Documents</div>

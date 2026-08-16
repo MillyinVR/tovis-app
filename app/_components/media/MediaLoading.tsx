@@ -37,7 +37,7 @@ export default function MediaLoading({
           <BrandMark size={40} title="Loading media" />
         </div>
 
-        <div className="h-[3px] w-full overflow-hidden rounded-full bg-white/10">
+        <div className="h-[3px] w-full overflow-hidden rounded-full bg-surfaceGlass/10">
           <div
             className={cn(
               'h-full rounded-full bg-accentPrimary transition-[width] duration-200 ease-out',

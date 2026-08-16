@@ -13,7 +13,7 @@ export function ColumnMappingBanner({ mappings }: Props) {
       {mappings.map((m) => (
         <span
           key={m.src}
-          className="inline-flex items-center gap-1.5 rounded-full bg-white/5 px-2.5 py-1 text-[12px]"
+          className="inline-flex items-center gap-1.5 rounded-full bg-surfaceGlass/5 px-2.5 py-1 text-[12px]"
         >
           <span className="font-mono text-textMuted">{m.src}</span>
           <span className="text-textMuted" aria-hidden="true">

@@ -85,7 +85,7 @@ export default function DiscoverActiveProCard({ pro, navHref }: DiscoverActivePr
       <div className="mt-3 flex items-center gap-2">
         <Link
           href={`/professionals/${encodeURIComponent(pro.id)}`}
-          className="rounded-full border border-surfaceGlass/10 bg-bgPrimary/25 px-4 py-2 text-[12px] font-black text-textPrimary transition-colors hover:bg-white/10"
+          className="rounded-full border border-surfaceGlass/10 bg-bgPrimary/25 px-4 py-2 text-[12px] font-black text-textPrimary transition-colors hover:bg-surfaceGlass/10"
         >
           View
         </Link>
@@ -98,7 +98,7 @@ export default function DiscoverActiveProCard({ pro, navHref }: DiscoverActivePr
         */}
         <Link
           href={`/messages/start?kind=PRO&professionalId=${encodeURIComponent(pro.id)}`}
-          className="rounded-full border border-surfaceGlass/10 bg-bgPrimary/25 px-4 py-2 text-[12px] font-black text-textPrimary transition-colors hover:bg-white/10"
+          className="rounded-full border border-surfaceGlass/10 bg-bgPrimary/25 px-4 py-2 text-[12px] font-black text-textPrimary transition-colors hover:bg-surfaceGlass/10"
         >
           Message
         </Link>

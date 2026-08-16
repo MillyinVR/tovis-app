@@ -245,9 +245,9 @@ export function MigrateCalendarClient({ copy }: Props) {
             </button>
 
             <div className="mx-auto mt-7 flex max-w-md items-center gap-3 text-[11px] uppercase tracking-[0.12em] text-textMuted">
-              <span className="h-px flex-1 bg-white/10" />
+              <span className="h-px flex-1 bg-surfaceGlass/10" />
               or paste a feed link
-              <span className="h-px flex-1 bg-white/10" />
+              <span className="h-px flex-1 bg-surfaceGlass/10" />
             </div>
             <p className="mx-auto mt-3 max-w-md text-[13px] text-textMuted">
               Most booking apps offer a read-only calendar &ldquo;subscribe&rdquo;
@@ -260,7 +260,7 @@ export function MigrateCalendarClient({ copy }: Props) {
                 value={feedUrl}
                 onChange={(e) => setFeedUrl(e.target.value)}
                 placeholder="https://…/calendar.ics"
-                className="flex-1 rounded-inner border border-surfaceGlass/10 bg-white/[0.03] px-3 py-2 text-[14px] text-textPrimary placeholder:text-textMuted focus:border-accentPrimary/40 focus:outline-none"
+                className="flex-1 rounded-inner border border-surfaceGlass/10 bg-surfaceGlass/[0.03] px-3 py-2 text-[14px] text-textPrimary placeholder:text-textMuted focus:border-accentPrimary/40 focus:outline-none"
               />
               <button
                 type="button"

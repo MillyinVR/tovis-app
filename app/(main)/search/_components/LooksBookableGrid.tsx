@@ -283,7 +283,7 @@ export default function LooksBookableGrid({
             className={cn(
               'rounded-full border border-surfaceGlass/15 bg-bgPrimary/25 px-5 py-2.5',
               'font-mono text-[11px] font-black uppercase tracking-[0.08em] text-textPrimary',
-              'transition hover:bg-white/10 disabled:opacity-60',
+              'transition hover:bg-surfaceGlass/10 disabled:opacity-60',
             )}
           >
             {loadingMore ? 'Loading…' : 'Load more'}

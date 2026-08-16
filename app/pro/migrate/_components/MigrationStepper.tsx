@@ -42,7 +42,7 @@ export function MigrationStepper({ active }: Props) {
                 ? 'bg-accentPrimary/15 text-accentPrimary ring-1 ring-accentPrimary/40'
                 : isActive
                   ? 'bg-accentPrimary text-onAccent'
-                  : 'bg-white/5 text-textMuted ring-1 ring-white/10',
+                  : 'bg-surfaceGlass/5 text-textMuted ring-1 ring-surfaceGlass/10',
             ].join(' ')}
             aria-hidden="true"
           >
@@ -88,7 +88,7 @@ export function MigrationStepper({ active }: Props) {
               content
             )}
             {i < MIGRATION_STEPS.length - 1 ? (
-              <span className="h-px w-6 bg-white/10" aria-hidden="true" />
+              <span className="h-px w-6 bg-surfaceGlass/10" aria-hidden="true" />
             ) : null}
           </span>
         )

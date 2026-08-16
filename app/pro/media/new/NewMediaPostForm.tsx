@@ -648,7 +648,7 @@ export default function NewMediaPostForm() {
                     type="button"
                     onClick={() => setImageEditorOpen(true)}
                     disabled={!file || imagePreparing}
-                    className="rounded-full border border-surfaceGlass/10 bg-bgSecondary px-3 py-2 text-[12px] font-black text-textPrimary hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="rounded-full border border-surfaceGlass/10 bg-bgSecondary px-3 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass/5 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     Crop / adjust image
                   </button>
