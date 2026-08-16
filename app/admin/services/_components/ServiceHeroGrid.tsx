@@ -792,7 +792,7 @@ export default function ServiceHeroGrid(props: {
                 className={cn(
                   'relative flex w-full max-w-3xl flex-col overflow-hidden outline-none',
                   'tovis-glass-strong tovis-noise',
-                  'rounded-t-[26px] border border-white/12 sm:rounded-[26px]',
+                  'rounded-t-[26px] border border-surfaceGlass/12 sm:rounded-[26px]',
                   'shadow-[0_50px_160px_rgb(0_0_0/0.78)]',
                   'max-h-[calc(100vh-12px)] sm:max-h-[calc(100vh-80px)]',
                 )}
@@ -800,7 +800,7 @@ export default function ServiceHeroGrid(props: {
                 <div className="pointer-events-none absolute inset-0 tovis-overlay-scrim" />
                 <div className="pointer-events-none absolute inset-0 ring-1 ring-white/10" />
 
-                <div className="relative z-[2] flex items-start justify-between gap-3 border-b border-white/10 bg-bgSecondary/70 px-4 py-3 backdrop-blur-xl">
+                <div className="relative z-[2] flex items-start justify-between gap-3 border-b border-surfaceGlass/10 bg-bgSecondary/70 px-4 py-3 backdrop-blur-xl">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <div className="text-[14px] font-black tracking-[0.04em] text-textPrimary">
@@ -1095,7 +1095,7 @@ const ServiceEditForm = forwardRef<
   return (
     <div className="relative p-4">
       <div className="grid gap-3">
-        <div className="grid gap-2 rounded-2xl border border-white/10 bg-bgPrimary/25 p-3">
+        <div className="grid gap-2 rounded-2xl border border-surfaceGlass/10 bg-bgPrimary/25 p-3">
           <div className="flex items-center justify-between gap-3">
             <div>
               <div className="text-xs font-extrabold text-textSecondary">
@@ -1157,7 +1157,7 @@ const ServiceEditForm = forwardRef<
             </div>
           </div>
 
-          <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-bgPrimary/20">
+          <div className="relative overflow-hidden rounded-2xl border border-surfaceGlass/10 bg-bgPrimary/20">
             {defaultImageUrl ? (
               <ImageWithShimmer
                 src={defaultImageUrl}
@@ -1250,7 +1250,7 @@ const ServiceEditForm = forwardRef<
           />
         </label>
 
-        <div className="grid gap-3 rounded-2xl border border-white/10 bg-bgPrimary/25 p-3">
+        <div className="grid gap-3 rounded-2xl border border-surfaceGlass/10 bg-bgPrimary/25 p-3">
           <div className="text-xs font-extrabold text-textSecondary">Flags</div>
 
           <label className="flex items-center gap-2 text-sm text-textPrimary">

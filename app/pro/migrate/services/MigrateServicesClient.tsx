@@ -390,7 +390,7 @@ function UploadStep({
 }) {
   return (
     <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-[1.1fr_1fr]">
-      <div className="rounded-card border border-white/10 bg-bgSurface p-5">
+      <div className="rounded-card border border-surfaceGlass/10 bg-bgSurface p-5">
         <h2 className="font-display text-[16px] font-medium">{copy.guideTitle}</h2>
         <ol className="mt-3 flex flex-col gap-3">
           {copy.guideSteps.map((step, i) => (
@@ -407,10 +407,10 @@ function UploadStep({
         </ol>
       </div>
 
-      <div className="flex flex-col items-center justify-center gap-3 rounded-card border border-dashed border-white/15 bg-bgSurface p-8 text-center">
+      <div className="flex flex-col items-center justify-center gap-3 rounded-card border border-dashed border-surfaceGlass/15 bg-bgSurface p-8 text-center">
         <p className="text-[15px] font-medium">{copy.upload}</p>
         <p className="text-[13px] text-textMuted">{copy.uploadHint}</p>
-        <label className="mt-2 inline-flex h-11 cursor-pointer items-center justify-center rounded-full border border-white/15 px-6 text-[14px] font-medium hover:border-white/30">
+        <label className="mt-2 inline-flex h-11 cursor-pointer items-center justify-center rounded-full border border-surfaceGlass/15 px-6 text-[14px] font-medium hover:border-surfaceGlass/30">
           {busy ? copy.importing : copy.chooseFile}
           <input
             type="file"
@@ -438,7 +438,7 @@ function DoneStep({
   result: { created: number; skipped: number; rampsCreated: number }
 }) {
   return (
-    <div className="mt-6 flex flex-col items-center gap-4 rounded-card border border-white/10 bg-bgSecondary px-6 py-10 text-center">
+    <div className="mt-6 flex flex-col items-center gap-4 rounded-card border border-surfaceGlass/10 bg-bgSecondary px-6 py-10 text-center">
       <span className="flex h-12 w-12 items-center justify-center rounded-full bg-fern/15 text-[22px] text-fern" aria-hidden="true">
         ✓
       </span>

@@ -493,7 +493,7 @@ export default function EditPaymentSettingsButton({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="rounded-full border border-white/10 bg-bgSecondary px-3 py-2 text-[12px] font-black text-textPrimary hover:border-white/20"
+        className="rounded-full border border-surfaceGlass/10 bg-bgSecondary px-3 py-2 text-[12px] font-black text-textPrimary hover:border-surfaceGlass/20"
       >
         Payment settings
       </button>
@@ -521,7 +521,7 @@ export default function EditPaymentSettingsButton({
         >
           <div
             className={[
-              'tovis-glass w-full max-w-180 max-h-[85vh] overflow-y-auto rounded-card border border-white/10 bg-bgSecondary p-4',
+              'tovis-glass w-full max-w-180 max-h-[85vh] overflow-y-auto rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4',
               'transform-gpu transition-all duration-150 ease-out',
               mounted && !closing
                 ? 'translate-y-0 scale-100 opacity-100'
@@ -546,8 +546,8 @@ export default function EditPaymentSettingsButton({
                 className={[
                   'grid h-9 w-9 place-items-center rounded-full border text-[14px] font-black',
                   busy
-                    ? 'cursor-not-allowed border-white/10 text-textSecondary opacity-70'
-                    : 'border-white/10 text-textPrimary hover:border-white/20',
+                    ? 'cursor-not-allowed border-surfaceGlass/10 text-textSecondary opacity-70'
+                    : 'border-surfaceGlass/10 text-textPrimary hover:border-surfaceGlass/20',
                 ].join(' ')}
                 aria-label="Close"
               >
@@ -661,7 +661,7 @@ export default function EditPaymentSettingsButton({
                         />
                       </div>
 
-                      <div className="rounded-card border border-white/10 bg-bgPrimary/60 p-3 text-[11px] text-textSecondary">
+                      <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary/60 p-3 text-[11px] text-textSecondary">
                         Deposits require Stripe payouts to be set up. The one-time
                         booking fee applies only to brand-new Looks/Discovery
                         clients — never to your existing clients.
@@ -745,7 +745,7 @@ export default function EditPaymentSettingsButton({
                           />
                         </div>
 
-                        <div className="rounded-card border border-white/10 bg-bgPrimary/60 p-3 text-[11px] text-textSecondary">
+                        <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary/60 p-3 text-[11px] text-textSecondary">
                           Applies to cancellations within 24 hours of the
                           appointment. Charging a fee requires the client to have
                           a saved card on file.
@@ -896,7 +896,7 @@ export default function EditPaymentSettingsButton({
                         {tipSuggestions.map((row) => (
                           <div
                             key={row.id}
-                            className="grid gap-2 rounded-card border border-white/10 bg-bgPrimary p-3 md:grid-cols-[1fr_120px_auto]"
+                            className="grid gap-2 rounded-card border border-surfaceGlass/10 bg-bgPrimary p-3 md:grid-cols-[1fr_120px_auto]"
                           >
                             <div>
                               <div className="mb-1 text-[11px] font-black text-textSecondary">
@@ -943,8 +943,8 @@ export default function EditPaymentSettingsButton({
                                 className={[
                                   'rounded-card border px-3 py-3 text-[12px] font-black transition',
                                   busy || tipSuggestions.length <= 1
-                                    ? 'cursor-not-allowed border-white/10 bg-bgSecondary text-textSecondary opacity-70'
-                                    : 'border-white/10 bg-bgSecondary text-textPrimary hover:border-white/20',
+                                    ? 'cursor-not-allowed border-surfaceGlass/10 bg-bgSecondary text-textSecondary opacity-70'
+                                    : 'border-surfaceGlass/10 bg-bgSecondary text-textPrimary hover:border-surfaceGlass/20',
                                 ].join(' ')}
                               >
                                 Remove
@@ -961,8 +961,8 @@ export default function EditPaymentSettingsButton({
                             className={[
                               'rounded-card border px-3 py-2 text-[12px] font-black transition',
                               busy
-                                ? 'cursor-not-allowed border-white/10 bg-bgPrimary text-textSecondary opacity-70'
-                                : 'border-white/10 bg-bgPrimary text-textPrimary hover:border-white/20',
+                                ? 'cursor-not-allowed border-surfaceGlass/10 bg-bgPrimary text-textSecondary opacity-70'
+                                : 'border-surfaceGlass/10 bg-bgPrimary text-textPrimary hover:border-surfaceGlass/20',
                             ].join(' ')}
                           >
                             Add tip option
@@ -1007,8 +1007,8 @@ export default function EditPaymentSettingsButton({
                   className={[
                     'rounded-card border px-4 py-3 text-[13px] font-black transition',
                     busy
-                      ? 'cursor-not-allowed border-white/10 bg-bgPrimary text-textSecondary opacity-70'
-                      : 'border-white/10 bg-bgPrimary text-textPrimary hover:border-white/20',
+                      ? 'cursor-not-allowed border-surfaceGlass/10 bg-bgPrimary text-textSecondary opacity-70'
+                      : 'border-surfaceGlass/10 bg-bgPrimary text-textPrimary hover:border-surfaceGlass/20',
                   ].join(' ')}
                 >
                   Cancel
@@ -1021,7 +1021,7 @@ export default function EditPaymentSettingsButton({
                   className={[
                     'rounded-card border px-4 py-3 text-[13px] font-black transition',
                     busy
-                      ? 'cursor-not-allowed border-white/10 bg-bgPrimary text-textSecondary opacity-70'
+                      ? 'cursor-not-allowed border-surfaceGlass/10 bg-bgPrimary text-textSecondary opacity-70'
                       : 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
                   ].join(' ')}
                 >
@@ -1069,13 +1069,13 @@ function ToggleRow(props: {
   disabled?: boolean
 }) {
   return (
-    <label className="flex items-start gap-3 rounded-card border border-white/10 bg-bgPrimary p-3">
+    <label className="flex items-start gap-3 rounded-card border border-surfaceGlass/10 bg-bgPrimary p-3">
       <input
         type="checkbox"
         checked={props.checked}
         onChange={(e) => props.onChange(e.target.checked)}
         disabled={props.disabled}
-        className="mt-1 h-4 w-4 rounded border-white/20 bg-bgSecondary text-accentPrimary focus:ring-accentPrimary/40"
+        className="mt-1 h-4 w-4 rounded border-surfaceGlass/20 bg-bgSecondary text-accentPrimary focus:ring-accentPrimary/40"
       />
 
       <div className="min-w-0">
@@ -1101,14 +1101,14 @@ function RadioRow(props: {
   name?: string
 }) {
   return (
-    <label className="flex items-start gap-3 rounded-card border border-white/10 bg-bgPrimary p-3">
+    <label className="flex items-start gap-3 rounded-card border border-surfaceGlass/10 bg-bgPrimary p-3">
       <input
         type="radio"
         name={props.name ?? 'collectPaymentAt'}
         checked={props.checked}
         onChange={props.onChange}
         disabled={props.disabled}
-        className="mt-1 h-4 w-4 border-white/20 bg-bgSecondary text-accentPrimary focus:ring-accentPrimary/40"
+        className="mt-1 h-4 w-4 border-surfaceGlass/20 bg-bgSecondary text-accentPrimary focus:ring-accentPrimary/40"
       />
 
       <div className="min-w-0">

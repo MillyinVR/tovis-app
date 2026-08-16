@@ -49,7 +49,7 @@ export default function BookingOverridePromptCard({
           checked={authorized}
           disabled={disabled}
           onChange={(e) => onToggleAuthorized(e.target.checked)}
-          className="mt-0.5 h-4 w-4 rounded border-white/10 bg-bgPrimary"
+          className="mt-0.5 h-4 w-4 rounded border-surfaceGlass/10 bg-bgPrimary"
         />
         <span className="text-[12px] font-black text-textPrimary">
           Book anyway — I’m overriding one of my booking rules

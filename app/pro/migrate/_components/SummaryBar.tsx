@@ -20,7 +20,7 @@ const TONE_CLASS: Record<NonNullable<SummaryStat['tone']>, string> = {
 
 export function SummaryBar({ stats, cta }: Props) {
   return (
-    <div className="sticky bottom-0 z-20 mt-8 border-t border-white/10 bg-bgSecondary/80 backdrop-blur">
+    <div className="sticky bottom-0 z-20 mt-8 border-t border-surfaceGlass/10 bg-bgSecondary/80 backdrop-blur">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div
           aria-live="polite"

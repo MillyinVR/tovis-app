@@ -79,7 +79,7 @@ export default function ServicesReceivedCard({
   if (!hasServices && !hasTotals) return null
 
   return (
-    <div className="rounded-card border border-white/10 bg-bgSecondary p-4 text-textPrimary">
+    <div className="rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4 text-textPrimary">
       <div className="text-xs font-black tracking-wide text-textPrimary">
         Services received
       </div>
@@ -92,13 +92,13 @@ export default function ServicesReceivedCard({
           {services.map((line) => (
             <div
               key={line.id}
-              className="flex items-center justify-between gap-3 rounded-card border border-white/10 bg-bgPrimary px-3 py-2"
+              className="flex items-center justify-between gap-3 rounded-card border border-surfaceGlass/10 bg-bgPrimary px-3 py-2"
             >
               <div className="min-w-0">
                 <div className="truncate text-sm font-black text-textPrimary">
                   {line.name}
                   {line.isAddOn ? (
-                    <span className="ml-2 rounded-full border border-white/10 bg-bgSecondary px-2 py-0.5 text-[10px] font-black text-textSecondary">
+                    <span className="ml-2 rounded-full border border-surfaceGlass/10 bg-bgSecondary px-2 py-0.5 text-[10px] font-black text-textSecondary">
                       ADD-ON
                     </span>
                   ) : null}
@@ -118,7 +118,7 @@ export default function ServicesReceivedCard({
       ) : null}
 
       {hasTotals ? (
-        <div className="mt-3 grid gap-1 border-t border-white/10 pt-3">
+        <div className="mt-3 grid gap-1 border-t border-surfaceGlass/10 pt-3">
           {isPositiveMoney(pricing.serviceSubtotal) ? (
             <MoneyRow label="Services" value={pricing.serviceSubtotal} />
           ) : null}

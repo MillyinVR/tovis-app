@@ -189,7 +189,7 @@ function LocationChip({ meta }: { meta: BookingLocationMeta }) {
   )
 
   const chipBase =
-    'mt-2 inline-flex min-h-11 max-w-full items-center gap-2 rounded-xl border border-white/10 bg-bgPrimary px-3 py-2'
+    'mt-2 inline-flex min-h-11 max-w-full items-center gap-2 rounded-xl border border-surfaceGlass/10 bg-bgPrimary px-3 py-2'
 
   if (!href) {
     return <div className={chipBase}>{inner}</div>
@@ -220,7 +220,7 @@ function StatCard({
   const cardCls =
     tone === 'warn'
       ? 'border-toneWarn/30 bg-toneWarn/10'
-      : 'border-white/10 bg-bgSecondary'
+      : 'border-surfaceGlass/10 bg-bgSecondary'
   const valueCls =
     tone === 'accent'
       ? 'text-accentPrimary'
@@ -275,7 +275,7 @@ function FilterPills({ active }: { active: StatusFilter }) {
               'rounded-full border px-4 py-2 text-[12px] font-black transition',
               isActive
                 ? 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary'
-                : 'border-white/10 bg-bgPrimary text-textPrimary hover:border-white/20',
+                : 'border-surfaceGlass/10 bg-bgPrimary text-textPrimary hover:border-surfaceGlass/20',
             ].join(' ')}
           >
             {pill.label}
@@ -390,7 +390,7 @@ function Section({
             return (
               <div
                 key={booking.id}
-                className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4 transition hover:border-accentPrimary/30"
+                className="tovis-glass rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4 transition hover:border-accentPrimary/30"
               >
                 <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                   <div className="min-w-0 flex-1">

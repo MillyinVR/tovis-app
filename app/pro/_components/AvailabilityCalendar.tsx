@@ -343,7 +343,7 @@ export default function AvailabilityCalendar({
 
   const chipClass = (chipDisabled: boolean) =>
     [
-      'rounded-full border border-white/10 px-2.5 py-1 text-[11px] font-black transition',
+      'rounded-full border border-surfaceGlass/10 px-2.5 py-1 text-[11px] font-black transition',
       chipDisabled
         ? 'cursor-not-allowed bg-bgPrimary text-textSecondary opacity-50'
         : 'bg-bgPrimary text-textPrimary hover:bg-surfaceGlass/10',
@@ -358,7 +358,7 @@ export default function AvailabilityCalendar({
           disabled={prevDisabled}
           aria-label="Previous month"
           className={[
-            'rounded-full border border-white/10 px-3 py-1 text-xs font-black',
+            'rounded-full border border-surfaceGlass/10 px-3 py-1 text-xs font-black',
             prevDisabled
               ? 'cursor-not-allowed bg-bgPrimary text-textSecondary opacity-50'
               : 'bg-bgPrimary text-textPrimary hover:bg-surfaceGlass/10',
@@ -375,7 +375,7 @@ export default function AvailabilityCalendar({
           disabled={disabled}
           aria-label="Next month"
           className={[
-            'rounded-full border border-white/10 px-3 py-1 text-xs font-black',
+            'rounded-full border border-surfaceGlass/10 px-3 py-1 text-xs font-black',
             disabled
               ? 'cursor-not-allowed bg-bgPrimary text-textSecondary opacity-50'
               : 'bg-bgPrimary text-textPrimary hover:bg-surfaceGlass/10',
@@ -492,14 +492,14 @@ export default function AvailabilityCalendar({
                     : isBlocked
                       ? 'border-microAccent/40 bg-microAccent/10 text-textPrimary hover:bg-microAccent/20'
                       : isFull
-                        ? 'border-white/10 bg-bgPrimary text-textSecondary/60 hover:bg-surfaceGlass/10'
+                        ? 'border-surfaceGlass/10 bg-bgPrimary text-textSecondary/60 hover:bg-surfaceGlass/10'
                         : hasCounts
                           ? 'border-toneSuccess/30 bg-toneSuccess/10 text-textPrimary hover:bg-toneSuccess/20'
                           : bookings > 0
-                            ? 'border-white/10 bg-bgPrimary text-textPrimary hover:bg-surfaceGlass/10'
+                            ? 'border-surfaceGlass/10 bg-bgPrimary text-textPrimary hover:bg-surfaceGlass/10'
                             : isOffDay
-                              ? 'border-dashed border-white/15 bg-bgPrimary text-textSecondary hover:bg-surfaceGlass/10 hover:text-textPrimary'
-                              : 'border-white/10 bg-bgPrimary text-textPrimary hover:bg-accentPrimary hover:text-bgPrimary',
+                              ? 'border-dashed border-surfaceGlass/15 bg-bgPrimary text-textSecondary hover:bg-surfaceGlass/10 hover:text-textPrimary'
+                              : 'border-surfaceGlass/10 bg-bgPrimary text-textPrimary hover:bg-accentPrimary hover:text-bgPrimary',
               ].join(' ')}
             >
               <span>{cell.day}</span>
@@ -560,7 +560,7 @@ export default function AvailabilityCalendar({
 
   if (!isModal) {
     return (
-      <div className="rounded-card border border-white/10 bg-bgSecondary p-3 text-textPrimary">
+      <div className="rounded-card border border-surfaceGlass/10 bg-bgSecondary p-3 text-textPrimary">
         {calendarBody}
       </div>
     )
@@ -575,7 +575,7 @@ export default function AvailabilityCalendar({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-sm rounded-card border border-white/10 bg-bgSecondary p-4 text-textPrimary shadow-xl"
+        className="w-full max-w-sm rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4 text-textPrimary shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-center justify-between gap-3">
@@ -584,7 +584,7 @@ export default function AvailabilityCalendar({
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-xs font-black text-textSecondary hover:bg-surfaceGlass/10"
+            className="rounded-full border border-surfaceGlass/10 bg-bgPrimary px-3 py-1 text-xs font-black text-textSecondary hover:bg-surfaceGlass/10"
           >
             ✕
           </button>

@@ -82,7 +82,7 @@ export default async function AdminSupportTicketPage(req: Ctx) {
 
   const btn =
     'inline-flex items-center rounded-full border px-3 py-2 text-[12px] font-black transition active:scale-[0.98]'
-  const btnSoft = 'border-white/12 bg-bgPrimary/55 hover:border-white/22 hover:bg-bgPrimary/70'
+  const btnSoft = 'border-surfaceGlass/12 bg-bgPrimary/55 hover:border-surfaceGlass/22 hover:bg-bgPrimary/70'
   const btnAccent = 'border-accentPrimary/50 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover'
 
   return (
@@ -90,7 +90,7 @@ export default async function AdminSupportTicketPage(req: Ctx) {
       <div className="mb-4 flex items-center justify-between gap-3">
         <Link
           href="/admin/support"
-          className="inline-flex items-center rounded-full border border-white/12 bg-bgPrimary/55 px-3 py-2 text-[12px] font-black hover:border-white/22 hover:bg-bgPrimary/70"
+          className="inline-flex items-center rounded-full border border-surfaceGlass/12 bg-bgPrimary/55 px-3 py-2 text-[12px] font-black hover:border-surfaceGlass/22 hover:bg-bgPrimary/70"
         >
           ← Back
         </Link>
@@ -98,7 +98,7 @@ export default async function AdminSupportTicketPage(req: Ctx) {
         <div className="text-[12px] font-black text-textSecondary">Status: {ticket.status}</div>
       </div>
 
-      <div className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
+      <div className="tovis-glass rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4">
         <div className="text-[16px] font-black">{ticket.subject}</div>
         <div className="mt-1 text-[11px] text-textSecondary">
           {ticket.createdByRole ?? 'UNKNOWN'} •{' '}

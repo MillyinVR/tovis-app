@@ -429,7 +429,7 @@ function OfferingCard(props: {
     'relative inline-flex items-center justify-center rounded-full px-3 py-2 text-[12px] font-black transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60'
 
   const btnSoft =
-    'border border-white/10 bg-bgPrimary/60 text-textPrimary hover:border-white/20 hover:bg-bgPrimary/80 shadow-[0_10px_24px_rgb(0_0_0/0.22)]'
+    'border border-surfaceGlass/10 bg-bgPrimary/60 text-textPrimary hover:border-surfaceGlass/20 hover:bg-bgPrimary/80 shadow-[0_10px_24px_rgb(0_0_0/0.22)]'
 
   const btnAccent =
     'border border-accentPrimary/45 bg-bgPrimary/55 text-textPrimary hover:border-accentPrimary/75 hover:bg-bgPrimary/85 shadow-[0_14px_34px_rgb(0_0_0/0.30)]'
@@ -438,7 +438,7 @@ function OfferingCard(props: {
     'border border-toneDanger/30 bg-bgPrimary/55 text-toneDanger hover:border-toneDanger/60 hover:bg-bgPrimary/85'
 
   const chip =
-    'inline-flex items-center rounded-full border border-white/10 bg-bgPrimary/40 px-2.5 py-1 text-[10px] font-black text-textSecondary'
+    'inline-flex items-center rounded-full border border-surfaceGlass/10 bg-bgPrimary/40 px-2.5 py-1 text-[10px] font-black text-textSecondary'
 
   const chipWarn =
     'inline-flex items-center rounded-full border border-toneWarn/30 bg-bgPrimary/50 px-2.5 py-1 text-[10px] font-black text-toneWarn'
@@ -446,7 +446,7 @@ function OfferingCard(props: {
   return (
     <div
       className={cn(
-        'relative overflow-hidden rounded-card border border-white/10 bg-bgSecondary shadow-[0_18px_50px_rgb(0_0_0/0.45)]',
+        'relative overflow-hidden rounded-card border border-surfaceGlass/10 bg-bgSecondary shadow-[0_18px_50px_rgb(0_0_0/0.45)]',
         !upstreamOk && 'opacity-[0.92]',
       )}
     >
@@ -467,7 +467,7 @@ function OfferingCard(props: {
         <div className="flex items-start gap-3">
           <div
             className={cn(
-              'relative h-14 w-14 shrink-0 overflow-hidden rounded-xl border border-white/10 bg-bgPrimary/50',
+              'relative h-14 w-14 shrink-0 overflow-hidden rounded-xl border border-surfaceGlass/10 bg-bgPrimary/50',
               !upstreamOk && 'grayscale',
             )}
           >
@@ -760,11 +760,11 @@ function OfferingEditor(props: {
     'relative inline-flex items-center justify-center rounded-full px-3 py-2 text-[12px] font-black transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60'
 
   const btnSoft =
-    'border border-white/10 bg-bgPrimary/60 text-textPrimary hover:border-white/20 hover:bg-bgPrimary/80 shadow-[0_10px_24px_rgb(0_0_0/0.22)]'
+    'border border-surfaceGlass/10 bg-bgPrimary/60 text-textPrimary hover:border-surfaceGlass/20 hover:bg-bgPrimary/80 shadow-[0_10px_24px_rgb(0_0_0/0.22)]'
 
   return (
     <form
-      className="mt-4 grid gap-4 border-t border-white/10 pt-4"
+      className="mt-4 grid gap-4 border-t border-surfaceGlass/10 pt-4"
       onSubmit={(e) => {
         e.preventDefault()
 
@@ -858,7 +858,7 @@ function OfferingEditor(props: {
       <div className="grid gap-3 md:grid-cols-2">
         <div
           className={cn(
-            'rounded-card border border-white/10 bg-bgPrimary/40 p-3',
+            'rounded-card border border-surfaceGlass/10 bg-bgPrimary/40 p-3',
             !offersInSalon && 'opacity-70',
           )}
         >
@@ -902,7 +902,7 @@ function OfferingEditor(props: {
 
         <div
           className={cn(
-            'rounded-card border border-white/10 bg-bgPrimary/40 p-3',
+            'rounded-card border border-surfaceGlass/10 bg-bgPrimary/40 p-3',
             !offersMobile && 'opacity-70',
           )}
         >
@@ -1002,7 +1002,7 @@ function OfferingEditor(props: {
           className={cn(
             'rounded-card border px-4 py-3 text-[13px] font-black transition active:scale-[0.99]',
             disabledForEdit
-              ? 'cursor-not-allowed border-white/10 bg-bgPrimary text-textSecondary opacity-70'
+              ? 'cursor-not-allowed border-surfaceGlass/10 bg-bgPrimary text-textSecondary opacity-70'
               : 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover shadow-[0_16px_40px_rgb(0_0_0/0.35)]',
           )}
         >
@@ -1139,7 +1139,7 @@ function AddOnsManager(props: {
   }
 
   return (
-    <div className="relative overflow-hidden rounded-card border border-white/10 bg-bgPrimary/35 p-3">
+    <div className="relative overflow-hidden rounded-card border border-surfaceGlass/10 bg-bgPrimary/35 p-3">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(560px_200px_at_25%_0%,rgb(255_255_255/0.10),transparent_60%)]" />
       <div className="relative flex items-center justify-between gap-3">
         <div>
@@ -1154,7 +1154,7 @@ function AddOnsManager(props: {
           className={cn(
             'rounded-full border px-3 py-2 text-[12px] font-black transition active:scale-[0.98]',
             disabled || saving || loading
-              ? 'cursor-not-allowed border-white/10 bg-bgSecondary text-textSecondary opacity-70'
+              ? 'cursor-not-allowed border-surfaceGlass/10 bg-bgSecondary text-textSecondary opacity-70'
               : 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover shadow-[0_14px_34px_rgb(0_0_0/0.30)]',
           )}
         >
@@ -1172,7 +1172,7 @@ function AddOnsManager(props: {
 
       <div className="relative mt-3 grid gap-3">
         {grouped.map(({ group, items }) => (
-          <div key={group} className="rounded-card border border-white/10 bg-bgSecondary/40 p-3">
+          <div key={group} className="rounded-card border border-surfaceGlass/10 bg-bgSecondary/40 p-3">
             <div className="text-[11px] font-black text-textSecondary">{group}</div>
 
             <div className="mt-2 grid gap-2">
@@ -1183,7 +1183,7 @@ function AddOnsManager(props: {
                 return (
                   <div
                     key={s.id}
-                    className="flex items-start justify-between gap-3 rounded-card border border-white/10 bg-bgPrimary/30 px-3 py-2"
+                    className="flex items-start justify-between gap-3 rounded-card border border-surfaceGlass/10 bg-bgPrimary/30 px-3 py-2"
                   >
                     <label className="flex min-w-0 flex-1 items-start gap-2">
                       <input
@@ -1214,10 +1214,10 @@ function AddOnsManager(props: {
                       className={cn(
                         'shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black transition',
                         !isOn
-                          ? 'border-white/10 bg-bgSecondary text-textSecondary opacity-60'
+                          ? 'border-surfaceGlass/10 bg-bgSecondary text-textSecondary opacity-60'
                           : recommended[s.id]
                             ? 'border-accentPrimary/40 bg-accentPrimary/10 text-textPrimary'
-                            : 'border-white/10 bg-bgSecondary text-textSecondary hover:border-white/20',
+                            : 'border-surfaceGlass/10 bg-bgSecondary text-textSecondary hover:border-surfaceGlass/20',
                       )}
                     >
                       {recommended[s.id] ? 'Recommended' : 'Recommend'}

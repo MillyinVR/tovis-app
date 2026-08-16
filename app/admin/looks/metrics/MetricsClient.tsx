@@ -115,7 +115,7 @@ export default function MetricsClient() {
             setWindowDays(next)
             startTransition(() => load(next))
           }}
-          className="rounded-card border border-white/15 bg-bgPrimary px-3 py-2 text-[12px] text-textPrimary focus:border-accentPrimary/60 focus:outline-none"
+          className="rounded-card border border-surfaceGlass/15 bg-bgPrimary px-3 py-2 text-[12px] text-textPrimary focus:border-accentPrimary/60 focus:outline-none"
         >
           {WINDOW_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>
@@ -133,7 +133,7 @@ export default function MetricsClient() {
         </button>
         <a
           href="/admin/looks/anomalies"
-          className="rounded-card border border-white/15 bg-bgPrimary px-3 py-2 text-[12px] font-black text-textPrimary transition hover:border-white/30"
+          className="rounded-card border border-surfaceGlass/15 bg-bgPrimary px-3 py-2 text-[12px] font-black text-textPrimary transition hover:border-surfaceGlass/30"
         >
           Engagement anomalies
         </a>
@@ -248,7 +248,7 @@ export default function MetricsClient() {
             <div className="overflow-x-auto">
               <table className="w-full min-w-[420px] text-left text-[12px]">
                 <thead className="text-textSecondary">
-                  <tr className="border-b border-white/10">
+                  <tr className="border-b border-surfaceGlass/10">
                     <th className="py-2 pr-3 font-black">Category</th>
                     <th className="py-2 pr-3 text-right font-black">Muted</th>
                     <th className="py-2 text-right font-black">Rate</th>
@@ -256,7 +256,7 @@ export default function MetricsClient() {
                 </thead>
                 <tbody>
                   {data.notificationOptOut.categories.map((c) => (
-                    <tr key={c.key} className="border-b border-white/5">
+                    <tr key={c.key} className="border-b border-surfaceGlass/5">
                       <td className="py-2 pr-3 text-textPrimary">{c.label}</td>
                       <td className="py-2 pr-3 text-right text-textSecondary">
                         {formatInt(c.mutedClients)}
@@ -274,7 +274,7 @@ export default function MetricsClient() {
       ) : null}
 
       {loaded && !data && !error ? (
-        <div className="mt-5 rounded-card border border-white/10 bg-bgPrimary/40 p-4 text-[13px] text-textSecondary">
+        <div className="mt-5 rounded-card border border-surfaceGlass/10 bg-bgPrimary/40 p-4 text-[13px] text-textSecondary">
           No metrics yet.
         </div>
       ) : null}
@@ -292,7 +292,7 @@ function Section({
   children: React.ReactNode
 }) {
   return (
-    <div className="rounded-card border border-white/10 bg-bgPrimary/20 p-4">
+    <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary/20 p-4">
       <div className="mb-3">
         <h2 className="text-[15px] font-black text-textPrimary">{title}</h2>
         {subtitle ? (
@@ -322,7 +322,7 @@ function Tile({
         ? 'text-toneDanger'
         : 'text-textPrimary'
   return (
-    <div className="rounded-card border border-white/10 bg-bgPrimary/40 p-3">
+    <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary/40 p-3">
       <div className="text-[11px] uppercase tracking-wide text-textSecondary">
         {label}
       </div>

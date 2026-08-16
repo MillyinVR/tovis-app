@@ -235,7 +235,7 @@ export default async function ServicesManagerSection({
           {backHref ? (
             <Link
               href={backHref}
-              className="inline-flex w-fit items-center rounded-full border border-white/10 bg-bgSecondary px-3 py-2 text-[12px] font-black text-textPrimary hover:border-white/20"
+              className="inline-flex w-fit items-center rounded-full border border-surfaceGlass/10 bg-bgSecondary px-3 py-2 text-[12px] font-black text-textPrimary hover:border-surfaceGlass/20"
             >
               {backLabel}
             </Link>
@@ -251,7 +251,7 @@ export default async function ServicesManagerSection({
       />
 
       {/* Offerings manager */}
-      <section className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
+      <section className="tovis-glass rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4">
         <div className="mb-3">
           <div className="text-[14px] font-black text-textPrimary">Your current offerings</div>
           <div className="mt-1 text-[12px] text-textSecondary">
@@ -260,7 +260,7 @@ export default async function ServicesManagerSection({
         </div>
 
         {offeringsPayload.length === 0 ? (
-          <div className="rounded-card border border-white/10 bg-bgPrimary p-3 text-[12px] text-textSecondary">
+          <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary p-3 text-[12px] text-textSecondary">
             You haven&apos;t added any services yet.
           </div>
         ) : (

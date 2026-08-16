@@ -190,10 +190,10 @@ export default function BookingActions({
 
   const btnBase =
     'inline-flex items-center justify-center rounded-full px-3 py-2 text-[12px] font-black transition ' +
-    'disabled:cursor-not-allowed disabled:opacity-60 border border-white/10'
+    'disabled:cursor-not-allowed disabled:opacity-60 border border-surfaceGlass/10'
 
   const btnPrimary = `${btnBase} bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover`
-  const btnGhost = `${btnBase} bg-bgPrimary text-textPrimary hover:border-white/20`
+  const btnGhost = `${btnBase} bg-bgPrimary text-textPrimary hover:border-surfaceGlass/20`
 
   if (viewModel.isTerminal || viewModel.actions.length === 0) {
     return (

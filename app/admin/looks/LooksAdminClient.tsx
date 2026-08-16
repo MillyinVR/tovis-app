@@ -362,7 +362,7 @@ export default function LooksAdminClient() {
   return (
     <div>
       <div className="flex flex-wrap items-center gap-2">
-        <div className="inline-flex rounded-card border border-white/15 p-0.5">
+        <div className="inline-flex rounded-card border border-surfaceGlass/15 p-0.5">
           {(['LOOK', 'COMMENT', 'TAG', 'BOARD'] as const).map((t) => (
             <button
               key={t}
@@ -398,7 +398,7 @@ export default function LooksAdminClient() {
               setBannedFilter(next)
               startTransition(() => load(tab, status, next, boardFilter, query))
             }}
-            className="rounded-card border border-white/15 bg-bgPrimary px-3 py-2 text-[12px] text-textPrimary focus:border-accentPrimary/60 focus:outline-none"
+            className="rounded-card border border-surfaceGlass/15 bg-bgPrimary px-3 py-2 text-[12px] text-textPrimary focus:border-accentPrimary/60 focus:outline-none"
           >
             {BANNED_FILTERS.map((f) => (
               <option key={f.value} value={f.value}>
@@ -416,7 +416,7 @@ export default function LooksAdminClient() {
                 load(tab, status, bannedFilter, next, query),
               )
             }}
-            className="rounded-card border border-white/15 bg-bgPrimary px-3 py-2 text-[12px] text-textPrimary focus:border-accentPrimary/60 focus:outline-none"
+            className="rounded-card border border-surfaceGlass/15 bg-bgPrimary px-3 py-2 text-[12px] text-textPrimary focus:border-accentPrimary/60 focus:outline-none"
           >
             {BOARD_VISIBILITY_FILTERS.map((f) => (
               <option key={f.value} value={f.value}>
@@ -434,7 +434,7 @@ export default function LooksAdminClient() {
                 load(tab, next, bannedFilter, boardFilter, query),
               )
             }}
-            className="rounded-card border border-white/15 bg-bgPrimary px-3 py-2 text-[12px] text-textPrimary focus:border-accentPrimary/60 focus:outline-none"
+            className="rounded-card border border-surfaceGlass/15 bg-bgPrimary px-3 py-2 text-[12px] text-textPrimary focus:border-accentPrimary/60 focus:outline-none"
           >
             {STATUS_FILTERS.map((f) => (
               <option key={f.value} value={f.value}>
@@ -461,7 +461,7 @@ export default function LooksAdminClient() {
                   ? 'Filter by board name, slug, or owner handle…'
                   : 'Filter by pro business, name, or handle…'
             }
-            className="min-w-45 flex-1 rounded-card border border-white/15 bg-bgPrimary px-3 py-2 text-[13px] text-textPrimary placeholder:text-textSecondary focus:border-accentPrimary/60 focus:outline-none"
+            className="min-w-45 flex-1 rounded-card border border-surfaceGlass/15 bg-bgPrimary px-3 py-2 text-[13px] text-textPrimary placeholder:text-textSecondary focus:border-accentPrimary/60 focus:outline-none"
           />
           <button
             type="submit"
@@ -524,7 +524,7 @@ export default function LooksAdminClient() {
                 ))}
 
         {loaded && empty && !error ? (
-          <div className="rounded-card border border-white/10 bg-bgPrimary/40 p-4 text-[13px] text-textSecondary">
+          <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary/40 p-4 text-[13px] text-textSecondary">
             Nothing in this queue.
           </div>
         ) : null}
@@ -643,10 +643,10 @@ function LookCard({
           ? 'border-toneDanger/40 bg-bgPrimary/20'
           : hidden
             ? 'border-toneWarn/40 bg-bgPrimary/20'
-            : 'border-white/10 bg-bgPrimary/40'
+            : 'border-surfaceGlass/10 bg-bgPrimary/40'
       }`}
     >
-      <div className="h-20 w-20 shrink-0 overflow-hidden rounded-card border border-white/10 bg-bgPrimary">
+      <div className="h-20 w-20 shrink-0 overflow-hidden rounded-card border border-surfaceGlass/10 bg-bgPrimary">
         {item.thumbUrl ? (
           <RemoteImage
             src={item.thumbUrl}
@@ -666,7 +666,7 @@ function LookCard({
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <div className="min-w-0">
             <span className="text-[14px] font-black">{item.authorLabel}</span>
-            <span className="ml-2 rounded-card border border-white/15 px-1.5 py-0.5 text-[10px] font-black uppercase text-textSecondary">
+            <span className="ml-2 rounded-card border border-surfaceGlass/15 px-1.5 py-0.5 text-[10px] font-black uppercase text-textSecondary">
               {item.authorKind === 'CLIENT' ? 'Client' : 'Pro'}
             </span>
             <span className="ml-2 text-[12px] text-textSecondary">
@@ -776,7 +776,7 @@ function CommentCard({
           ? 'border-toneDanger/40 bg-bgPrimary/20'
           : removed
             ? 'border-toneWarn/40 bg-bgPrimary/20'
-            : 'border-white/10 bg-bgPrimary/40'
+            : 'border-surfaceGlass/10 bg-bgPrimary/40'
       }`}
     >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -808,7 +808,7 @@ function CommentCard({
           href={`/looks/${item.lookPostId}`}
           target="_blank"
           rel="noreferrer"
-          className="rounded-card border border-white/15 bg-bgPrimary px-3 py-1.5 text-[12px] font-black text-textPrimary transition hover:border-white/30"
+          className="rounded-card border border-surfaceGlass/15 bg-bgPrimary px-3 py-1.5 text-[12px] font-black text-textPrimary transition hover:border-surfaceGlass/30"
         >
           View look
         </a>
@@ -870,7 +870,7 @@ function TagCard({
       className={`rounded-card border p-4 ${
         item.banned
           ? 'border-toneDanger/40 bg-bgPrimary/20'
-          : 'border-white/10 bg-bgPrimary/40'
+          : 'border-surfaceGlass/10 bg-bgPrimary/40'
       }`}
     >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -941,7 +941,7 @@ function BoardCard({
       className={`rounded-card border p-4 ${
         item.hidden
           ? 'border-toneDanger/40 bg-bgPrimary/20'
-          : 'border-white/10 bg-bgPrimary/40'
+          : 'border-surfaceGlass/10 bg-bgPrimary/40'
       }`}
     >
       <div className="flex flex-wrap items-baseline justify-between gap-2">

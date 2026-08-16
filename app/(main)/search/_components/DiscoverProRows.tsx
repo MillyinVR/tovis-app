@@ -43,7 +43,7 @@ export default function DiscoverProRows({ pros, activeProId, onSelect, itemRefs 
               'flex w-full items-center gap-3 rounded-card border p-2.5 text-left transition-colors',
               active
                 ? 'border-accentPrimary/60 bg-accentPrimary/10'
-                : 'border-white/10 bg-bgPrimary/25 hover:bg-white/10',
+                : 'border-surfaceGlass/10 bg-bgPrimary/25 hover:bg-white/10',
             )}
           >
             <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-inner bg-bgPrimary/45">

@@ -532,7 +532,7 @@ function FormCard({
   children: React.ReactNode
 }) {
   return (
-    <section className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
+    <section className="tovis-glass rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4">
       <div className="mb-3.5 flex items-center gap-2">
         <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accentPrimary font-mono text-[9px] font-bold text-bgPrimary">
           {step}
@@ -1650,7 +1650,7 @@ export default function NewBookingForm({
     'flex-1 rounded-xl border px-3 py-2 text-[12px] font-black transition disabled:opacity-60'
   const toggleActive = 'border-accentPrimary bg-accentPrimary/15 text-textPrimary'
   const toggleIdle =
-    'border-white/10 bg-bgPrimary text-textSecondary hover:border-white/20 hover:text-textPrimary'
+    'border-surfaceGlass/10 bg-bgPrimary text-textSecondary hover:border-surfaceGlass/20 hover:text-textPrimary'
 
   const tzLabel = sanitizeTimeZone(bookingTimeZone, 'UTC')
 
@@ -1712,7 +1712,7 @@ export default function NewBookingForm({
               'rounded-card border px-4 py-3 text-left transition',
               clientMode === 'existing'
                 ? 'border-accentPrimary/60 bg-accentPrimary/10'
-                : 'border-white/10 bg-bgPrimary hover:border-white/20',
+                : 'border-surfaceGlass/10 bg-bgPrimary hover:border-surfaceGlass/20',
               loading ? 'cursor-not-allowed opacity-50' : '',
             ].join(' ')}
           >
@@ -1732,7 +1732,7 @@ export default function NewBookingForm({
               'rounded-card border px-4 py-3 text-left transition',
               clientMode === 'new'
                 ? 'border-accentPrimary/60 bg-accentPrimary/10'
-                : 'border-white/10 bg-bgPrimary hover:border-white/20',
+                : 'border-surfaceGlass/10 bg-bgPrimary hover:border-surfaceGlass/20',
               loading ? 'cursor-not-allowed opacity-50' : '',
             ].join(' ')}
           >
@@ -1895,7 +1895,7 @@ export default function NewBookingForm({
               'rounded-card border px-4 py-3 text-left transition',
               locationType === 'SALON'
                 ? 'border-accentPrimary/60 bg-accentPrimary/10'
-                : 'border-white/10 bg-bgPrimary hover:border-white/20',
+                : 'border-surfaceGlass/10 bg-bgPrimary hover:border-surfaceGlass/20',
               loading ? 'cursor-not-allowed opacity-50' : '',
             ].join(' ')}
           >
@@ -1913,7 +1913,7 @@ export default function NewBookingForm({
               'rounded-card border px-4 py-3 text-left transition',
               locationType === 'MOBILE'
                 ? 'border-accentPrimary/60 bg-accentPrimary/10'
-                : 'border-white/10 bg-bgPrimary hover:border-white/20',
+                : 'border-surfaceGlass/10 bg-bgPrimary hover:border-surfaceGlass/20',
               loading ? 'cursor-not-allowed opacity-50' : '',
             ].join(' ')}
           >
@@ -1975,7 +1975,7 @@ export default function NewBookingForm({
                       'flex items-center justify-between gap-3 rounded-xl border px-3 py-2.5 transition',
                       checked
                         ? 'border-accentPrimary/60 bg-accentPrimary/10'
-                        : 'border-white/10 bg-bgPrimary hover:border-white/20',
+                        : 'border-surfaceGlass/10 bg-bgPrimary hover:border-surfaceGlass/20',
                       loading ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
                     ].join(' ')}
                   >
@@ -1985,7 +1985,7 @@ export default function NewBookingForm({
                         checked={checked}
                         disabled={loading}
                         onChange={(e) => toggleAddOn(addOn.id, e.target.checked)}
-                        className="h-4 w-4 rounded border-white/10 bg-bgPrimary"
+                        className="h-4 w-4 rounded border-surfaceGlass/10 bg-bgPrimary"
                       />
                       <span className="text-[13px] font-black text-textPrimary">
                         {addOn.title}
@@ -2059,7 +2059,7 @@ export default function NewBookingForm({
                   'rounded-card border px-4 py-3 text-left transition',
                   addressMode === 'existing'
                     ? 'border-accentPrimary/60 bg-accentPrimary/10'
-                    : 'border-white/10 bg-bgPrimary hover:border-white/20',
+                    : 'border-surfaceGlass/10 bg-bgPrimary hover:border-surfaceGlass/20',
                   loading || !canUseSavedAddresses
                     ? 'cursor-not-allowed opacity-50'
                     : '',
@@ -2081,7 +2081,7 @@ export default function NewBookingForm({
                   'rounded-card border px-4 py-3 text-left transition',
                   addressMode === 'new'
                     ? 'border-accentPrimary/60 bg-accentPrimary/10'
-                    : 'border-white/10 bg-bgPrimary hover:border-white/20',
+                    : 'border-surfaceGlass/10 bg-bgPrimary hover:border-surfaceGlass/20',
                   loading ? 'cursor-not-allowed opacity-50' : '',
                 ].join(' ')}
               >
@@ -2172,7 +2172,7 @@ export default function NewBookingForm({
                         type="button"
                         disabled={loading}
                         onClick={() => void chooseServicePrediction(prediction)}
-                        className="rounded-xl border border-white/10 bg-bgPrimary/40 p-2 text-left hover:bg-white/5 disabled:opacity-60"
+                        className="rounded-xl border border-surfaceGlass/10 bg-bgPrimary/40 p-2 text-left hover:bg-white/5 disabled:opacity-60"
                       >
                         <div className="text-[13px] font-black text-textPrimary">
                           {prediction.mainText || prediction.description}
@@ -2342,7 +2342,7 @@ export default function NewBookingForm({
                       isDefault: e.target.checked,
                     }))
                   }
-                  className="h-4 w-4 rounded border-white/10 bg-bgPrimary"
+                  className="h-4 w-4 rounded border-surfaceGlass/10 bg-bgPrimary"
                 />
                 <span className="text-[12px] text-textSecondary">
                   Save as the default mobile service address for this client
@@ -2644,7 +2644,7 @@ export default function NewBookingForm({
         </div>
 
         <aside className="lg:sticky lg:top-4">
-          <div className="tovis-glass rounded-card border border-white/10 bg-bgSurface p-4">
+          <div className="tovis-glass rounded-card border border-surfaceGlass/10 bg-bgSurface p-4">
             <div className="font-mono text-[9px] font-bold uppercase tracking-[0.16em] text-accentPrimary">
               Booking summary
             </div>
@@ -2686,7 +2686,7 @@ export default function NewBookingForm({
               ) : null}
             </div>
 
-            <div className="mt-3.5 flex items-baseline justify-between border-t border-dashed border-white/10 pt-3.5">
+            <div className="mt-3.5 flex items-baseline justify-between border-t border-dashed border-surfaceGlass/10 pt-3.5">
               <span className="font-mono text-[9px] font-bold uppercase tracking-widest text-textMuted">
                 Total
               </span>
@@ -2711,7 +2711,7 @@ export default function NewBookingForm({
               type="button"
               onClick={handleCancel}
               disabled={loading}
-              className="mt-2.5 flex h-11 w-full items-center justify-center rounded-xl border border-white/10 bg-bgPrimary text-[13px] font-black text-textPrimary transition hover:border-white/20 disabled:opacity-60"
+              className="mt-2.5 flex h-11 w-full items-center justify-center rounded-xl border border-surfaceGlass/10 bg-bgPrimary text-[13px] font-black text-textPrimary transition hover:border-surfaceGlass/20 disabled:opacity-60"
             >
               Cancel
             </button>

@@ -6,7 +6,7 @@ type Props = {
 
 export function ColumnMappingBanner({ mappings }: Props) {
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-card border border-white/10 bg-bgSecondary px-4 py-3">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-card border border-surfaceGlass/10 bg-bgSecondary px-4 py-3">
       <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-textMuted">
         Columns mapped
       </span>

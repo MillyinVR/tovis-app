@@ -362,9 +362,9 @@ export default function PlacesAutocomplete(props: {
             placeholder={placeholder}
             disabled={disabled}
             className={cn(
-              'w-full rounded-2xl border border-white/12 bg-bgPrimary/30 px-3 py-2 pr-10',
+              'w-full rounded-2xl border border-surfaceGlass/12 bg-bgPrimary/30 px-3 py-2 pr-10',
               'text-[13px] font-semibold text-textPrimary placeholder:text-textSecondary/70 outline-none',
-              'focus:border-white/20',
+              'focus:border-surfaceGlass/20',
               disabled && 'opacity-60',
             )}
             role="combobox"
@@ -378,7 +378,7 @@ export default function PlacesAutocomplete(props: {
             <button
               type="button"
               onClick={clear}
-              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full border border-white/10 bg-bgSecondary/60 px-2 py-1 text-[11px] font-black text-textPrimary hover:border-white/20"
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full border border-surfaceGlass/10 bg-bgSecondary/60 px-2 py-1 text-[11px] font-black text-textPrimary hover:border-surfaceGlass/20"
               aria-label="Clear"
             >
               ✕
@@ -393,7 +393,7 @@ export default function PlacesAutocomplete(props: {
         <div
           id={listId}
           role="listbox"
-          className="absolute top-[calc(100%+6px)] z-50 w-full overflow-hidden rounded-2xl border border-white/10 bg-bgSecondary shadow-[0_24px_90px_rgb(0_0_0/0.55)] backdrop-blur-xl"
+          className="absolute top-[calc(100%+6px)] z-50 w-full overflow-hidden rounded-2xl border border-surfaceGlass/10 bg-bgSecondary shadow-[0_24px_90px_rgb(0_0_0/0.55)] backdrop-blur-xl"
         >
           {emptyState ? (
             <div className="px-3 py-3 text-[12px] font-semibold text-textSecondary">{emptyState}</div>
@@ -413,7 +413,7 @@ export default function PlacesAutocomplete(props: {
                     className={cn(
                       'w-full text-left px-3 py-2.5 transition',
                       active ? 'bg-bgPrimary/35' : 'bg-bgSecondary/40 hover:bg-bgPrimary/30',
-                      'border-b border-white/10 last:border-b-0',
+                      'border-b border-surfaceGlass/10 last:border-b-0',
                     )}
                   >
                     <div className="text-[13px] font-black text-textPrimary">{p.mainText || p.description}</div>

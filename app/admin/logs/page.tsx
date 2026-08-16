@@ -50,7 +50,7 @@ export default async function AdminLogsPage() {
       allowedRoles={[AdminPermissionRole.SUPER_ADMIN]}
     >
       <main className="mx-auto w-full max-w-960px px-4 pb-10 pt-6">
-        <div className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
+        <div className="tovis-glass rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4">
           <div className="flex flex-wrap items-baseline justify-between gap-3">
             <h1 className="m-0 text-[18px] font-black text-textPrimary">
               Admin Logs
@@ -62,7 +62,7 @@ export default async function AdminLogsPage() {
           </div>
         </div>
 
-        <section className="tovis-glass mt-4 overflow-hidden rounded-card border border-white/10 bg-bgSecondary">
+        <section className="tovis-glass mt-4 overflow-hidden rounded-card border border-surfaceGlass/10 bg-bgSecondary">
           {logs.length === 0 ? (
             <div className="p-4 text-[13px] font-semibold text-textSecondary">
               No logs yet.

@@ -435,7 +435,7 @@ export default function ServicesCreateWizard(props: { categories: CategoryDTO[] 
               Allow mobile by default
             </label>
 
-            <div className="grid gap-2 rounded-2xl border border-white/10 bg-bgPrimary/20 p-3">
+            <div className="grid gap-2 rounded-2xl border border-surfaceGlass/10 bg-bgPrimary/20 p-3">
               <div className="flex items-center justify-between gap-3">
                 <div className="grid gap-0.5">
                   <div className="text-xs font-extrabold text-textSecondary">Default service image (optional)</div>

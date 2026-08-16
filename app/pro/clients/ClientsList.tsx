@@ -143,7 +143,7 @@ export default function ClientsList({ clients }: { clients: ProClientRow[] }) {
           ) : null}
 
           {filtered.length === 0 ? (
-            <div className="rounded-card border border-white/10 bg-bgSecondary px-4 py-6 text-center text-[13px] font-semibold text-textSecondary">
+            <div className="rounded-card border border-surfaceGlass/10 bg-bgSecondary px-4 py-6 text-center text-[13px] font-semibold text-textSecondary">
               {/* Always query-driven: the requirements filter only renders when
                   at least one client has them, so it cannot empty the list on
                   its own. */}

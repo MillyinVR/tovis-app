@@ -482,7 +482,7 @@ export default function EditProfileButton({ canEditHandle, initial }: Props) {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="rounded-full border border-white/10 bg-bgSecondary px-3 py-2 text-[12px] font-black text-textPrimary hover:border-white/20"
+        className="rounded-full border border-surfaceGlass/10 bg-bgSecondary px-3 py-2 text-[12px] font-black text-textPrimary hover:border-surfaceGlass/20"
       >
         Edit
       </button>
@@ -507,7 +507,7 @@ export default function EditProfileButton({ canEditHandle, initial }: Props) {
         >
           <div
             className={[
-              'tovis-glass w-full max-w-130 max-h-[85vh] overflow-y-auto rounded-card border border-white/10 bg-bgSecondary p-4',
+              'tovis-glass w-full max-w-130 max-h-[85vh] overflow-y-auto rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4',
               'transform-gpu transition-all duration-150 ease-out',
               mounted && !closing
                 ? 'translate-y-0 scale-100 opacity-100'
@@ -527,8 +527,8 @@ export default function EditProfileButton({ canEditHandle, initial }: Props) {
                 className={[
                   'tap-target grid h-9 w-9 place-items-center rounded-full border text-[14px] font-black',
                   busy
-                    ? 'cursor-not-allowed border-white/10 text-textSecondary opacity-70'
-                    : 'border-white/10 text-textPrimary hover:border-white/20',
+                    ? 'cursor-not-allowed border-surfaceGlass/10 text-textSecondary opacity-70'
+                    : 'border-surfaceGlass/10 text-textPrimary hover:border-surfaceGlass/20',
                 ].join(' ')}
                 aria-label="Close"
               >
@@ -552,7 +552,7 @@ export default function EditProfileButton({ canEditHandle, initial }: Props) {
                     inputMode="text"
                   />
 
-                  <div className="rounded-xl border border-white/10 bg-bgPrimary/40 px-3 py-2 text-[12px] text-textSecondary">
+                  <div className="rounded-xl border border-surfaceGlass/10 bg-bgPrimary/40 px-3 py-2 text-[12px] text-textSecondary">
                     {canEditHandle ? (
                       vanityPreview ? (
                         <>
@@ -626,7 +626,7 @@ export default function EditProfileButton({ canEditHandle, initial }: Props) {
                           type="button"
                           onClick={() => setHandle(suggestion)}
                           disabled={busy}
-                          className="rounded-full border border-white/10 bg-bgPrimary px-2.5 py-1 text-[11px] font-black text-textPrimary hover:border-white/20 disabled:cursor-not-allowed disabled:opacity-70"
+                          className="rounded-full border border-surfaceGlass/10 bg-bgPrimary px-2.5 py-1 text-[11px] font-black text-textPrimary hover:border-surfaceGlass/20 disabled:cursor-not-allowed disabled:opacity-70"
                         >
                           {suggestion}
                         </button>
@@ -678,7 +678,7 @@ export default function EditProfileButton({ canEditHandle, initial }: Props) {
                             busy ? 'cursor-not-allowed opacity-70' : '',
                             active
                               ? 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary'
-                              : 'border-white/10 bg-bgPrimary text-textPrimary hover:border-white/20',
+                              : 'border-surfaceGlass/10 bg-bgPrimary text-textPrimary hover:border-surfaceGlass/20',
                           ].join(' ')}
                         >
                           {option.label}
@@ -717,7 +717,7 @@ export default function EditProfileButton({ canEditHandle, initial }: Props) {
               <Field label="Avatar">
                 <div className="grid gap-2">
                   <div className="flex items-center gap-3">
-                    <div className="h-11 w-11 overflow-hidden rounded-full border border-white/10 bg-bgPrimary">
+                    <div className="h-11 w-11 overflow-hidden rounded-full border border-surfaceGlass/10 bg-bgPrimary">
                       {showAvatarImage ? (
                         <RemoteImage
                           src={avatarSrc ?? ''}
@@ -822,8 +822,8 @@ export default function EditProfileButton({ canEditHandle, initial }: Props) {
                   className={[
                     'rounded-card border px-4 py-3 text-[13px] font-black transition',
                     busy
-                      ? 'cursor-not-allowed border-white/10 bg-bgPrimary text-textSecondary opacity-70'
-                      : 'border-white/10 bg-bgPrimary text-textPrimary hover:border-white/20',
+                      ? 'cursor-not-allowed border-surfaceGlass/10 bg-bgPrimary text-textSecondary opacity-70'
+                      : 'border-surfaceGlass/10 bg-bgPrimary text-textPrimary hover:border-surfaceGlass/20',
                   ].join(' ')}
                 >
                   Cancel
@@ -836,7 +836,7 @@ export default function EditProfileButton({ canEditHandle, initial }: Props) {
                   className={[
                     'rounded-card border px-4 py-3 text-[13px] font-black transition',
                     busy || handleBlocked
-                      ? 'cursor-not-allowed border-white/10 bg-bgPrimary text-textSecondary opacity-70'
+                      ? 'cursor-not-allowed border-surfaceGlass/10 bg-bgPrimary text-textSecondary opacity-70'
                       : 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
                   ].join(' ')}
                 >

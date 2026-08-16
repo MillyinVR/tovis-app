@@ -67,7 +67,7 @@ export function MigrateEntryClient({ copy, progress }: Props) {
                   'relative flex h-16 items-center justify-center rounded-card border bg-bgSurface px-3 text-[14px] transition',
                   selected
                     ? 'border-accentPrimary/60 text-textPrimary shadow-[0_0_28px_rgb(var(--accent-primary)/0.25)]'
-                    : 'border-white/10 text-textSecondary hover:border-white/20',
+                    : 'border-surfaceGlass/10 text-textSecondary hover:border-surfaceGlass/20',
                 ].join(' ')}
               >
                 {app}
@@ -87,7 +87,7 @@ export function MigrateEntryClient({ copy, progress }: Props) {
         {/* Per-source export guide — revealed once the pro picks where they're
             coming from, so the picker actually helps them get their files out. */}
         {sourceApp && guide ? (
-          <div className="mt-4 rounded-card border border-white/10 bg-bgSurface p-5">
+          <div className="mt-4 rounded-card border border-surfaceGlass/10 bg-bgSurface p-5">
             <h3 className="font-display text-[16px] font-medium">
               {copy.exportGuide.title} {sourceApp}
             </h3>
@@ -125,7 +125,7 @@ export function MigrateEntryClient({ copy, progress }: Props) {
             return (
               <div
                 key={c.key}
-                className="flex flex-col gap-2 rounded-card border border-white/10 bg-bgSurface p-4"
+                className="flex flex-col gap-2 rounded-card border border-surfaceGlass/10 bg-bgSurface p-4"
               >
                 <span className="text-[22px]" aria-hidden="true">
                   {c.icon}
@@ -150,7 +150,7 @@ export function MigrateEntryClient({ copy, progress }: Props) {
         </div>
 
         {/* CTA */}
-        <div className="mt-10 flex flex-col items-center gap-4 rounded-card border border-white/10 bg-bgSecondary px-6 py-8 text-center">
+        <div className="mt-10 flex flex-col items-center gap-4 rounded-card border border-surfaceGlass/10 bg-bgSecondary px-6 py-8 text-center">
           <h3 className="font-display text-[20px] font-medium">{copy.readyTitle}</h3>
           <p className="max-w-md text-[14px] text-textSecondary">{copy.readySub}</p>
           <Link

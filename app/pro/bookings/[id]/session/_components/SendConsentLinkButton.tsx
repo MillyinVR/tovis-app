@@ -78,7 +78,7 @@ export function SendConsentLinkButton(props: Props) {
         onClick={send}
         disabled={busy}
         aria-label={`Send “${props.formTitle}” to the client to sign`}
-        className="inline-flex h-7 items-center rounded-full border border-white/15 bg-bgPrimary/70 px-3 text-[11px] font-black text-textPrimary transition hover:border-white/25 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+        className="inline-flex h-7 items-center rounded-full border border-surfaceGlass/15 bg-bgPrimary/70 px-3 text-[11px] font-black text-textPrimary transition hover:border-surfaceGlass/25 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
       >
         {busy ? 'Sending…' : 'Send to sign'}
       </button>

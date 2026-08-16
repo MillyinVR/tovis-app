@@ -31,7 +31,7 @@ export default function SupportForm() {
   }
 
   return (
-    <form action={submit} className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4 grid gap-4">
+    <form action={submit} className="tovis-glass rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4 grid gap-4">
       {/* The two headings stay hand-written. They ARE field labels, but they
           carry no colour token and so inherit `text-textPrimary` from the page,
           where the kit's FieldLabel is `text-textSecondary` — migrating them is

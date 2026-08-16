@@ -60,7 +60,7 @@ export default function ServicesManagerSectionClient(props: {
   return (
     <>
       {/* Luxe “Add service” trigger (replaces the big inline picker section) */}
-      <section className="tovis-glass mb-5 rounded-card border border-white/10 bg-bgSecondary p-4">
+      <section className="tovis-glass mb-5 rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4">
         <div className="flex items-center justify-between gap-3">
           <div>
             <div className="text-[14px] font-black text-textPrimary">Add a service</div>
@@ -72,7 +72,7 @@ export default function ServicesManagerSectionClient(props: {
           <button
             type="button"
             onClick={openOverlay}
-            className="rounded-full border border-white/12 bg-bgPrimary/40 px-4 py-2 text-[12px] font-black text-textPrimary hover:border-white/22 active:scale-[0.98] transition"
+            className="rounded-full border border-surfaceGlass/12 bg-bgPrimary/40 px-4 py-2 text-[12px] font-black text-textPrimary hover:border-surfaceGlass/22 active:scale-[0.98] transition"
           >
             + Add
           </button>

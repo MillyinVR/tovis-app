@@ -240,7 +240,7 @@ export default function OpenSlotPicker({
                 className={`rounded-xl border px-2 py-2.5 text-[13px] font-black transition disabled:opacity-60 ${
                   active
                     ? 'border-accentPrimary bg-accentPrimary/15 text-textPrimary'
-                    : 'border-white/10 bg-bgPrimary text-textSecondary hover:border-white/20 hover:text-textPrimary'
+                    : 'border-surfaceGlass/10 bg-bgPrimary text-textSecondary hover:border-surfaceGlass/20 hover:text-textPrimary'
                 }`}
               >
                 {formatInTimeZone(slot, displayTz, {

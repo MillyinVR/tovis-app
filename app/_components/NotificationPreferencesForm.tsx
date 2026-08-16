@@ -442,7 +442,7 @@ export default function NotificationPreferencesForm({
                   const minutes = timeValueToMinutes(e.target.value)
                   if (minutes !== null) setQuietHours({ startMinutes: minutes })
                 }}
-                className="rounded-card border border-white/10 bg-bgSecondary/40 px-3 py-2 text-sm font-semibold text-textPrimary"
+                className="rounded-card border border-surfaceGlass/10 bg-bgSecondary/40 px-3 py-2 text-sm font-semibold text-textPrimary"
               />
             </label>
             <label className="flex flex-col gap-1">
@@ -456,7 +456,7 @@ export default function NotificationPreferencesForm({
                   const minutes = timeValueToMinutes(e.target.value)
                   if (minutes !== null) setQuietHours({ endMinutes: minutes })
                 }}
-                className="rounded-card border border-white/10 bg-bgSecondary/40 px-3 py-2 text-sm font-semibold text-textPrimary"
+                className="rounded-card border border-surfaceGlass/10 bg-bgSecondary/40 px-3 py-2 text-sm font-semibold text-textPrimary"
               />
             </label>
           </div>
