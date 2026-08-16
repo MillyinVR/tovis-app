@@ -906,7 +906,7 @@ function HermesToggleRow({
 
           <div
             className={cn(
-              'relative h-5 w-5 rounded-full bg-white transition',
+              'relative h-5 w-5 rounded-full bg-textPrimary transition',
               'shadow-[0_10px_25px_rgb(var(--shadow-color)/0.35)]',
               value ? 'translate-x-7' : 'translate-x-0',
             )}
@@ -914,7 +914,7 @@ function HermesToggleRow({
             <div
               className={cn(
                 'absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full',
-                value ? 'bg-accentPrimary' : 'bg-black/25',
+                value ? 'bg-accentPrimary' : 'bg-bgPrimary/25',
               )}
             />
           </div>

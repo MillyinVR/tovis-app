@@ -7,8 +7,31 @@ import { cn } from '@/lib/utils'
  *
  * Not a kit primitive: the kit's `Button variant="primary"` is the app's gradient
  * CTA, and this is the auth screens' own tinted hero button. It stays the area
- * canonical — but there is exactly ONE copy of its class string now, here.
+ * canonical — and as of this change there really is exactly ONE copy of its
+ * class string, here. The previous version of this sentence was already wrong
+ * when it was written: `verify-email` carried two more verbatim copies, one on
+ * a `<button>` and one on a `<Link>`, which is where four of phase 7's raw
+ * colours came from. Reach for `primaryButtonClassName` + `HeroTopHairline`.
  */
+
+/**
+ * The 1px specular hairline along the top edge of a hero button. Rendered
+ * alongside `primaryButtonClassName({ withArrow: true })` — a separate element
+ * because it needs its own stacking context above the button's fill.
+ *
+ * The white here is deliberate and is phase 7's one remaining raw colour in
+ * this family: it is a specular highlight on a tinted button, not a surface,
+ * and swapping it for `surfaceGlass` would flip it to a dark line in light
+ * mode. Decided with Tori 2026-08-16: consolidate the copies, keep the sheen.
+ */
+export function HeroTopHairline() {
+  return (
+    <span
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(255,255,255,0.22),transparent)]"
+    />
+  )
+}
 
 export type PrimaryButtonStyleOptions = {
   /** Dims and blocks the hover states. Links are never disabled. */
@@ -71,12 +94,7 @@ export default function PrimaryButton({
       disabled={isDisabled}
       className={primaryButtonClassName({ disabled: isDisabled, withArrow })}
     >
-      {withArrow ? (
-        <span
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(255,255,255,0.22),transparent)]"
-        />
-      ) : null}
+      {withArrow ? <HeroTopHairline /> : null}
       <span className="relative inline-flex items-center gap-2">
         <span>{children}</span>
         {withArrow ? (

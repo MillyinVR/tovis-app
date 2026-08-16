@@ -2,6 +2,7 @@
 'use client'
 
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import ProTilePlaceholder from './ProTilePlaceholder'
 import { formatRoundedDollars } from '@/lib/money'
 import { cn } from '@/lib/utils'
 
@@ -54,16 +55,7 @@ export default function TrendingProRail({ pros, onSelectPro }: TrendingProRailPr
                   loading="lazy"
                 />
               ) : (
-                <>
-                  <div
-                    aria-hidden
-                    className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.08)_0,rgba(255,255,255,0.02)_35%,rgba(0,0,0,0.24)_100%)]"
-                  />
-                  <div
-                    aria-hidden
-                    className="absolute inset-0 opacity-20 [background-image:repeating-linear-gradient(135deg,transparent_0,transparent_10px,rgba(255,255,255,0.12)_11px,transparent_12px)]"
-                  />
-                </>
+                <ProTilePlaceholder />
               )}
 
               <div

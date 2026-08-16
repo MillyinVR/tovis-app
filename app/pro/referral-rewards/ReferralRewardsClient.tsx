@@ -138,7 +138,7 @@ export default function ReferralRewardsClient(props: { initial: Settings }) {
             } disabled:opacity-50`}
           >
             <span
-              className={`absolute top-0.5 block h-6 w-6 rounded-full bg-white shadow transition-transform ${
+              className={`absolute top-0.5 block h-6 w-6 rounded-full bg-textPrimary shadow transition-transform ${
                 enabled ? 'translate-x-[22px]' : 'translate-x-0.5'
               }`}
             />
