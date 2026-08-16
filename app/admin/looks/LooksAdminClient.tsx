@@ -577,9 +577,13 @@ function StatusBadges({
 }
 
 // Moderation action, as a tone. Keeps the label/busy API the queue rows call
-// with; the styling is the canonical <Button>. Its own class strings used raw
-// `border-white/15`, which is invisible to [data-mode] and only ever looked
-// right in dark.
+// with; the styling is the canonical <Button>. Its own class strings used a raw
+// white border at 15% alpha, which is invisible to [data-mode] and only ever
+// looked right in dark.
+//
+// (Spelled out rather than written as a class token: Tailwind scans comments
+// for candidates, so naming it kept a real, permanently dead rule in the
+// shipped stylesheet long after the last call site was gone.)
 const MODERATION_VARIANT: Record<ModerationTone, ButtonVariant> = {
   primary: 'accent',
   danger: 'danger',
