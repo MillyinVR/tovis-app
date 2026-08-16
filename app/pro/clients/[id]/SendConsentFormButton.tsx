@@ -78,20 +78,23 @@ export default function SendConsentFormButton({ clientId, forms }: Props) {
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        {/* 🔴 This is the one field in either family whose container is
-            `bg-bgPrimary` (the panel above), and `bg-bgPrimary/70` over
-            `bg-bgPrimary` IS `bg-bgPrimary` — so it already renders at Δ=0
-            against its own panel, which is the exact defect that keeps the
-            `raised` family off `solid`. `raised` is the fix, but changing it
-            here would be a restyle of a surface nobody can currently render
-            (the seeded pro owns no ConsentForm rows, so it never appears), so
-            it keeps its appearance and the bug is written up in the register.
+        {/* `raised`, because the panel above is `bg-bgPrimary` — the kit's rule
+            is that a field is painted relative to WHAT IT SITS ON.
+
+            🔴 It used to be translucent, and that was a real bug rather than a
+            style: `bg-bgPrimary/70` over `bg-bgPrimary` IS `bg-bgPrimary`, so
+            the field rendered flush against its own panel with only a
+            10%-alpha border to say a control was there. Measured from
+            composited pixels on this page: Δ 0 → 8.8 in dark and 3 → 16.8 in
+            light, with the box unchanged at 262×41. Same defect that stopped
+            the `raised` family folding onto `solid` in #919; this site was the
+            one member the nesting rule had never been applied to.
 
             `w-auto` cancels the kit's `w-full`: this is a `flex-1` item in a
             row, and `width:100%` would fight its own flex basis. `py-2` is its
             own shorter box. */}
         <Select
-          surface="translucent"
+          surface="raised"
           className="w-auto min-w-[200px] flex-1 py-2"
           value={formId}
           disabled={busy}
