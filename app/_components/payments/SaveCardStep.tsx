@@ -95,7 +95,7 @@ function AddCardForm(props: {
 
   return (
     <form onSubmit={onSubmit} className="mt-4 grid gap-4">
-      <div className="rounded-card border border-white/10 bg-bgSecondary/35 p-3">
+      <div className="rounded-card border border-surfaceGlass/10 bg-bgSecondary/35 p-3">
         <PaymentElement />
       </div>
 

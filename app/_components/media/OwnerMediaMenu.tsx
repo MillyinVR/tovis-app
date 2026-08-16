@@ -369,7 +369,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
         className={cn(
           'tap-target',
           'inline-flex h-10 w-10 items-center justify-center rounded-full',
-          'border border-white/12 bg-bgPrimary/20 backdrop-blur-xl',
+          'border border-surfaceGlass/12 bg-bgPrimary/20 backdrop-blur-xl',
           'text-white/90 shadow-[0_10px_30px_rgba(0,0,0,0.35)]',
           'hover:bg-white/10 active:scale-[0.99] transition',
         )}
@@ -384,7 +384,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
         <div
           className={cn(
             'absolute right-0 mt-2 w-44 overflow-hidden rounded-[16px]',
-            'border border-white/12 bg-bgPrimary/70 backdrop-blur-xl',
+            'border border-surfaceGlass/12 bg-bgPrimary/70 backdrop-blur-xl',
             'shadow-[0_18px_60px_rgba(0,0,0,0.55)]',
           )}
         >
@@ -446,7 +446,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
           <div
             className={cn(
               'mx-auto mt-4 w-full max-w-[560px] overflow-hidden rounded-[18px]',
-              'border border-white/12 bg-bgPrimary/70 backdrop-blur-2xl',
+              'border border-surfaceGlass/12 bg-bgPrimary/70 backdrop-blur-2xl',
               'shadow-[0_22px_90px_rgba(0,0,0,0.70)]',
               'grid grid-rows-[auto_1fr_auto]',
             )}
@@ -457,7 +457,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
             aria-label="Edit media"
           >
             {/* Header */}
-            <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
+            <div className="flex items-center justify-between gap-3 border-b border-surfaceGlass/10 px-4 py-3">
               <div className="grid">
                 <div className="text-[13px] font-black text-textPrimary">Edit media</div>
                 <div className="text-[11px] font-semibold text-textSecondary">Luxury controls. Zero confusion.</div>
@@ -497,7 +497,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
                     rows={3}
                     disabled={busy}
                     className={cn(
-                      'w-full resize-y rounded-[16px] border border-white/10 bg-bgPrimary/35',
+                      'w-full resize-y rounded-[16px] border border-surfaceGlass/10 bg-bgPrimary/35',
                       'px-3 py-3 text-[13px] text-textPrimary outline-none',
                       'focus:ring-2 focus:ring-accentPrimary/35',
                     )}
@@ -519,7 +519,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
                 </Field>
 
                 {/* Toggles */}
-                <div className="rounded-[18px] border border-white/12 bg-bgPrimary/25 p-3">
+                <div className="rounded-[18px] border border-surfaceGlass/12 bg-bgPrimary/25 p-3">
                   <HermesToggleRow
                     label="Show in Looks feed"
                     hint="Discovery feed + more exposure."
@@ -549,7 +549,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
                     label="Before / after"
                     hint="Pair a “before” photo to show a comparison slider on your public portfolio."
                   >
-                    <div className="flex flex-wrap gap-2 rounded-[18px] border border-white/10 bg-bgPrimary/25 p-3">
+                    <div className="flex flex-wrap gap-2 rounded-[18px] border border-surfaceGlass/10 bg-bgPrimary/25 p-3">
                       {!beforeOptionsLoaded ? (
                         <div className="grid h-16 place-items-center px-2 text-[11px] font-semibold text-textSecondary">
                           Loading…
@@ -572,7 +572,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
                               'grid h-16 w-16 place-items-center rounded-xl border text-[11px] font-black transition',
                               beforeAssetId === null
                                 ? 'border-accentPrimary/40 bg-accentPrimary/15 text-accentPrimary'
-                                : 'border-white/12 bg-bgPrimary/30 text-textSecondary hover:bg-white/5',
+                                : 'border-surfaceGlass/12 bg-bgPrimary/30 text-textSecondary hover:bg-white/5',
                               busy ? 'cursor-not-allowed opacity-70' : '',
                             )}
                             title="No before/after pairing"
@@ -596,7 +596,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
                                   'relative h-16 w-16 overflow-hidden rounded-xl border transition',
                                   on
                                     ? 'border-accentPrimary shadow-[0_0_0_2px_rgb(var(--accent-primary)/0.45)]'
-                                    : 'border-white/12 hover:border-white/30',
+                                    : 'border-surfaceGlass/12 hover:border-surfaceGlass/30',
                                   busy ? 'cursor-not-allowed opacity-70' : '',
                                 )}
                                 title={
@@ -633,7 +633,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
                   right={<span className="text-[11px] font-semibold text-textSecondary">{selectedServiceIds.length} selected</span>}
                 >
                   {selectedServiceIds.length ? (
-                    <div className="flex flex-wrap gap-2 rounded-[18px] border border-white/10 bg-bgPrimary/25 p-3">
+                    <div className="flex flex-wrap gap-2 rounded-[18px] border border-surfaceGlass/10 bg-bgPrimary/25 p-3">
                       {selectedServiceIds.slice(0, 10).map((id) => {
                         const name = selectedServiceMap.get(id) || 'Service'
                         return (
@@ -644,7 +644,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
                             onClick={() => removeService(id)}
                             className={cn(
                               'inline-flex items-center gap-2 rounded-full px-3 py-1',
-                              'border border-white/12 bg-bgPrimary/30 backdrop-blur-xl',
+                              'border border-surfaceGlass/12 bg-bgPrimary/30 backdrop-blur-xl',
                               'text-[12px] font-extrabold text-textPrimary',
                               busy ? 'opacity-70' : 'hover:bg-white/10',
                             )}
@@ -658,7 +658,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
                         )
                       })}
                       {selectedServiceIds.length > 10 ? (
-                        <div className="rounded-full border border-white/10 bg-bgPrimary/25 px-3 py-1 text-[12px] font-extrabold text-textSecondary">
+                        <div className="rounded-full border border-surfaceGlass/10 bg-bgPrimary/25 px-3 py-1 text-[12px] font-extrabold text-textSecondary">
                           +{selectedServiceIds.length - 10} more
                         </div>
                       ) : null}
@@ -676,14 +676,14 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
                       placeholder="Search services…"
                       disabled={busy}
                       className={cn(
-                        'w-full rounded-[16px] border border-white/10 bg-bgPrimary/35',
+                        'w-full rounded-[16px] border border-surfaceGlass/10 bg-bgPrimary/35',
                         'px-3 py-2 text-[13px] text-textPrimary outline-none',
                         'focus:ring-2 focus:ring-accentPrimary/35',
                       )}
                     />
                   </div>
 
-                  <div className="mt-2 max-h-[260px] overflow-auto rounded-[18px] border border-white/10 bg-bgPrimary/20">
+                  <div className="mt-2 max-h-[260px] overflow-auto rounded-[18px] border border-surfaceGlass/10 bg-bgPrimary/20">
                     {filteredServices.map((s) => {
                       const on = selectedServiceIds.includes(s.id)
                       return (
@@ -694,7 +694,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
                           onClick={() => toggleService(s.id)}
                           className={cn(
                             'flex w-full items-center justify-between gap-3 px-4 py-3 text-left',
-                            'border-b border-white/5 last:border-b-0',
+                            'border-b border-surfaceGlass/5 last:border-b-0',
                             busy ? 'opacity-70' : 'hover:bg-white/5',
                           )}
                         >
@@ -705,7 +705,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
                               'inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-black',
                               on
                                 ? 'border border-accentPrimary/30 bg-accentPrimary/20 text-accentPrimary'
-                                : 'border border-white/10 bg-bgPrimary/25 text-textSecondary',
+                                : 'border border-surfaceGlass/10 bg-bgPrimary/25 text-textSecondary',
                             )}
                           >
                             <span className={cn('h-1.5 w-1.5 rounded-full', on ? 'bg-accentPrimary' : 'bg-white/35')} />
@@ -731,7 +731,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
 
             {/* Actions */}
             <div
-              className="border-t border-white/10 bg-bgPrimary/85 px-4 py-3 backdrop-blur-2xl"
+              className="border-t border-surfaceGlass/10 bg-bgPrimary/85 px-4 py-3 backdrop-blur-2xl"
               style={{ paddingBottom: actionSafePaddingBottom }}
             >
               <div className="flex items-center justify-between gap-2">
@@ -747,8 +747,8 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
                     className={cn(
                       'rounded-[16px] border px-4 py-3 text-[13px] font-black transition',
                       busy
-                        ? 'cursor-not-allowed border-white/10 bg-bgPrimary text-textSecondary opacity-70'
-                        : 'border-white/12 bg-bgPrimary/35 text-textPrimary hover:bg-white/5',
+                        ? 'cursor-not-allowed border-surfaceGlass/10 bg-bgPrimary text-textSecondary opacity-70'
+                        : 'border-surfaceGlass/12 bg-bgPrimary/35 text-textPrimary hover:bg-white/5',
                     )}
                   >
                     Cancel
@@ -761,7 +761,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
                     className={cn(
                       'rounded-[16px] border px-4 py-3 text-[13px] font-black transition',
                       !canSave
-                        ? 'cursor-not-allowed border-white/10 bg-bgPrimary text-textSecondary opacity-70'
+                        ? 'cursor-not-allowed border-surfaceGlass/10 bg-bgPrimary text-textSecondary opacity-70'
                         : 'border-accentPrimary/40 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
                     )}
                     title={!mustHaveService ? 'Attach at least 1 service' : undefined}
@@ -817,7 +817,7 @@ function Segmented<T extends string>({
   return (
     <div
       className={cn(
-        'grid grid-cols-2 gap-2 rounded-[18px] border border-white/12 bg-bgPrimary/25 p-2',
+        'grid grid-cols-2 gap-2 rounded-[18px] border border-surfaceGlass/12 bg-bgPrimary/25 p-2',
         disabled ? 'opacity-70' : '',
       )}
       role="radiogroup"
@@ -836,7 +836,7 @@ function Segmented<T extends string>({
               'backdrop-blur-xl',
               active
                 ? 'border-accentPrimary/35 bg-accentPrimary/15 shadow-[0_10px_30px_rgba(0,0,0,0.25)]'
-                : 'border-white/10 bg-bgPrimary/25 hover:bg-white/5',
+                : 'border-surfaceGlass/10 bg-bgPrimary/25 hover:bg-white/5',
               disabled ? 'cursor-not-allowed' : 'active:scale-[0.99]',
             )}
             role="radio"
@@ -888,7 +888,7 @@ function HermesToggleRow({
             'hidden sm:inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-black',
             value
               ? 'border border-accentPrimary/25 bg-accentPrimary/15 text-accentPrimary'
-              : 'border border-white/10 bg-bgPrimary/25 text-textSecondary',
+              : 'border border-surfaceGlass/10 bg-bgPrimary/25 text-textSecondary',
           )}
         >
           <span className={cn('h-1.5 w-1.5 rounded-full', value ? 'bg-accentPrimary' : 'bg-white/35')} />
@@ -898,7 +898,7 @@ function HermesToggleRow({
         <div
           className={cn(
             'relative h-7 w-14 rounded-full border p-1 transition',
-            value ? 'border-accentPrimary/35 bg-accentPrimary/80' : 'border-white/12 bg-bgPrimary/50',
+            value ? 'border-accentPrimary/35 bg-accentPrimary/80' : 'border-surfaceGlass/12 bg-bgPrimary/50',
           )}
           aria-hidden="true"
         >

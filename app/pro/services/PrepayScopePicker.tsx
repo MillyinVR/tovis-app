@@ -88,7 +88,7 @@ export default function PrepayScopePicker(props: {
                   'peer-focus-visible:ring-2 peer-focus-visible:ring-accentPrimary/60 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-bgSecondary',
                   selected
                     ? 'border-accentPrimary bg-accentPrimary/15 text-textPrimary'
-                    : 'border-white/10 bg-bgPrimary/60 text-textSecondary hover:border-white/20',
+                    : 'border-surfaceGlass/10 bg-bgPrimary/60 text-textSecondary hover:border-surfaceGlass/20',
                 )}
               >
                 {option.label}

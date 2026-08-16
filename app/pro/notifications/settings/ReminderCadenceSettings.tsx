@@ -233,7 +233,7 @@ export default function ReminderCadenceSettings() {
       {state.enabled ? (
         <div className="mt-4 flex flex-col gap-2">
           {state.leads.length === 0 ? (
-            <div className="rounded-card border border-white/5 px-3 py-3 text-[11px] font-semibold text-textSecondary">
+            <div className="rounded-card border border-surfaceGlass/5 px-3 py-3 text-[11px] font-semibold text-textSecondary">
               No reminders yet — clients won&apos;t get an appointment reminder
               until you add at least one.
             </div>
@@ -241,7 +241,7 @@ export default function ReminderCadenceSettings() {
             state.leads.map((row) => (
               <div
                 key={row.id}
-                className="flex items-center gap-2 rounded-card border border-white/5 px-3 py-2"
+                className="flex items-center gap-2 rounded-card border border-surfaceGlass/5 px-3 py-2"
               >
                 <input
                   type="number"
@@ -250,7 +250,7 @@ export default function ReminderCadenceSettings() {
                   value={row.value}
                   onChange={(e) => updateRow(row.id, { value: e.target.value })}
                   aria-label="Reminder lead time"
-                  className="w-16 rounded-card border border-white/10 bg-bgPrimary/40 px-2 py-1.5 text-[13px] font-bold text-textPrimary outline-none focus:border-accentPrimary"
+                  className="w-16 rounded-card border border-surfaceGlass/10 bg-bgPrimary/40 px-2 py-1.5 text-[13px] font-bold text-textPrimary outline-none focus:border-accentPrimary"
                 />
                 <select
                   value={row.unit}
@@ -260,7 +260,7 @@ export default function ReminderCadenceSettings() {
                     })
                   }
                   aria-label="Reminder lead unit"
-                  className="rounded-card border border-white/10 bg-bgPrimary/40 px-2 py-1.5 text-[13px] font-bold text-textPrimary outline-none focus:border-accentPrimary"
+                  className="rounded-card border border-surfaceGlass/10 bg-bgPrimary/40 px-2 py-1.5 text-[13px] font-bold text-textPrimary outline-none focus:border-accentPrimary"
                 >
                   <option value="days">days before</option>
                   <option value="hours">hours before</option>
@@ -293,7 +293,7 @@ export default function ReminderCadenceSettings() {
                   type="button"
                   disabled={added || atMax}
                   onClick={() => addLead(preset.value, preset.unit)}
-                  className="rounded-full border border-white/10 px-3 py-1 text-[11px] font-bold text-textPrimary transition hover:border-accentPrimary disabled:opacity-40"
+                  className="rounded-full border border-surfaceGlass/10 px-3 py-1 text-[11px] font-bold text-textPrimary transition hover:border-accentPrimary disabled:opacity-40"
                 >
                   {added ? `✓ ${preset.label}` : `+ ${preset.label}`}
                 </button>
@@ -303,7 +303,7 @@ export default function ReminderCadenceSettings() {
               type="button"
               disabled={atMax}
               onClick={() => addLead(1, 'days')}
-              className="rounded-full border border-white/10 px-3 py-1 text-[11px] font-black text-textPrimary transition hover:border-accentPrimary disabled:opacity-40"
+              className="rounded-full border border-surfaceGlass/10 px-3 py-1 text-[11px] font-black text-textPrimary transition hover:border-accentPrimary disabled:opacity-40"
             >
               + Add reminder
             </button>

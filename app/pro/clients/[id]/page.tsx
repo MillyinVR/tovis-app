@@ -585,7 +585,7 @@ type ClientNoteRow = ClientDetailRecord['notes'][number]
 
 function NoteCard({ note, tz }: { note: ClientNoteRow; tz: string }) {
   return (
-    <div className="rounded-card border border-white/10 bg-bgPrimary p-4">
+    <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary p-4">
       <div className="flex items-baseline justify-between gap-3">
         <div className="min-w-0 truncate text-[13px] font-black text-textPrimary">
           {note.title || 'Note'}
@@ -617,7 +617,7 @@ function ClientNotesList({
 
   if (groups.length === 0) {
     return (
-      <div className="rounded-card border border-white/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
+      <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
         No notes yet. Start the “professional memory” file.
       </div>
     )
@@ -648,7 +648,7 @@ function ClientAllergiesList({
 }) {
   if (client.allergies.length === 0) {
     return (
-      <div className="rounded-card border border-white/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
+      <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
         No allergies recorded yet.
       </div>
     )
@@ -659,7 +659,7 @@ function ClientAllergiesList({
       {client.allergies.map((allergy) => (
         <div
           key={allergy.id}
-          className="rounded-card border border-white/10 bg-bgPrimary p-4"
+          className="rounded-card border border-surfaceGlass/10 bg-bgPrimary p-4"
         >
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0 truncate text-[13px] font-black text-textPrimary">
@@ -725,7 +725,7 @@ function BookingFilterForm({
           id="bookingFilter"
           name="bookingFilter"
           defaultValue={bookingFilter}
-          className="rounded-full border border-white/10 bg-bgPrimary px-3 py-2 text-[12px] font-black text-textPrimary"
+          className="rounded-full border border-surfaceGlass/10 bg-bgPrimary px-3 py-2 text-[12px] font-black text-textPrimary"
         >
           <option value="ALL">All bookings</option>
           <option value="WITH_ME">Only bookings with me</option>
@@ -747,7 +747,7 @@ function BookingFilterForm({
           name="q"
           defaultValue={bookingQ}
           placeholder="Service, category, notes, status…"
-          className="w-56 rounded-full border border-white/10 bg-bgPrimary px-3 py-2 text-[12px] font-semibold text-textPrimary placeholder:text-textSecondary/70"
+          className="w-56 rounded-full border border-surfaceGlass/10 bg-bgPrimary px-3 py-2 text-[12px] font-semibold text-textPrimary placeholder:text-textSecondary/70"
         />
       </div>
 
@@ -780,7 +780,7 @@ function ServiceHistoryList({
 }) {
   if (bookingRowsFiltered.length === 0) {
     return (
-      <div className="rounded-card border border-white/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
+      <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
         No bookings match your search/filter.
       </div>
     )
@@ -821,7 +821,7 @@ function ServiceHistoryList({
           <Link
             key={booking.id}
             href={`/pro/bookings/${encodeURIComponent(booking.id)}`}
-            className="block rounded-card border border-white/10 bg-bgPrimary p-4 hover:bg-surfaceGlass/10"
+            className="block rounded-card border border-surfaceGlass/10 bg-bgPrimary p-4 hover:bg-surfaceGlass/10"
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -892,7 +892,7 @@ function ProductRecommendationsList({
 }) {
   if (productRecs.length === 0) {
     return (
-      <div className="rounded-card border border-white/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
+      <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
         No product recommendations recorded yet.
       </div>
     )
@@ -903,7 +903,7 @@ function ProductRecommendationsList({
       {sortProductRecommendations(productRecs).map((recommendation) => (
         <div
           key={recommendation.id}
-          className="rounded-card border border-white/10 bg-bgPrimary p-4"
+          className="rounded-card border border-surfaceGlass/10 bg-bgPrimary p-4"
         >
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
@@ -949,7 +949,7 @@ function ClientLeftReviewsList({
 }) {
   if (reviews.length === 0) {
     return (
-      <div className="rounded-card border border-white/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
+      <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
         This client hasn&apos;t left any reviews yet.
       </div>
     )
@@ -968,7 +968,7 @@ function ClientLeftReviewsList({
         return (
           <div
             key={review.id}
-            className="rounded-card border border-white/10 bg-bgPrimary p-4"
+            className="rounded-card border border-surfaceGlass/10 bg-bgPrimary p-4"
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -1014,7 +1014,7 @@ function ProFeedbackList({
 }) {
   if (feedback.length === 0) {
     return (
-      <div className="rounded-card border border-white/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
+      <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
         No pro feedback recorded yet.
       </div>
     )
@@ -1033,7 +1033,7 @@ function ProFeedbackList({
         return (
           <div
             key={note.id}
-            className="rounded-card border border-white/10 bg-bgPrimary p-4"
+            className="rounded-card border border-surfaceGlass/10 bg-bgPrimary p-4"
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -1073,7 +1073,7 @@ function PhotoTimeline({
 }) {
   if (visits.length === 0) {
     return (
-      <div className="rounded-card border border-white/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
+      <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
         No before/after photos for this client yet.
       </div>
     )
@@ -1084,7 +1084,7 @@ function PhotoTimeline({
       {visits.map((visit) => (
         <div
           key={visit.bookingId}
-          className="rounded-card border border-white/10 bg-bgPrimary p-4"
+          className="rounded-card border border-surfaceGlass/10 bg-bgPrimary p-4"
         >
           <div className="mb-3 flex items-center justify-between gap-3">
             <div className="min-w-0 truncate text-[13px] font-black text-textPrimary">
@@ -1117,7 +1117,7 @@ function PhotoTimeline({
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
             {visit.photos.map((photo) => (
               <div key={photo.id} className="grid gap-1">
-                <div className="relative aspect-square overflow-hidden rounded-card border border-white/10 bg-bgSecondary">
+                <div className="relative aspect-square overflow-hidden rounded-card border border-surfaceGlass/10 bg-bgSecondary">
                   {photo.imageUrl ? (
                     <RemoteImage
                       src={photo.imageUrl}
@@ -1180,7 +1180,7 @@ function FormulaList({
 }) {
   if (formula.length === 0) {
     return (
-      <div className="rounded-card border border-white/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
+      <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
         No formula history yet.
       </div>
     )
@@ -1201,7 +1201,7 @@ function FormulaList({
         return (
           <div
             key={entry.id}
-            className="rounded-card border border-white/10 bg-bgPrimary p-4"
+            className="rounded-card border border-surfaceGlass/10 bg-bgPrimary p-4"
           >
             <div className="flex items-baseline justify-between gap-3">
               <div className="min-w-0 truncate text-[13px] font-black text-textPrimary">
@@ -1249,7 +1249,7 @@ function ConsentList({
 }) {
   if (consents.length === 0) {
     return (
-      <div className="rounded-card border border-white/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
+      <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
         No consent or patch-test records yet.
       </div>
     )
@@ -1264,7 +1264,7 @@ function ConsentList({
         return (
           <div
             key={record.id}
-            className="rounded-card border border-white/10 bg-bgPrimary p-4"
+            className="rounded-card border border-surfaceGlass/10 bg-bgPrimary p-4"
           >
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
@@ -1321,7 +1321,7 @@ function ConsentList({
             ) : null}
 
             {record.formVersion ? (
-              <details className="mt-2 rounded-card border border-white/10 bg-bgSecondary p-2">
+              <details className="mt-2 rounded-card border border-surfaceGlass/10 bg-bgSecondary p-2">
                 <summary className="cursor-pointer text-[12px] font-black text-textPrimary">
                   {record.formVersion.title}{' '}
                   <span className="font-semibold text-textSecondary">
@@ -1455,7 +1455,7 @@ function ViewToggle({
 
   return (
     <div
-      className="inline-flex rounded-full border border-white/10 bg-bgPrimary p-1"
+      className="inline-flex rounded-full border border-surfaceGlass/10 bg-bgPrimary p-1"
       role="tablist"
       aria-label="Chart view"
     >
@@ -1609,7 +1609,7 @@ function IntelStat({
   hint?: string | null
 }) {
   return (
-    <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
+    <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary p-3">
       <div className="text-[10px] font-black uppercase tracking-widest text-textSecondary">
         {label}
       </div>
@@ -2129,7 +2129,7 @@ export default async function ClientDetailPage(props: {
         <ViewToggle clientId={clientId} view={view} tab={tab} />
       </div>
 
-      <header className="tovis-glass mb-4 rounded-card border border-white/10 bg-bgSecondary p-5">
+      <header className="tovis-glass mb-4 rounded-card border border-surfaceGlass/10 bg-bgSecondary p-5">
         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div className="min-w-0">
             <h1 className="text-[22px] font-black text-textPrimary">
@@ -2216,7 +2216,7 @@ export default async function ClientDetailPage(props: {
                 + New booking
               </Link>
 
-              <div className="rounded-full border border-white/10 bg-bgPrimary px-3 py-2">
+              <div className="rounded-full border border-surfaceGlass/10 bg-bgPrimary px-3 py-2">
                 <EditAlertBannerForm
                   clientId={client.id}
                   initialAlertBanner={client.alertBanner ?? null}

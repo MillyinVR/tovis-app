@@ -152,7 +152,7 @@ export default async function ProBookingSeriesPage(props: {
           materializer actually tried, so an open-ended series that stopped at
           the horizon does not read as a failure. */}
       <section
-        className="tovis-glass mt-5 rounded-card border border-white/10 bg-bgSecondary p-4"
+        className="tovis-glass mt-5 rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4"
         aria-labelledby="series-outcome-heading"
       >
         <h2
@@ -231,7 +231,7 @@ export default async function ProBookingSeriesPage(props: {
           anything has moved since. Surfaced, never applied — repricing a
           standing client is a decision, not a side effect. */}
       <section
-        className="tovis-glass mt-3.5 rounded-card border border-white/10 bg-bgSecondary p-4"
+        className="tovis-glass mt-3.5 rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4"
         aria-labelledby="series-price-heading"
       >
         <h2

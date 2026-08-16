@@ -118,7 +118,7 @@ export default async function AdminRuntimeFlagsPage() {
           return (
             <section
               key={meta.name}
-              className="rounded-card border border-white/10 bg-bgSecondary p-4"
+              className="rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4"
             >
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">
@@ -158,7 +158,7 @@ export default async function AdminRuntimeFlagsPage() {
                         ? enabled
                           ? 'border-toneDanger/25 bg-toneDanger/10 text-toneDanger hover:border-toneDanger/35 hover:bg-toneDanger/15'
                           : 'border-toneSuccess/25 bg-toneSuccess/10 text-toneSuccess hover:border-toneSuccess/35 hover:bg-toneSuccess/15'
-                        : 'cursor-not-allowed border-white/10 bg-bgPrimary/40 text-textSecondary opacity-60',
+                        : 'cursor-not-allowed border-surfaceGlass/10 bg-bgPrimary/40 text-textSecondary opacity-60',
                     ].join(' ')}
                   >
                     {enabled ? 'Disable flag' : 'Enable flag'}

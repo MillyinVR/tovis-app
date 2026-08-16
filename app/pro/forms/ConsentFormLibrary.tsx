@@ -28,7 +28,7 @@ type Props = {
 }
 
 const fieldClass =
-  'w-full rounded-card border border-white/10 bg-bgPrimary p-2 text-[13px] font-semibold text-textPrimary'
+  'w-full rounded-card border border-surfaceGlass/10 bg-bgPrimary p-2 text-[13px] font-semibold text-textPrimary'
 
 export default function ConsentFormLibrary({ forms, templates }: Props) {
   const router = useRouter()
@@ -96,7 +96,7 @@ export default function ConsentFormLibrary({ forms, templates }: Props) {
       {error ? (
         <div
           role="alert"
-          className="rounded-card border border-white/10 bg-bgPrimary p-3 text-[12px] font-black text-toneDanger"
+          className="rounded-card border border-surfaceGlass/10 bg-bgPrimary p-3 text-[12px] font-black text-toneDanger"
         >
           {error}
         </div>
@@ -120,7 +120,7 @@ export default function ConsentFormLibrary({ forms, templates }: Props) {
 
         {creating ? (
           <form
-            className="grid gap-2 rounded-card border border-white/10 bg-bgSecondary p-3"
+            className="grid gap-2 rounded-card border border-surfaceGlass/10 bg-bgSecondary p-3"
             onSubmit={(e) => {
               e.preventDefault()
               void send(
@@ -182,14 +182,14 @@ export default function ConsentFormLibrary({ forms, templates }: Props) {
         ) : null}
 
         {forms.length === 0 ? (
-          <p className="rounded-card border border-white/10 bg-bgPrimary p-3 text-[12px] font-semibold text-textSecondary">
+          <p className="rounded-card border border-surfaceGlass/10 bg-bgPrimary p-3 text-[12px] font-semibold text-textSecondary">
             No forms yet. Write your own, or add one of the templates below.
           </p>
         ) : (
           forms.map((form) => (
             <article
               key={form.id}
-              className="grid gap-2 rounded-card border border-white/10 bg-bgPrimary p-3"
+              className="grid gap-2 rounded-card border border-surfaceGlass/10 bg-bgPrimary p-3"
             >
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div className="grid gap-1">
@@ -216,7 +216,7 @@ export default function ConsentFormLibrary({ forms, templates }: Props) {
               </div>
 
               {form.currentVersion ? (
-                <details className="rounded-card border border-white/10 bg-bgSecondary p-2">
+                <details className="rounded-card border border-surfaceGlass/10 bg-bgSecondary p-2">
                   <summary className="cursor-pointer text-[11px] font-black text-textSecondary">
                     Current text
                   </summary>
@@ -316,14 +316,14 @@ export default function ConsentFormLibrary({ forms, templates }: Props) {
       <section className="grid gap-2">
         <h2 className="text-[13px] font-black text-textPrimary">Templates</h2>
         {templates.length === 0 ? (
-          <p className="rounded-card border border-white/10 bg-bgPrimary p-3 text-[12px] font-semibold text-textSecondary">
+          <p className="rounded-card border border-surfaceGlass/10 bg-bgPrimary p-3 text-[12px] font-semibold text-textSecondary">
             No templates are available yet.
           </p>
         ) : (
           templates.map((template) => (
             <article
               key={template.id}
-              className="grid gap-2 rounded-card border border-white/10 bg-bgPrimary p-3"
+              className="grid gap-2 rounded-card border border-surfaceGlass/10 bg-bgPrimary p-3"
             >
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div className="grid gap-1">
@@ -357,7 +357,7 @@ export default function ConsentFormLibrary({ forms, templates }: Props) {
                 )}
               </div>
               {template.currentVersion ? (
-                <details className="rounded-card border border-white/10 bg-bgSecondary p-2">
+                <details className="rounded-card border border-surfaceGlass/10 bg-bgSecondary p-2">
                   <summary className="cursor-pointer text-[11px] font-black text-textSecondary">
                     Read the text
                   </summary>

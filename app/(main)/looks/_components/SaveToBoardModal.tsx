@@ -148,7 +148,7 @@ function SaveRowButton(props: {
         'inline-flex min-h-10 min-w-[88px] items-center justify-center rounded-full border px-3 py-2',
         'text-[12px] font-bold transition',
         props.inBoard
-          ? 'border-white/10 bg-bgPrimary text-textPrimary hover:border-white/20'
+          ? 'border-surfaceGlass/10 bg-bgPrimary text-textPrimary hover:border-surfaceGlass/20'
           : 'border-[rgb(var(--accent-primary))]/25 bg-[rgb(var(--accent-primary))]/10 text-textPrimary hover:border-[rgb(var(--accent-primary))]/40',
         'disabled:cursor-not-allowed disabled:opacity-60',
       )}
@@ -383,13 +383,13 @@ export default function SaveToBoardModal({
         <div
           className="
             pointer-events-auto flex w-full max-w-lg flex-col
-            rounded-card border border-white/10 bg-bgSecondary
+            rounded-card border border-surfaceGlass/10 bg-bgSecondary
             shadow-[0_24px_80px_rgba(0,0,0,0.45)]
             h-[min(760px,calc(100dvh-0.5rem))]
             overflow-hidden
           "
         >
-          <div className="shrink-0 border-b border-white/10 px-4 py-4">
+          <div className="shrink-0 border-b border-surfaceGlass/10 px-4 py-4">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-textSecondary/60">
@@ -409,7 +409,7 @@ export default function SaveToBoardModal({
                 type="button"
                 aria-label="Close"
                 onClick={onClose}
-                className="tap-target inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-bgPrimary text-textSecondary transition hover:border-white/20 hover:text-textPrimary"
+                className="tap-target inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-surfaceGlass/10 bg-bgPrimary text-textSecondary transition hover:border-surfaceGlass/20 hover:text-textPrimary"
               >
                 ×
               </button>
@@ -448,9 +448,9 @@ export default function SaveToBoardModal({
                     value={createName}
                     onChange={(event) => setCreateName(event.target.value)}
                     className={cn(
-                      'w-full rounded-card border border-white/10 bg-bgPrimary px-3 py-3',
+                      'w-full rounded-card border border-surfaceGlass/10 bg-bgPrimary px-3 py-3',
                       'text-[14px] text-textPrimary outline-none transition',
-                      'placeholder:text-textMuted focus:border-white/20',
+                      'placeholder:text-textMuted focus:border-surfaceGlass/20',
                     )}
                     required
                   />
@@ -460,13 +460,13 @@ export default function SaveToBoardModal({
                   Boards are private to you.
                 </p>
 
-                <div className="flex flex-wrap items-center gap-3 border-t border-white/10 pt-3">
+                <div className="flex flex-wrap items-center gap-3 border-t border-surfaceGlass/10 pt-3">
                   <button
                     type="submit"
                     disabled={creating}
                     className={cn(
-                      'inline-flex min-h-11 items-center justify-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2',
-                      'text-[12px] font-bold text-textPrimary transition hover:border-white/20',
+                      'inline-flex min-h-11 items-center justify-center rounded-full border border-surfaceGlass/10 bg-bgPrimary px-4 py-2',
+                      'text-[12px] font-bold text-textPrimary transition hover:border-surfaceGlass/20',
                       'disabled:cursor-not-allowed disabled:opacity-60',
                     )}
                   >
@@ -488,14 +488,14 @@ export default function SaveToBoardModal({
             ) : (
               <>
                 {loadState === 'loading' ? (
-                  <div className="rounded-card border border-white/10 bg-bgPrimary px-4 py-8 text-center text-[13px] text-textSecondary">
+                  <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary px-4 py-8 text-center text-[13px] text-textSecondary">
                     Loading boards…
                   </div>
                 ) : null}
 
                 {loadState === 'error' && !saveState ? (
                   <div className="grid gap-3">
-                    <div className="rounded-card border border-white/10 bg-bgPrimary px-4 py-8 text-center text-[13px] text-textSecondary">
+                    <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary px-4 py-8 text-center text-[13px] text-textSecondary">
                       We couldn’t load your boards.
                     </div>
 
@@ -503,7 +503,7 @@ export default function SaveToBoardModal({
                       <button
                         type="button"
                         onClick={() => void loadModalData()}
-                        className="inline-flex min-h-11 items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-bold text-textPrimary transition hover:border-white/20"
+                        className="inline-flex min-h-11 items-center rounded-full border border-surfaceGlass/10 bg-bgPrimary px-4 py-2 text-[12px] font-bold text-textPrimary transition hover:border-surfaceGlass/20"
                       >
                         Retry
                       </button>
@@ -521,7 +521,7 @@ export default function SaveToBoardModal({
 
                 {saveState ? (
                 <div className="grid gap-4">
-                    <div className="rounded-card border border-white/10 bg-bgPrimary px-4 py-3">
+                    <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary px-4 py-3">
                     <div className="text-[12px] font-bold text-textPrimary">
                         {saveState.isSaved
                         ? `Saved in ${saveState.boardIds.length} board${
@@ -541,7 +541,7 @@ export default function SaveToBoardModal({
                         setMode('create')
                         setCreateError(null)
                     }}
-                    className="inline-flex min-h-11 w-full items-center justify-center rounded-full border border-white/10 bg-bgPrimary px-4 py-3 text-[12px] font-bold text-textPrimary transition hover:border-white/20"
+                    className="inline-flex min-h-11 w-full items-center justify-center rounded-full border border-surfaceGlass/10 bg-bgPrimary px-4 py-3 text-[12px] font-bold text-textPrimary transition hover:border-surfaceGlass/20"
                     >
                     Create new board
                     </button>
@@ -555,7 +555,7 @@ export default function SaveToBoardModal({
                         return (
                             <div
                             key={board.id}
-                            className="flex items-center justify-between gap-3 rounded-card border border-white/10 bg-bgPrimary px-4 py-3"
+                            className="flex items-center justify-between gap-3 rounded-card border border-surfaceGlass/10 bg-bgPrimary px-4 py-3"
                             >
                             <div className="min-w-0">
                                 <div className="truncate text-[14px] font-bold text-textPrimary">
@@ -577,7 +577,7 @@ export default function SaveToBoardModal({
                         })}
                     </div>
                     ) : loadState === 'ready' ? (
-                    <div className="rounded-card border border-white/10 bg-bgPrimary px-4 py-8 text-center">
+                    <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary px-4 py-8 text-center">
                         <div className="text-[14px] font-bold text-textPrimary">
                         You don’t have any boards yet.
                         </div>
@@ -592,7 +592,7 @@ export default function SaveToBoardModal({
             )}
           </div>
 
-          <div className="shrink-0 border-t border-white/10 px-4 py-4">
+          <div className="shrink-0 border-t border-surfaceGlass/10 px-4 py-4">
             <div className="flex flex-wrap items-center gap-3">
               {mode === 'list' ? (
                 <button
@@ -601,13 +601,13 @@ export default function SaveToBoardModal({
                     setMode('create')
                     setCreateError(null)
                   }}
-                  className="inline-flex min-h-11 items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-bold text-textPrimary transition hover:border-white/20"
+                  className="inline-flex min-h-11 items-center rounded-full border border-surfaceGlass/10 bg-bgPrimary px-4 py-2 text-[12px] font-bold text-textPrimary transition hover:border-surfaceGlass/20"
                 >
                   Create new board
                 </button>
               ) : null}
 
-                <div className="shrink-0 border-t border-white/10 px-4 py-4">
+                <div className="shrink-0 border-t border-surfaceGlass/10 px-4 py-4">
                 <div className="flex flex-wrap items-center gap-3">
                     <Link
                     href="/client/me"

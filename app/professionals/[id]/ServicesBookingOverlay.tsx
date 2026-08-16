@@ -227,7 +227,7 @@ function ServiceOfferingCard({
   return (
     <article className="brand-profile-service-card">
       <div className="flex min-w-0 flex-1 gap-3">
-        <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-[var(--radius-card)] border border-white/10 bg-bgSurface">
+        <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-[var(--radius-card)] border border-surfaceGlass/10 bg-bgSurface">
           {offering.imageUrl ? (
             <RemoteImage
               src={offering.imageUrl}

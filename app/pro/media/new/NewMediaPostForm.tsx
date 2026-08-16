@@ -606,7 +606,7 @@ export default function NewMediaPostForm() {
 
   return (
     <>
-      <div className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
+      <div className="tovis-glass rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4">
         <div className="grid gap-4">
           <div className="grid gap-2">
             <label className="text-[12px] font-black text-textPrimary">
@@ -627,7 +627,7 @@ export default function NewMediaPostForm() {
             </div>
 
             {file && mediaType === MediaType.IMAGE ? (
-              <div className="grid gap-2 rounded-xl border border-white/10 bg-bgPrimary p-3">
+              <div className="grid gap-2 rounded-xl border border-surfaceGlass/10 bg-bgPrimary p-3">
                 {uploadPreviewUrl ? (
                   <div className="overflow-hidden rounded-card border border-white/10 bg-black">
                     <RemoteImage
@@ -648,7 +648,7 @@ export default function NewMediaPostForm() {
                     type="button"
                     onClick={() => setImageEditorOpen(true)}
                     disabled={!file || imagePreparing}
-                    className="rounded-full border border-white/10 bg-bgSecondary px-3 py-2 text-[12px] font-black text-textPrimary hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="rounded-full border border-surfaceGlass/10 bg-bgSecondary px-3 py-2 text-[12px] font-black text-textPrimary hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     Crop / adjust image
                   </button>
@@ -695,8 +695,8 @@ export default function NewMediaPostForm() {
                 className={[
                   'rounded-full border px-3 py-2 text-[12px] font-black transition',
                   !isPrivate
-                    ? 'border-white/10 bg-textPrimary text-bgPrimary'
-                    : 'border-white/10 bg-bgPrimary text-textPrimary hover:border-white/20',
+                    ? 'border-surfaceGlass/10 bg-textPrimary text-bgPrimary'
+                    : 'border-surfaceGlass/10 bg-bgPrimary text-textPrimary hover:border-surfaceGlass/20',
                 ].join(' ')}
               >
                 Public
@@ -708,8 +708,8 @@ export default function NewMediaPostForm() {
                 className={[
                   'rounded-full border px-3 py-2 text-[12px] font-black transition',
                   isPrivate
-                    ? 'border-white/10 bg-textPrimary text-bgPrimary'
-                    : 'border-white/10 bg-bgPrimary text-textPrimary hover:border-white/20',
+                    ? 'border-surfaceGlass/10 bg-textPrimary text-bgPrimary'
+                    : 'border-surfaceGlass/10 bg-bgPrimary text-textPrimary hover:border-surfaceGlass/20',
                 ].join(' ')}
               >
                 Private (only you)
@@ -747,7 +747,7 @@ export default function NewMediaPostForm() {
               <option value={MediaType.VIDEO}>Video</option>
             </select>
 
-            <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-bgPrimary px-3 py-3">
+            <div className="flex items-center gap-2 rounded-xl border border-surfaceGlass/10 bg-bgPrimary px-3 py-3">
               <span className="text-[12px] font-black text-textSecondary">
                 Media visibility
               </span>
@@ -817,8 +817,8 @@ export default function NewMediaPostForm() {
                         className={[
                           'rounded-full border px-3 py-2 text-[12px] font-black transition',
                           active
-                            ? 'border-white/10 bg-textPrimary text-bgPrimary'
-                            : 'border-white/10 bg-bgPrimary text-textPrimary hover:border-white/20',
+                            ? 'border-surfaceGlass/10 bg-textPrimary text-bgPrimary'
+                            : 'border-surfaceGlass/10 bg-bgPrimary text-textPrimary hover:border-surfaceGlass/20',
                         ].join(' ')}
                       >
                         {service.name}
@@ -837,7 +837,7 @@ export default function NewMediaPostForm() {
           </div>
 
           {isEligibleForLooks ? (
-            <div className="grid gap-3 rounded-xl border border-white/10 bg-bgPrimary p-3">
+            <div className="grid gap-3 rounded-xl border border-surfaceGlass/10 bg-bgPrimary p-3">
               <div className="text-[12px] font-black text-textPrimary">
                 Looks settings
               </div>
@@ -965,7 +965,7 @@ export default function NewMediaPostForm() {
               'rounded-card border px-4 py-3 text-[13px] font-black transition',
               canSubmit
                 ? 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover'
-                : 'cursor-not-allowed border-white/10 bg-bgPrimary text-textSecondary opacity-70',
+                : 'cursor-not-allowed border-surfaceGlass/10 bg-bgPrimary text-textSecondary opacity-70',
             ].join(' ')}
           >
             {saving

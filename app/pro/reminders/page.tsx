@@ -179,7 +179,7 @@ export default async function ProRemindersPage() {
                 name="title"
                 required
                 placeholder="Follow up with client"
-                className="w-full rounded-card border border-white/10 bg-bgPrimary px-3 py-2 text-[13px] font-semibold text-textPrimary placeholder:text-textSecondary/70"
+                className="w-full rounded-card border border-surfaceGlass/10 bg-bgPrimary px-3 py-2 text-[13px] font-semibold text-textPrimary placeholder:text-textSecondary/70"
               />
             </div>
 
@@ -193,7 +193,7 @@ export default async function ProRemindersPage() {
                 name="body"
                 rows={3}
                 placeholder="E.g. ask how her scalp handled last lightening, remind about purple shampoo."
-                className="w-full rounded-card border border-white/10 bg-bgPrimary px-3 py-2 text-[13px] font-semibold text-textPrimary placeholder:text-textSecondary/70"
+                className="w-full rounded-card border border-surfaceGlass/10 bg-bgPrimary px-3 py-2 text-[13px] font-semibold text-textPrimary placeholder:text-textSecondary/70"
               />
             </div>
 
@@ -208,7 +208,7 @@ export default async function ProRemindersPage() {
                   name="dueAt"
                   type="datetime-local"
                   required
-                  className="w-full rounded-card border border-white/10 bg-bgPrimary px-3 py-2 text-[13px] font-semibold text-textPrimary"
+                  className="w-full rounded-card border border-surfaceGlass/10 bg-bgPrimary px-3 py-2 text-[13px] font-semibold text-textPrimary"
                 />
 
                 <div className="text-[11px] font-semibold text-textSecondary/80">
@@ -224,7 +224,7 @@ export default async function ProRemindersPage() {
                 <select
                   id="clientId"
                   name="clientId"
-                  className="w-full rounded-card border border-white/10 bg-bgPrimary px-3 py-2 text-[13px] font-semibold text-textPrimary"
+                  className="w-full rounded-card border border-surfaceGlass/10 bg-bgPrimary px-3 py-2 text-[13px] font-semibold text-textPrimary"
                 >
                   <option value="">No specific client</option>
 
@@ -269,7 +269,7 @@ export default async function ProRemindersPage() {
         </div>
 
         {openReminders.length === 0 ? (
-          <div className="rounded-card border border-white/10 bg-bgSecondary p-4 text-[12px] font-semibold text-textSecondary">
+          <div className="rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4 text-[12px] font-semibold text-textSecondary">
             Nothing on your radar yet. Future you is suspicious.
           </div>
         ) : (
@@ -328,7 +328,7 @@ export default async function ProRemindersPage() {
                     </div>
 
                     <div className="shrink-0 md:text-right">
-                      <span className="inline-flex rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textSecondary">
+                      <span className="inline-flex rounded-full border border-surfaceGlass/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textSecondary">
                         {String(reminder.type || 'GENERAL').toLowerCase()}
                       </span>
 
@@ -370,7 +370,7 @@ export default async function ProRemindersPage() {
         </div>
 
         {completedReminders.length === 0 ? (
-          <div className="rounded-card border border-white/10 bg-bgSecondary p-4 text-[12px] font-semibold text-textSecondary">
+          <div className="rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4 text-[12px] font-semibold text-textSecondary">
             Once you start completing reminders, they&apos;ll show up here.
           </div>
         ) : (
@@ -378,7 +378,7 @@ export default async function ProRemindersPage() {
             {completedReminders.map((reminder) => (
               <div
                 key={reminder.id}
-                className="rounded-card border border-white/10 bg-bgSecondary p-4"
+                className="rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">

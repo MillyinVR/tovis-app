@@ -73,26 +73,26 @@ export default function ProReferralActivitySection({
       </div>
 
       {rows.length === 0 ? (
-        <div className="rounded-2xl border border-white/10 bg-bgSecondary p-5 text-sm text-textMuted">
+        <div className="rounded-2xl border border-surfaceGlass/10 bg-bgSecondary p-5 text-sm text-textMuted">
           No referrals have converted into a booking with you yet. When a client
           you were referred to books, they&apos;ll show up here.
         </div>
       ) : (
         <>
           <div className="grid grid-cols-3 gap-3">
-            <div className="rounded-2xl border border-white/10 bg-bgSecondary p-4">
+            <div className="rounded-2xl border border-surfaceGlass/10 bg-bgSecondary p-4">
               <p className="text-2xl font-semibold text-textPrimary">
                 {summary.total}
               </p>
               <p className="text-xs text-textMuted">Referred bookings</p>
             </div>
-            <div className="rounded-2xl border border-white/10 bg-bgSecondary p-4">
+            <div className="rounded-2xl border border-surfaceGlass/10 bg-bgSecondary p-4">
               <p className="text-2xl font-semibold text-textPrimary">
                 {summary.rewarded}
               </p>
               <p className="text-xs text-textMuted">Rewards applied</p>
             </div>
-            <div className="rounded-2xl border border-white/10 bg-bgSecondary p-4">
+            <div className="rounded-2xl border border-surfaceGlass/10 bg-bgSecondary p-4">
               <p className="text-2xl font-semibold text-textPrimary">
                 ${summary.creditDollarsApplied}
               </p>
@@ -100,7 +100,7 @@ export default function ProReferralActivitySection({
             </div>
           </div>
 
-          <div className="overflow-hidden rounded-2xl border border-white/10 bg-bgSecondary">
+          <div className="overflow-hidden rounded-2xl border border-surfaceGlass/10 bg-bgSecondary">
             <ul className="divide-y divide-white/10">
               {rows.map((row) => (
                 <li

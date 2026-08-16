@@ -48,7 +48,7 @@ function errorFromResponse(res: Response, data: unknown): string {
 }
 
 const inputClass =
-  'w-full rounded-card border border-white/10 bg-bgPrimary px-3 py-2 text-sm text-textPrimary outline-none focus:border-white/20'
+  'w-full rounded-card border border-surfaceGlass/10 bg-bgPrimary px-3 py-2 text-sm text-textPrimary outline-none focus:border-surfaceGlass/20'
 const labelClass = 'mb-1 block text-xs font-black text-textSecondary'
 const sectionTitleClass = 'text-sm font-black text-textPrimary'
 
@@ -56,8 +56,8 @@ function addBtn(disabled: boolean) {
   return [
     'inline-flex items-center justify-center rounded-full px-4 py-2 text-xs font-black transition',
     disabled
-      ? 'cursor-not-allowed border border-white/10 bg-bgPrimary text-textSecondary opacity-60'
-      : 'border border-white/10 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
+      ? 'cursor-not-allowed border border-surfaceGlass/10 bg-bgPrimary text-textSecondary opacity-60'
+      : 'border border-surfaceGlass/10 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
   ].join(' ')
 }
 
@@ -113,7 +113,7 @@ function AllergyForm({ clientId }: { clientId: string }) {
   return (
     <form
       onSubmit={onSubmit}
-      className="mt-3 grid gap-2 rounded-card border border-white/10 bg-bgPrimary p-3"
+      className="mt-3 grid gap-2 rounded-card border border-surfaceGlass/10 bg-bgPrimary p-3"
     >
       <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
         <div>
@@ -225,7 +225,7 @@ function NoteForm({ clientId }: { clientId: string }) {
   return (
     <form
       onSubmit={onSubmit}
-      className="mt-3 grid gap-2 rounded-card border border-white/10 bg-bgPrimary p-3"
+      className="mt-3 grid gap-2 rounded-card border border-surfaceGlass/10 bg-bgPrimary p-3"
     >
       <div>
         <label className={labelClass} htmlFor="ac-note-title">
@@ -253,7 +253,7 @@ function NoteForm({ clientId }: { clientId: string }) {
           rows={3}
           onChange={(e) => setBody(e.target.value)}
           placeholder="e.g. Prefers cooler tones, sensitive to strong fragrances."
-          className="w-full resize-y rounded-card border border-white/10 bg-bgPrimary px-3 py-2 text-sm text-textPrimary outline-none focus:border-white/20"
+          className="w-full resize-y rounded-card border border-surfaceGlass/10 bg-bgPrimary px-3 py-2 text-sm text-textPrimary outline-none focus:border-surfaceGlass/20"
         />
       </div>
 
@@ -280,7 +280,7 @@ export default function ClientProfilePanel({
   notes: ClientNoteItem[]
 }) {
   return (
-    <div className="rounded-card border border-white/10 bg-bgSecondary p-4 text-textPrimary">
+    <div className="rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4 text-textPrimary">
       <div className="text-xs font-black tracking-wide text-textPrimary">
         Client profile (private)
       </div>
@@ -292,7 +292,7 @@ export default function ClientProfilePanel({
       <div className="mt-4">
         <div className={sectionTitleClass}>Allergies &amp; sensitivities</div>
         {allergies.length === 0 ? (
-          <div className="mt-2 rounded-card border border-white/10 bg-bgPrimary p-3 text-xs font-semibold text-textSecondary">
+          <div className="mt-2 rounded-card border border-surfaceGlass/10 bg-bgPrimary p-3 text-xs font-semibold text-textSecondary">
             None recorded yet.
           </div>
         ) : (
@@ -300,13 +300,13 @@ export default function ClientProfilePanel({
             {allergies.map((a) => (
               <div
                 key={a.id}
-                className="rounded-card border border-white/10 bg-bgPrimary p-3"
+                className="rounded-card border border-surfaceGlass/10 bg-bgPrimary p-3"
               >
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0 truncate text-sm font-black text-textPrimary">
                     {a.label}
                   </div>
-                  <span className="shrink-0 rounded-full border border-white/10 bg-bgSecondary px-3 py-1 text-[11px] font-black text-textSecondary">
+                  <span className="shrink-0 rounded-full border border-surfaceGlass/10 bg-bgSecondary px-3 py-1 text-[11px] font-black text-textSecondary">
                     {a.severity.toUpperCase()}
                   </span>
                 </div>
@@ -329,7 +329,7 @@ export default function ClientProfilePanel({
       <div className="mt-5">
         <div className={sectionTitleClass}>Your notes on this client</div>
         {notes.length === 0 ? (
-          <div className="mt-2 rounded-card border border-white/10 bg-bgPrimary p-3 text-xs font-semibold text-textSecondary">
+          <div className="mt-2 rounded-card border border-surfaceGlass/10 bg-bgPrimary p-3 text-xs font-semibold text-textSecondary">
             No notes yet. Start the “professional memory” file.
           </div>
         ) : (
@@ -337,7 +337,7 @@ export default function ClientProfilePanel({
             {notes.map((n) => (
               <div
                 key={n.id}
-                className="rounded-card border border-white/10 bg-bgPrimary p-3"
+                className="rounded-card border border-surfaceGlass/10 bg-bgPrimary p-3"
               >
                 <div className="flex items-baseline justify-between gap-3">
                   <div className="min-w-0 truncate text-sm font-black text-textPrimary">

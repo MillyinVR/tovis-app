@@ -68,7 +68,7 @@ export default async function AdminBookingMoneyTrailPage(props: {
         </div>
       ) : (
         <div className="grid gap-3.5">
-          <section className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
+          <section className="tovis-glass rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4">
             <div className="font-mono text-[10px] font-bold uppercase tracking-[0.16em] text-accentPrimary">
               Booking · #{shortId}
             </div>

@@ -342,7 +342,7 @@ export default function ServicePicker({
   const inputClass = controlClassName({ surface: 'solid' })
 
   return (
-    <div className="rounded-card border border-white/10 bg-bgPrimary p-4">
+    <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary p-4">
       <div className="grid gap-4">
         <div className="grid gap-3 md:grid-cols-3">
           <label className="grid gap-2">
@@ -394,11 +394,11 @@ export default function ServicePicker({
           </label>
         </div>
 
-        <form onSubmit={handleSubmit} className="grid gap-4 border-t border-white/10 pt-4">
+        <form onSubmit={handleSubmit} className="grid gap-4 border-t border-surfaceGlass/10 pt-4">
           <div className="grid gap-2">
             <div className="text-[12px] font-black text-textPrimary">Service image (optional)</div>
 
-            <div className="rounded-card border border-white/10 bg-bgSecondary p-3">
+            <div className="rounded-card border border-surfaceGlass/10 bg-bgSecondary p-3">
               <input
                 type="file"
                 accept="image/*"
@@ -408,7 +408,7 @@ export default function ServicePicker({
                   if (f) uploadServiceImage(f)
                   e.currentTarget.value = ''
                 }}
-                className="block w-full text-[12px] text-textSecondary file:mr-3 file:rounded-full file:border file:border-white/10 file:bg-bgPrimary file:px-3 file:py-2 file:text-[12px] file:font-black file:text-textPrimary hover:file:border-white/20"
+                className="block w-full text-[12px] text-textSecondary file:mr-3 file:rounded-full file:border file:border-surfaceGlass/10 file:bg-bgPrimary file:px-3 file:py-2 file:text-[12px] file:font-black file:text-textPrimary hover:file:border-surfaceGlass/20"
               />
 
               <div className="mt-2 text-[12px] text-textSecondary">
@@ -422,7 +422,7 @@ export default function ServicePicker({
                   <RemoteImage
                     src={serviceImageUrl}
                     alt="Service image preview"
-                    className="h-16 w-16 rounded-xl border border-white/10 object-cover"
+                    className="h-16 w-16 rounded-xl border border-surfaceGlass/10 object-cover"
                     width={64}
                     height={64}
                   />
@@ -430,7 +430,7 @@ export default function ServicePicker({
                     type="button"
                     onClick={() => setServiceImageUrl(null)}
                     disabled={loading || uploadingImage}
-                    className="rounded-full border border-white/10 bg-bgPrimary px-3 py-2 text-[12px] font-black text-textPrimary hover:border-white/20 disabled:opacity-60"
+                    className="rounded-full border border-surfaceGlass/10 bg-bgPrimary px-3 py-2 text-[12px] font-black text-textPrimary hover:border-surfaceGlass/20 disabled:opacity-60"
                   >
                     Remove
                   </button>
@@ -482,7 +482,7 @@ export default function ServicePicker({
                 </span>
 
                 {selectedService.isAddOnEligible ? (
-                  <span className="ml-2 rounded-full border border-white/10 bg-bgPrimary px-2 py-0.5 text-[10px] font-black text-textSecondary">
+                  <span className="ml-2 rounded-full border border-surfaceGlass/10 bg-bgPrimary px-2 py-0.5 text-[10px] font-black text-textSecondary">
                     Add-on{selectedService.addOnGroup ? ` • ${selectedService.addOnGroup}` : ''}
                   </span>
                 ) : null}
@@ -491,7 +491,7 @@ export default function ServicePicker({
           </div>
 
           <div className="grid gap-3 md:grid-cols-2">
-            <div className={['rounded-card border border-white/10 bg-bgSecondary p-3', offersInSalon ? '' : 'opacity-70'].join(' ')}>
+            <div className={['rounded-card border border-surfaceGlass/10 bg-bgSecondary p-3', offersInSalon ? '' : 'opacity-70'].join(' ')}>
               <div className="mb-2 text-[12px] font-black text-textPrimary">Salon pricing</div>
 
               <div className="grid gap-2">
@@ -522,7 +522,7 @@ export default function ServicePicker({
               </div>
             </div>
 
-            <div className={['rounded-card border border-white/10 bg-bgSecondary p-3', offersMobile ? '' : 'opacity-70'].join(' ')}>
+            <div className={['rounded-card border border-surfaceGlass/10 bg-bgSecondary p-3', offersMobile ? '' : 'opacity-70'].join(' ')}>
               <div className="mb-2 text-[12px] font-black text-textPrimary">Mobile pricing</div>
 
               <div className="grid gap-2">
@@ -567,7 +567,7 @@ export default function ServicePicker({
                 resetFormForService(null)
               }}
               disabled={loading}
-              className="rounded-full border border-white/10 bg-bgSecondary px-4 py-2 text-[12px] font-black text-textPrimary hover:border-white/20 disabled:opacity-60"
+              className="rounded-full border border-surfaceGlass/10 bg-bgSecondary px-4 py-2 text-[12px] font-black text-textPrimary hover:border-surfaceGlass/20 disabled:opacity-60"
             >
               Reset
             </button>

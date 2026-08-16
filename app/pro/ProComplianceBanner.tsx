@@ -98,7 +98,7 @@ function toneForKind(kind: BannerKind): string {
     return 'border-toneWarn/35 bg-bgSecondary/98'
   }
 
-  return 'border-white/10 bg-bgSecondary/98'
+  return 'border-surfaceGlass/10 bg-bgSecondary/98'
 }
 
 export default function ProComplianceBanner() {
@@ -208,7 +208,7 @@ export default function ProComplianceBanner() {
         <div className="flex shrink-0 items-center gap-2">
           <Link
             href="/pro/verification"
-            className="rounded-full border border-white/10 bg-bgSecondary px-3 py-1 text-xs font-black text-textPrimary hover:border-white/20"
+            className="rounded-full border border-surfaceGlass/10 bg-bgSecondary px-3 py-1 text-xs font-black text-textPrimary hover:border-surfaceGlass/20"
           >
             {dismissible ? 'Upload' : 'Update license'}
           </Link>
@@ -229,7 +229,7 @@ export default function ProComplianceBanner() {
 
                 setBannerPx(0)
               }}
-              className="tap-target rounded-full border border-white/10 bg-bgSecondary px-3 py-1 text-xs font-black text-textPrimary hover:border-white/20"
+              className="tap-target rounded-full border border-surfaceGlass/10 bg-bgSecondary px-3 py-1 text-xs font-black text-textPrimary hover:border-surfaceGlass/20"
               aria-label="Dismiss"
             >
               ✕

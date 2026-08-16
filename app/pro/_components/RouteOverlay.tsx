@@ -111,7 +111,7 @@ export default function RouteOverlay(props: {
               <div className="absolute inset-0 ring-1 ring-white/10" />
             </div>
 
-            <div className="relative sticky top-0 z-10 border-b border-white/12 bg-bgSecondary/80 backdrop-blur-xl">
+            <div className="relative sticky top-0 z-10 border-b border-surfaceGlass/12 bg-bgSecondary/80 backdrop-blur-xl">
               <div className="px-4 pt-3">
                 <div className="mx-auto h-1 w-12 rounded-full bg-white/18 shadow-[0_1px_0_rgb(255_255_255/0.18)_inset]" />
               </div>
@@ -133,9 +133,9 @@ export default function RouteOverlay(props: {
                   onClick={() => router.back()}
                   className={[
                     'shrink-0 rounded-full',
-                    'border border-white/14 bg-bgPrimary/55',
+                    'border border-surfaceGlass/14 bg-bgPrimary/55',
                     'px-3 py-2 text-[12px] font-black tracking-[0.06em] text-textPrimary',
-                    'hover:border-white/26 hover:bg-bgPrimary/70',
+                    'hover:border-surfaceGlass/26 hover:bg-bgPrimary/70',
                     'active:scale-[0.98] transition',
                   ].join(' ')}
                 >

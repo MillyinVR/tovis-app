@@ -21,7 +21,7 @@ function Observation({
   confidence: { min: number; max: number }
 }) {
   return (
-    <li className="rounded-xl border border-white/10 bg-bgPrimary px-3 py-2.5">
+    <li className="rounded-xl border border-surfaceGlass/10 bg-bgPrimary px-3 py-2.5">
       <div className="text-[11px] font-bold uppercase tracking-wide text-textMuted">
         {label}
       </div>
@@ -100,7 +100,7 @@ export default function ProConsultBrief({
           Photo-based observations to verify in person.
         </p>
         <ul className="mt-3 grid gap-2 sm:grid-cols-2">
-          <li className="rounded-xl border border-white/10 bg-bgPrimary px-3 py-2.5">
+          <li className="rounded-xl border border-surfaceGlass/10 bg-bgPrimary px-3 py-2.5">
             <div className="text-[11px] font-bold uppercase tracking-wide text-textMuted">
               Current level
             </div>
@@ -170,7 +170,7 @@ export default function ProConsultBrief({
         >
           Directions to discuss
         </h3>
-        <div className="mt-2 rounded-xl border border-white/10 bg-bgPrimary p-3">
+        <div className="mt-2 rounded-xl border border-surfaceGlass/10 bg-bgPrimary p-3">
           <div className="text-[12px] font-black text-textPrimary">
             Achievability: {labelCode(brief.achievabilityDirection.assessment)}
           </div>
@@ -185,7 +185,7 @@ export default function ProConsultBrief({
           {brief.recommendationDirections.map((recommendation) => (
             <li
               key={`${recommendation.title}:${recommendation.reference.serviceId ?? recommendation.reference.serviceCategoryId}`}
-              className="rounded-xl border border-white/10 bg-bgPrimary p-3"
+              className="rounded-xl border border-surfaceGlass/10 bg-bgPrimary p-3"
             >
               <div className="text-[12.5px] font-black text-textPrimary">
                 {recommendation.title}
@@ -202,7 +202,7 @@ export default function ProConsultBrief({
       </section>
 
       {feedbackEnabled || brief.feedback ? (
-        <div className="border-t border-white/10 pt-4">
+        <div className="border-t border-surfaceGlass/10 pt-4">
           <ConsultBriefFeedbackButtons
             consultId={brief.consultId}
             initialFeedback={brief.feedback}

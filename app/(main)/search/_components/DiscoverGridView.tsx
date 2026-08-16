@@ -68,7 +68,7 @@ export default function DiscoverGridView({ pros, activeProId, onSelectPro }: Dis
             key={pro.id}
             className={cn(
               'overflow-hidden rounded-card border bg-bgSecondary',
-              active ? 'border-accentPrimary/70' : 'border-white/10',
+              active ? 'border-accentPrimary/70' : 'border-surfaceGlass/10',
             )}
           >
             <button
@@ -121,7 +121,7 @@ export default function DiscoverGridView({ pros, activeProId, onSelectPro }: Dis
             <div className="px-3 pb-3">
               <Link
                 href={`/professionals/${encodeURIComponent(pro.id)}`}
-                className="flex h-9 w-full items-center justify-center rounded-full border border-white/15 bg-bgPrimary/25 font-mono text-[10px] font-black uppercase tracking-widest text-textPrimary transition-colors hover:bg-white/10"
+                className="flex h-9 w-full items-center justify-center rounded-full border border-surfaceGlass/15 bg-bgPrimary/25 font-mono text-[10px] font-black uppercase tracking-widest text-textPrimary transition-colors hover:bg-white/10"
               >
                 View profile
               </Link>

@@ -52,7 +52,7 @@ export default async function AdminNotificationsPage() {
           <form action={markAllRead}>
             <button
               type="submit"
-              className="inline-flex items-center rounded-full border border-white/12 bg-bgPrimary/55 px-3 py-2 text-[12px] font-black hover:border-white/22 hover:bg-bgPrimary/70"
+              className="inline-flex items-center rounded-full border border-surfaceGlass/12 bg-bgPrimary/55 px-3 py-2 text-[12px] font-black hover:border-surfaceGlass/22 hover:bg-bgPrimary/70"
             >
               Mark all read
             </button>
@@ -61,7 +61,7 @@ export default async function AdminNotificationsPage() {
       </div>
 
       {items.length === 0 ? (
-        <div className="rounded-card border border-white/10 bg-bgSecondary p-4 text-[13px] text-textSecondary">
+        <div className="rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4 text-[13px] text-textSecondary">
           You’re all caught up — no notifications.
         </div>
       ) : (
@@ -73,7 +73,7 @@ export default async function AdminNotificationsPage() {
                 key={n.id}
                 className={[
                   'tovis-glass rounded-card border bg-bgSecondary p-4',
-                  unread ? 'border-accentPrimary/40' : 'border-white/10',
+                  unread ? 'border-accentPrimary/40' : 'border-surfaceGlass/10',
                 ].join(' ')}
               >
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -101,7 +101,7 @@ export default async function AdminNotificationsPage() {
                   {n.href ? (
                     <Link
                       href={n.href}
-                      className="inline-flex items-center rounded-full border border-white/12 bg-bgPrimary/55 px-3 py-2 text-[12px] font-black hover:border-white/22 hover:bg-bgPrimary/70"
+                      className="inline-flex items-center rounded-full border border-surfaceGlass/12 bg-bgPrimary/55 px-3 py-2 text-[12px] font-black hover:border-surfaceGlass/22 hover:bg-bgPrimary/70"
                     >
                       View
                     </Link>

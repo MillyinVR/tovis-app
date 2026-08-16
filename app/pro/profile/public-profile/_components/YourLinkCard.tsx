@@ -139,11 +139,11 @@ function LiveState({
 
   return (
     <div className="mt-1 grid gap-3">
-      <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-bgPrimary px-3 py-2.5">
+      <div className="flex items-center gap-2 rounded-xl border border-surfaceGlass/10 bg-bgPrimary px-3 py-2.5">
         <span className="truncate text-[13px] font-black text-textPrimary">
           {vanityHost}
         </span>
-        <span className="ml-auto shrink-0 rounded-full border border-white/10 px-2 py-0.5 text-[10px] font-black text-toneSuccess">
+        <span className="ml-auto shrink-0 rounded-full border border-surfaceGlass/10 px-2 py-0.5 text-[10px] font-black text-toneSuccess">
           Live
         </span>
       </div>
@@ -152,7 +152,7 @@ function LiveState({
         <button
           type="button"
           onClick={copy}
-          className="rounded-full border border-white/10 bg-bgPrimary px-3 py-2 text-[12px] font-black text-textPrimary transition hover:border-white/20"
+          className="rounded-full border border-surfaceGlass/10 bg-bgPrimary px-3 py-2 text-[12px] font-black text-textPrimary transition hover:border-surfaceGlass/20"
         >
           {copied ? 'Copied ✓' : 'Copy'}
         </button>
@@ -161,7 +161,7 @@ function LiveState({
           href={vanityUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="rounded-full border border-white/10 bg-bgPrimary px-3 py-2 text-[12px] font-black text-textPrimary transition hover:border-white/20"
+          className="rounded-full border border-surfaceGlass/10 bg-bgPrimary px-3 py-2 text-[12px] font-black text-textPrimary transition hover:border-surfaceGlass/20"
         >
           Open ↗
         </a>
@@ -173,7 +173,7 @@ function LiveState({
             type="button"
             onClick={() => setShowQr((v) => !v)}
             aria-expanded={showQr}
-            className="rounded-full border border-white/10 bg-bgPrimary px-3 py-2 text-[12px] font-black text-textPrimary transition hover:border-white/20"
+            className="rounded-full border border-surfaceGlass/10 bg-bgPrimary px-3 py-2 text-[12px] font-black text-textPrimary transition hover:border-surfaceGlass/20"
           >
             {showQr ? 'Hide QR' : 'QR code'}
           </button>

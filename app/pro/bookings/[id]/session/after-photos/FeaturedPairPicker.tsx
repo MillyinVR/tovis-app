@@ -79,12 +79,12 @@ function Strip({
                 'aspect-square rounded-card bg-bgPrimary transition',
                 isFeatured
                   ? 'border-2 border-accentPrimary'
-                  : 'border border-white/10',
+                  : 'border border-surfaceGlass/10',
                 'hover:bg-surfaceGlass/10',
               ].join(' ')}
             >
               {isVideo ? (
-                <div className="pointer-events-none absolute right-2 top-2 rounded-full border border-white/10 bg-bgSecondary px-2 py-1 text-[10px] font-black text-textPrimary">
+                <div className="pointer-events-none absolute right-2 top-2 rounded-full border border-surfaceGlass/10 bg-bgSecondary px-2 py-1 text-[10px] font-black text-textPrimary">
                   VIDEO
                 </div>
               ) : null}
@@ -104,7 +104,7 @@ function Strip({
                   'absolute right-1 top-1 z-10 rounded-full px-2 py-1 text-[10px] font-black transition',
                   isFeatured
                     ? 'bg-accentPrimary text-bgPrimary'
-                    : 'border border-white/10 bg-bgSecondary text-textPrimary hover:bg-surfaceGlass/10',
+                    : 'border border-surfaceGlass/10 bg-bgSecondary text-textPrimary hover:bg-surfaceGlass/10',
                 ].join(' ')}
               >
                 {isFeatured ? '★ Featured' : 'Feature'}

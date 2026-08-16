@@ -116,7 +116,7 @@ export default function ReferralRewardsClient(props: { initial: Settings }) {
         </div>
       )}
 
-      <div className="rounded-2xl border border-white/10 bg-bgSecondary p-5">
+      <div className="rounded-2xl border border-surfaceGlass/10 bg-bgSecondary p-5">
         <div className="flex items-center justify-between">
           <div>
             <p className="font-medium text-textPrimary">
@@ -148,7 +148,7 @@ export default function ReferralRewardsClient(props: { initial: Settings }) {
 
       {enabled && (
         <>
-          <div className="rounded-2xl border border-white/10 bg-bgSecondary p-5">
+          <div className="rounded-2xl border border-surfaceGlass/10 bg-bgSecondary p-5">
             <p className="mb-3 font-medium text-textPrimary">Reward tier</p>
             <div className="space-y-2">
               {(Object.keys(TIER_LABELS) as Tier[]).map((t) => (
@@ -157,7 +157,7 @@ export default function ReferralRewardsClient(props: { initial: Settings }) {
                   className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors ${
                     tier === t
                       ? 'border-accentPrimary/50 bg-accentPrimary/5'
-                      : 'border-white/10 bg-bgPrimary'
+                      : 'border-surfaceGlass/10 bg-bgPrimary'
                   }`}
                 >
                   <input
@@ -183,7 +183,7 @@ export default function ReferralRewardsClient(props: { initial: Settings }) {
           </div>
 
           {tier === 'DISCOUNT' && (
-            <div className="rounded-2xl border border-white/10 bg-bgSecondary p-5">
+            <div className="rounded-2xl border border-surfaceGlass/10 bg-bgSecondary p-5">
               <label className="block">
                 <span className="font-medium text-textPrimary">
                   Discount percentage
@@ -199,7 +199,7 @@ export default function ReferralRewardsClient(props: { initial: Settings }) {
                     }
                     onBlur={handleDiscountBlur}
                     disabled={busy}
-                    className="w-24 rounded-xl border border-white/20 bg-bgPrimary px-3 py-2 text-textPrimary disabled:opacity-50"
+                    className="w-24 rounded-xl border border-surfaceGlass/20 bg-bgPrimary px-3 py-2 text-textPrimary disabled:opacity-50"
                   />
                   <span className="text-textMuted">%</span>
                 </div>
@@ -211,7 +211,7 @@ export default function ReferralRewardsClient(props: { initial: Settings }) {
           )}
 
           {tier === 'CREDIT' && (
-            <div className="rounded-2xl border border-white/10 bg-bgSecondary p-5">
+            <div className="rounded-2xl border border-surfaceGlass/10 bg-bgSecondary p-5">
               <label className="block">
                 <span className="font-medium text-textPrimary">
                   Credit amount
@@ -228,7 +228,7 @@ export default function ReferralRewardsClient(props: { initial: Settings }) {
                     }
                     onBlur={handleCreditBlur}
                     disabled={busy}
-                    className="w-24 rounded-xl border border-white/20 bg-bgPrimary px-3 py-2 text-textPrimary disabled:opacity-50"
+                    className="w-24 rounded-xl border border-surfaceGlass/20 bg-bgPrimary px-3 py-2 text-textPrimary disabled:opacity-50"
                   />
                 </div>
                 <p className="mt-1 text-sm text-textMuted">

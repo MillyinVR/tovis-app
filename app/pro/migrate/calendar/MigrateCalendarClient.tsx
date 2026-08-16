@@ -214,7 +214,7 @@ export function MigrateCalendarClient({ copy }: Props) {
         ) : null}
 
         {phase === 'upload' ? (
-          <div className="mt-6 rounded-card border border-dashed border-white/15 bg-bgSurface p-8 text-center">
+          <div className="mt-6 rounded-card border border-dashed border-surfaceGlass/15 bg-bgSurface p-8 text-center">
             <p className="text-[15px] text-textPrimary">
               Upload your calendar export (.ics)
             </p>
@@ -260,13 +260,13 @@ export function MigrateCalendarClient({ copy }: Props) {
                 value={feedUrl}
                 onChange={(e) => setFeedUrl(e.target.value)}
                 placeholder="https://…/calendar.ics"
-                className="flex-1 rounded-inner border border-white/10 bg-white/[0.03] px-3 py-2 text-[14px] text-textPrimary placeholder:text-textMuted focus:border-accentPrimary/40 focus:outline-none"
+                className="flex-1 rounded-inner border border-surfaceGlass/10 bg-white/[0.03] px-3 py-2 text-[14px] text-textPrimary placeholder:text-textMuted focus:border-accentPrimary/40 focus:outline-none"
               />
               <button
                 type="button"
                 disabled={busy || !feedUrl.trim()}
                 onClick={() => void handleUrl()}
-                className="rounded-full border border-white/15 px-5 py-2 text-[14px] font-medium text-textPrimary disabled:opacity-50"
+                className="rounded-full border border-surfaceGlass/15 px-5 py-2 text-[14px] font-medium text-textPrimary disabled:opacity-50"
               >
                 {busy ? 'Fetching…' : 'Fetch'}
               </button>
@@ -298,7 +298,7 @@ export function MigrateCalendarClient({ copy }: Props) {
                     key={row.uid}
                     className={[
                       'rounded-card border bg-bgSurface p-4 transition',
-                      included ? 'border-white/10' : 'border-white/10 opacity-60',
+                      included ? 'border-surfaceGlass/10' : 'border-surfaceGlass/10 opacity-60',
                     ].join(' ')}
                   >
                     <div className="grid grid-cols-1 gap-3 md:grid-cols-[1.2fr_1.4fr_auto_auto] md:items-center">

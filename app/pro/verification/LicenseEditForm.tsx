@@ -67,10 +67,10 @@ export default function LicenseEditForm({
   }
 
   const field =
-    'w-full rounded-lg border border-white/10 bg-bgPrimary/40 px-2 py-1.5 text-sm text-textPrimary'
+    'w-full rounded-lg border border-surfaceGlass/10 bg-bgPrimary/40 px-2 py-1.5 text-sm text-textPrimary'
 
   return (
-    <div className="rounded-card border border-white/10 bg-bgPrimary/30 p-4">
+    <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary/30 p-4">
       <div className="text-xs font-extrabold text-textSecondary">License</div>
 
       <div className="mt-3 grid gap-3">

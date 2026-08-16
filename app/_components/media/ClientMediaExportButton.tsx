@@ -247,7 +247,7 @@ export default function ClientMediaExportButton({
           <div
             className={cn(
               'mx-auto mt-10 w-full max-w-[420px] overflow-hidden rounded-[18px]',
-              'border border-white/12 bg-bgPrimary/90 backdrop-blur-2xl',
+              'border border-surfaceGlass/12 bg-bgPrimary/90 backdrop-blur-2xl',
               'shadow-[0_22px_90px_rgba(0,0,0,0.70)]',
               'grid grid-rows-[auto_1fr_auto]',
             )}
@@ -257,7 +257,7 @@ export default function ClientMediaExportButton({
             aria-modal="true"
             aria-label="Share photo"
           >
-            <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
+            <div className="flex items-center justify-between gap-3 border-b border-surfaceGlass/10 px-4 py-3">
               <div className="text-[13px] font-black text-textPrimary">Share photo</div>
               <button
                 type="button"
@@ -308,7 +308,7 @@ export default function ClientMediaExportButton({
                           'rounded-[14px] border px-3 py-2 text-left transition',
                           f === format
                             ? 'border-accentPrimary/40 bg-accentPrimary/15'
-                            : 'border-white/10 bg-bgPrimary/25 hover:bg-white/5',
+                            : 'border-surfaceGlass/10 bg-bgPrimary/25 hover:bg-white/5',
                         )}
                       >
                         <div className="text-[13px] font-black text-textPrimary">{formatShortLabel(f)}</div>
@@ -341,7 +341,7 @@ export default function ClientMediaExportButton({
             </div>
 
             {identityState.status === 'loaded' && identityState.identity.enabled ? (
-              <div className="flex gap-2 border-t border-white/10 bg-bgPrimary/85 px-4 py-3">
+              <div className="flex gap-2 border-t border-surfaceGlass/10 bg-bgPrimary/85 px-4 py-3">
                 <button
                   type="button"
                   onClick={() => void share()}
@@ -349,7 +349,7 @@ export default function ClientMediaExportButton({
                   className={cn(
                     'flex-1 rounded-[14px] px-3 py-3 text-[13px] font-black transition',
                     rendering || !preview
-                      ? 'cursor-not-allowed border border-white/10 bg-bgPrimary text-textSecondary opacity-70'
+                      ? 'cursor-not-allowed border border-surfaceGlass/10 bg-bgPrimary text-textSecondary opacity-70'
                       : 'bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
                   )}
                 >
@@ -362,7 +362,7 @@ export default function ClientMediaExportButton({
                   className={cn(
                     'flex-1 rounded-[14px] border px-3 py-3 text-[13px] font-black transition',
                     rendering || !preview
-                      ? 'cursor-not-allowed border-white/10 text-textSecondary opacity-70'
+                      ? 'cursor-not-allowed border-surfaceGlass/10 text-textSecondary opacity-70'
                       : 'border-accentPrimary/40 text-accentPrimary hover:bg-white/5',
                   )}
                 >
