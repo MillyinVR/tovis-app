@@ -4,6 +4,19 @@
 @import "./styles/footers.css";
 @config "../tailwind.config.js";
 
+/* Tailwind v4 auto-detects sources by walking the repo, so it also scans the
+   build tooling — and it scans COMMENTS, not just code. A class-shaped string
+   anywhere in `tools/` therefore emits a real CSS rule that nothing can ever
+   use: the static guards quote example classes in their docstrings, and
+   `tools/baselines/*.txt` is a verbatim list of the very class strings the
+   migration is trying to remove. Nothing under `tools/` renders, so nothing
+   under it should reach the stylesheet.
+
+   This was found while fixing an invalid `border-[rgb(var(--x))/0.25]`
+   declaration: the fix landed, and the dead rule stayed in the served CSS,
+   because a guard's docstring was still spelling the broken class out. */
+@source not "../tools";
+
 @theme {
   --radius-app-icon: 22px;
   --radius-card:     18px;
