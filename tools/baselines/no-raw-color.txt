@@ -2,8 +2,8 @@
 #
 # One entry per SOURCE LINE, not per occurrence: a single line can carry
 # several (`'bg-black/45 text-white hover:bg-black/60'`). At the time this
-# baseline was written that was 624 lines carrying
-# 914 raw colours.
+# baseline was written that was 611 lines carrying
+# 901 raw colours.
 #
 # Shrink this list; never add to it. Replacements:
 #   border-white/N  -> border-surfaceGlass/N   (invisible in light mode today)
@@ -59,7 +59,6 @@ app/(main)/looks/_components/SaveToBoardModal.tsx|<div className="rounded-card b
 app/(main)/looks/_components/SaveToBoardModal.tsx|<div className="shrink-0 border-b border-white/10 px-4 py-4">
 app/(main)/looks/_components/SaveToBoardModal.tsx|<div className="shrink-0 border-t border-white/10 px-4 py-4">
 app/(main)/looks/_components/SaveToBoardModal.tsx|? 'border-white/10 bg-bgPrimary text-textPrimary hover:border-white/20'
-app/(main)/looks/_components/SaveToBoardModal.tsx|className="absolute inset-0 bg-black/60 backdrop-blur-[2px]"
 app/(main)/looks/_components/SaveToBoardModal.tsx|className="flex items-center justify-between gap-3 rounded-card border border-white/10 bg-bgPrimary px-4 py-3"
 app/(main)/looks/_components/SaveToBoardModal.tsx|className="inline-flex min-h-11 items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-bold text-textPrimary transition hover:border-white/20"
 app/(main)/looks/_components/SaveToBoardModal.tsx|className="inline-flex min-h-11 w-full items-center justify-center rounded-full border border-white/10 bg-bgPrimary px-4 py-3 text-[12px] font-bold text-textPrimary transition hover:border-white/20"
@@ -151,7 +150,6 @@ app/_components/media/ClientMediaExportButton.tsx|<div className="flex gap-2 bor
 app/_components/media/ClientMediaExportButton.tsx|<div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
 app/_components/media/ClientMediaExportButton.tsx|<div className="rounded-[14px] border border-white/10 bg-black/20 p-3 text-[12px] font-semibold text-textSecondary">
 app/_components/media/ClientMediaExportButton.tsx|<div className="rounded-[14px] border border-white/10 bg-black/20 p-3 text-[12px] font-semibold text-toneDanger">
-app/_components/media/ClientMediaExportButton.tsx|<div className={cn('fixed inset-0 bg-black/60', zClass.modal)} onClick={close}>
 app/_components/media/ClientMediaExportButton.tsx|? 'cursor-not-allowed border border-white/10 bg-bgPrimary text-textSecondary opacity-70'
 app/_components/media/ClientMediaExportButton.tsx|? 'cursor-not-allowed border-white/10 text-textSecondary opacity-70'
 app/_components/media/ClientMediaExportButton.tsx|className="grid h-9 w-9 place-items-center rounded-full border border-white/12 bg-bgPrimary/30 text-[14px] font-black text-white hover:bg-white/10"
@@ -191,7 +189,6 @@ app/_components/media/OwnerMediaMenu.tsx|<div className="my-2 h-px bg-white/8" /
 app/_components/media/OwnerMediaMenu.tsx|<div className="rounded-[14px] border border-white/10 bg-black/20 p-3 text-[12px] font-semibold text-toneDanger">
 app/_components/media/OwnerMediaMenu.tsx|<div className="rounded-[18px] border border-white/12 bg-bgPrimary/25 p-3">
 app/_components/media/OwnerMediaMenu.tsx|<div className="rounded-full border border-white/10 bg-bgPrimary/25 px-3 py-1 text-[12px] font-extrabold text-textSecondary">
-app/_components/media/OwnerMediaMenu.tsx|<div className={`fixed inset-0 ${zClass.modal} bg-black/60`} onClick={closeEdit}>
 app/_components/media/OwnerMediaMenu.tsx|<div className={cn('h-2 w-2 rounded-full', active ? 'bg-accentPrimary' : 'bg-white/35')} />
 app/_components/media/OwnerMediaMenu.tsx|<span className="text-white/70" aria-hidden="true">
 app/_components/media/OwnerMediaMenu.tsx|<span className={cn('h-1.5 w-1.5 rounded-full', on ? 'bg-accentPrimary' : 'bg-white/35')} />
@@ -277,7 +274,6 @@ app/admin/services/_components/ServiceHeroGrid.tsx|<div className="pointer-event
 app/admin/services/_components/ServiceHeroGrid.tsx|<div className="pointer-events-none absolute inset-0 translate-x-[-60%] animate-[shimmer_1.2s_infinite] bg-[linear-gradient(90deg,transparent,rgb(255_255_255/0.08),transparent)]" />
 app/admin/services/_components/ServiceHeroGrid.tsx|<div className="relative overflow-hidden rounded-2xl border border-white/10 bg-bgPrimary/20">
 app/admin/services/_components/ServiceHeroGrid.tsx|<div className="relative z-[2] flex items-start justify-between gap-3 border-b border-white/10 bg-bgSecondary/70 px-4 py-3 backdrop-blur-xl">
-app/admin/services/_components/ServiceHeroGrid.tsx|className="absolute inset-0 bg-black/80 backdrop-blur-lg"
 app/admin/services/_components/ServicesBrowseBar.tsx|'shadow-[0_18px_60px_rgb(0_0_0/0.55)]',
 app/admin/services/_components/ServicesCreateWizard.tsx|'border border-accentPrimary/45 bg-accentPrimary/15 text-textPrimary hover:bg-accentPrimary/20 hover:border-accentPrimary/60 shadow-[0_18px_50px_rgb(0_0_0/0.35)]'
 app/admin/services/_components/ServicesCreateWizard.tsx|<div className="grid gap-2 rounded-2xl border border-white/10 bg-bgPrimary/20 p-3">
@@ -310,7 +306,6 @@ app/pro/_components/AvailabilityCalendar.tsx|? 'border-white/10 bg-bgPrimary tex
 app/pro/_components/AvailabilityCalendar.tsx|? 'border-white/10 bg-bgPrimary text-textSecondary/60 hover:bg-surfaceGlass/10'
 app/pro/_components/AvailabilityCalendar.tsx|className="rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-xs font-black text-textSecondary hover:bg-surfaceGlass/10"
 app/pro/_components/AvailabilityCalendar.tsx|className="w-full max-w-sm rounded-card border border-white/10 bg-bgSecondary p-4 text-textPrimary shadow-xl"
-app/pro/_components/AvailabilityCalendar.tsx|className={`fixed inset-0 ${zClass.modal} flex items-center justify-center bg-black/60 p-4`}
 app/pro/_components/BookingOverridePromptCard.tsx|className="mt-0.5 h-4 w-4 rounded border-white/10 bg-bgPrimary"
 app/pro/_components/ProAccountMenu.tsx|'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20',
 app/pro/_components/ProAccountMenu.tsx|'hover:border-white/20',
@@ -323,7 +318,6 @@ app/pro/_components/RouteOverlay.tsx|<div className="absolute inset-0 ring-1 rin
 app/pro/_components/RouteOverlay.tsx|<div className="mx-auto h-1 w-12 rounded-full bg-white/18 shadow-[0_1px_0_rgb(255_255_255/0.18)_inset]" />
 app/pro/_components/RouteOverlay.tsx|<div className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-b from-transparent to-black/35" />
 app/pro/_components/RouteOverlay.tsx|<div className="relative sticky top-0 z-10 border-b border-white/12 bg-bgSecondary/80 backdrop-blur-xl">
-app/pro/_components/RouteOverlay.tsx|className="absolute inset-0 bg-black/80 backdrop-blur-lg"
 app/pro/_components/consult/ProConsultBrief.tsx|<div className="border-t border-white/10 pt-4">
 app/pro/_components/consult/ProConsultBrief.tsx|<div className="mt-2 rounded-xl border border-white/10 bg-bgPrimary p-3">
 app/pro/_components/consult/ProConsultBrief.tsx|<li className="rounded-xl border border-white/10 bg-bgPrimary px-3 py-2.5">
@@ -408,9 +402,7 @@ app/pro/bookings/series/[id]/SeriesCancelControls.tsx|className="tovis-glass mt-
 app/pro/bookings/series/[id]/page.tsx|className="tovis-glass mt-3.5 rounded-card border border-white/10 bg-bgSecondary p-4"
 app/pro/bookings/series/[id]/page.tsx|className="tovis-glass mt-5 rounded-card border border-white/10 bg-bgSecondary p-4"
 app/pro/calendar/_components/BookingOverrideConfirmModal.tsx|'shadow-[0_28px_90px_rgb(0_0_0_/_0.62)]',
-app/pro/calendar/_components/BookingOverrideConfirmModal.tsx|className={`fixed inset-0 ${zClass.modal} flex items-end justify-center bg-black/75 p-0 backdrop-blur-md sm:items-center sm:p-4`}
 app/pro/calendar/_components/ConfirmChangeModal.tsx|'shadow-[0_28px_90px_rgb(0_0_0_/_0.62)]',
-app/pro/calendar/_components/ConfirmChangeModal.tsx|className={`fixed inset-0 ${zClass.modal} flex items-end justify-center bg-black/75 p-0 backdrop-blur-md sm:items-center sm:p-4`}
 app/pro/clients/ClientsList.tsx|<div className="rounded-card border border-white/10 bg-bgSecondary px-4 py-6 text-center text-[13px] font-semibold text-textSecondary">
 app/pro/clients/NewClientForm.tsx|'w-full rounded-card border border-white/10 bg-bgPrimary/20 px-3 py-2 text-sm text-textPrimary outline-none placeholder:text-textSecondary disabled:opacity-60'
 app/pro/clients/NewClientForm.tsx|className="grid gap-3 rounded-card border border-white/10 bg-bgSurface p-4"
@@ -449,7 +441,6 @@ app/pro/locations/LocationsClient.tsx|<div className="mt-3 grid gap-3 rounded-2x
 app/pro/locations/LocationsClient.tsx|<div className="mt-3 rounded-inner border border-white/10 bg-bgPrimary/20 p-3">
 app/pro/locations/LocationsClient.tsx|<div className="rounded-2xl border border-white/10 bg-bgSecondary/50 p-3">
 app/pro/locations/LocationsClient.tsx|<div className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
-app/pro/locations/LocationsClient.tsx|<div className={`fixed inset-0 ${zClass.modal} flex items-center justify-center bg-black/70 p-4`} onClick={onCancel}>
 app/pro/locations/LocationsClient.tsx|<div key={l.id} className="rounded-card border border-white/10 bg-bgPrimary/20 p-3">
 app/pro/locations/LocationsClient.tsx|className="rounded-full border border-white/10 bg-bgPrimary/25 px-4 py-2 text-[12px] font-black text-textPrimary hover:border-white/20 disabled:opacity-60"
 app/pro/locations/LocationsClient.tsx|className="w-full max-w-lg overflow-hidden rounded-2xl border border-white/10 bg-bgSecondary shadow-[0_50px_160px_rgb(0_0_0/0.78)] backdrop-blur-xl"
@@ -466,7 +457,6 @@ app/pro/media/new/ImageEditModal.tsx|className="rounded-xl border border-white/1
 app/pro/media/new/ImageEditModal.tsx|className="rounded-xl border border-white/10 bg-bgSecondary px-3 py-3 text-[13px] font-black text-textPrimary hover:bg-white/5"
 app/pro/media/new/ImageEditModal.tsx|className="shrink-0 rounded-full border border-white/10 bg-bgPrimary px-3 py-1.5 text-[12px] font-black text-textPrimary hover:bg-white/5"
 app/pro/media/new/ImageEditModal.tsx|className="sticky bottom-0 z-30 border-t border-white/10 bg-bgSecondary px-4 pt-3"
-app/pro/media/new/ImageEditModal.tsx|className={`fixed inset-0 ${zClass.modal} bg-black/80`}
 app/pro/media/new/NewMediaPostForm.tsx|: 'border-white/10 bg-bgPrimary text-textPrimary hover:border-white/20',
 app/pro/media/new/NewMediaPostForm.tsx|: 'cursor-not-allowed border-white/10 bg-bgPrimary text-textSecondary opacity-70',
 app/pro/media/new/NewMediaPostForm.tsx|<div className="flex items-center gap-2 rounded-xl border border-white/10 bg-bgPrimary px-3 py-3">
@@ -556,13 +546,11 @@ app/pro/profile/_sections/AddServiceOverlay.tsx|<div className="mx-auto h-1 w-12
 app/pro/profile/_sections/AddServiceOverlay.tsx|<div className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-b from-transparent to-black/35" />
 app/pro/profile/_sections/AddServiceOverlay.tsx|<div className="relative sticky top-0 z-10 border-b border-white/12 bg-bgSecondary/80 backdrop-blur-xl">
 app/pro/profile/_sections/AddServiceOverlay.tsx|<div className="rounded-[22px] border border-white/12 bg-bgPrimary/25 p-3 shadow-[inset_0_1px_0_rgb(255_255_255/0.10)]">
-app/pro/profile/_sections/AddServiceOverlay.tsx|className="absolute inset-0 bg-black/80 backdrop-blur-lg"
 app/pro/profile/_sections/ServicesManagerSection.tsx|<div className="rounded-card border border-white/10 bg-bgPrimary p-3 text-[12px] text-textSecondary">
 app/pro/profile/_sections/ServicesManagerSection.tsx|<section className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
 app/pro/profile/_sections/ServicesManagerSection.tsx|className="inline-flex w-fit items-center rounded-full border border-white/10 bg-bgSecondary px-3 py-2 text-[12px] font-black text-textPrimary hover:border-white/20"
 app/pro/profile/_sections/ServicesManagerSectionClient.tsx|<section className="tovis-glass mb-5 rounded-card border border-white/10 bg-bgSecondary p-4">
 app/pro/profile/_sections/ServicesManagerSectionClient.tsx|className="rounded-full border border-white/12 bg-bgPrimary/40 px-4 py-2 text-[12px] font-black text-textPrimary hover:border-white/22 active:scale-[0.98] transition"
-app/pro/profile/public-profile/EditPaymentSettingsButton.tsx|'bg-black/70 backdrop-blur-sm',
 app/pro/profile/public-profile/EditPaymentSettingsButton.tsx|'tovis-glass w-full max-w-180 max-h-[85vh] overflow-y-auto rounded-card border border-white/10 bg-bgSecondary p-4',
 app/pro/profile/public-profile/EditPaymentSettingsButton.tsx|: 'border-white/10 bg-bgPrimary text-textPrimary hover:border-white/20',
 app/pro/profile/public-profile/EditPaymentSettingsButton.tsx|: 'border-white/10 bg-bgSecondary text-textPrimary hover:border-white/20',
@@ -576,7 +564,6 @@ app/pro/profile/public-profile/EditPaymentSettingsButton.tsx|className="grid gap
 app/pro/profile/public-profile/EditPaymentSettingsButton.tsx|className="mt-1 h-4 w-4 border-white/20 bg-bgSecondary text-accentPrimary focus:ring-accentPrimary/40"
 app/pro/profile/public-profile/EditPaymentSettingsButton.tsx|className="mt-1 h-4 w-4 rounded border-white/20 bg-bgSecondary text-accentPrimary focus:ring-accentPrimary/40"
 app/pro/profile/public-profile/EditPaymentSettingsButton.tsx|className="rounded-full border border-white/10 bg-bgSecondary px-3 py-2 text-[12px] font-black text-textPrimary hover:border-white/20"
-app/pro/profile/public-profile/EditProfileButton.tsx|'bg-black/70 backdrop-blur-sm',
 app/pro/profile/public-profile/EditProfileButton.tsx|'tovis-glass w-full max-w-130 max-h-[85vh] overflow-y-auto rounded-card border border-white/10 bg-bgSecondary p-4',
 app/pro/profile/public-profile/EditProfileButton.tsx|: 'border-white/10 bg-bgPrimary text-textPrimary hover:border-white/20',
 app/pro/profile/public-profile/EditProfileButton.tsx|: 'border-white/10 text-textPrimary hover:border-white/20',
