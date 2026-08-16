@@ -173,7 +173,13 @@ describe('form controls', () => {
   // `0 0 0 2px bg, 0 0 0 4px accent/.5` with the utility and without it.
   // Asserted as an absence so the dead pair cannot be reintroduced.
   it('leaves the focus RING to the global rule, and shifts the border itself', () => {
-    for (const surface of ['dense', 'soft', 'solid'] as const) {
+    for (const surface of [
+      'dense',
+      'soft',
+      'solid',
+      'raised',
+      'translucent',
+    ] as const) {
       expect(controlClassName({ surface })).not.toContain('focus:ring')
     }
     for (const surface of ['dense', 'soft'] as const) {
@@ -183,10 +189,12 @@ describe('form controls', () => {
         'focus:border-accentPrimary/',
       )
     }
-    // `solid` is the exception, and deliberately: the pro fields never carried a
-    // focus border, so adding one here would be a restyle of 51 controls rather
+    // The three pro fills are the exception, and deliberately: the pro fields
+    // never carried a focus border, so adding one here would be a restyle rather
     // than a migration. The global ring is their focus indicator.
-    expect(controlClassName({ surface: 'solid' })).not.toContain('focus:border')
+    for (const surface of ['solid', 'raised', 'translucent'] as const) {
+      expect(controlClassName({ surface })).not.toContain('focus:border')
+    }
   })
 
   it('renders the right elements and forwards props', () => {
@@ -339,11 +347,120 @@ describe('form controls', () => {
     expect(solid.split(' ')).not.toContain('placeholder:text-textSecondary')
   })
 
-  it('states the disabled treatment in CSS, for all three surfaces', () => {
-    for (const surface of ['dense', 'soft', 'solid'] as const) {
+  it('states the disabled treatment in CSS, for every surface', () => {
+    for (const surface of [
+      'dense',
+      'soft',
+      'solid',
+      'raised',
+      'translucent',
+    ] as const) {
       const cls = controlClassName({ surface })
       expect(cls).toContain('disabled:opacity-60')
       expect(cls).toContain('disabled:cursor-not-allowed')
+    }
+  })
+
+  // ── the two fill siblings ────────────────────────────────────────────────
+  //
+  // `raised` and `translucent` exist because a field is painted relative to
+  // WHAT IT SITS ON, and neither could fold onto `solid`:
+  //
+  //   solid        on the page / a modal          bg-bgPrimary
+  //   raised       on a bg-bgPrimary PANEL        bg-bgSecondary
+  //   translucent  on a raised or glass card      bg-bgPrimary/70
+  //
+  // 🔴 The load-bearing one is `raised`. Its six controls all sit inside a
+  // `bg-bgPrimary` panel, so painting them `bg-bgPrimary` makes the field EXACTLY
+  // the colour of the panel behind it — measured from composited pixels, Δ = 0 in
+  // both modes on both screens, with only a 10%-alpha border left to say a
+  // control is there. This assertion is the guard on that: if `raised` ever
+  // becomes `bg-bgPrimary`, nine controls silently disappear into their panels.
+  it('keeps `raised` off the fill of the panel it sits on', () => {
+    const raised = controlClassName({ surface: 'raised' })
+    expect(raised).toContain('bg-bgSecondary')
+    expect(raised.split(' ')).not.toContain('bg-bgPrimary')
+  })
+
+  it('keeps `translucent` translucent', () => {
+    const translucent = controlClassName({ surface: 'translucent' })
+    expect(translucent).toContain('bg-bgPrimary/70')
+    expect(translucent.split(' ')).not.toContain('bg-bgPrimary')
+    expect(translucent.split(' ')).not.toContain('bg-bgSecondary')
+  })
+
+  // The three are ONE box at three fills. If they ever differ by more than the
+  // background utility, they have stopped being the same field and the reason for
+  // three surfaces instead of a `className` at the call site has evaporated.
+  it('differs from `solid` by exactly the fill, and nothing else', () => {
+    const solid = controlClassName({ surface: 'solid' }).split(' ')
+    for (const [surface, fill] of [
+      ['raised', 'bg-bgSecondary'],
+      ['translucent', 'bg-bgPrimary/70'],
+    ] as const) {
+      const other = controlClassName({ surface }).split(' ')
+      expect(other.filter((c) => !solid.includes(c))).toEqual([fill])
+      expect(solid.filter((c) => !other.includes(c))).toEqual(['bg-bgPrimary'])
+    }
+  })
+
+  // The literal strings the 17 call sites were carrying, verbatim, so the
+  // migration cannot be quietly restyled later. Same shape as the `solid` pin
+  // above: a SET, because splitting into BASE + SURFACES reorders the tokens.
+  it('emits exactly the token sets the two fill families were carrying', () => {
+    const cases = [
+      [
+        'raised',
+        'w-full rounded-xl border border-white/10 bg-bgSecondary px-3 py-3 ' +
+          'text-[13px] text-textPrimary placeholder:text-textSecondary/70 ' +
+          'focus:outline-none focus:ring-2 focus:ring-accentPrimary/40 ' +
+          'disabled:opacity-60',
+      ],
+      [
+        'translucent',
+        'w-full rounded-xl border border-white/10 bg-bgPrimary/70 px-3 py-3 ' +
+          'text-[13px] text-textPrimary placeholder:text-textSecondary/70 ' +
+          'focus:outline-none focus:ring-2 focus:ring-accentPrimary/40 ' +
+          'disabled:opacity-60',
+      ],
+    ] as const
+
+    for (const [surface, inheritedClasses] of cases) {
+      const emitted = new Set(controlClassName({ surface }).split(' '))
+      const inherited = new Set(inheritedClasses.split(' '))
+
+      expect([...inherited].filter((c) => !emitted.has(c)).sort()).toEqual(
+        [
+          // Dead on these elements — the unlayered `:focus-visible` rule owns
+          // the shadow, measured identical with and without the pair.
+          'focus:ring-2',
+          'focus:ring-accentPrimary/40',
+          'focus:outline-none',
+          // The raw white tint becomes the token: imperceptible in dark, a
+          // hairline in light where it had been invisible.
+          'border-white/10',
+        ].sort(),
+      )
+      expect([...emitted].filter((c) => !inherited.has(c)).sort()).toEqual([
+        'border-surfaceGlass/10',
+        'disabled:cursor-not-allowed',
+        'outline-none',
+      ])
+    }
+  })
+
+  it('applies the two fill surfaces through the components too', () => {
+    for (const surface of ['raised', 'translucent'] as const) {
+      const { container } = render(
+        <>
+          <TextInput surface={surface} />
+          <Select surface={surface} />
+          <Textarea surface={surface} />
+        </>,
+      )
+      const classes = Array.from(container.children).map((el) => el.className)
+      expect(new Set(classes).size).toBe(1)
+      expect(classes[0]).toBe(controlClassName({ surface }))
     }
   })
 })

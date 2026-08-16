@@ -16,6 +16,8 @@
  * placeholder — clearing a requirement must be as easy as setting one.
  */
 
+import { Select } from '@/app/_components/ui'
+
 type FormOption = {
   formId: string
   title: string
@@ -57,12 +59,12 @@ export default function ConsentRequirementPicker(props: {
           Forms, then come back to require it here.
         </div>
       ) : (
-        <select
+        <Select
           id={id}
+          surface="translucent"
           value={boundButUnlisted ? '' : (value ?? '')}
           disabled={disabled}
           onChange={(event) => onChange(event.target.value || null)}
-          className="w-full rounded-xl border border-white/10 bg-bgPrimary/70 px-3 py-3 text-[13px] text-textPrimary focus:outline-none focus:ring-2 focus:ring-accentPrimary/40"
         >
           <option value="">No form needed</option>
           {forms.map((form) => (
@@ -70,7 +72,7 @@ export default function ConsentRequirementPicker(props: {
               {form.title} ({form.kindLabel}, v{form.version})
             </option>
           ))}
-        </select>
+        </Select>
       )}
 
       {boundButUnlisted ? (

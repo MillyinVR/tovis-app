@@ -9,6 +9,7 @@ import { normalizeMoney2, moneyToCentsInt } from '@/lib/money'
 import { cn } from '@/lib/utils'
 import { errorMessageFromUnknown, readErrorMessage, safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
+import { controlClassName } from '@/app/_components/ui'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import CalendarSwatchPicker from '@/app/pro/services/CalendarSwatchPicker'
 import PrepayScopePicker from '@/app/pro/services/PrepayScopePicker'
@@ -751,8 +752,9 @@ function OfferingEditor(props: {
     }
   }
 
-  const inputBase =
-    'w-full rounded-xl border border-white/10 bg-bgPrimary/70 px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary/70 focus:outline-none focus:ring-2 focus:ring-accentPrimary/40'
+  // The editor's fields sit on `bg-bgPrimary/40` panels inside a `bg-bgSecondary`
+  // card, so they take the kit's translucent fill rather than `solid`.
+  const inputBase = controlClassName({ surface: 'translucent' })
 
   const btnBase =
     'relative inline-flex items-center justify-center rounded-full px-3 py-2 text-[12px] font-black transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60'

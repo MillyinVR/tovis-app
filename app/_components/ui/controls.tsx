@@ -47,14 +47,28 @@
 // because an apostrophe inside a `//` comment in the attribute list opened a
 // phantom string and swallowed the rest of the tag.
 //
-// Two neighbouring families are deliberately NOT on `solid`, because they differ
-// by FILL rather than by drift, and folding them in would be a restyle:
-//   · `bg-bgPrimary/70` — ConsentRequirementPicker, OfferingManager (6),
-//     client ConsentSignCard, supportForm. A translucent field; `solid` is solid
-//     by definition and by name.
-//   · `bg-bgSecondary`  — NewMediaPostForm's three lower controls, which sit on a
-//     raised panel inside the very form whose upper controls are `bg-bgPrimary`.
-// Both are recorded in the cleanup register; neither is a fork of this surface.
+// Those two neighbouring families are now `translucent` and `raised`, and the
+// reason they could not simply fold onto `solid` is the rule the three fills
+// exist to express: A FIELD IS PAINTED RELATIVE TO WHATEVER IT SITS ON.
+//
+//   solid        a field on the page or a modal   bg-bgPrimary
+//   raised       a field on a bg-bgPrimary PANEL  bg-bgSecondary
+//   translucent  a field on a raised/glass card   bg-bgPrimary/70
+//
+// `raised` is not a variant anyone chose for flavour — every one of its six
+// controls sits inside a `bg-bgPrimary` panel (NewMediaPostForm:840,
+// ImageEditModal:343, EditPaymentSettingsButton:899). Folding those onto `solid`
+// paints the field the exact colour of the panel behind it: measured from
+// composited pixels, field and panel both land on rgb(10,20,19) in dark and
+// rgb(243,240,231) in light — Δ = 0, in both modes, on both screens. Only the
+// 10%-alpha border would have been left to say a control was there, and in light
+// mode it does not carry it. `translucent` folds harmlessly by the same
+// measurement (Δ rises, 23.7 → 34.7 on /support), and is kept as its own surface
+// anyway so that nothing restyles — decided with Tori against a rendered A/B.
+//
+// ⚠️ getComputedStyle cannot see this. It reports a translucent field's DECLARED
+// `rgba(…, 0.7)`, never the composited result, so the whole finding is invisible
+// to the obvious measurement. Sample real pixels.
 //
 // The copies disagreed on exactly one thing — the placeholder alpha — and that
 // disagreement is now settled. `solid` shipped `placeholder:text-textSecondary`
@@ -82,11 +96,14 @@ import { cn } from '@/lib/utils'
  * `dense` is the admin/table field this file shipped with. `soft` is the
  * card-radius field the auth and client-settings forms use — a lighter border on
  * the raised surface, with a hover tint, for a form that is the whole page rather
- * than a cell in a dense table. `solid` is the pro forms' field: the dense box at
- * a roomier height, filled solid so it reads as a control sitting on top of a
- * modal rather than a tint let through it.
+ * than a cell in a dense table.
+ *
+ * The last three are one box at three fills, chosen by what the field SITS ON:
+ * `solid` on the page or a modal, `raised` on a `bg-bgPrimary` panel,
+ * `translucent` on a raised or glass card. Picking by appearance rather than by
+ * container is how a field ends up the same colour as the thing behind it.
  */
-export type ControlSurface = 'dense' | 'soft' | 'solid'
+export type ControlSurface = 'dense' | 'soft' | 'solid' | 'raised' | 'translucent'
 
 export type ControlStyleOptions = {
   surface?: ControlSurface
@@ -125,6 +142,11 @@ const SURFACES: Record<ControlSurface, string> = {
   // rgba(255,255,255,.1) → rgba(10,20,19,.1), i.e. a border that was invisible
   // over a near-white page becomes a hairline.
   solid: 'rounded-xl border-surfaceGlass/10 bg-bgPrimary py-3 text-[13px]',
+  // `solid`'s box at the two other fills. They differ from it by exactly one
+  // utility, which is the point: same field, painted for its container.
+  raised: 'rounded-xl border-surfaceGlass/10 bg-bgSecondary py-3 text-[13px]',
+  translucent:
+    'rounded-xl border-surfaceGlass/10 bg-bgPrimary/70 py-3 text-[13px]',
 }
 
 /** The one control surface. Brand tokens only — no raw colors. */

@@ -13,7 +13,7 @@ import { pickStringOrEmpty } from '@/lib/pick'
 import { safeJsonRecord, readErrorMessage } from '@/lib/http'
 import ImageEditModal from './ImageEditModal'
 import RemoteImage from '@/app/_components/media/RemoteImage'
-import { controlClassName } from '@/app/_components/ui'
+import { Select, TextInput, controlClassName } from '@/app/_components/ui'
 import {
   DEFAULT_IMAGE_EDIT_STATE,
   IMAGE_UPLOAD_MAX_BYTES,
@@ -846,7 +846,8 @@ export default function NewMediaPostForm() {
                 <label className="text-[12px] font-black text-textPrimary">
                   Primary service
                 </label>
-                <select
+                <Select
+                  surface="raised"
                   value={primaryServiceId ?? ''}
                   onChange={(e) => {
                     setPrimaryServiceId(
@@ -855,7 +856,6 @@ export default function NewMediaPostForm() {
                     setError(null)
                   }}
                   disabled={serviceIds.length === 0}
-                  className="rounded-xl border border-white/10 bg-bgSecondary px-3 py-3 text-[13px] text-textPrimary focus:outline-none focus:ring-2 focus:ring-accentPrimary/40 disabled:opacity-60"
                 >
                   <option value="">
                     {serviceIds.length <= 1
@@ -869,7 +869,7 @@ export default function NewMediaPostForm() {
                         {service.name}
                       </option>
                     ))}
-                </select>
+                </Select>
 
                 {needsPrimaryService ? (
                   <div className="text-[12px] text-toneDanger">
@@ -884,7 +884,8 @@ export default function NewMediaPostForm() {
                   <label className="text-[12px] font-black text-textPrimary">
                     Looks visibility
                   </label>
-                  <select
+                  <Select
+                    surface="raised"
                     value={lookVisibility}
                     onChange={(e) => {
                       const value = e.target.value
@@ -897,7 +898,6 @@ export default function NewMediaPostForm() {
                       )
                       setError(null)
                     }}
-                    className="rounded-xl border border-white/10 bg-bgSecondary px-3 py-3 text-[13px] text-textPrimary focus:outline-none focus:ring-2 focus:ring-accentPrimary/40"
                   >
                     <option value={LookPostVisibility.PUBLIC}>Public</option>
                     <option value={LookPostVisibility.FOLLOWERS_ONLY}>
@@ -906,14 +906,18 @@ export default function NewMediaPostForm() {
                     <option value={LookPostVisibility.UNLISTED}>
                       Unlisted
                     </option>
-                  </select>
+                  </Select>
                 </div>
 
                 <div className="grid gap-2">
                   <label className="text-[12px] font-black text-textPrimary">
                     Starting price (optional)
                   </label>
-                  <input
+                  {/* The placeholder was full-opacity `text-textSecondary` here
+                      and moves to the kit's `/70` — the alpha settled with Tori
+                      in #917, which this control was missed by. */}
+                  <TextInput
+                    surface="raised"
                     type="text"
                     inputMode="decimal"
                     value={priceStartingAt}
@@ -922,7 +926,6 @@ export default function NewMediaPostForm() {
                       setError(null)
                     }}
                     placeholder="85.00"
-                    className="rounded-xl border border-white/10 bg-bgSecondary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary focus:outline-none focus:ring-2 focus:ring-accentPrimary/40"
                   />
                   {priceError ? (
                     <div className="text-[12px] text-toneDanger">
