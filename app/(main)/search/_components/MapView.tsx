@@ -169,16 +169,16 @@ function MapControls(props: { me: Coords | null; origin: Coords | null }) {
         <button
           type="button"
           onClick={() => map.zoomIn()}
-          className="block w-11 px-0 py-2 text-center text-[16px] font-black text-textPrimary hover:bg-white/10"
+          className="block w-11 px-0 py-2 text-center text-[16px] font-black text-textPrimary hover:bg-surfaceGlass/10"
           aria-label="Zoom in"
         >
           +
         </button>
-        <div className="h-px bg-white/10" />
+        <div className="h-px bg-surfaceGlass/10" />
         <button
           type="button"
           onClick={() => map.zoomOut()}
-          className="block w-11 px-0 py-2 text-center text-[16px] font-black text-textPrimary hover:bg-white/10"
+          className="block w-11 px-0 py-2 text-center text-[16px] font-black text-textPrimary hover:bg-surfaceGlass/10"
           aria-label="Zoom out"
         >
           −
@@ -189,7 +189,7 @@ function MapControls(props: { me: Coords | null; origin: Coords | null }) {
         <button
           type="button"
           onClick={() => map.setView([origin.lat, origin.lng], Math.max(map.getZoom(), 11), { animate: true })}
-          className="pointer-events-auto tovis-glass-strong rounded-full border border-surfaceGlass/12 bg-bgSecondary/80 px-3 py-2 text-[12px] font-black text-textPrimary backdrop-blur-xl hover:bg-white/10"
+          className="pointer-events-auto tovis-glass-strong rounded-full border border-surfaceGlass/12 bg-bgSecondary/80 px-3 py-2 text-[12px] font-black text-textPrimary backdrop-blur-xl hover:bg-surfaceGlass/10"
         >
           Center
         </button>
@@ -199,7 +199,7 @@ function MapControls(props: { me: Coords | null; origin: Coords | null }) {
         <button
           type="button"
           onClick={() => map.setView([me.lat, me.lng], Math.max(map.getZoom(), 12), { animate: true })}
-          className="pointer-events-auto tovis-glass-strong rounded-full border border-surfaceGlass/12 bg-bgSecondary/80 px-3 py-2 text-[12px] font-black text-textPrimary backdrop-blur-xl hover:bg-white/10"
+          className="pointer-events-auto tovis-glass-strong rounded-full border border-surfaceGlass/12 bg-bgSecondary/80 px-3 py-2 text-[12px] font-black text-textPrimary backdrop-blur-xl hover:bg-surfaceGlass/10"
         >
           Me
         </button>

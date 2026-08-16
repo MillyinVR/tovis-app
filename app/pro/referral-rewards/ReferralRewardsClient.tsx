@@ -134,7 +134,7 @@ export default function ReferralRewardsClient(props: { initial: Settings }) {
             disabled={busy}
             onClick={handleToggle}
             className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${
-              enabled ? 'bg-accentPrimary' : 'bg-white/20'
+              enabled ? 'bg-accentPrimary' : 'bg-surfaceGlass/20'
             } disabled:opacity-50`}
           >
             <span

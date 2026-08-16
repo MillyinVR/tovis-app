@@ -55,7 +55,7 @@ export default function DiscoverCategoryRail({
                 'transition-colors duration-150',
                 active
                   ? 'border-accentPrimary bg-accentPrimary text-bgPrimary'
-                  : 'border-surfaceGlass/12 bg-bgPrimary/20 text-textPrimary hover:bg-white/10',
+                  : 'border-surfaceGlass/12 bg-bgPrimary/20 text-textPrimary hover:bg-surfaceGlass/10',
               )}
             >
               {category.label}

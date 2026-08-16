@@ -153,7 +153,7 @@ export default async function MediaDetailPage({ params }: PageProps) {
             'tap-target inline-flex items-center gap-2 rounded-full border border-surfaceGlass/10',
             'bg-bgPrimary/25 px-4 py-2 text-[12px] font-black text-textPrimary',
             'backdrop-blur-xl shadow-[0_14px_40px_rgba(0,0,0,0.55)]',
-            'hover:bg-white/10',
+            'hover:bg-surfaceGlass/10',
           )}
         >
           ← Back to profile

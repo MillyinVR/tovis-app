@@ -274,7 +274,7 @@ function ImageEditModalContent({
               <button
                 type="button"
                 onClick={onClose}
-                className="shrink-0 rounded-full border border-surfaceGlass/10 bg-bgPrimary px-3 py-1.5 text-[12px] font-black text-textPrimary hover:bg-white/5"
+                className="shrink-0 rounded-full border border-surfaceGlass/10 bg-bgPrimary px-3 py-1.5 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass/5"
               >
                 Close
               </button>
@@ -392,7 +392,7 @@ function ImageEditModalContent({
                 <button
                   type="button"
                   onClick={() => setEdit(LOOKS_DEFAULT_EDIT_STATE)}
-                  className="rounded-xl border border-surfaceGlass/10 bg-bgSecondary px-3 py-3 text-[13px] font-black text-textPrimary hover:bg-white/5"
+                  className="rounded-xl border border-surfaceGlass/10 bg-bgSecondary px-3 py-3 text-[13px] font-black text-textPrimary hover:bg-surfaceGlass/5"
                 >
                   Reset image
                 </button>
@@ -416,7 +416,7 @@ function ImageEditModalContent({
               <button
                 type="button"
                 onClick={onClose}
-                className="rounded-xl border border-surfaceGlass/10 bg-bgPrimary px-3 py-3 text-[13px] font-black text-textPrimary hover:bg-white/5"
+                className="rounded-xl border border-surfaceGlass/10 bg-bgPrimary px-3 py-3 text-[13px] font-black text-textPrimary hover:bg-surfaceGlass/5"
               >
                 Cancel
               </button>

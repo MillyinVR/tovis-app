@@ -304,7 +304,7 @@ function RaiseConfigurator({
               key={s.index}
               className={[
                 'flex items-center justify-between gap-3 rounded-inner px-3 py-2',
-                atMin ? 'bg-fern/12' : 'bg-white/[0.03]',
+                atMin ? 'bg-fern/12' : 'bg-surfaceGlass/[0.03]',
               ].join(' ')}
             >
               <span className="flex items-center gap-3">
@@ -346,7 +346,7 @@ function MetricCard({
   hint: string
 }) {
   return (
-    <div className="rounded-inner bg-white/[0.03] p-3">
+    <div className="rounded-inner bg-surfaceGlass/[0.03] p-3">
       <p className="text-[12px] text-textMuted">{label}</p>
       <p className="mt-1 text-[20px] font-medium text-textPrimary">{value}</p>
       <p className="mt-0.5 text-[11px] text-textMuted">{hint}</p>

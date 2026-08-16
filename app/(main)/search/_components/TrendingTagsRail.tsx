@@ -55,7 +55,7 @@ export default function TrendingTagsRail() {
           <Link
             key={tag.slug}
             href={`/looks/tags/${encodeURIComponent(tag.slug)}`}
-            className="shrink-0 rounded-full border border-accentPrimary/40 bg-bgPrimary/30 px-3 py-1.5 font-mono text-[11px] font-black text-textPrimary transition-colors hover:border-accentPrimary hover:bg-white/10"
+            className="shrink-0 rounded-full border border-accentPrimary/40 bg-bgPrimary/30 px-3 py-1.5 font-mono text-[11px] font-black text-textPrimary transition-colors hover:border-accentPrimary hover:bg-surfaceGlass/10"
           >
             #{tag.display}
           </Link>

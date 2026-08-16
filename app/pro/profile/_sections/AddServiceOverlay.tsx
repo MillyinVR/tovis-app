@@ -145,7 +145,7 @@ export default function AddServiceOverlay(props: {
               <div className="relative sticky top-0 z-10 border-b border-surfaceGlass/12 bg-bgSecondary/80 backdrop-blur-xl">
                 <div className="px-4 pt-3">
                   {/* “hardware” handle */}
-                  <div className="mx-auto h-1 w-12 rounded-full bg-white/18 shadow-[0_1px_0_rgb(255_255_255/0.18)_inset]" />
+                  <div className="mx-auto h-1 w-12 rounded-full bg-surfaceGlass/18 shadow-[0_1px_0_rgb(var(--surface-glass)/0.18)_inset]" />
                 </div>
 
                 <div className="flex items-center justify-between gap-3 px-4 py-3">

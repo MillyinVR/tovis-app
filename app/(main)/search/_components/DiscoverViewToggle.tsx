@@ -38,7 +38,7 @@ export default function DiscoverViewToggle({ value, onChange }: DiscoverViewTogg
               'transition-colors duration-150',
               active
                 ? 'border-textPrimary bg-textPrimary text-bgPrimary'
-                : 'border-surfaceGlass/12 bg-bgPrimary/20 text-textPrimary hover:bg-white/10',
+                : 'border-surfaceGlass/12 bg-bgPrimary/20 text-textPrimary hover:bg-surfaceGlass/10',
             )}
           >
             <Icon size={14} strokeWidth={2.4} />

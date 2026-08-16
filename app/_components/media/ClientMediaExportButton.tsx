@@ -262,7 +262,7 @@ export default function ClientMediaExportButton({
               <button
                 type="button"
                 onClick={close}
-                className="grid h-9 w-9 place-items-center rounded-full border border-white/12 bg-bgPrimary/30 text-[14px] font-black text-white hover:bg-white/10"
+                className="grid h-9 w-9 place-items-center rounded-full border border-surfaceGlass/12 bg-bgPrimary/30 text-[14px] font-black text-textPrimary hover:bg-surfaceGlass/10"
                 aria-label="Close"
               >
                 ✕
@@ -308,7 +308,7 @@ export default function ClientMediaExportButton({
                           'rounded-[14px] border px-3 py-2 text-left transition',
                           f === format
                             ? 'border-accentPrimary/40 bg-accentPrimary/15'
-                            : 'border-surfaceGlass/10 bg-bgPrimary/25 hover:bg-white/5',
+                            : 'border-surfaceGlass/10 bg-bgPrimary/25 hover:bg-surfaceGlass/5',
                         )}
                       >
                         <div className="text-[13px] font-black text-textPrimary">{formatShortLabel(f)}</div>
@@ -363,7 +363,7 @@ export default function ClientMediaExportButton({
                     'flex-1 rounded-[14px] border px-3 py-3 text-[13px] font-black transition',
                     rendering || !preview
                       ? 'cursor-not-allowed border-surfaceGlass/10 text-textSecondary opacity-70'
-                      : 'border-accentPrimary/40 text-accentPrimary hover:bg-white/5',
+                      : 'border-accentPrimary/40 text-accentPrimary hover:bg-surfaceGlass/5',
                   )}
                 >
                   Download

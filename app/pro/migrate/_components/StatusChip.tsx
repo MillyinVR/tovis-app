@@ -19,7 +19,7 @@ const VARIANT_CLASSES: Record<ChipVariant, string> = {
   accent: 'bg-accentPrimary/12 text-accentPrimary ring-accentPrimary/30',
   gold: 'bg-amber/12 text-amber ring-amber/30',
   warn: 'bg-ember/12 text-ember ring-ember/30',
-  muted: 'bg-white/5 text-textMuted ring-white/10',
+  muted: 'bg-surfaceGlass/5 text-textMuted ring-surfaceGlass/10',
   violet: 'bg-acid/12 text-acid ring-acid/30',
 }
 

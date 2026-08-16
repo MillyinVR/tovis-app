@@ -1248,7 +1248,7 @@ export default function SearchMapClient() {
                         setAcPreds([])
                         setAcIndex(-1)
                       }}
-                      className="rounded-full px-2 py-1 text-[12px] font-black text-textPrimary/70 hover:bg-white/10"
+                      className="rounded-full px-2 py-1 text-[12px] font-black text-textPrimary/70 hover:bg-surfaceGlass/10"
                       aria-label="Clear search"
                     >
                       x
@@ -1271,7 +1271,7 @@ export default function SearchMapClient() {
                     'relative flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border transition-colors',
                     filtersOpen
                       ? 'border-accentPrimary bg-accentPrimary text-bgPrimary'
-                      : 'border-surfaceGlass/12 bg-bgPrimary/20 text-textPrimary hover:bg-white/10',
+                      : 'border-surfaceGlass/12 bg-bgPrimary/20 text-textPrimary hover:bg-surfaceGlass/10',
                   )}
                 >
                   <SlidersHorizontal size={16} />
@@ -1308,7 +1308,7 @@ export default function SearchMapClient() {
                         onMouseEnter={() => setAcIndex(index)}
                         className={cn(
                           'flex w-full flex-col gap-0.5 px-3 py-2 text-left transition',
-                          index === acIndex ? 'bg-white/10' : 'bg-transparent hover:bg-white/10',
+                          index === acIndex ? 'bg-surfaceGlass/10' : 'bg-transparent hover:bg-surfaceGlass/10',
                           'border-b border-surfaceGlass/10 last:border-b-0',
                         )}
                       >
@@ -1401,7 +1401,7 @@ export default function SearchMapClient() {
                       'rounded-full border px-3 py-2 text-[12px] font-black transition',
                       openNowOnly
                         ? 'border-accentPrimary bg-accentPrimary/15 text-textPrimary'
-                        : 'border-surfaceGlass/12 bg-bgPrimary/20 text-textSecondary hover:bg-white/10',
+                        : 'border-surfaceGlass/12 bg-bgPrimary/20 text-textSecondary hover:bg-surfaceGlass/10',
                     )}
                   >
                     Open now
@@ -1415,7 +1415,7 @@ export default function SearchMapClient() {
                       'rounded-full border px-3 py-2 text-[12px] font-black transition',
                       mobileOnly
                         ? 'border-accentPrimary bg-accentPrimary/15 text-textPrimary'
-                        : 'border-surfaceGlass/12 bg-bgPrimary/20 text-textSecondary hover:bg-white/10',
+                        : 'border-surfaceGlass/12 bg-bgPrimary/20 text-textSecondary hover:bg-surfaceGlass/10',
                     )}
                   >
                     Comes to you
@@ -1438,7 +1438,7 @@ export default function SearchMapClient() {
                         lastSearchRef.current = nextSearch
                         void runSearch(nextSearch)
                       }}
-                      className="rounded-full border border-surfaceGlass/12 bg-bgPrimary/20 px-3 py-2 text-[12px] font-black text-textPrimary hover:bg-white/10"
+                      className="rounded-full border border-surfaceGlass/12 bg-bgPrimary/20 px-3 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass/10"
                     >
                       Use me
                     </button>
@@ -1500,7 +1500,7 @@ export default function SearchMapClient() {
                     'border border-surfaceGlass/15 bg-bgPrimary/25 backdrop-blur-xl',
                     'text-textPrimary',
                     'shadow-[0_14px_40px_rgba(0,0,0,0.55)]',
-                    'transition hover:bg-white/10',
+                    'transition hover:bg-surfaceGlass/10',
                   )}
                 >
                   Search this area

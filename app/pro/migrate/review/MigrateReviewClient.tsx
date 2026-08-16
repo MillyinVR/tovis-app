@@ -131,7 +131,7 @@ export function MigrateReviewClient({ copy, vm }: Props) {
             {copy.trust.map((t) => (
               <span
                 key={t}
-                className="rounded-full bg-white/5 px-3 py-1 text-[11px] text-textMuted"
+                className="rounded-full bg-surfaceGlass/5 px-3 py-1 text-[11px] text-textMuted"
               >
                 {t}
               </span>

@@ -29,7 +29,7 @@ export function SummaryBar({ stats, cta }: Props) {
           {stats.map((stat, i) => (
             <div key={stat.label} className="flex items-center gap-5">
               {i > 0 ? (
-                <span className="hidden h-6 w-px bg-white/10 sm:block" aria-hidden="true" />
+                <span className="hidden h-6 w-px bg-surfaceGlass/10 sm:block" aria-hidden="true" />
               ) : null}
               <span className="flex items-baseline gap-1.5">
                 <span
@@ -53,7 +53,7 @@ export function SummaryBar({ stats, cta }: Props) {
           className={[
             'inline-flex h-11 shrink-0 items-center justify-center rounded-full px-6 text-[14px] font-medium transition',
             cta.disabled
-              ? 'cursor-not-allowed bg-white/5 text-textMuted'
+              ? 'cursor-not-allowed bg-surfaceGlass/5 text-textMuted'
               : 'text-onAccent hover:opacity-90',
           ].join(' ')}
           style={

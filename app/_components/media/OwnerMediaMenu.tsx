@@ -395,7 +395,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
               setOpenEdit(true)
               setError(null)
             }}
-            className="block w-full px-4 py-3 text-left text-[13px] font-black text-textPrimary hover:bg-white/10"
+            className="block w-full px-4 py-3 text-left text-[13px] font-black text-textPrimary hover:bg-surfaceGlass/10"
           >
             Edit
           </button>
@@ -407,7 +407,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
               onClick={toggleCover}
               disabled={saving}
               className={cn(
-                'block w-full px-4 py-3 text-left text-[13px] font-black text-textPrimary hover:bg-white/10',
+                'block w-full px-4 py-3 text-left text-[13px] font-black text-textPrimary hover:bg-surfaceGlass/10',
                 saving ? 'cursor-not-allowed opacity-70' : '',
               )}
             >
@@ -422,7 +422,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
               onClick={toggleSignature}
               disabled={saving}
               className={cn(
-                'block w-full px-4 py-3 text-left text-[13px] font-black text-textPrimary hover:bg-white/10',
+                'block w-full px-4 py-3 text-left text-[13px] font-black text-textPrimary hover:bg-surfaceGlass/10',
                 saving ? 'cursor-not-allowed opacity-70' : '',
               )}
             >
@@ -433,7 +433,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
           <button
             type="button"
             onClick={deleteMedia}
-            className="block w-full px-4 py-3 text-left text-[13px] font-black text-toneDanger hover:bg-white/10"
+            className="block w-full px-4 py-3 text-left text-[13px] font-black text-toneDanger hover:bg-surfaceGlass/10"
           >
             Delete
           </button>
@@ -470,8 +470,8 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
                   'tap-target',
                   'grid h-9 w-9 place-items-center rounded-full border text-[14px] font-black',
                   busy
-                    ? 'cursor-not-allowed border-white/10 text-white/50 opacity-70'
-                    : 'border-white/12 bg-bgPrimary/30 text-white hover:bg-white/10',
+                    ? 'cursor-not-allowed border-surfaceGlass/10 text-textSecondary opacity-70'
+                    : 'border-surfaceGlass/12 bg-bgPrimary/30 text-textPrimary hover:bg-surfaceGlass/10',
                 )}
                 aria-label="Close"
               >
@@ -530,7 +530,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
                     }}
                     disabled={busy}
                   />
-                  <div className="my-2 h-px bg-white/8" />
+                  <div className="my-2 h-px bg-surfaceGlass/8" />
                   <HermesToggleRow
                     label="Feature in public portfolio"
                     hint="Appears on your profile grid."
@@ -572,7 +572,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
                               'grid h-16 w-16 place-items-center rounded-xl border text-[11px] font-black transition',
                               beforeAssetId === null
                                 ? 'border-accentPrimary/40 bg-accentPrimary/15 text-accentPrimary'
-                                : 'border-surfaceGlass/12 bg-bgPrimary/30 text-textSecondary hover:bg-white/5',
+                                : 'border-surfaceGlass/12 bg-bgPrimary/30 text-textSecondary hover:bg-surfaceGlass/5',
                               busy ? 'cursor-not-allowed opacity-70' : '',
                             )}
                             title="No before/after pairing"
@@ -646,12 +646,12 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
                               'inline-flex items-center gap-2 rounded-full px-3 py-1',
                               'border border-surfaceGlass/12 bg-bgPrimary/30 backdrop-blur-xl',
                               'text-[12px] font-extrabold text-textPrimary',
-                              busy ? 'opacity-70' : 'hover:bg-white/10',
+                              busy ? 'opacity-70' : 'hover:bg-surfaceGlass/10',
                             )}
                             title="Remove"
                           >
                             <span className="max-w-[220px] truncate">{name}</span>
-                            <span className="text-white/70" aria-hidden="true">
+                            <span className="text-textSecondary" aria-hidden="true">
                               ✕
                             </span>
                           </button>
@@ -695,7 +695,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
                           className={cn(
                             'flex w-full items-center justify-between gap-3 px-4 py-3 text-left',
                             'border-b border-surfaceGlass/5 last:border-b-0',
-                            busy ? 'opacity-70' : 'hover:bg-white/5',
+                            busy ? 'opacity-70' : 'hover:bg-surfaceGlass/5',
                           )}
                         >
                           <span className="text-[13px] font-black text-textPrimary">{s.name}</span>
@@ -708,7 +708,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
                                 : 'border border-surfaceGlass/10 bg-bgPrimary/25 text-textSecondary',
                             )}
                           >
-                            <span className={cn('h-1.5 w-1.5 rounded-full', on ? 'bg-accentPrimary' : 'bg-white/35')} />
+                            <span className={cn('h-1.5 w-1.5 rounded-full', on ? 'bg-accentPrimary' : 'bg-surfaceGlass/35')} />
                             {on ? 'Selected' : 'Add'}
                           </span>
                         </button>
@@ -748,7 +748,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
                       'rounded-[16px] border px-4 py-3 text-[13px] font-black transition',
                       busy
                         ? 'cursor-not-allowed border-surfaceGlass/10 bg-bgPrimary text-textSecondary opacity-70'
-                        : 'border-surfaceGlass/12 bg-bgPrimary/35 text-textPrimary hover:bg-white/5',
+                        : 'border-surfaceGlass/12 bg-bgPrimary/35 text-textPrimary hover:bg-surfaceGlass/5',
                     )}
                   >
                     Cancel
@@ -836,7 +836,7 @@ function Segmented<T extends string>({
               'backdrop-blur-xl',
               active
                 ? 'border-accentPrimary/35 bg-accentPrimary/15 shadow-[0_10px_30px_rgba(0,0,0,0.25)]'
-                : 'border-surfaceGlass/10 bg-bgPrimary/25 hover:bg-white/5',
+                : 'border-surfaceGlass/10 bg-bgPrimary/25 hover:bg-surfaceGlass/5',
               disabled ? 'cursor-not-allowed' : 'active:scale-[0.99]',
             )}
             role="radio"
@@ -844,7 +844,7 @@ function Segmented<T extends string>({
           >
             <div className="flex items-center justify-between gap-2">
               <div className="text-[13px] font-black text-textPrimary">{opt.label}</div>
-              <div className={cn('h-2 w-2 rounded-full', active ? 'bg-accentPrimary' : 'bg-white/35')} />
+              <div className={cn('h-2 w-2 rounded-full', active ? 'bg-accentPrimary' : 'bg-surfaceGlass/35')} />
             </div>
             {opt.sub ? <div className="mt-0.5 text-[11px] font-semibold text-textSecondary">{opt.sub}</div> : null}
           </button>
@@ -874,7 +874,7 @@ function HermesToggleRow({
       disabled={disabled}
       className={cn(
         'flex w-full items-center justify-between gap-3 rounded-[16px] px-3 py-3 text-left transition',
-        disabled ? 'cursor-not-allowed opacity-70' : 'hover:bg-white/5 active:scale-[0.995]',
+        disabled ? 'cursor-not-allowed opacity-70' : 'hover:bg-surfaceGlass/5 active:scale-[0.995]',
       )}
     >
       <div className="min-w-0">
@@ -891,7 +891,7 @@ function HermesToggleRow({
               : 'border border-surfaceGlass/10 bg-bgPrimary/25 text-textSecondary',
           )}
         >
-          <span className={cn('h-1.5 w-1.5 rounded-full', value ? 'bg-accentPrimary' : 'bg-white/35')} />
+          <span className={cn('h-1.5 w-1.5 rounded-full', value ? 'bg-accentPrimary' : 'bg-surfaceGlass/35')} />
           {value ? 'Enabled' : 'Disabled'}
         </span>
 

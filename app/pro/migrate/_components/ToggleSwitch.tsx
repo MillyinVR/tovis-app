@@ -18,7 +18,7 @@ export function ToggleSwitch({ on, onChange, label }: Props) {
       onClick={() => onChange(!on)}
       className={[
         'relative inline-flex h-6 w-[42px] shrink-0 items-center rounded-full transition',
-        on ? 'bg-accentPrimary' : 'bg-white/10',
+        on ? 'bg-accentPrimary' : 'bg-surfaceGlass/10',
       ].join(' ')}
     >
       <span

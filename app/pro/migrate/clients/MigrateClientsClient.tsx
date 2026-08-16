@@ -346,7 +346,7 @@ function MapStep({
     <div className="mt-5">
       <div className="flex flex-wrap items-center gap-3">
         <h2 className="font-display text-[18px] font-medium">{copy.mapTitle}</h2>
-        <span className="rounded-full bg-white/5 px-3 py-1 font-mono text-[11px] uppercase tracking-[0.1em] text-textMuted">
+        <span className="rounded-full bg-surfaceGlass/5 px-3 py-1 font-mono text-[11px] uppercase tracking-[0.1em] text-textMuted">
           {rowCount} rows
         </span>
       </div>
@@ -369,7 +369,7 @@ function MapStep({
                 else delete next[field]
                 setMapping(next)
               }}
-              className="h-10 rounded-[12px] border border-surfaceGlass/10 bg-white/[0.03] px-3 text-[14px] text-textPrimary outline-none focus:border-surfaceGlass/25"
+              className="h-10 rounded-[12px] border border-surfaceGlass/10 bg-surfaceGlass/[0.03] px-3 text-[14px] text-textPrimary outline-none focus:border-surfaceGlass/25"
             >
               <option value="">{copy.unmapped}</option>
               {headers.map((h) => (

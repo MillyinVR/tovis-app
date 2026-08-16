@@ -139,7 +139,7 @@ export function MigrateEntryClient({ copy, progress }: Props) {
                     'mt-1 inline-flex w-fit items-center rounded-full px-2.5 py-1 text-[11px] ring-1',
                     done
                       ? 'bg-accentPrimary/10 text-textPrimary ring-accentPrimary/30'
-                      : 'bg-white/5 text-textMuted ring-white/10',
+                      : 'bg-surfaceGlass/5 text-textMuted ring-surfaceGlass/10',
                   ].join(' ')}
                 >
                   {done ? `${count} ${copy.imported}` : copy.notStarted}
@@ -164,7 +164,7 @@ export function MigrateEntryClient({ copy, progress }: Props) {
             {copy.trust.map((t) => (
               <span
                 key={t}
-                className="rounded-full bg-white/5 px-3 py-1 text-[11px] text-textMuted"
+                className="rounded-full bg-surfaceGlass/5 px-3 py-1 text-[11px] text-textMuted"
               >
                 {t}
               </span>
