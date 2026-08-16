@@ -113,9 +113,15 @@ function haptic(ms = 8): void {
 }
 
 // Save state for a hero tile, as a tone. This used to re-author its own class
-// strings, and two of its three states wrote `border-[rgb(var(--micro-accent))/0.35]`
-// — the alpha inside the bracket makes the whole declaration invalid, so the
-// browser dropped it and the pill rendered with no border and no fill at all.
+// strings, and two of its three states put the alpha INSIDE the arbitrary
+// bracket (`border-[rgb(var(--micro-accent))` … `/0.35]`) — which makes the
+// whole declaration invalid, so the browser dropped it and the pill rendered
+// with no border and no fill at all. Use `border-microAccent/35`.
+//
+// ⚠️ The broken form is deliberately not spelled as one token above: Tailwind
+// scans COMMENTS for class candidates, so writing it out generated a real (and
+// permanently dead) rule in the shipped stylesheet — verified by grepping the
+// served CSS, where it was the only such rule with no call site in any code.
 function SaveStateBadge({ dirty, saving }: { dirty: boolean; saving: boolean }) {
   if (saving) return <Badge fill="soft">Saving…</Badge>
 
@@ -328,11 +334,24 @@ function ImageWithShimmer(props: {
   )
 }
 
+// The same alpha-inside-the-bracket bug SaveStateBadge above had, in the
+// component 200 lines below it: both tones put the alpha inside the arbitrary
+// bracket, which emits `border-color: rgb(var(--tone-success))/.25`. That is
+// invalid CSS, so the browser dropped BOTH declarations — the border fell back
+// to `currentColor` and the fill to `transparent`. Measured, not assumed: the
+// success and error toasts rendered identically, which is the part that
+// mattered, because the tone is the only thing telling a user that the toast
+// they are reading is an error.
+//
+// (The broken class is not spelled out as one token anywhere here. Tailwind
+// scans comments for candidates, so writing it would ship a real, permanently
+// dead rule into the stylesheet — which is exactly how the old docstring above
+// kept a `--micro-accent` rule alive long after its call site was fixed.)
 function Toast(props: ToastState) {
   const toneClasses =
     props.tone === 'success'
-      ? 'border-[rgb(var(--tone-success))/0.25] bg-[rgb(var(--tone-success))/0.10]'
-      : 'border-[rgb(var(--tone-danger))/0.25] bg-[rgb(var(--tone-danger))/0.10]'
+      ? 'border-toneSuccess/25 bg-toneSuccess/10'
+      : 'border-toneDanger/25 bg-toneDanger/10'
 
   return (
     <div
