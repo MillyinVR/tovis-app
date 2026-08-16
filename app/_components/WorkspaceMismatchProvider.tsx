@@ -169,7 +169,7 @@ export default function WorkspaceMismatchProvider() {
         style={{
           position: 'absolute',
           inset: 0,
-          background: 'rgba(0,0,0,0.5)',
+          background: 'rgb(var(--scrim) / 0.5)',
           border: 'none',
           padding: 0,
           cursor: switching ? 'default' : 'pointer',

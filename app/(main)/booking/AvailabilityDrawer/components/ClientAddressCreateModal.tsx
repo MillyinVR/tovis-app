@@ -266,7 +266,7 @@ export default function ClientAddressCreateModal(props: Props) {
         style={{
           position: 'absolute',
           inset: 0,
-          background: 'rgba(0, 0, 0, 0.72)',
+          background: 'rgb(var(--scrim) / 0.72)',
           backdropFilter: 'blur(6px)',
           WebkitBackdropFilter: 'blur(6px)',
         }}

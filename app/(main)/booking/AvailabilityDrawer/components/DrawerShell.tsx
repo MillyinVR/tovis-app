@@ -58,7 +58,7 @@ export default function DrawerShell({
   const scrimStyle: React.CSSProperties = {
     position: 'absolute',
     inset: 0,
-    background: 'rgba(0,0,0,0.68)',
+    background: 'rgb(var(--scrim) / 0.68)',
     backdropFilter: 'blur(4px)',
     WebkitBackdropFilter: 'blur(4px)',
     opacity: visible ? 1 : 0,

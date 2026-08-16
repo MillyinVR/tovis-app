@@ -2,22 +2,41 @@
 #
 # One entry per SOURCE LINE, not per occurrence: a single line can carry
 # several (`'bg-black/45 text-white hover:bg-black/60'`). At the time this
-# baseline was written that was 113 lines carrying
-# 157 raw colours.
+# baseline was written that was 108 lines carrying
+# 152 raw colours.
 #
 # Shrink this list; never add to it. Replacements:
 #   border-white/N  -> border-surfaceGlass/N   (invisible in light mode today)
 #   bg-white/N      -> bg-surfaceGlass/N
-#   bg-black/N      -> bg-overlay/N            (modal scrims ONLY)
-#   rgba(0,0,0,a)   -> rgb(var(--shadow-color) / a)
+#   bg-black/N      -> bg-scrim/N              (modal scrims ONLY)
+#   background: 'rgba(0,0,0,a)' -> 'rgb(var(--scrim) / a)'   (an inline-style scrim)
 #
-# ⚠️ NOT every entry should be migrated. Three classes below are PERMANENT
+# NOT bg-overlay/N, which an earlier version of this header prescribed for
+# scrims: --overlay IS --bg-primary, and a translucent fill of the ground
+# colour composites back to the ground colour at EVERY alpha, so a scrim
+# built that way darkens nothing. --scrim is the token that exists for this.
+#
+# 🔴 A black SHADOW has NO replacement, and an earlier version of this
+# header prescribed `rgb(var(--shadow-color) / a)`. That swap DELETES the
+# shadow in dark mode: --shadow-color is 10 20 19, the dark page ground
+# itself, so an ink shadow has nothing left to darken. Measured on isolated
+# probes, a 0.78-alpha shadow drops from 12.0 units of separation from the
+# page to 1.7. The `shadow-[…rgb(0 0 0/a)]` entries and the inline
+# `boxShadow: '… rgba(0,0,0,a)'` ones are ONE family, and it is BLOCKED on a
+# per-mode shadowColor decision. Leave every one of them alone.
+#
+# ⚠️ NOT every entry should be migrated. Four classes below are PERMANENT
 # residents — they are raw on purpose, and "fixing" them is the regression:
 #
-#   1. Anything painted on a PHOTOGRAPH. A photo is dark in both modes, so
-#      its scrim, caption chip and overlay text must be too. Includes
+#   1. Anything painted on a PHOTOGRAPH, or on third-party imagery this app
+#      does not restyle. A photo is dark in both modes, so its scrim,
+#      caption chip and overlay text must be too. Includes
 #      MediaFullscreenViewer, LookSlide, SheetCover, the media letterboxes
-#      in MediaUploader / ImageEditModal / NewMediaPostForm.
+#      in MediaUploader / ImageEditModal / NewMediaPostForm, and the Leaflet
+#      markers in search/MapView, which sit on OpenStreetMap's raster tiles.
+#      A subtree pinned `data-mode="dark"` counts here too — app/(main)/
+#      looks/page.tsx pins the whole feed, so its raw blacks sit BESIDE
+#      tokens already resolved to their dark values, not against them.
 #   2. Anything rendered to an IMAGE rather than to the DOM. An exported PNG
 #      carries no [data-mode]: lib/media/socialExportRender.ts composites on
 #      a <canvas> and its colours are the artwork.
@@ -25,14 +44,19 @@
 #      stops constant across modes on purpose (the feather is drawn to read
 #      on a dark disc); TovisFeatherMark and lib/brand/eyeSvg.ts are the same
 #      artwork. Their drift is phase 8 of the register, not a colour swap.
+#   4. The white SPECULAR sheen system — a `rgb(255 255 255/0.10–0.20)`
+#      radial highlight layered under an accent/micro-accent gradient and a
+#      `ring-white/8–10`, in admin ServiceHeroGrid, pro OfferingManager,
+#      RouteOverlay and AddServiceOverlay. Its members only read together;
+#      converting the ring without its own sheen, or either without the
+#      gradient, half-migrates a coherent look. That is a design decision,
+#      not cleanup — take the whole system or none of it.
 #
 # Classify by what the class lands on before touching it.
 app/(auth)/_components/PrimaryButton.tsx|'before:pointer-events-none before:absolute before:inset-0 before:bg-[linear-gradient(110deg,transparent,rgba(255,255,255,0.10),transparent)] before:opacity-0 before:transition',
 app/(auth)/_components/PrimaryButton.tsx|className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(255,255,255,0.22),transparent)]"
 app/(auth)/verify-email/page.tsx|'before:pointer-events-none before:absolute before:inset-0 before:bg-[linear-gradient(110deg,transparent,rgba(255,255,255,0.10),transparent)] before:opacity-0 before:transition',
 app/(auth)/verify-email/page.tsx|className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(255,255,255,0.22),transparent)]"
-app/(main)/booking/AvailabilityDrawer/components/ClientAddressCreateModal.tsx|background: 'rgba(0, 0, 0, 0.72)',
-app/(main)/booking/AvailabilityDrawer/components/DrawerShell.tsx|background: 'rgba(0,0,0,0.68)',
 app/(main)/booking/AvailabilityDrawer/components/DrawerShell.tsx|boxShadow: '0 -18px 60px rgba(0,0,0,0.70)',
 app/(main)/booking/AvailabilityDrawer/components/SheetCover.tsx|'linear-gradient(to top, rgb(var(--bg-primary)) 3%, rgb(var(--bg-primary) / 0.05) 58%, rgb(0 0 0 / 0.45) 100%)',
 app/(main)/booking/AvailabilityDrawer/components/SheetCover.tsx|? 'bg-black/45 text-white hover:bg-black/60'
@@ -64,11 +88,9 @@ app/(main)/search/_components/MapView.tsx|box-shadow: 0 16px 48px rgb(0 0 0 / 0.
 app/(main)/search/_components/TrendingProRail.tsx|className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.08)_0,rgba(255,255,255,0.02)_35%,rgba(0,0,0,0.24)_100%)]"
 app/(main)/search/_components/TrendingProRail.tsx|className="absolute inset-0 opacity-20 [background-image:repeating-linear-gradient(135deg,transparent_0,transparent_10px,rgba(255,255,255,0.12)_11px,transparent_12px)]"
 app/_components/AdminSessionFooter/AdminSessionFooter.tsx|boxShadow: '0 10px 22px rgb(0 0 0 / 0.35)',
-app/_components/AdminSessionFooter/SwitchAccountSheet.tsx|background: 'rgba(0,0,0,0.5)',
 app/_components/AdminSessionFooter/SwitchAccountSheet.tsx|boxShadow: '0 24px 60px rgba(0,0,0,0.4)',
 app/_components/ProSessionFooter/ProSessionFooter.tsx|boxShadow: '0 18px 40px rgba(0,0,0,0.35)',
 app/_components/ProSessionFooter/ProSessionFooter.tsx|boxShadow: '0 24px 60px rgba(0,0,0,0.45)',
-app/_components/WorkspaceMismatchProvider.tsx|background: 'rgba(0,0,0,0.5)',
 app/_components/WorkspaceMismatchProvider.tsx|boxShadow: '0 24px 60px rgba(0,0,0,0.4)',
 app/_components/WorkspaceSwitchLauncher/WorkspaceSwitchLauncherClient.tsx|boxShadow: '0 6px 20px rgba(0,0,0,0.22)',
 app/_components/aftercare/AftercareBeforeAfter.tsx|className="border border-white/12 bg-bgPrimary/25 text-white/90 shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur-xl hover:bg-white/10"
@@ -119,7 +141,6 @@ app/pro/locations/LocationsClient.tsx|className="w-full max-w-lg overflow-hidden
 app/pro/locations/PlacesAutocomplete.tsx|className="absolute top-[calc(100%+6px)] z-50 w-full overflow-hidden rounded-2xl border border-surfaceGlass/10 bg-bgSecondary shadow-[0_24px_90px_rgb(0_0_0/0.55)] backdrop-blur-xl"
 app/pro/media/new/ImageEditModal.tsx|className="relative overflow-hidden rounded-card border border-white/10 bg-black"
 app/pro/media/new/NewMediaPostForm.tsx|<div className="overflow-hidden rounded-card border border-white/10 bg-black">
-app/pro/profile/ReviewsPanel.tsx|background: 'rgba(0,0,0,0.6)',
 app/pro/profile/ReviewsPanel.tsx|className="border border-white/12 bg-bgPrimary/25 text-white/90 shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur-xl hover:bg-white/10"
 app/pro/profile/_sections/AddServiceOverlay.tsx|'shadow-[0_50px_160px_rgb(0_0_0/0.78)]',
 app/pro/profile/_sections/AddServiceOverlay.tsx|<div className="absolute inset-0 bg-[radial-gradient(900px_320px_at_18%_0%,rgb(255_255_255/0.16),transparent_60%)]" />
