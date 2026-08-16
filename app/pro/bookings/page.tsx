@@ -476,7 +476,7 @@ function Section({
                     <div className="mt-3 flex flex-wrap gap-3">
                       <Link
                         href={`/pro/bookings/${encodeURIComponent(booking.id)}`}
-                        className="inline-block text-[11px] font-black text-textPrimary underline decoration-white/20 underline-offset-2 hover:decoration-white/40"
+                        className="inline-block text-[11px] font-black text-textPrimary underline decoration-surfaceGlass/20 underline-offset-2 hover:decoration-surfaceGlass/40"
                       >
                         Details &amp; aftercare
                       </Link>

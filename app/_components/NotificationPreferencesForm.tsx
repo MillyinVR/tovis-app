@@ -481,7 +481,7 @@ export default function NotificationPreferencesForm({
             </div>
           </div>
 
-          <div className="flex flex-col divide-y divide-white/5">
+          <div className="flex flex-col divide-y divide-surfaceGlass/5">
             {category.events.map((event) => {
               const state = payload.events[event.eventKey] ?? {
                 inAppEnabled: true,
