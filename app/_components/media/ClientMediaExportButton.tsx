@@ -275,11 +275,11 @@ export default function ClientMediaExportButton({
                   Loading…
                 </div>
               ) : identityState.status === 'error' ? (
-                <div className="rounded-[14px] border border-white/10 bg-black/20 p-3 text-[12px] font-semibold text-toneDanger">
+                <div className="rounded-[14px] border border-toneDanger/30 bg-toneDanger/10 p-3 text-[12px] font-semibold text-toneDanger">
                   Couldn’t load sharing settings for this pro. Try again.
                 </div>
               ) : !identityState.identity.enabled ? (
-                <div className="rounded-[14px] border border-white/10 bg-black/20 p-3 text-[12px] font-semibold text-textSecondary">
+                <div className="rounded-[14px] border border-surfaceGlass/10 bg-surfaceGlass/5 p-3 text-[12px] font-semibold text-textSecondary">
                   This pro has turned off sharing.
                 </div>
               ) : (

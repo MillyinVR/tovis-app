@@ -722,7 +722,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
                 </Field>
 
                 {error ? (
-                  <div className="rounded-[14px] border border-white/10 bg-black/20 p-3 text-[12px] font-semibold text-toneDanger">
+                  <div className="rounded-[14px] border border-toneDanger/30 bg-toneDanger/10 p-3 text-[12px] font-semibold text-toneDanger">
                     {error}
                   </div>
                 ) : null}
