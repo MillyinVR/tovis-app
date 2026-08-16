@@ -2,6 +2,7 @@
 'use client'
 
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { FieldLabel } from '@/app/_components/ui'
 import { cn } from '@/lib/utils'
 import { isAbortError, safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
@@ -313,7 +314,7 @@ export default function PlacesAutocomplete(props: {
   return (
     <div ref={wrapRef} className="relative grid gap-2">
       <div className="grid gap-1">
-        <div className="text-[12px] font-black text-textSecondary">{label}</div>
+        <FieldLabel>{label}</FieldLabel>
 
         <div className="relative">
           <input

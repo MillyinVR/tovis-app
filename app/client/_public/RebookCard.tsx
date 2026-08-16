@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
+import { FieldLabel } from '@/app/_components/ui'
 import { isRecord } from '@/lib/guards'
 import {
   buildClientIdempotencyKey,
@@ -365,9 +366,7 @@ export function RebookCard({
     <div className="mt-4">
       {locationModes.length > 1 ? (
         <div className="mb-4">
-          <div className="mb-1.5 text-[12px] font-black text-textSecondary">
-            Where
-          </div>
+          <FieldLabel className="mb-1.5">Where</FieldLabel>
           <div className="inline-flex gap-1.5 rounded-full border border-textPrimary/10 bg-bgPrimary/35 p-1">
             {locationModes.map((mode) => {
               const active = mode.type === locationType
@@ -398,9 +397,7 @@ export function RebookCard({
 
       {locationType === 'MOBILE' && savedAddresses.length > 0 ? (
         <div className="mb-4">
-          <div className="mb-1.5 text-[12px] font-black text-textSecondary">
-            Service address
-          </div>
+          <FieldLabel className="mb-1.5">Service address</FieldLabel>
           <div className="grid gap-1.5">
             {savedAddresses.map((address) => {
               const active = address.id === selectedAddressId
@@ -447,9 +444,7 @@ export function RebookCard({
 
       <div className="flex flex-wrap items-end gap-3">
         <label className="flex flex-col gap-1">
-          <span className="text-[12px] font-black text-textSecondary">
-            Pick a day
-          </span>
+          <FieldLabel as="span">Pick a day</FieldLabel>
           <input
             type="date"
             value={date}

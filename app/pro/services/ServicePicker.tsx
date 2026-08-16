@@ -335,10 +335,11 @@ export default function ServicePicker({
     }
   }
 
-  // One string for both: the two copies differed only by a placeholder rule, and
-  // `selectClass` sat on a <select>, which has no placeholder to style.
+  // One string for every control here. The two copies this replaced differed
+  // only by a placeholder rule, and the `selectClass` one sat on a <select>,
+  // which has no placeholder to style — so `const selectClass = inputClass` was
+  // left behind by #917 as a pure alias and is now gone.
   const inputClass = controlClassName({ surface: 'solid' })
-  const selectClass = inputClass
 
   return (
     <div className="rounded-card border border-white/10 bg-bgPrimary p-4">
@@ -346,7 +347,7 @@ export default function ServicePicker({
         <div className="grid gap-3 md:grid-cols-3">
           <label className="grid gap-2">
             <div className="text-[12px] font-black text-textPrimary">Main category</div>
-            <select value={selectedCategoryId} onChange={(e) => handleCategoryChange(e.target.value)} className={selectClass}>
+            <select value={selectedCategoryId} onChange={(e) => handleCategoryChange(e.target.value)} className={inputClass}>
               <option value="">Select category</option>
               {categories.map((c) => (
                 <option key={c.id} value={c.id}>
@@ -362,7 +363,7 @@ export default function ServicePicker({
               value={selectedSubcategoryId}
               onChange={(e) => handleSubcategoryChange(e.target.value)}
               disabled={!selectedCategory}
-              className={[selectClass, !selectedCategory ? 'cursor-not-allowed opacity-60' : ''].join(' ')}
+              className={inputClass}
             >
               <option value="">All under this category</option>
               {selectedCategory?.children.map((child) => (
@@ -379,7 +380,7 @@ export default function ServicePicker({
               value={selectedServiceId}
               onChange={(e) => handleServiceChange(e.target.value)}
               disabled={!selectedCategory}
-              className={[selectClass, !selectedCategory ? 'cursor-not-allowed opacity-60' : ''].join(' ')}
+              className={inputClass}
             >
               <option value="">Select service</option>
               {servicesForSelection.map((s) => (

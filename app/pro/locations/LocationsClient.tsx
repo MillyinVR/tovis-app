@@ -13,7 +13,7 @@ import { clampInt, isRecord } from '@/lib/guards'
 import { kmToMiles } from '@/lib/units'
 import { friendlyTimeZoneLabel } from '@/lib/timeZone'
 import { cn } from '@/lib/utils'
-import { Badge, Button, buttonClassName } from '@/app/_components/ui'
+import { Badge, Button, FieldLabel, buttonClassName } from '@/app/_components/ui'
 
 type ToastState = { tone: 'success' | 'error'; title: string; body?: string | null }
 const ADVANCE_NOTICE_OPTIONS = [
@@ -697,7 +697,7 @@ async function updateAdvanceNotice(
 
         <div className="mt-4 grid gap-3">
           <label className="grid gap-2">
-            <div className="text-[12px] font-black text-textSecondary">Type</div>
+            <FieldLabel>Type</FieldLabel>
             <select
               value={type}
               onChange={(e) => setType(parseLocationType(e.target.value))}
@@ -714,7 +714,7 @@ async function updateAdvanceNotice(
           </label>
 
           <label className="grid gap-2">
-            <div className="text-[12px] font-black text-textSecondary">Name (optional)</div>
+            <FieldLabel>Name (optional)</FieldLabel>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -738,9 +738,7 @@ async function updateAdvanceNotice(
           </label>
 
           <label className="grid gap-2">
-            <div className="text-[12px] font-black text-textSecondary">
-              Minimum advance notice
-            </div>
+            <FieldLabel>Minimum advance notice</FieldLabel>
 
             <select
               value={advanceNoticeMinutes}
@@ -828,7 +826,7 @@ async function updateAdvanceNotice(
 
               <div className="grid gap-2 sm:grid-cols-2">
                 <label className="grid gap-2">
-                  <div className="text-[12px] font-black text-textSecondary">ZIP code</div>
+                  <FieldLabel>ZIP code</FieldLabel>
                   <input
                     value={mobilePostalCode}
                     onChange={(e) => setMobilePostalCode(e.target.value)}
@@ -843,7 +841,7 @@ async function updateAdvanceNotice(
                 </label>
 
                 <label className="grid gap-2">
-                  <div className="text-[12px] font-black text-textSecondary">Travel radius</div>
+                  <FieldLabel>Travel radius</FieldLabel>
                   <select
                     value={mobileRadiusKm}
                     onChange={(e) => setMobileRadiusKm(Number(e.target.value))}
@@ -1012,7 +1010,7 @@ async function updateAdvanceNotice(
 
                       <div className="grid gap-2 sm:grid-cols-2">
                         <label className="grid gap-2">
-                          <div className="text-[12px] font-black text-textSecondary">ZIP code</div>
+                          <FieldLabel>ZIP code</FieldLabel>
                           <input
                             value={editBaseZip}
                             onChange={(e) => setEditBaseZip(e.target.value)}
@@ -1027,7 +1025,7 @@ async function updateAdvanceNotice(
                         </label>
 
                         <label className="grid gap-2">
-                          <div className="text-[12px] font-black text-textSecondary">Travel radius</div>
+                          <FieldLabel>Travel radius</FieldLabel>
                           <select
                             value={editBaseRadius}
                             onChange={(e) => setEditBaseRadius(Number(e.target.value))}
