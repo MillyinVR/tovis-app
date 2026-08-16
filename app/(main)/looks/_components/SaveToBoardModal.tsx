@@ -376,7 +376,7 @@ export default function SaveToBoardModal({
         type="button"
         aria-label="Close save to board modal"
         onClick={onClose}
-        className="absolute inset-0 bg-overlay/60 backdrop-blur-[2px]"
+        className="absolute inset-0 bg-scrim/60 backdrop-blur-[2px]"
       />
 
       <div className="pointer-events-none relative z-10 flex min-h-full items-end justify-center px-4 pb-2 pt-2 sm:items-center sm:p-4">

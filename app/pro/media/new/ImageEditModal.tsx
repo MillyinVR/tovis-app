@@ -253,7 +253,7 @@ function ImageEditModalContent({
 
   return createPortal(
     <div
-      className={`fixed inset-0 ${zClass.modal} bg-overlay/80`}
+      className={`fixed inset-0 ${zClass.modal} bg-scrim/80`}
       role="dialog"
       aria-modal="true"
       aria-label="Edit image"

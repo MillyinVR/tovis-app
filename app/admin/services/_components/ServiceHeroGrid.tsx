@@ -777,7 +777,7 @@ export default function ServiceHeroGrid(props: {
               type="button"
               aria-label="Close"
               onClick={close}
-              className="absolute inset-0 bg-overlay/80 backdrop-blur-lg"
+              className="absolute inset-0 bg-scrim/80 backdrop-blur-lg"
               variants={overlayFade}
             />
 

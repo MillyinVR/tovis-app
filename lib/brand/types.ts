@@ -459,6 +459,22 @@ export type BrandTokens = {
     bgSecondary: RgbTriplet // elevated surface → --bg-secondary / --ink-2
     bgSurface: RgbTriplet // card / inner surface → --ink-3
 
+    /**
+     * The modal backdrop. A scrim's whole job is to sit BEHIND a panel and read
+     * as darker (dark mode) or lighter (light mode) than the page it covers, so
+     * it cannot be `bgPrimary`: `--overlay` is exactly `--bg-primary`, and over
+     * the page ground a translucent fill of the ground colour composites back to
+     * the ground colour at EVERY alpha. #922 moved 13 backdrops onto
+     * `bg-overlay/N` to fix light mode and, as a side effect, flattened the dark
+     * scrim from `rgb(3,6,6)` to `rgb(10,20,19)` — the page's own ink.
+     *
+     * Raising the alpha cannot undo that; only a separate colour can. Hence this
+     * token: black in dark, the paper canvas in light. A white-label brand may
+     * tint it, but it must stay clear of `bgPrimary` in dark or the backdrop
+     * goes flat again.
+     */
+    scrim: RgbTriplet // modal backdrop, used with opacity → --scrim
+
     // ── Text layers ───────────────────────────────────────────────
     textPrimary: RgbTriplet // primary readable text → --text-primary / --paper
     textSecondary: RgbTriplet // dimmed text → --text-secondary / --paper-dim

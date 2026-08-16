@@ -31,6 +31,8 @@ export function toCssVars(tokens: BrandTokens): Record<string, string> {
     '--bg-secondary': colors.bgSecondary,
     '--bg-surface': colors.bgSurface,
 
+    '--scrim': colors.scrim,
+
     '--text-primary': colors.textPrimary,
     '--text-secondary': colors.textSecondary,
     '--text-muted': colors.textMuted,

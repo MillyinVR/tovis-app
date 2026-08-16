@@ -41,6 +41,8 @@ export const exampleSchoolBrand: BrandConfig = createBrandConfig({
       bgSecondary: '18 23 38',
       bgSurface: '24 30 48',
 
+      scrim: '0 0 0', // modal backdrop — must be DARKER than bgPrimary
+
       textPrimary: '237 240 248',
       textSecondary: '190 198 214',
       textMuted: '128 138 158',
@@ -61,6 +63,8 @@ export const exampleSchoolBrand: BrandConfig = createBrandConfig({
       bgPrimary: '244 246 251',
       bgSecondary: '236 239 247',
       bgSurface: '255 255 255',
+
+      scrim: '244 246 251', // modal backdrop — must stay LIGHT here
 
       textPrimary: '13 17 28',
       textSecondary: '55 65 88',

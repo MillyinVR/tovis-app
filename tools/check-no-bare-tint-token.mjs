@@ -11,6 +11,9 @@
 // disappears. Measured in a browser: `getComputedStyle(el).backgroundColor ===
 // .color`. See PR #789 (R3) and the sweep that added this guard.
 //
+// `scrim` joined the list with the `--scrim` token: at full opacity a modal
+// backdrop stops being a backdrop and paints the whole viewport solid.
+//
 // Nothing else catches it. `check:no-hardcoded-brand-strings` and the raw-colour
 // rule are about hex and stock Tailwind palettes; a *token* used at full opacity
 // looks perfectly compliant, and typecheck/lint/tests are all green on it.
@@ -26,11 +29,23 @@
 // Allowed: `bg-surfaceGlass/10`, `border-surfaceGlass/12`,
 // `rgb(var(--surface-glass) / 0.1)`, and the brand layer that defines the token.
 //
+// 🔴 A hand-written CSS class is NOT a Tailwind utility, and the first version
+// of this guard could not tell them apart. It matched any class name ending in
+// `-<token>`, so naming a token `scrim` made it flag `.tovis-overlay-scrim`,
+// `.brand-pp-tile-scrim` and `.brand-profile-cover-scrim` — three photo-
+// legibility gradients that have nothing to do with the token and cannot paint
+// it at any opacity. The fix does not hardcode Tailwind's utility list (that
+// would under-report the moment Tailwind grows one). It derives the set of
+// class names this repo's OWN stylesheets define and skips those, because a
+// class the CSS defines is that class, not a utility. Everything else ending in
+// `-<token>` is still flagged.
+//
 // Usage:
 //   node tools/check-no-bare-tint-token.mjs
 
 import fs from 'node:fs'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 const ROOT = process.cwd()
 
@@ -66,7 +81,7 @@ function isTestFile(relPath) {
  * whose declaration line carries the `used with opacity` marker; the `--css-var`
  * on that same line is captured so the CSS half of the check stays in sync too.
  */
-function readTintTokens() {
+export function readTintTokens() {
   const source = path.join(ROOT, TOKEN_SOURCE)
 
   if (!fs.existsSync(source)) {
@@ -115,6 +130,28 @@ function listFiles(scanDir) {
     )
 }
 
+/**
+ * Every class name this repo's own stylesheets define. Derived from the CSS
+ * under SCAN_DIRS — the same files the guard scans — so a class added tomorrow
+ * is recognised without touching this list. A leading `.` is required, which is
+ * what separates a selector from a class *used* in a `className` string.
+ */
+export function readDefinedCssClasses(files) {
+  const defined = new Set()
+
+  for (const file of files) {
+    if (path.extname(file) !== '.css') continue
+
+    const source = fs.readFileSync(file, 'utf8')
+
+    for (const match of source.matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)) {
+      defined.add(match[1])
+    }
+  }
+
+  return defined
+}
+
 function buildPatterns(token) {
   const patterns = [
     // A Tailwind utility ending in `-surfaceGlass` with nothing after it. The
@@ -122,6 +159,7 @@ function buildPatterns(token) {
     // guard permits `/10` while rejecting a bare use at a class boundary.
     {
       regex: new RegExp(`(?<=[a-zA-Z])-${token.name}(?![\\w/-])`, 'g'),
+      needsClassCheck: true,
       hint: `${token.name} is a tint token — give it an alpha (e.g. bg-${token.name}/10)`,
     },
   ]
@@ -133,6 +171,7 @@ function buildPatterns(token) {
         `rgba?\\(\\s*var\\(\\s*${token.cssVar}\\s*\\)\\s*\\)`,
         'g',
       ),
+      needsClassCheck: false,
       hint: `${token.cssVar} is a tint variable — use rgb(var(${token.cssVar}) / 0.1)`,
     })
   }
@@ -140,33 +179,66 @@ function buildPatterns(token) {
   return patterns
 }
 
-function findViolations(tokens) {
+/**
+ * The full class token a match sits inside, with any Tailwind variants
+ * (`hover:`, `md:`, `file:`) stripped. `bg-scrim` out of `hover:bg-scrim`;
+ * `tovis-overlay-scrim` out of `.tovis-overlay-scrim {`.
+ */
+function classTokenAt(line, matchIndex, matchLength) {
+  let start = matchIndex
+
+  while (start > 0 && /[\w:-]/.test(line[start - 1])) start -= 1
+
+  const token = line.slice(start, matchIndex + matchLength)
+
+  return token.slice(token.lastIndexOf(':') + 1)
+}
+
+export function scanSource(relPath, source, tokens, definedClasses) {
   const violations = []
   const patterns = tokens.flatMap(buildPatterns)
 
-  for (const scanDir of SCAN_DIRS) {
-    for (const file of listFiles(scanDir)) {
-      const rel = normalize(path.relative(ROOT, file))
+  source.split('\n').forEach((line, index) => {
+    for (const { regex, hint, needsClassCheck } of patterns) {
+      regex.lastIndex = 0
 
-      if (isTestFile(rel)) continue
-      if (ALLOWED_PATH_PREFIXES.some((prefix) => rel.startsWith(prefix))) continue
+      let match
+      while ((match = regex.exec(line)) !== null) {
+        if (needsClassCheck) {
+          const className = classTokenAt(line, match.index, match[0].length)
 
-      const lines = fs.readFileSync(file, 'utf8').split('\n')
-
-      lines.forEach((line, index) => {
-        for (const { regex, hint } of patterns) {
-          regex.lastIndex = 0
-          if (!regex.test(line)) continue
-
-          violations.push({
-            file: rel,
-            line: index + 1,
-            snippet: line.trim(),
-            hint,
-          })
+          // A class this repo's CSS defines is that class, not a utility.
+          if (definedClasses.has(className)) continue
         }
-      })
+
+        violations.push({
+          file: relPath,
+          line: index + 1,
+          snippet: line.trim(),
+          hint,
+        })
+        break
+      }
     }
+  })
+
+  return violations
+}
+
+function findViolations(tokens) {
+  const violations = []
+  const files = SCAN_DIRS.flatMap(listFiles)
+  const definedClasses = readDefinedCssClasses(files)
+
+  for (const file of files) {
+    const rel = normalize(path.relative(ROOT, file))
+
+    if (isTestFile(rel)) continue
+    if (ALLOWED_PATH_PREFIXES.some((prefix) => rel.startsWith(prefix))) continue
+
+    violations.push(
+      ...scanSource(rel, fs.readFileSync(file, 'utf8'), tokens, definedClasses),
+    )
   }
 
   return violations
@@ -210,4 +282,6 @@ function main() {
   )
 }
 
-main()
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main()
+}
