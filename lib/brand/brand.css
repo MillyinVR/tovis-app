@@ -140,7 +140,12 @@
   /* Effects */
   --glass-blur: 20px;
   --glass-opacity: 0.09;
-  --shadow-color: 10 20 19;
+  /* Black, NOT var(--bg-primary): a shadow tinted with the colour of the page
+     it falls on has nothing left to darken. This was `10 20 19` — the dark
+     ground itself — and a 0.78-alpha drop shadow measured 1.7 units of
+     separation from the page instead of 12.0. Dark fallback, like the rest of
+     this :root block; BrandProvider emits the per-mode pair (ink in light). */
+  --shadow-color: 0 0 0;
 
   --shadow-soft: 0 10px 30px rgb(var(--shadow-color) / 0.32);
   --shadow-strong: 0 18px 55px rgb(var(--shadow-color) / 0.48);

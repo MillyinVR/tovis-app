@@ -129,7 +129,7 @@ function ConfirmModal(props: {
   return (
     <div className={`fixed inset-0 ${zClass.modal} flex items-center justify-center bg-scrim/70 p-4`} onClick={onCancel}>
       <div
-        className="w-full max-w-lg overflow-hidden rounded-2xl border border-surfaceGlass/10 bg-bgSecondary shadow-[0_50px_160px_rgb(0_0_0/0.78)] backdrop-blur-xl"
+        className="w-full max-w-lg overflow-hidden rounded-2xl border border-surfaceGlass/10 bg-bgSecondary shadow-[0_50px_160px_rgb(var(--shadow-color)/0.78)] backdrop-blur-xl"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -169,7 +169,7 @@ function Toast(props: ToastState) {
   return (
     <div
       className={cn(
-        'rounded-2xl border px-4 py-3 shadow-[0_24px_90px_rgb(0_0_0/0.55)] backdrop-blur-xl',
+        'rounded-2xl border px-4 py-3 shadow-[0_24px_90px_rgb(var(--shadow-color)/0.55)] backdrop-blur-xl',
         'tovis-glass-strong tovis-noise',
         tone,
       )}

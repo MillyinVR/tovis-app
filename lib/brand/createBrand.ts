@@ -26,8 +26,12 @@ export type CreateBrandInput = {
   colors: { dark: BrandTokens['colors']; light: BrandTokens['colors'] }
 
   // ── Optional overrides (rarely needed) ──────────────────────────────
-  /** Shadow tint; defaults to the dark background (deep-ink shadows). */
-  shadowColor?: RgbTriplet
+  /**
+   * Shadow tint, PER MODE. A shadow has to be darker than the surface it falls
+   * on, and the two modes have different surfaces, so one triplet cannot serve
+   * both — see the default below for what went wrong when it did.
+   */
+  shadowColor?: { dark: RgbTriplet; light: RgbTriplet }
   /**
    * Per-service calendar swatches (K7). Defaults to the shared twelve-hue
    * palette, which is already contrast-tuned for both modes — override only
@@ -50,7 +54,24 @@ export type CreateBrandInput = {
 }
 
 export function createBrandConfig(input: CreateBrandInput): BrandConfig {
-  const shadowColor = input.shadowColor ?? input.colors.dark.bgPrimary
+  // 🔴 This used to be one triplet handed to BOTH modes — `colors.dark
+  // .bgPrimary`, i.e. the dark page ground itself. A shadow tinted with the
+  // colour of the page it falls on has nothing left to darken, so in dark mode
+  // it did not render as a soft shadow, it rendered as almost nothing:
+  // measured on isolated probes, a 0.78-alpha drop shadow gave 12.0 units of
+  // separation from the page as black and 1.7 on this token. Every site on
+  // `--shadow-color`, plus `--shadow-soft` and `--shadow-strong`, was affected,
+  // which is also why ~48 sites still hand-write a raw black shadow instead.
+  //
+  // Light mode was never the problem (the same swap costs 3–10 units out of
+  // 50–157 there), so only the dark half moves.
+  const shadowColor = input.shadowColor ?? {
+    // Black is the only value with headroom under a page that is already the
+    // brand's deepest ink.
+    dark: '0 0 0',
+    // Paper page: the brand's own ink reads as a warm shadow, not a hard black.
+    light: input.colors.dark.bgPrimary,
+  }
   const typography = { ...DEFAULT_TYPOGRAPHY, ...input.typography }
   const layout = { ...DEFAULT_LAYOUT, ...input.layout }
 
@@ -58,7 +79,10 @@ export function createBrandConfig(input: CreateBrandInput): BrandConfig {
     colors: input.colors[mode],
     calendarSwatches:
       input.calendarSwatches?.[mode] ?? DEFAULT_CALENDAR_SWATCHES[mode],
-    effects: { ...defaultEffects(mode, shadowColor), ...input.effects?.[mode] },
+    effects: {
+      ...defaultEffects(mode, shadowColor[mode]),
+      ...input.effects?.[mode],
+    },
     typography,
     layout,
   })

@@ -356,7 +356,7 @@ function Toast(props: ToastState) {
   return (
     <div
       className={cn(
-        'rounded-2xl border px-4 py-3 shadow-[0_24px_90px_rgb(0_0_0/0.55)] backdrop-blur-xl',
+        'rounded-2xl border px-4 py-3 shadow-[0_24px_90px_rgb(var(--shadow-color)/0.55)] backdrop-blur-xl',
         'tovis-glass-strong tovis-noise',
         toneClasses,
       )}
@@ -635,7 +635,7 @@ export default function ServiceHeroGrid(props: {
     'border border-accentPrimary/40 bg-accentPrimary/14 text-textPrimary hover:border-accentPrimary/60 hover:bg-accentPrimary/18'
 
   const btnPrimary =
-    'border border-accentPrimary/55 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover shadow-[0_16px_40px_rgb(0_0_0/0.35)]'
+    'border border-accentPrimary/55 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover shadow-[0_16px_40px_rgb(var(--shadow-color)/0.35)]'
 
   return (
     <>
@@ -680,7 +680,7 @@ export default function ServiceHeroGrid(props: {
             key={service.id}
             className={cn(
               'relative overflow-hidden rounded-card border border-surfaceGlass/10 bg-bgSecondary',
-              'shadow-[0_18px_50px_rgb(0_0_0/0.45)]',
+              'shadow-[0_18px_50px_rgb(var(--shadow-color)/0.45)]',
             )}
           >
             <div
@@ -793,7 +793,7 @@ export default function ServiceHeroGrid(props: {
                   'relative flex w-full max-w-3xl flex-col overflow-hidden outline-none',
                   'tovis-glass-strong tovis-noise',
                   'rounded-t-[26px] border border-surfaceGlass/12 sm:rounded-[26px]',
-                  'shadow-[0_50px_160px_rgb(0_0_0/0.78)]',
+                  'shadow-[0_50px_160px_rgb(var(--shadow-color)/0.78)]',
                   'max-h-[calc(100vh-12px)] sm:max-h-[calc(100vh-80px)]',
                 )}
               >

@@ -370,7 +370,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
           'tap-target',
           'inline-flex h-10 w-10 items-center justify-center rounded-full',
           'border border-surfaceGlass/12 bg-bgPrimary/20 backdrop-blur-xl',
-          'text-white/90 shadow-[0_10px_30px_rgba(0,0,0,0.35)]',
+          'text-white/90 shadow-[0_10px_30px_rgb(var(--shadow-color)/0.35)]',
           'hover:bg-white/10 active:scale-[0.99] transition',
         )}
         aria-label="Media options"
@@ -385,7 +385,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
           className={cn(
             'absolute right-0 mt-2 w-44 overflow-hidden rounded-[16px]',
             'border border-surfaceGlass/12 bg-bgPrimary/70 backdrop-blur-xl',
-            'shadow-[0_18px_60px_rgba(0,0,0,0.55)]',
+            'shadow-[0_18px_60px_rgb(var(--shadow-color)/0.55)]',
           )}
         >
           <button
@@ -447,7 +447,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
             className={cn(
               'mx-auto mt-4 w-full max-w-[560px] overflow-hidden rounded-[18px]',
               'border border-surfaceGlass/12 bg-bgPrimary/70 backdrop-blur-2xl',
-              'shadow-[0_22px_90px_rgba(0,0,0,0.70)]',
+              'shadow-[0_22px_90px_rgb(var(--shadow-color)/0.70)]',
               'grid grid-rows-[auto_1fr_auto]',
             )}
             style={{ maxHeight: modalMaxHeight }}
@@ -835,7 +835,7 @@ function Segmented<T extends string>({
               'rounded-[16px] border px-3 py-3 text-left transition',
               'backdrop-blur-xl',
               active
-                ? 'border-accentPrimary/35 bg-accentPrimary/15 shadow-[0_10px_30px_rgba(0,0,0,0.25)]'
+                ? 'border-accentPrimary/35 bg-accentPrimary/15 shadow-[0_10px_30px_rgb(var(--shadow-color)/0.25)]'
                 : 'border-surfaceGlass/10 bg-bgPrimary/25 hover:bg-surfaceGlass/5',
               disabled ? 'cursor-not-allowed' : 'active:scale-[0.99]',
             )}
@@ -907,7 +907,7 @@ function HermesToggleRow({
           <div
             className={cn(
               'relative h-5 w-5 rounded-full bg-white transition',
-              'shadow-[0_10px_25px_rgba(0,0,0,0.35)]',
+              'shadow-[0_10px_25px_rgb(var(--shadow-color)/0.35)]',
               value ? 'translate-x-7' : 'translate-x-0',
             )}
           >

@@ -1145,7 +1145,7 @@ export default function SearchMapClient() {
             ref={acRootRef}
             className={cn(
               'tovis-glass-strong rounded-card border border-surfaceGlass/12 bg-bgSecondary/80 p-3 backdrop-blur-xl',
-              'shadow-[0_18px_60px_rgba(0,0,0,0.65)] lg:shadow-none',
+              'shadow-[0_18px_60px_rgb(var(--shadow-color)/0.65)] lg:shadow-none',
             )}
           >
             <div className="mb-3 flex justify-center lg:justify-start">
@@ -1499,7 +1499,7 @@ export default function SearchMapClient() {
                     'rounded-full px-4 py-2 text-[12px] font-black',
                     'border border-surfaceGlass/15 bg-bgPrimary/25 backdrop-blur-xl',
                     'text-textPrimary',
-                    'shadow-[0_14px_40px_rgba(0,0,0,0.55)]',
+                    'shadow-[0_14px_40px_rgb(var(--shadow-color)/0.55)]',
                     'transition hover:bg-surfaceGlass/10',
                   )}
                 >

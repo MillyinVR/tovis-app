@@ -146,7 +146,7 @@ export default function ProSessionFooter({
               padding: '10px 14px',
               fontSize: 13,
               color: 'rgb(var(--text-primary))',
-              boxShadow: '0 18px 40px rgba(0,0,0,0.35)',
+              boxShadow: '0 18px 40px rgb(var(--shadow-color) / 0.35)',
             }}
           >
             {error}
@@ -167,7 +167,7 @@ export default function ProSessionFooter({
               border: '1px solid var(--line)',
               borderRadius: 16,
               padding: '14px 14px 12px',
-              boxShadow: '0 24px 60px rgba(0,0,0,0.45)',
+              boxShadow: '0 24px 60px rgb(var(--shadow-color) / 0.45)',
             }}
           >
             <div

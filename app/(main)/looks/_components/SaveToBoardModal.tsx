@@ -384,7 +384,7 @@ export default function SaveToBoardModal({
           className="
             pointer-events-auto flex w-full max-w-lg flex-col
             rounded-card border border-surfaceGlass/10 bg-bgSecondary
-            shadow-[0_24px_80px_rgba(0,0,0,0.45)]
+            shadow-[0_24px_80px_rgb(var(--shadow-color)/0.45)]
             h-[min(760px,calc(100dvh-0.5rem))]
             overflow-hidden
           "

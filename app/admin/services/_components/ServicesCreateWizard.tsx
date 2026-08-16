@@ -170,7 +170,7 @@ export default function ServicesCreateWizard(props: { categories: CategoryDTO[] 
     'border border-surfaceGlass/15 bg-bgPrimary/30 text-textPrimary hover:bg-bgPrimary/40 hover:border-surfaceGlass/25'
 
   const btnAccent =
-    'border border-accentPrimary/45 bg-accentPrimary/15 text-textPrimary hover:bg-accentPrimary/20 hover:border-accentPrimary/60 shadow-[0_18px_50px_rgb(0_0_0/0.35)]'
+    'border border-accentPrimary/45 bg-accentPrimary/15 text-textPrimary hover:bg-accentPrimary/20 hover:border-accentPrimary/60 shadow-[0_18px_50px_rgb(var(--shadow-color)/0.35)]'
 
   async function createService(): Promise<{ id: string } | null> {
     const form = new FormData()

@@ -95,7 +95,7 @@ export default function WorkspaceSwitchLauncherClient({
             backdropFilter: 'blur(8px)',
             WebkitBackdropFilter: 'blur(8px)',
             color: 'rgb(var(--text-primary))',
-            boxShadow: '0 6px 20px rgba(0,0,0,0.22)',
+            boxShadow: '0 6px 20px rgb(var(--shadow-color) / 0.22)',
             cursor: 'pointer',
           }}
         >

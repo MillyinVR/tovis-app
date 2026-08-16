@@ -126,7 +126,7 @@ export default function AddServiceOverlay(props: {
                 // ✅ stronger glass = readable
                 'tovis-glass-strong tovis-noise overflow-hidden',
                 'rounded-[26px]',
-                'shadow-[0_50px_160px_rgb(0_0_0/0.78)]',
+                'shadow-[0_50px_160px_rgb(var(--shadow-color)/0.78)]',
                 'max-h-[78vh]',
                 'sm:h-full sm:max-h-none sm:rounded-l-[26px] sm:rounded-r-none',
               ].join(' ')}
