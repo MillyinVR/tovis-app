@@ -185,7 +185,7 @@ export default function AddServiceOverlay(props: {
               >
                 <div className="p-4">
                   {/* Inner frame = boutique card */}
-                  <div className="rounded-[22px] border border-surfaceGlass/12 bg-bgPrimary/25 p-3 shadow-[inset_0_1px_0_rgb(255_255_255/0.10)]">
+                  <div className="rounded-[22px] border border-surfaceGlass/12 bg-bgPrimary/25 p-3 shadow-[inset_0_1px_0_rgb(var(--surface-glass)/0.10)]">
                     <ServicePicker
                       categories={categories}
                       offerings={offerings}

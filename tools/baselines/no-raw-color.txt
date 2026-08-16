@@ -2,8 +2,8 @@
 #
 # One entry per SOURCE LINE, not per occurrence: a single line can carry
 # several (`'bg-black/45 text-white hover:bg-black/60'`). At the time this
-# baseline was written that was 119 lines carrying
-# 166 raw colours.
+# baseline was written that was 116 lines carrying
+# 163 raw colours.
 #
 # Shrink this list; never add to it. Replacements:
 #   border-white/N  -> border-surfaceGlass/N   (invisible in light mode today)
@@ -49,10 +49,8 @@ app/(main)/looks/_components/RightActionRail.tsx|'0 2px 20px rgba(0,0,0,0.85), 0
 app/(main)/looks/_components/RightActionRail.tsx|'0 8px 24px rgb(var(--accent-primary) / 0.55), 0 2px 6px rgba(0,0,0,0.6)',
 app/(main)/looks/_components/RightActionRail.tsx|boxShadow: '0 4px 12px rgba(0,0,0,0.6)',
 app/(main)/looks/_components/SaveToBoardModal.tsx|shadow-[0_24px_80px_rgba(0,0,0,0.45)]
-app/(main)/search/SearchMapClient.tsx|'focus-within:shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_0_0_3px_rgba(var(--accent-primary),0.25)]',
 app/(main)/search/SearchMapClient.tsx|'shadow-[0_14px_40px_rgba(0,0,0,0.55)]',
 app/(main)/search/SearchMapClient.tsx|'shadow-[0_18px_60px_rgba(0,0,0,0.65)] lg:shadow-none',
-app/(main)/search/SearchMapClient.tsx|'shadow-[inset_0_1px_0_rgba(255,255,255,0.14)]',
 app/(main)/search/SearchMapClient.tsx|className="pointer-events-none absolute left-0 right-0 top-0 z-10 h-47.5 bg-linear-to-b from-black/60 via-black/25 to-transparent lg:hidden"
 app/(main)/search/_components/DiscoverActiveProCard.tsx|className="absolute inset-0 bg-linear-to-br from-white/10 via-white/2 to-black/25"
 app/(main)/search/_components/DiscoverGridView.tsx|'bg-[linear-gradient(135deg,rgba(255,255,255,0.08)_0,rgba(255,255,255,0.02)_35%,rgba(0,0,0,0.24)_100%)]',
@@ -130,7 +128,6 @@ app/pro/profile/_sections/AddServiceOverlay.tsx|'shadow-[0_50px_160px_rgb(0_0_0/
 app/pro/profile/_sections/AddServiceOverlay.tsx|<div className="absolute inset-0 bg-[radial-gradient(900px_320px_at_18%_0%,rgb(255_255_255/0.16),transparent_60%)]" />
 app/pro/profile/_sections/AddServiceOverlay.tsx|<div className="absolute inset-0 ring-1 ring-white/10" />
 app/pro/profile/_sections/AddServiceOverlay.tsx|<div className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-b from-transparent to-black/35" />
-app/pro/profile/_sections/AddServiceOverlay.tsx|<div className="rounded-[22px] border border-surfaceGlass/12 bg-bgPrimary/25 p-3 shadow-[inset_0_1px_0_rgb(255_255_255/0.10)]">
 app/pro/profile/public-profile/_components/YourLinkCard.tsx|className="h-40 w-40 overflow-hidden rounded-xl bg-white p-2"
 app/pro/referral-rewards/ReferralRewardsClient.tsx|className={`absolute top-0.5 block h-6 w-6 rounded-full bg-white shadow transition-transform ${
 app/pro/services/OfferingManager.tsx|'before:bg-[radial-gradient(700px_260px_at_30%_0%,rgb(255_255_255/0.14),transparent_60%)]',
