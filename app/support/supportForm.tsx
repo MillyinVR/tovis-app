@@ -1,5 +1,6 @@
 // app/support/supportForm.tsx
 import { redirect } from 'next/navigation'
+import { TextInput, Textarea } from '@/app/_components/ui'
 import { getCurrentUser } from '@/lib/currentUser'
 import { pickStringOrEmpty } from '@/lib/pick'
 import {
@@ -31,23 +32,32 @@ export default function SupportForm() {
 
   return (
     <form action={submit} className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4 grid gap-4">
+      {/* The two headings stay hand-written. They ARE field labels, but they
+          carry no colour token and so inherit `text-textPrimary` from the page,
+          where the kit's FieldLabel is `text-textSecondary` — migrating them is
+          a COLOUR change on a public page, not the fill decision this PR made. */}
       <label className="grid gap-2">
         <div className="text-[12px] font-black">Subject</div>
-        <input
+        <TextInput
           name="subject"
+          surface="translucent"
           maxLength={SUPPORT_SUBJECT_MAX_LEN}
-          className="h-11 rounded-xl border border-white/10 bg-bgPrimary/70 px-3 text-[13px] outline-none focus:ring-2 focus:ring-accentPrimary/40"
+          // This field is sized by HEIGHT, not by padding, and predates the
+          // surface. `py-0` is load-bearing: the kit's `py-3` inside a fixed
+          // `h-11` shrinks the content box from 42px to 18px, which measured as
+          // a real padding diff in the A/B and would clip at a larger type size.
+          className="h-11 py-0"
           placeholder="e.g. Booking not confirming"
         />
       </label>
 
       <label className="grid gap-2">
         <div className="text-[12px] font-black">Message</div>
-        <textarea
+        <Textarea
           name="message"
+          surface="translucent"
           rows={6}
           maxLength={SUPPORT_MESSAGE_MAX_LEN}
-          className="rounded-xl border border-white/10 bg-bgPrimary/70 px-3 py-3 text-[13px] outline-none focus:ring-2 focus:ring-accentPrimary/40"
           placeholder="Tell us what happened, what you expected, and anything relevant."
         />
       </label>

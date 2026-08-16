@@ -13,6 +13,7 @@ import {
   type ImageEditState,
   type ProcessedImageResult,
 } from '@/lib/media/processImageForUpload'
+import { Select } from '@/app/_components/ui'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import { zClass } from '@/lib/zIndex'
 
@@ -345,7 +346,8 @@ function ImageEditModalContent({
                   <label className="text-[12px] font-black text-textPrimary">
                     Crop preset
                   </label>
-                  <select
+                  <Select
+                    surface="raised"
                     value={edit.preset}
                     onChange={(e) =>
                       setEdit((prev) => ({
@@ -353,14 +355,13 @@ function ImageEditModalContent({
                         preset: parseCropPreset(e.target.value),
                       }))
                     }
-                    className="rounded-xl border border-white/10 bg-bgSecondary px-3 py-3 text-[13px] text-textPrimary focus:outline-none focus:ring-2 focus:ring-accentPrimary/40"
                   >
                     {IMAGE_CROP_PRESET_OPTIONS.map((option) => (
                       <option key={option.value} value={option.value}>
                         {option.label}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </div>
 
                 <div className="grid gap-2">

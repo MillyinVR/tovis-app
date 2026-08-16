@@ -14,6 +14,7 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 
+import { Select } from '@/app/_components/ui'
 import type { ConsentFormOption } from '@/lib/consentForms/loader'
 import { readErrorMessageOr } from '@/lib/http'
 
@@ -77,12 +78,25 @@ export default function SendConsentFormButton({ clientId, forms }: Props) {
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <select
+        {/* 🔴 This is the one field in either family whose container is
+            `bg-bgPrimary` (the panel above), and `bg-bgPrimary/70` over
+            `bg-bgPrimary` IS `bg-bgPrimary` — so it already renders at Δ=0
+            against its own panel, which is the exact defect that keeps the
+            `raised` family off `solid`. `raised` is the fix, but changing it
+            here would be a restyle of a surface nobody can currently render
+            (the seeded pro owns no ConsentForm rows, so it never appears), so
+            it keeps its appearance and the bug is written up in the register.
+
+            `w-auto` cancels the kit's `w-full`: this is a `flex-1` item in a
+            row, and `width:100%` would fight its own flex basis. `py-2` is its
+            own shorter box. */}
+        <Select
+          surface="translucent"
+          className="w-auto min-w-[200px] flex-1 py-2"
           value={formId}
           disabled={busy}
           onChange={(event) => setFormId(event.target.value)}
           aria-label="Form to send"
-          className="min-w-[200px] flex-1 rounded-xl border border-white/10 bg-bgPrimary/70 px-3 py-2 text-[13px] text-textPrimary focus:outline-none focus:ring-2 focus:ring-accentPrimary/40"
         >
           <option value="">Choose a form…</option>
           {forms.map((form) => (
@@ -90,7 +104,7 @@ export default function SendConsentFormButton({ clientId, forms }: Props) {
               {form.title} (v{form.version})
             </option>
           ))}
-        </select>
+        </Select>
 
         <button
           type="button"

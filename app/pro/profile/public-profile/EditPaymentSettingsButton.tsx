@@ -902,14 +902,14 @@ export default function EditPaymentSettingsButton({
                               <div className="mb-1 text-[11px] font-black text-textSecondary">
                                 Label
                               </div>
-                              <input
+                              <TextInput
+                                surface="raised"
                                 value={row.label}
                                 onChange={(e) =>
                                   updateTipSuggestion(row.id, {
                                     label: e.target.value,
                                   })
                                 }
-                                className="w-full rounded-xl border border-white/10 bg-bgSecondary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary focus:outline-none focus:ring-2 focus:ring-accentPrimary/40"
                                 placeholder="e.g. 20%"
                                 disabled={busy}
                               />
@@ -919,7 +919,8 @@ export default function EditPaymentSettingsButton({
                               <div className="mb-1 text-[11px] font-black text-textSecondary">
                                 Percent
                               </div>
-                              <input
+                              <TextInput
+                                surface="raised"
                                 value={row.percent}
                                 onChange={(e) =>
                                   updateTipSuggestion(row.id, {
@@ -928,7 +929,6 @@ export default function EditPaymentSettingsButton({
                                     ),
                                   })
                                 }
-                                className="w-full rounded-xl border border-white/10 bg-bgSecondary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary focus:outline-none focus:ring-2 focus:ring-accentPrimary/40"
                                 placeholder="20"
                                 inputMode="decimal"
                                 disabled={busy}

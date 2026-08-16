@@ -16,6 +16,7 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 
+import { TextInput } from '@/app/_components/ui'
 import { readErrorMessageOr } from '@/lib/http'
 import {
   CONSENT_SIGNATURE_NAME_MAX,
@@ -91,14 +92,14 @@ export function ConsentSignCard(props: Props) {
         <span className="text-[11px] font-black text-textSecondary">
           Your full name
         </span>
-        <input
+        <TextInput
+          surface="translucent"
           value={name}
           onChange={(event) => setName(event.target.value)}
           disabled={busy}
           maxLength={CONSENT_SIGNATURE_NAME_MAX}
           autoComplete="name"
           placeholder="Type your full name"
-          className="w-full rounded-xl border border-textPrimary/10 bg-bgPrimary/70 px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary/70 focus:outline-none focus:ring-2 focus:ring-accentPrimary/40"
         />
       </label>
 
