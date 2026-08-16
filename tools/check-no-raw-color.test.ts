@@ -113,6 +113,22 @@ describe('scanSource — must FLAG', () => {
     ])
   })
 
+  // The shape that cost /search its focus ring: a token is three
+  // space-separated channels, so the comma before the alpha makes the whole
+  // declaration invalid and the browser drops it. NUMERIC_RGB cannot see it —
+  // the digit it requires never arrives, because `var(` follows the paren.
+  it('flags a token handed to rgba() with a COMMA before the alpha', () => {
+    expect(
+      kinds("'focus-within:shadow-[0_0_0_3px_rgba(var(--accent-primary),0.25)]'"),
+    ).toEqual(['comma-alpha-on-var'])
+  })
+
+  it('flags it in an inline style too, not only in a class string', () => {
+    expect(kinds("style={{ boxShadow: '0 0 0 3px rgba(var(--accent-primary), 0.25)' }}")).toEqual([
+      'comma-alpha-on-var',
+    ])
+  })
+
   it('reports every raw colour on one line, once per line', () => {
     const found = scan(`const c = 'bg-black/45 text-white hover:bg-black/60'`)
     expect(found.map((v) => v.matches)).toEqual([
@@ -143,6 +159,14 @@ describe('scanSource — must STAY SILENT', () => {
     expect(matches('const s = "rgb(var(--bg-primary))"')).toEqual([])
     expect(matches('const s = "rgb(var(--shadow-color) / 0.35)"')).toEqual([])
     expect(matches('const s = "rgba(var(--overlay) / 0.7)"')).toEqual([])
+  })
+
+  // The SLASH is what separates the fix from the bug, so the compliant spelling
+  // of the very shape flagged above must stay silent — including the one this
+  // repo writes most, inside a Tailwind arbitrary value.
+  it('ignores a token with a SLASH alpha, which is the valid form', () => {
+    expect(matches("'shadow-[0_10px_30px_rgb(var(--shadow-color)/0.35)]'")).toEqual([])
+    expect(matches("'shadow-[0_0_0_3px_rgb(var(--accent-primary)/0.25)]'")).toEqual([])
   })
 
   it('ignores a raw colour that appears only in a comment', () => {

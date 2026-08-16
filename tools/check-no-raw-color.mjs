@@ -7,7 +7,7 @@
 // A raw colour is blind to the mode: it renders the same in both, which means
 // it is wrong in at least one of them.
 //
-// Three shapes are flagged:
+// Four shapes are flagged:
 //
 //   1. Raw `white`/`black` Tailwind utilities — `border-white/10`, `bg-black/70`.
 //      `border-white/10` is a near-no-op in dark (the paper token is 242,239,231
@@ -26,6 +26,13 @@
 //      which is invalid CSS, so the browser drops the declaration entirely and
 //      the element renders with `currentColor` / `transparent`. Typecheck, lint
 //      and every other guard pass on it. Write `border-toneSuccess/25`.
+//
+//   4. A token handed to `rgba()` with a COMMA before the alpha,
+//      `rgba(var(--accent-primary), 0.25)`. Same failure as 3 from the other
+//      side: a token is three space-separated channels, so this expands to
+//      `rgba(10 115 99, 0.25)` and the browser drops the declaration. It cost
+//      /search's location field its whole focus treatment. Write
+//      `rgb(var(--accent-primary)/0.25)`.
 //
 // ── Two traps this guard is built to avoid ────────────────────────────────
 //
@@ -121,6 +128,21 @@ const NUMERIC_RGB = /(?<![a-zA-Z0-9])rgba?\(\s*[0-9.][0-9.,%/\s]*\)?/g
 
 const ALPHA_IN_BRACKET =
   /(?<![\w-])(?:bg|text|border|ring|fill|stroke|shadow|outline|divide)-\[rgb\(var\(--[a-z0-9-]+\)\)\/[0-9.]+\]/g
+
+// The same bug wearing the other trouser leg: a token is three SPACE-separated
+// channels, so `rgba(var(--accent-primary), 0.25)` expands to
+// `rgba(10 115 99, 0.25)` — space-separated components with a comma before the
+// alpha, which is not valid CSS in either syntax. The browser drops the whole
+// declaration.
+//
+// Measured on `origin/main`: /search's location field carried this inside a
+// `focus-within:shadow-[…]`, and focusing it computed `box-shadow: none` — the
+// field LOST its resting inset highlight and gained no focus ring. Invisible to
+// typecheck, lint, 22 guards and 9164 tests, and invisible to NUMERIC_RGB too,
+// because the digit that pattern requires never arrives: `var(` follows the
+// paren. Write `rgb(var(--accent-primary)/0.25)`. Held by a test.
+const COMMA_ALPHA_ON_VAR =
+  /(?<![a-zA-Z0-9])rgba?\(\s*var\(--[a-z0-9-]+\)\s*,\s*[0-9.]+\s*\)/g
 
 // Replace comment bodies with spaces, keeping every newline, so offsets in the
 // stripped text are offsets in the original. String literals are copied
@@ -272,10 +294,11 @@ export function scanSource(relPath, src) {
     // Trailing separators survive when an interpolation cut the match short.
     entry.matches.push(match[0].replace(/[\s,]+$/, ''))
     // A dropped declaration outranks a mode-blind one when reporting.
-    if (kind === 'alpha-in-bracket') entry.kind = kind
+    if (kind === 'alpha-in-bracket' || kind === 'comma-alpha-on-var') entry.kind = kind
   }
 
   for (const m of stripped.matchAll(ALPHA_IN_BRACKET)) record('alpha-in-bracket', m)
+  for (const m of stripped.matchAll(COMMA_ALPHA_ON_VAR)) record('comma-alpha-on-var', m)
   for (const m of stripped.matchAll(RAW_UTILITY)) record('raw-utility', m)
   for (const m of stripped.matchAll(NUMERIC_RGB)) record('numeric-rgb', m)
 
@@ -387,12 +410,27 @@ function main() {
   const currentKeys = new Set(violations.map(makeKey))
   const resolved = [...baseline].filter((entry) => !currentKeys.has(entry))
 
-  // An alpha-in-bracket declaration is invalid CSS that the browser drops, not
-  // a style preference, so it fails even when the line is already baselined.
+  // Both of these are invalid CSS that the browser drops, not a style
+  // preference, so they fail even when the line is already baselined.
   const dropped = violations.filter((v) => v.kind === 'alpha-in-bracket')
+  const varAlpha = violations.filter((v) => v.kind === 'comma-alpha-on-var')
 
-  if (newViolations.length > 0 || dropped.length > 0) {
+  if (newViolations.length > 0 || dropped.length > 0 || varAlpha.length > 0) {
     console.error('\ncheck-no-raw-color: failed\n')
+
+    if (varAlpha.length > 0) {
+      console.error(
+        'These pass a TOKEN to rgba() with a comma before the alpha. A token is\n' +
+          'three space-separated channels, so this expands to `rgba(10 115 99, .25)`\n' +
+          '— invalid in either CSS syntax, and the browser drops the whole\n' +
+          'declaration. Write `rgb(var(--accent-primary)/0.25)` instead.\n',
+      )
+      for (const v of varAlpha) {
+        console.error(`${v.file}:${v.line}`)
+        console.error(`  ${v.snippet}`)
+      }
+      console.error('')
+    }
 
     if (dropped.length > 0) {
       console.error(

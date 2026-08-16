@@ -1180,10 +1180,10 @@ export default function SearchMapClient() {
                   className={cn(
                     'flex flex-1 items-center gap-2 rounded-2xl px-3 py-2',
                       'border border-surfaceGlass/12 bg-bgPrimary/20 backdrop-blur-xl',
-                      'shadow-[inset_0_1px_0_rgba(255,255,255,0.14)]',
+                      'shadow-[inset_0_1px_0_rgb(var(--surface-glass)/0.14)]',
                       'transition duration-200',
                       'focus-within:border-surfaceGlass/20',
-                      'focus-within:shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_0_0_3px_rgba(var(--accent-primary),0.25)]',
+                      'focus-within:shadow-[inset_0_1px_0_rgb(var(--surface-glass)/0.18),0_0_0_3px_rgb(var(--accent-primary)/0.25)]',
                     )}
                   >
                     <Search size={16} aria-hidden className="shrink-0 text-textMuted" />
