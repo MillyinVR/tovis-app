@@ -101,7 +101,7 @@ export default function ProReferralActivitySection({
           </div>
 
           <div className="overflow-hidden rounded-2xl border border-surfaceGlass/10 bg-bgSecondary">
-            <ul className="divide-y divide-white/10">
+            <ul className="divide-y divide-surfaceGlass/10">
               {rows.map((row) => (
                 <li
                   key={row.id}

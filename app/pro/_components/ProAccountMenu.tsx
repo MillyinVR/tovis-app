@@ -224,7 +224,7 @@ export default function ProAccountMenu(props: Props) {
           'rounded-full border border-surfaceGlass/10 bg-bgSecondary',
           'text-textPrimary',
           'hover:border-surfaceGlass/20',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-surfaceGlass/20',
           'transition',
         ].join(' ')}
         aria-haspopup="menu"

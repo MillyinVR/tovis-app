@@ -68,7 +68,7 @@ export default async function AdminLogsPage() {
               No logs yet.
             </div>
           ) : (
-            <div className="divide-y divide-white/10">
+            <div className="divide-y divide-surfaceGlass/10">
               {logs.map((log) => {
                 const scopeParts = [
                   formatNullableId('Admin ID', log.adminUserId),
