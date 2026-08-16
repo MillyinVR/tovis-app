@@ -248,7 +248,7 @@ export default function ClientMediaExportButton({
             className={cn(
               'mx-auto mt-10 w-full max-w-[420px] overflow-hidden rounded-[18px]',
               'border border-surfaceGlass/12 bg-bgPrimary/90 backdrop-blur-2xl',
-              'shadow-[0_22px_90px_rgba(0,0,0,0.70)]',
+              'shadow-[0_22px_90px_rgb(var(--shadow-color)/0.70)]',
               'grid grid-rows-[auto_1fr_auto]',
             )}
             style={{ maxHeight: 'calc(100dvh - 60px)' }}

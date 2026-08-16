@@ -86,7 +86,7 @@ export default function LookSlide(props: {
               <div className="pointer-events-none absolute left-3 right-3 z-30" style={{ top: spotlightTop }}>
                 <div
                   className="inline-flex max-w-full flex-col gap-0.5 rounded-2xl border border-white/10 bg-black/35 px-3 py-2 backdrop-blur-md"
-                  style={{ boxShadow: '0 10px 26px rgba(0,0,0,0.35)' }}
+                  style={{ boxShadow: '0 10px 26px rgb(var(--shadow-color) / 0.35)' }}
                 >
                   <div className="text-[12px] font-black tracking-tight text-white">Review Spotlight</div>
                   {metaLine ? (

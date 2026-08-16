@@ -222,7 +222,7 @@ export default function ServicesBrowseBar({ categories, initial, stats }: Props)
       className={cn(
         'sticky top-3 z-20',
         'rounded-card border border-surfaceGlass/10 bg-bgSecondary/80 backdrop-blur-xl',
-        'shadow-[0_18px_60px_rgb(0_0_0/0.55)]',
+        'shadow-[0_18px_60px_rgb(var(--shadow-color)/0.55)]',
       )}
     >
       <div className="p-3">

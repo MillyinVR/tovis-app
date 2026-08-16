@@ -142,7 +142,7 @@ export default function SwitchAccountSheet({
           border: '1px solid var(--line)',
           borderRadius: 18,
           padding: '18px 16px 12px',
-          boxShadow: '0 24px 60px rgba(0,0,0,0.4)',
+          boxShadow: '0 24px 60px rgb(var(--shadow-color) / 0.4)',
         }}
       >
         <div

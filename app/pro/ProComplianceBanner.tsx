@@ -197,7 +197,7 @@ export default function ProComplianceBanner() {
       ref={ref}
       className={[
         'fixed left-0 right-0 z-45',
-        'border-b backdrop-blur-xl shadow-[0_8px_30px_rgba(0,0,0,0.25)]',
+        'border-b backdrop-blur-xl shadow-[0_8px_30px_rgb(var(--shadow-color)/0.25)]',
         tone,
       ].join(' ')}
       style={{ top: 48 }}

@@ -97,7 +97,7 @@ export default function AftercareBeforeAfter(props: {
           <div className="absolute right-2 top-2">
             <ClientMediaExportButton
               professionalId={professionalId}
-              className="border border-white/12 bg-bgPrimary/25 text-white/90 shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur-xl hover:bg-white/10"
+              className="border border-white/12 bg-bgPrimary/25 text-white/90 shadow-[0_10px_30px_rgb(var(--shadow-color)/0.35)] backdrop-blur-xl hover:bg-white/10"
               media={{ kind: 'pair', beforeUrl: beforeFullUrl ?? beforeUrl, afterUrl: afterFullUrl ?? afterUrl }}
             />
           </div>
@@ -152,7 +152,7 @@ function SingleTileExportButton({
     <div className="absolute right-2 top-2">
       <ClientMediaExportButton
         professionalId={professionalId}
-        className="border border-white/12 bg-bgPrimary/25 text-white/90 shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur-xl hover:bg-white/10"
+        className="border border-white/12 bg-bgPrimary/25 text-white/90 shadow-[0_10px_30px_rgb(var(--shadow-color)/0.35)] backdrop-blur-xl hover:bg-white/10"
         media={{ kind: 'single', url }}
       />
     </div>

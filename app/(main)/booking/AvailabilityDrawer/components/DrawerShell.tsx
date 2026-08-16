@@ -83,7 +83,7 @@ export default function DrawerShell({
     borderTopLeftRadius: 22,
     borderTopRightRadius: 22,
     overflow: 'hidden',
-    boxShadow: '0 -18px 60px rgba(0,0,0,0.70)',
+    boxShadow: '0 -18px 60px rgb(var(--shadow-color) / 0.70)',
     display: 'grid',
     gridTemplateRows: 'auto 1fr auto',
     background: 'rgb(var(--bg-primary))',

@@ -252,7 +252,7 @@ export default function RightActionRail({
                   fontWeight: 900,
                   fontSize: 14,
                   lineHeight: 1,
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.6)',
+                  boxShadow: '0 4px 12px rgb(var(--shadow-color) / 0.6)',
                 }}
               >
                 +
@@ -290,7 +290,7 @@ export default function RightActionRail({
               cursor: 'pointer',
               padding: 0,
               boxShadow:
-                '0 8px 24px rgb(var(--accent-primary) / 0.55), 0 2px 6px rgba(0,0,0,0.6)',
+                '0 8px 24px rgb(var(--accent-primary) / 0.55), 0 2px 6px rgb(var(--shadow-color) / 0.6)',
             }}
           >
             <CalendarDays size={30} aria-hidden="true" />

@@ -393,7 +393,7 @@ export default function PlacesAutocomplete(props: {
         <div
           id={listId}
           role="listbox"
-          className="absolute top-[calc(100%+6px)] z-50 w-full overflow-hidden rounded-2xl border border-surfaceGlass/10 bg-bgSecondary shadow-[0_24px_90px_rgb(0_0_0/0.55)] backdrop-blur-xl"
+          className="absolute top-[calc(100%+6px)] z-50 w-full overflow-hidden rounded-2xl border border-surfaceGlass/10 bg-bgSecondary shadow-[0_24px_90px_rgb(var(--shadow-color)/0.55)] backdrop-blur-xl"
         >
           {emptyState ? (
             <div className="px-3 py-3 text-[12px] font-semibold text-textSecondary">{emptyState}</div>

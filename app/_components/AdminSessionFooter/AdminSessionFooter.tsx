@@ -53,7 +53,7 @@ function CountBadge({ value }: { value?: string | null }) {
         fontSize: 10,
         fontWeight: 700,
         lineHeight: 1,
-        boxShadow: '0 10px 22px rgb(0 0 0 / 0.35)',
+        boxShadow: '0 10px 22px rgb(var(--shadow-color) / 0.35)',
       }}
     >
       {value}

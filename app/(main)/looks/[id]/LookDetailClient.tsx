@@ -379,7 +379,7 @@ export default function LookDetailClient({
             <div className="absolute left-3 top-3">
               <ClientMediaExportButton
                 professionalId={item.professional.id}
-                className="border border-white/12 bg-bgPrimary/25 text-white/90 shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur-xl hover:bg-white/10"
+                className="border border-white/12 bg-bgPrimary/25 text-white/90 shadow-[0_10px_30px_rgb(var(--shadow-color)/0.35)] backdrop-blur-xl hover:bg-white/10"
                 media={
                   item.before
                     ? {

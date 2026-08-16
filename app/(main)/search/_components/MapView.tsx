@@ -276,7 +276,7 @@ function ClusterMarker(props: { lat: number; lng: number; count: number; sampleL
           border-radius:999px;
           display:flex; align-items:center; justify-content:center;
           background: rgb(var(--accent-primary));
-          box-shadow: 0 16px 48px rgb(0 0 0 / 0.55), 0 0 0 3px rgb(255 255 255 / 0.18);
+          box-shadow: 0 16px 48px rgb(var(--shadow-color) / 0.55), 0 0 0 3px rgb(255 255 255 / 0.18);
           color: rgb(var(--bg-primary));
           font-weight: 900;
           font-size: 13px;
@@ -350,7 +350,7 @@ export default function MapView({
           width: 18px; height: 18px;
           border-radius: 999px;
           background: rgb(var(--accent-primary));
-          box-shadow: 0 0 0 4px rgb(var(--bg-primary)), 0 0 0 6px rgb(var(--gold)), 0 10px 26px rgb(0 0 0 / 0.55);
+          box-shadow: 0 0 0 4px rgb(var(--bg-primary)), 0 0 0 6px rgb(var(--gold)), 0 10px 26px rgb(var(--shadow-color) / 0.55);
         "></div>
       `,
       iconSize: [18, 18],
@@ -366,7 +366,7 @@ export default function MapView({
           width: 12px; height: 12px;
           border-radius: 999px;
           background: rgb(var(--accent-primary));
-          box-shadow: 0 0 0 3px rgb(var(--bg-primary)), 0 6px 16px rgb(0 0 0 / 0.45);
+          box-shadow: 0 0 0 3px rgb(var(--bg-primary)), 0 6px 16px rgb(var(--shadow-color) / 0.45);
         "></div>
       `,
       iconSize: [12, 12],
@@ -382,7 +382,7 @@ export default function MapView({
           width: 12px; height: 12px;
           border-radius: 999px;
           background: rgb(255 255 255 / 0.92);
-          box-shadow: 0 14px 40px rgb(0 0 0 / 0.60), 0 0 0 3px rgb(var(--accent-primary) / 0.45);
+          box-shadow: 0 14px 40px rgb(var(--shadow-color) / 0.60), 0 0 0 3px rgb(var(--accent-primary) / 0.45);
         "></div>
       `,
       iconSize: [12, 12],

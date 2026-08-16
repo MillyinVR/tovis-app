@@ -2,28 +2,31 @@
 #
 # One entry per SOURCE LINE, not per occurrence: a single line can carry
 # several (`'bg-black/45 text-white hover:bg-black/60'`). At the time this
-# baseline was written that was 108 lines carrying
-# 152 raw colours.
+# baseline was written that was 64 lines carrying
+# 100 raw colours.
 #
 # Shrink this list; never add to it. Replacements:
 #   border-white/N  -> border-surfaceGlass/N   (invisible in light mode today)
 #   bg-white/N      -> bg-surfaceGlass/N
 #   bg-black/N      -> bg-scrim/N              (modal scrims ONLY)
 #   background: 'rgba(0,0,0,a)' -> 'rgb(var(--scrim) / a)'   (an inline-style scrim)
+#   any black SHADOW      -> rgb(var(--shadow-color) / a)
 #
 # NOT bg-overlay/N, which an earlier version of this header prescribed for
 # scrims: --overlay IS --bg-primary, and a translucent fill of the ground
 # colour composites back to the ground colour at EVERY alpha, so a scrim
 # built that way darkens nothing. --scrim is the token that exists for this.
 #
-# 🔴 A black SHADOW has NO replacement, and an earlier version of this
-# header prescribed `rgb(var(--shadow-color) / a)`. That swap DELETES the
-# shadow in dark mode: --shadow-color is 10 20 19, the dark page ground
-# itself, so an ink shadow has nothing left to darken. Measured on isolated
-# probes, a 0.78-alpha shadow drops from 12.0 units of separation from the
-# page to 1.7. The `shadow-[…rgb(0 0 0/a)]` entries and the inline
-# `boxShadow: '… rgba(0,0,0,a)'` ones are ONE family, and it is BLOCKED on a
-# per-mode shadowColor decision. Leave every one of them alone.
+# The shadow replacement was UNSAFE until 2026-08-16 and this header used to
+# prescribe it anyway. `--shadow-color` was `10 20 19` — the dark page
+# ground itself — handed to BOTH modes, so an ink shadow in dark mode had
+# nothing left to darken: a 0.78-alpha drop shadow measured 1.7 units of
+# separation from the page where black gave 12.0. `createBrand.ts` now
+# defaults it PER MODE (black in dark, the brand ink in light), which makes
+# the swap byte-identical in dark at every alpha and leaves light untouched.
+# A shadow expresses a control ELEVATION, so it follows this token wherever
+# the control sits — including over a photograph, where "darker" is right in
+# both modes. Only TEXT-shadow on overlay text stays raw (class 1 below).
 #
 # ⚠️ NOT every entry should be migrated. Four classes below are PERMANENT
 # residents — they are raw on purpose, and "fixing" them is the regression:
@@ -32,8 +35,10 @@
 #      does not restyle. A photo is dark in both modes, so its scrim,
 #      caption chip and overlay text must be too. Includes
 #      MediaFullscreenViewer, LookSlide, SheetCover, the media letterboxes
-#      in MediaUploader / ImageEditModal / NewMediaPostForm, and the Leaflet
-#      markers in search/MapView, which sit on OpenStreetMap's raster tiles.
+#      in MediaUploader / ImageEditModal / NewMediaPostForm, and the white
+#      marker rings in search/MapView, which sit on OpenStreetMap's raster
+#      tiles. Overlay TEXT on a photo keeps its raw text-shadow too: that
+#      glow is tuned to the photograph, not to a surface that flips.
 #      A subtree pinned `data-mode="dark"` counts here too — app/(main)/
 #      looks/page.tsx pins the whole feed, so its raw blacks sit BESIDE
 #      tokens already resolved to their dark values, not against them.
@@ -57,47 +62,28 @@ app/(auth)/_components/PrimaryButton.tsx|'before:pointer-events-none before:abso
 app/(auth)/_components/PrimaryButton.tsx|className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(255,255,255,0.22),transparent)]"
 app/(auth)/verify-email/page.tsx|'before:pointer-events-none before:absolute before:inset-0 before:bg-[linear-gradient(110deg,transparent,rgba(255,255,255,0.10),transparent)] before:opacity-0 before:transition',
 app/(auth)/verify-email/page.tsx|className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(255,255,255,0.22),transparent)]"
-app/(main)/booking/AvailabilityDrawer/components/DrawerShell.tsx|boxShadow: '0 -18px 60px rgba(0,0,0,0.70)',
 app/(main)/booking/AvailabilityDrawer/components/SheetCover.tsx|'linear-gradient(to top, rgb(var(--bg-primary)) 3%, rgb(var(--bg-primary) / 0.05) 58%, rgb(0 0 0 / 0.45) 100%)',
 app/(main)/booking/AvailabilityDrawer/components/SheetCover.tsx|? 'bg-black/45 text-white hover:bg-black/60'
-app/(main)/looks/[id]/LookDetailClient.tsx|className="border border-white/12 bg-bgPrimary/25 text-white/90 shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur-xl hover:bg-white/10"
+app/(main)/looks/[id]/LookDetailClient.tsx|className="border border-white/12 bg-bgPrimary/25 text-white/90 shadow-[0_10px_30px_rgb(var(--shadow-color)/0.35)] backdrop-blur-xl hover:bg-white/10"
 app/(main)/looks/_components/LookOverlays.tsx|const TEXT_SHADOW = '0 2px 20px rgba(0,0,0,0.85), 0 1px 4px rgba(0,0,0,0.9)'
 app/(main)/looks/_components/LookSlide.tsx|<div className="text-[12px] font-black tracking-tight text-white">Review Spotlight</div>
 app/(main)/looks/_components/LookSlide.tsx|<div className="truncate text-[11px] font-semibold text-white/80">{metaLine}</div>
 app/(main)/looks/_components/LookSlide.tsx|className="inline-flex max-w-full flex-col gap-0.5 rounded-2xl border border-white/10 bg-black/35 px-3 py-2 backdrop-blur-md"
-app/(main)/looks/_components/LookSlide.tsx|style={{ boxShadow: '0 10px 26px rgba(0,0,0,0.35)' }}
 app/(main)/looks/_components/LooksFeed.tsx|background: 'rgba(0,0,0,0.28)',
 app/(main)/looks/_components/LooksFeed.tsx|border: '1px solid rgba(255,255,255,0.10)',
 app/(main)/looks/_components/LooksTopBar.tsx|const TEXT_SHADOW = '0 2px 20px rgba(0,0,0,0.85), 0 1px 4px rgba(0,0,0,0.9)'
 app/(main)/looks/_components/RightActionRail.tsx|'0 2px 20px rgba(0,0,0,0.85), 0 1px 4px rgba(0,0,0,0.9)'
-app/(main)/looks/_components/RightActionRail.tsx|'0 8px 24px rgb(var(--accent-primary) / 0.55), 0 2px 6px rgba(0,0,0,0.6)',
-app/(main)/looks/_components/RightActionRail.tsx|boxShadow: '0 4px 12px rgba(0,0,0,0.6)',
-app/(main)/looks/_components/SaveToBoardModal.tsx|shadow-[0_24px_80px_rgba(0,0,0,0.45)]
-app/(main)/search/SearchMapClient.tsx|'shadow-[0_14px_40px_rgba(0,0,0,0.55)]',
-app/(main)/search/SearchMapClient.tsx|'shadow-[0_18px_60px_rgba(0,0,0,0.65)] lg:shadow-none',
 app/(main)/search/SearchMapClient.tsx|className="pointer-events-none absolute left-0 right-0 top-0 z-10 h-47.5 bg-linear-to-b from-black/60 via-black/25 to-transparent lg:hidden"
 app/(main)/search/_components/DiscoverActiveProCard.tsx|className="absolute inset-0 bg-linear-to-br from-white/10 via-white/2 to-black/25"
 app/(main)/search/_components/DiscoverGridView.tsx|'bg-[linear-gradient(135deg,rgba(255,255,255,0.08)_0,rgba(255,255,255,0.02)_35%,rgba(0,0,0,0.24)_100%)]',
 app/(main)/search/_components/DiscoverGridView.tsx|className="absolute inset-0 opacity-20 [background-image:repeating-linear-gradient(135deg,transparent_0,transparent_10px,rgba(255,255,255,0.12)_11px,transparent_12px)]"
 app/(main)/search/_components/DiscoverProRows.tsx|className="absolute inset-0 bg-linear-to-br from-white/10 via-white/2 to-black/25"
 app/(main)/search/_components/MapView.tsx|background: rgb(255 255 255 / 0.92);
-app/(main)/search/_components/MapView.tsx|box-shadow: 0 0 0 3px rgb(var(--bg-primary)), 0 6px 16px rgb(0 0 0 / 0.45);
-app/(main)/search/_components/MapView.tsx|box-shadow: 0 0 0 4px rgb(var(--bg-primary)), 0 0 0 6px rgb(var(--gold)), 0 10px 26px rgb(0 0 0 / 0.55);
-app/(main)/search/_components/MapView.tsx|box-shadow: 0 14px 40px rgb(0 0 0 / 0.60), 0 0 0 3px rgb(var(--accent-primary) / 0.45);
-app/(main)/search/_components/MapView.tsx|box-shadow: 0 16px 48px rgb(0 0 0 / 0.55), 0 0 0 3px rgb(255 255 255 / 0.18);
+app/(main)/search/_components/MapView.tsx|box-shadow: 0 16px 48px rgb(var(--shadow-color) / 0.55), 0 0 0 3px rgb(255 255 255 / 0.18);
 app/(main)/search/_components/TrendingProRail.tsx|className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.08)_0,rgba(255,255,255,0.02)_35%,rgba(0,0,0,0.24)_100%)]"
 app/(main)/search/_components/TrendingProRail.tsx|className="absolute inset-0 opacity-20 [background-image:repeating-linear-gradient(135deg,transparent_0,transparent_10px,rgba(255,255,255,0.12)_11px,transparent_12px)]"
-app/_components/AdminSessionFooter/AdminSessionFooter.tsx|boxShadow: '0 10px 22px rgb(0 0 0 / 0.35)',
-app/_components/AdminSessionFooter/SwitchAccountSheet.tsx|boxShadow: '0 24px 60px rgba(0,0,0,0.4)',
-app/_components/ProSessionFooter/ProSessionFooter.tsx|boxShadow: '0 18px 40px rgba(0,0,0,0.35)',
-app/_components/ProSessionFooter/ProSessionFooter.tsx|boxShadow: '0 24px 60px rgba(0,0,0,0.45)',
-app/_components/WorkspaceMismatchProvider.tsx|boxShadow: '0 24px 60px rgba(0,0,0,0.4)',
-app/_components/WorkspaceSwitchLauncher/WorkspaceSwitchLauncherClient.tsx|boxShadow: '0 6px 20px rgba(0,0,0,0.22)',
-app/_components/aftercare/AftercareBeforeAfter.tsx|className="border border-white/12 bg-bgPrimary/25 text-white/90 shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur-xl hover:bg-white/10"
+app/_components/aftercare/AftercareBeforeAfter.tsx|className="border border-white/12 bg-bgPrimary/25 text-white/90 shadow-[0_10px_30px_rgb(var(--shadow-color)/0.35)] backdrop-blur-xl hover:bg-white/10"
 app/_components/footer/TovisFeatherMark.tsx|'radial-gradient(circle at center, rgba(255,243,202,0.46) 0%, rgba(249,216,134,0.36) 19%, rgba(122,226,188,0.30) 40%, rgba(92,208,176,0.12) 60%, transparent 80%)',
-app/_components/media/ClickableMedia.tsx|'backdrop-blur-xl shadow-[0_14px_40px_rgba(0,0,0,0.55)]',
-app/_components/media/ClickableMedia.tsx|'px-4 py-3 shadow-[0_18px_60px_rgba(0,0,0,0.65)]',
-app/_components/media/ClientMediaExportButton.tsx|'shadow-[0_22px_90px_rgba(0,0,0,0.70)]',
 app/_components/media/ClientMediaExportButton.tsx|{rendering && preview ? <div className="absolute inset-0 bg-black/15" /> : null}
 app/_components/media/MediaFullscreenViewer.tsx|<div className="absolute inset-x-0 bottom-0 h-44 bg-gradient-to-t from-black/80 to-transparent" />
 app/_components/media/MediaFullscreenViewer.tsx|<div className="absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-black/70 to-transparent" />
@@ -106,54 +92,29 @@ app/_components/media/MediaFullscreenViewer.tsx|<main className={cn('fixed inset
 app/_components/media/MediaFullscreenViewer.tsx|<main className={cn('fixed inset-0 overflow-hidden bg-black', zClass.modal, className || '')}>
 app/_components/media/OwnerMediaMenu.tsx|'hover:bg-white/10 active:scale-[0.99] transition',
 app/_components/media/OwnerMediaMenu.tsx|'relative h-5 w-5 rounded-full bg-white transition',
-app/_components/media/OwnerMediaMenu.tsx|'shadow-[0_10px_25px_rgba(0,0,0,0.35)]',
-app/_components/media/OwnerMediaMenu.tsx|'shadow-[0_18px_60px_rgba(0,0,0,0.55)]',
-app/_components/media/OwnerMediaMenu.tsx|'shadow-[0_22px_90px_rgba(0,0,0,0.70)]',
-app/_components/media/OwnerMediaMenu.tsx|'text-white/90 shadow-[0_10px_30px_rgba(0,0,0,0.35)]',
+app/_components/media/OwnerMediaMenu.tsx|'text-white/90 shadow-[0_10px_30px_rgb(var(--shadow-color)/0.35)]',
 app/_components/media/OwnerMediaMenu.tsx|<div className="absolute inset-0 rounded-full bg-gradient-to-b from-white/10 to-transparent" />
-app/_components/media/OwnerMediaMenu.tsx|? 'border-accentPrimary/35 bg-accentPrimary/15 shadow-[0_10px_30px_rgba(0,0,0,0.25)]'
 app/_components/media/OwnerMediaMenu.tsx|value ? 'bg-accentPrimary' : 'bg-black/25',
 app/admin/services/_components/ServiceHeroGrid.tsx|'before:bg-[radial-gradient(700px_260px_at_30%_0%,rgb(255_255_255/0.12),transparent_60%)]',
-app/admin/services/_components/ServiceHeroGrid.tsx|'border border-accentPrimary/55 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover shadow-[0_16px_40px_rgb(0_0_0/0.35)]'
-app/admin/services/_components/ServiceHeroGrid.tsx|'rounded-2xl border px-4 py-3 shadow-[0_24px_90px_rgb(0_0_0/0.55)] backdrop-blur-xl',
-app/admin/services/_components/ServiceHeroGrid.tsx|'shadow-[0_18px_50px_rgb(0_0_0/0.45)]',
-app/admin/services/_components/ServiceHeroGrid.tsx|'shadow-[0_50px_160px_rgb(0_0_0/0.78)]',
 app/admin/services/_components/ServiceHeroGrid.tsx|<div className="pointer-events-none absolute inset-0 bg-[radial-gradient(120px_120px_at_20%_18%,rgb(255_255_255/0.10),transparent_60%)]" />
 app/admin/services/_components/ServiceHeroGrid.tsx|<div className="pointer-events-none absolute inset-0 bg-[radial-gradient(80px_80px_at_20%_18%,rgb(255_255_255/0.12),transparent_60%)]" />
 app/admin/services/_components/ServiceHeroGrid.tsx|<div className="pointer-events-none absolute inset-0 ring-1 ring-white/10" />
 app/admin/services/_components/ServiceHeroGrid.tsx|<div className="pointer-events-none absolute inset-0 ring-1 ring-white/8" />
 app/admin/services/_components/ServiceHeroGrid.tsx|<div className="pointer-events-none absolute inset-0 translate-x-[-60%] animate-[shimmer_1.2s_infinite] bg-[linear-gradient(90deg,transparent,rgb(255_255_255/0.08),transparent)]" />
-app/admin/services/_components/ServicesBrowseBar.tsx|'shadow-[0_18px_60px_rgb(0_0_0/0.55)]',
-app/admin/services/_components/ServicesCreateWizard.tsx|'border border-accentPrimary/45 bg-accentPrimary/15 text-textPrimary hover:bg-accentPrimary/20 hover:border-accentPrimary/60 shadow-[0_18px_50px_rgb(0_0_0/0.35)]'
-app/media/[id]/page.tsx|'backdrop-blur-xl shadow-[0_14px_40px_rgba(0,0,0,0.55)]',
-app/media/[id]/page.tsx|'shadow-[0_18px_60px_rgba(0,0,0,0.65)]',
-app/media/[id]/page.tsx|className="border border-surfaceGlass/10 bg-bgPrimary/25 backdrop-blur-xl shadow-[0_14px_40px_rgba(0,0,0,0.55)] hover:bg-white/10"
-app/pro/ProComplianceBanner.tsx|'border-b backdrop-blur-xl shadow-[0_8px_30px_rgba(0,0,0,0.25)]',
-app/pro/_components/RouteOverlay.tsx|'shadow-[0_50px_160px_rgb(0_0_0/0.78)]',
+app/media/[id]/page.tsx|className="border border-surfaceGlass/10 bg-bgPrimary/25 backdrop-blur-xl shadow-[0_14px_40px_rgb(var(--shadow-color)/0.55)] hover:bg-white/10"
 app/pro/_components/RouteOverlay.tsx|<div className="absolute inset-0 bg-[radial-gradient(900px_320px_at_18%_0%,rgb(255_255_255/0.16),transparent_60%)]" />
 app/pro/_components/RouteOverlay.tsx|<div className="absolute inset-0 ring-1 ring-white/10" />
 app/pro/_components/RouteOverlay.tsx|<div className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-b from-transparent to-black/35" />
 app/pro/bookings/[id]/session/MediaUploader.tsx|<div className="relative aspect-[9/16] w-full overflow-hidden rounded-card border border-white/10 bg-black">
-app/pro/calendar/_components/BookingOverrideConfirmModal.tsx|'shadow-[0_28px_90px_rgb(0_0_0_/_0.62)]',
-app/pro/calendar/_components/ConfirmChangeModal.tsx|'shadow-[0_28px_90px_rgb(0_0_0_/_0.62)]',
-app/pro/locations/LocationsClient.tsx|'rounded-2xl border px-4 py-3 shadow-[0_24px_90px_rgb(0_0_0/0.55)] backdrop-blur-xl',
-app/pro/locations/LocationsClient.tsx|className="w-full max-w-lg overflow-hidden rounded-2xl border border-surfaceGlass/10 bg-bgSecondary shadow-[0_50px_160px_rgb(0_0_0/0.78)] backdrop-blur-xl"
-app/pro/locations/PlacesAutocomplete.tsx|className="absolute top-[calc(100%+6px)] z-50 w-full overflow-hidden rounded-2xl border border-surfaceGlass/10 bg-bgSecondary shadow-[0_24px_90px_rgb(0_0_0/0.55)] backdrop-blur-xl"
 app/pro/media/new/ImageEditModal.tsx|className="relative overflow-hidden rounded-card border border-white/10 bg-black"
 app/pro/media/new/NewMediaPostForm.tsx|<div className="overflow-hidden rounded-card border border-white/10 bg-black">
-app/pro/profile/ReviewsPanel.tsx|className="border border-white/12 bg-bgPrimary/25 text-white/90 shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur-xl hover:bg-white/10"
-app/pro/profile/_sections/AddServiceOverlay.tsx|'shadow-[0_50px_160px_rgb(0_0_0/0.78)]',
+app/pro/profile/ReviewsPanel.tsx|className="border border-white/12 bg-bgPrimary/25 text-white/90 shadow-[0_10px_30px_rgb(var(--shadow-color)/0.35)] backdrop-blur-xl hover:bg-white/10"
 app/pro/profile/_sections/AddServiceOverlay.tsx|<div className="absolute inset-0 bg-[radial-gradient(900px_320px_at_18%_0%,rgb(255_255_255/0.16),transparent_60%)]" />
 app/pro/profile/_sections/AddServiceOverlay.tsx|<div className="absolute inset-0 ring-1 ring-white/10" />
 app/pro/profile/_sections/AddServiceOverlay.tsx|<div className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-b from-transparent to-black/35" />
 app/pro/profile/public-profile/_components/YourLinkCard.tsx|className="h-40 w-40 overflow-hidden rounded-xl bg-white p-2"
 app/pro/referral-rewards/ReferralRewardsClient.tsx|className={`absolute top-0.5 block h-6 w-6 rounded-full bg-white shadow transition-transform ${
 app/pro/services/OfferingManager.tsx|'before:bg-[radial-gradient(700px_260px_at_30%_0%,rgb(255_255_255/0.14),transparent_60%)]',
-app/pro/services/OfferingManager.tsx|'border border-accentPrimary/45 bg-bgPrimary/55 text-textPrimary hover:border-accentPrimary/75 hover:bg-bgPrimary/85 shadow-[0_14px_34px_rgb(0_0_0/0.30)]'
-app/pro/services/OfferingManager.tsx|'border border-surfaceGlass/10 bg-bgPrimary/60 text-textPrimary hover:border-surfaceGlass/20 hover:bg-bgPrimary/80 shadow-[0_10px_24px_rgb(0_0_0/0.22)]'
-app/pro/services/OfferingManager.tsx|'relative overflow-hidden rounded-card border border-surfaceGlass/10 bg-bgSecondary shadow-[0_18px_50px_rgb(0_0_0/0.45)]',
-app/pro/services/OfferingManager.tsx|: 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover shadow-[0_14px_34px_rgb(0_0_0/0.30)]',
-app/pro/services/OfferingManager.tsx|: 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover shadow-[0_16px_40px_rgb(0_0_0/0.35)]',
 app/pro/services/OfferingManager.tsx|<div className="pointer-events-none absolute inset-0 bg-[radial-gradient(40px_40px_at_30%_20%,rgb(255_255_255/0.20),transparent_60%)]" />
 app/pro/services/OfferingManager.tsx|<div className="pointer-events-none absolute inset-0 bg-[radial-gradient(560px_200px_at_25%_0%,rgb(255_255_255/0.10),transparent_60%)]" />
 app/pro/services/OfferingManager.tsx|<div className="pointer-events-none absolute inset-0 ring-1 ring-white/10" />

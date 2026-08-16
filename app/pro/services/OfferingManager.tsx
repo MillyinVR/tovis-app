@@ -429,10 +429,10 @@ function OfferingCard(props: {
     'relative inline-flex items-center justify-center rounded-full px-3 py-2 text-[12px] font-black transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60'
 
   const btnSoft =
-    'border border-surfaceGlass/10 bg-bgPrimary/60 text-textPrimary hover:border-surfaceGlass/20 hover:bg-bgPrimary/80 shadow-[0_10px_24px_rgb(0_0_0/0.22)]'
+    'border border-surfaceGlass/10 bg-bgPrimary/60 text-textPrimary hover:border-surfaceGlass/20 hover:bg-bgPrimary/80 shadow-[0_10px_24px_rgb(var(--shadow-color)/0.22)]'
 
   const btnAccent =
-    'border border-accentPrimary/45 bg-bgPrimary/55 text-textPrimary hover:border-accentPrimary/75 hover:bg-bgPrimary/85 shadow-[0_14px_34px_rgb(0_0_0/0.30)]'
+    'border border-accentPrimary/45 bg-bgPrimary/55 text-textPrimary hover:border-accentPrimary/75 hover:bg-bgPrimary/85 shadow-[0_14px_34px_rgb(var(--shadow-color)/0.30)]'
 
   const btnDanger =
     'border border-toneDanger/30 bg-bgPrimary/55 text-toneDanger hover:border-toneDanger/60 hover:bg-bgPrimary/85'
@@ -446,7 +446,7 @@ function OfferingCard(props: {
   return (
     <div
       className={cn(
-        'relative overflow-hidden rounded-card border border-surfaceGlass/10 bg-bgSecondary shadow-[0_18px_50px_rgb(0_0_0/0.45)]',
+        'relative overflow-hidden rounded-card border border-surfaceGlass/10 bg-bgSecondary shadow-[0_18px_50px_rgb(var(--shadow-color)/0.45)]',
         !upstreamOk && 'opacity-[0.92]',
       )}
     >
@@ -760,7 +760,7 @@ function OfferingEditor(props: {
     'relative inline-flex items-center justify-center rounded-full px-3 py-2 text-[12px] font-black transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60'
 
   const btnSoft =
-    'border border-surfaceGlass/10 bg-bgPrimary/60 text-textPrimary hover:border-surfaceGlass/20 hover:bg-bgPrimary/80 shadow-[0_10px_24px_rgb(0_0_0/0.22)]'
+    'border border-surfaceGlass/10 bg-bgPrimary/60 text-textPrimary hover:border-surfaceGlass/20 hover:bg-bgPrimary/80 shadow-[0_10px_24px_rgb(var(--shadow-color)/0.22)]'
 
   return (
     <form
@@ -1003,7 +1003,7 @@ function OfferingEditor(props: {
             'rounded-card border px-4 py-3 text-[13px] font-black transition active:scale-[0.99]',
             disabledForEdit
               ? 'cursor-not-allowed border-surfaceGlass/10 bg-bgPrimary text-textSecondary opacity-70'
-              : 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover shadow-[0_16px_40px_rgb(0_0_0/0.35)]',
+              : 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover shadow-[0_16px_40px_rgb(var(--shadow-color)/0.35)]',
           )}
         >
           {busy ? 'Saving…' : 'Save changes'}
@@ -1155,7 +1155,7 @@ function AddOnsManager(props: {
             'rounded-full border px-3 py-2 text-[12px] font-black transition active:scale-[0.98]',
             disabled || saving || loading
               ? 'cursor-not-allowed border-surfaceGlass/10 bg-bgSecondary text-textSecondary opacity-70'
-              : 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover shadow-[0_14px_34px_rgb(0_0_0/0.30)]',
+              : 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover shadow-[0_14px_34px_rgb(var(--shadow-color)/0.30)]',
           )}
         >
           {saving ? 'Saving…' : 'Save add-ons'}

@@ -142,7 +142,7 @@ export function BookingOverrideConfirmModal(
         className={[
           'flex max-h-[94vh] w-full flex-col overflow-hidden rounded-t-[24px]',
           'border border-[var(--line-strong)] bg-ink',
-          'shadow-[0_28px_90px_rgb(0_0_0_/_0.62)]',
+          'shadow-[0_28px_90px_rgb(var(--shadow-color)/0.62)]',
           'sm:max-w-[34rem] sm:rounded-[24px]',
         ].join(' ')}
         onMouseDown={(event) => event.stopPropagation()}
