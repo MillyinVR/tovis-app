@@ -1,6 +1,6 @@
 // app/support/supportForm.tsx
 import { redirect } from 'next/navigation'
-import { TextInput, Textarea } from '@/app/_components/ui'
+import { FieldLabel, TextInput, Textarea } from '@/app/_components/ui'
 import { getCurrentUser } from '@/lib/currentUser'
 import { pickStringOrEmpty } from '@/lib/pick'
 import {
@@ -32,12 +32,15 @@ export default function SupportForm() {
 
   return (
     <form action={submit} className="tovis-glass rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4 grid gap-4">
-      {/* The two headings stay hand-written. They ARE field labels, but they
-          carry no colour token and so inherit `text-textPrimary` from the page,
-          where the kit's FieldLabel is `text-textSecondary` — migrating them is
-          a COLOUR change on a public page, not the fill decision this PR made. */}
+      {/* These two were the last of the hand-written field labels, and the only
+          ones written with NO colour token — so they inherited `textPrimary`
+          from the page while the kit's FieldLabel declares `textSecondary`.
+          Migrating them is therefore a colour change on a public page, which is
+          why #918/#919 left them for a decision. Tori was shown exactly that and
+          chose "migrate, accept the dimmer colour" over pinning
+          `text-textPrimary` at the call site — do not add it back. */}
       <label className="grid gap-2">
-        <div className="text-[12px] font-black">Subject</div>
+        <FieldLabel>Subject</FieldLabel>
         <TextInput
           name="subject"
           surface="translucent"
@@ -52,7 +55,7 @@ export default function SupportForm() {
       </label>
 
       <label className="grid gap-2">
-        <div className="text-[12px] font-black">Message</div>
+        <FieldLabel>Message</FieldLabel>
         <Textarea
           name="message"
           surface="translucent"
