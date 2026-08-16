@@ -311,7 +311,27 @@ export default function ProSessionFooter({
                 cursor: centerDisabled ? 'not-allowed' : 'pointer',
               }}
             >
+              {/* 🔴 The coin is deliberately dark in BOTH themes (see the
+                  --tovis-coin comment in app/styles/footers.css — the --coin-*
+                  stops do not flip), but this label was painted with
+                  `--accent-primary`, which does. Measured on the coin surface,
+                  rgb(31,61,55) in either mode: the light accent gave 3.40:1,
+                  already below AA, while dark gave 5.59:1. Deepening the light
+                  accent so it clears AA on paper drops this to 2.05:1 — a
+                  mode-flipping token on a mode-CONSTANT surface gets worse from
+                  one direction and cannot be fixed from the other.
+
+                  `data-mode="dark"` pins the tokens for this subtree, exactly as
+                  app/(main)/looks/page.tsx pins the feed for the same reason, so
+                  the label reads at 5.59:1 in both modes — which is what dark
+                  mode already showed.
+
+                  ⚠️ Measuring this needs the centre button ENABLED. With no
+                  upcoming session it renders `opacity: 0.5`, and a
+                  half-transparent dark disc over a paper page reads as mid-grey,
+                  which inverts the sign of every contrast number taken from it. */}
               <span
+                data-mode="dark"
                 style={{
                   display: 'grid',
                   placeItems: 'center',

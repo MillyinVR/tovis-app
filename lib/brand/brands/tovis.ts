@@ -72,8 +72,17 @@ export const tovisBrand: BrandConfig = createBrandConfig({
 
       surfaceGlass: '10 20 19', // ink-tinted glass
 
-      accentPrimary: '14 155 134', // #0E9B86 (deeper teal for contrast on paper)
-      accentPrimaryHover: '11 122 107', // #0B7A6B accent-ink
+      // #0E9B86 was not deep enough: 3.05:1 on paper, 2.83:1 on the section
+      // band, and — the part nobody had measured — only 3.47:1 for the WHITE
+      // `onAccent` sitting on top of it, so every filled accent button in light
+      // mode was below AA both ways round.
+      //
+      // ⚠️ The hover has to move WITH it. Any base dark enough to clear 4.5:1 on
+      // paper lands on top of the old hover (#0B7A6B), which would leave the two
+      // states ~1.0 apart — an invisible hover is a worse bug than the one being
+      // fixed. This pair keeps a 1.47 step, against today's 1.51.
+      accentPrimary: '10 115 99', // #0A7363 — paper 5.06, band 4.71, white-on 5.76
+      accentPrimaryHover: '8 87 75', // #08574B — paper 7.45, white-on 8.48
       microAccent: '183 131 31', // #B7831F gold-ink (readable gold)
       onAccent: '255 255 255', // white reads on light-mode teal
 
