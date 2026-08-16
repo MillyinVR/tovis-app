@@ -6,6 +6,10 @@ import { useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 
 import AuthShell from '../_components/AuthShell'
+import {
+  HeroTopHairline,
+  primaryButtonClassName,
+} from '../_components/PrimaryButton'
 import { cn } from '@/lib/utils'
 import {
   safeJsonRecord,
@@ -139,25 +143,15 @@ function PrimaryActionButton({
   disabled?: boolean
   onClick?: () => void
 }) {
+  const isDisabled = Boolean(disabled || loading)
   return (
     <button
       type="button"
       onClick={onClick}
-      disabled={disabled || loading}
-      className={cn(
-        'relative inline-flex w-full items-center justify-center overflow-hidden rounded-full px-4 py-2.5 text-sm font-black transition',
-        'border border-accentPrimary/35',
-        'bg-accentPrimary/26 text-textPrimary',
-        'before:pointer-events-none before:absolute before:inset-0 before:bg-[linear-gradient(110deg,transparent,rgba(255,255,255,0.10),transparent)] before:opacity-0 before:transition',
-        'hover:bg-accentPrimary/30 hover:border-accentPrimary/45 hover:before:opacity-100',
-        'focus:outline-none focus:ring-2 focus:ring-accentPrimary/20',
-        loading ? 'cursor-not-allowed opacity-65' : 'cursor-pointer',
-      )}
+      disabled={isDisabled}
+      className={primaryButtonClassName({ disabled: isDisabled, withArrow: true })}
     >
-      <span
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(255,255,255,0.22),transparent)]"
-      />
+      <HeroTopHairline />
       <span className="relative">{children}</span>
     </button>
   )
@@ -173,19 +167,9 @@ function PrimaryLinkButton({
   return (
     <Link
       href={href}
-      className={cn(
-        'relative inline-flex w-full items-center justify-center overflow-hidden rounded-full px-4 py-2.5 text-sm font-black transition',
-        'border border-accentPrimary/35',
-        'bg-accentPrimary/26 text-textPrimary',
-        'before:pointer-events-none before:absolute before:inset-0 before:bg-[linear-gradient(110deg,transparent,rgba(255,255,255,0.10),transparent)] before:opacity-0 before:transition',
-        'hover:bg-accentPrimary/30 hover:border-accentPrimary/45 hover:before:opacity-100',
-        'focus:outline-none focus:ring-2 focus:ring-accentPrimary/20',
-      )}
+      className={primaryButtonClassName({ withArrow: true })}
     >
-      <span
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(255,255,255,0.22),transparent)]"
-      />
+      <HeroTopHairline />
       <span className="relative">{children}</span>
     </Link>
   )

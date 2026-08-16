@@ -2,8 +2,8 @@
 #
 # One entry per SOURCE LINE, not per occurrence: a single line can carry
 # several (`'bg-black/45 text-white hover:bg-black/60'`). At the time this
-# baseline was written that was 64 lines carrying
-# 100 raw colours.
+# baseline was written that was 57 lines carrying
+# 89 raw colours.
 #
 # Shrink this list; never add to it. Replacements:
 #   border-white/N  -> border-surfaceGlass/N   (invisible in light mode today)
@@ -60,8 +60,6 @@
 # Classify by what the class lands on before touching it.
 app/(auth)/_components/PrimaryButton.tsx|'before:pointer-events-none before:absolute before:inset-0 before:bg-[linear-gradient(110deg,transparent,rgba(255,255,255,0.10),transparent)] before:opacity-0 before:transition',
 app/(auth)/_components/PrimaryButton.tsx|className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(255,255,255,0.22),transparent)]"
-app/(auth)/verify-email/page.tsx|'before:pointer-events-none before:absolute before:inset-0 before:bg-[linear-gradient(110deg,transparent,rgba(255,255,255,0.10),transparent)] before:opacity-0 before:transition',
-app/(auth)/verify-email/page.tsx|className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(255,255,255,0.22),transparent)]"
 app/(main)/booking/AvailabilityDrawer/components/SheetCover.tsx|'linear-gradient(to top, rgb(var(--bg-primary)) 3%, rgb(var(--bg-primary) / 0.05) 58%, rgb(0 0 0 / 0.45) 100%)',
 app/(main)/booking/AvailabilityDrawer/components/SheetCover.tsx|? 'bg-black/45 text-white hover:bg-black/60'
 app/(main)/looks/[id]/LookDetailClient.tsx|className="border border-white/12 bg-bgPrimary/25 text-white/90 shadow-[0_10px_30px_rgb(var(--shadow-color)/0.35)] backdrop-blur-xl hover:bg-white/10"
@@ -75,13 +73,11 @@ app/(main)/looks/_components/LooksTopBar.tsx|const TEXT_SHADOW = '0 2px 20px rgb
 app/(main)/looks/_components/RightActionRail.tsx|'0 2px 20px rgba(0,0,0,0.85), 0 1px 4px rgba(0,0,0,0.9)'
 app/(main)/search/SearchMapClient.tsx|className="pointer-events-none absolute left-0 right-0 top-0 z-10 h-47.5 bg-linear-to-b from-black/60 via-black/25 to-transparent lg:hidden"
 app/(main)/search/_components/DiscoverActiveProCard.tsx|className="absolute inset-0 bg-linear-to-br from-white/10 via-white/2 to-black/25"
-app/(main)/search/_components/DiscoverGridView.tsx|'bg-[linear-gradient(135deg,rgba(255,255,255,0.08)_0,rgba(255,255,255,0.02)_35%,rgba(0,0,0,0.24)_100%)]',
-app/(main)/search/_components/DiscoverGridView.tsx|className="absolute inset-0 opacity-20 [background-image:repeating-linear-gradient(135deg,transparent_0,transparent_10px,rgba(255,255,255,0.12)_11px,transparent_12px)]"
 app/(main)/search/_components/DiscoverProRows.tsx|className="absolute inset-0 bg-linear-to-br from-white/10 via-white/2 to-black/25"
 app/(main)/search/_components/MapView.tsx|background: rgb(255 255 255 / 0.92);
 app/(main)/search/_components/MapView.tsx|box-shadow: 0 16px 48px rgb(var(--shadow-color) / 0.55), 0 0 0 3px rgb(255 255 255 / 0.18);
-app/(main)/search/_components/TrendingProRail.tsx|className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.08)_0,rgba(255,255,255,0.02)_35%,rgba(0,0,0,0.24)_100%)]"
-app/(main)/search/_components/TrendingProRail.tsx|className="absolute inset-0 opacity-20 [background-image:repeating-linear-gradient(135deg,transparent_0,transparent_10px,rgba(255,255,255,0.12)_11px,transparent_12px)]"
+app/(main)/search/_components/ProTilePlaceholder.tsx|className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.08)_0,rgba(255,255,255,0.02)_35%,rgba(0,0,0,0.24)_100%)]"
+app/(main)/search/_components/ProTilePlaceholder.tsx|className="absolute inset-0 opacity-20 [background-image:repeating-linear-gradient(135deg,transparent_0,transparent_10px,rgba(255,255,255,0.12)_11px,transparent_12px)]"
 app/_components/aftercare/AftercareBeforeAfter.tsx|className="border border-white/12 bg-bgPrimary/25 text-white/90 shadow-[0_10px_30px_rgb(var(--shadow-color)/0.35)] backdrop-blur-xl hover:bg-white/10"
 app/_components/footer/TovisFeatherMark.tsx|'radial-gradient(circle at center, rgba(255,243,202,0.46) 0%, rgba(249,216,134,0.36) 19%, rgba(122,226,188,0.30) 40%, rgba(92,208,176,0.12) 60%, transparent 80%)',
 app/_components/media/ClientMediaExportButton.tsx|{rendering && preview ? <div className="absolute inset-0 bg-black/15" /> : null}
@@ -91,10 +87,8 @@ app/_components/media/MediaFullscreenViewer.tsx|<div className="rounded-card bor
 app/_components/media/MediaFullscreenViewer.tsx|<main className={cn('fixed inset-0 grid place-items-center bg-black', zClass.modal, className || '')}>
 app/_components/media/MediaFullscreenViewer.tsx|<main className={cn('fixed inset-0 overflow-hidden bg-black', zClass.modal, className || '')}>
 app/_components/media/OwnerMediaMenu.tsx|'hover:bg-white/10 active:scale-[0.99] transition',
-app/_components/media/OwnerMediaMenu.tsx|'relative h-5 w-5 rounded-full bg-white transition',
 app/_components/media/OwnerMediaMenu.tsx|'text-white/90 shadow-[0_10px_30px_rgb(var(--shadow-color)/0.35)]',
 app/_components/media/OwnerMediaMenu.tsx|<div className="absolute inset-0 rounded-full bg-gradient-to-b from-white/10 to-transparent" />
-app/_components/media/OwnerMediaMenu.tsx|value ? 'bg-accentPrimary' : 'bg-black/25',
 app/admin/services/_components/ServiceHeroGrid.tsx|'before:bg-[radial-gradient(700px_260px_at_30%_0%,rgb(255_255_255/0.12),transparent_60%)]',
 app/admin/services/_components/ServiceHeroGrid.tsx|<div className="pointer-events-none absolute inset-0 bg-[radial-gradient(120px_120px_at_20%_18%,rgb(255_255_255/0.10),transparent_60%)]" />
 app/admin/services/_components/ServiceHeroGrid.tsx|<div className="pointer-events-none absolute inset-0 bg-[radial-gradient(80px_80px_at_20%_18%,rgb(255_255_255/0.12),transparent_60%)]" />
@@ -113,7 +107,6 @@ app/pro/profile/_sections/AddServiceOverlay.tsx|<div className="absolute inset-0
 app/pro/profile/_sections/AddServiceOverlay.tsx|<div className="absolute inset-0 ring-1 ring-white/10" />
 app/pro/profile/_sections/AddServiceOverlay.tsx|<div className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-b from-transparent to-black/35" />
 app/pro/profile/public-profile/_components/YourLinkCard.tsx|className="h-40 w-40 overflow-hidden rounded-xl bg-white p-2"
-app/pro/referral-rewards/ReferralRewardsClient.tsx|className={`absolute top-0.5 block h-6 w-6 rounded-full bg-white shadow transition-transform ${
 app/pro/services/OfferingManager.tsx|'before:bg-[radial-gradient(700px_260px_at_30%_0%,rgb(255_255_255/0.14),transparent_60%)]',
 app/pro/services/OfferingManager.tsx|<div className="pointer-events-none absolute inset-0 bg-[radial-gradient(40px_40px_at_30%_20%,rgb(255_255_255/0.20),transparent_60%)]" />
 app/pro/services/OfferingManager.tsx|<div className="pointer-events-none absolute inset-0 bg-[radial-gradient(560px_200px_at_25%_0%,rgb(255_255_255/0.10),transparent_60%)]" />
