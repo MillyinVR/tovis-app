@@ -2,8 +2,8 @@
 #
 # One entry per SOURCE LINE, not per occurrence: a single line can carry
 # several (`'bg-black/45 text-white hover:bg-black/60'`). At the time this
-# baseline was written that was 116 lines carrying
-# 163 raw colours.
+# baseline was written that was 113 lines carrying
+# 157 raw colours.
 #
 # Shrink this list; never add to it. Replacements:
 #   border-white/N  -> border-surfaceGlass/N   (invisible in light mode today)
@@ -76,8 +76,6 @@ app/_components/footer/TovisFeatherMark.tsx|'radial-gradient(circle at center, r
 app/_components/media/ClickableMedia.tsx|'backdrop-blur-xl shadow-[0_14px_40px_rgba(0,0,0,0.55)]',
 app/_components/media/ClickableMedia.tsx|'px-4 py-3 shadow-[0_18px_60px_rgba(0,0,0,0.65)]',
 app/_components/media/ClientMediaExportButton.tsx|'shadow-[0_22px_90px_rgba(0,0,0,0.70)]',
-app/_components/media/ClientMediaExportButton.tsx|<div className="rounded-[14px] border border-white/10 bg-black/20 p-3 text-[12px] font-semibold text-textSecondary">
-app/_components/media/ClientMediaExportButton.tsx|<div className="rounded-[14px] border border-white/10 bg-black/20 p-3 text-[12px] font-semibold text-toneDanger">
 app/_components/media/ClientMediaExportButton.tsx|{rendering && preview ? <div className="absolute inset-0 bg-black/15" /> : null}
 app/_components/media/MediaFullscreenViewer.tsx|<div className="absolute inset-x-0 bottom-0 h-44 bg-gradient-to-t from-black/80 to-transparent" />
 app/_components/media/MediaFullscreenViewer.tsx|<div className="absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-black/70 to-transparent" />
@@ -91,7 +89,6 @@ app/_components/media/OwnerMediaMenu.tsx|'shadow-[0_18px_60px_rgba(0,0,0,0.55)]'
 app/_components/media/OwnerMediaMenu.tsx|'shadow-[0_22px_90px_rgba(0,0,0,0.70)]',
 app/_components/media/OwnerMediaMenu.tsx|'text-white/90 shadow-[0_10px_30px_rgba(0,0,0,0.35)]',
 app/_components/media/OwnerMediaMenu.tsx|<div className="absolute inset-0 rounded-full bg-gradient-to-b from-white/10 to-transparent" />
-app/_components/media/OwnerMediaMenu.tsx|<div className="rounded-[14px] border border-white/10 bg-black/20 p-3 text-[12px] font-semibold text-toneDanger">
 app/_components/media/OwnerMediaMenu.tsx|? 'border-accentPrimary/35 bg-accentPrimary/15 shadow-[0_10px_30px_rgba(0,0,0,0.25)]'
 app/_components/media/OwnerMediaMenu.tsx|value ? 'bg-accentPrimary' : 'bg-black/25',
 app/admin/services/_components/ServiceHeroGrid.tsx|'before:bg-[radial-gradient(700px_260px_at_30%_0%,rgb(255_255_255/0.12),transparent_60%)]',
