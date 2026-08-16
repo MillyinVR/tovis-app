@@ -395,6 +395,49 @@ describe('FieldLabel', () => {
     const { container } = render(<FieldLabel as="span">Name</FieldLabel>)
     expect(container.firstElementChild?.tagName).toBe('SPAN')
   })
+
+  // The LITERAL string, not the module's own constant. A test that asserts the
+  // rendered class equals `FIELD_LABEL_CLASS` moves both sides of its own
+  // comparison and stays green on exactly the restyle it exists to catch — the
+  // failure #914 shipped and had to rewrite. `text-xs` is the load-bearing
+  // token here: the 15 hand-written labels migrated in this PR were
+  // `text-[12px]`, which sets no line-height and rendered 2px taller.
+  it('emits exactly the converged label token set', () => {
+    const { container } = render(<FieldLabel>Name</FieldLabel>)
+    expect(container.firstElementChild?.className).toBe(
+      'text-xs font-black text-textSecondary',
+    )
+  })
+
+  // The four `app/pro/reminders` sites are real `<label htmlFor=…>` elements.
+  // A <div> cannot carry htmlFor, so without this variant migrating them would
+  // have traded an accessible name for a class string.
+  it('renders a real <label> that keeps its htmlFor association', () => {
+    const { container } = render(
+      <FieldLabel as="label" htmlFor="title">
+        Title
+      </FieldLabel>,
+    )
+    const el = container.firstElementChild
+    expect(el?.tagName).toBe('LABEL')
+    expect(el?.getAttribute('for')).toBe('title')
+    expect(el?.className).toBe('text-xs font-black text-textSecondary')
+  })
+
+  it('still merges a caller className onto every variant', () => {
+    for (const el of [
+      render(<FieldLabel className="mb-1.5">a</FieldLabel>).container
+        .firstElementChild,
+      render(
+        <FieldLabel as="label" htmlFor="x" className="mb-1.5">
+          b
+        </FieldLabel>,
+      ).container.firstElementChild,
+    ]) {
+      expect(el?.className).toContain('text-xs')
+      expect(el?.className).toContain('mb-1.5')
+    }
+  })
 })
 
 describe('Avatar', () => {

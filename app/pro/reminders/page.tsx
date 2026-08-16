@@ -12,7 +12,7 @@ import {
 import { getCurrentUser } from '@/lib/currentUser'
 import { prisma } from '@/lib/prisma'
 import { getVisibleClientIdSetForPro } from '@/lib/clientVisibility'
-import { Button, Card, buttonClassName } from '@/app/_components/ui'
+import { Button, Card, FieldLabel, buttonClassName } from '@/app/_components/ui'
 import { formatInTimeZone } from '@/lib/time'
 import { resolveAppointmentDisplayTimeZone } from '@/lib/booking/appointmentDisplayTimeZone'
 import { resolveProScheduleTimeZone } from '@/lib/proLocations/resolveProScheduleTimeZone'
@@ -170,12 +170,9 @@ export default async function ProRemindersPage() {
 
           <form method="post" action="/api/v1/pro/reminders" className="grid gap-3">
             <div className="grid gap-1">
-              <label
-                className="text-[12px] font-black text-textSecondary"
-                htmlFor="title"
-              >
+              <FieldLabel as="label" htmlFor="title">
                 Title *
-              </label>
+              </FieldLabel>
 
               <input
                 id="title"
@@ -187,12 +184,9 @@ export default async function ProRemindersPage() {
             </div>
 
             <div className="grid gap-1">
-              <label
-                className="text-[12px] font-black text-textSecondary"
-                htmlFor="body"
-              >
+              <FieldLabel as="label" htmlFor="body">
                 Notes (optional)
-              </label>
+              </FieldLabel>
 
               <textarea
                 id="body"
@@ -205,12 +199,9 @@ export default async function ProRemindersPage() {
 
             <div className="grid gap-3 md:grid-cols-2">
               <div className="grid gap-1">
-                <label
-                  className="text-[12px] font-black text-textSecondary"
-                  htmlFor="dueAt"
-                >
+                <FieldLabel as="label" htmlFor="dueAt">
                   Due date &amp; time *
-                </label>
+                </FieldLabel>
 
                 <input
                   id="dueAt"
@@ -226,12 +217,9 @@ export default async function ProRemindersPage() {
               </div>
 
               <div className="grid gap-1">
-                <label
-                  className="text-[12px] font-black text-textSecondary"
-                  htmlFor="clientId"
-                >
+                <FieldLabel as="label" htmlFor="clientId">
                   Linked client (optional)
-                </label>
+                </FieldLabel>
 
                 <select
                   id="clientId"
