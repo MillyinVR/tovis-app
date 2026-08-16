@@ -72,7 +72,7 @@ function Sheet({
 }) {
   return (
     <div
-      className={cn('fixed inset-0 flex items-end justify-center bg-overlay/70', zClass.modal)}
+      className={cn('fixed inset-0 flex items-end justify-center bg-scrim/70', zClass.modal)}
       onClick={onClose}
     >
       <div

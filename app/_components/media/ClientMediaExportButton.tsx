@@ -243,7 +243,7 @@ export default function ClientMediaExportButton({
       </button>
 
       {open ? (
-        <div className={cn('fixed inset-0 bg-overlay/60', zClass.modal)} onClick={close}>
+        <div className={cn('fixed inset-0 bg-scrim/60', zClass.modal)} onClick={close}>
           <div
             className={cn(
               'mx-auto mt-10 w-full max-w-[420px] overflow-hidden rounded-[18px]',

@@ -74,7 +74,7 @@ export default async function ClientNewBoardModalPage(props: {
     <div className={`fixed inset-0 ${zClass.modal}`}>
       <DismissModalButton
         ariaLabel="Close create board modal"
-        className="absolute inset-0 bg-overlay/70 backdrop-blur-[2px]"
+        className="absolute inset-0 bg-scrim/70 backdrop-blur-[2px]"
       />
 
       <div className="pointer-events-none relative z-10 flex min-h-full items-end justify-center px-4 pb-2 pt-2 sm:items-center sm:p-4">

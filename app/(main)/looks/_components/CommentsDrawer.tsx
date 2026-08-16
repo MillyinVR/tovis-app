@@ -257,7 +257,7 @@ export default function CommentsDrawer({
   return (
     <div
       onClick={onClose}
-      className={`fixed inset-0 ${zClass.modal} bg-overlay/70`}
+      className={`fixed inset-0 ${zClass.modal} bg-scrim/70`}
       role="presentation"
     >
       <div

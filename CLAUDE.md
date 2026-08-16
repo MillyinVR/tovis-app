@@ -44,11 +44,20 @@ will catch them.
     `[data-mode]`, never raw hex or raw Tailwind color classes.
     ⚠️ **Raw colors are NOT caught by the static guards — self-check them.**
   - Tint tokens always carry an alpha. A token whose declaration in
-    `lib/brand/types.ts` says `used with opacity` (today: `surfaceGlass`) is a
-    tint meant to layer over a surface, never painted solid — its value is
-    byte-identical to `textPrimary` in *both* modes, so a bare
-    `bg-surfaceGlass` renders the label invisible. Write `bg-surfaceGlass/10`.
-    *Enforced* by `check:no-bare-tint-token`.
+    `lib/brand/types.ts` says `used with opacity` (today: `surfaceGlass` and
+    `scrim`) is a tint meant to layer over a surface, never painted solid.
+    `surfaceGlass` is byte-identical to `textPrimary` in *both* modes, so
+    painting it with no alpha renders the label invisible; `scrim` with no alpha
+    fills the whole viewport. Always write the alpha: `bg-surfaceGlass/10`,
+    `bg-scrim/70`. *Enforced* by `check:no-bare-tint-token`, which matches
+    Tailwind utilities only and skips class names this repo's own CSS defines
+    (`.tovis-overlay-scrim` is a gradient, not a bare token).
+    ⚠️ Never spell an alpha-less tint utility out in prose — Tailwind's source
+    detection walks this file too, and the class it extracts becomes a REAL rule
+    in the shipped stylesheet (a leading `.` does not save you; the extractor
+    strips it). An earlier wording of this very bullet is why a bare
+    `surfaceGlass` background rule the codebase never writes was shipping in
+    production CSS. Describe it in words; only ever type the alpha'd form.
 
 Before pushing any change, run:
 

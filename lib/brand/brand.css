@@ -169,6 +169,12 @@
   --page-max-width: 960px;
   --mobile-shell-width: 430px;
   --overlay: var(--bg-primary);
+
+  /* Modal backdrop. NOT var(--bg-primary): a translucent fill of the ground
+     colour composites back to the ground colour at every alpha, so a scrim
+     built that way never darkens anything. Dark fallback, like the rest of
+     this :root block; BrandProvider emits the per-mode pair. */
+  --scrim: 0 0 0;
 }
 
 /* ──────────────────────────────────────────────────────────────────

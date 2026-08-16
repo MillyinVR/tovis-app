@@ -34,6 +34,11 @@ export const tovisBrand: BrandConfig = createBrandConfig({
       bgSecondary: '14 26 24', // #0E1A18
       bgSurface: '17 32 30', // #11201E
 
+      // Black, so a backdrop still darkens the ink canvas. At /70 over
+      // bgPrimary this composites to rgb(3,6,6) — byte-identical to the
+      // bg-black/70 that shipped before #922.
+      scrim: '0 0 0',
+
       textPrimary: '242 239 231', // #F2EFE7 paper
       textSecondary: '199 210 207', // #C7D2CF
       textMuted: '143 163 158', // #8FA39E
@@ -55,6 +60,11 @@ export const tovisBrand: BrandConfig = createBrandConfig({
       bgPrimary: '243 240 231', // #F3F0E7
       bgSecondary: '236 232 221', // #ECE8DD section band
       bgSurface: '255 255 255', // #FFFFFF elevated card
+
+      // Paper, matching bgPrimary — light mode's backdrop must stay light or
+      // the ink-coloured labels sitting on the glass panel go invisible again
+      // (#922 measured 12 of 12 failing WCAG AA before that fix).
+      scrim: '243 240 231', // #F3F0E7
 
       textPrimary: '10 20 19', // #0A1413 ink
       textSecondary: '58 74 70', // #3A4A46

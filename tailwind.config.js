@@ -33,6 +33,7 @@ module.exports = {
         toneInfo: 'rgb(var(--tone-info) / <alpha-value>)',
 
         overlay: 'rgb(var(--overlay) / <alpha-value>)',
+        scrim: 'rgb(var(--scrim) / <alpha-value>)',
 
         // ── Prototype aliases used by editorial/new screens ─────────
         ink: 'rgb(var(--ink) / <alpha-value>)',
