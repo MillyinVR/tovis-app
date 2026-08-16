@@ -352,7 +352,7 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
                   name="qty"
                   defaultValue="25"
                   inputMode="numeric"
-                  className="h-11 rounded-xl border border-white/15 bg-bgPrimary px-3 text-sm text-textPrimary outline-none focus:border-white/30"
+                  className="h-11 rounded-xl border border-surfaceGlass/15 bg-bgPrimary px-3 text-sm text-textPrimary outline-none focus:border-surfaceGlass/30"
                 />
               </label>
 
@@ -361,7 +361,7 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
                 <select
                   name="type"
                   defaultValue={NfcCardType.UNASSIGNED}
-                  className="h-11 rounded-xl border border-white/15 bg-bgPrimary px-3 text-sm text-textPrimary outline-none focus:border-white/30"
+                  className="h-11 rounded-xl border border-surfaceGlass/15 bg-bgPrimary px-3 text-sm text-textPrimary outline-none focus:border-surfaceGlass/30"
                 >
                   <option value={NfcCardType.UNASSIGNED}>UNASSIGNED (recommended)</option>
                   <option value={NfcCardType.CLIENT_REFERRAL}>CLIENT_REFERRAL</option>
@@ -377,7 +377,7 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
                 <select
                   name="isActive"
                   defaultValue="true"
-                  className="h-11 rounded-xl border border-white/15 bg-bgPrimary px-3 text-sm text-textPrimary outline-none focus:border-white/30"
+                  className="h-11 rounded-xl border border-surfaceGlass/15 bg-bgPrimary px-3 text-sm text-textPrimary outline-none focus:border-surfaceGlass/30"
                 >
                   <option value="true">Yes (tap works)</option>
                   <option value="false">No (tap goes invalid)</option>
@@ -389,7 +389,7 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
                 <input
                   name="tenantSlug"
                   placeholder="e.g. luxe-la"
-                  className="h-11 rounded-xl border border-white/15 bg-bgPrimary px-3 text-sm text-textPrimary outline-none focus:border-white/30"
+                  className="h-11 rounded-xl border border-surfaceGlass/15 bg-bgPrimary px-3 text-sm text-textPrimary outline-none focus:border-surfaceGlass/30"
                 />
               </label>
             </div>
@@ -401,7 +401,7 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
               <input
                 name="professionalId"
                 placeholder="Leave blank for an unclaimed card"
-                className="h-11 rounded-xl border border-white/15 bg-bgPrimary px-3 font-mono text-sm text-textPrimary outline-none focus:border-white/30"
+                className="h-11 rounded-xl border border-surfaceGlass/15 bg-bgPrimary px-3 font-mono text-sm text-textPrimary outline-none focus:border-surfaceGlass/30"
               />
               <span className="text-[11px] text-textSecondary">
                 When set, the whole batch is created as PRO_BOOKING already bound to that pro (no claim race).
@@ -534,7 +534,7 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
                           <input type="hidden" name="active" value={c.isActive ? 'false' : 'true'} />
                           <button
                             type="submit"
-                            className="inline-flex h-8 items-center justify-center rounded-lg border border-white/15 px-3 text-xs font-medium text-textPrimary transition hover:border-white/30"
+                            className="inline-flex h-8 items-center justify-center rounded-lg border border-surfaceGlass/15 px-3 text-xs font-medium text-textPrimary transition hover:border-surfaceGlass/30"
                           >
                             {c.isActive ? 'Deactivate' : 'Activate'}
                           </button>
@@ -545,7 +545,7 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
                             <input type="hidden" name="cardId" value={c.id} />
                             <button
                               type="submit"
-                              className="inline-flex h-8 items-center justify-center rounded-lg border border-white/15 px-3 text-xs font-medium text-textPrimary transition hover:border-white/30"
+                              className="inline-flex h-8 items-center justify-center rounded-lg border border-surfaceGlass/15 px-3 text-xs font-medium text-textPrimary transition hover:border-surfaceGlass/30"
                             >
                               Re-issue (unclaim)
                             </button>
@@ -557,11 +557,11 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
                           <input
                             name="professionalId"
                             placeholder="proId"
-                            className="h-8 w-28 rounded-lg border border-white/15 bg-bgPrimary px-2 font-mono text-[11px] text-textPrimary outline-none focus:border-white/30"
+                            className="h-8 w-28 rounded-lg border border-surfaceGlass/15 bg-bgPrimary px-2 font-mono text-[11px] text-textPrimary outline-none focus:border-surfaceGlass/30"
                           />
                           <button
                             type="submit"
-                            className="inline-flex h-8 items-center justify-center rounded-lg border border-white/15 px-2 text-xs font-medium text-textPrimary transition hover:border-white/30"
+                            className="inline-flex h-8 items-center justify-center rounded-lg border border-surfaceGlass/15 px-2 text-xs font-medium text-textPrimary transition hover:border-surfaceGlass/30"
                           >
                             Bind
                           </button>

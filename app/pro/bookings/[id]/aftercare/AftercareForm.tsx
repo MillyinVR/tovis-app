@@ -194,7 +194,7 @@ function safeId() {
 }
 
 function cardClass() {
-  return 'rounded-card border border-white/10 bg-bgSecondary p-4 text-textPrimary'
+  return 'rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4 text-textPrimary'
 }
 
 function subtleTextClass() {
@@ -208,7 +208,7 @@ function sectionTitleClass() {
 function pillClass(active: boolean) {
   return [
     'inline-flex items-center rounded-full px-3 py-1 text-xs font-black transition',
-    'border border-white/10',
+    'border border-surfaceGlass/10',
     active
       ? 'bg-accentPrimary text-bgPrimary'
       : 'bg-bgPrimary text-textPrimary hover:bg-surfaceGlass/10',
@@ -219,8 +219,8 @@ function primaryBtn(disabled: boolean) {
   return [
     'inline-flex items-center justify-center rounded-full px-4 py-2 text-xs font-black transition',
     disabled
-      ? 'cursor-not-allowed border border-white/10 bg-bgPrimary text-textSecondary opacity-60'
-      : 'border border-white/10 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
+      ? 'cursor-not-allowed border border-surfaceGlass/10 bg-bgPrimary text-textSecondary opacity-60'
+      : 'border border-surfaceGlass/10 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
   ].join(' ')
 }
 
@@ -228,15 +228,15 @@ function secondaryBtn(disabled: boolean) {
   return [
     'inline-flex items-center justify-center rounded-full px-4 py-2 text-xs font-black transition',
     disabled
-      ? 'cursor-not-allowed border border-white/10 bg-bgPrimary text-textSecondary opacity-60'
-      : 'border border-white/10 bg-bgPrimary text-textPrimary hover:bg-surfaceGlass/10',
+      ? 'cursor-not-allowed border border-surfaceGlass/10 bg-bgPrimary text-textSecondary opacity-60'
+      : 'border border-surfaceGlass/10 bg-bgPrimary text-textPrimary hover:bg-surfaceGlass/10',
   ].join(' ')
 }
 
 function inputClass(disabled: boolean) {
   return [
-    'w-full rounded-card border border-white/10 bg-bgPrimary px-3 py-2 text-sm text-textPrimary outline-none',
-    disabled ? 'opacity-60 cursor-not-allowed' : 'focus:border-white/20',
+    'w-full rounded-card border border-surfaceGlass/10 bg-bgPrimary px-3 py-2 text-sm text-textPrimary outline-none',
+    disabled ? 'opacity-60 cursor-not-allowed' : 'focus:border-surfaceGlass/20',
   ].join(' ')
 }
 
@@ -1129,7 +1129,7 @@ export default function AftercareForm({
 
   return (
     <div className="grid gap-3">
-      <div className="rounded-card border border-white/10 bg-bgSecondary p-4">
+      <div className="rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4">
         <div className="text-xs font-black text-accentPrimary">
           Client-facing
         </div>
@@ -1273,10 +1273,10 @@ export default function AftercareForm({
                 disabled={disabled}
                 placeholder="E.g. wash after 48 hours, use sulfate-free shampoo, avoid tight ponytails for 7 days…"
                 className={[
-                  'w-full resize-y rounded-card border border-white/10 bg-bgPrimary px-3 py-2 text-sm text-textPrimary outline-none',
+                  'w-full resize-y rounded-card border border-surfaceGlass/10 bg-bgPrimary px-3 py-2 text-sm text-textPrimary outline-none',
                   disabled
                     ? 'cursor-not-allowed opacity-60'
-                    : 'focus:border-white/20',
+                    : 'focus:border-surfaceGlass/20',
                 ].join(' ')}
               />
               <div className="mt-1 text-xs font-semibold text-textSecondary">
@@ -1586,7 +1586,7 @@ export default function AftercareForm({
                 products.map((p, idx) => (
                   <div
                     key={p.id}
-                    className="rounded-card border border-white/10 bg-bgPrimary p-3"
+                    className="rounded-card border border-surfaceGlass/10 bg-bgPrimary p-3"
                   >
                     <div className="flex items-center justify-between gap-3">
                       <div className="text-sm font-black text-textPrimary">
@@ -1719,7 +1719,7 @@ export default function AftercareForm({
                     markDirty()
                   }}
                   className={[
-                    'mx-1 rounded-full border border-white/10 bg-bgPrimary px-2 py-1 text-xs font-black text-textPrimary',
+                    'mx-1 rounded-full border border-surfaceGlass/10 bg-bgPrimary px-2 py-1 text-xs font-black text-textPrimary',
                     !(
                       rebookMode === 'BOOKED_NEXT_APPOINTMENT' && hasBookedDate
                     ) || disabled
@@ -1756,7 +1756,7 @@ export default function AftercareForm({
                     markDirty()
                   }}
                   className={[
-                    'mx-1 rounded-full border border-white/10 bg-bgPrimary px-2 py-1 text-xs font-black text-textPrimary',
+                    'mx-1 rounded-full border border-surfaceGlass/10 bg-bgPrimary px-2 py-1 text-xs font-black text-textPrimary',
                     disabled ? 'cursor-not-allowed opacity-60' : '',
                   ].join(' ')}
                 >
@@ -1893,18 +1893,18 @@ function MediaGrid({
                 isFeatured
                   ? 'border-2 border-accentPrimary'
                   : isProClient
-                    ? 'border border-white/10'
+                    ? 'border border-surfaceGlass/10'
                     : 'border border-transparent',
                 'hover:bg-surfaceGlass/10',
               ].join(' ')}
             >
               {isVideo ? (
-                <div className="pointer-events-none absolute right-2 top-2 rounded-full border border-white/10 bg-bgSecondary px-2 py-1 text-[10px] font-black text-textPrimary">
+                <div className="pointer-events-none absolute right-2 top-2 rounded-full border border-surfaceGlass/10 bg-bgSecondary px-2 py-1 text-[10px] font-black text-textPrimary">
                   VIDEO
                 </div>
               ) : null}
 
-              <div className="pointer-events-none absolute bottom-2 left-2 rounded-full border border-white/10 bg-bgSecondary px-2 py-1 text-[10px] font-black text-textPrimary">
+              <div className="pointer-events-none absolute bottom-2 left-2 rounded-full border border-surfaceGlass/10 bg-bgSecondary px-2 py-1 text-[10px] font-black text-textPrimary">
                 {isProClient ? 'PRO + CLIENT' : 'PUBLIC'}
               </div>
             </ClickableMedia>
@@ -1925,7 +1925,7 @@ function MediaGrid({
                   'disabled:cursor-not-allowed disabled:opacity-50',
                   isFeatured
                     ? 'bg-accentPrimary text-bgPrimary'
-                    : 'border border-white/10 bg-bgSecondary text-textPrimary hover:bg-surfaceGlass/10',
+                    : 'border border-surfaceGlass/10 bg-bgSecondary text-textPrimary hover:bg-surfaceGlass/10',
                 ].join(' ')}
               >
                 {isFeatured ? '★ Featured' : 'Feature'}

@@ -97,7 +97,7 @@ export default function AnomaliesClient() {
             setWindowDays(next)
             startTransition(() => load(next))
           }}
-          className="rounded-card border border-white/15 bg-bgPrimary px-3 py-2 text-[12px] text-textPrimary focus:border-accentPrimary/60 focus:outline-none"
+          className="rounded-card border border-surfaceGlass/15 bg-bgPrimary px-3 py-2 text-[12px] text-textPrimary focus:border-accentPrimary/60 focus:outline-none"
         >
           {WINDOW_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>
@@ -115,7 +115,7 @@ export default function AnomaliesClient() {
         </button>
         <a
           href="/admin/looks"
-          className="rounded-card border border-white/15 bg-bgPrimary px-3 py-2 text-[12px] font-black text-textPrimary transition hover:border-white/30"
+          className="rounded-card border border-surfaceGlass/15 bg-bgPrimary px-3 py-2 text-[12px] font-black text-textPrimary transition hover:border-surfaceGlass/30"
         >
           Looks moderation
         </a>
@@ -137,7 +137,7 @@ export default function AnomaliesClient() {
         ))}
 
         {loaded && rows.length === 0 && !error ? (
-          <div className="rounded-card border border-white/10 bg-bgPrimary/40 p-4 text-[13px] text-textSecondary">
+          <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary/40 p-4 text-[13px] text-textSecondary">
             No anomalies in this window. Either engagement is tracking impressions
             honestly, or there isn’t enough recent activity to flag.
           </div>
@@ -227,13 +227,13 @@ function AnomalyCard({
           href={`/looks/${row.lookPostId}`}
           target="_blank"
           rel="noreferrer"
-          className="rounded-card border border-white/15 bg-bgPrimary px-3 py-1.5 text-[12px] font-black text-textPrimary transition hover:border-white/30"
+          className="rounded-card border border-surfaceGlass/15 bg-bgPrimary px-3 py-1.5 text-[12px] font-black text-textPrimary transition hover:border-surfaceGlass/30"
         >
           View look
         </a>
         <a
           href="/admin/looks"
-          className="rounded-card border border-white/15 bg-bgPrimary px-3 py-1.5 text-[12px] font-black text-textPrimary transition hover:border-white/30"
+          className="rounded-card border border-surfaceGlass/15 bg-bgPrimary px-3 py-1.5 text-[12px] font-black text-textPrimary transition hover:border-surfaceGlass/30"
         >
           Review pro
         </a>

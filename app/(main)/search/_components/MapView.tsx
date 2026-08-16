@@ -165,7 +165,7 @@ function MapControls(props: { me: Coords | null; origin: Coords | null }) {
 
   return (
     <div className="pointer-events-none absolute right-3 top-3 z-[800] flex flex-col gap-2">
-      <div className="pointer-events-auto tovis-glass-strong overflow-hidden rounded-2xl border border-white/12 bg-bgSecondary/80 backdrop-blur-xl">
+      <div className="pointer-events-auto tovis-glass-strong overflow-hidden rounded-2xl border border-surfaceGlass/12 bg-bgSecondary/80 backdrop-blur-xl">
         <button
           type="button"
           onClick={() => map.zoomIn()}
@@ -189,7 +189,7 @@ function MapControls(props: { me: Coords | null; origin: Coords | null }) {
         <button
           type="button"
           onClick={() => map.setView([origin.lat, origin.lng], Math.max(map.getZoom(), 11), { animate: true })}
-          className="pointer-events-auto tovis-glass-strong rounded-full border border-white/12 bg-bgSecondary/80 px-3 py-2 text-[12px] font-black text-textPrimary backdrop-blur-xl hover:bg-white/10"
+          className="pointer-events-auto tovis-glass-strong rounded-full border border-surfaceGlass/12 bg-bgSecondary/80 px-3 py-2 text-[12px] font-black text-textPrimary backdrop-blur-xl hover:bg-white/10"
         >
           Center
         </button>
@@ -199,7 +199,7 @@ function MapControls(props: { me: Coords | null; origin: Coords | null }) {
         <button
           type="button"
           onClick={() => map.setView([me.lat, me.lng], Math.max(map.getZoom(), 12), { animate: true })}
-          className="pointer-events-auto tovis-glass-strong rounded-full border border-white/12 bg-bgSecondary/80 px-3 py-2 text-[12px] font-black text-textPrimary backdrop-blur-xl hover:bg-white/10"
+          className="pointer-events-auto tovis-glass-strong rounded-full border border-surfaceGlass/12 bg-bgSecondary/80 px-3 py-2 text-[12px] font-black text-textPrimary backdrop-blur-xl hover:bg-white/10"
         >
           Me
         </button>
@@ -395,7 +395,7 @@ export default function MapView({
   }, [pins, zoom, enableClustering])
 
   return (
-    <div className="tovis-glass relative h-full w-full overflow-hidden rounded-card border border-white/10">
+    <div className="tovis-glass relative h-full w-full overflow-hidden rounded-card border border-surfaceGlass/10">
       <MapContainer
         center={center}
         zoom={baseZoom}

@@ -125,13 +125,13 @@ export default function NewClientForm() {
   }
 
   const fieldClassName =
-    'w-full rounded-card border border-white/10 bg-bgPrimary/20 px-3 py-2 text-sm text-textPrimary outline-none placeholder:text-textSecondary disabled:opacity-60'
+    'w-full rounded-card border border-surfaceGlass/10 bg-bgPrimary/20 px-3 py-2 text-sm text-textPrimary outline-none placeholder:text-textSecondary disabled:opacity-60'
   const labelClassName = 'mb-1 block text-xs font-semibold text-textSecondary'
 
   return (
     <form
       onSubmit={handleSubmit}
-      className="grid gap-3 rounded-card border border-white/10 bg-bgSurface p-4"
+      className="grid gap-3 rounded-card border border-surfaceGlass/10 bg-bgSurface p-4"
     >
       <div className="grid grid-cols-2 gap-2.5">
         <div>

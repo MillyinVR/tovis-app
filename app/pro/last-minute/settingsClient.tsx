@@ -158,7 +158,7 @@ function TogglePill({
         disabled ? 'cursor-not-allowed opacity-60' : 'hover:bg-surfaceGlass/10',
         on
           ? 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary'
-          : 'border-white/10 bg-bgPrimary text-textPrimary',
+          : 'border-surfaceGlass/10 bg-bgPrimary text-textPrimary',
       ].join(' ')}
     >
       {on ? labelOn : labelOff}
@@ -419,14 +419,14 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
     }
   }
 
-  const card = 'tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4'
+  const card = 'tovis-glass rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4'
   const label = 'text-[12px] font-black text-textPrimary'
   const hint = 'text-[12px] font-semibold text-textSecondary'
   const field = controlClassName({ surface: 'solid' })
   const btnPrimary =
     'rounded-full border border-accentPrimary/60 bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary hover:bg-accentPrimaryHover disabled:opacity-60'
   const btnDanger =
-    'rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-toneDanger hover:bg-surfaceGlass/10 disabled:opacity-60'
+    'rounded-full border border-surfaceGlass/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-toneDanger hover:bg-surfaceGlass/10 disabled:opacity-60'
 
   return (
     <div className="grid gap-3">
@@ -503,7 +503,7 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
 
           <div className="grid gap-2">
             <span className={label}>Current mode</span>
-            <div className="rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] font-semibold text-textSecondary">
+            <div className="rounded-xl border border-surfaceGlass/10 bg-bgPrimary px-3 py-3 text-[13px] font-semibold text-textSecondary">
               {visibilityLabel(defaultVisibilityMode)}
             </div>
           </div>
@@ -555,7 +555,7 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
           </label>
         </div>
 
-        <div className="mt-4 rounded-xl border border-white/10 bg-bgPrimary/40 p-4">
+        <div className="mt-4 rounded-xl border border-surfaceGlass/10 bg-bgPrimary/40 p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-[220px]">
               <div className="text-[13px] font-black text-textPrimary">
@@ -615,7 +615,7 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
               const on = days[key]
               const classes = on
                 ? 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary'
-                : 'border-white/10 bg-bgPrimary text-textPrimary'
+                : 'border-surfaceGlass/10 bg-bgPrimary text-textPrimary'
 
               return (
                 <button
@@ -724,7 +724,7 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
             blocks.map((b) => (
               <div
                 key={b.id}
-                className="rounded-card border border-white/10 bg-bgPrimary p-3 flex items-center justify-between gap-3"
+                className="rounded-card border border-surfaceGlass/10 bg-bgPrimary p-3 flex items-center justify-between gap-3"
               >
                 <div className="min-w-0">
                   <div className="text-[13px] font-black text-textPrimary">
@@ -772,7 +772,7 @@ function ServiceRuleRow({
   const field = controlClassName({ surface: 'solid' })
 
   return (
-    <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
+    <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary p-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="text-[13px] font-black text-textPrimary truncate">{label}</div>
@@ -787,7 +787,7 @@ function ServiceRuleRow({
             'rounded-full border px-4 py-2 text-[12px] font-black transition',
             ruleEnabled
               ? 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary'
-              : 'border-white/10 bg-bgPrimary text-textPrimary',
+              : 'border-surfaceGlass/10 bg-bgPrimary text-textPrimary',
             busy || !enabled ? 'cursor-not-allowed opacity-60' : 'hover:bg-surfaceGlass/10',
           ].join(' ')}
         >

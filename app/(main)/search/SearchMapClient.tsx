@@ -1139,12 +1139,12 @@ export default function SearchMapClient() {
 
         {/* Left column: `contents` on mobile (the header floats over the map);
             a bordered flex column on desktop holding the header + results list. */}
-        <div className="contents lg:col-start-1 lg:row-start-1 lg:flex lg:min-h-0 lg:flex-col lg:overflow-hidden lg:border-r lg:border-white/10 lg:bg-bgPrimary">
+        <div className="contents lg:col-start-1 lg:row-start-1 lg:flex lg:min-h-0 lg:flex-col lg:overflow-hidden lg:border-r lg:border-surfaceGlass/10 lg:bg-bgPrimary">
         <div ref={headerRef} className="absolute left-0 right-0 top-0 z-20 px-3 pt-3 lg:relative lg:z-20 lg:shrink-0 lg:px-4 lg:pt-4">
           <div
             ref={acRootRef}
             className={cn(
-              'tovis-glass-strong rounded-card border border-white/12 bg-bgSecondary/80 p-3 backdrop-blur-xl',
+              'tovis-glass-strong rounded-card border border-surfaceGlass/12 bg-bgSecondary/80 p-3 backdrop-blur-xl',
               'shadow-[0_18px_60px_rgba(0,0,0,0.65)] lg:shadow-none',
             )}
           >
@@ -1179,10 +1179,10 @@ export default function SearchMapClient() {
                 <div
                   className={cn(
                     'flex flex-1 items-center gap-2 rounded-2xl px-3 py-2',
-                      'border border-white/12 bg-bgPrimary/20 backdrop-blur-xl',
+                      'border border-surfaceGlass/12 bg-bgPrimary/20 backdrop-blur-xl',
                       'shadow-[inset_0_1px_0_rgba(255,255,255,0.14)]',
                       'transition duration-200',
-                      'focus-within:border-white/20',
+                      'focus-within:border-surfaceGlass/20',
                       'focus-within:shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_0_0_3px_rgba(var(--accent-primary),0.25)]',
                     )}
                   >
@@ -1271,7 +1271,7 @@ export default function SearchMapClient() {
                     'relative flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border transition-colors',
                     filtersOpen
                       ? 'border-accentPrimary bg-accentPrimary text-bgPrimary'
-                      : 'border-white/12 bg-bgPrimary/20 text-textPrimary hover:bg-white/10',
+                      : 'border-surfaceGlass/12 bg-bgPrimary/20 text-textPrimary hover:bg-white/10',
                   )}
                 >
                   <SlidersHorizontal size={16} />
@@ -1296,7 +1296,7 @@ export default function SearchMapClient() {
                 </div>
 
                 {acOpen && acPreds.length > 0 ? (
-                  <div className="mt-2 overflow-hidden rounded-2xl border border-white/12 bg-bgPrimary/45 backdrop-blur-xl">
+                  <div className="mt-2 overflow-hidden rounded-2xl border border-surfaceGlass/12 bg-bgPrimary/45 backdrop-blur-xl">
                     {acPreds.slice(0, 8).map((prediction, index) => (
                       <button
                         key={prediction.placeId}
@@ -1309,7 +1309,7 @@ export default function SearchMapClient() {
                         className={cn(
                           'flex w-full flex-col gap-0.5 px-3 py-2 text-left transition',
                           index === acIndex ? 'bg-white/10' : 'bg-transparent hover:bg-white/10',
-                          'border-b border-white/10 last:border-b-0',
+                          'border-b border-surfaceGlass/10 last:border-b-0',
                         )}
                       >
                         <div className="text-[13px] font-black text-textPrimary">{prediction.mainText}</div>
@@ -1327,7 +1327,7 @@ export default function SearchMapClient() {
                     value={radiusMiles}
                     onChange={(event) => setRadiusMiles(Number(event.target.value))}
                     className={cn(
-                      'rounded-full border border-white/12 bg-bgPrimary/20 px-3 py-2',
+                      'rounded-full border border-surfaceGlass/12 bg-bgPrimary/20 px-3 py-2',
                       'text-[12px] font-black text-textPrimary outline-none',
                     )}
                     aria-label="Search radius"
@@ -1347,7 +1347,7 @@ export default function SearchMapClient() {
                       }
                     }}
                     className={cn(
-                      'rounded-full border border-white/12 bg-bgPrimary/20 px-3 py-2',
+                      'rounded-full border border-surfaceGlass/12 bg-bgPrimary/20 px-3 py-2',
                       'text-[12px] font-black text-textPrimary outline-none',
                     )}
                     aria-label="Sort"
@@ -1365,7 +1365,7 @@ export default function SearchMapClient() {
                       setMinRating(raw ? Number(raw) : null)
                     }}
                     className={cn(
-                      'rounded-full border border-white/12 bg-bgPrimary/20 px-3 py-2',
+                      'rounded-full border border-surfaceGlass/12 bg-bgPrimary/20 px-3 py-2',
                       'text-[12px] font-black text-textPrimary outline-none',
                     )}
                     aria-label="Minimum rating"
@@ -1382,7 +1382,7 @@ export default function SearchMapClient() {
                       setMaxPrice(raw ? Number(raw) : null)
                     }}
                     className={cn(
-                      'rounded-full border border-white/12 bg-bgPrimary/20 px-3 py-2',
+                      'rounded-full border border-surfaceGlass/12 bg-bgPrimary/20 px-3 py-2',
                       'text-[12px] font-black text-textPrimary outline-none',
                     )}
                     aria-label="Maximum starting price"
@@ -1401,7 +1401,7 @@ export default function SearchMapClient() {
                       'rounded-full border px-3 py-2 text-[12px] font-black transition',
                       openNowOnly
                         ? 'border-accentPrimary bg-accentPrimary/15 text-textPrimary'
-                        : 'border-white/12 bg-bgPrimary/20 text-textSecondary hover:bg-white/10',
+                        : 'border-surfaceGlass/12 bg-bgPrimary/20 text-textSecondary hover:bg-white/10',
                     )}
                   >
                     Open now
@@ -1415,7 +1415,7 @@ export default function SearchMapClient() {
                       'rounded-full border px-3 py-2 text-[12px] font-black transition',
                       mobileOnly
                         ? 'border-accentPrimary bg-accentPrimary/15 text-textPrimary'
-                        : 'border-white/12 bg-bgPrimary/20 text-textSecondary hover:bg-white/10',
+                        : 'border-surfaceGlass/12 bg-bgPrimary/20 text-textSecondary hover:bg-white/10',
                     )}
                   >
                     Comes to you
@@ -1438,7 +1438,7 @@ export default function SearchMapClient() {
                         lastSearchRef.current = nextSearch
                         void runSearch(nextSearch)
                       }}
-                      className="rounded-full border border-white/12 bg-bgPrimary/20 px-3 py-2 text-[12px] font-black text-textPrimary hover:bg-white/10"
+                      className="rounded-full border border-surfaceGlass/12 bg-bgPrimary/20 px-3 py-2 text-[12px] font-black text-textPrimary hover:bg-white/10"
                     >
                       Use me
                     </button>
@@ -1497,7 +1497,7 @@ export default function SearchMapClient() {
                   }}
                   className={cn(
                     'rounded-full px-4 py-2 text-[12px] font-black',
-                    'border border-white/15 bg-bgPrimary/25 backdrop-blur-xl',
+                    'border border-surfaceGlass/15 bg-bgPrimary/25 backdrop-blur-xl',
                     'text-textPrimary',
                     'shadow-[0_14px_40px_rgba(0,0,0,0.55)]',
                     'transition hover:bg-white/10',
@@ -1516,11 +1516,11 @@ export default function SearchMapClient() {
             className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 pb-4 pt-3"
           >
             {err ? (
-              <div className="rounded-card border border-white/10 bg-bgSecondary/80 p-4 text-[13px] font-semibold text-microAccent">
+              <div className="rounded-card border border-surfaceGlass/10 bg-bgSecondary/80 p-4 text-[13px] font-semibold text-microAccent">
                 {err}
               </div>
             ) : loading ? (
-              <div className="rounded-card border border-white/10 bg-bgSecondary/80 p-4">
+              <div className="rounded-card border border-surfaceGlass/10 bg-bgSecondary/80 p-4">
                 <DiscoverLoadingRow />
               </div>
             ) : !displayPros.length ? (
@@ -1556,11 +1556,11 @@ export default function SearchMapClient() {
             }}
           >
             {err ? (
-              <div className="rounded-card border border-white/10 bg-bgSecondary/80 p-4 text-[13px] font-semibold text-microAccent">
+              <div className="rounded-card border border-surfaceGlass/10 bg-bgSecondary/80 p-4 text-[13px] font-semibold text-microAccent">
                 {err}
               </div>
             ) : loading ? (
-              <div className="rounded-card border border-white/10 bg-bgSecondary/80 p-4">
+              <div className="rounded-card border border-surfaceGlass/10 bg-bgSecondary/80 p-4">
                 <DiscoverLoadingRow />
               </div>
             ) : (
@@ -1589,7 +1589,7 @@ export default function SearchMapClient() {
 
         {!isDesktop && viewMode === 'MAP' ? (
           <div className="absolute left-0 right-0 z-20 px-3" style={{ bottom: APP_BOTTOM_INSET, paddingBottom: 12 }}>
-            <div className="tovis-glass-strong rounded-card border border-white/10 bg-bgSecondary p-3">
+            <div className="tovis-glass-strong rounded-card border border-surfaceGlass/10 bg-bgSecondary p-3">
               {err ? (
                 <div className="text-[13px] font-semibold text-microAccent">{err}</div>
               ) : loading ? (

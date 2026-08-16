@@ -108,7 +108,7 @@ export default function ReviewsAdminClient() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Filter by pro business, name, or handle…"
-          className="w-full max-w-md rounded-card border border-white/15 bg-bgPrimary px-3 py-2 text-[13px] text-textPrimary placeholder:text-textSecondary focus:border-accentPrimary/60 focus:outline-none"
+          className="w-full max-w-md rounded-card border border-surfaceGlass/15 bg-bgPrimary px-3 py-2 text-[13px] text-textPrimary placeholder:text-textSecondary focus:border-accentPrimary/60 focus:outline-none"
         />
         <button
           type="submit"
@@ -139,7 +139,7 @@ export default function ReviewsAdminClient() {
           />
         ))}
         {loaded && items.length === 0 && !error ? (
-          <div className="rounded-card border border-white/10 bg-bgPrimary/40 p-4 text-[13px] text-textSecondary">
+          <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary/40 p-4 text-[13px] text-textSecondary">
             No reviews matched.
           </div>
         ) : null}
@@ -171,7 +171,7 @@ function ReviewRow({
       className={`rounded-card border p-4 ${
         item.hidden
           ? 'border-toneWarn/40 bg-bgPrimary/20'
-          : 'border-white/10 bg-bgPrimary/40'
+          : 'border-surfaceGlass/10 bg-bgPrimary/40'
       }`}
     >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -216,7 +216,7 @@ function ReviewRow({
       ) : null}
 
       {item.proReplyBody ? (
-        <div className="mt-3 rounded-card border border-white/10 bg-bgPrimary/60 p-3">
+        <div className="mt-3 rounded-card border border-surfaceGlass/10 bg-bgPrimary/60 p-3">
           <div className="text-[11px] font-black uppercase text-textSecondary">
             Pro reply{replyDateLabel ? ` · ${replyDateLabel}` : ''}
           </div>
@@ -227,7 +227,7 @@ function ReviewRow({
             type="button"
             disabled={busy}
             onClick={onRemoveReply}
-            className="mt-2 rounded-card border border-white/15 bg-bgPrimary px-3 py-1.5 text-[12px] font-black text-toneDanger transition hover:border-white/30 disabled:cursor-not-allowed disabled:opacity-60"
+            className="mt-2 rounded-card border border-surfaceGlass/15 bg-bgPrimary px-3 py-1.5 text-[12px] font-black text-toneDanger transition hover:border-surfaceGlass/30 disabled:cursor-not-allowed disabled:opacity-60"
           >
             Remove reply
           </button>
@@ -250,13 +250,13 @@ function ReviewRow({
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               placeholder="Reason (optional)"
-              className="min-w-[160px] flex-1 rounded-card border border-white/15 bg-bgPrimary px-2 py-1.5 text-[12px] text-textPrimary placeholder:text-textSecondary"
+              className="min-w-[160px] flex-1 rounded-card border border-surfaceGlass/15 bg-bgPrimary px-2 py-1.5 text-[12px] text-textPrimary placeholder:text-textSecondary"
             />
             <button
               type="button"
               disabled={busy}
               onClick={() => onHide(reason.trim())}
-              className="rounded-card border border-white/15 bg-bgPrimary px-3 py-1.5 text-[12px] font-black text-toneDanger transition hover:border-white/30 disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-card border border-surfaceGlass/15 bg-bgPrimary px-3 py-1.5 text-[12px] font-black text-toneDanger transition hover:border-surfaceGlass/30 disabled:cursor-not-allowed disabled:opacity-60"
             >
               Hide review
             </button>

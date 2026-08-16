@@ -72,7 +72,7 @@ export default function SendConsentFormButton({ clientId, forms }: Props) {
   }
 
   return (
-    <div className="grid gap-2 rounded-card border border-white/10 bg-bgPrimary p-3">
+    <div className="grid gap-2 rounded-card border border-surfaceGlass/10 bg-bgPrimary p-3">
       <div className="text-[12px] font-black text-textPrimary">
         Send a form to sign
       </div>

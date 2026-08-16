@@ -87,7 +87,7 @@ export default async function AdminProfessionalDetailPage({ params }: PageProps)
         allowedRoles={[AdminPermissionRole.SUPER_ADMIN, AdminPermissionRole.REVIEWER]}
       >
         <main className="mx-auto w-full max-w-960px px-4 pb-10 pt-6">
-          <div className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4 text-[13px] font-semibold text-textSecondary">
+          <div className="tovis-glass rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4 text-[13px] font-semibold text-textSecondary">
             Missing professional id.
           </div>
         </main>
@@ -162,7 +162,7 @@ export default async function AdminProfessionalDetailPage({ params }: PageProps)
         scope={{ professionalId: id }}
       >
         <main className="mx-auto w-full max-w-960px px-4 pb-10 pt-6">
-          <div className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4 text-[13px] font-semibold text-textSecondary">
+          <div className="tovis-glass rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4 text-[13px] font-semibold text-textSecondary">
             Professional not found.
           </div>
         </main>
@@ -190,7 +190,7 @@ export default async function AdminProfessionalDetailPage({ params }: PageProps)
     return `License: ${state} ${num}${exp}`
   })()
 
-  const card = 'tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4'
+  const card = 'tovis-glass rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4'
   const hint = 'text-[12px] font-semibold text-textSecondary'
 
   return (
@@ -250,7 +250,7 @@ export default async function AdminProfessionalDetailPage({ params }: PageProps)
 
               <div className="mt-4 grid gap-2">
                 {pro.locations.map((location) => (
-                  <div key={location.id} className="rounded-card border border-white/10 bg-bgPrimary p-3">
+                  <div key={location.id} className="rounded-card border border-surfaceGlass/10 bg-bgPrimary p-3">
                     <div className="flex flex-wrap items-baseline justify-between gap-3">
                       <div className="text-[13px] font-black text-textPrimary">
                         {formatLocationLabel(location)}
@@ -288,7 +288,7 @@ export default async function AdminProfessionalDetailPage({ params }: PageProps)
                     : null
 
                   return (
-                    <div key={doc.id} className="rounded-card border border-white/10 bg-bgPrimary p-3">
+                    <div key={doc.id} className="rounded-card border border-surfaceGlass/10 bg-bgPrimary p-3">
                       <div className="flex flex-wrap items-baseline justify-between gap-3">
                         <div className="text-[13px] font-black text-textPrimary">
                           {doc.type}{' '}
@@ -305,7 +305,7 @@ export default async function AdminProfessionalDetailPage({ params }: PageProps)
                             href={openHref}
                             target="_blank"
                             rel="noreferrer"
-                            className="inline-flex rounded-full border border-white/10 bg-bgSecondary px-3 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass/10"
+                            className="inline-flex rounded-full border border-surfaceGlass/10 bg-bgSecondary px-3 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass/10"
                           >
                             Open document
                           </a>

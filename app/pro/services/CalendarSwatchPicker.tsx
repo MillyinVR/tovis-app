@@ -82,7 +82,7 @@ export default function CalendarSwatchPicker(props: {
               'w-auto gap-1 px-3 text-[11px] font-black',
               value === null
                 ? 'border-accentPrimary bg-accentPrimary/15 text-textPrimary'
-                : 'border-white/10 bg-bgPrimary/60 text-textSecondary hover:border-white/20',
+                : 'border-surfaceGlass/10 bg-bgPrimary/60 text-textSecondary hover:border-surfaceGlass/20',
             )}
           >
             None
@@ -115,7 +115,7 @@ export default function CalendarSwatchPicker(props: {
                   // hue-only "selected" state does not.
                   selected
                     ? 'border-textPrimary ring-2 ring-textPrimary ring-offset-2 ring-offset-bgSecondary'
-                    : 'border-white/20 hover:border-white/40',
+                    : 'border-surfaceGlass/20 hover:border-surfaceGlass/40',
                 )}
                 style={{ background: `rgb(var(--swatch-${id}))` }}
               />

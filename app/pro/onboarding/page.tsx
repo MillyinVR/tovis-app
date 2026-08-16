@@ -67,7 +67,7 @@ export default async function ProOnboardingPage() {
 
   return (
     <div className="mx-auto grid w-full max-w-3xl gap-4 px-4 py-6">
-      <div className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-5">
+      <div className="tovis-glass rounded-card border border-surfaceGlass/10 bg-bgSecondary p-5">
         <div className="text-[12px] font-black uppercase tracking-wide text-textSecondary">
           Finish setup
         </div>
@@ -87,7 +87,7 @@ export default async function ProOnboardingPage() {
           <Link
             key={`${item.href}:${item.label}`}
             href={item.href}
-            className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4 transition hover:border-toneWarn/50"
+            className="tovis-glass rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4 transition hover:border-toneWarn/50"
           >
             <div className="flex items-center gap-3">
               <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-toneWarn/35 bg-toneWarn/10 text-[12px] font-black text-toneWarn">

@@ -221,9 +221,9 @@ export default function ProAccountMenu(props: Props) {
         onClick={() => setOpen((value) => !value)}
         className={[
           'group tap-target inline-flex h-10 w-10 items-center justify-center',
-          'rounded-full border border-white/10 bg-bgSecondary',
+          'rounded-full border border-surfaceGlass/10 bg-bgSecondary',
           'text-textPrimary',
-          'hover:border-white/20',
+          'hover:border-surfaceGlass/20',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20',
           'transition',
         ].join(' ')}

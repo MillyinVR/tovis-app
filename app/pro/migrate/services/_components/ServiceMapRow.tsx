@@ -18,12 +18,12 @@ type Props = {
 }
 
 const BORDER_BY_STATUS: Record<Row['status'], string> = {
-  OK: 'border-white/10',
+  OK: 'border-surfaceGlass/10',
   PRICE_GRACE: 'border-accentPrimary/40',
-  UNLICENSED: 'border-white/10 opacity-70',
+  UNLICENSED: 'border-surfaceGlass/10 opacity-70',
   NEEDS_ATTENTION: 'border-amber/50',
-  REQUEST_PENDING: 'border-white/10',
-  SKIPPED: 'border-white/10 opacity-60',
+  REQUEST_PENDING: 'border-surfaceGlass/10',
+  SKIPPED: 'border-surfaceGlass/10 opacity-60',
 }
 
 export function ServiceMapRow({ row, catalog, copy, onSelectService }: Props) {
@@ -188,7 +188,7 @@ function ServiceDropdown({
         aria-haspopup="listbox"
         className={[
           'flex w-full items-center justify-between gap-2 rounded-[12px] border px-3 py-2 text-left text-[13px] transition',
-          open ? 'border-white/25' : 'border-white/10 hover:border-white/20',
+          open ? 'border-surfaceGlass/25' : 'border-surfaceGlass/10 hover:border-surfaceGlass/20',
         ].join(' ')}
       >
         <span className={mapped ? 'text-textPrimary' : 'text-textMuted'}>
@@ -208,14 +208,14 @@ function ServiceDropdown({
       {open ? (
         <div
           role="listbox"
-          className="tovis-glass-strong absolute left-0 right-0 top-full z-30 mt-1 max-h-72 overflow-auto rounded-card border border-white/15 bg-bgSurface p-2 shadow-[0_24px_50px_rgb(var(--shadow-color)/0.4)]"
+          className="tovis-glass-strong absolute left-0 right-0 top-full z-30 mt-1 max-h-72 overflow-auto rounded-card border border-surfaceGlass/15 bg-bgSurface p-2 shadow-[0_24px_50px_rgb(var(--shadow-color)/0.4)]"
         >
           <input
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={copy.dropdownSearch}
-            className="mb-2 w-full rounded-[10px] border border-white/10 bg-white/[0.03] px-3 py-2 text-[13px] text-textPrimary outline-none placeholder:text-textMuted focus:border-white/25"
+            className="mb-2 w-full rounded-[10px] border border-surfaceGlass/10 bg-white/[0.03] px-3 py-2 text-[13px] text-textPrimary outline-none placeholder:text-textMuted focus:border-surfaceGlass/25"
           />
           {groups.map(([cat, services]) => (
             <div key={cat} className="mb-1">
@@ -256,7 +256,7 @@ function ServiceDropdown({
               })}
             </div>
           ))}
-          <div className="mt-1 border-t border-white/10 pt-1">
+          <div className="mt-1 border-t border-surfaceGlass/10 pt-1">
             <button
               type="button"
               className="flex w-full rounded-[8px] px-2 py-1.5 text-left text-[13px] text-amber hover:bg-white/5"

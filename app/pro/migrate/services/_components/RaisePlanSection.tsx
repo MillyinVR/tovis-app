@@ -123,7 +123,7 @@ function RaiseRow({
         <button
           type="button"
           onClick={onToggle}
-          className="shrink-0 rounded-full border border-white/10 px-3 py-1 text-[12px] text-textSecondary hover:border-white/20"
+          className="shrink-0 rounded-full border border-surfaceGlass/10 px-3 py-1 text-[12px] text-textSecondary hover:border-surfaceGlass/20"
         >
           {copy.tune} ▾
         </button>
@@ -140,7 +140,7 @@ function RaiseRow({
         <button
           type="button"
           onClick={onToggle}
-          className="rounded-full border border-white/10 px-3 py-1 text-[12px] text-textSecondary hover:border-white/20"
+          className="rounded-full border border-surfaceGlass/10 px-3 py-1 text-[12px] text-textSecondary hover:border-surfaceGlass/20"
         >
           {copy.tune} ▴
         </button>
@@ -205,7 +205,7 @@ function RaiseConfigurator({
         <div
           role="group"
           aria-label="Increase mode"
-          className="inline-flex overflow-hidden rounded-full border border-white/15"
+          className="inline-flex overflow-hidden rounded-full border border-surfaceGlass/15"
         >
           {(['PCT', 'USD'] as const).map((mode) => (
             <button

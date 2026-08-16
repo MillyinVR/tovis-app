@@ -110,7 +110,7 @@ export default function MembershipsAdminClient() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search by business, name, handle, or email…"
-          className="w-full max-w-md rounded-card border border-white/15 bg-bgPrimary px-3 py-2 text-[13px] text-textPrimary placeholder:text-textSecondary focus:border-accentPrimary/60 focus:outline-none"
+          className="w-full max-w-md rounded-card border border-surfaceGlass/15 bg-bgPrimary px-3 py-2 text-[13px] text-textPrimary placeholder:text-textSecondary focus:border-accentPrimary/60 focus:outline-none"
         />
         <button
           type="submit"
@@ -142,7 +142,7 @@ export default function MembershipsAdminClient() {
           />
         ))}
         {searched && items.length === 0 && !error ? (
-          <div className="rounded-card border border-white/10 bg-bgPrimary/40 p-4 text-[13px] text-textSecondary">
+          <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary/40 p-4 text-[13px] text-textSecondary">
             No pros matched that search.
           </div>
         ) : null}
@@ -226,7 +226,7 @@ function MembershipRow({
   const renewLabel = formatIsoDateShort(item.currentPeriodEnd)
 
   return (
-    <div className="rounded-card border border-white/10 bg-bgPrimary/40 p-4">
+    <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary/40 p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div>
           <span className="text-[14px] font-black">{item.displayLabel}</span>
@@ -265,7 +265,7 @@ function MembershipRow({
         <select
           value={planKey}
           onChange={(e) => setPlanKey(e.target.value)}
-          className="rounded-card border border-white/15 bg-bgPrimary px-2 py-1.5 text-[12px] text-textPrimary"
+          className="rounded-card border border-surfaceGlass/15 bg-bgPrimary px-2 py-1.5 text-[12px] text-textPrimary"
           aria-label="Comp plan"
         >
           {COMP_PLANS.map((p) => (
@@ -277,7 +277,7 @@ function MembershipRow({
         <select
           value={months}
           onChange={(e) => setMonths(Number(e.target.value))}
-          className="rounded-card border border-white/15 bg-bgPrimary px-2 py-1.5 text-[12px] text-textPrimary"
+          className="rounded-card border border-surfaceGlass/15 bg-bgPrimary px-2 py-1.5 text-[12px] text-textPrimary"
           aria-label="Comp months"
         >
           {COMP_MONTHS.map((m) => (
@@ -290,7 +290,7 @@ function MembershipRow({
           value={note}
           onChange={(e) => setNote(e.target.value)}
           placeholder="Note (optional)"
-          className="min-w-[160px] flex-1 rounded-card border border-white/15 bg-bgPrimary px-2 py-1.5 text-[12px] text-textPrimary placeholder:text-textSecondary"
+          className="min-w-[160px] flex-1 rounded-card border border-surfaceGlass/15 bg-bgPrimary px-2 py-1.5 text-[12px] text-textPrimary placeholder:text-textSecondary"
         />
         <button
           type="button"
@@ -305,14 +305,14 @@ function MembershipRow({
             type="button"
             disabled={busy}
             onClick={onRevoke}
-            className="rounded-card border border-white/15 bg-bgPrimary px-3 py-1.5 text-[12px] font-black text-toneDanger transition hover:border-white/30 disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-card border border-surfaceGlass/15 bg-bgPrimary px-3 py-1.5 text-[12px] font-black text-toneDanger transition hover:border-surfaceGlass/30 disabled:cursor-not-allowed disabled:opacity-60"
           >
             Revoke
           </button>
         ) : null}
       </div>
 
-      <div className="mt-3 border-t border-white/10 pt-3">
+      <div className="mt-3 border-t border-surfaceGlass/10 pt-3">
         <div className="text-[12px] text-textSecondary">
           AI camera this month:{' '}
           {usage ? (
@@ -333,7 +333,7 @@ function MembershipRow({
             inputMode="numeric"
             placeholder="Bonus images"
             aria-label="Bonus images to grant"
-            className="w-32 rounded-card border border-white/15 bg-bgPrimary px-2 py-1.5 text-[12px] text-textPrimary placeholder:text-textSecondary"
+            className="w-32 rounded-card border border-surfaceGlass/15 bg-bgPrimary px-2 py-1.5 text-[12px] text-textPrimary placeholder:text-textSecondary"
           />
           <button
             type="button"

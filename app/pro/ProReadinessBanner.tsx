@@ -141,7 +141,7 @@ export default function ProReadinessBanner() {
               <li key={`${blocker.href}:${blocker.label}`}>
                 <Link
                   href={blocker.href}
-                  className="inline-flex rounded-xl border border-white/10 bg-bgPrimary px-3 py-2 font-bold text-textPrimary transition hover:border-toneWarn/50"
+                  className="inline-flex rounded-xl border border-surfaceGlass/10 bg-bgPrimary px-3 py-2 font-bold text-textPrimary transition hover:border-toneWarn/50"
                 >
                   {blocker.label}
                 </Link>

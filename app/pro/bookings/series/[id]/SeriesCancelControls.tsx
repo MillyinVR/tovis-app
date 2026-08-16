@@ -186,11 +186,11 @@ export default function SeriesCancelControls({
   )
 
   const rowButton =
-    'rounded-xl border border-white/10 bg-bgPrimary px-3 py-2 text-[11px] font-black text-textSecondary transition hover:border-toneDanger/50 hover:text-textPrimary disabled:opacity-60'
+    'rounded-xl border border-surfaceGlass/10 bg-bgPrimary px-3 py-2 text-[11px] font-black text-textSecondary transition hover:border-toneDanger/50 hover:text-textPrimary disabled:opacity-60'
 
   return (
     <section
-      className="tovis-glass mt-3.5 rounded-card border border-white/10 bg-bgSecondary p-4"
+      className="tovis-glass mt-3.5 rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4"
       aria-labelledby="series-occurrences-heading"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -219,7 +219,7 @@ export default function SeriesCancelControls({
         {series.occurrences.map((occurrence) => (
           <li
             key={occurrence.bookingId}
-            className="rounded-xl border border-white/10 bg-bgPrimary p-3"
+            className="rounded-xl border border-surfaceGlass/10 bg-bgPrimary p-3"
             data-testid={`series-occurrence-${occurrence.index}`}
           >
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -380,7 +380,7 @@ export default function SeriesCancelControls({
                 setPending(null)
                 setError(null)
               }}
-              className="rounded-xl border border-white/10 bg-bgSecondary px-3 py-2 text-[12px] font-black text-textSecondary transition hover:text-textPrimary disabled:opacity-60"
+              className="rounded-xl border border-surfaceGlass/10 bg-bgSecondary px-3 py-2 text-[12px] font-black text-textSecondary transition hover:text-textPrimary disabled:opacity-60"
             >
               Keep them
             </button>

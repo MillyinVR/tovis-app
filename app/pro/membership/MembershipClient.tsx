@@ -177,7 +177,7 @@ export default function MembershipClient(props: Props) {
                 'rounded-card border p-4',
                 isCurrent
                   ? 'border-accentPrimary/60 bg-bgSecondary'
-                  : 'border-white/10 bg-bgPrimary/40',
+                  : 'border-surfaceGlass/10 bg-bgPrimary/40',
               ].join(' ')}
             >
               <div className="flex items-center justify-between">
@@ -213,7 +213,7 @@ export default function MembershipClient(props: Props) {
 
               <div className="mt-3 grid gap-2">
                 {isCurrent ? (
-                  <div className="rounded-card border border-white/10 bg-bgPrimary px-3 py-2 text-center text-[12px] font-black text-textSecondary">
+                  <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary px-3 py-2 text-center text-[12px] font-black text-textSecondary">
                     Current plan
                   </div>
                 ) : isContact ? (
@@ -222,7 +222,7 @@ export default function MembershipClient(props: Props) {
                   // brand-resolved support address, so this stays white-label safe.
                   <Link
                     href="/support"
-                    className="w-full rounded-card border border-white/15 bg-bgPrimary px-3 py-2 text-center text-[12px] font-black text-textPrimary transition hover:border-white/30"
+                    className="w-full rounded-card border border-surfaceGlass/15 bg-bgPrimary px-3 py-2 text-center text-[12px] font-black text-textPrimary transition hover:border-surfaceGlass/30"
                   >
                     Contact us for more info
                   </Link>
@@ -238,7 +238,7 @@ export default function MembershipClient(props: Props) {
                         className={[
                           'w-full rounded-card border px-3 py-2 text-[12px] font-black transition',
                           pending
-                            ? 'cursor-not-allowed border-white/10 bg-bgPrimary text-textSecondary opacity-70'
+                            ? 'cursor-not-allowed border-surfaceGlass/10 bg-bgPrimary text-textSecondary opacity-70'
                             : 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
                         ].join(' ')}
                       >
@@ -255,8 +255,8 @@ export default function MembershipClient(props: Props) {
                         className={[
                           'w-full rounded-card border px-3 py-2 text-[12px] font-black transition',
                           pending
-                            ? 'cursor-not-allowed border-white/10 bg-bgPrimary text-textSecondary opacity-70'
-                            : 'border-white/15 bg-bgPrimary text-textPrimary hover:border-white/30',
+                            ? 'cursor-not-allowed border-surfaceGlass/10 bg-bgPrimary text-textSecondary opacity-70'
+                            : 'border-surfaceGlass/15 bg-bgPrimary text-textPrimary hover:border-surfaceGlass/30',
                         ].join(' ')}
                       >
                         Save with annual · {dollars(annual.amountCents)}/yr
@@ -275,7 +275,7 @@ export default function MembershipClient(props: Props) {
           type="button"
           onClick={() => startTransition(openPortal)}
           disabled={pending}
-          className="mt-5 rounded-card border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:border-white/20"
+          className="mt-5 rounded-card border border-surfaceGlass/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:border-surfaceGlass/20"
         >
           Manage billing
         </button>
@@ -307,7 +307,7 @@ export default function MembershipClient(props: Props) {
         </div>
       ) : null}
 
-      <div className="mt-6 rounded-card border border-white/10 bg-bgSecondary p-4">
+      <div className="mt-6 rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4">
         <label className="flex cursor-pointer items-start gap-3">
           <input
             type="checkbox"

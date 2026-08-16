@@ -397,7 +397,7 @@ export default async function ProBookingDetailPage(props: {
     success: { box: 'border-accentPrimary/30 bg-accentPrimary/10', icon: 'text-accentPrimary' },
     danger: { box: 'border-toneDanger/30 bg-toneDanger/10', icon: 'text-toneDanger' },
     warn: { box: 'border-toneWarn/30 bg-toneWarn/10', icon: 'text-toneWarn' },
-    muted: { box: 'border-white/10 bg-bgPrimary', icon: 'text-textMuted' },
+    muted: { box: 'border-surfaceGlass/10 bg-bgPrimary', icon: 'text-textMuted' },
   }[paymentView.tone]
   const servicesAmount = moneyToString(
     booking.serviceSubtotalSnapshot ?? booking.subtotalSnapshot,
@@ -455,7 +455,7 @@ export default async function ProBookingDetailPage(props: {
       </div>
 
       {/* header card */}
-      <section className="tovis-glass mb-3.5 rounded-card border border-white/10 bg-bgSecondary p-5">
+      <section className="tovis-glass mb-3.5 rounded-card border border-surfaceGlass/10 bg-bgSecondary p-5">
         <div className="font-mono text-[10px] font-bold uppercase tracking-[0.16em] text-accentPrimary">
           Booking · #{shortId}
         </div>
@@ -477,7 +477,7 @@ export default async function ProBookingDetailPage(props: {
         </div>
 
         {/* client */}
-        <div className="mt-3.5 flex items-center gap-2.5 border-t border-white/10 pt-3.5">
+        <div className="mt-3.5 flex items-center gap-2.5 border-t border-surfaceGlass/10 pt-3.5">
           <ClientProfileLink
             href={clientHref}
             label={clientName || 'Client'}
@@ -521,7 +521,7 @@ export default async function ProBookingDetailPage(props: {
               href={mapsHref}
               target="_blank"
               rel="noopener noreferrer"
-              className="mt-3 flex items-center gap-2.5 rounded-xl border border-white/10 bg-bgPrimary px-3 py-2.5 transition hover:border-accentPrimary/40"
+              className="mt-3 flex items-center gap-2.5 rounded-xl border border-surfaceGlass/10 bg-bgPrimary px-3 py-2.5 transition hover:border-accentPrimary/40"
             >
               <PinIcon
                 className={
@@ -539,7 +539,7 @@ export default async function ProBookingDetailPage(props: {
               <ExternalIcon className="text-textMuted" />
             </a>
           ) : (
-            <div className="mt-3 flex items-center gap-2.5 rounded-xl border border-white/10 bg-bgPrimary px-3 py-2.5">
+            <div className="mt-3 flex items-center gap-2.5 rounded-xl border border-surfaceGlass/10 bg-bgPrimary px-3 py-2.5">
               <PinIcon
                 className={
                   locationMeta.isMobile ? 'text-accentPrimary' : 'text-textMuted'
@@ -568,7 +568,7 @@ export default async function ProBookingDetailPage(props: {
           </Link>
         </div>
 
-        <div className="mt-3 border-t border-white/10 pt-3">
+        <div className="mt-3 border-t border-surfaceGlass/10 pt-3">
           <BookingActions
             bookingId={booking.id}
             status={booking.status}
@@ -584,7 +584,7 @@ export default async function ProBookingDetailPage(props: {
       </section>
 
       {consultBriefs.length ? (
-        <section className="tovis-glass mb-3.5 rounded-card border border-white/10 bg-bgSecondary p-4">
+        <section className="tovis-glass mb-3.5 rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4">
           <h2 className="font-display text-[14px] font-bold text-textPrimary">
             Pre-appointment consult brief
           </h2>
@@ -611,7 +611,7 @@ export default async function ProBookingDetailPage(props: {
           just THIS one is the existing Cancel action above; the other two scopes
           live on the series page. */}
       {booking.seriesId ? (
-        <section className="tovis-glass mb-3.5 rounded-card border border-white/10 bg-bgSecondary p-4">
+        <section className="tovis-glass mb-3.5 rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4">
           <h2 className="font-display text-[14px] font-bold text-textPrimary">
             Part of a recurring appointment
           </h2>
@@ -623,7 +623,7 @@ export default async function ProBookingDetailPage(props: {
           </div>
           <Link
             href={`/pro/bookings/series/${encodeURIComponent(booking.seriesId)}`}
-            className="mt-3 inline-flex rounded-xl border border-white/10 bg-bgPrimary px-3 py-2 text-[12px] font-black text-textPrimary transition hover:border-white/20"
+            className="mt-3 inline-flex rounded-xl border border-surfaceGlass/10 bg-bgPrimary px-3 py-2 text-[12px] font-black text-textPrimary transition hover:border-surfaceGlass/20"
           >
             Manage the whole series
           </Link>
@@ -647,7 +647,7 @@ export default async function ProBookingDetailPage(props: {
 
       {/* timing + payment */}
       <div className="grid gap-3.5 lg:grid-cols-2">
-        <section className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
+        <section className="tovis-glass rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4">
           <h2 className="font-display text-[14px] font-bold text-textPrimary">
             Timing
           </h2>
@@ -659,14 +659,14 @@ export default async function ProBookingDetailPage(props: {
             {timing.map((row) => (
               <div
                 key={row.label}
-                className="flex items-center gap-3 border-t border-white/10 py-2.5"
+                className="flex items-center gap-3 border-t border-surfaceGlass/10 py-2.5"
               >
                 <span
                   className={[
                     'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border',
                     row.done
                       ? 'border-accentPrimary/30 bg-accentPrimary/10 text-accentPrimary'
-                      : 'border-white/10 bg-bgPrimary text-textMuted',
+                      : 'border-surfaceGlass/10 bg-bgPrimary text-textMuted',
                   ].join(' ')}
                 >
                   {row.done ? (
@@ -686,7 +686,7 @@ export default async function ProBookingDetailPage(props: {
           </div>
         </section>
 
-        <section className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
+        <section className="tovis-glass rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4">
           <h2 className="font-display text-[14px] font-bold text-textPrimary">
             Payment
           </h2>
@@ -720,13 +720,13 @@ export default async function ProBookingDetailPage(props: {
             ) : null}
             {taxStr ? <MoneyRow label="Tax" value={taxStr} /> : null}
             {tipStr ? <MoneyRow label="Tip" value={tipStr} /> : null}
-            <div className="mt-1 border-t border-dashed border-white/10 pt-2">
+            <div className="mt-1 border-t border-dashed border-surfaceGlass/10 pt-2">
               <MoneyRow label="Total" value={total} strong />
             </div>
           </div>
 
           {awaitingPaymentConfirmation ? (
-            <div className="mt-3 border-t border-white/10 pt-3">
+            <div className="mt-3 border-t border-surfaceGlass/10 pt-3">
               <ConfirmPaymentReceivedButton bookingId={booking.id} fullWidth />
               <p className="mt-2 text-[11.5px] text-textMuted">
                 {COPY.proBookingCheckout.approvesNextNote}
@@ -742,7 +742,7 @@ export default async function ProBookingDetailPage(props: {
       </div>
 
       {/* aftercare snapshot */}
-      <section className="tovis-glass mt-3.5 rounded-card border border-white/10 bg-bgSecondary p-4">
+      <section className="tovis-glass mt-3.5 rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4">
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="font-display text-[14px] font-bold text-textPrimary">
@@ -770,18 +770,18 @@ export default async function ProBookingDetailPage(props: {
         </div>
 
         {aftercareNotes ? (
-          <div className="mt-3 whitespace-pre-wrap rounded-xl border border-white/10 bg-bgPrimary p-3 text-[13px] leading-relaxed text-textSecondary">
+          <div className="mt-3 whitespace-pre-wrap rounded-xl border border-surfaceGlass/10 bg-bgPrimary p-3 text-[13px] leading-relaxed text-textSecondary">
             {aftercareNotes}
           </div>
         ) : (
-          <div className="mt-3 rounded-xl border border-white/10 bg-bgPrimary p-3 text-[12px] text-textMuted">
+          <div className="mt-3 rounded-xl border border-surfaceGlass/10 bg-bgPrimary p-3 text-[12px] text-textMuted">
             No aftercare notes yet.
           </div>
         )}
 
         <Link
           href={aftercareHref}
-          className="mt-3 inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-white/10 bg-bgPrimary px-4 text-[13px] font-black text-textPrimary transition hover:border-white/20"
+          className="mt-3 inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-surfaceGlass/10 bg-bgPrimary px-4 text-[13px] font-black text-textPrimary transition hover:border-surfaceGlass/20"
         >
           View full aftercare
           <ArrowRightIcon />

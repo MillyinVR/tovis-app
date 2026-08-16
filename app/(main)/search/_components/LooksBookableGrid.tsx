@@ -187,7 +187,7 @@ export default function LooksBookableGrid({
           ? Array.from({ length: 8 }).map((_, index) => (
               <div
                 key={`looks-skeleton-${index}`}
-                className="overflow-hidden rounded-card border border-white/10 bg-bgSecondary"
+                className="overflow-hidden rounded-card border border-surfaceGlass/10 bg-bgSecondary"
               >
                 <div className="aspect-3/4 animate-pulse bg-bgPrimary/45" />
                 <div className="space-y-1.5 p-2.5">
@@ -207,7 +207,7 @@ export default function LooksBookableGrid({
               return (
                 <article
                   key={look.id}
-                  className="overflow-hidden rounded-card border border-white/10 bg-bgSecondary"
+                  className="overflow-hidden rounded-card border border-surfaceGlass/10 bg-bgSecondary"
                 >
                   <div className="relative aspect-3/4 overflow-hidden bg-bgPrimary/45">
                     <RemoteImage
@@ -281,7 +281,7 @@ export default function LooksBookableGrid({
             onClick={() => void loadMore()}
             disabled={loadingMore}
             className={cn(
-              'rounded-full border border-white/15 bg-bgPrimary/25 px-5 py-2.5',
+              'rounded-full border border-surfaceGlass/15 bg-bgPrimary/25 px-5 py-2.5',
               'font-mono text-[11px] font-black uppercase tracking-[0.08em] text-textPrimary',
               'transition hover:bg-white/10 disabled:opacity-60',
             )}

@@ -79,7 +79,7 @@ const TONE_DOT: Record<Tone, string> = {
   danger: 'border-toneDanger/30 bg-toneDanger/10 text-toneDanger',
   warn: 'border-toneWarn/30 bg-toneWarn/10 text-toneWarn',
   info: 'border-toneInfo/30 bg-toneInfo/10 text-toneInfo',
-  muted: 'border-white/10 bg-bgPrimary text-textMuted',
+  muted: 'border-surfaceGlass/10 bg-bgPrimary text-textMuted',
 }
 
 function depositStatusTone(status: BookingDepositStatus): Tone {
@@ -291,7 +291,7 @@ function buildEntries(trail: BookingMoneyTrail): TrailEntry[] {
 
 function StatChip({ label, value, tone }: { label: string; value: string; tone: Tone }) {
   return (
-    <div className="rounded-xl border border-white/10 bg-bgPrimary px-3 py-2.5">
+    <div className="rounded-xl border border-surfaceGlass/10 bg-bgPrimary px-3 py-2.5">
       <div className="font-mono text-[8px] font-bold uppercase tracking-[0.14em] text-textMuted">
         {label}
       </div>
@@ -304,7 +304,7 @@ function StatChip({ label, value, tone }: { label: string; value: string; tone: 
 
 const btnBase =
   'inline-flex items-center justify-center rounded-full px-3 py-2 text-[12px] font-black transition ' +
-  'disabled:cursor-not-allowed disabled:opacity-60 border border-white/10'
+  'disabled:cursor-not-allowed disabled:opacity-60 border border-surfaceGlass/10'
 
 export default function MoneyTrailInspector({ bookingId, heading }: Props) {
   const [trail, setTrail] = useState<BookingMoneyTrail | null>(null)
@@ -540,7 +540,7 @@ export default function MoneyTrailInspector({ bookingId, heading }: Props) {
   }
 
   return (
-    <section className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
+    <section className="tovis-glass rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4">
       <div className="flex items-center justify-between gap-3">
         <div>
           <h2 className="font-display text-[14px] font-bold text-textPrimary">
@@ -584,7 +584,7 @@ export default function MoneyTrailInspector({ bookingId, heading }: Props) {
             {buildEntries(trail).map((e) => (
               <div
                 key={e.key}
-                className="flex items-center gap-3 border-t border-white/10 py-2.5"
+                className="flex items-center gap-3 border-t border-surfaceGlass/10 py-2.5"
               >
                 <span
                   className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border ${TONE_DOT[e.tone]}`}
@@ -623,7 +623,7 @@ export default function MoneyTrailInspector({ bookingId, heading }: Props) {
               </div>
             ))}
             {buildEntries(trail).length === 0 ? (
-              <div className="border-t border-white/10 py-3 text-[12px] text-textMuted">
+              <div className="border-t border-surfaceGlass/10 py-3 text-[12px] text-textMuted">
                 No money has moved on this booking yet.
               </div>
             ) : null}
@@ -651,9 +651,9 @@ export default function MoneyTrailInspector({ bookingId, heading }: Props) {
           {trail.capabilities.canRefund ||
           trail.capabilities.canWaiveNoShowFee ||
           trail.capabilities.canRefundNoShowFee ? (
-            <div className="mt-3 border-t border-white/10 pt-3">
+            <div className="mt-3 border-t border-surfaceGlass/10 pt-3">
               {refundOpen ? (
-                <div className="grid gap-2 rounded-2xl border border-white/10 bg-bgPrimary p-3">
+                <div className="grid gap-2 rounded-2xl border border-surfaceGlass/10 bg-bgPrimary p-3">
                   <label className="grid gap-1 text-[11px] font-black text-textSecondary">
                     Amount ({trail.currency.toUpperCase()})
                     <input
@@ -663,7 +663,7 @@ export default function MoneyTrailInspector({ bookingId, heading }: Props) {
                       placeholder={`Full: ${(
                         trail.capabilities.refundableRemainingCents / 100
                       ).toFixed(2)}`}
-                      className="rounded-lg border border-white/10 bg-surfaceGlass/10 px-2 py-1 text-[13px] font-black text-textPrimary"
+                      className="rounded-lg border border-surfaceGlass/10 bg-surfaceGlass/10 px-2 py-1 text-[13px] font-black text-textPrimary"
                     />
                   </label>
                   <label className="grid gap-1 text-[11px] font-black text-textSecondary">
@@ -673,7 +673,7 @@ export default function MoneyTrailInspector({ bookingId, heading }: Props) {
                       onChange={(ev) => setRefundReason(ev.target.value)}
                       maxLength={500}
                       placeholder="e.g. service issue"
-                      className="rounded-lg border border-white/10 bg-surfaceGlass/10 px-2 py-1 text-[13px] font-black text-textPrimary"
+                      className="rounded-lg border border-surfaceGlass/10 bg-surfaceGlass/10 px-2 py-1 text-[13px] font-black text-textPrimary"
                     />
                   </label>
                   <div className="flex flex-wrap gap-2">
@@ -692,7 +692,7 @@ export default function MoneyTrailInspector({ bookingId, heading }: Props) {
                         setActionError(null)
                       }}
                       disabled={actionPending}
-                      className={`${btnBase} bg-bgPrimary text-textPrimary hover:border-white/20`}
+                      className={`${btnBase} bg-bgPrimary text-textPrimary hover:border-surfaceGlass/20`}
                     >
                       Cancel
                     </button>
@@ -708,7 +708,7 @@ export default function MoneyTrailInspector({ bookingId, heading }: Props) {
                         setFlash(null)
                         setRefundOpen(true)
                       }}
-                      className={`${btnBase} bg-bgPrimary text-textPrimary hover:border-white/20`}
+                      className={`${btnBase} bg-bgPrimary text-textPrimary hover:border-surfaceGlass/20`}
                     >
                       Refund…
                     </button>
@@ -718,7 +718,7 @@ export default function MoneyTrailInspector({ bookingId, heading }: Props) {
                       type="button"
                       onClick={waiveNoShow}
                       disabled={actionPending}
-                      className={`${btnBase} bg-bgPrimary text-textPrimary hover:border-white/20`}
+                      className={`${btnBase} bg-bgPrimary text-textPrimary hover:border-surfaceGlass/20`}
                     >
                       {actionPending ? 'Waiving…' : 'Waive no-show fee'}
                     </button>
@@ -728,7 +728,7 @@ export default function MoneyTrailInspector({ bookingId, heading }: Props) {
                       type="button"
                       onClick={refundNoShow}
                       disabled={actionPending}
-                      className={`${btnBase} bg-bgPrimary text-textPrimary hover:border-white/20`}
+                      className={`${btnBase} bg-bgPrimary text-textPrimary hover:border-surfaceGlass/20`}
                     >
                       {actionPending ? 'Refunding…' : 'Refund no-show fee'}
                     </button>

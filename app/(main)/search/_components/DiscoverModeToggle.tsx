@@ -22,7 +22,7 @@ const OPTIONS: {
 export default function DiscoverModeToggle({ value, onChange }: DiscoverModeToggleProps) {
   return (
     <div
-      className="inline-flex items-center gap-1 rounded-full border border-white/12 bg-bgPrimary/20 p-1"
+      className="inline-flex items-center gap-1 rounded-full border border-surfaceGlass/12 bg-bgPrimary/20 p-1"
       role="group"
       aria-label="Discover mode"
     >

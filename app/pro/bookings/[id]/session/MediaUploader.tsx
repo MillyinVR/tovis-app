@@ -412,17 +412,17 @@ export default function MediaUploader({
   }
 
   const shell =
-    'rounded-card border border-white/10 bg-bgSecondary p-4 text-textPrimary'
+    'rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4 text-textPrimary'
   const input =
-    'w-full rounded-card border border-white/10 bg-bgPrimary px-3 py-2 text-sm text-textPrimary outline-none focus:border-white/20'
+    'w-full rounded-card border border-surfaceGlass/10 bg-bgPrimary px-3 py-2 text-sm text-textPrimary outline-none focus:border-surfaceGlass/20'
   const select =
-    'rounded-card border border-white/10 bg-bgPrimary px-3 py-2 text-sm font-semibold text-textPrimary outline-none focus:border-white/20'
+    'rounded-card border border-surfaceGlass/10 bg-bgPrimary px-3 py-2 text-sm font-semibold text-textPrimary outline-none focus:border-surfaceGlass/20'
 
   const btn = [
     'inline-flex items-center justify-center rounded-full px-4 py-2 text-xs font-black transition',
     canSubmit && !disabled
-      ? 'border border-white/10 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover'
-      : 'cursor-not-allowed border border-white/10 bg-bgPrimary text-textSecondary opacity-60',
+      ? 'border border-surfaceGlass/10 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover'
+      : 'cursor-not-allowed border border-surfaceGlass/10 bg-bgPrimary text-textSecondary opacity-60',
   ].join(' ')
 
   const hint = (() => {
@@ -463,7 +463,7 @@ export default function MediaUploader({
             onChange={(event) =>
               void onPickFile(event.target.files?.[0] ?? null)
             }
-            className="block w-full text-sm text-textSecondary file:mr-3 file:rounded-full file:border file:border-white/10 file:bg-bgPrimary file:px-4 file:py-2 file:text-xs file:font-black file:text-textPrimary hover:file:bg-surfaceGlass/10"
+            className="block w-full text-sm text-textSecondary file:mr-3 file:rounded-full file:border file:border-surfaceGlass/10 file:bg-bgPrimary file:px-4 file:py-2 file:text-xs file:font-black file:text-textPrimary hover:file:bg-surfaceGlass/10"
           />
 
           <div className="mt-2 text-[11px] font-semibold text-textSecondary">
@@ -472,7 +472,7 @@ export default function MediaUploader({
         </div>
 
         {previewUrl ? (
-          <div className="rounded-card border border-white/10 bg-bgPrimary p-2">
+          <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary p-2">
             <div className="relative aspect-[9/16] w-full overflow-hidden rounded-card border border-white/10 bg-black">
               {error ? (
                 <div className="grid h-full w-full place-items-center px-4 text-center text-[11px] font-black text-textSecondary">

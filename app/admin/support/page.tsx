@@ -56,7 +56,7 @@ export default async function AdminSupportPage(props: { searchParams?: SearchPar
   const tabBase =
     'inline-flex items-center rounded-full border px-3 py-2 text-[12px] font-black transition active:scale-[0.98]'
   const tabOn = 'border-accentPrimary/40 bg-bgPrimary/70 text-textPrimary'
-  const tabOff = 'border-white/10 bg-bgPrimary/35 text-textSecondary hover:border-white/18 hover:bg-bgPrimary/55'
+  const tabOff = 'border-surfaceGlass/10 bg-bgPrimary/35 text-textSecondary hover:border-surfaceGlass/18 hover:bg-bgPrimary/55'
 
   return (
     <main className="mx-auto w-full max-w-1100px px-4 py-6 text-textPrimary">
@@ -89,13 +89,13 @@ export default async function AdminSupportPage(props: { searchParams?: SearchPar
       </div>
 
       {tickets.length === 0 ? (
-        <div className="rounded-card border border-white/10 bg-bgSecondary p-4 text-[13px] text-textSecondary">
+        <div className="rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4 text-[13px] text-textSecondary">
           Nothing here. Either everything is perfect… or everyone gave up. (Let’s assume perfect.)
         </div>
       ) : (
         <div className="grid gap-3">
           {tickets.map((t) => (
-            <div key={t.id} className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
+            <div key={t.id} className="tovis-glass rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="text-[13px] font-black">{t.subject}</div>
@@ -114,7 +114,7 @@ export default async function AdminSupportPage(props: { searchParams?: SearchPar
 
                 <Link
                   href={`/admin/support/${encodeURIComponent(t.id)}`}
-                  className="inline-flex items-center rounded-full border border-white/12 bg-bgPrimary/55 px-3 py-2 text-[12px] font-black hover:border-white/22 hover:bg-bgPrimary/70"
+                  className="inline-flex items-center rounded-full border border-surfaceGlass/12 bg-bgPrimary/55 px-3 py-2 text-[12px] font-black hover:border-surfaceGlass/22 hover:bg-bgPrimary/70"
                 >
                   View
                 </Link>

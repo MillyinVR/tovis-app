@@ -260,7 +260,7 @@ function ImageEditModalContent({
     >
       <div className="flex h-[100dvh] w-full items-stretch justify-center">
         <div className="flex h-full w-full max-w-3xl flex-col bg-bgSecondary text-textPrimary">
-          <div className="sticky top-0 z-20 border-b border-white/10 bg-bgSecondary px-4 py-3">
+          <div className="sticky top-0 z-20 border-b border-surfaceGlass/10 bg-bgSecondary px-4 py-3">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="text-[16px] font-black text-textPrimary">
@@ -274,7 +274,7 @@ function ImageEditModalContent({
               <button
                 type="button"
                 onClick={onClose}
-                className="shrink-0 rounded-full border border-white/10 bg-bgPrimary px-3 py-1.5 text-[12px] font-black text-textPrimary hover:bg-white/5"
+                className="shrink-0 rounded-full border border-surfaceGlass/10 bg-bgPrimary px-3 py-1.5 text-[12px] font-black text-textPrimary hover:bg-white/5"
               >
                 Close
               </button>
@@ -283,7 +283,7 @@ function ImageEditModalContent({
 
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4">
             <div className="grid gap-4">
-              <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
+              <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary p-3">
                 <div className="mx-auto w-full max-w-[360px]">
                   <div
                     ref={previewFrameRef}
@@ -324,7 +324,7 @@ function ImageEditModalContent({
                 </div>
               </div>
 
-              <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
+              <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary p-3">
                 <div className="grid gap-1">
                   <div className="text-[12px] font-black text-textPrimary">
                     File
@@ -341,7 +341,7 @@ function ImageEditModalContent({
                 </div>
               </div>
 
-              <div className="grid gap-4 rounded-card border border-white/10 bg-bgPrimary p-3">
+              <div className="grid gap-4 rounded-card border border-surfaceGlass/10 bg-bgPrimary p-3">
                 <div className="grid gap-2">
                   <label className="text-[12px] font-black text-textPrimary">
                     Crop preset
@@ -392,7 +392,7 @@ function ImageEditModalContent({
                 <button
                   type="button"
                   onClick={() => setEdit(LOOKS_DEFAULT_EDIT_STATE)}
-                  className="rounded-xl border border-white/10 bg-bgSecondary px-3 py-3 text-[13px] font-black text-textPrimary hover:bg-white/5"
+                  className="rounded-xl border border-surfaceGlass/10 bg-bgSecondary px-3 py-3 text-[13px] font-black text-textPrimary hover:bg-white/5"
                 >
                   Reset image
                 </button>
@@ -407,7 +407,7 @@ function ImageEditModalContent({
           </div>
 
           <div
-            className="sticky bottom-0 z-30 border-t border-white/10 bg-bgSecondary px-4 pt-3"
+            className="sticky bottom-0 z-30 border-t border-surfaceGlass/10 bg-bgSecondary px-4 pt-3"
             style={{
               paddingBottom: 'max(16px, calc(env(safe-area-inset-bottom) + 16px))',
             }}
@@ -416,7 +416,7 @@ function ImageEditModalContent({
               <button
                 type="button"
                 onClick={onClose}
-                className="rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] font-black text-textPrimary hover:bg-white/5"
+                className="rounded-xl border border-surfaceGlass/10 bg-bgPrimary px-3 py-3 text-[13px] font-black text-textPrimary hover:bg-white/5"
               >
                 Cancel
               </button>

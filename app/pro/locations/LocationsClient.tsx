@@ -129,12 +129,12 @@ function ConfirmModal(props: {
   return (
     <div className={`fixed inset-0 ${zClass.modal} flex items-center justify-center bg-overlay/70 p-4`} onClick={onCancel}>
       <div
-        className="w-full max-w-lg overflow-hidden rounded-2xl border border-white/10 bg-bgSecondary shadow-[0_50px_160px_rgb(0_0_0/0.78)] backdrop-blur-xl"
+        className="w-full max-w-lg overflow-hidden rounded-2xl border border-surfaceGlass/10 bg-bgSecondary shadow-[0_50px_160px_rgb(0_0_0/0.78)] backdrop-blur-xl"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
       >
-        <div className="border-b border-white/10 p-4">
+        <div className="border-b border-surfaceGlass/10 p-4">
           <div className="text-[14px] font-black text-textPrimary">{title}</div>
           {body ? <div className="mt-1 text-[12px] text-textSecondary">{body}</div> : null}
         </div>
@@ -144,7 +144,7 @@ function ConfirmModal(props: {
             type="button"
             onClick={onCancel}
             disabled={busy}
-            className="rounded-full border border-white/10 bg-bgPrimary/25 px-4 py-2 text-[12px] font-black text-textPrimary hover:border-white/20 disabled:opacity-60"
+            className="rounded-full border border-surfaceGlass/10 bg-bgPrimary/25 px-4 py-2 text-[12px] font-black text-textPrimary hover:border-surfaceGlass/20 disabled:opacity-60"
           >
             {cancelLabel}
           </button>
@@ -670,7 +670,7 @@ async function updateAdvanceNotice(
       />
 
       {/* Add */}
-      <div className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
+      <div className="tovis-glass rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <div className="text-[13px] font-black text-textPrimary">Add a location</div>
@@ -702,7 +702,7 @@ async function updateAdvanceNotice(
               value={type}
               onChange={(e) => setType(parseLocationType(e.target.value))}
               className={cn(
-                'rounded-2xl border border-white/12 bg-bgPrimary/30 px-3 py-2',
+                'rounded-2xl border border-surfaceGlass/12 bg-bgPrimary/30 px-3 py-2',
                 'text-[13px] font-bold text-textPrimary outline-none',
               )}
               disabled={busy}
@@ -720,7 +720,7 @@ async function updateAdvanceNotice(
               onChange={(e) => setName(e.target.value)}
               placeholder={type === 'MOBILE_BASE' ? 'e.g. Mobile in North County' : 'e.g. Encinitas Studio'}
               className={cn(
-                'rounded-2xl border border-white/12 bg-bgPrimary/30 px-3 py-2',
+                'rounded-2xl border border-surfaceGlass/12 bg-bgPrimary/30 px-3 py-2',
                 'text-[13px] font-semibold text-textPrimary placeholder:text-textSecondary/70 outline-none',
               )}
               disabled={busy}
@@ -744,7 +744,7 @@ async function updateAdvanceNotice(
               value={advanceNoticeMinutes}
               onChange={(e) => setAdvanceNoticeMinutes(Number(e.target.value))}
               className={cn(
-                'rounded-2xl border border-white/12 bg-bgPrimary/30 px-3 py-2',
+                'rounded-2xl border border-surfaceGlass/12 bg-bgPrimary/30 px-3 py-2',
                 'text-[13px] font-bold text-textPrimary outline-none',
               )}
               disabled={busy}
@@ -762,7 +762,7 @@ async function updateAdvanceNotice(
           </label>
 
           {showPlacePicker ? (
-            <div className="grid gap-3 rounded-2xl border border-white/10 bg-bgPrimary/20 p-3">
+            <div className="grid gap-3 rounded-2xl border border-surfaceGlass/10 bg-bgPrimary/20 p-3">
               <div className="text-[13px] text-textSecondary">Search and pick an address. Then confirm to add it.</div>
 
               <PlacesAutocomplete
@@ -784,7 +784,7 @@ async function updateAdvanceNotice(
               />
 
               {pickedPlace ? (
-                <div className="rounded-2xl border border-white/10 bg-bgSecondary/50 p-3">
+                <div className="rounded-2xl border border-surfaceGlass/10 bg-bgSecondary/50 p-3">
                   <div className="text-[11px] font-black text-textSecondary">Selected</div>
                   <div className="mt-1 text-[13px] font-black text-textPrimary">{pickedPlace.formattedAddress || '—'}</div>
                   <div className="mt-1 text-[12px] text-textSecondary">
@@ -821,7 +821,7 @@ async function updateAdvanceNotice(
           ) : null}
 
           {showMobileForm ? (
-            <div className="grid gap-3 rounded-2xl border border-white/10 bg-bgPrimary/20 p-3">
+            <div className="grid gap-3 rounded-2xl border border-surfaceGlass/10 bg-bgPrimary/20 p-3">
               <div className="text-[13px] text-textSecondary">Set your home ZIP and travel radius. This powers mobile discovery.</div>
 
               <div className="grid gap-2 sm:grid-cols-2">
@@ -832,7 +832,7 @@ async function updateAdvanceNotice(
                     onChange={(e) => setMobilePostalCode(e.target.value)}
                     placeholder="e.g. 92024"
                     className={cn(
-                      'rounded-2xl border border-white/12 bg-bgPrimary/30 px-3 py-2',
+                      'rounded-2xl border border-surfaceGlass/12 bg-bgPrimary/30 px-3 py-2',
                       'text-[13px] font-semibold text-textPrimary placeholder:text-textSecondary/70 outline-none',
                     )}
                     disabled={busy}
@@ -846,7 +846,7 @@ async function updateAdvanceNotice(
                     value={mobileRadiusKm}
                     onChange={(e) => setMobileRadiusKm(Number(e.target.value))}
                     className={cn(
-                      'rounded-2xl border border-white/12 bg-bgPrimary/30 px-3 py-2',
+                      'rounded-2xl border border-surfaceGlass/12 bg-bgPrimary/30 px-3 py-2',
                       'text-[13px] font-bold text-textPrimary outline-none',
                     )}
                     disabled={busy}
@@ -903,7 +903,7 @@ async function updateAdvanceNotice(
       ) : null}
 
       {/* List */}
-      <div className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
+      <div className="tovis-glass rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4">
         <div className="mb-3 text-[13px] font-black text-textPrimary">Your locations</div>
 
         {locations.length === 0 ? (
@@ -927,7 +927,7 @@ async function updateAdvanceNotice(
               })
 
               return (
-                <div key={l.id} className="rounded-card border border-white/10 bg-bgPrimary/20 p-3">
+                <div key={l.id} className="rounded-card border border-surfaceGlass/10 bg-bgPrimary/20 p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
@@ -991,7 +991,7 @@ async function updateAdvanceNotice(
                         }
                         disabled={busy}
                         className={cn(
-                          'rounded-2xl border border-white/12 bg-bgPrimary/30 px-3 py-2',
+                          'rounded-2xl border border-surfaceGlass/12 bg-bgPrimary/30 px-3 py-2',
                           'text-[13px] font-bold text-textPrimary outline-none disabled:opacity-60',
                         )}
                       >
@@ -1005,7 +1005,7 @@ async function updateAdvanceNotice(
                   </div>
 
                   {l.type === 'MOBILE_BASE' && editingBaseId === l.id ? (
-                    <div className="mt-3 grid gap-3 rounded-2xl border border-white/10 bg-bgSecondary/50 p-3">
+                    <div className="mt-3 grid gap-3 rounded-2xl border border-surfaceGlass/10 bg-bgSecondary/50 p-3">
                       <div className="text-[12px] font-black text-textSecondary">Edit mobile base</div>
 
                       <div className="grid gap-2 sm:grid-cols-2">
@@ -1016,7 +1016,7 @@ async function updateAdvanceNotice(
                             onChange={(e) => setEditBaseZip(e.target.value)}
                             placeholder="e.g. 92024"
                             className={cn(
-                              'rounded-2xl border border-white/12 bg-bgPrimary/30 px-3 py-2',
+                              'rounded-2xl border border-surfaceGlass/12 bg-bgPrimary/30 px-3 py-2',
                               'text-[13px] font-semibold text-textPrimary placeholder:text-textSecondary/70 outline-none',
                             )}
                             disabled={busy}
@@ -1030,7 +1030,7 @@ async function updateAdvanceNotice(
                             value={editBaseRadius}
                             onChange={(e) => setEditBaseRadius(Number(e.target.value))}
                             className={cn(
-                              'rounded-2xl border border-white/12 bg-bgPrimary/30 px-3 py-2',
+                              'rounded-2xl border border-surfaceGlass/12 bg-bgPrimary/30 px-3 py-2',
                               'text-[13px] font-bold text-textPrimary outline-none',
                             )}
                             disabled={busy}
@@ -1074,7 +1074,7 @@ async function updateAdvanceNotice(
                     here and the API refuses it too.
                   */}
                   {l.type !== 'MOBILE_BASE' ? (
-                    <div className="mt-3 rounded-inner border border-white/10 bg-bgPrimary/20 p-3">
+                    <div className="mt-3 rounded-inner border border-surfaceGlass/10 bg-bgPrimary/20 p-3">
                       <label className="flex items-start gap-3">
                         <input
                           type="checkbox"

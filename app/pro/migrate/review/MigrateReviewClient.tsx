@@ -102,7 +102,7 @@ export function MigrateReviewClient({ copy, vm }: Props) {
           {vm.checklist.map((item) => (
             <div
               key={item.label}
-              className="flex items-center gap-3 rounded-card border border-white/10 bg-bgSurface px-4 py-3"
+              className="flex items-center gap-3 rounded-card border border-surfaceGlass/10 bg-bgSurface px-4 py-3"
             >
               <span
                 className="flex h-5 w-5 items-center justify-center rounded-full bg-fern/15 text-[12px] text-fern"
@@ -116,7 +116,7 @@ export function MigrateReviewClient({ copy, vm }: Props) {
         </div>
 
         {/* Go-live */}
-        <div className="mt-8 flex flex-col items-center gap-4 rounded-card border border-white/10 bg-bgSecondary px-6 py-10 text-center">
+        <div className="mt-8 flex flex-col items-center gap-4 rounded-card border border-surfaceGlass/10 bg-bgSecondary px-6 py-10 text-center">
           <h3 className="font-display text-[20px] font-medium">{copy.goLiveTitle}</h3>
           <button
             type="button"
@@ -151,7 +151,7 @@ function SummaryCard({
   copy: MigrationCopy['review']
 }) {
   return (
-    <div className="flex flex-col gap-3 rounded-card border border-white/10 bg-bgSurface p-4">
+    <div className="flex flex-col gap-3 rounded-card border border-surfaceGlass/10 bg-bgSurface p-4">
       <div className="flex items-center justify-between">
         <span className={['text-[20px]', TONE_TEXT[card.tone]].join(' ')} aria-hidden="true">
           {CARD_ICON[card.key] ?? '✓'}

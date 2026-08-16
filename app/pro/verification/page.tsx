@@ -79,13 +79,13 @@ export default async function ProVerificationPage() {
 
   return (
     <main className="mx-auto max-w-3xl pb-24 pt-6 font-sans">
-      <div className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-5">
+      <div className="tovis-glass rounded-card border border-surfaceGlass/10 bg-bgSecondary p-5">
         <div className="text-lg font-black text-textPrimary">Verification</div>
         <div className="mt-1 text-sm text-textSecondary">
           This controls marketplace visibility + who can book you. (Yes, paperwork is the villain.)
         </div>
 
-        <div className="mt-4 rounded-card border border-white/10 bg-bgPrimary/30 p-4">
+        <div className="mt-4 rounded-card border border-surfaceGlass/10 bg-bgPrimary/30 p-4">
           <div className="text-xs font-extrabold text-textSecondary">Status</div>
           <div className="mt-2 text-sm font-black text-textPrimary">{pro.verificationStatus}</div>
           <div className="mt-2 text-xs text-textSecondary">
@@ -132,7 +132,7 @@ export default async function ProVerificationPage() {
           ) : (
             <div className="mt-3 grid gap-2">
               {pro.verificationDocs.map((d) => (
-                <div key={d.id} className="rounded-card border border-white/10 bg-bgPrimary/25 p-3">
+                <div key={d.id} className="rounded-card border border-surfaceGlass/10 bg-bgPrimary/25 p-3">
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="text-xs font-black text-textPrimary">
@@ -172,7 +172,7 @@ export default async function ProVerificationPage() {
                     <RemoteImage
                       src={`/api/v1/pro/verification-docs/${encodeURIComponent(d.id)}`}
                       alt="Uploaded document preview"
-                      className="h-28 w-44 rounded-lg border border-white/10 bg-bgPrimary/30 object-cover"
+                      className="h-28 w-44 rounded-lg border border-surfaceGlass/10 bg-bgPrimary/30 object-cover"
                       width={176}
                       height={112}
                     />

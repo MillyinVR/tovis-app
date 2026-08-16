@@ -37,7 +37,7 @@ export default function DiscoverActiveProCard({ pro, navHref }: DiscoverActivePr
   const statLine = buildStatLine(pro)
 
   return (
-    <div className="rounded-card border border-white/10 bg-bgPrimary/25 p-3">
+    <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary/25 p-3">
       <div className="flex items-center gap-3">
         <div className="relative h-13 w-13 shrink-0 overflow-hidden rounded-inner bg-bgPrimary/45">
           {pro.avatarUrl ? (
@@ -85,7 +85,7 @@ export default function DiscoverActiveProCard({ pro, navHref }: DiscoverActivePr
       <div className="mt-3 flex items-center gap-2">
         <Link
           href={`/professionals/${encodeURIComponent(pro.id)}`}
-          className="rounded-full border border-white/10 bg-bgPrimary/25 px-4 py-2 text-[12px] font-black text-textPrimary transition-colors hover:bg-white/10"
+          className="rounded-full border border-surfaceGlass/10 bg-bgPrimary/25 px-4 py-2 text-[12px] font-black text-textPrimary transition-colors hover:bg-white/10"
         >
           View
         </Link>
@@ -98,7 +98,7 @@ export default function DiscoverActiveProCard({ pro, navHref }: DiscoverActivePr
         */}
         <Link
           href={`/messages/start?kind=PRO&professionalId=${encodeURIComponent(pro.id)}`}
-          className="rounded-full border border-white/10 bg-bgPrimary/25 px-4 py-2 text-[12px] font-black text-textPrimary transition-colors hover:bg-white/10"
+          className="rounded-full border border-surfaceGlass/10 bg-bgPrimary/25 px-4 py-2 text-[12px] font-black text-textPrimary transition-colors hover:bg-white/10"
         >
           Message
         </Link>
