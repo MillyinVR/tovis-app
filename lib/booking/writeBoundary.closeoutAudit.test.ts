@@ -67,6 +67,13 @@ const tx = {
     findUnique: mocks.txBookingFindUnique,
     update: mocks.txBookingUpdate,
   },
+  // Settling a bill off-Stripe hands back any credit reservation quoted into an
+  // abandoned card checkout. Nothing is reserved in these fixtures, so this
+  // matches nothing — but the delegate has to exist.
+  clientCreditEntry: {
+    updateMany: vi.fn(async () => ({ count: 0 })),
+    createMany: vi.fn(async () => ({ count: 0 })),
+  },
   mediaAsset: {
     count: mocks.txMediaAssetCount,
   },

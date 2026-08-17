@@ -13938,6 +13938,18 @@ if (areAuditValuesEqual(oldCheckoutState, nextCheckoutState)) {
     select: BOOKING_CHECKOUT_MONEY_SELECT,
   })
 
+
+  // Same rule as the client's own off-Stripe confirm below: money recorded as
+  // settled outside Stripe means the client's credit reservation on this booking
+  // is not going to be spent, so hand it straight back rather than leaving their
+  // balance locked until the sweep expires it. Only touches a PENDING row.
+  if (shouldSetAuthorizedAt || shouldSetCollectedAt) {
+    await releaseClientCreditForBooking(args.tx, {
+      bookingId: booking.id,
+      now: args.now,
+    })
+  }
+
   await maybeCompleteBookingCloseout({
     tx: args.tx,
     now: args.now,
@@ -14728,6 +14740,30 @@ if (areAuditValuesEqual(oldCheckoutState, nextCheckoutState)) {
     },
     select: BOOKING_CHECKOUT_MONEY_SELECT,
   })
+
+  // 🔴 Committing to an OFF-STRIPE payment hands the client's credit back.
+  //
+  // Credit may only be spent through the CARD checkout, because the pro is made
+  // whole by a platform→pro Stripe transfer and that rail needs a connected
+  // account — this route rejects STRIPE_CARD on its confirm path entirely. But a
+  // client CAN quote credit into a card checkout, abandon it, and settle in cash
+  // instead; without this their own balance would stay locked against a booking
+  // they have already paid for until the sweep expires it 72 hours later.
+  //
+  // Gated on AUTHORIZED, not collected: an off-platform confirm lands in
+  // AWAITING_CONFIRMATION with `paymentCollectedAt` still null while the pro
+  // verifies receipt, so waiting for collection would leave the balance held for
+  // exactly the case this exists to fix. Authorizing is the moment the client
+  // committed to paying another way.
+  //
+  // Only ever touches a PENDING row: a spend that already settled is a payment
+  // that happened.
+  if (args.markPaymentAuthorized || args.markPaymentCollected) {
+    await releaseClientCreditForBooking(args.tx, {
+      bookingId: booking.id,
+      now: args.now,
+    })
+  }
 
   await maybeCompleteBookingCloseout({
     tx: args.tx,
