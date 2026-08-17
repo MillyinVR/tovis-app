@@ -1,6 +1,7 @@
 // lib/time/relativeTime.ts
 import { formatInTimeZone } from '@/lib/formatInTimeZone'
 import { daySerialInTimeZone } from '@/lib/timeZone'
+import { DISPLAY_LOCALE } from '@/lib/locale'
 
 type RelativeBucket =
   | { unit: 'now' }
@@ -59,7 +60,7 @@ export function formatRelativeTimeCompact(input: string | Date): string {
     case 'week':
       return `${bucket.value}w`
     case 'older':
-      return bucket.at.toLocaleDateString(undefined, {
+      return bucket.at.toLocaleDateString(DISPLAY_LOCALE, {
         month: 'short',
         day: 'numeric',
         year: 'numeric',
@@ -89,7 +90,7 @@ export function formatRelativeTimeAgo(input: string | Date): string {
     case 'week':
       return `${bucket.value}w ago`
     case 'older':
-      return bucket.at.toLocaleDateString(undefined, {
+      return bucket.at.toLocaleDateString(DISPLAY_LOCALE, {
         month: 'short',
         day: 'numeric',
       })

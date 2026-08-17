@@ -6,6 +6,7 @@
 import type { ProNameDisplay } from '@prisma/client'
 import { pickProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import { formatInTimeZone } from '@/lib/time'
+import { DISPLAY_LOCALE } from '@/lib/locale'
 
 // Brand-token gradient pairs mirroring the design's avatar/portrait fills.
 // Each pair references per-brand CSS variables (overridden by BrandProvider per
@@ -34,7 +35,7 @@ export function money(
   const numeric =
     typeof value === 'number' ? value : Number.parseFloat(value.toString())
   if (!Number.isFinite(numeric)) return null
-  return new Intl.NumberFormat('en-US', {
+  return new Intl.NumberFormat(DISPLAY_LOCALE, {
     style: 'currency',
     currency: 'USD',
     maximumFractionDigits: 0,
@@ -85,7 +86,7 @@ export function formatDateTime(
   }
   // Appointment time: format in the supplied zone. A null/invalid tz sanitizes
   // to UTC, matching the prior no-tz fallback (server zone = UTC on Vercel).
-  return formatInTimeZone(date, timeZone ?? 'UTC', options, 'en-US')
+  return formatInTimeZone(date, timeZone ?? 'UTC', options)
 }
 
 /**

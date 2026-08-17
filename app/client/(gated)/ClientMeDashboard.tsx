@@ -25,6 +25,7 @@ import LogoutButton from './components/LogoutButton'
 import FollowSuggestionsRail from './_components/FollowSuggestionsRail'
 import WorkspaceSwitcher from '@/app/_components/WorkspaceSwitcher'
 import type { WorkspaceOption } from '@/lib/auth/workspaces'
+import { DISPLAY_LOCALE } from '@/lib/locale'
 
 type MeTabKey = 'boards' | 'following' | 'history'
 
@@ -439,7 +440,7 @@ function CreatorStat(props: { label: string; value: number; withBorder?: boolean
       )}
     >
       <div className="text-[16px] font-black leading-none text-textPrimary">
-        {props.value.toLocaleString()}
+        {props.value.toLocaleString(DISPLAY_LOCALE)}
       </div>
       <div className="mt-1.5 text-[9px] font-bold uppercase tracking-[0.1em] text-textSecondary">
         {props.label}

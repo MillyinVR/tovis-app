@@ -41,7 +41,6 @@ function formatVisitDate(value: Date, timeZone: string | null): string {
       month: 'short',
       day: 'numeric',
     },
-    'en-US',
   )
 }
 

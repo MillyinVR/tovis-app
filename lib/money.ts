@@ -1,5 +1,6 @@
 // lib/money.ts
 import { Prisma } from '@prisma/client'
+import { DISPLAY_LOCALE } from '@/lib/locale'
 
 export type MoneyInput = Prisma.Decimal | string | number
 
@@ -281,7 +282,7 @@ export function formatRoundedDollars(value: MoneyInput | null | undefined): stri
   const amount = moneyToNumber(value)
   if (amount === null) return null
 
-  return `$${Math.round(amount).toLocaleString('en-US')}`
+  return `$${Math.round(amount).toLocaleString(DISPLAY_LOCALE)}`
 }
 
 /**
@@ -306,7 +307,7 @@ export function formatCents(
   }
 
   try {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency: code }).format(dollars)
+    return new Intl.NumberFormat(DISPLAY_LOCALE, { style: 'currency', currency: code }).format(dollars)
   } catch {
     return `${dollars.toFixed(2)} ${code}`
   }

@@ -26,37 +26,3 @@ export function combineDateAndTimeInput(date: string, time: string): string {
 export function dateTimeLocalToUtcIso(value: string, timeZone: string): string {
   return sharedDateTimeLocalToUtcIso(value, timeZone)
 }
-
-export function formatUtcInAppointmentTz(
-  iso: string,
-  timeZone: string,
-  locale?: string,
-): string {
-  const date = new Date(iso)
-  if (!Number.isFinite(date.getTime())) return ''
-
-  return date.toLocaleString(locale, {
-    timeZone,
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  })
-}
-
-export function formatUtcInViewerTz(
-  iso: string,
-  viewerTimeZone: string,
-  locale?: string,
-): string {
-  const date = new Date(iso)
-  if (!Number.isFinite(date.getTime())) return ''
-
-  return date.toLocaleString(locale, {
-    timeZone: viewerTimeZone,
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  })
-}

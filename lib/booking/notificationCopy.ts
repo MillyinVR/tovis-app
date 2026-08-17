@@ -15,7 +15,6 @@ export function formatBookingDateLabel(date: Date, timeZone: string): string {
     date,
     safeZone(timeZone),
     { weekday: 'short', month: 'short', day: 'numeric' },
-    'en-US',
   )
 }
 
@@ -25,7 +24,6 @@ export function formatBookingTimeLabel(date: Date, timeZone: string): string {
     date,
     safeZone(timeZone),
     { hour: 'numeric', minute: '2-digit' },
-    'en-US',
   )
 }
 

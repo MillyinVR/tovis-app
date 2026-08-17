@@ -1,4 +1,6 @@
 // lib/timeZone.ts
+import { DISPLAY_LOCALE } from '@/lib/locale'
+
 /**
  * Single source of truth for timezone ops across the app.
  * - Intl-only (no deps)
@@ -82,7 +84,7 @@ export function friendlyTimeZoneLabel(tz: unknown): string | null {
   const zone = pickTimeZoneOrNull(tz)
   if (!zone) return null
   try {
-    const parts = new Intl.DateTimeFormat('en-US', {
+    const parts = new Intl.DateTimeFormat(DISPLAY_LOCALE, {
       timeZone: zone,
       timeZoneName: 'longGeneric',
     }).formatToParts(new Date())

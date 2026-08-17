@@ -198,7 +198,6 @@ function monthLabel(parts: MonthParts, timeZone: string): string {
       month: 'short',
       year: 'numeric',
     },
-    'en-US',
   )
 }
 

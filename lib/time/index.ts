@@ -12,6 +12,7 @@
 //   2. UTC instant -> display  formatInTimeZone / formatAppointmentWhen / formatSlot*
 //   3. wall clock <-> UTC      dateTimeLocalToUtc* / utc*ToDateTimeLocal / *ToUtc / utc*Local*
 //   4. viewer's own zone       getViewerTimeZone (hints only, never scheduling truth)
+//   5. WHICH locale?           DISPLAY_LOCALE — the display formatters default to it
 
 // 1. Which timezone wins (precedence: booking snapshot -> hold -> location -> pro -> fallback)
 export {
@@ -60,7 +61,13 @@ export {
   utcFromDayAndMinutesInTimeZone,
 } from '@/lib/timeZone'
 
-// 2. Display formatting (sanitized + explicit timeZone)
+// 5. The display locale. `Intl` resolves an omitted locale to the RUNTIME's
+// default — the server's LANG, and the VISITOR's browser locale in the client
+// bundle — which is the same failure as an omitted timeZone, one axis over.
+// The formatters below default their `locale` argument to this.
+export { DISPLAY_LOCALE } from '@/lib/locale'
+
+// 2. Display formatting (sanitized + explicit timeZone, pinned locale)
 export {
   formatInTimeZone,
   formatAppointmentWhen,
@@ -80,7 +87,6 @@ export {
   datetimeLocalToUtcIsoStrict,
   WALL_TIME_ERROR_MESSAGE,
   isoToDatetimeLocalInTimeZone,
-  formatInBookingTimeZone,
 } from '@/lib/bookingTime'
 export type { WallTimeToUtcResult } from '@/lib/bookingTime'
 
@@ -105,8 +111,6 @@ export {
   utcIsoToTimeInputValue,
   combineDateAndTimeInput,
   dateTimeLocalToUtcIso as dateTimeLocalToUtcIsoClient,
-  formatUtcInAppointmentTz,
-  formatUtcInViewerTz,
 } from '@/lib/bookingDateTimeClient'
 
 // The app's short calendar date — "Aug 9, 2026"

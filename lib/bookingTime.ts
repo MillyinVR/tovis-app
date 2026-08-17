@@ -11,13 +11,6 @@ import { sanitizeTimeZone, getZonedParts, zonedTimeToUtc, ymdInTimeZone } from '
 import { formatInTimeZone } from '@/lib/formatInTimeZone'
 import { zonedPartsToUtcStrict } from '@/lib/booking/dateTime'
 
-type DateLike = Date | string | number
-
-function toDate(v: DateLike): Date | null {
-  const d = v instanceof Date ? v : new Date(v)
-  return Number.isNaN(d.getTime()) ? null : d
-}
-
 /**
  * YYYY-MM-DD in the given timezone from an ISO UTC instant string.
  */
@@ -288,20 +281,4 @@ export function isoToDatetimeLocalInTimeZone(isoUtc: string | null, timeZone: st
   const min = String(p.minute).padStart(2, '0')
 
   return `${yyyy}-${mm}-${dd}T${hh}:${min}`
-}
-
-/**
- * General formatter wrapper for booking surfaces.
- * Kept here to encourage importing bookingTime utilities instead of scattered Intl usage.
- */
-export function formatInBookingTimeZone(
-  date: DateLike,
-  timeZone: string,
-  options: Intl.DateTimeFormatOptions,
-  locale?: string,
-) {
-  const d = toDate(date)
-  if (!d) return 'Invalid date'
-  const tz = sanitizeTimeZone(timeZone, 'UTC')
-  return formatInTimeZone(d, tz, options, locale)
 }

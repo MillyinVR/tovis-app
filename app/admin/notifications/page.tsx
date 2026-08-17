@@ -93,7 +93,6 @@ export default async function AdminNotificationsPage() {
                         n.createdAt,
                         'UTC',
                         { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' },
-                        'en-US',
                       )}
                     </div>
                   </div>

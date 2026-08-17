@@ -105,7 +105,6 @@ export function buildMonthDayCells(args: {
         month: 'numeric',
         year: 'numeric',
       },
-      'en-US',
     )
 
   const dayNumberFormatter = (date: Date): string =>
@@ -115,7 +114,6 @@ export function buildMonthDayCells(args: {
       {
         day: 'numeric',
       },
-      'en-US',
     )
 
   const currentMonthKey = monthYearFormatter(currentDate)

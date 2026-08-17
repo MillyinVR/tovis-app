@@ -160,7 +160,6 @@ export function nextQuarterlyDueLabel(args: {
           candidate,
           tz,
           { month: 'long', day: 'numeric', year: 'numeric' },
-          'en-US',
         )
       }
     }
@@ -222,7 +221,6 @@ export function serializeProFinanceExpense(
       row.spentAt,
       timeZone,
       { month: 'short', day: 'numeric' },
-      'en-US',
     ),
     spentAtIso: row.spentAt.toISOString(),
     hasReceipt: row.receiptMediaId != null,

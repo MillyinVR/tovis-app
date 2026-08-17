@@ -1,6 +1,7 @@
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { DISPLAY_LOCALE } from '@/lib/locale'
 import {
   AftercareRebookMode,
   BookingStatus,
@@ -89,6 +90,17 @@ vi.mock('@/lib/booking/publicCheckoutAvailability', () => ({
 vi.mock('@/lib/timeZone', () => ({
   sanitizeTimeZone: mocks.sanitizeTimeZone,
   friendlyTimeZoneLabel: (tz: string | null | undefined) => tz ?? null,
+  // RebookCard reads the canonical ymdInTimeZone (it used to carry a private
+  // copy built on `formatInTimeZone(…, 'en-CA')`). Faithful impl, same reason
+  // as the formatInTimeZone mock below: real output without pulling in the
+  // mocked module's internals.
+  ymdInTimeZone: (date: Date, timeZone: string) =>
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(date),
 }))
 
 vi.mock('@/lib/formatInTimeZone', () => ({
@@ -98,11 +110,16 @@ vi.mock('@/lib/formatInTimeZone', () => ({
   // barrel, which re-exports this module). Provide a faithful, self-contained
   // impl so the rendered slot times/ymd are real without pulling in the mocked
   // @/lib/timeZone internals.
+  //
+  // The `locale` DEFAULT is part of what is being faithful to: the real helper
+  // pins it, and a mock that forwarded `undefined` would format in whatever
+  // locale the test runner happens to have — green here, red on a CI box with
+  // a different LANG, and asserting nothing either way.
   formatInTimeZone: (
     date: Date | string | number,
     timeZone: string,
     options: Intl.DateTimeFormatOptions,
-    locale?: string,
+    locale: string = DISPLAY_LOCALE,
   ) =>
     new Intl.DateTimeFormat(locale, { ...options, timeZone }).format(
       date instanceof Date ? date : new Date(date),

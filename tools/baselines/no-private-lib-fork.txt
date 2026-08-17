@@ -84,7 +84,6 @@ app/booking/[id]/page.tsx|decimalToNumber
 app/booking/[id]/page.tsx|sumDecimal
 app/booking/[id]/page.tsx|upper
 app/client/(gated)/bookings/[id]/AftercareProductRecommendationsCard.tsx|upper
-app/client/(gated)/bookings/[id]/AftercareRebookButton.tsx|ymdInTimeZone
 app/client/(gated)/bookings/[id]/ClientCheckoutCard.tsx|upper
 app/client/(gated)/bookings/[id]/_view/buildBookingViewModel.ts|upper
 app/client/(gated)/bookings/[id]/_view/statusPresentation.ts|upper
@@ -92,7 +91,6 @@ app/client/(gated)/bookings/[id]/page.tsx|upper
 app/client/(gated)/settings/ClientAddressesSettings.tsx|parsePlaceDetails
 app/client/(gated)/settings/ClientLocationSettings.tsx|parsePlaceDetails
 app/client/_public/CreateAccountInviteCard.tsx|COPY
-app/client/_public/RebookCard.tsx|ymdInTimeZone
 app/client/consultation/[token]/page.tsx|formatDurationMinutes
 app/client/consultation/[token]/page.tsx|upper
 app/nfc/invalid/page.tsx|COPY

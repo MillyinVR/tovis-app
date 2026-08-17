@@ -187,7 +187,7 @@ export default async function AdminProfessionalsPage({
                                 year: 'numeric',
                                 month: 'short',
                                 day: 'numeric',
-                              }, 'en-US')}
+                              })}
                             </span>
                           ) : null}
                         </div>

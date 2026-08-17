@@ -17,7 +17,6 @@ function fmtUtcDate(d: Date) {
     d,
     'UTC',
     { year: 'numeric', month: 'short', day: '2-digit' },
-    'en-US',
   )
 }
 
@@ -33,7 +32,6 @@ function fmtUtcDateTime(d: Date) {
       minute: '2-digit',
       second: '2-digit',
     },
-    'en-US',
   )
 }
 

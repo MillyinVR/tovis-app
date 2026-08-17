@@ -1,0 +1,20 @@
+# Locale literals and unpinned formatters that are NOT display decisions.
+#
+# NOT a to-do list. Each entry is a MACHINE formatter: the locale is a
+# required positional argument whose output is parsed or discarded, never
+# read by a person. Migrating one would be a no-op at best.
+#
+#   lib/timeZone.ts | 'en-US'          — isValidIanaTimeZone builds a
+#   formatter purely to see whether the constructor throws. The result is
+#   a boolean; the formatted string is discarded.
+#
+#   lib/timeZone.ts | 'en-US-u-hc-h23' — getZonedParts pins the 24-hour
+#   cycle through a locale extension and reads formatToParts to get
+#   numeric Y/M/D/h/m/s. This is the timezone MATH engine; a display
+#   locale here would change what the parser sees.
+#
+# Format: file|kind|token|count. The count is load-bearing — a THIRD
+# literal in one of these files must still fail. See
+# tools/check-locale-pinned.mjs.
+lib/timeZone.ts|literal|'en-US'|1
+lib/timeZone.ts|literal|'en-US-u-hc-h23'|1

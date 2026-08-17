@@ -59,7 +59,6 @@ function relativeDay(date: Date, timeZone?: string | null): string {
     date,
     tz,
     { weekday: 'short', month: 'short', day: 'numeric' },
-    'en-US',
   )
 }
 
@@ -73,7 +72,6 @@ function formatTime(date: Date, timeZone?: string | null): string {
       hour: 'numeric',
       minute: '2-digit',
     },
-    'en-US',
   )
 }
 

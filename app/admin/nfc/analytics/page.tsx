@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation'
 import { getCurrentUser } from '@/lib/currentUser'
 import { getNfcAnalytics } from '@/lib/nfc/nfcAnalytics'
 import { formatShortCode } from '@/lib/nfcShortCode'
+import { DISPLAY_LOCALE } from '@/lib/locale'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,7 +21,7 @@ function StatCard(props: { label: string; value: number; hint?: string }) {
     <div className="rounded-2xl border border-surfaceGlass/10 bg-bgSecondary p-5 shadow-sm">
       <div className="text-xs font-medium text-textSecondary">{props.label}</div>
       <div className="mt-1 text-3xl font-semibold tracking-tight text-textPrimary">
-        {props.value.toLocaleString()}
+        {props.value.toLocaleString(DISPLAY_LOCALE)}
       </div>
       {props.hint ? (
         <div className="mt-1 text-[11px] text-textSecondary">{props.hint}</div>
@@ -110,10 +111,10 @@ export default async function AdminNfcAnalyticsPage() {
                   </td>
                   <td className="px-3 py-3 text-textPrimary">{card.type}</td>
                   <td className="px-3 py-3 text-textPrimary">{card.isActive ? 'Yes' : 'No'}</td>
-                  <td className="px-3 py-3 text-textPrimary">{card.taps.toLocaleString()}</td>
-                  <td className="px-3 py-3 text-textPrimary">{card.signups.toLocaleString()}</td>
+                  <td className="px-3 py-3 text-textPrimary">{card.taps.toLocaleString(DISPLAY_LOCALE)}</td>
+                  <td className="px-3 py-3 text-textPrimary">{card.signups.toLocaleString(DISPLAY_LOCALE)}</td>
                   <td className="px-3 py-3 text-textPrimary">
-                    {card.referralCount.toLocaleString()}
+                    {card.referralCount.toLocaleString(DISPLAY_LOCALE)}
                   </td>
                 </tr>
               ))}

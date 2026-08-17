@@ -24,8 +24,8 @@ function formatMemberSince(value: unknown): string | null {
   // Member-since label — not an appointment, so there's no booking tz. This is
   // a server component, so the prior no-tz Intl rendered in the server's zone
   // (UTC on Vercel); preserve that explicitly.
-  const month = formatInTimeZone(date, 'UTC', { month: 'short' }, 'en-US')
-  const year = formatInTimeZone(date, 'UTC', { year: '2-digit' }, 'en-US')
+  const month = formatInTimeZone(date, 'UTC', { month: 'short' })
+  const year = formatInTimeZone(date, 'UTC', { year: '2-digit' })
 
   return `${month} '${year}`
 }

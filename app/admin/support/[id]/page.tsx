@@ -106,7 +106,6 @@ export default async function AdminSupportTicketPage(req: Ctx) {
             ticket.createdAt,
             'UTC',
             { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' },
-            'en-US',
           )}
           {ticket.createdByUserId ? ` • user:${ticket.createdByUserId}` : ''}
         </div>

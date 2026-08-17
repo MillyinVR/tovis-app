@@ -2945,7 +2945,7 @@ function resolveAftercareTimeZone(args: {
 
 function formatDateTimeInTimeZone(date: Date, timeZone: string): string {
   // formatInTimeZone sanitizes: a missing/invalid zone falls back to UTC.
-  return formatDatedAppointmentWhen(date, timeZone, 'en-US')
+  return formatDatedAppointmentWhen(date, timeZone)
 }
 
 /** Booking's display timezone via the standard truth precedence, never throwing. */
