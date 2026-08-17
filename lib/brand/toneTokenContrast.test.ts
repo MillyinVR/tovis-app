@@ -59,19 +59,27 @@ function grounds(mode: BrandMode): Array<[string, RgbTriplet]> {
  *    clears 4.5 on every bare surface (5.06 on paper) but reaches only 4.43
  *    inside the tint — #928 measured the token, not the pattern, exactly as the
  *    register did for ember.
- *  - LIGHT `--tone-success` is `colorFern`: 5.30 bare, but 4.32 in a notice on
- *    the section band.
- *  - DARK `--tone-success` is the worst of the set and had never been measured
- *    at all — the register's palette table was light-only. It is 4.45 on bare
- *    `bgSecondary` and 4.24 / 3.98 / 3.75 inside its own notice, so it fails on
- *    every dark ground. A green success notice in dark mode is below AA today.
+ *  - ~~`--tone-success` (`colorFern`)~~ **FIXED.** It failed in BOTH modes —
+ *    light 4.32 in a notice on the band, and dark 4.45 bare on `bgSecondary`
+ *    with 4.24 / 3.98 / 3.75 inside its own notice, i.e. every dark ground,
+ *    in the app's DEFAULT mode. Raised to `#0AA49E` dark / `#0D6860` light
+ *    (worst reading 4.76 / 4.71). All 66 of its text sites are at full
+ *    opacity, so the token's own value governed exactly the failing role.
+ *    ⚠️ That fix REQUIRED a second change and cannot be reverted alone: the
+ *    calendar's mobile Approve button paints a ✓ on a SOLID fill of this
+ *    token, which pulls the opposite way — on the raised green `textPrimary`
+ *    reads 2.68 / 2.82, below even the 3:1 bar an aria-labelled glyph owes.
+ *    It moved to `--on-accent` in proCalendar.css. See
+ *    `toneOnSolidFill.test.ts`, which exists because THIS suite could not see
+ *    that surface: it checks tones against grounds and tints, never against a
+ *    foreground sitting on the tone itself.
  *
  * ⚠️ This list FAILS when an entry starts passing. A known-shortfall list that
  * silently goes stale is how a fixed thing keeps being described as broken.
  */
 const KNOWN_BELOW_AA: Record<BrandMode, Set<string>> = {
-  light: new Set(['--tone-info', '--tone-success']),
-  dark: new Set(['--tone-success']),
+  light: new Set(['--tone-info']),
+  dark: new Set(),
 }
 
 describe('status tone tokens', () => {

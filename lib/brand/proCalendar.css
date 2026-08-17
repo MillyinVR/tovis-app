@@ -1300,9 +1300,16 @@
   font-weight: 900;
 }
 
+/* The ✓ sits on a SOLID fill of --tone-success, so it is the one surface that
+   pulls the opposite way from the `bg-toneSuccess/10 text-toneSuccess` notice:
+   a green light enough for the notice is too light for textPrimary. On the
+   raised token textPrimary reads 2.68 in dark and 2.82 in light — below even
+   the 3:1 icon bar this aria-labelled glyph owes. --on-accent is the token
+   that exists for text on a filled control (brand.css, proSession.css already
+   use it) and it flips per mode: 6.07 dark, 6.63 light. */
 .brand-pro-calendar-pending-action[data-action="approve"] {
   background: rgb(var(--tone-success));
-  color: rgb(var(--text-primary));
+  color: rgb(var(--on-accent));
 }
 
 .brand-pro-calendar-pending-action[data-action="deny"] {

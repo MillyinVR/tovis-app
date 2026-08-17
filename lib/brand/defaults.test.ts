@@ -18,6 +18,7 @@ import {
 } from './contrast'
 import { DEFAULT_CALENDAR_SWATCHES } from './defaults'
 import { tovisBrand } from './brands/tovis'
+import { toCssVars } from './utils'
 import type { BrandMode } from './types'
 
 const MODES: BrandMode[] = ['dark', 'light']
@@ -131,6 +132,40 @@ describe('DEFAULT_CALENDAR_SWATCHES', () => {
       expect(declared.get(id), `--swatch-${id} in brand.css`).toBe(
         DEFAULT_CALENDAR_SWATCHES.dark[id],
       )
+    }
+  })
+
+  // The swatches were pinned against brand.css; the rest of the palette was
+  // not, and it drifted the moment a DARK token moved. #928 and #935 both
+  // changed LIGHT values only, so the gap stayed invisible until
+  // `colorFern`'s dark value was raised and left `--color-fern: 14 142 137`
+  // behind in the stylesheet — 28 of 29 mirrored tokens still agreed, which is
+  // exactly how a single stale copy hides.
+  //
+  // Derived from `toCssVars`, not hand-listed, so a token added tomorrow is
+  // covered the day it lands.
+  it('mirrors every dark palette token in the :root fallback', () => {
+    const css = fs.readFileSync(
+      path.join(process.cwd(), 'lib/brand/brand.css'),
+      'utf8',
+    )
+
+    const rootStart = css.indexOf(':root')
+    const root = css.slice(rootStart, css.indexOf('}', rootStart))
+    const dark = toCssVars(tovisBrand.tokensByMode.dark)
+
+    const declared = new Map<string, string>()
+    for (const match of root.matchAll(/(--[a-z0-9-]+):\s*(\d+ \d+ \d+);/g)) {
+      const [, name, value] = match
+      if (name && value) declared.set(name, value)
+    }
+
+    // A mirror that mirrors nothing would pass vacuously.
+    const mirrored = [...declared.keys()].filter((name) => name in dark)
+    expect(mirrored.length).toBeGreaterThan(20)
+
+    for (const name of mirrored) {
+      expect(declared.get(name), `${name} in brand.css :root`).toBe(dark[name])
     }
   })
 

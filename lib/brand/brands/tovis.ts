@@ -51,7 +51,12 @@ export const tovisBrand: BrandConfig = createBrandConfig({
       onAccent: '10 20 19', // ink reads on teal/gold
 
       colorAcid: '107 75 230', // #6B4BE6 Iris Violet (pop / saves)
-      colorFern: '14 142 137', // #0E8E89 Deep Emerald (success)
+      // 🔴 Was #0E8E89, which failed AA as TEXT on 4 of 6 dark readings —
+      // including 3.75 inside its own `bg-toneSuccess/10` notice — and dark
+      // is the DEFAULT mode. It went unseen because every palette check in
+      // the cleanup register was light-only. All 66 of this token's text
+      // sites are at FULL opacity, so its raw value governs the failing role.
+      colorFern: '10 164 158', // #0AA49E Deep Emerald (success) — worst reading 4.76
       colorEmber: '255 61 110', // #FF3D6E Like coral (danger / like)
       colorAmber: '242 180 62', // #F2B43E Gold (pending / attention)
     },
@@ -92,7 +97,9 @@ export const tovisBrand: BrandConfig = createBrandConfig({
       onAccent: '255 255 255', // white reads on light-mode teal
 
       colorAcid: '91 60 214', // #5B3CD6 iris (light)
-      colorFern: '11 111 102', // #0B6F66 emerald (light)
+      // 🔴 Was #0B6F66: 5.30 on paper but 4.32 inside its own notice on the
+      // section band. Measure the PATTERN, not the token on a bare surface.
+      colorFern: '13 104 96', // #0D6860 emerald (light) — worst reading 4.71
       // 🔴 Both were below AA as TEXT, which is the role they mostly play. The
       // role count (rolecount.mjs, on 72def5a7) found ember painting 238 text
       // sites against 277 fills and borders, and the gold 135 against 203 — and

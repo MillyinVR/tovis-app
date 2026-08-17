@@ -1259,7 +1259,13 @@
   padding: 8px 12px;
   border-radius: var(--radius-card);
   background: rgb(var(--tone-danger));
-  color: rgb(var(--text-primary));
+  /* Was --text-primary, which reads 2.97 in dark and 2.80 in light on this
+     solid fill — below AA for what is prose, not a glyph. Found by
+     toneOnSolidFill.test.ts, not by anyone looking: no component references
+     this class today, so the fix is latent rather than visible. Left in place
+     and repaired rather than deleted, because a literal sweep is a floor —
+     a runtime-composed class name would not show up in one. */
+  color: rgb(var(--on-accent));
   font-size: 12px;
   font-weight: 850;
   line-height: 1.3;
