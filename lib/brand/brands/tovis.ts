@@ -86,7 +86,16 @@ export const tovisBrand: BrandConfig = createBrandConfig({
       // paper lands on top of the old hover (#0B7A6B), which would leave the two
       // states ~1.0 apart — an invisible hover is a worse bug than the one being
       // fixed. This pair keeps a 1.47 step, against today's 1.51.
-      accentPrimary: '10 115 99', // #0A7363 — paper 5.06, band 4.71, white-on 5.76
+      //
+      // ✅ [approved by Tori 2026-08-17] #0A7363 (5.06 on paper) still failed
+      // AA INSIDE its own `/10` notice tint — 4.43 on bgPrimary, 4.11 on
+      // bgSecondary — the pattern the app actually writes
+      // (`bg-toneInfo/10 text-toneInfo`), not the bare token #928 measured.
+      // #0A6B5C is a 1.6% lightness step (Δhue 0.1°) that clears every ground
+      // bare AND inside the notice (worst 4.58), raises the white `onAccent`
+      // label on a solid fill 5.76 → 6.42, and needed no hover change — no
+      // fern-style deadlock, both constraints pull the same way here.
+      accentPrimary: '10 107 92', // #0A6B5C — paper 5.63, band notice 4.58, white-on 6.42
       accentPrimaryHover: '8 87 75', // #08574B — paper 7.45, white-on 8.48
       // The BRAND gold (→ --micro-accent / --gold). Was #B7831F, 2.93 on paper
       // and below AA on all 42 TEXT sites (the governing role — 371 of 373

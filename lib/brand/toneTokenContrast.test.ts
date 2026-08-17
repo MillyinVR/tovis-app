@@ -55,10 +55,14 @@ function grounds(mode: BrandMode): Array<[string, RgbTriplet]> {
  * of these predate this file; raising them is Tori's call, not a sweep's, and
  * the numbers are with her.
  *
- *  - LIGHT `--tone-info` is `accentPrimary`. #928 raised it to #0A7363, which
- *    clears 4.5 on every bare surface (5.06 on paper) but reaches only 4.43
- *    inside the tint — #928 measured the token, not the pattern, exactly as the
- *    register did for ember.
+ *  - ~~LIGHT `--tone-info` (`accentPrimary`)~~ **FIXED.** #928 raised it to
+ *    #0A7363, which cleared 4.5 on every bare surface (5.06 on paper) but
+ *    reached only 4.43 inside the tint — #928 measured the token, not the
+ *    pattern, exactly as the register did for ember. Raised to `#0A6B5C`
+ *    [approved by Tori 2026-08-17] — a 1.6% lightness step, Δhue 0.1°, worst
+ *    reading 4.58 (inside the notice on `bgSecondary`). Unlike fern there was
+ *    no deadlock: the white `onAccent` label on a solid fill of this token
+ *    moved the SAME direction, 5.76 → 6.42, so no second change was needed.
  *  - ~~`--tone-success` (`colorFern`)~~ **FIXED.** It failed in BOTH modes —
  *    light 4.32 in a notice on the band, and dark 4.45 bare on `bgSecondary`
  *    with 4.24 / 3.98 / 3.75 inside its own notice, i.e. every dark ground,
@@ -78,7 +82,7 @@ function grounds(mode: BrandMode): Array<[string, RgbTriplet]> {
  * silently goes stale is how a fixed thing keeps being described as broken.
  */
 const KNOWN_BELOW_AA: Record<BrandMode, Set<string>> = {
-  light: new Set(['--tone-info']),
+  light: new Set(),
   dark: new Set(),
 }
 

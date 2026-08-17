@@ -293,14 +293,22 @@ select {
   text-shadow: 0 2px 12px rgb(var(--bg-primary) / 0.72);
 }
 
-.cap,
-.brand-cap {
-  color: rgb(var(--text-muted));
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: var(--ls-caps);
-  text-transform: uppercase;
+/* In @layer base so Tailwind text-color utilities (which live in the higher
+   `utilities` layer) can override the default muted colour — without the
+   layer, this unlayered rule wins over utilities under v4's cascade-layer
+   model, and every `text-toneX`/`text-accentPrimary`/etc. on a `.brand-cap`
+   element is silently ignored, no matter what the class list says. Same
+   family as the `button { color: inherit }` reset above. */
+@layer base {
+  .cap,
+  .brand-cap {
+    color: rgb(var(--text-muted));
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: var(--ls-caps);
+    text-transform: uppercase;
+  }
 }
 
 /* ──────────────────────────────────────────────────────────────────
