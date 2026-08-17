@@ -5,7 +5,34 @@
 // plus a cream glint. Brand-constant (the plume gradient), so this is the
 // TOVIS mark specifically; white-label tenants render their own
 // brand.assets.mark image instead.
+//
+// The artwork itself lives in lib/brand/eyeSvg.ts — this file draws it, it
+// does not define it. See that file for why.
 import type { CSSProperties } from 'react'
+
+import {
+  TOVIS_EYE_GLINT,
+  TOVIS_EYE_GRADIENT,
+  TOVIS_EYE_PATH,
+  TOVIS_EYE_STOPS,
+} from './eyeSvg'
+
+/**
+ * The plume gradient's <defs>, shared by every React rendering of the mark
+ * (this component, the footer's feather, the loading splash). The caller owns
+ * the id so a page can carry several without them colliding.
+ */
+export function TovisEyeGradient({ id }: { id: string }) {
+  return (
+    <defs>
+      <radialGradient id={id} {...TOVIS_EYE_GRADIENT}>
+        {TOVIS_EYE_STOPS.map((stop) => (
+          <stop key={stop.offset} offset={stop.offset} stopColor={stop.color} />
+        ))}
+      </radialGradient>
+    </defs>
+  )
+}
 
 type TovisEyeProps = {
   size?: number
@@ -37,20 +64,14 @@ export default function TovisEye({
       aria-hidden={title ? undefined : true}
       focusable="false"
     >
-      <defs>
-        <radialGradient id={gradientId} cx="48%" cy="40%" r="64%">
-          <stop offset="0%" stopColor="#FFF0C2" />
-          <stop offset="20%" stopColor="#F2B43E" />
-          <stop offset="46%" stopColor="#15C9A8" />
-          <stop offset="72%" stopColor="#1574C4" />
-          <stop offset="100%" stopColor="#6B4BE6" />
-        </radialGradient>
-      </defs>
-      <path
-        d="M50 4 C78 27 78 73 50 96 C22 73 22 27 50 4 Z"
-        fill={`url(#${gradientId})`}
+      <TovisEyeGradient id={gradientId} />
+      <path d={TOVIS_EYE_PATH} fill={`url(#${gradientId})`} />
+      <circle
+        cx={TOVIS_EYE_GLINT.cx}
+        cy={TOVIS_EYE_GLINT.cy}
+        r={TOVIS_EYE_GLINT.r}
+        fill={TOVIS_EYE_GLINT.color}
       />
-      <circle cx="42" cy="38" r="6.5" fill="#FFF6E2" />
     </svg>
   )
 }

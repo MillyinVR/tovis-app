@@ -3,10 +3,10 @@
   <g transform="translate(50 50) scale(0.82) translate(-50 -50)">
     <defs>
       <radialGradient id="te" cx="48%" cy="40%" r="64%">
-        <stop offset="0%" stop-color="#FFF6E2" />
-        <stop offset="22%" stop-color="#F2B43E" />
-        <stop offset="48%" stop-color="#15C9A8" />
-        <stop offset="74%" stop-color="#1574C4" />
+        <stop offset="0%" stop-color="#FFF0C2" />
+        <stop offset="20%" stop-color="#F2B43E" />
+        <stop offset="46%" stop-color="#15C9A8" />
+        <stop offset="72%" stop-color="#1574C4" />
         <stop offset="100%" stop-color="#6B4BE6" />
       </radialGradient>
     </defs>
