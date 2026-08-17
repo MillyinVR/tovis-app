@@ -18,6 +18,7 @@ import {
   type FinanceExportScope,
 } from '@/lib/finance/financeExportData'
 import { SCHEDULE_C_LINE } from '@/lib/finance/expenseCategories'
+import { wrapText } from '@/lib/pdf/wrapText'
 
 export type ScheduleCPdfResult = {
   filename: string
@@ -189,27 +190,4 @@ export async function buildScheduleCPdf(args: {
 
   const bytes = await pdf.save()
   return { filename: `schedule-c-${scopeLabel}.pdf`, bytes }
-}
-
-// Greedy word-wrap to a pixel width for the disclaimer block.
-function wrapText(
-  content: string,
-  font: import('pdf-lib').PDFFont,
-  size: number,
-  maxWidth: number,
-): string[] {
-  const words = content.split(' ')
-  const lines: string[] = []
-  let current = ''
-  for (const word of words) {
-    const candidate = current ? `${current} ${word}` : word
-    if (font.widthOfTextAtSize(candidate, size) > maxWidth && current) {
-      lines.push(current)
-      current = word
-    } else {
-      current = candidate
-    }
-  }
-  if (current) lines.push(current)
-  return lines
 }

@@ -2005,12 +2005,13 @@ model ProfessionalProfile {
   licenseRawJson        Json? // snapshot for audit/debug/demo (optional but powerful)
 
   // Social/engagement (unchanged)
-  favorites       ProfessionalFavorite[] @relation("ProFavorites")
-  intentEvents    ClientIntentEvent[]
-  messageThreads  MessageThread[]        @relation("ProThreads")
-  mediaAssets     MediaAsset[]
-  practiceShots   PracticeShot[]
-  waitlistEntries WaitlistEntry[]
+  favorites                ProfessionalFavorite[]    @relation("ProFavorites")
+  intentEvents             ClientIntentEvent[]
+  messageThreads           MessageThread[]           @relation("ProThreads")
+  mediaAssets              MediaAsset[]
+  mediaCaptureAttestations MediaCaptureAttestation[]
+  practiceShots            PracticeShot[]
+  waitlistEntries          WaitlistEntry[]
 
   lookPosts LookPost[]
   followers ProFollow[]
@@ -3836,14 +3837,15 @@ model Booking {
   // action for the whole session's media; it does NOT auto-make anything public.
   mediaUseConsentAt DateTime?
 
-  mediaAssets             MediaAsset[]
-  messageThreads          MessageThread[]              @relation("BookingThreads")
-  productSales            ProductSale[]
-  serviceItems            BookingServiceItem[]
-  checkoutProductItems    BookingCheckoutProductItem[]
-  clientProfessionalNotes ClientProfessionalNote[]
-  clientFormulaEntries    ClientFormulaEntry[]
-  clientConsentRecords    ClientConsentRecord[]
+  mediaAssets              MediaAsset[]
+  mediaCaptureAttestations MediaCaptureAttestation[]
+  messageThreads           MessageThread[]              @relation("BookingThreads")
+  productSales             ProductSale[]
+  serviceItems             BookingServiceItem[]
+  checkoutProductItems     BookingCheckoutProductItem[]
+  clientProfessionalNotes  ClientProfessionalNote[]
+  clientFormulaEntries     ClientFormulaEntry[]
+  clientConsentRecords     ClientConsentRecord[]
 
   referralTrigger Referral? @relation("ReferralTriggerBooking")
   referralReward  Referral? @relation("ReferralRewardBooking")
@@ -5128,6 +5130,10 @@ model MediaAsset {
   likes    MediaLike[]
   comments MediaComment[]
 
+  // At most one — written once, at attach time, by the server that verified
+  // the bytes. See MediaCaptureAttestation for why this is never plural.
+  captureAttestation MediaCaptureAttestation?
+
   expenseReceipts ProfessionalExpense[]      @relation("ExpenseReceipt")
   receiptInbox    ProfessionalReceiptInbox[] @relation("ReceiptInboxMedia")
 
@@ -5151,6 +5157,41 @@ model MediaAsset {
   @@index([proTenantId])
   @@index([primaryServiceId])
   @@index([beforeAssetId])
+}
+
+// Append-only tamper-evidence record for one captured MediaAsset. Written once,
+// at attach time, by the server that received the bytes — there is no update
+// route, and the only delete path is the account-deletion boundary
+// (lib/privacy/deleteRules.ts), which is why mediaAssetId cascades instead of
+// being hand-cleared.
+//
+// sha256Server is the only hash this app trusts: it is computed here from the
+// bytes Supabase actually stored, never from what a client claims. sha256Client
+// (when the caller sent one) is kept alongside for comparison; hashMismatch
+// flags a claim that did not match the server-computed digest — evidence that
+// the claim was wrong, not proof of what happened to the bytes.
+// capturedAtClaimed is the device's own clock and is never verified — an
+// offline capture uploaded hours later legitimately shows a gap here.
+// receivedAt is this server's clock and is the only timestamp the record can
+// actually vouch for.
+model MediaCaptureAttestation {
+  id                String    @id @default(cuid())
+  mediaAssetId      String    @unique
+  bookingId         String?
+  professionalId    String
+  sha256Server      String
+  sha256Client      String?
+  hashMismatch      Boolean   @default(false)
+  capturedAtClaimed DateTime?
+  receivedAt        DateTime
+  createdAt         DateTime  @default(now())
+
+  mediaAsset   MediaAsset          @relation(fields: [mediaAssetId], references: [id], onDelete: Cascade)
+  booking      Booking?            @relation(fields: [bookingId], references: [id])
+  professional ProfessionalProfile @relation(fields: [professionalId], references: [id])
+
+  @@index([bookingId])
+  @@index([professionalId, createdAt])
 }
 
 // UploadSession binds a server-minted signed-upload URL to the eventual

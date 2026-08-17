@@ -110,6 +110,11 @@ export const DELETE_BOUNDARY: Readonly<Record<string, DeleteDisposition>> = {
     reason:
       "The subject's private photos. ⚠️ ClientIntentEvent.mediaId references it WITHOUT a cascade, so the intent events must be cleared first or the delete raises a foreign-key violation. Storage object bytes are a separate write boundary.",
   },
+  MediaCaptureAttestation: {
+    status: 'DELETE',
+    reason:
+      "Tamper-evidence record for the subject's media. mediaAssetId cascades automatically when its MediaAsset is hard-deleted, so this is also matched directly by professionalId here — coverage is proved, not left to an implicit cascade.",
+  },
   PracticeShot: {
     status: 'DELETE',
     reason:
