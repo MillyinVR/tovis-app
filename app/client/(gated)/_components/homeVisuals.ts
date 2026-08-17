@@ -7,6 +7,7 @@ import type { ProNameDisplay } from '@prisma/client'
 import { pickProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import { formatInTimeZone } from '@/lib/time'
 import { DISPLAY_LOCALE } from '@/lib/locale'
+import { resolveChargeCurrency } from '@/lib/payments/resolveChargeCurrency'
 
 // Brand-token gradient pairs mirroring the design's avatar/portrait fills.
 // Each pair references per-brand CSS variables (overridden by BrandProvider per
@@ -37,7 +38,7 @@ export function money(
   if (!Number.isFinite(numeric)) return null
   return new Intl.NumberFormat(DISPLAY_LOCALE, {
     style: 'currency',
-    currency: 'USD',
+    currency: resolveChargeCurrency(),
     maximumFractionDigits: 0,
   }).format(numeric)
 }

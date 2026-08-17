@@ -24,6 +24,7 @@ import {
   buildClientPaymentOptions,
   clientPaymentOptionsSelect,
 } from '@/lib/payments/clientPaymentOptions'
+import { resolveChargeCurrency } from '@/lib/payments/resolveChargeCurrency'
 import { prisma } from '@/lib/prisma'
 
 export type PublicCheckoutAmounts = {
@@ -153,7 +154,7 @@ export async function getPublicCheckoutAvailability(args: {
       discountAmount: decimalToString(booking.discountAmount),
       totalAmount: decimalToString(booking.totalAmount),
       amountCents,
-      currency: booking.stripeCurrency ?? 'usd',
+      currency: resolveChargeCurrency(booking.stripeCurrency),
     },
     paymentOptions,
   }

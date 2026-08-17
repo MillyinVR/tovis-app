@@ -1,6 +1,7 @@
 // lib/money.ts
 import { Prisma } from '@prisma/client'
 import { DISPLAY_LOCALE } from '@/lib/locale'
+import { resolveChargeCurrency } from '@/lib/payments/resolveChargeCurrency'
 
 export type MoneyInput = Prisma.Decimal | string | number
 
@@ -300,7 +301,7 @@ export function formatCents(
   options: { currency?: string | null; style?: 'symbol' | 'code' } = {},
 ): string {
   const dollars = amountCents / 100
-  const code = (options.currency ?? 'usd').toUpperCase()
+  const code = resolveChargeCurrency(options.currency).toUpperCase()
 
   if (options.style === 'code') {
     return `${dollars.toFixed(2)} ${code}`

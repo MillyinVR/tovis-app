@@ -844,6 +844,43 @@ describe('app/api/v1/pro/bookings/[id]/consultation-proposal/route.ts', () => {
     expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
   })
 
+  // The web ConsultationForm used to send `proposedServicesJson.currency` and
+  // this route has never read it: parseProposalPayload takes only `raw.items`,
+  // and what is persisted is buildProposalJson's own stamp. The literal was
+  // deleted from the form on the strength of this test — which is also the
+  // reason not to "make the two sides agree" by re-adding it. (The iOS client
+  // still sends one; it is discarded here just the same.)
+  it('discards a client-sent proposal currency and stamps its own', async () => {
+    expectIdempotencyStarted('idem_currency_1')
+
+    const raw = makeRawProposalBody()
+
+    await POST(
+      makeIdempotentRequest({
+        key: 'idem_currency_1',
+        body: {
+          ...raw,
+          proposedServicesJson: {
+            ...raw.proposedServicesJson,
+            currency: 'EUR',
+          },
+        },
+      }),
+      makeCtx(),
+    )
+
+    expect(mocks.txConsultationApprovalUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          proposedServicesJson: makeExpectedProposalJson(),
+        }),
+        update: expect.objectContaining({
+          proposedServicesJson: makeExpectedProposalJson(),
+        }),
+      }),
+    )
+  })
+
   it('sends a consultation proposal, writes notification/audit data, queues delivery, and completes idempotency', async () => {
     expectIdempotencyStarted('idem_1')
 

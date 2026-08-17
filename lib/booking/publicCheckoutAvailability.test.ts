@@ -123,6 +123,31 @@ describe('getPublicCheckoutAvailability', () => {
     ])
     expect(r.amounts.totalAmount).toBe('45')
     expect(r.amounts.amountCents).toBe(4500)
+    expect(r.amounts.currency).toBe('usd')
+  })
+
+  // The stored column is passed through as written — the checkout-attached
+  // write path upper-cases, the webhook stores Stripe's lowercase — and only
+  // the absent case takes the shared default, which is ISO 4217 'USD'.
+  it('passes the stored currency through and defaults an absent one', async () => {
+    for (const [stored, expected] of [
+      ['usd', 'usd'],
+      ['USD', 'USD'],
+      [null, 'USD'],
+    ] as const) {
+      mocks.bookingFindUnique.mockResolvedValue(
+        makeBooking({ stripeCurrency: stored }),
+      )
+
+      const r = await getPublicCheckoutAvailability({
+        bookingId: 'b1',
+        clientId: 'client_1',
+      })
+
+      expect(r.status).toBe('PAYABLE')
+      if (r.status !== 'PAYABLE') return
+      expect(r.amounts.currency).toBe(expected)
+    }
   })
 
   it('includes Stripe card once the connected account can charge', async () => {

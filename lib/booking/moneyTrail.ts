@@ -29,6 +29,7 @@ import {
 } from '@prisma/client'
 
 import { decimalToCents } from '@/lib/money'
+import { resolveChargeCurrencyLower } from '@/lib/payments/resolveChargeCurrency'
 
 /**
  * The exact Booking selection the assembler needs. The route selects with this
@@ -208,7 +209,7 @@ function toIso(value: Date | null): string | null {
  * already loaded the row (MONEY_TRAIL_SELECT) and authorized the viewer.
  */
 export function assembleMoneyTrail(row: MoneyTrailBookingRow): BookingMoneyTrail {
-  const currency = (row.stripeCurrency ?? 'usd').toLowerCase()
+  const currency = resolveChargeCurrencyLower(row.stripeCurrency)
 
   // Final-bill Stripe charge (distinct from the deposit + no-show fee charges).
   // Only surface it once Stripe has an actual payment status; a MANUAL/cash

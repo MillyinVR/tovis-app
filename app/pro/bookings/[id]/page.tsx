@@ -36,6 +36,7 @@ import { pickString } from '@/lib/pick'
 import { resolveBookingLocationMeta } from '@/lib/booking/locationMeta'
 import { mapsHrefFromLocation } from '@/lib/maps'
 import { paymentMethodLabel } from '@/lib/payments/acceptedMethods'
+import { resolveChargeCurrency } from '@/lib/payments/resolveChargeCurrency'
 import ProConsultBrief from '@/app/pro/_components/consult/ProConsultBrief'
 import {
   loadAuthorizedProConsultBriefs,
@@ -346,7 +347,7 @@ export default async function ProBookingDetailPage(props: {
   const refundedLabel =
     refundedCents > 0
       ? formatCents(refundedCents, {
-          currency: booking.stripeCurrency ?? 'usd',
+          currency: resolveChargeCurrency(booking.stripeCurrency),
           style: 'symbol',
         })
       : null

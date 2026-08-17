@@ -630,7 +630,6 @@ export default function ConsultationForm({
 
     try {
       const proposedServicesJson = {
-        currency: 'USD',
         items: items.map((item, index) => {
           const parsedPrice = normalizeMoneyInput(item.price)
           const parsedDuration = normalizeDurationInput(item.durationMinutes)

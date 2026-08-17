@@ -42,6 +42,7 @@ import {
   emitPaymentRefundedNotifications,
 } from '@/lib/notifications/paymentNotifications'
 import { noShowFeeAmountToCents } from '@/lib/noShowProtection/fee'
+import { resolveChargeCurrencyLower } from '@/lib/payments/resolveChargeCurrency'
 
 // Distinct from the schedule lock namespace (scheduleLock.ts = 41021) so refund
 // serialization never contends with booking-schedule locks.
@@ -246,7 +247,7 @@ async function reserveRefund(input: RefundBookingInput): Promise<Reservation> {
       data: {
         bookingId: input.bookingId,
         amountCents: requested,
-        currency: (booking.stripeCurrency ?? 'usd').toLowerCase(),
+        currency: resolveChargeCurrencyLower(booking.stripeCurrency),
         status: BookingRefundStatus.PENDING,
         trigger: input.trigger,
         reverseTransfer: true,
@@ -632,7 +633,7 @@ export async function refundDiscoveryDeposit(args: {
         data: {
           bookingId: args.bookingId,
           amountCents: args.refundAmountCents,
-          currency: 'usd',
+          currency: resolveChargeCurrencyLower(),
           status: BookingRefundStatus.SUCCEEDED,
           trigger: args.trigger,
           reverseTransfer: true,
@@ -700,7 +701,7 @@ export async function refundDiscoveryDeposit(args: {
           data: {
             bookingId: args.bookingId,
             amountCents: args.refundAmountCents,
-            currency: 'usd',
+            currency: resolveChargeCurrencyLower(),
             status: BookingRefundStatus.FAILED,
             trigger: args.trigger,
             reverseTransfer: true,
@@ -907,7 +908,7 @@ export async function refundNoShowFee(args: {
       data: {
         bookingId: args.bookingId,
         amountCents: claim.refundAmountCents,
-        currency: 'usd',
+        currency: resolveChargeCurrencyLower(),
         status: BookingRefundStatus.SUCCEEDED,
         trigger: BookingRefundTrigger.DISCRETIONARY,
         reverseTransfer: true,
@@ -967,7 +968,7 @@ export async function refundNoShowFee(args: {
           data: {
             bookingId: args.bookingId,
             amountCents: claim.refundAmountCents,
-            currency: 'usd',
+            currency: resolveChargeCurrencyLower(),
             status: BookingRefundStatus.FAILED,
             trigger: BookingRefundTrigger.DISCRETIONARY,
             reverseTransfer: true,
