@@ -10,7 +10,11 @@
  * artwork and still draw its own gradient two lines lower.
  */
 import { describe, expect, it } from 'vitest'
-import { render } from '@testing-library/react'
+
+// BrandLoader renders BrandWordmark, which reads the tenant-resolved brand
+// from the provider and throws without one — so this has to be the real
+// tree, not a bare render.
+import { renderWithBrand as render } from '@/test/renderWithBrand'
 
 import TovisFeatherMark from '@/app/_components/footer/TovisFeatherMark'
 

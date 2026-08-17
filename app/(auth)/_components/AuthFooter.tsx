@@ -1,9 +1,10 @@
 // app/(auth)/_components/AuthFooter.tsx
 import Link from 'next/link'
-import { getBrandConfig } from '@/lib/brand'
+import { getBrandForTenantContext } from '@/lib/brand/forTenant'
+import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 
-export default function AuthFooter() {
-  const brand = getBrandConfig()
+export default async function AuthFooter() {
+  const brand = getBrandForTenantContext(await resolveTenantContextForLayout())
 
   return (
     <footer className="mt-8 border-t border-surfaceGlass/10 pt-4 text-xs text-textSecondary">

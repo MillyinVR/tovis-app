@@ -2,12 +2,13 @@
 import Link from 'next/link'
 import { buildTransactionalSmsPageCopy } from '@/lib/transactionalSmsPolicy'
 import PublicTopBar from '@/app/_components/PublicTopBar/PublicTopBar'
-import { getBrandConfig } from '@/lib/brand'
+import { getBrandForTenantContext } from '@/lib/brand/forTenant'
+import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 
 export const dynamic = 'force-dynamic'
 
-export default function FaqPage() {
-  const brand = getBrandConfig()
+export default async function FaqPage() {
+  const brand = getBrandForTenantContext(await resolveTenantContextForLayout())
   const n = brand.displayName // shorthand for inline use
 
   const faqs = [

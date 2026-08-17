@@ -1,20 +1,13 @@
 // app/pro/migrate/clients/page.tsx
 
-import { headers } from 'next/headers'
-
-import { getBrandConfig } from '@/lib/brand'
+import { getBrandForTenantContext } from '@/lib/brand/forTenant'
+import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 import { defaultMigrationCopy } from '@/lib/brand/defaultMigrationCopy'
 
 import { MigrateClientsClient } from './MigrateClientsClient'
 
-async function getRequestHost(): Promise<string | null> {
-  const requestHeaders = await headers()
-  return requestHeaders.get('x-forwarded-host') ?? requestHeaders.get('host')
-}
-
 export default async function ProMigrateClientsPage() {
-  const host = await getRequestHost()
-  const brand = getBrandConfig({ host })
+  const brand = getBrandForTenantContext(await resolveTenantContextForLayout())
   const copy = defaultMigrationCopy(brand.assets.wordmark.text)
 
   return <MigrateClientsClient copy={copy.clients} />

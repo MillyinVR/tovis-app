@@ -1,12 +1,13 @@
 // app/support/page.tsx
 import SupportForm from './supportForm'
 import PublicTopBar from '@/app/_components/PublicTopBar/PublicTopBar'
-import { getBrandConfig } from '@/lib/brand'
+import { getBrandForTenantContext } from '@/lib/brand/forTenant'
+import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 
 export const dynamic = 'force-dynamic'
 
-export default function SupportPage() {
-  const brand = getBrandConfig()
+export default async function SupportPage() {
+  const brand = getBrandForTenantContext(await resolveTenantContextForLayout())
 
   return (
     <main className="min-h-screen w-full text-textPrimary">

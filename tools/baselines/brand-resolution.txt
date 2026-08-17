@@ -1,0 +1,10 @@
+# Files outside lib/brand that still call getBrandConfig().
+#
+# NOT a to-do list. Each entry is a surface that cannot resolve a tenant
+# context at all, with the reason. Never add an entry that merely has not
+# been migrated yet — migrate it. See tools/check-brand-resolution.mjs.
+#
+#   app/global-error.tsx — replaces the ROOT layout when the root layout
+#   itself throws, so there is no BrandProvider above it to read and no
+#   request scope to resolve a tenant from. The env chain is all it has.
+app/global-error.tsx

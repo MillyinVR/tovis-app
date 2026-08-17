@@ -2,7 +2,8 @@
 import Link from 'next/link'
 import { buildTransactionalSmsPageCopy } from '@/lib/transactionalSmsPolicy'
 import PublicTopBar from '@/app/_components/PublicTopBar/PublicTopBar'
-import { getBrandConfig } from '@/lib/brand'
+import { getBrandForTenantContext } from '@/lib/brand/forTenant'
+import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,8 +14,8 @@ const footerLinks = [
   { href: '/terms', label: 'Terms' },
 ] as const
 
-export default function Home() {
-  const brand = getBrandConfig()
+export default async function Home() {
+  const brand = getBrandForTenantContext(await resolveTenantContextForLayout())
 
   return (
     <main className="min-h-screen text-textPrimary">

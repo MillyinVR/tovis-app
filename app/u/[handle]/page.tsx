@@ -3,7 +3,8 @@ import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { Role } from '@prisma/client'
 
-import { getBrandConfig } from '@/lib/brand'
+import { getBrandForTenantContext } from '@/lib/brand/forTenant'
+import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 import { getCurrentUser } from '@/lib/currentUser'
 import { buildLoginHref } from '@/lib/profiles/publicProfileFormatting'
 import { loadPublicClientProfile } from './_data/loadPublicClientProfile'
@@ -20,7 +21,7 @@ export async function generateMetadata({
   const { handle } = await params
   const data = await loadPublicClientProfile(handle)
   if (!data) return { title: 'Profile' }
-  const brand = getBrandConfig()
+  const brand = getBrandForTenantContext(await resolveTenantContextForLayout())
   const title = `@${data.handle}`
   const description =
     data.bio ?? `@${data.handle}'s looks on ${brand.displayName}.`

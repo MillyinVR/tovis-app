@@ -1,6 +1,7 @@
 import { notFound, redirect } from 'next/navigation'
 
-import { getBrandConfig } from '@/lib/brand'
+import { getBrandForTenantContext } from '@/lib/brand/forTenant'
+import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 import {
   ClientConsultResultsError,
   loadAuthorizedClientConsultResults,
@@ -35,10 +36,14 @@ export default async function ClientConsultResultsPage({ params }: PageProps) {
     throw error
   }
 
+  const brand = getBrandForTenantContext(
+    await resolveTenantContextForLayout(),
+  )
+
   return (
     <ClientConsultResults
       results={results}
-      copy={getBrandConfig().clientConsultResults}
+      copy={brand.clientConsultResults}
     />
   )
 }

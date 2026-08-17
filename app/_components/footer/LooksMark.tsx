@@ -2,7 +2,7 @@
 'use client'
 
 import Image from 'next/image'
-import { getBrandConfig } from '@/lib/brand'
+import { useBrand } from '@/lib/brand/BrandProvider'
 import RingCoin from './RingCoin'
 import TovisFeatherMark from './TovisFeatherMark'
 
@@ -14,7 +14,7 @@ import TovisFeatherMark from './TovisFeatherMark'
  * tenant ever ships the default-brand feather.
  */
 export default function LooksMark({ size = 66 }: { size?: number }) {
-  const brand = getBrandConfig()
+  const { brand } = useBrand()
 
   if (brand.id === 'tovis') {
     return <TovisFeatherMark size={size} />

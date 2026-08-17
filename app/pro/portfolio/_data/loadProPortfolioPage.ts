@@ -4,7 +4,8 @@ import 'server-only'
 import { redirect } from 'next/navigation'
 import { BookingStatus, MediaType, Prisma, Role } from '@prisma/client'
 
-import { getBrandConfig } from '@/lib/brand'
+import { getBrandForTenantContext } from '@/lib/brand/forTenant'
+import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 import { getCurrentUser } from '@/lib/currentUser'
 import { isNonNull } from '@/lib/guards'
 import { mapPortfolioTileToDto } from '@/lib/looks/mappers'
@@ -164,7 +165,7 @@ export async function buildProPortfolioModel({
   professionalId: string
   searchParams?: ProPortfolioSearchParams | null
 }): Promise<ProPortfolioPageModel | null> {
-  const brand = getBrandConfig()
+  const brand = getBrandForTenantContext(await resolveTenantContextForLayout())
 
   const pro = await prisma.professionalProfile.findUnique({
     where: { id: professionalId },

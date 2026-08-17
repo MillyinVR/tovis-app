@@ -1,5 +1,6 @@
 // app/_components/ProSessionFooter/ProSessionFooter.test.tsx
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, screen } from '@testing-library/react'
+import { renderWithBrand as render } from '@/test/renderWithBrand'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
