@@ -12,6 +12,8 @@
 
 import { ClientConsentKind } from '@prisma/client'
 
+import { envFlagEnabled } from '@/lib/env'
+
 /**
  * Long-tier retention for pro-authored technical records. Decision (2026-06-21):
  * INDEFINITE — records persist for the authoring pro independent of the 30-day
@@ -33,10 +35,7 @@ export const TECHNICAL_RECORD_PRO_ALLOWLIST: readonly string[] = [
 ]
 
 function globalTechnicalRecordFlag(): boolean {
-  const raw = process.env.ENABLE_CLIENT_TECHNICAL_RECORD
-  if (typeof raw !== 'string') return false
-  const v = raw.trim().toLowerCase()
-  return v === '1' || v === 'true' || v === 'yes'
+  return envFlagEnabled('ENABLE_CLIENT_TECHNICAL_RECORD')
 }
 
 /**

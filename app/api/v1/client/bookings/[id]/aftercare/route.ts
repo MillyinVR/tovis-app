@@ -15,7 +15,7 @@ import {
   buildClientAftercareDetailDTO,
   type ClientAftercareDetailDTO,
 } from '@/lib/dto/clientAftercare'
-import { getClientCreditBalanceCents } from '@/lib/credit/clientCredit'
+import { getOfferableClientCreditBalanceCents } from '@/lib/credit/clientCredit'
 import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
@@ -184,7 +184,7 @@ export async function GET(_req: Request, ctx: RouteContext) {
       // booking page's loader does — otherwise reopening a checkout that
       // already has credit applied would offer a balance its own pending
       // reservation had already taken off.
-      creatorCreditBalanceCents: await getClientCreditBalanceCents(
+      creatorCreditBalanceCents: await getOfferableClientCreditBalanceCents(
         prisma,
         clientId,
         { excludeBookingId: bookingId },

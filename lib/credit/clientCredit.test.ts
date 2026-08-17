@@ -4,7 +4,7 @@
 // ledger would give a client something they did not earn, take something they
 // did, or let one dollar be quoted onto two bills.
 
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   ClientCreditEntryKind,
   ClientCreditEntryStatus,
@@ -13,10 +13,13 @@ import {
 
 import {
   applyClientCreditForBooking,
+  clientCreditSpendEnabled,
   CREATOR_CREDIT_RATE_PERCENT,
   creatorCreditCentsFor,
+  findSpendableCheckoutBookingId,
   getClientCreditBalanceCents,
   getClientCreditSummary,
+  getOfferableClientCreditBalanceCents,
   mintCreatorCreditOnCompletion,
   releaseClientCreditForBooking,
   reserveClientCreditForBooking,
@@ -25,6 +28,23 @@ import {
 const NOW = new Date('2026-08-17T12:00:00.000Z')
 
 const money = (value: string) => new Prisma.Decimal(value)
+
+/**
+ * Pin ENABLE_CLIENT_CREDIT for a describe block, and put it back afterwards so
+ * one block's rail state cannot leak into the next file's.
+ */
+function withCreditSpend(on: boolean) {
+  let prior: string | undefined
+  beforeEach(() => {
+    prior = process.env.ENABLE_CLIENT_CREDIT
+    if (on) process.env.ENABLE_CLIENT_CREDIT = '1'
+    else delete process.env.ENABLE_CLIENT_CREDIT
+  })
+  afterEach(() => {
+    if (prior === undefined) delete process.env.ENABLE_CLIENT_CREDIT
+    else process.env.ENABLE_CLIENT_CREDIT = prior
+  })
+}
 
 /** A ledger stand-in whose aggregate answers earned-then-spent, in call order. */
 function ledgerWithBalance(earnedCents: number, spentCents: number) {
@@ -223,6 +243,11 @@ describe('getClientCreditBalanceCents', () => {
 })
 
 describe('reserveClientCreditForBooking', () => {
+  // Every case in this block describes the rail OPEN. The master switch is
+  // default-OFF (see the switch's own block below), so without this the whole
+  // suite would pass by reserving nothing and prove none of it.
+  withCreditSpend(true)
+
   function tx(args: {
     existing: unknown
     earnedCents: number
@@ -479,5 +504,161 @@ describe('getClientCreditSummary — the activity banner', () => {
 
     expect(summary?.latestEarned?.lookName).toBeNull()
     expect(summary?.latestEarned?.bookerHandle).toBeNull()
+  })
+})
+
+// ── the master switch ────────────────────────────────────────────────────────
+//
+// The switch's job is asymmetric, and both halves matter: it must stop every
+// route by which a client could SPEND, and must not touch money that has already
+// been earned or already moved.
+
+describe('clientCreditSpendEnabled — the parse', () => {
+  withCreditSpend(false)
+
+  it('is OFF when unset — the rail opens only by deliberate act', () => {
+    expect(clientCreditSpendEnabled()).toBe(false)
+  })
+
+  it('is ON for the three affirmatives, whatever the casing or padding', () => {
+    for (const value of ['1', 'true', 'yes', ' TRUE ', 'Yes']) {
+      process.env.ENABLE_CLIENT_CREDIT = value
+      expect(clientCreditSpendEnabled()).toBe(true)
+    }
+  })
+
+  it('fails CLOSED on anything else, including a typo’d truthy value', () => {
+    for (const value of ['', '  ', '0', 'false', 'no', 'ture', 'on', 'enabled']) {
+      process.env.ENABLE_CLIENT_CREDIT = value
+      expect(clientCreditSpendEnabled()).toBe(false)
+    }
+  })
+})
+
+describe('the switch OFF closes every route to a spend', () => {
+  withCreditSpend(false)
+
+  it('offers no balance — and does not even ask the ledger', async () => {
+    const db = { clientCreditEntry: { aggregate: vi.fn() } }
+
+    expect(
+      await getOfferableClientCreditBalanceCents(db as never, 'c1'),
+    ).toBe(0)
+    expect(db.clientCreditEntry.aggregate).not.toHaveBeenCalled()
+  })
+
+  it('finds no spendable checkout, so the banner’s Use link cannot render', async () => {
+    const db = { booking: { findFirst: vi.fn() } }
+
+    expect(await findSpendableCheckoutBookingId(db as never, 'c1')).toBeNull()
+    expect(db.booking.findFirst).not.toHaveBeenCalled()
+  })
+
+  it('reserves nothing even when the client has a balance and asked for it', async () => {
+    const db = {
+      clientCreditEntry: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        aggregate: ledgerWithBalance(5_000, 0),
+        create: vi.fn(),
+        update: vi.fn(),
+      },
+    }
+
+    expect(
+      await reserveClientCreditForBooking(db as never, {
+        clientId: 'c1',
+        bookingId: 'b1',
+        maxApplicableCents: 2_000,
+        now: NOW,
+      }),
+    ).toBe(0)
+    expect(db.clientCreditEntry.create).not.toHaveBeenCalled()
+  })
+
+  it('🔴 hands back a hold it had already taken, rather than stranding it', async () => {
+    // The flip-off case. A client mid-checkout has balance reserved against
+    // their bill; the switch closes. If this returned early instead of falling
+    // through to the release, that money would sit PENDING — invisible to a
+    // client who can no longer see the toggle — until the sweep's 72h TTL.
+    const db = {
+      clientCreditEntry: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'e1',
+          status: ClientCreditEntryStatus.PENDING,
+          amount: money('20.00'),
+        }),
+        aggregate: ledgerWithBalance(5_000, 2_000),
+        create: vi.fn(),
+        update: vi.fn().mockResolvedValue({ id: 'e1' }),
+      },
+    }
+
+    expect(
+      await reserveClientCreditForBooking(db as never, {
+        clientId: 'c1',
+        bookingId: 'b1',
+        maxApplicableCents: 2_000,
+        now: NOW,
+      }),
+    ).toBe(0)
+    expect(db.clientCreditEntry.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: ClientCreditEntryStatus.RELEASED,
+        }),
+      }),
+    )
+  })
+})
+
+describe('the switch OFF leaves earned and settled money alone', () => {
+  withCreditSpend(false)
+
+  it('🔴 still MINTS — balances accrue honestly while the rail is shut', async () => {
+    // Gating the earn path instead would silently under-credit every booking
+    // that completed while the switch was off, with no record it happened.
+    const db = {
+      booking: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'b1',
+          clientId: 'booker',
+          serviceSubtotalSnapshot: money('250.00'),
+          subtotalSnapshot: money('300.00'),
+          sourceLookPostId: 'look-1',
+          sourceLookPost: { clientAuthorId: 'creator' },
+        }),
+      },
+      clientCreditEntry: { createMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    }
+
+    const result = await mintCreatorCreditOnCompletion(db as never, {
+      bookingId: 'b1',
+      now: NOW,
+    })
+
+    expect(result).toEqual({ mintedCents: 750, reason: 'MINTED' })
+  })
+
+  it('🔴 still reports the honest balance to the activity banner', async () => {
+    // What a creator EARNED is theirs and is shown; only the invitation to
+    // spend it goes away.
+    const db = {
+      clientCreditEntry: { aggregate: ledgerWithBalance(3_000, 0) },
+    }
+
+    expect(await getClientCreditBalanceCents(db as never, 'c1')).toBe(3_000)
+  })
+
+  it('🔴 still APPLIES a spend that already settled — the charge is a fact', async () => {
+    const db = {
+      clientCreditEntry: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    }
+
+    expect(
+      await applyClientCreditForBooking(db as never, {
+        bookingId: 'b1',
+        now: NOW,
+      }),
+    ).toBe(1)
   })
 })
