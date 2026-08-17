@@ -1,8 +1,9 @@
 // lib/payments/resolveChargeCurrency.ts
 //
 // The currency the app charges, refunds and displays in — one home for what was
-// eleven hand-written `?? 'usd'` / `?? 'USD'` expressions and bare literals
-// scattered across the payment path.
+// **14** hand-written `?? 'usd'` / `?? 'USD'` expressions and bare literals
+// across 10 files: 6 charge/refund sites, 5 reading a nullable column, and 3
+// display formatters.
 //
 // BEHAVIOUR TODAY IS EXACTLY WHAT IT WAS: the `Booking.stripeCurrency` column
 // stays the source of truth wherever a booking is in hand, and 'USD' is the
@@ -42,7 +43,7 @@
 // and threaded into these call sites the way `connectedAccountId` already is.
 // That is a payments programme with a Connect dependency, not a constant, and
 // it lands here: every site above already calls this module, so the resolution
-// changes in one file rather than eleven.
+// changes in one file rather than fourteen.
 
 /**
  * The charge currency used when no stored value exists. ISO 4217 casing.
