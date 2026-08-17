@@ -16,6 +16,13 @@ type UseProFollowArgs = {
   professionalId: string | null
   /** Called with `'follow'` when the viewer must sign in to follow. */
   onRequireAuth: (reason: string) => void
+  /**
+   * Seed the state instead of fetching it, for a caller that already knows the
+   * answer — the client's own Following list is BY DEFINITION every pro they
+   * follow, so hydrating each row would fire one GET per row to be told what
+   * the list already said. Omit it anywhere the state is genuinely unknown.
+   */
+  initialFollowing?: boolean
 }
 
 type UseProFollowResult = ProFollowState & {
@@ -49,8 +56,9 @@ function isGuestBlocked(status: number): boolean {
 export function useProFollow({
   professionalId,
   onRequireAuth,
+  initialFollowing,
 }: UseProFollowArgs): UseProFollowResult {
-  const [following, setFollowing] = useState(false)
+  const [following, setFollowing] = useState(initialFollowing ?? false)
   const [followerCount, setFollowerCount] = useState(0)
   const [ready, setReady] = useState(false)
   const inFlight = useRef(false)
@@ -59,6 +67,12 @@ export function useProFollow({
   // the default "not following" state — no redirect until the viewer acts.
   useEffect(() => {
     if (!professionalId) {
+      setReady(true)
+      return
+    }
+
+    // The caller already told us; don't ask the server to repeat it.
+    if (typeof initialFollowing === 'boolean') {
       setReady(true)
       return
     }
@@ -92,7 +106,7 @@ export function useProFollow({
     return () => {
       cancelled = true
     }
-  }, [professionalId])
+  }, [professionalId, initialFollowing])
 
   const toggle = useCallback(() => {
     if (!professionalId) return

@@ -150,6 +150,8 @@ export type SearchProItemDto = {
   displayName: string
   handle: string | null
   professionType: ProfessionType | null
+  /** Human label for {@link professionType} — see LooksProProfilePreviewDto. */
+  professionLabel: string
   avatarUrl: string | null
   locationLabel: string | null
   distanceMiles: number | null

@@ -40,6 +40,7 @@ import {
   MediaType,
   MediaVisibility,
   ModerationStatus,
+  NotificationEventKey,
   OpeningStatus,
   PaymentCollectionTiming,
   Prisma,
@@ -124,6 +125,48 @@ const publicFanIndices = (attributedBookings: number): number[] =>
   Array.from({ length: attributedBookings }, (_, i) => i).filter(
     (i) => i % PUBLIC_FAN_EVERY === 0,
   )
+
+/**
+ * Which fan each activity-feed row is attributed to.
+ *
+ * The feed's PII model branches on whether the actor is publicly addressable, so
+ * these are not interchangeable: `PRIVATE` must be a fan `publicFanIndices` did
+ * NOT make public, every other one must be a fan it did, and `MUTUAL` is the one
+ * Maya follows back (so the row offers "View" rather than "Follow"). Asserted at
+ * seed time by {@link assertActivityFanRoles} — a change to `PUBLIC_FAN_EVERY`
+ * would otherwise silently collapse these rows into one shape.
+ */
+const ACTIVITY_OPEN_FOLLOW_FAN = 0
+const ACTIVITY_PRIVATE_FOLLOW_FAN = 1
+const ACTIVITY_COMMENT_FAN = 3
+const ACTIVITY_MUTUAL_FAN = 6
+const ACTIVITY_LIKE_FAN = 9
+const ACTIVITY_REPLY_FAN = 12
+
+function assertActivityFanRoles(publicFans: Set<number>): void {
+  const mustBePublic = [
+    ACTIVITY_OPEN_FOLLOW_FAN,
+    ACTIVITY_COMMENT_FAN,
+    ACTIVITY_MUTUAL_FAN,
+    ACTIVITY_LIKE_FAN,
+    ACTIVITY_REPLY_FAN,
+  ]
+  for (const index of mustBePublic) {
+    if (!publicFans.has(index)) {
+      throw new Error(
+        `[seedDemoClientProfile] activity fan ${index} must be a PUBLIC fan, ` +
+          'but publicFanIndices did not make it one — the named-actor rows ' +
+          'would all render as "Someone".',
+      )
+    }
+  }
+  if (publicFans.has(ACTIVITY_PRIVATE_FOLLOW_FAN)) {
+    throw new Error(
+      `[seedDemoClientProfile] activity fan ${ACTIVITY_PRIVATE_FOLLOW_FAN} must ` +
+        'be PRIVATE — it exists to exercise the anonymous branch.',
+    )
+  }
+}
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -973,6 +1016,22 @@ async function clean(): Promise<void> {
     where: { opening: { professionalId: idPrefix } },
   })
   await prisma.lastMinuteOpening.deleteMany({ where: { professionalId: idPrefix } })
+  // 🔴 `LastMinuteSettings` is created LAZILY BY THE APP — `loadLastMinuteWorkspace`
+  // creates one the first time a pro opens their last-minute workspace — so the
+  // row carries a cuid, not this script's prefix, and its relation to the pro is
+  // RESTRICT. One visit to that screen while driving the fixture permanently
+  // blocked `--clean` from removing the demo pro. Keyed on the PRO for the same
+  // reason the bookings and openings above are. Neither child cascades, so they
+  // go first.
+  await prisma.lastMinuteServiceRule.deleteMany({
+    where: { settings: { professionalId: idPrefix } },
+  })
+  await prisma.lastMinuteBlock.deleteMany({
+    where: { settings: { professionalId: idPrefix } },
+  })
+  await prisma.lastMinuteSettings.deleteMany({
+    where: { professionalId: idPrefix },
+  })
   await prisma.waitlistEntry.deleteMany({ where: { professionalId: idPrefix } })
   await prisma.viralRequestApprovalFanOut.deleteMany({
     where: { professionalId: idPrefix },
@@ -990,6 +1049,10 @@ async function clean(): Promise<void> {
   await prisma.boardItem.deleteMany({ where: { id: idPrefix } })
   await prisma.board.deleteMany({ where: { id: idPrefix } })
   await prisma.clientFollow.deleteMany({ where: { id: idPrefix } })
+  // Both cascade from the client profile below, but are removed explicitly so
+  // `--clean` stays honest about everything this script writes.
+  await prisma.proFollow.deleteMany({ where: { id: idPrefix } })
+  await prisma.clientNotification.deleteMany({ where: { id: idPrefix } })
   await prisma.lookPost.deleteMany({ where: { id: idPrefix } })
   // The look's primary MediaAsset is @unique + cascades TO the look, so the
   // looks above are already gone; drop the assets themselves now.
@@ -1575,6 +1638,7 @@ async function main(): Promise<void> {
   const fanCount = FOLLOWER_COUNT + FOLLOWING_COUNT
   const attributedBookings = LOOKS.reduce((sum, look) => sum + look.recreated, 0)
   const publicFans = new Set(publicFanIndices(attributedBookings))
+  assertActivityFanRoles(publicFans)
 
   await prisma.clientProfile.createMany({
     data: Array.from({ length: fanCount }, (_, i) => ({
@@ -1623,6 +1687,183 @@ async function main(): Promise<void> {
       followerClientId: creator.id,
       followedClientId: `${P}fan-${String(FOLLOWER_COUNT + i).padStart(4, '0')}`,
     })),
+  })
+
+  // 🔴 One follow-back at a PUBLIC fan. The 18 rows above all point at fans
+  // 312–329, and `publicFanIndices` only makes fans 0–44 public — so no fan was
+  // both nameable AND followed back, and `buildFollowItem`'s
+  // `alreadyFollowing: true` branch (the one that renders "View" instead of a
+  // Follow button) could not be reached by any fixture row.
+  await prisma.clientFollow.create({
+    data: {
+      id: `${P}follow-out-public`,
+      followerClientId: creator.id,
+      followedClientId: `${P}fan-${String(ACTIVITY_MUTUAL_FAN).padStart(4, '0')}`,
+    },
+  })
+
+  // ── pros she follows ───────────────────────────────────────────────────────
+  // Me › FOLLOWING reads `ProFollow` (client → PRO), which is a different edge
+  // from the client↔client `ClientFollow` above and from `ProfessionalFavorite`
+  // (screen 5's "favourite pros"). Nothing in the fixture wrote one, and there
+  // were ZERO ProFollow rows in the whole dev database — so the FOLLOWING tab
+  // rendered "No follows yet" on both platforms and had never been looked at.
+  await prisma.proFollow.createMany({
+    data: PROS.map((pro) => ({
+      id: `${P}profollow-${pro.key}`,
+      clientId: creator.id,
+      professionalId: proId(pro.key),
+    })),
+  })
+
+  // ── activity feed ──────────────────────────────────────────────────────────
+  // `/client/activity` reads ClientNotification rows filtered to
+  // ACTIVITY_FEED_EVENT_KEYS. The dev DB held ZERO of them for any demo client,
+  // so the entire screen rendered its empty state on web AND iOS.
+  //
+  // One row per builder branch in `lib/notifications/activityFeed.ts`, so every
+  // shape the feed can render is on screen at once: named vs anonymous actors,
+  // single vs batched engagement, follow-back offered vs already-following, and
+  // read vs unread.
+  //
+  // Timestamps hang off the REAL clock, not the frozen NOW: the rows render as
+  // relative times ("2h ago"), and anchoring them to a fixture date three days
+  // in the past would make every row say "3d ago" and never exercise the
+  // hours/minutes wording.
+  const activityNow = Date.now()
+  const HOUR_MS = 60 * 60 * 1000
+  const ago = (ms: number): Date => new Date(activityNow - ms)
+  const lookHref = (key: string): string =>
+    `/looks/${encodeURIComponent(lookId(key))}`
+  const fanId = (i: number): string => `${P}fan-${String(i).padStart(4, '0')}`
+
+  await prisma.clientNotification.createMany({
+    data: [
+      // Batched saves → "12 saves" / "on your look" (no actor is nameable).
+      {
+        id: `${P}activity-saves-batch`,
+        clientId: creator.id,
+        eventKey: NotificationEventKey.LOOK_SAVED,
+        title: 'Your look was saved 12 times',
+        href: lookHref('lived-in-blonde'),
+        dedupeKey: `${P}activity-saves-batch`,
+        data: { lookPostId: lookId('lived-in-blonde'), count: 12 },
+        createdAt: ago(2 * HOUR_MS),
+        readAt: null,
+      },
+      // A public follower she does NOT follow back → named + Follow button.
+      {
+        id: `${P}activity-follow-open`,
+        clientId: creator.id,
+        eventKey: NotificationEventKey.CLIENT_FOLLOW,
+        title: 'Someone started following you',
+        href: '/client/activity',
+        dedupeKey: `${P}activity-follow-open`,
+        data: { followerClientId: fanId(ACTIVITY_OPEN_FOLLOW_FAN) },
+        createdAt: ago(5 * HOUR_MS),
+        readAt: null,
+      },
+      // A comment carries its (public) snippet as the body.
+      {
+        id: `${P}activity-comment`,
+        clientId: creator.id,
+        eventKey: NotificationEventKey.LOOK_COMMENTED,
+        title: 'Someone commented on your look',
+        body: 'what toner did she use on this? it’s perfect',
+        href: lookHref('cherry-cola-balayage'),
+        dedupeKey: `${P}activity-comment`,
+        data: { actorClientId: fanId(ACTIVITY_COMMENT_FAN) },
+        createdAt: ago(9 * HOUR_MS),
+        readAt: null,
+      },
+      // Single like by a nameable actor → "@handle liked your look".
+      {
+        id: `${P}activity-like-single`,
+        clientId: creator.id,
+        eventKey: NotificationEventKey.LOOK_LIKED,
+        title: 'Someone liked your look',
+        href: lookHref('money-piece-blonde'),
+        dedupeKey: `${P}activity-like-single`,
+        data: {
+          lookPostId: lookId('money-piece-blonde'),
+          count: 1,
+          actorClientId: fanId(ACTIVITY_LIKE_FAN),
+        },
+        createdAt: ago(26 * HOUR_MS),
+        readAt: ago(20 * HOUR_MS),
+      },
+      // Batched likes count PEOPLE (saves count saves) — different plural copy.
+      {
+        id: `${P}activity-like-batch`,
+        clientId: creator.id,
+        eventKey: NotificationEventKey.LOOK_LIKED,
+        title: '9 people liked your look',
+        href: lookHref('glazed-almond-set'),
+        dedupeKey: `${P}activity-like-batch`,
+        data: { lookPostId: lookId('glazed-almond-set'), count: 9 },
+        createdAt: ago(30 * HOUR_MS),
+        readAt: ago(20 * HOUR_MS),
+      },
+      // A PRIVATE follower: no name, no link, no follow-back — the PII branch.
+      {
+        id: `${P}activity-follow-private`,
+        clientId: creator.id,
+        eventKey: NotificationEventKey.CLIENT_FOLLOW,
+        title: 'Someone started following you',
+        href: '/client/activity',
+        dedupeKey: `${P}activity-follow-private`,
+        data: { followerClientId: fanId(ACTIVITY_PRIVATE_FOLLOW_FAN) },
+        createdAt: ago(2 * 24 * HOUR_MS),
+        readAt: ago(24 * HOUR_MS),
+      },
+      // A public follower she ALREADY follows back → "View", not "Follow".
+      {
+        id: `${P}activity-follow-mutual`,
+        clientId: creator.id,
+        eventKey: NotificationEventKey.CLIENT_FOLLOW,
+        title: 'Someone started following you',
+        href: '/client/activity',
+        dedupeKey: `${P}activity-follow-mutual`,
+        data: { followerClientId: fanId(ACTIVITY_MUTUAL_FAN) },
+        createdAt: ago(3 * 24 * HOUR_MS),
+        readAt: ago(24 * HOUR_MS),
+      },
+      {
+        id: `${P}activity-comment-reply`,
+        clientId: creator.id,
+        eventKey: NotificationEventKey.LOOK_COMMENT_REPLIED,
+        title: 'Someone replied to your comment',
+        body: 'same! booked her for next month',
+        href: lookHref('lash-lift-tint'),
+        dedupeKey: `${P}activity-comment-reply`,
+        data: { actorClientId: fanId(ACTIVITY_REPLY_FAN) },
+        createdAt: ago(4 * 24 * HOUR_MS),
+        readAt: ago(3 * 24 * HOUR_MS),
+      },
+      {
+        id: `${P}activity-new-look`,
+        clientId: creator.id,
+        eventKey: NotificationEventKey.LOOK_NEW_FROM_FOLLOWED_PRO,
+        title: 'A pro you follow posted a new look',
+        body: 'Copper on a natural level 5 — no lift, all gloss.',
+        href: lookHref('brow-lamination'),
+        dedupeKey: `${P}activity-new-look`,
+        data: {},
+        createdAt: ago(5 * 24 * HOUR_MS),
+        readAt: ago(4 * 24 * HOUR_MS),
+      },
+      {
+        id: `${P}activity-milestone`,
+        clientId: creator.id,
+        eventKey: NotificationEventKey.LOOK_MILESTONE_REACHED,
+        title: 'Your look hit 50 saves',
+        href: lookHref('lived-in-blonde'),
+        dedupeKey: `${P}activity-milestone`,
+        data: { metric: 'saves', threshold: 50 },
+        createdAt: ago(6 * 24 * HOUR_MS),
+        readAt: ago(5 * 24 * HOUR_MS),
+      },
+    ],
   })
 
   // ── background creator field ───────────────────────────────────────────────

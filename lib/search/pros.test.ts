@@ -361,6 +361,7 @@ describe('lib/search/pros.ts', () => {
             displayName: 'TOVIS Studio',
             handle: 'tovisstudio',
             professionType: ProfessionType.MAKEUP_ARTIST,
+            professionLabel: 'Makeup artist',
             avatarUrl: null,
             locationLabel: 'San Diego, CA',
             distanceMiles: null,

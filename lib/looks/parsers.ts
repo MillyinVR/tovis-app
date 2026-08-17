@@ -11,6 +11,7 @@ import {
 } from '@prisma/client'
 
 import { isRecord } from '@/lib/guards'
+import { formatProfessionLabel } from '@/lib/profiles/publicProfileFormatting'
 import type {
   LookBadgeDto,
   LookBadgeKind,
@@ -117,16 +118,17 @@ function isRole(value: unknown): value is Role {
   return value === Role.CLIENT || value === Role.PRO || value === Role.ADMIN
 }
 
+/**
+ * Derived from the enum itself rather than an || chain: the hand-written list
+ * had drifted to 8 of the 11 members — LASH_TECHNICIAN, HAIR_BRAIDER and
+ * PERMANENT_MAKEUP_ARTIST all parsed to `null`, so those pros lost their craft
+ * on every client-parsed surface. A list that must be kept in step with a Prisma
+ * enum by hand is a list that will drift again.
+ */
 function isProfessionType(value: unknown): value is ProfessionType {
   return (
-    value === ProfessionType.COSMETOLOGIST ||
-    value === ProfessionType.BARBER ||
-    value === ProfessionType.ESTHETICIAN ||
-    value === ProfessionType.MANICURIST ||
-    value === ProfessionType.HAIRSTYLIST ||
-    value === ProfessionType.ELECTROLOGIST ||
-    value === ProfessionType.MASSAGE_THERAPIST ||
-    value === ProfessionType.MAKEUP_ARTIST
+    typeof value === 'string' &&
+    Object.prototype.hasOwnProperty.call(ProfessionType, value)
   )
 }
 
@@ -233,6 +235,13 @@ export function parseLooksFeedResponse(raw: unknown): LooksFeedItemDto[] {
           professionType: isProfessionType(professionTypeRaw)
             ? professionTypeRaw
             : null,
+          // Same rule as the detail shape: prefer the server's label, fall back
+          // to the ONE map rather than inventing a second one here.
+          professionLabel:
+            pickString(professionalRaw.professionLabel) ??
+            formatProfessionLabel(
+              isProfessionType(professionTypeRaw) ? professionTypeRaw : null,
+            ),
           avatarUrl: pickString(professionalRaw.avatarUrl),
           location: pickString(professionalRaw.location),
           followerCount: followerCountRaw !== null && followerCountRaw >= 0
@@ -599,6 +608,13 @@ export function parseLooksDetailResponse(raw: unknown): LooksDetailItemDto | nul
       : null,
     avatarUrl: pickString(professionalRaw.avatarUrl),
     professionType,
+    // Prefer what the server sent; fall back to deriving it so a response from
+    // an older server still yields a human label rather than an empty string.
+    // This is the SAME map the server used, not a second one — the enum→label
+    // table lives only in `publicProfileFormatting`.
+    professionLabel:
+      pickString(professionalRaw.professionLabel) ??
+      formatProfessionLabel(professionType),
     location: pickString(professionalRaw.location),
     verificationStatus,
     isPremium,

@@ -62,6 +62,32 @@ export const clientMeBookingSelect =
     source: true,
     // Rebook-chain link — part of the canonical ClientBookingRow shape.
     rebookOfBookingId: true,
+    // The look this booking was made from. Not on ClientBookingDTO, and read
+    // here only to give a booking with no after-photo — every UPCOMING one — a
+    // hero image. See loadBookingHeroImageUrls.
+    //
+    // Traversed as a RELATION rather than fetched by id in a second query.
+    // A standalone bulk read of the look table is a discovery-shaped one, which
+    // check:tenant-aware-discovery flags (correctly — it cannot tell that the
+    // ids came from rows already scoped to this client); riding the relation is
+    // both tenant-safe by construction and one round trip cheaper.
+    // ⚠️ Do not name that call here in prose — the guard is a substring match,
+    // so writing it in a comment IS the violation.
+    sourceLookPostId: true,
+    sourceLookPost: {
+      select: {
+        primaryMediaAsset: {
+          select: {
+            storageBucket: true,
+            storagePath: true,
+            thumbBucket: true,
+            thumbPath: true,
+            url: true,
+            thumbUrl: true,
+          },
+        },
+      },
+    },
     sessionStep: true,
     scheduledFor: true,
     finishedAt: true,
@@ -188,6 +214,11 @@ type ClientMeBookingRow = Prisma.BookingGetPayload<{
   select: typeof clientMeBookingSelect
 }>
 
+/** What {@link renderMediaUrls} needs — the shape both hero sources select. */
+type MediaRenderSource = NonNullable<
+  NonNullable<ClientMeBookingRow['sourceLookPost']>['primaryMediaAsset']
+>
+
 type ClientMeHistoryItem =
   | {
       kind: 'completed'
@@ -223,6 +254,12 @@ export type ClientMePageData = {
     followers: number
   }
   upcomingNotificationBooking: ClientBookingDTO | null
+  /**
+   * Hero image for the upcoming card. Resolved by the same
+   * {@link loadBookingHeroImageUrls} the history cards use, so the two cannot
+   * disagree about which photo represents a visit.
+   */
+  upcomingNotificationHeroImageUrl: string | null
   history: ClientMeHistoryItem[]
   myLooks: ClientMeLook[]
   /** Unread count for the engagement activity feed (powers the header badge). */
@@ -316,22 +353,34 @@ async function requireAuthedClientUser(): Promise<AuthedClientUser> {
 }
 
 /**
- * Resolve the result ("after") photo for a set of completed bookings.
+ * Resolve one hero image per booking — for the history cards AND the upcoming
+ * card, which is why it takes the source look as well as the booking id.
+ *
+ * Two sources, in order:
+ *  1. the visit's own result ("after") photo, which only a finished visit has;
+ *  2. failing that, the look the booking was made FROM.
+ *
+ * The fallback is what makes an UPCOMING booking picture-led at all: it has no
+ * after-photo by definition, and the card used to render a permanently empty
+ * grey box in the one slot the design fills with a photo.
  *
  * After-photos live in the private session bucket, so they're rendered via
  * {@link renderMediaUrls} (signed URLs) — never by reading `url`/`thumbUrl`
  * directly. This is the client viewing their OWN visits, so they're an
- * authorized participant. Returns one hero URL per booking that has an image.
+ * authorized participant.
  */
-async function loadHistoryHeroImageUrls(
-  bookingIds: string[],
+async function loadBookingHeroImageUrls(
+  bookings: Array<{
+    id: string
+    sourceLookMedia: MediaRenderSource | null
+  }>,
 ): Promise<Map<string, string>> {
   const heroByBooking = new Map<string, string>()
-  if (bookingIds.length === 0) return heroByBooking
+  if (bookings.length === 0) return heroByBooking
 
-  const rows = await prisma.mediaAsset.findMany({
+  const afterRows = await prisma.mediaAsset.findMany({
     where: {
-      bookingId: { in: bookingIds },
+      bookingId: { in: bookings.map((booking) => booking.id) },
       phase: MediaPhase.AFTER,
       mediaType: MediaType.IMAGE,
     },
@@ -348,17 +397,20 @@ async function loadHistoryHeroImageUrls(
   })
 
   // `orderBy createdAt desc` makes the first row per booking the most recent.
-  const latestByBooking = new Map<string, (typeof rows)[number]>()
-  for (const row of rows) {
+  const latestByBooking = new Map<string, (typeof afterRows)[number]>()
+  for (const row of afterRows) {
     if (!row.bookingId || latestByBooking.has(row.bookingId)) continue
     latestByBooking.set(row.bookingId, row)
   }
 
   await Promise.all(
-    Array.from(latestByBooking.entries()).map(async ([bookingId, row]) => {
-      const { renderUrl, renderThumbUrl } = await renderMediaUrls(row)
+    bookings.map(async (booking) => {
+      const asset = latestByBooking.get(booking.id) ?? booking.sourceLookMedia
+      if (!asset) return
+
+      const { renderUrl, renderThumbUrl } = await renderMediaUrls(asset)
       const hero = renderThumbUrl ?? renderUrl
-      if (hero) heroByBooking.set(bookingId, hero)
+      if (hero) heroByBooking.set(booking.id, hero)
     }),
   )
 
@@ -552,8 +604,22 @@ export async function loadClientMePage(): Promise<ClientMePageData> {
 
   const upcomingNotificationBooking = upcomingBookings[0] ?? null
 
-  const [historyHeroImageUrls, myLooks] = await Promise.all([
-    loadHistoryHeroImageUrls(completedBookings.map((booking) => booking.id)),
+  // The source look's media rides the raw rows, not the DTO, so pair it back up.
+  const sourceLookMediaByBookingId = new Map(
+    bookingRows.map((row) => [
+      row.id,
+      row.sourceLookPost?.primaryMediaAsset ?? null,
+    ]),
+  )
+  const heroCandidates = [...upcomingBookings, ...completedBookings].map(
+    (booking) => ({
+      id: booking.id,
+      sourceLookMedia: sourceLookMediaByBookingId.get(booking.id) ?? null,
+    }),
+  )
+
+  const [bookingHeroImageUrls, myLooks] = await Promise.all([
+    loadBookingHeroImageUrls(heroCandidates),
     loadMyLooks(clientId),
   ])
 
@@ -561,14 +627,16 @@ export async function loadClientMePage(): Promise<ClientMePageData> {
     kind: 'upcoming',
     label: 'UPCOMING',
     booking,
-    heroImageUrl: null,
+    // Was hard-coded null, so every upcoming visit rendered a textual fallback
+    // tile that repeated the title the card already prints underneath it.
+    heroImageUrl: bookingHeroImageUrls.get(booking.id) ?? null,
   }))
 
   const historyCompleted: ClientMeHistoryItem[] = completedBookings.map((booking) => ({
     kind: 'completed',
     label: 'BOOKED',
     booking,
-    heroImageUrl: historyHeroImageUrls.get(booking.id) ?? null,
+    heroImageUrl: bookingHeroImageUrls.get(booking.id) ?? null,
   }))
 
   const following = buildMyFollowingListResponse({
@@ -590,6 +658,9 @@ export async function loadClientMePage(): Promise<ClientMePageData> {
       followers: creatorStats.followers,
     },
     upcomingNotificationBooking,
+    upcomingNotificationHeroImageUrl: upcomingNotificationBooking
+      ? (bookingHeroImageUrls.get(upcomingNotificationBooking.id) ?? null)
+      : null,
     history: [...historyUpcoming, ...historyCompleted].sort(compareHistoryItems),
     myLooks,
     activityUnreadCount,

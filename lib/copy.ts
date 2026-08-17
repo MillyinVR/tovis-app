@@ -355,6 +355,22 @@ export const COPY = {
   },
 
   /** The client's OWN boards screen. */
+  clientActivity: {
+    eyebrow: 'Activity',
+    /**
+     * 🔴 NOT "Who engaged with you". The feed's allowlist includes
+     * `LOOK_NEW_FROM_FOLLOWED_PRO` — "A pro you follow posted a new look" —
+     * which is a discovery nudge with no actor on the other end of it, so the
+     * old heading made a claim one of its own rows contradicts. This wording is
+     * true of every row the allowlist can produce.
+     */
+    title: 'What’s happening',
+    emptyTitle: 'No activity yet',
+    emptyBody:
+      'When someone follows you or engages with your looks, it’ll show up here.',
+    emptyCta: 'Browse looks',
+  },
+
   boards: {
     /**
      * Marks a board anyone with the link can open. Owner surfaces only — on the

@@ -9,6 +9,8 @@ import {
   type WorkspaceOption,
 } from '@/lib/auth/workspaces'
 import { formatInTimeZone } from '@/lib/time'
+import { formatProfileSubtitle } from '@/lib/profiles/publicProfileFormatting'
+import type { ProfessionType } from '@prisma/client'
 
 import ClientMeDashboard from '../ClientMeDashboard'
 import { loadClientMePage } from './_data/loadClientMePage'
@@ -79,12 +81,22 @@ function buildBoardPreviewImageUrls(board: {
     .filter(isNonEmptyString)
 }
 
+/**
+ * "Manicurist · Brooklyn, NY".
+ *
+ * This used to join the RAW `professionType` enum, so the card read
+ * "MANICURIST · Brooklyn, NY" — and iOS had copied the same hand-rolled join.
+ * `formatProfileSubtitle` already existed and already mapped the enum; the
+ * duplicate simply never got the mapping. It returns the neutral noun rather
+ * than nothing when the type is missing, so the empty case is handled by the
+ * location check below rather than by the label.
+ */
 function buildFollowingSubtitle(params: {
-  professionType: string | null
+  professionType: ProfessionType | null
   location: string | null
 }): string | null {
-  const parts = [params.professionType, params.location].filter(isNonEmptyString)
-  return parts.length > 0 ? parts.join(' · ') : null
+  if (!params.professionType && !isNonEmptyString(params.location)) return null
+  return formatProfileSubtitle(params)
 }
 
 export default async function ClientMePage() {
@@ -127,6 +139,7 @@ export default async function ClientMePage() {
         totalLabel:
           formatMoneyLabel(data.upcomingNotificationBooking.checkout.totalAmount) ??
           formatMoneyLabel(data.upcomingNotificationBooking.subtotalSnapshot),
+        heroImageUrl: data.upcomingNotificationHeroImageUrl,
       }
     : null
 

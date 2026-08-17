@@ -5014,6 +5014,10 @@
                     "null"
                   ]
                 },
+                "professionLabel": {
+                  "description": "Human label for  {@link  professionType  }  — see LooksProProfilePreviewDto.",
+                  "type": "string"
+                },
                 "professionType": {
                   "type": [
                     "string",
@@ -5028,6 +5032,7 @@
                 "handle",
                 "avatarUrl",
                 "professionType",
+                "professionLabel",
                 "location"
               ],
               "type": "object"
@@ -5281,6 +5286,10 @@
                     "null"
                   ]
                 },
+                "professionLabel": {
+                  "description": "Human label for  {@link  professionType  }  — see LooksProProfilePreviewDto.",
+                  "type": "string"
+                },
                 "professionType": {
                   "type": [
                     "string",
@@ -5301,6 +5310,7 @@
                 "handle",
                 "avatarUrl",
                 "professionType",
+                "professionLabel",
                 "location",
                 "timeZone"
               ],
@@ -6076,6 +6086,13 @@
             }
           ]
         },
+        "upcomingNotificationHeroImageUrl": {
+          "description": "Hero photo for the upcoming card — same resolver the history cards use.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "user": {
           "$ref": "#/definitions/ClientMeUserDTO"
         }
@@ -6087,6 +6104,7 @@
         "following",
         "counts",
         "upcomingNotificationBooking",
+        "upcomingNotificationHeroImageUrl",
         "history",
         "myLooks",
         "activityUnreadCount",
@@ -10731,6 +10749,10 @@
             }
           ]
         },
+        "professionLabel": {
+          "description": "The human label for  {@link  professionType  }  — \"Manicurist\", never the raw `MANICURIST`. Composed server-side by `formatProfessionLabel` so the enum→label map has exactly ONE home: every client that used to derive this itself (web's Me › Following, and five iOS call sites doing `.capitalized`, which also leaked the underscore in `MASSAGE_THERAPIST`) renders it verbatim instead. Falls back to the neutral noun, so it is never empty.",
+          "type": "string"
+        },
         "professionType": {
           "anyOf": [
             {
@@ -10754,6 +10776,7 @@
         "nameDisplay",
         "avatarUrl",
         "professionType",
+        "professionLabel",
         "location",
         "verificationStatus",
         "isPremium"
@@ -10814,6 +10837,10 @@
             }
           ]
         },
+        "professionLabel": {
+          "description": "Human label for  {@link  professionType  }  — see LooksProProfilePreviewDto.",
+          "type": "string"
+        },
         "professionType": {
           "anyOf": [
             {
@@ -10833,6 +10860,7 @@
         "handle",
         "nameDisplay",
         "professionType",
+        "professionLabel",
         "avatarUrl",
         "location",
         "followerCount"
@@ -18206,6 +18234,10 @@
             }
           ]
         },
+        "professionLabel": {
+          "description": "Human label for  {@link  professionType  }  — see LooksProProfilePreviewDto.",
+          "type": "string"
+        },
         "professionType": {
           "anyOf": [
             {
@@ -18235,6 +18267,7 @@
         "displayName",
         "handle",
         "professionType",
+        "professionLabel",
         "avatarUrl",
         "locationLabel",
         "distanceMiles",

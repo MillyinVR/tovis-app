@@ -32,6 +32,7 @@ function makeItem(overrides: Partial<FeedItem> = {}): FeedItem {
       handle: 'tovisstudio',
       nameDisplay: ProNameDisplay.BUSINESS_NAME,
       professionType: 'BARBER',
+      professionLabel: 'Barber',
       avatarUrl: null,
       location: 'San Diego, CA',
       followerCount: 0,

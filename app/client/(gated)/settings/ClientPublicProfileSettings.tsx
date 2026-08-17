@@ -15,9 +15,11 @@ type PublicProfile = {
   handle: string
   isPublicProfile: boolean
   publicBio: string
+  publicCity: string
 }
 
 const BIO_MAX = 280
+const CITY_MAX = 80
 
 function pickProfile(raw: unknown): PublicProfile | null {
   if (!isRecord(raw)) return null
@@ -27,6 +29,7 @@ function pickProfile(raw: unknown): PublicProfile | null {
     handle: typeof profile.handle === 'string' ? profile.handle : '',
     isPublicProfile: profile.isPublicProfile === true,
     publicBio: typeof profile.publicBio === 'string' ? profile.publicBio : '',
+    publicCity: typeof profile.publicCity === 'string' ? profile.publicCity : '',
   }
 }
 
@@ -40,6 +43,7 @@ export default function ClientPublicProfileSettings() {
   const [handle, setHandle] = useState('')
   const [isPublic, setIsPublic] = useState(false)
   const [bio, setBio] = useState('')
+  const [city, setCity] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -55,6 +59,7 @@ export default function ClientPublicProfileSettings() {
         setHandle(profile.handle)
         setIsPublic(profile.isPublicProfile)
         setBio(profile.publicBio)
+        setCity(profile.publicCity)
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load.')
@@ -72,9 +77,10 @@ export default function ClientPublicProfileSettings() {
     return (
       handle !== saved.handle ||
       isPublic !== saved.isPublicProfile ||
-      bio !== saved.publicBio
+      bio !== saved.publicBio ||
+      city !== saved.publicCity
     )
-  }, [saved, handle, isPublic, bio])
+  }, [saved, handle, isPublic, bio, city])
 
   const canGoPublic = handle.trim().length > 0
 
@@ -87,7 +93,12 @@ export default function ClientPublicProfileSettings() {
       const res = await fetch('/api/v1/client/profile', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ handle, isPublicProfile: isPublic, publicBio: bio }),
+        body: JSON.stringify({
+          handle,
+          isPublicProfile: isPublic,
+          publicBio: bio,
+          publicCity: city,
+        }),
       })
       const raw = await safeJson(res)
       if (!res.ok) throw new Error(readErrorMessage(raw) ?? 'Failed to save.')
@@ -97,6 +108,7 @@ export default function ClientPublicProfileSettings() {
         setHandle(profile.handle)
         setIsPublic(profile.isPublicProfile)
         setBio(profile.publicBio)
+        setCity(profile.publicCity)
       }
       setSuccess('Public profile updated.')
     } catch (e) {
@@ -183,6 +195,26 @@ export default function ClientPublicProfileSettings() {
             />
             <span className="text-xs text-textSecondary/80">
               {bio.length}/{BIO_MAX}
+            </span>
+          </label>
+
+          {/* The standing line on /u/[handle] has rendered this since it
+              shipped, with nothing but the demo seed able to write it. Opt-in:
+              blank means the line simply omits the place. */}
+          <label className="flex flex-col gap-1.5">
+            <FieldLabel>City</FieldLabel>
+            <input
+              value={city}
+              onChange={(e) => setCity(e.target.value.slice(0, CITY_MAX))}
+              placeholder="Brooklyn, NY"
+              className={controlClassName({
+                surface: 'soft',
+                className: 'w-full text-sm text-textPrimary',
+              })}
+            />
+            <span className="text-xs text-textSecondary/80">
+              Shown beside your saver ranking on your public profile. Leave it
+              blank to keep your city to yourself.
             </span>
           </label>
 
