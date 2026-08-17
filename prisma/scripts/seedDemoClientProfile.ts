@@ -63,6 +63,7 @@ import { refreshClientCreatorStats } from '@/lib/clients/creatorTier'
 import { refreshClientLookTrendStats } from '@/lib/clients/lookTrend'
 import { mintCreatorCreditOnCompletion } from '@/lib/credit/clientCredit'
 import { normalizeHandle } from '@/lib/handles'
+import { refreshProfessional } from '@/lib/search/index/refreshSearchIndex'
 import {
   addDaysToYMD,
   getZonedParts,
@@ -3048,6 +3049,29 @@ async function main(): Promise<void> {
   // is computed from the BoardItem rows above rather than asserted.
   const trends = await refreshClientLookTrendStats(prisma, NOW)
 
+  // 🔴 The pro finder (`/search` → FIND A PRO) reads `ProfessionalSearchIndex`,
+  // which CASCADES from `ProfessionalProfile`. This script deletes and recreates
+  // every pro it owns, so it destroys their index rows and — until now — never
+  // rewrote them. Result: `/search` answered "No pros found nearby" for every
+  // seeded pro, which is indistinguishable from a finder nobody built, and it
+  // held even right after `pnpm backfill:search-index` because THIS script runs
+  // afterwards.
+  //
+  // Same rule as the two scorers above: run the REAL refresher (the one every
+  // location write and `backfill:search-index` call) rather than inserting rows,
+  // and derive the list from the DATABASE so a pro added to PROS or to the extra
+  // creators later cannot be silently missed.
+  const seededPros = await prisma.professionalProfile.findMany({
+    where: { id: { startsWith: P } },
+    select: { id: true },
+  })
+  for (const pro of seededPros) {
+    await refreshProfessional(pro.id, 'backfill')
+  }
+  const indexedLocations = await prisma.professionalSearchIndex.count({
+    where: { professionalId: { startsWith: P } },
+  })
+
   console.log(
     `[seedDemoClientProfile] seeded @${CREATOR.handle}: ` +
       `${LOOKS.length} looks, ${BOARDS.length} boards ` +
@@ -3060,7 +3084,10 @@ async function main(): Promise<void> {
       `creator tiers: ${stats.ranked} ranked of ${stats.scored} scored; ` +
       `trending looks: ${trends.ranked} city-ranked of ${trends.trending}; ` +
       `creator credits minted: ${mintedCredits} of ${bookingRows.length} ` +
-      `attributed bookings (the rest cite a pro-authored look, which mints none).`,
+      `attributed bookings (the rest cite a pro-authored look, which mints none); ` +
+      `search index: ${indexedLocations} bookable location(s) across ` +
+      `${seededPros.length} seeded pro(s) — the pro finder reads this, and it ` +
+      `renders nothing when it is empty.`,
   )
   console.log('  → http://localhost:3000/u/' + CREATOR.handle)
 }
