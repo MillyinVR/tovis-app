@@ -1,13 +1,18 @@
 'use client'
 
 // Shared error-boundary UI for the app's route-segment error.tsx files.
-// White-label safe: brand tokens + tone utilities only, brand name resolved
-// from lib/brand (never hardcoded). Each error.tsx is a thin wrapper that
-// passes Next's { error, reset } through plus area-specific copy/links.
+// White-label safe: brand tokens + tone utilities only, brand name never
+// hardcoded. Each error.tsx is a thin wrapper that passes Next's
+// { error, reset } through plus area-specific copy/links.
+//
+// A segment error boundary renders INSIDE the root layout, so the tenant's
+// brand is in context above it. (app/global-error.tsx is the one that is not
+// — it replaces the root layout, and is the sole baselined exception in
+// tools/check-brand-resolution.mjs.)
 import { useEffect } from 'react'
 import * as Sentry from '@sentry/nextjs'
 import Link from 'next/link'
-import { getBrandConfig } from '@/lib/brand'
+import { useBrand } from '@/lib/brand/BrandProvider'
 
 type ErrorStateProps = {
   error: Error & { digest?: string }
@@ -29,7 +34,7 @@ export default function ErrorState({
   homeHref,
   homeLabel,
 }: ErrorStateProps) {
-  const brand = getBrandConfig()
+  const { brand } = useBrand()
 
   useEffect(() => {
     Sentry.captureException(error)

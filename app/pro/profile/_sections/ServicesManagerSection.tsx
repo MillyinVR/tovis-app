@@ -4,7 +4,8 @@ import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { moneyToString } from '@/lib/money'
-import { getBrandConfig } from '@/lib/brand'
+import { getBrandForTenantContext } from '@/lib/brand/forTenant'
+import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 import { parseCalendarSwatch } from '@/lib/calendar/eventColor'
 import { isClientTechnicalRecordEnabled } from '@/lib/clients/technicalRecord'
 import { CONSENT_KIND_LABELS } from '@/lib/consentForms/kindLabels'
@@ -31,16 +32,17 @@ export default async function ServicesManagerSection({
   subtitle,
   variant = 'section',
 }: Props) {
-  const brand = getBrandConfig()
-  const resolvedSubtitle =
-    subtitle !== undefined
-      ? subtitle
-      : `Pick from the ${brand.displayName} service library. Set pricing for Salon and/or Mobile. Service names stay consistent across the platform.`
   const user = await getCurrentUser()
 
   if (!user || user.role !== 'PRO' || !user.professionalProfile) {
     redirect('/login')
   }
+
+  const brand = getBrandForTenantContext(await resolveTenantContextForLayout())
+  const resolvedSubtitle =
+    subtitle !== undefined
+      ? subtitle
+      : `Pick from the ${brand.displayName} service library. Set pricing for Salon and/or Mobile. Service names stay consistent across the platform.`
 
   const profId = user.professionalProfile.id
 

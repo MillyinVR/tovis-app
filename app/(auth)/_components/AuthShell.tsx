@@ -1,6 +1,13 @@
 // app/(auth)/_components/AuthShell.tsx
+//
+// Every importer of this shell is a client component (the login, signup,
+// reset and verify screens), so it has always been in the client bundle and
+// cannot read next/headers. It takes the tenant-resolved brand from the
+// provider the root layout already put above it.
+'use client'
+
 import type { ReactNode } from 'react'
-import { getBrandConfig } from '@/lib/brand'
+import { useBrand } from '@/lib/brand/BrandProvider'
 import BrandWordmark from '@/lib/brand/BrandWordmark'
 
 export default function AuthShell({
@@ -12,7 +19,7 @@ export default function AuthShell({
   subtitle?: string
   children: ReactNode
 }) {
-  const brand = getBrandConfig()
+  const { brand } = useBrand()
 
   return (
     <div className="relative min-h-[100svh] w-full overflow-hidden px-4 py-10 text-textPrimary">

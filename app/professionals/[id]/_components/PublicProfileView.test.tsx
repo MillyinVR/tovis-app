@@ -1,5 +1,6 @@
 import React from 'react'
-import { render, screen } from '@testing-library/react'
+import { screen } from '@testing-library/react'
+import { renderWithBrand as render } from '@/test/renderWithBrand'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   BookingStatus,

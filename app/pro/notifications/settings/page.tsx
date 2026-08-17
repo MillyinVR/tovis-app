@@ -6,14 +6,15 @@ import { Role } from '@prisma/client'
 
 import NotificationPreferencesForm from '@/app/_components/NotificationPreferencesForm'
 import ReminderCadenceSettings from '@/app/pro/notifications/settings/ReminderCadenceSettings'
-import { getBrandConfig } from '@/lib/brand'
+import { getBrandForTenantContext } from '@/lib/brand/forTenant'
+import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 import { getCurrentUser } from '@/lib/currentUser'
 
 export const dynamic = 'force-dynamic'
 
 export default async function ProNotificationSettingsPage() {
   const user = await getCurrentUser()
-  const brand = getBrandConfig()
+  const brand = getBrandForTenantContext(await resolveTenantContextForLayout())
 
   if (!user || user.role !== Role.PRO || !user.professionalProfile) {
     redirect('/login?from=/pro/notifications/settings')

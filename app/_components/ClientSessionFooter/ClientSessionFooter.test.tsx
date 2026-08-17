@@ -10,7 +10,8 @@
 // still has a live consumer here (it is NOT orphaned by the bell going away),
 // and the tab it feeds is still the one flagged `hasBadge` in CLIENT_TABS.
 
-import { render, screen } from '@testing-library/react'
+import { screen } from '@testing-library/react'
+import { renderWithBrand as render } from '@/test/renderWithBrand'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({

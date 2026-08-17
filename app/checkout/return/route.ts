@@ -11,7 +11,8 @@
 
 import type { NextRequest } from 'next/server'
 
-import { getBrandConfig } from '@/lib/brand'
+import { getBrandForTenantContext } from '@/lib/brand/forTenant'
+import { resolveTenantContextForRequest } from '@/lib/tenant'
 
 export const dynamic = 'force-dynamic'
 
@@ -40,7 +41,7 @@ function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;')
 }
 
-export function GET(req: NextRequest): Response {
+export async function GET(req: NextRequest): Promise<Response> {
   const { searchParams } = req.nextUrl
 
   const status = pickStatus(searchParams.get('status'))
@@ -64,7 +65,10 @@ export function GET(req: NextRequest): Response {
   // light/dark negotiation would only buy a flash. Sourcing them from the brand
   // config is what keeps this page white-label instead of the previous
   // off-brand purple.
-  const { colors } = getBrandConfig().tokensByMode.dark
+  const brand = getBrandForTenantContext(
+    await resolveTenantContextForRequest(req),
+  )
+  const { colors } = brand.tokensByMode.dark
 
   const html = `<!doctype html>
 <html lang="en">

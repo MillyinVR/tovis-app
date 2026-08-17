@@ -4,7 +4,8 @@ import { Role } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
-import { getBrandConfig } from '@/lib/brand'
+import { getBrandForTenantContext } from '@/lib/brand/forTenant'
+import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 
 import ClientHomeShell from './_components/ClientHomeShell'
 import { getClientHomeData } from './_data/getClientHomeData'
@@ -55,8 +56,8 @@ async function removeProFavoriteAction(formData: FormData) {
 }
 
 export default async function ClientHomePage() {
-  const brand = getBrandConfig()
   const user = await requireClientOrRedirect()
+  const brand = getBrandForTenantContext(await resolveTenantContextForLayout())
 
   const userId = user.id
   const clientId = user.clientProfile.id

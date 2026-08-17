@@ -5,7 +5,8 @@ import { notFound } from 'next/navigation'
 import { Role } from '@prisma/client'
 
 import RemoteImage from '@/app/_components/media/RemoteImage'
-import { getBrandConfig } from '@/lib/brand'
+import { getBrandForTenantContext } from '@/lib/brand/forTenant'
+import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 import { getCurrentUser } from '@/lib/currentUser'
 import { resolveFocalPoint } from '@/lib/media/focalPoint'
 import { loadPublicBoard } from '@/lib/boards/publicBoard'
@@ -23,7 +24,7 @@ export async function generateMetadata({
   const data = await loadPublicBoard(handle, slug)
   if (!data) return { title: 'Board' }
 
-  const brand = getBrandConfig()
+  const brand = getBrandForTenantContext(await resolveTenantContextForLayout())
   const title = `${data.boardName} · @${data.handle}`
   const description = `${data.boardName} — a board of looks saved by @${data.handle} on ${brand.displayName}.`
 

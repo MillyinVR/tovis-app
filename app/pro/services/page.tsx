@@ -1,7 +1,8 @@
 // app/pro/services/page.tsx
 import { redirect } from 'next/navigation'
 import { getCurrentUser } from '@/lib/currentUser'
-import { getBrandConfig } from '@/lib/brand'
+import { getBrandForTenantContext } from '@/lib/brand/forTenant'
+import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 import ServicesManagerSection from '@/app/pro/profile/_sections/ServicesManagerSection'
 import PrepChecklistEditor from '@/app/pro/services/PrepChecklistEditor'
 
@@ -9,7 +10,7 @@ export const dynamic = 'force-dynamic'
 
 export default async function ProServicesPage() {
   const user = await getCurrentUser()
-  const brand = getBrandConfig()
+  const brand = getBrandForTenantContext(await resolveTenantContextForLayout())
 
   if (!user || user.role !== 'PRO' || !user.professionalProfile) {
     redirect('/login?from=/pro/services')

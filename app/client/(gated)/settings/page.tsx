@@ -30,7 +30,8 @@ import {
 } from 'lucide-react'
 
 import ThemeToggle from '@/lib/brand/ThemeToggle'
-import { getBrandConfig } from '@/lib/brand'
+import { getBrandForTenantContext } from '@/lib/brand/forTenant'
+import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
 
 import ClientPage from '../_components/ClientPage'
@@ -38,8 +39,8 @@ import SettingsRow from './_components/SettingsRow'
 
 export const dynamic = 'force-dynamic'
 
-export default function ClientSettingsPage() {
-  const brand = getBrandConfig()
+export default async function ClientSettingsPage() {
+  const brand = getBrandForTenantContext(await resolveTenantContextForLayout())
   const showPaymentMethods = noShowProtectionEnabled()
 
   return (

@@ -3,7 +3,8 @@
 // from lib/brand. Server component (no client JS) — each not-found.tsx is a
 // thin wrapper that passes area-specific copy + a link back into the area.
 import Link from 'next/link'
-import { getBrandConfig } from '@/lib/brand'
+import { getBrandForTenantContext } from '@/lib/brand/forTenant'
+import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 
 type NotFoundStateProps = {
   /** Headline override. */
@@ -15,13 +16,13 @@ type NotFoundStateProps = {
   homeLabel?: string
 }
 
-export default function NotFoundState({
+export default async function NotFoundState({
   title,
   description,
   homeHref = '/',
   homeLabel = 'Back to home',
 }: NotFoundStateProps) {
-  const brand = getBrandConfig()
+  const brand = getBrandForTenantContext(await resolveTenantContextForLayout())
 
   return (
     <main className="mx-auto flex min-h-[60vh] w-full max-w-md flex-col items-center justify-center gap-4 px-6 py-16 text-center">

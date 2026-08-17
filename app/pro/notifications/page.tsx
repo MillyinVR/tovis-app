@@ -2,7 +2,8 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { getCurrentUser } from '@/lib/currentUser'
-import { getBrandConfig } from '@/lib/brand'
+import { getBrandForTenantContext } from '@/lib/brand/forTenant'
+import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 import { prisma } from '@/lib/prisma'
 import { formatInTimeZone } from '@/lib/formatInTimeZone'
 import {
@@ -263,7 +264,7 @@ export default async function ProNotificationsPage(props: {
   searchParams?: SearchParams
 }) {
   const user = await getCurrentUser()
-  const brand = getBrandConfig()
+  const brand = getBrandForTenantContext(await resolveTenantContextForLayout())
 
   if (!user || user.role !== Role.PRO || !user.professionalProfile) {
     redirect('/login?from=/pro/notifications')

@@ -9,7 +9,8 @@ import {
   type ProfessionType,
 } from '@prisma/client'
 
-import { getBrandConfig } from '@/lib/brand'
+import { getBrandForTenantContext } from '@/lib/brand/forTenant'
+import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 import { getCurrentUser } from '@/lib/currentUser'
 import { countFollowers } from '@/lib/follows'
 import { formatCompactCount } from '@/lib/format/compactCount'
@@ -156,7 +157,7 @@ export async function loadProProfileManagementPage({
   searchParams?: ProProfileManagementSearchParams | null
 }): Promise<ProProfileManagementPageModel> {
   const user = await getCurrentUser()
-  const brand = getBrandConfig()
+  const brand = getBrandForTenantContext(await resolveTenantContextForLayout())
 
   if (!user || user.role !== Role.PRO || !user.professionalProfile) {
     redirect(

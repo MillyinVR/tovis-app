@@ -2,7 +2,7 @@
 'use client'
 
 import Image from 'next/image'
-import { getBrandConfig } from '@/lib/brand'
+import { useBrand } from '@/lib/brand/BrandProvider'
 import TovisEye from '@/lib/brand/TovisEye'
 
 /**
@@ -18,7 +18,7 @@ export default function BrandMark({
   size?: number
   title?: string
 }) {
-  const brand = getBrandConfig()
+  const { brand } = useBrand()
 
   if (brand.id === 'tovis') {
     return <TovisEye size={size} title={title} />

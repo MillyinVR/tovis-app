@@ -2,6 +2,8 @@
 import { render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { rootTenantContext } from '@/lib/tenant/context'
+
 type MockClientHomeShellProps = {
   brandText: string
   displayName: string
@@ -15,7 +17,7 @@ const mocks = vi.hoisted(() => ({
   }),
 
   getCurrentUser: vi.fn(),
-  getBrandConfig: vi.fn(),
+  getBrandForTenantContext: vi.fn(),
   getClientHomeData: vi.fn(),
 
   clientHomeShellProps: [] as MockClientHomeShellProps[],
@@ -46,8 +48,14 @@ vi.mock('@/lib/currentUser', () => ({
   getCurrentUser: mocks.getCurrentUser,
 }))
 
-vi.mock('@/lib/brand', () => ({
-  getBrandConfig: mocks.getBrandConfig,
+vi.mock('@/lib/brand/forTenant', () => ({
+  getBrandForTenantContext: mocks.getBrandForTenantContext,
+}))
+
+// The page resolves its brand through the tenant context now, so the
+// context has to exist for the call to be made at all.
+vi.mock('@/lib/tenant/layoutContext', () => ({
+  resolveTenantContextForLayout: async () => rootTenantContext('tenant_root'),
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -77,7 +85,7 @@ describe('app/client/page.tsx', () => {
     vi.clearAllMocks()
     mocks.clientHomeShellProps.length = 0
 
-    mocks.getBrandConfig.mockReturnValue({
+    mocks.getBrandForTenantContext.mockReturnValue({
       assets: {
         wordmark: {
           text: 'TOVIS',
