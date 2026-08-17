@@ -351,6 +351,11 @@ export default function SearchMapClient() {
 
   const [mapCenter, setMapCenter] = useState<Coords | null>(null)
   const [origin, setOrigin] = useState<Coords | null>(null)
+  // A real PLACE NAME, or empty when all we have is coordinates. Empty is a
+  // meaningful state, not a missing one: the two geolocation paths used to store
+  // the literal string 'Near you' here, which reads correctly in the location
+  // chip but interpolates into the hint line as "Searching near Near you".
+  // Keeping the sentinel out of the value lets each site word itself.
   const [originLabel, setOriginLabel] = useState<string>('')
   const [fitBounds, setFitBounds] = useState<Bounds | null>(null)
 
@@ -368,7 +373,6 @@ export default function SearchMapClient() {
   // The scrollable GRID body sits below the floating header panel. Measure the
   // panel rather than hardcode an offset, so the headline + collapsible filters
   // never overlap the content.
-  const headerRef = useRef<HTMLDivElement | null>(null)
   const [headerHeight, setHeaderHeight] = useState(178)
 
   const listRef = useRef<HTMLDivElement | null>(null)
@@ -443,17 +447,36 @@ export default function SearchMapClient() {
     )
   }, [categories, activeCategoryId])
 
-  useEffect(() => {
-    const node = headerRef.current
-    if (!node || typeof ResizeObserver === 'undefined') return
+  // 🔴 A callback ref, not an effect. This component MOUNTS in LOOKS mode, whose
+  // early return does not render this header at all — so a `[]`-deps effect ran
+  // once against a null ref, bailed, and never ran again. `headerHeight` then sat
+  // at its 178px default for the entire session while the real header measured
+  // 306px, and every consumer of it was wrong by 128px: the GRID body started
+  // under the header, and the MAP sheet grew up into it and ate the taps meant
+  // for the MAP/GRID toggle and the category rail.
+  //
+  // A callback ref fires on every attach and detach, so switching modes now
+  // measures the header that actually exists.
+  const headerObserverRef = useRef<ResizeObserver | null>(null)
+  const attachHeaderRef = useCallback((node: HTMLDivElement | null) => {
+    // React calls this with null on detach and unmount, which is what retires
+    // the observer — there is no separate cleanup effect to keep in sync.
+    headerObserverRef.current?.disconnect()
+    headerObserverRef.current = null
 
-    const observer = new ResizeObserver((entries) => {
-      const height = entries[0]?.contentRect.height
-      if (typeof height === 'number') setHeaderHeight(Math.ceil(height))
-    })
+    if (!node) return
 
+    // The BORDER box, via getBoundingClientRect: the header carries top padding
+    // and `contentRect` excludes it, which undercounted the offset even once the
+    // observer was attached.
+    const measure = () => setHeaderHeight(Math.ceil(node.getBoundingClientRect().height))
+    measure()
+
+    if (typeof ResizeObserver === 'undefined') return
+
+    const observer = new ResizeObserver(measure)
     observer.observe(node)
-    return () => observer.disconnect()
+    headerObserverRef.current = observer
   }, [])
 
   const pins: Pin[] = useMemo(() => {
@@ -634,7 +657,7 @@ export default function SearchMapClient() {
         if (!didInitialSearchRef.current) {
           didInitialSearchRef.current = true
           setOrigin(coords)
-          setOriginLabel('Near you')
+          setOriginLabel('')
           setFitBounds(null)
 
           const nextSearch: SearchArgs = {
@@ -1140,7 +1163,7 @@ export default function SearchMapClient() {
         {/* Left column: `contents` on mobile (the header floats over the map);
             a bordered flex column on desktop holding the header + results list. */}
         <div className="contents lg:col-start-1 lg:row-start-1 lg:flex lg:min-h-0 lg:flex-col lg:overflow-hidden lg:border-r lg:border-surfaceGlass/10 lg:bg-bgPrimary">
-        <div ref={headerRef} className="absolute left-0 right-0 top-0 z-20 px-3 pt-3 lg:relative lg:z-20 lg:shrink-0 lg:px-4 lg:pt-4">
+        <div ref={attachHeaderRef} className="absolute left-0 right-0 top-0 z-20 px-3 pt-3 lg:relative lg:z-20 lg:shrink-0 lg:px-4 lg:pt-4">
           <div
             ref={acRootRef}
             className={cn(
@@ -1285,7 +1308,11 @@ export default function SearchMapClient() {
 
               <div className="mt-2 flex items-center justify-between gap-2">
                 <div className="text-[12px] font-semibold text-textSecondary">
-                  {origin ? `Searching near ${originLabel} · ${radiusMiles} mi` : 'Pick a place to set origin.'}
+                  {origin
+                    ? originLabel
+                      ? `Searching near ${originLabel} · ${radiusMiles} mi`
+                      : `Searching near you · ${radiusMiles} mi`
+                    : 'Pick a place to set origin.'}
                 </div>
 
                   {geoDenied ? (
@@ -1432,7 +1459,7 @@ export default function SearchMapClient() {
                         }
 
                         setOrigin(me)
-                        setOriginLabel('Near you')
+                        setOriginLabel('')
                         setFitBounds(null)
 
                         lastSearchRef.current = nextSearch
@@ -1588,8 +1615,25 @@ export default function SearchMapClient() {
         ) : null}
 
         {!isDesktop && viewMode === 'MAP' ? (
-          <div className="absolute left-0 right-0 z-20 px-3" style={{ bottom: APP_BOTTOM_INSET, paddingBottom: 12 }}>
-            <div className="tovis-glass-strong rounded-card border border-surfaceGlass/10 bg-bgSecondary p-3">
+          // 🔴 `top` is load-bearing, not symmetry with the GRID body below.
+          // This sheet is bottom-anchored and its height is content-driven, so
+          // without an upper bound it grows straight up into the header: at four
+          // results it reached 99px past the header's own bottom edge, hiding the
+          // MAP/GRID toggle and the whole category rail behind a translucent
+          // panel. Both are z-20 siblings and this one is later in the DOM, so it
+          // also SWALLOWED their clicks — the controls were still painted, still
+          // focusable, and completely dead to a tap.
+          //
+          // `justify-end` keeps the sheet hugging the bottom (the map has to stay
+          // the thing you are looking at), `pointer-events-none` on the frame
+          // keeps the map draggable in the gap above the card, and `min-h-0` lets
+          // the card shrink into whatever the header leaves rather than clip its
+          // own top.
+          <div
+            className="pointer-events-none absolute left-0 right-0 z-20 flex flex-col justify-end px-3"
+            style={{ top: headerHeight, bottom: APP_BOTTOM_INSET, paddingBottom: 12 }}
+          >
+            <div className="tovis-glass-strong pointer-events-auto flex min-h-0 flex-col rounded-card border border-surfaceGlass/10 bg-bgSecondary p-3">
               {err ? (
                 <div className="text-[13px] font-semibold text-microAccent">{err}</div>
               ) : loading ? (
@@ -1608,7 +1652,10 @@ export default function SearchMapClient() {
                     </div>
                   ) : null}
 
-                  <div ref={listRef} className="overlayScroll max-h-[34dvh] overflow-y-auto pr-1">
+                  {/* `min-h-0` lets this shrink below the 34dvh cap when the
+                      header is tall; the cap alone kept the sheet oversized and
+                      was half of how it climbed into the header. */}
+                  <div ref={listRef} className="overlayScroll min-h-0 max-h-[34dvh] overflow-y-auto pr-1">
                     <DiscoverProRows
                       pros={displayPros.slice(0, 30)}
                       activeProId={activeProId}

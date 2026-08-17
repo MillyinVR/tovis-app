@@ -167,6 +167,13 @@ jobs:
       - name: Backfill contact lookup hashes
         run: pnpm run backfill:contact-hash-v2 -- --write
 
+      # Same shape of gap: the pro finder reads ProfessionalSearchIndex, and
+      # seed.cjs writes ProfessionalLocation but never the index derived from it.
+      # Without this every /search result set is empty here — not "no pros
+      # nearby" but a surface that cannot be exercised at all.
+      - name: Backfill professional search index
+        run: pnpm run backfill:search-index
+
       # Build here rather than inside Playwright's `webServer` command, which
       # caps it at 120s: a full production build of ~111 routes routinely ran
       # longer on a slow runner and killed the job before a single test ran,
