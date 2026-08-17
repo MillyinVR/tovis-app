@@ -68,6 +68,14 @@ export type ClientMeHistoryItemDTO = {
   label: 'BOOKED' | 'UPCOMING'
   booking: ClientBookingDTO
   heroImageUrl: string | null
+  /**
+   * The look this visit produced, or null when nobody has posted one yet.
+   *
+   * Carries the visibility switch that used to live on a separate "Your looks"
+   * grid: screen 7 folds it onto the history card so a past visit and the look
+   * that came out of it are one row, not two lists the client has to reconcile.
+   */
+  look: ClientMePageData['history'][number]['look']
 }
 
 export type ClientMePageDTO = {
@@ -80,8 +88,19 @@ export type ClientMePageDTO = {
   /** Hero photo for the upcoming card — same resolver the history cards use. */
   upcomingNotificationHeroImageUrl: string | null
   history: ClientMeHistoryItemDTO[]
+  /**
+   * The client's authored looks.
+   *
+   * ⚠️ Web no longer RENDERS this as its own grid — screen 7 folded each look's
+   * visibility switch onto the history card it belongs to. The field stays on
+   * the wire because it is REQUIRED by shipped iOS builds (`ClientMe.myLooks`
+   * is non-optional there), and a required key vanishing is a decode failure
+   * that takes the whole Me tab down, not a graceful degradation.
+   */
   myLooks: ClientMePageData['myLooks']
   activityUnreadCount: number
+  /** The owner's own tier / percentile / city. */
+  standing: ClientMePageData['standing']
   creator: ClientMePageData['creator']
 }
 
@@ -143,9 +162,11 @@ export function serializeClientMePageData(
       label: item.label,
       booking: item.booking,
       heroImageUrl: item.heroImageUrl,
+      look: item.look,
     })),
     myLooks: data.myLooks,
     activityUnreadCount: data.activityUnreadCount,
+    standing: data.standing,
     creator: data.creator,
   }
 }

@@ -10,6 +10,15 @@ import {
   Prisma,
 } from '@prisma/client'
 
+import {
+  buildCreatorStanding,
+  CREATOR_STANDING_SELECT,
+  type CreatorStandingValue,
+} from '@/lib/clients/creatorStanding'
+import {
+  resolveCreatorLevel,
+  type CreatorLevelProgress,
+} from '@/lib/clients/creatorLevel'
 import { getCurrentUser } from '@/lib/currentUser'
 import { prisma } from '@/lib/prisma'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
@@ -49,6 +58,9 @@ export const clientMeProfileSelect =
     claimedAt: true,
     handle: true,
     isPublicProfile: true,
+    // The owner's own tier / percentile / city — the same columns and the same
+    // null-handling the public profile reads (lib/clients/creatorStanding.ts).
+    ...CREATOR_STANDING_SELECT,
   })
 
 export type ClientMeProfileRow = Prisma.ClientProfileGetPayload<{
@@ -225,12 +237,14 @@ type ClientMeHistoryItem =
       label: 'BOOKED'
       booking: ClientBookingDTO
       heroImageUrl: string | null
+      look: ClientMeHistoryLook | null
     }
   | {
       kind: 'upcoming'
       label: 'UPCOMING'
       booking: ClientBookingDTO
       heroImageUrl: string | null
+      look: ClientMeHistoryLook | null
     }
 
 export type ClientMeLook = {
@@ -239,6 +253,27 @@ export type ClientMeLook = {
   imageUrl: string | null
   visibility: string
   serviceId: string | null
+  /**
+   * The visit this look was authored from, when there is one.
+   *
+   * The Share-your-look flow stamps `MediaAsset.bookingId` on the look's
+   * primary asset, so this is the join that lets a history card carry its own
+   * look's visibility switch — the mapping exists, it is just indirect (a
+   * history card is a `Booking`, a look is a `LookPost`).
+   */
+  bookingId: string | null
+}
+
+/**
+ * The authored look a history card owns, folded onto the card itself.
+ *
+ * Null for a visit nobody has posted a look from — those keep the "Share your
+ * look" CTA instead of a switch, because there is no visibility to toggle yet.
+ */
+export type ClientMeHistoryLook = {
+  id: string
+  name: string
+  visibility: string
 }
 
 export type ClientMePageData = {
@@ -265,6 +300,12 @@ export type ClientMePageData = {
   /** Unread count for the engagement activity feed (powers the header badge). */
   activityUnreadCount: number
   /**
+   * The owner's OWN standing — the same tier pill and "top 5% saver · Brooklyn"
+   * line a visitor to `/u/{handle}` already saw. Tori's first screen-7 note was
+   * that the owner's page showed neither.
+   */
+  standing: CreatorStandingValue
+  /**
    * Real-data creator metrics + remixes. `isCreator` gates the whole creator
    * UI: false until the client has published at least one authored look.
    */
@@ -273,6 +314,12 @@ export type ClientMePageData = {
     savesOnYourLooks: number
     bookedFromYou: number
     remixes: ClientLookRemix[]
+    /**
+     * Level and progress, derived server-side from the two ladders in
+     * `lib/clients/creatorLevel.ts`. Computed here, not on either client, so the
+     * thresholds have exactly one home and iOS cannot drift from web.
+     */
+    level: CreatorLevelProgress
   }
 }
 
@@ -304,6 +351,9 @@ async function loadMyLooks(clientId: string): Promise<ClientMeLook[]> {
               thumbPath: true,
               url: true,
               thumbUrl: true,
+              // The visit this look came out of — the join that lets the
+              // history card own its look's visibility switch.
+              bookingId: true,
             },
           },
         },
@@ -325,6 +375,7 @@ async function loadMyLooks(clientId: string): Promise<ClientMeLook[]> {
         imageUrl: renderThumbUrl ?? renderUrl,
         visibility: row.visibility,
         serviceId: row.serviceId,
+        bookingId: row.primaryMediaAsset?.bookingId ?? null,
       }
     }),
   )
@@ -623,6 +674,20 @@ export async function loadClientMePage(): Promise<ClientMePageData> {
     loadMyLooks(clientId),
   ])
 
+  // The authored look each visit produced, keyed by the booking its primary
+  // asset was stamped with. A client can author more than one look from the
+  // same visit; `loadMyLooks` orders by `publishedAt desc`, so the FIRST match
+  // wins and the card carries the most recent look rather than an arbitrary one.
+  const lookByBookingId = new Map<string, ClientMeHistoryLook>()
+  for (const look of myLooks) {
+    if (!look.bookingId || lookByBookingId.has(look.bookingId)) continue
+    lookByBookingId.set(look.bookingId, {
+      id: look.id,
+      name: look.name,
+      visibility: look.visibility,
+    })
+  }
+
   const historyUpcoming: ClientMeHistoryItem[] = upcomingBookings.map((booking) => ({
     kind: 'upcoming',
     label: 'UPCOMING',
@@ -630,6 +695,7 @@ export async function loadClientMePage(): Promise<ClientMePageData> {
     // Was hard-coded null, so every upcoming visit rendered a textual fallback
     // tile that repeated the title the card already prints underneath it.
     heroImageUrl: bookingHeroImageUrls.get(booking.id) ?? null,
+    look: lookByBookingId.get(booking.id) ?? null,
   }))
 
   const historyCompleted: ClientMeHistoryItem[] = completedBookings.map((booking) => ({
@@ -637,6 +703,7 @@ export async function loadClientMePage(): Promise<ClientMePageData> {
     label: 'BOOKED',
     booking,
     heroImageUrl: bookingHeroImageUrls.get(booking.id) ?? null,
+    look: lookByBookingId.get(booking.id) ?? null,
   }))
 
   const following = buildMyFollowingListResponse({
@@ -664,11 +731,16 @@ export async function loadClientMePage(): Promise<ClientMePageData> {
     history: [...historyUpcoming, ...historyCompleted].sort(compareHistoryItems),
     myLooks,
     activityUnreadCount,
+    standing: buildCreatorStanding(profile),
     creator: {
       isCreator: creatorStats.authoredLooksCount > 0,
       savesOnYourLooks: creatorStats.savesOnYourLooks,
       bookedFromYou: creatorStats.bookedFromYou,
       remixes,
+      level: resolveCreatorLevel({
+        savesOnYourLooks: creatorStats.savesOnYourLooks,
+        bookedFromYou: creatorStats.bookedFromYou,
+      }),
     },
   }
 }

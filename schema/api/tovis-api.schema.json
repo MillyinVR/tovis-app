@@ -5953,18 +5953,57 @@
             "UPCOMING"
           ],
           "type": "string"
+        },
+        "look": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ClientMeHistoryLook"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The look this visit produced, or null when nobody has posted one yet.\n\nCarries the visibility switch that used to live on a separate \"Your looks\" grid: screen 7 folds it onto the history card so a past visit and the look that came out of it are one row, not two lists the client has to reconcile."
         }
       },
       "required": [
         "kind",
         "label",
         "booking",
-        "heroImageUrl"
+        "heroImageUrl",
+        "look"
+      ],
+      "type": "object"
+    },
+    "ClientMeHistoryLook": {
+      "description": "The authored look a history card owns, folded onto the card itself.\n\nNull for a visit nobody has posted a look from — those keep the \"Share your look\" CTA instead of a switch, because there is no visibility to toggle yet.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "visibility": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "visibility"
       ],
       "type": "object"
     },
     "ClientMeLook": {
       "properties": {
+        "bookingId": {
+          "description": "The visit this look was authored from, when there is one.\n\nThe Share-your-look flow stamps `MediaAsset.bookingId` on the look's primary asset, so this is the join that lets a history card carry its own look's visibility switch — the mapping exists, it is just indirect (a history card is a `Booking`, a look is a `LookPost`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "id": {
           "type": "string"
         },
@@ -5992,7 +6031,8 @@
         "name",
         "imageUrl",
         "visibility",
-        "serviceId"
+        "serviceId",
+        "bookingId"
       ],
       "type": "object"
     },
@@ -6040,6 +6080,10 @@
             "isCreator": {
               "type": "boolean"
             },
+            "level": {
+              "$ref": "#/definitions/CreatorLevelProgress",
+              "description": "Level and progress, derived server-side from the two ladders in `lib/clients/creatorLevel.ts`. Computed here, not on either client, so the thresholds have exactly one home and iOS cannot drift from web."
+            },
             "remixes": {
               "items": {
                 "$ref": "#/definitions/ClientLookRemix"
@@ -6054,7 +6098,8 @@
             "isCreator",
             "savesOnYourLooks",
             "bookedFromYou",
-            "remixes"
+            "remixes",
+            "level"
           ],
           "type": "object"
         },
@@ -6068,6 +6113,7 @@
           "type": "array"
         },
         "myLooks": {
+          "description": "The client's authored looks.\n\n⚠️ Web no longer RENDERS this as its own grid — screen 7 folded each look's visibility switch onto the history card it belongs to. The field stays on the wire because it is REQUIRED by shipped iOS builds (`ClientMe.myLooks` is non-optional there), and a required key vanishing is a decode failure that takes the whole Me tab down, not a graceful degradation.",
           "items": {
             "$ref": "#/definitions/ClientMeLook"
           },
@@ -6075,6 +6121,10 @@
         },
         "profile": {
           "$ref": "#/definitions/ClientMeProfileDTO"
+        },
+        "standing": {
+          "$ref": "#/definitions/CreatorStandingValue",
+          "description": "The owner's own tier / percentile / city."
         },
         "upcomingNotificationBooking": {
           "anyOf": [
@@ -6108,6 +6158,7 @@
         "history",
         "myLooks",
         "activityUnreadCount",
+        "standing",
         "creator"
       ],
       "type": "object"
@@ -8931,6 +8982,94 @@
         "createdAt",
         "senderUserId",
         "attachments"
+      ],
+      "type": "object"
+    },
+    "CreatorLadderKey": {
+      "description": "Which ladder a level or a progress reading came from.",
+      "enum": [
+        "saves",
+        "bookings"
+      ],
+      "type": "string"
+    },
+    "CreatorLevelProgress": {
+      "properties": {
+        "level": {
+          "description": "0 through  {@link  CREATOR_MAX_LEVEL } . 0 means \"not on the ladder yet\".",
+          "type": "number"
+        },
+        "nextLadder": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CreatorLadderKey"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The ladder the creator is FURTHEST along toward the next level — the one the progress line should talk about. Null at the top."
+        },
+        "nextLevel": {
+          "description": "The level being worked toward, or null at the top.",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "nextThreshold": {
+          "description": "{@link  nextLadder  } 's threshold for  {@link  nextLevel  } , or null at the top.",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "progress": {
+          "description": "0–1 along  {@link  nextLadder  } 's current rung. 1 at the top of the ladder, so a finished bar reads as finished rather than as an empty new one.",
+          "type": "number"
+        },
+        "remaining": {
+          "description": "How many more saves (or bookings) on  {@link  nextLadder  }  are needed. Always at least 1 below the top, and null at the top.",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "level",
+        "nextLevel",
+        "nextLadder",
+        "nextThreshold",
+        "remaining",
+        "progress"
+      ],
+      "type": "object"
+    },
+    "CreatorStandingValue": {
+      "properties": {
+        "city": {
+          "description": "The creator's own opted-in public city. Null until they set one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tier": {
+          "$ref": "#/definitions/ClientCreatorTier"
+        },
+        "topPercent": {
+          "description": "e.g. 5 for \"top 5% saver\". Null when the creator is unranked.",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "tier",
+        "topPercent",
+        "city"
       ],
       "type": "object"
     },
@@ -17375,31 +17514,8 @@
       "type": "object"
     },
     "PublicClientProfileStanding": {
-      "properties": {
-        "city": {
-          "description": "The creator's own opted-in public city.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "tier": {
-          "$ref": "#/definitions/ClientCreatorTier"
-        },
-        "topPercent": {
-          "description": "e.g. 5 for \"top 5% saver\". Null when the creator is unranked.",
-          "type": [
-            "number",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "tier",
-        "topPercent",
-        "city"
-      ],
-      "type": "object"
+      "$ref": "#/definitions/CreatorStandingValue",
+      "description": "A creator's standing. An alias, not a second declaration: `/client/me` shows the owner the same thing, and one shape with one name is what stops the two surfaces describing it differently."
     },
     "PublicClientProfileViewer": {
       "properties": {

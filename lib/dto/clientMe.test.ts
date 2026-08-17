@@ -10,6 +10,8 @@
 // role, so without this field a dual-role pro browsing as a client is
 // indistinguishable on the wire from a client-only account.
 import { VerificationStatus, type Role } from '@prisma/client'
+
+import { resolveCreatorLevel } from '@/lib/clients/creatorLevel'
 import { describe, expect, it } from 'vitest'
 
 import { serializeClientMePageData } from '@/lib/dto/clientMe'
@@ -83,6 +85,8 @@ function makePageData(args: {
       claimedAt: null,
       handle: 'ada',
       isPublicProfile: false,
+      publicCity: null,
+      creatorStat: null,
     },
     boards: [],
     following: {
@@ -96,11 +100,13 @@ function makePageData(args: {
     history: [],
     myLooks: [],
     activityUnreadCount: 0,
+    standing: { tier: 'NONE', topPercent: null, city: null },
     creator: {
       isCreator: false,
       savesOnYourLooks: 0,
       bookedFromYou: 0,
       remixes: [],
+      level: resolveCreatorLevel({ savesOnYourLooks: 0, bookedFromYou: 0 }),
     },
   }
 }

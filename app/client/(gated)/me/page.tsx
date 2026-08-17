@@ -179,13 +179,9 @@ export default async function ClientMePage() {
       item.kind === 'completed'
         ? `/client/looks/share/${encodeURIComponent(item.booking.id)}`
         : null,
-  }))
-
-  const myLooks = data.myLooks.map((look) => ({
-    id: look.id,
-    name: look.name,
-    imageUrl: look.imageUrl,
-    isPublic: look.visibility === 'PUBLIC',
+    // The look this visit produced — carries the visibility switch that used to
+    // live on the separate "Your looks" grid.
+    look: item.look,
   }))
 
   return (
@@ -200,11 +196,11 @@ export default async function ClientMePage() {
         boards={boards}
         following={following}
         history={history}
-        myLooks={myLooks}
         publicProfile={{
           handle: data.profile.handle ?? null,
           isPublic: data.profile.isPublicProfile,
         }}
+        standing={data.standing}
         activityHref="/client/activity"
         activityUnreadCount={data.activityUnreadCount}
         creator={data.creator}

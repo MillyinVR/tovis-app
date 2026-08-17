@@ -13,6 +13,12 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
+// The header's Share button reads the brand for its share title. At runtime the
+// root layout supplies the provider (app/layout.tsx); a bare render() does not.
+vi.mock('@/lib/brand/BrandProvider', () => ({
+  useBrand: () => ({ brand: { displayName: 'TOVIS' } }),
+}))
+
 vi.mock('next/link', () => ({
   default: ({
     href,

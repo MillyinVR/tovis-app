@@ -27,10 +27,31 @@ import type {
   ClientActivityItem,
 } from '@/lib/notifications/activityFeed'
 
+/**
+ * How the feed is presented.
+ *
+ * - `page` — the standalone `/client/activity` route, reached by deep link, a
+ *   notification tap, or anyone landing on the URL directly. Keeps the full
+ *   ClientPage chrome, which is the only way OUT of a non-tab client page on web.
+ * - `sheet` — the overview the Me bell opens: a scrim + panel over the page you
+ *   came from, dismissed with Done.
+ *
+ * Tori (2026-08-17): *"the pop up and done buttons on the iOS version so it
+ * feels like its an overview not a full page"*. iOS already presents
+ * `ClientActivityView` as a sheet; this is the web half of that parity.
+ *
+ * Both share ONE component, so the optimistic mark-all-read has one
+ * implementation and the two presentations cannot drift.
+ */
+export type ClientActivityPresentation = 'page' | 'sheet'
+
 type ClientActivityFrameProps = {
   items: ClientActivityItem[]
   unreadCount: number
   markReadEventKeys: string[]
+  presentation?: ClientActivityPresentation
+  /** Dismisses the sheet. Required for `sheet`, ignored for `page`. */
+  onDone?: () => void
 }
 
 const ICONS: Record<
@@ -187,6 +208,8 @@ export default function ClientActivityFrame({
   items,
   unreadCount,
   markReadEventKeys,
+  presentation = 'page',
+  onDone,
 }: ClientActivityFrameProps) {
   const [rows, setRows] = useState(items)
   const [unread, setUnread] = useState(Math.max(0, unreadCount))
@@ -207,40 +230,84 @@ export default function ClientActivityFrame({
 
   const lastIndex = useMemo(() => rows.length - 1, [rows.length])
 
+  const markAllRead = (
+    <ClientMarkAllReadButton
+      unreadCount={unread}
+      eventKeys={markReadEventKeys}
+      onOptimistic={clearUnreadOptimistically}
+      onRollback={restoreUnread}
+      // The rows are already cleared in state, so a refresh would only
+      // re-fetch what this page is deliberately holding itself.
+      onSuccess={() => {}}
+    />
+  )
+
+  const body =
+    rows.length > 0 ? (
+      <div className="flex flex-col">
+        {rows.map((item, index) => (
+          <ActivityRow
+            key={item.id}
+            item={item}
+            withDivider={index !== lastIndex}
+          />
+        ))}
+      </div>
+    ) : (
+      <EmptyState
+        title={COPY.clientActivity.emptyTitle}
+        description={COPY.clientActivity.emptyBody}
+        action={{ label: COPY.clientActivity.emptyCta, href: '/looks' }}
+      />
+    )
+
+  if (presentation === 'sheet') {
+    return (
+      <>
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-textPrimary/10 px-4 py-4">
+          <div className="min-w-0">
+            <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-textSecondary/60">
+              {COPY.clientActivity.eyebrow}
+            </div>
+            {/* 18px, not the modal convention's 20px: at 430px the actions
+                beside it push "What's happening" onto a second line mid-phrase. */}
+            <h1 className="mt-1 text-[18px] font-bold leading-tight text-textPrimary">
+              {COPY.clientActivity.title}
+            </h1>
+          </div>
+
+          <div className="flex shrink-0 items-center gap-2">
+            {markAllRead}
+            {/*
+              Done, not an ×. Tori asked for the iOS sheet's affordance, and on
+              iOS this is a labelled Done button — an unlabelled glyph is a
+              different control that happens to dismiss the same thing.
+            */}
+            <button
+              type="button"
+              onClick={onDone}
+              className="brand-focus tap-target-keep rounded-full border border-textPrimary/15 px-3.5 py-1.5 text-[12px] font-black text-textPrimary transition hover:border-textPrimary/30"
+            >
+              {COPY.common.done}
+            </button>
+          </div>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain px-4 py-2">
+          {body}
+        </div>
+      </>
+    )
+  }
+
   return (
     <ClientPage
       eyebrow={COPY.clientActivity.eyebrow}
       title={COPY.clientActivity.title}
       back={{ href: '/client', label: 'Home' }}
-      action={
-        <ClientMarkAllReadButton
-          unreadCount={unread}
-          eventKeys={markReadEventKeys}
-          onOptimistic={clearUnreadOptimistically}
-          onRollback={restoreUnread}
-          // The rows are already cleared in state, so a refresh would only
-          // re-fetch what this page is deliberately holding itself.
-          onSuccess={() => {}}
-        />
-      }
+      action={markAllRead}
     >
-      {rows.length > 0 ? (
-        <div className="flex flex-col">
-          {rows.map((item, index) => (
-            <ActivityRow
-              key={item.id}
-              item={item}
-              withDivider={index !== lastIndex}
-            />
-          ))}
-        </div>
-      ) : (
-        <EmptyState
-          title={COPY.clientActivity.emptyTitle}
-          description={COPY.clientActivity.emptyBody}
-          action={{ label: COPY.clientActivity.emptyCta, href: '/looks' }}
-        />
-      )}
+      {body}
     </ClientPage>
   )
 }

@@ -8,7 +8,11 @@ import {
   Prisma,
 } from '@prisma/client'
 
-import { topPercentFromPercentile } from '@/lib/clients/creatorTier'
+import {
+  buildCreatorStanding,
+  CREATOR_STANDING_SELECT,
+  type CreatorStandingValue,
+} from '@/lib/clients/creatorStanding'
 import { COPY } from '@/lib/copy'
 import { getViewerClientFollowState } from '@/lib/follows'
 import { asTrimmedString } from '@/lib/guards'
@@ -75,13 +79,12 @@ export type PublicClientProfileViewer = {
   following: boolean
 }
 
-export type PublicClientProfileStanding = {
-  tier: ClientCreatorTier
-  /** e.g. 5 for "top 5% saver". Null when the creator is unranked. */
-  topPercent: number | null
-  /** The creator's own opted-in public city. */
-  city: string | null
-}
+/**
+ * A creator's standing. An alias, not a second declaration: `/client/me` shows
+ * the owner the same thing, and one shape with one name is what stops the two
+ * surfaces describing it differently.
+ */
+export type PublicClientProfileStanding = CreatorStandingValue
 
 export type PublicClientProfileData = {
   handle: string
@@ -141,13 +144,12 @@ async function loadPublicClientProfileWhere(
       // we deliberately do NOT surface firstName/lastName to strangers.
       avatarUrl: true,
       publicBio: true,
-      publicCity: true,
       isPublicProfile: true,
       // Derived standing (lib/clients/creatorTier.ts). Absent until the hourly
-      // job has scored this client; absence renders as no badge.
-      creatorStat: {
-        select: { tier: true, savePercentile: true },
-      },
+      // job has scored this client; absence renders as no badge. The columns
+      // and the null-handling are shared with /client/me — see
+      // lib/clients/creatorStanding.ts.
+      ...CREATOR_STANDING_SELECT,
       _count: {
         select: {
           followers: true,
@@ -308,18 +310,12 @@ async function loadPublicClientProfileWhere(
     }
   })
 
-  const stat = client.creatorStat
-
   return {
     handle: client.handle,
     displayName: `@${client.handle}`,
     avatarUrl: client.avatarUrl ?? null,
     bio: client.publicBio ?? null,
-    standing: {
-      tier: stat?.tier ?? ClientCreatorTier.NONE,
-      topPercent: topPercentFromPercentile(stat?.savePercentile ?? null),
-      city: client.publicCity ?? null,
-    },
+    standing: buildCreatorStanding(client),
     counts: {
       followers: client._count.followers,
       following: client._count.following,

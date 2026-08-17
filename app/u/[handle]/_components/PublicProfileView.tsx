@@ -7,12 +7,12 @@ import { ClientCreatorTier } from '@prisma/client'
 
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import BoardStripCard from '@/app/_components/boards/BoardStripCard'
+import CreatorStandingRow from '@/app/_components/clients/CreatorStandingRow'
 import { COPY } from '@/lib/copy'
 import type {
   PublicClientBoard,
   PublicClientLook,
   PublicClientProfileData,
-  PublicClientProfileStanding,
 } from '../_data/loadPublicClientProfile'
 import { useClientFollow, type FollowMode } from './followState'
 
@@ -77,38 +77,6 @@ function Avatar({
             ✦
           </span>
         </span>
-      ) : null}
-    </div>
-  )
-}
-
-function StandingRow({ standing }: { standing: PublicClientProfileStanding }) {
-  const isTastemaker = standing.tier === ClientCreatorTier.TASTEMAKER
-  const isRising = standing.tier === ClientCreatorTier.RISING
-  if (!isTastemaker && !isRising) return null
-
-  // "top 5% saver · Brooklyn" — each half only appears when it's real. An
-  // unranked creator has no percent, and the city is opt-in, so neither is
-  // padded with a placeholder.
-  const detail = [
-    standing.topPercent !== null
-      ? `${COPY.publicProfile.topPercentPrefix} ${standing.topPercent}${COPY.publicProfile.topPercentSuffix}`
-      : null,
-    standing.city,
-  ]
-    .filter(Boolean)
-    .join(' · ')
-
-  return (
-    <div className="mt-2 flex flex-wrap items-center gap-2.5">
-      <span className="inline-flex items-center gap-1.5 rounded-full border border-toneWarn px-2.5 py-[3px] text-[10px] font-bold uppercase tracking-[0.1em] text-toneWarn">
-        <span aria-hidden="true">✦</span>
-        {isTastemaker
-          ? COPY.publicProfile.tierTastemaker
-          : COPY.publicProfile.tierRising}
-      </span>
-      {detail ? (
-        <span className="text-[12.5px] text-textSecondary">{detail}</span>
       ) : null}
     </div>
   )
@@ -261,7 +229,7 @@ export default function PublicProfileView({
           >
             {data.displayName}
           </h1>
-          <StandingRow standing={data.standing} />
+          <CreatorStandingRow standing={data.standing} className="mt-2" />
           <div className="mt-3.5 flex flex-wrap items-center gap-5">
             <Stat
               value={follow.followerCount}

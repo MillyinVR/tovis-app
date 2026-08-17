@@ -39,6 +39,12 @@ const TAB_PAGES = new Set(['/client', '/client/me'])
  */
 const NOT_A_PAGE = new Map<string, 'intercepting-modal' | 'redirect-only'>([
   ['/client/me/(..)boards/new', 'intercepting-modal'],
+  // Screen 7: the Me bell opens Activity as an OVERVIEW rather than a full
+  // page (Tori, 2026-08-17). It is a scrim + panel over /client/me with a Done
+  // button, so the shell's back link would be a second, contradictory exit.
+  // The route it intercepts — /client/activity — is a real page and DOES mount
+  // the shell, which is what a deep link or a push tap lands on.
+  ['/client/me/(..)activity', 'intercepting-modal'],
   ['/client/bookings/[id]/consultation', 'redirect-only'],
 ])
 

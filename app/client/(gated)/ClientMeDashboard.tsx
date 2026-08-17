@@ -13,6 +13,12 @@ import { cn } from '@/lib/utils'
 import type { BoardVisibility } from '@prisma/client'
 import BoardStripCard from '@/app/_components/boards/BoardStripCard'
 import BoardVisibilitySwitch from '@/app/_components/boards/BoardVisibilitySwitch'
+import LookVisibilitySwitch from '@/app/_components/looks/LookVisibilitySwitch'
+import CreatorStandingRow, {
+  type CreatorStanding,
+} from '@/app/_components/clients/CreatorStandingRow'
+import ShareButton from '@/app/professionals/[id]/ShareButton'
+import type { CreatorLevelProgress } from '@/lib/clients/creatorLevel'
 import {
   formatInTimeZone,
   formatRelativeDayAgo,
@@ -45,6 +51,8 @@ type CreatorInfo = {
   savesOnYourLooks: number
   bookedFromYou: number
   remixes: ClientLookRemix[]
+  /** Resolved server-side — this component owns no thresholds. */
+  level: CreatorLevelProgress
 }
 
 type UpcomingNotificationBooking = {
@@ -84,13 +92,12 @@ type HistoryItem = {
   heroImageUrl: string | null
   // Set for completed visits → opens the Share-your-look capture sheet.
   shareHref?: string | null
-}
-
-type MyLook = {
-  id: string
-  name: string
-  imageUrl: string | null
-  isPublic: boolean
+  /**
+   * The look this visit produced. When present the card carries that look's
+   * visibility switch; when absent it keeps the "Share your look" CTA, because
+   * there is no visibility to toggle until a look exists.
+   */
+  look?: { id: string; name: string; visibility: string } | null
 }
 
 type PublicProfileInfo = {
@@ -108,8 +115,9 @@ type ClientMeDashboardProps = {
   boards: BoardCardItem[]
   following: FollowingItem[]
   history: HistoryItem[]
-  myLooks?: MyLook[]
   publicProfile?: PublicProfileInfo
+  /** The owner's own tier / percentile / city. Absent renders no standing row. */
+  standing?: CreatorStanding | null
   activityHref?: string
   activityUnreadCount?: number
   creator?: CreatorInfo
@@ -488,12 +496,23 @@ function FollowingCard(props: { item: FollowingItem }) {
   )
 }
 
+/**
+ * One past or upcoming visit, picture-led.
+ *
+ * Screen 7 folded the client's authored looks onto these cards and deleted the
+ * separate "Your looks" grid, so each visit is ONE row that carries its own
+ * photo, its caption and — when a look was posted from it — that look's
+ * public/private switch. A visit with no look yet keeps the "Share your look"
+ * CTA in the same slot, so the card always has exactly one action rather than
+ * the client having to reconcile two lists holding two halves of one thing.
+ */
 function HistoryCard(props: { item: HistoryItem }) {
   const { item } = props
+  const look = item.look ?? null
 
   return (
-    <div className="block">
-      <Link href={item.href} className="block">
+    <div className="relative block">
+      <Link href={item.href} className="block brand-focus">
         <BookingHeroImage
           src={item.heroImageUrl}
           alt={item.title}
@@ -512,13 +531,23 @@ function HistoryCard(props: { item: HistoryItem }) {
         </div>
       </Link>
 
-      {item.shareHref ? (
+      {look ? (
+        // Sits ON the photo, like the board card's switch, so folding it in
+        // costs the list no extra vertical rhythm.
+        <div className="absolute right-2.5 top-2.5">
+          <LookVisibilitySwitch
+            lookId={look.id}
+            initialVisibility={look.visibility}
+            lookName={look.name}
+          />
+        </div>
+      ) : item.shareHref ? (
         <Link
           href={item.shareHref}
           className="mt-2 inline-flex min-h-9 items-center gap-1.5 rounded-full border border-accentPrimary/30 bg-accentPrimary/8 px-3 py-1.5 text-[12px] font-black text-accentPrimary transition hover:bg-accentPrimary/15"
         >
           <span aria-hidden="true">✦</span>
-          Share your look
+          {COPY.clientLooks.shareCta}
         </Link>
       ) : null}
     </div>
@@ -544,25 +573,99 @@ function CreatorStat(props: { label: string; value: number; withBorder?: boolean
 }
 
 /**
- * Real-data creator metrics. The gamified influence tier / level / progress bar
- * from the design is intentionally omitted — it needs product-defined thresholds
- * (deferred). This card shows only numbers derived live from Prisma.
+ * The progress line under the level pill — "125 saves to Lvl 4".
+ *
+ * Names the UNIT because the level is the higher of two ladders
+ * (`lib/clients/creatorLevel.ts`), so a bare "125 to Lvl 4" would not say 125
+ * of what. The server picks which ladder to report; this only renders it.
+ */
+function levelProgressLabel(level: CreatorLevelProgress): string | null {
+  if (level.remaining === null || level.nextLevel === null) return null
+
+  const one = level.remaining === 1
+  const unit =
+    level.nextLadder === 'bookings'
+      ? one
+        ? COPY.clientMe.levelUnitBookingsOne
+        : COPY.clientMe.levelUnitBookings
+      : one
+        ? COPY.clientMe.levelUnitSavesOne
+        : COPY.clientMe.levelUnitSaves
+
+  return `${level.remaining.toLocaleString(DISPLAY_LOCALE)} ${unit} ${
+    COPY.clientMe.levelProgressJoin
+  } ${COPY.clientMe.levelPrefix} ${level.nextLevel}`
+}
+
+/**
+ * Real-data creator metrics, plus the LEVEL — Tori's call (2026-08-17): the
+ * higher of the saves ladder and the bookings ladder, whichever ranks better.
+ *
+ * The thresholds are NOT here. They live in `lib/clients/creatorLevel.ts` and
+ * are resolved server-side, so this card and its iOS twin render one computed
+ * level rather than each re-deriving it from raw totals.
+ *
+ * Level is not TIER. The tier pill ("✦ Tastemaker") is percentile-based and
+ * lives in the header; a level is absolute and can never fall because somebody
+ * else did well. The two are deliberately shown as separate things.
  */
 function CreatorStatusCard(props: { creator: CreatorInfo }) {
   const { creator } = props
+  const { level } = creator
+  const progressLabel = levelProgressLabel(level)
+  const progressPercent = Math.round(level.progress * 100)
+
   return (
     <div className="relative overflow-hidden rounded-[20px] border border-textPrimary/10 bg-bgSecondary p-[18px]">
-      <div className="mb-3.5 flex items-center gap-2">
-        <span aria-hidden="true" className="text-[13px] text-accentPrimary">
-          ✦
-        </span>
-        <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-textSecondary">
-          Your influence
-        </span>
+      <div className="mb-3.5 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <span aria-hidden="true" className="text-[13px] text-accentPrimary">
+            ✦
+          </span>
+          <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-textSecondary">
+            {COPY.clientMe.influenceEyebrow}
+          </span>
+        </div>
+
+        {/* Level 0 shows no pill: nobody has saved or booked a look of yours
+            yet, and "Lvl 0" is a grade rather than a starting point. The
+            progress line below still points at the first rung. */}
+        {level.level > 0 ? (
+          <span className="inline-flex items-center rounded-full border border-accentPrimary/35 bg-accentPrimary/10 px-2.5 py-[3px] text-[10px] font-black uppercase tracking-[0.1em] text-accentPrimary">
+            {COPY.clientMe.levelPrefix} {level.level}
+          </span>
+        ) : null}
       </div>
+
+      <div className="mb-3.5">
+        <div
+          className="h-1.5 w-full overflow-hidden rounded-full bg-textPrimary/10"
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={progressPercent}
+          aria-label={progressLabel ?? COPY.clientMe.levelMaxed}
+        >
+          <span
+            className="block h-full rounded-full bg-accentPrimary transition-[width]"
+            style={{ width: `${progressPercent}%` }}
+          />
+        </div>
+        <div className="mt-2 text-[11.5px] text-textSecondary">
+          {progressLabel ?? COPY.clientMe.levelMaxed}
+        </div>
+      </div>
+
       <div className="flex gap-3 border-t border-textPrimary/10 pt-3.5">
-        <CreatorStat label="Saves on your looks" value={creator.savesOnYourLooks} />
-        <CreatorStat label="Booked from you" value={creator.bookedFromYou} withBorder />
+        <CreatorStat
+          label={COPY.clientMe.savesStatLabel}
+          value={creator.savesOnYourLooks}
+        />
+        <CreatorStat
+          label={COPY.clientMe.bookedStatLabel}
+          value={creator.bookedFromYou}
+          withBorder
+        />
       </div>
     </div>
   )
@@ -619,75 +722,6 @@ function RemixesCard(props: { remixes: ClientLookRemix[] }) {
   )
 }
 
-function MyLookCard(props: { look: MyLook }) {
-  const [isPublic, setIsPublic] = useState(props.look.isPublic)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState(false)
-  const { look } = props
-
-  async function toggle() {
-    if (busy) return
-    const next = !isPublic
-    setBusy(true)
-    setError(false)
-    setIsPublic(next) // optimistic
-    try {
-      const res = await fetch(`/api/v1/client/looks/${encodeURIComponent(look.id)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ isPublic: next }),
-      })
-      if (!res.ok) throw new Error('failed')
-    } catch {
-      setIsPublic(!next) // revert
-      setError(true)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <div className="block">
-      <div className="overflow-hidden rounded-[22px] border border-textPrimary/10">
-        <div className="aspect-[1/1] bg-bgSecondary">
-          {look.imageUrl ? (
-            <RemoteImage
-              src={look.imageUrl}
-              alt={look.name}
-              className="h-full w-full object-cover"
-              loading="lazy"
-              width={400}
-              height={400}
-            />
-          ) : (
-            <div className="grid h-full place-items-center px-4 text-center text-[13px] font-black text-textPrimary">
-              {look.name}
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="mt-2 flex items-center justify-between gap-2">
-        <div className="min-w-0">
-          <div className="truncate text-[13px] font-black text-textPrimary">
-            {look.name}
-          </div>
-          <div className="mt-0.5 text-[10px] font-bold tracking-[0.12em] text-textSecondary">
-            {error ? 'COULDN’T SAVE' : isPublic ? 'PUBLIC' : 'PRIVATE'}
-          </div>
-        </div>
-        <ToggleSwitch
-          checked={isPublic}
-          onChange={toggle}
-          label={`Make ${look.name} ${isPublic ? 'private' : 'public'}`}
-          size="sm"
-          disabled={busy}
-        />
-      </div>
-    </div>
-  )
-}
-
 export default function ClientMeDashboard({
   displayName,
   handle,
@@ -698,8 +732,8 @@ export default function ClientMeDashboard({
   boards,
   following,
   history,
-  myLooks = [],
   publicProfile,
+  standing = null,
   activityHref,
   activityUnreadCount = 0,
   creator,
@@ -774,6 +808,17 @@ export default function ClientMeDashboard({
                 {displayName}
               </h1>
 
+              {/*
+                The owner's OWN standing — the same pill and "top 5% saver ·
+                Brooklyn" line a visitor to /u/{handle} already saw. Tori's
+                first screen-7 note was that this page showed the owner LESS
+                about themselves than a stranger got. Same component as the
+                public profile, so the two can never drift.
+              */}
+              {standing ? (
+                <CreatorStandingRow standing={standing} className="mt-2" />
+              ) : null}
+
               {memberSince ? (
                 <div className="mt-2 text-[14px] text-textSecondary">
                   joined {memberSince}
@@ -791,15 +836,32 @@ export default function ClientMeDashboard({
               </div>
 
               {publicProfile ? (
-                <div className="mt-4">
+                <div className="mt-4 flex flex-wrap items-center gap-2">
                   {publicProfile.isPublic && publicProfile.handle ? (
-                    <Link
-                      href={`/u/${encodeURIComponent(publicProfile.handle)}`}
-                      className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-accentPrimary/30 bg-accentPrimary/8 px-3 py-1.5 text-[12px] font-black text-accentPrimary transition hover:bg-accentPrimary/15"
-                    >
-                      View public profile
-                      <span aria-hidden="true">→</span>
-                    </Link>
+                    <>
+                      <Link
+                        href={`/u/${encodeURIComponent(publicProfile.handle)}`}
+                        className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-accentPrimary/30 bg-accentPrimary/8 px-3 py-1.5 text-[12px] font-black text-accentPrimary transition hover:bg-accentPrimary/15"
+                      >
+                        View public profile
+                        <span aria-hidden="true">→</span>
+                      </Link>
+                      {/*
+                        The design file's header pairs the standing line with a
+                        Share button. Reuses the app's existing ShareButton
+                        (native share sheet → clipboard → prompt) rather than a
+                        second implementation, and points at the PUBLIC url —
+                        /client/me is gated, so sharing the current page would
+                        hand someone a login wall.
+
+                        Offered only on a PUBLIC profile: a private one 404s for
+                        everybody the link is sent to.
+                      */}
+                      <ShareButton
+                        url={`/u/${encodeURIComponent(publicProfile.handle)}`}
+                        text={displayName}
+                      />
+                    </>
                   ) : (
                     <Link
                       href="/client/settings"
@@ -826,25 +888,15 @@ export default function ClientMeDashboard({
           </section>
         ) : null}
 
-        {myLooks.length > 0 ? (
-          <section className="mt-8">
-            <div className="mb-3 flex items-baseline justify-between">
-              <h2 className="text-[12px] font-black tracking-[0.08em] text-textPrimary">
-                YOUR LOOKS
-              </h2>
-              <span className="text-[11px] tracking-[0.12em] text-textSecondary">
-                {myLooks.length}
-              </span>
-            </div>
-            <div className="grid grid-cols-2 gap-x-4 gap-y-6 md:grid-cols-3 lg:grid-cols-4">
-              {myLooks.map((look) => (
-                <MyLookCard key={look.id} look={look} />
-              ))}
-            </div>
-          </section>
-        ) : null}
-
-        <section className="mt-8">
+        {/*
+          Tabs sit DIRECTLY under the Upcoming card (Tori, 2026-08-17). Six
+          "Your looks" cards used to sit in this gap, which pushed BOARDS /
+          FOLLOWING / HISTORY about 1,300px down a phone — the three controls
+          the screen exists to offer were below the fold on every visit. That
+          grid is gone entirely: each look's visibility switch now rides the
+          history card for the visit it came out of.
+        */}
+        <section className="mt-6">
           <SectionTabs value={tab} onChange={setTab} />
         </section>
 

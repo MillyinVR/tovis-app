@@ -168,6 +168,36 @@ function assertActivityFanRoles(publicFans: Set<number>): void {
   }
 }
 
+/**
+ * Both history-card branches must be reachable.
+ *
+ * Screen 7 gives a completed visit EITHER its authored look's public/private
+ * switch (when `MediaAsset.bookingId` links one) OR the "Share your look" CTA
+ * (when it does not). A fixture holding only one of the two renders one of the
+ * branches nowhere, and an unreachable control is indistinguishable in a
+ * screenshot from a control that was never built — which is precisely how this
+ * screen's empty Activity feed and empty FOLLOWING tab went unlooked-at for a
+ * whole round.
+ */
+function assertHistoryLookBranches(args: {
+  completedWithLook: number
+  completedWithoutLook: number
+}): void {
+  if (args.completedWithLook < 1) {
+    throw new Error(
+      '[seedDemoClientProfile] no completed booking has an authored look ' +
+        '(MediaAsset.bookingId), so the history card visibility switch is ' +
+        'unreachable.',
+    )
+  }
+  if (args.completedWithoutLook < 1) {
+    throw new Error(
+      '[seedDemoClientProfile] every completed booking has an authored look, ' +
+        'so the "Share your look" CTA is unreachable.',
+    )
+  }
+}
+
 const DAY_MS = 24 * 60 * 60 * 1000
 
 /**
@@ -512,6 +542,18 @@ const OWN_APPOINTMENTS = {
   /** Long enough ago that the rebook window below is live, not expired. */
   pastDaysAgo: 38,
   pastHour: 10,
+  /**
+   * A SECOND completed visit, with no look posted from it.
+   *
+   * Screen 7 folded each authored look's visibility switch onto the history
+   * card for the visit it came out of; a visit with no look keeps the "Share
+   * your look" CTA instead. With only one completed booking in the fixture,
+   * stamping a look onto it would make that CTA branch unreachable — the same
+   * class of blind spot as an empty ClientNotification table, just inverted.
+   * Two completed visits keep BOTH branches on screen at once.
+   */
+  earlierPastDaysAgo: 96,
+  earlierPastHour: 15,
   /** The MOBILE one, a different day so it can't collide on the pro's clock. */
   mobileInDays: 9,
   mobileHour: 14,
@@ -2204,6 +2246,75 @@ async function main(): Promise<void> {
       ),
     },
     select: { id: true },
+  })
+
+  // The look Maya POSTED from that visit.
+  //
+  // The Share-your-look flow stamps `MediaAsset.bookingId` on the look's primary
+  // asset, and that stamp is the ONLY join between a history card (a Booking)
+  // and the look it produced (a LookPost). Nothing in the fixture wrote it, so
+  // every authored look was an orphan and the visibility switch screen 7 folded
+  // onto the history cards could never appear — a control with no reachable
+  // state, which reads in a screenshot exactly like a control that isn't built.
+  //
+  // Deliberately a DIFFERENT look from this booking's `sourceLookPostId`
+  // (lived-in-blonde): the look you booked FROM and the look you POSTED after
+  // are different relations, and a fixture where they are the same row cannot
+  // tell a surface reading one from a surface reading the other.
+  await prisma.mediaAsset.update({
+    where: { id: `${P}media-cherry-cola-balayage` },
+    data: { bookingId: pastBooking.id },
+  })
+
+  // A second completed visit, with NO look posted from it, so the "Share your
+  // look" CTA the other card no longer shows is still on screen. See
+  // OWN_APPOINTMENTS.earlierPastDaysAgo.
+  const earlierPastAt = atLocalHour(
+    -OWN_APPOINTMENTS.earlierPastDaysAgo,
+    OWN_APPOINTMENTS.earlierPastHour,
+  )
+  await prisma.booking.create({
+    data: {
+      ...ownBookingBase,
+      id: `${P}booking-own-past-earlier`,
+      status: BookingStatus.COMPLETED,
+      createdAt: new Date(earlierPastAt.getTime() - 10 * 24 * 60 * 60 * 1000),
+      scheduledFor: earlierPastAt,
+      startedAt: earlierPastAt,
+      finishedAt: new Date(
+        earlierPastAt.getTime() + OWN_APPOINTMENTS.durationMinutes * 60 * 1000,
+      ),
+    },
+  })
+
+  // Read the branches back from what was actually written, rather than
+  // asserting the constants this block was built from — the point is to catch a
+  // future edit that breaks the link, and a check against the intent would
+  // agree with itself while the database disagreed.
+  const completedOwnBookings = await prisma.booking.findMany({
+    where: { clientId: creator.id, status: BookingStatus.COMPLETED },
+    select: { id: true },
+  })
+  const bookingIdsWithAuthoredLook = new Set(
+    (
+      await prisma.mediaAsset.findMany({
+        where: {
+          bookingId: { in: completedOwnBookings.map((row) => row.id) },
+          lookPostPrimaryFor: { some: { clientAuthorId: creator.id } },
+        },
+        select: { bookingId: true },
+      })
+    )
+      .map((row) => row.bookingId)
+      .filter((id): id is string => Boolean(id)),
+  )
+  assertHistoryLookBranches({
+    completedWithLook: completedOwnBookings.filter((row) =>
+      bookingIdsWithAuthoredLook.has(row.id),
+    ).length,
+    completedWithoutLook: completedOwnBookings.filter(
+      (row) => !bookingIdsWithAuthoredLook.has(row.id),
+    ).length,
   })
 
   // The before/after pair. `phase` is what `loadBookingBeforeAfterThumbs` reads;
