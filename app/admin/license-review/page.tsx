@@ -190,7 +190,7 @@ export default async function AdminLicenseReviewPage() {
                               year: 'numeric',
                               month: 'short',
                               day: 'numeric',
-                            }, 'en-US')}
+                            })}
                           </span>
                         ) : (
                           <span className="text-toneWarn">no expiry on file</span>

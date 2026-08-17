@@ -81,7 +81,6 @@ export function serializeReceiptInboxItem(
       row.receivedAt,
       timeZone,
       { month: 'short', day: 'numeric' },
-      'en-US',
     ),
     parsedAmountCents: row.parsedAmountCents,
     parsedAmountLabel:

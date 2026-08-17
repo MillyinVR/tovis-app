@@ -81,7 +81,6 @@ function formatWhen(iso: string, timeZone: string | null): string {
       hour: 'numeric',
       minute: '2-digit',
     },
-    'en-US',
   )
 }
 

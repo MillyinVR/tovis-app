@@ -440,7 +440,6 @@ function eventTimeFormatter(timeZone: string): (date: Date) => string {
         hour: 'numeric',
         minute: '2-digit',
       },
-      'en-US',
     )
 }
 

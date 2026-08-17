@@ -15,7 +15,7 @@ import {
   type DayPeriod,
 } from '@/lib/bookingTime'
 import { friendlyTimeZoneLabel } from '@/lib/timeZone'
-import { formatInTimeZone } from '@/lib/time'
+import { formatInTimeZone, ymdInTimeZone } from '@/lib/time'
 
 const PERIOD_LABEL: Record<DayPeriod, string> = {
   MORNING: 'Morning',
@@ -77,20 +77,6 @@ type SlotsState =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
   | { kind: 'ready'; slots: string[] }
-
-function ymdInTimeZone(date: Date, timeZone: string): string {
-  // en-CA renders YYYY-MM-DD.
-  return formatInTimeZone(
-    date,
-    timeZone,
-    {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    },
-    'en-CA',
-  )
-}
 
 function formatSlotTime(iso: string, timeZone: string): string {
   const date = new Date(iso)

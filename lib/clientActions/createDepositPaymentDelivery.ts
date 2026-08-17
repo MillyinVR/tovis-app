@@ -105,7 +105,7 @@ export function formatDepositPayByLabel(
   timeZone: string | null,
 ): string {
   // formatInTimeZone sanitizes: a missing/invalid zone falls back to UTC.
-  return formatDatedAppointmentWhen(dueAt, timeZone ?? '', 'en-US')
+  return formatDatedAppointmentWhen(dueAt, timeZone ?? '')
 }
 
 export function buildDepositPaymentTitle(amountLabel: string | null): string {

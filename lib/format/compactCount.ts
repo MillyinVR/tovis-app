@@ -7,21 +7,25 @@
 // abbreviate below 10,000 at all and clamped everything above 999,999 to
 // "1000K", and the comments drawer emitted a trailing ".0" ("1.0K").
 //
-// The canonical rule is `Intl.NumberFormat` compact notation (en-US): uppercase
-// K/M/B, at most one fraction digit, no trailing ".0", and correct rollover
-// (999,999 → "1M", not "1000K").
+// The canonical rule is `Intl.NumberFormat` compact notation in the app's
+// DISPLAY_LOCALE: uppercase K/M/B, at most one fraction digit, no trailing
+// ".0", and correct rollover (999,999 → "1M", not "1000K"). The locale is
+// pinned rather than omitted — an omitted one resolves to the runtime's, so
+// this module's whole reason for existing (four surfaces agreeing) would have
+// held only as long as every runtime agreed too.
 //
 // Cross-platform: iOS's `TovisKit/CompactCount.label` agrees with this BELOW a
 // million (uppercase K, whole thousands drop the ".0", exact under 1,000) but
 // has NO M branch at all — it renders 1,000,000 as "1000K" and 999,999 as
 // "1000.0K", i.e. the same bug this module just fixed on web. Aligning it is
 // round-3 queue item 15; until then the platforms agree only under 1M.
-//
+import { DISPLAY_LOCALE } from '@/lib/locale'
+
 // ⚠️ The formatter is built ONCE at module scope on purpose. Each Intl instance
 // carries ~31KB of native ICU state that is invisible to V8's heap accounting
 // and never collected — constructing one per item/render is the leak that took
 // down the e2e suite (see docs + `lib/time` for the same rule on dates).
-const COMPACT_COUNT_FORMATTER = new Intl.NumberFormat('en-US', {
+const COMPACT_COUNT_FORMATTER = new Intl.NumberFormat(DISPLAY_LOCALE, {
   compactDisplay: 'short',
   maximumFractionDigits: 1,
   notation: 'compact',

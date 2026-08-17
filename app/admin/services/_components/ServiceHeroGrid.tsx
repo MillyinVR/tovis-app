@@ -27,6 +27,7 @@ import {
   isOkTrue,
 } from '@/lib/http'
 import { withCacheBuster } from '@/lib/url'
+import { DISPLAY_LOCALE } from '@/lib/locale'
 
 type CategoryDTO = {
   id: string
@@ -93,7 +94,7 @@ function fmtMoney(value: string | null): string {
   const amount = Number(raw)
   if (!Number.isFinite(amount)) return `$${raw}`
 
-  return new Intl.NumberFormat(undefined, {
+  return new Intl.NumberFormat(DISPLAY_LOCALE, {
     style: 'currency',
     currency: 'USD',
   }).format(amount)

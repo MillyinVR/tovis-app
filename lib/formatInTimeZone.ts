@@ -1,4 +1,5 @@
 // lib/formatInTimeZone.ts
+import { DISPLAY_LOCALE } from '@/lib/locale'
 import { DEFAULT_TIME_ZONE, sanitizeTimeZone } from '@/lib/timeZone'
 
 type DateLike = Date | string | number
@@ -27,9 +28,9 @@ function stableOptionsKey(options: Intl.DateTimeFormatOptions): string {
 function getDateTimeFormat(
   tz: string,
   options: Intl.DateTimeFormatOptions,
-  locale?: string,
+  locale: string,
 ): Intl.DateTimeFormat {
-  const key = `${locale ?? ''}|${tz}|${stableOptionsKey(options)}`
+  const key = `${locale}|${tz}|${stableOptionsKey(options)}`
   const cached = FORMATTER_CACHE.get(key)
   if (cached) return cached
 
@@ -38,11 +39,17 @@ function getDateTimeFormat(
   return formatter
 }
 
+// `locale` defaults rather than being optional-and-undefined: an omitted
+// locale used to reach `Intl` as `undefined`, which resolves to the RUNTIME's
+// default — the server's `LANG` during SSR and the VISITOR's browser locale
+// after hydration, for the same node. See lib/locale.ts for the measurements.
+// Callers that pass `undefined` explicitly (helpers forwarding an optional
+// argument) get the default too, which is what a default parameter does.
 export function formatInTimeZone(
   date: DateLike,
   timeZone: string,
   options: Intl.DateTimeFormatOptions,
-  locale?: string,
+  locale: string = DISPLAY_LOCALE,
 ) {
   const d = toDate(date)
   if (!d) return 'Invalid date'
@@ -51,7 +58,11 @@ export function formatInTimeZone(
   return getDateTimeFormat(tz, options, locale).format(d)
 }
 
-export function formatAppointmentWhen(date: DateLike, timeZone: string, locale?: string) {
+export function formatAppointmentWhen(
+  date: DateLike,
+  timeZone: string,
+  locale: string = DISPLAY_LOCALE,
+) {
   return formatInTimeZone(
     date,
     timeZone,
@@ -74,7 +85,7 @@ export function formatAppointmentWhen(date: DateLike, timeZone: string, locale?:
 export function formatDatedAppointmentWhen(
   date: DateLike,
   timeZone: string,
-  locale?: string,
+  locale: string = DISPLAY_LOCALE,
 ) {
   return formatInTimeZone(
     date,
@@ -91,7 +102,12 @@ export function formatDatedAppointmentWhen(
   )
 }
 
-export function formatRangeInTimeZone(start: DateLike, end: DateLike, timeZone: string, locale?: string) {
+export function formatRangeInTimeZone(
+  start: DateLike,
+  end: DateLike,
+  timeZone: string,
+  locale: string = DISPLAY_LOCALE,
+) {
   const s = toDate(start)
   const e = toDate(end)
   if (!s || !e) return 'Invalid range'

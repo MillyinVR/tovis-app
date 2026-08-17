@@ -257,3 +257,53 @@ describe('startOfLocalDayUtc', () => {
     ).toBe('2026-06-10T00:00:00.000Z')
   })
 })
+
+// `RebookCard` and `AftercareRebookButton` each carried a private
+// `ymdInTimeZone` that got its YYYY-MM-DD out of `formatInTimeZone(…, 'en-CA')`
+// instead of out of `getZonedParts`. Two byte-identical copies, a locale
+// literal apiece, and a name that collides with this export — the duplicate the
+// `no-private-lib-fork` guard cannot see, because it is not a UI primitive.
+//
+// They are gone. This pins the equivalence that made deleting them safe, so
+// that the claim lives in the repo rather than in a session's notes, and so
+// that a future change to `getZonedParts` cannot quietly break the callers that
+// were moved onto it.
+describe('ymdInTimeZone agrees with the en-CA formulation it replaced', () => {
+  const enCaYmd = (date: Date, timeZone: string): string =>
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(date)
+
+  // Zones chosen for the ways a local day can disagree with UTC: either side of
+  // the line, a half-hour offset, the two extreme offsets (+14, -11), and a
+  // southern-hemisphere DST schedule.
+  const ZONES = [
+    'UTC',
+    'America/New_York',
+    'America/Chicago',
+    'Asia/Kolkata',
+    'Pacific/Kiritimati',
+    'Pacific/Niue',
+    'Australia/Sydney',
+    'Europe/London',
+  ]
+
+  it.each(ZONES)('%s — every 7 hours across three years', (zone) => {
+    const start = Date.UTC(2024, 0, 1)
+    const end = Date.UTC(2027, 0, 1)
+    const step = 7 * 60 * 60 * 1000
+
+    let compared = 0
+    for (let t = start; t < end; t += step) {
+      const at = new Date(t)
+      expect(ymdInTimeZone(at, zone)).toBe(enCaYmd(at, zone))
+      compared++
+    }
+
+    // A loop that ran zero times would pass every assertion inside it.
+    expect(compared).toBeGreaterThan(3_500)
+  })
+})
