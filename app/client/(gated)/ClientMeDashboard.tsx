@@ -26,7 +26,6 @@ import {
   DEFAULT_TIME_ZONE,
 } from '@/lib/time'
 import type { ClientLookRemix } from '@/lib/creator/creatorProfileStats'
-import ToggleSwitch from '@/app/_components/ToggleSwitch'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import ProProfileLink from '@/app/_components/ProProfileLink'
 import { CardLinkOverlay } from '@/app/_components/ui'
