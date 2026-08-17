@@ -780,8 +780,7 @@ describe('app/api/internal/jobs/client-reminders/route.ts', () => {
   // ---------------------------------------------------------------------
 
   const MANAGE_NUDGE = ' Need to change it? Tap to manage.'
-  const CONFIRM_NUDGE =
-    ' Can you make it? Tap to confirm — or reschedule if you need to.'
+  const CONFIRM_NUDGE = ' Can you make it? Tap to confirm or reschedule.'
 
   function makeAppointmentProcessValidation() {
     return {

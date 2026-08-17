@@ -332,10 +332,11 @@ export const APPOINTMENT_REMINDER_MANAGE_NUDGE =
 /**
  * K12: the closing ask when the reminder carries an APPOINTMENT_CONFIRMATION
  * token link — confirm is one tap on the page; cancel/reschedule sit behind
- * their own confirmation screens there.
+ * their own confirmation screens there. No em dash (GSM-7 has none — one
+ * would force the whole SMS into UCS-2 and roughly halve the segment budget).
  */
 export const APPOINTMENT_REMINDER_CONFIRMATION_ASK_NUDGE =
-  ' Can you make it? Tap to confirm — or reschedule if you need to.'
+  ' Can you make it? Tap to confirm or reschedule.'
 
 /**
  * Swap the reminder's closing nudge for the confirmation ask. String-replace on

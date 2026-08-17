@@ -66,8 +66,12 @@ function buildAftercareTitle(): string {
 }
 
 function buildAftercareBody(): string {
-  // §12 NC1 #17: lead with the "ready" cue, keep the secure-link phrasing.
-  return "Your aftercare is ready — use this secure link to view your summary and rebook when you're ready."
+  // §12 NC1 #17 / SMS tightening: the "ready" cue already leads the title, so
+  // the body doesn't repeat it — keeps the secure-link phrasing, drops the
+  // repeated clause and the em dash (GSM-7 has no em dash, so leaving one in
+  // forces the whole SMS into UCS-2 and roughly halves the single-segment
+  // budget).
+  return "Use this secure link to view your summary and rebook when you're ready."
 }
 
 function buildAftercareMetadata(

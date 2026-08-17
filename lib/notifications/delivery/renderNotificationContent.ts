@@ -25,6 +25,15 @@ export type NotificationRenderDispatchLike = {
   // notifications (confirm / reschedule / reminder / claim-invite). Absent for
   // every other notification, so the renderer simply formats them when present.
   calendarLinks?: BookingCalendarLinks | null
+  // Pre-shortened, ABSOLUTE tovis.me short-link URLs for SMS specifically —
+  // built by processDueDeliveries via lib/shortLink before render, so an SMS
+  // carries a tiny tappable URL instead of the full app link. When present the
+  // sms() renderer uses these INSTEAD of deriving from href/calendarLinks;
+  // every other channel (in-app/email/push) is untouched. Absent in tests that
+  // exercise renderNotificationContent directly (a pure function with no DB
+  // access), which is why the derivation fallback stays in sms() below.
+  smsHref?: string | null
+  smsCalendarUrl?: string | null
 }
 
 export type RenderedInAppNotificationContent = {
@@ -307,7 +316,7 @@ function buildStandardTemplateRenderer(ctaLabel: string): TemplateRendererSet {
     sms(dispatch, brandName) {
       const title = normalizeText(dispatch.title)
       const body = normalizeText(dispatch.body)
-      const href = buildExternalAppHref(dispatch.href)
+      const href = dispatch.smsHref ?? buildExternalAppHref(dispatch.href)
 
       // Clip the message body first, then append the calendar link intact — an
       // "add to calendar" URL is worthless if truncated. Prefer the shorter
@@ -318,6 +327,7 @@ function buildStandardTemplateRenderer(ctaLabel: string): TemplateRendererSet {
         href,
       })
       const calendarUrl =
+        dispatch.smsCalendarUrl ??
         dispatch.calendarLinks?.icsUrl ??
         dispatch.calendarLinks?.googleUrl ??
         null

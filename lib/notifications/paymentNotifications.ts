@@ -162,7 +162,10 @@ export async function emitPaymentActionRequiredNotifications(args: {
     bookingId: args.bookingId,
     eventKey: NotificationEventKey.PAYMENT_ACTION_REQUIRED,
     title: 'Action needed on your payment',
-    body: `We couldn’t process your payment for ${ctx.serviceName}. Please update your payment details to keep your appointment.`,
+    // Straight apostrophe and no "Please" filler on purpose: a curly '’' or an
+    // em dash anywhere in an SMS forces the whole message into UCS-2 encoding
+    // (GSM-7 has neither), which roughly halves the single-segment budget.
+    body: `We couldn't process your payment for ${ctx.serviceName}. Update your payment to keep your appointment.`,
     href: `/client/bookings/${args.bookingId}`,
     dedupeKey,
     data: {

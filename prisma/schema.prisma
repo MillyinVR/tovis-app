@@ -6522,6 +6522,38 @@ model AttributionEvent {
   @@index([creditedUserId])
 }
 
+// Public SMS/email link shortener. The `code` is what's exposed; `destinationPath`
+// is always a site-root-relative internal path drawn from a fixed allowlist
+// (lib/shortLink/allowlist.ts) — never a full URL — so this can never become an
+// open redirect no matter what writes the row. The destination keeps its OWN
+// auth (a ClientActionToken path re-checks its own expiry/revocation on every
+// hit); `expiresAt` here only gates how long the SHORT LINK ITSELF resolves,
+// and is set to mirror the destination's token TTL where one exists.
+model ShortLink {
+  id String @id @default(cuid())
+
+  code            String @unique @db.VarChar(16)
+  destinationPath String @db.VarChar(512)
+
+  // What minted this link, e.g. ("notification_dispatch_href", dispatch.id) —
+  // lets a retried delivery reuse the same code instead of minting a new one
+  // every attempt. createdForId is nullable so a one-off caller with no
+  // natural dedupe key can still create a row (NULL never collides with NULL
+  // in a Postgres unique index, so this never blocks such an insert).
+  createdForType String  @db.VarChar(64)
+  createdForId   String? @db.VarChar(128)
+
+  expiresAt DateTime?
+
+  clickCount    Int       @default(0)
+  lastClickedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@unique([createdForType, createdForId])
+  @@index([expiresAt])
+}
+
 model PasswordResetToken {
   id        String    @id @default(cuid())
   userId    String

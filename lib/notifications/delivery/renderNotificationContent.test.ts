@@ -23,6 +23,10 @@ function makeDispatch(
     ...(overrides.calendarLinks !== undefined
       ? { calendarLinks: overrides.calendarLinks }
       : {}),
+    ...(overrides.smsHref !== undefined ? { smsHref: overrides.smsHref } : {}),
+    ...(overrides.smsCalendarUrl !== undefined
+      ? { smsCalendarUrl: overrides.smsCalendarUrl }
+      : {}),
   }
 }
 
@@ -184,6 +188,60 @@ describe('lib/notifications/delivery/renderNotificationContent', () => {
     expect(result.text).toContain(
       `Add to calendar: ${calendarLinks.googleUrl}`,
     )
+  })
+
+  it('uses smsHref instead of the derived app href when present', () => {
+    const result = renderNotificationContent({
+      tenantContext: rootTenantContext('tenant_root'),
+      channel: NotificationChannel.SMS,
+      templateKey: 'booking_confirmed',
+      dispatch: makeDispatch({ smsHref: 'https://tovis.me/s/Ab3xK9pQ' }),
+    })
+
+    if (result.channel !== NotificationChannel.SMS) {
+      throw new Error('expected SMS content')
+    }
+
+    expect(result.text).toContain('https://tovis.me/s/Ab3xK9pQ')
+    expect(result.text).not.toContain('/client/bookings/booking_1')
+  })
+
+  it('leaves every other channel untouched by smsHref', () => {
+    const result = renderNotificationContent({
+      tenantContext: rootTenantContext('tenant_root'),
+      channel: NotificationChannel.IN_APP,
+      templateKey: 'booking_confirmed',
+      templateVersion: 1,
+      dispatch: makeDispatch({ smsHref: 'https://tovis.me/s/Ab3xK9pQ' }),
+    })
+
+    expect(result).toEqual({
+      channel: NotificationChannel.IN_APP,
+      templateKey: 'booking_confirmed',
+      templateVersion: 1,
+      title: 'Appointment confirmed',
+      body: 'Your appointment has been confirmed.',
+      href: '/client/bookings/booking_1',
+    })
+  })
+
+  it('uses smsCalendarUrl instead of calendarLinks.icsUrl when present', () => {
+    const result = renderNotificationContent({
+      tenantContext: rootTenantContext('tenant_root'),
+      channel: NotificationChannel.SMS,
+      templateKey: 'booking_confirmed',
+      dispatch: makeDispatch({
+        calendarLinks,
+        smsCalendarUrl: 'https://tovis.me/s/Q7mZ2xLp',
+      }),
+    })
+
+    if (result.channel !== NotificationChannel.SMS) {
+      throw new Error('expected SMS content')
+    }
+
+    expect(result.text).toContain('Add to calendar: https://tovis.me/s/Q7mZ2xLp')
+    expect(result.text).not.toContain(calendarLinks.icsUrl)
   })
 
   it('adds no calendar links when the dispatch carries none', () => {

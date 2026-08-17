@@ -6,6 +6,7 @@ import {
   NotificationPriority,
   NotificationProvider,
   NotificationRecipientKind,
+  Prisma,
 } from '@prisma/client'
 
 import { rootTenantContext } from '@/lib/tenant/context'
@@ -15,6 +16,8 @@ import { SmsDeliveryProvider } from './sendSms'
 
 const mockClaimDeliveries = vi.hoisted(() => vi.fn())
 const mockCompleteDeliveryAttempt = vi.hoisted(() => vi.fn())
+const mockGetOrCreateShortLink = vi.hoisted(() => vi.fn())
+const mockBuildShortLinkUrl = vi.hoisted(() => vi.fn())
 
 vi.mock('./claimDeliveries', () => ({
   claimDeliveries: mockClaimDeliveries,
@@ -24,7 +27,20 @@ vi.mock('./completeDeliveryAttempt', () => ({
   completeDeliveryAttempt: mockCompleteDeliveryAttempt,
 }))
 
-import { processDueDeliveries } from './processDueDeliveries'
+// Left UNCONFIGURED by default (resolves to undefined) in most tests below —
+// that makes resolveSmsLinkOverrides' own try/catch fall back to the
+// un-shortened href, the same degrade-safely behavior a real short-link mint
+// failure produces. Tests that care about the shortened path configure it
+// explicitly.
+vi.mock('@/lib/shortLink/shortLinkService', () => ({
+  getOrCreateShortLink: mockGetOrCreateShortLink,
+  buildShortLinkUrl: mockBuildShortLinkUrl,
+}))
+
+import {
+  processDueDeliveries,
+  resolveSmsLinkOverrides,
+} from './processDueDeliveries'
 
 function makeClaimedDelivery(
   args: Partial<{
@@ -90,7 +106,7 @@ function makeClaimedDelivery(
       href: '/client/bookings/booking_1',
       payload: {
         bookingId: 'booking_1',
-      },
+      } as Prisma.JsonValue,
       scheduledFor: now,
       cancelledAt: null,
       createdAt: now,
@@ -184,6 +200,8 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
     mockClaimDeliveries.mockReset()
     mockCompleteDeliveryAttempt.mockReset()
     mockCompleteDeliveryAttempt.mockResolvedValue(undefined)
+    mockGetOrCreateShortLink.mockReset()
+    mockBuildShortLinkUrl.mockReset()
   })
 
   afterEach(() => {
@@ -1087,5 +1105,166 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
         },
       }),
     ).rejects.toThrow('processDueDeliveries: invalid now')
+  })
+})
+
+describe('lib/notifications/delivery/processDueDeliveries — resolveSmsLinkOverrides', () => {
+  beforeEach(() => {
+    mockGetOrCreateShortLink.mockReset()
+    mockBuildShortLinkUrl.mockReset()
+  })
+
+  it('returns nulls for a non-SMS channel without minting anything', async () => {
+    const delivery = makeClaimedDelivery({ channel: NotificationChannel.IN_APP })
+
+    const result = await resolveSmsLinkOverrides({
+      delivery,
+      calendarLinks: null,
+    })
+
+    expect(result).toEqual({ smsHref: null, smsCalendarUrl: null })
+    expect(mockGetOrCreateShortLink).not.toHaveBeenCalled()
+  })
+
+  it('mints a short link for the dispatch href on an SMS delivery', async () => {
+    const delivery = makeClaimedDelivery({ channel: NotificationChannel.SMS })
+    mockGetOrCreateShortLink.mockResolvedValue({ code: 'Ab3xK9pQ' })
+    mockBuildShortLinkUrl.mockReturnValue('https://tovis.me/s/Ab3xK9pQ')
+
+    const result = await resolveSmsLinkOverrides({
+      delivery,
+      calendarLinks: null,
+    })
+
+    expect(result).toEqual({
+      smsHref: 'https://tovis.me/s/Ab3xK9pQ',
+      smsCalendarUrl: null,
+    })
+    expect(mockGetOrCreateShortLink).toHaveBeenCalledWith({
+      destinationPath: delivery.dispatch.href,
+      createdForType: 'notification_dispatch_href',
+      createdForId: delivery.dispatch.id,
+      expiresAt: null,
+    })
+    expect(mockBuildShortLinkUrl).toHaveBeenCalledWith('Ab3xK9pQ')
+  })
+
+  it('mirrors the underlying ClientActionToken expiry from the dispatch payload onto the short link', async () => {
+    const delivery = makeClaimedDelivery({ channel: NotificationChannel.SMS })
+    delivery.dispatch.payload = {
+      bookingId: 'booking_1',
+      expiresAt: '2026-08-20T00:00:00.000Z',
+    } satisfies Prisma.JsonValue
+    mockGetOrCreateShortLink.mockResolvedValue({ code: 'Ab3xK9pQ' })
+    mockBuildShortLinkUrl.mockReturnValue('https://tovis.me/s/Ab3xK9pQ')
+
+    await resolveSmsLinkOverrides({ delivery, calendarLinks: null })
+
+    expect(mockGetOrCreateShortLink).toHaveBeenCalledWith({
+      destinationPath: delivery.dispatch.href,
+      createdForType: 'notification_dispatch_href',
+      createdForId: delivery.dispatch.id,
+      expiresAt: new Date('2026-08-20T00:00:00.000Z'),
+    })
+  })
+
+  it('ignores an unparsable expiresAt in the payload rather than throwing', async () => {
+    const delivery = makeClaimedDelivery({ channel: NotificationChannel.SMS })
+    delivery.dispatch.payload = {
+      bookingId: 'booking_1',
+      expiresAt: 'not-a-date',
+    } satisfies Prisma.JsonValue
+    mockGetOrCreateShortLink.mockResolvedValue({ code: 'Ab3xK9pQ' })
+    mockBuildShortLinkUrl.mockReturnValue('https://tovis.me/s/Ab3xK9pQ')
+
+    await resolveSmsLinkOverrides({ delivery, calendarLinks: null })
+
+    expect(mockGetOrCreateShortLink).toHaveBeenCalledWith({
+      destinationPath: delivery.dispatch.href,
+      createdForType: 'notification_dispatch_href',
+      createdForId: delivery.dispatch.id,
+      expiresAt: null,
+    })
+  })
+
+  it('also mints a short link for the calendar ics url when present', async () => {
+    const delivery = makeClaimedDelivery({ channel: NotificationChannel.SMS })
+    mockGetOrCreateShortLink
+      .mockResolvedValueOnce({ code: 'HrefCode1' })
+      .mockResolvedValueOnce({ code: 'CalCode22' })
+    mockBuildShortLinkUrl
+      .mockReturnValueOnce('https://tovis.me/s/HrefCode1')
+      .mockReturnValueOnce('https://tovis.me/s/CalCode22')
+
+    const result = await resolveSmsLinkOverrides({
+      delivery,
+      calendarLinks: {
+        googleUrl: 'https://calendar.google.com/calendar/render?action=TEMPLATE',
+        icsUrl: 'https://tovis.test/api/v1/calendar/ics/v1.abc.def',
+      },
+    })
+
+    expect(result).toEqual({
+      smsHref: 'https://tovis.me/s/HrefCode1',
+      smsCalendarUrl: 'https://tovis.me/s/CalCode22',
+    })
+    expect(mockGetOrCreateShortLink).toHaveBeenNthCalledWith(2, {
+      destinationPath: '/api/v1/calendar/ics/v1.abc.def',
+      createdForType: 'notification_dispatch_calendar',
+      createdForId: delivery.dispatch.id,
+    })
+  })
+
+  it('falls back to null (never throws) when the href mint fails', async () => {
+    const delivery = makeClaimedDelivery({ channel: NotificationChannel.SMS })
+    mockGetOrCreateShortLink.mockRejectedValue(new Error('destination not allowlisted'))
+
+    const result = await resolveSmsLinkOverrides({
+      delivery,
+      calendarLinks: null,
+    })
+
+    expect(result).toEqual({ smsHref: null, smsCalendarUrl: null })
+  })
+
+  it('falls back to null for the calendar link alone when only that mint fails', async () => {
+    const delivery = makeClaimedDelivery({ channel: NotificationChannel.SMS })
+    mockGetOrCreateShortLink
+      .mockResolvedValueOnce({ code: 'HrefCode1' })
+      .mockRejectedValueOnce(new Error('db hiccup'))
+    mockBuildShortLinkUrl.mockReturnValueOnce('https://tovis.me/s/HrefCode1')
+
+    const result = await resolveSmsLinkOverrides({
+      delivery,
+      calendarLinks: {
+        googleUrl: 'https://calendar.google.com/calendar/render?action=TEMPLATE',
+        icsUrl: 'https://tovis.test/api/v1/calendar/ics/v1.abc.def',
+      },
+    })
+
+    expect(result).toEqual({
+      smsHref: 'https://tovis.me/s/HrefCode1',
+      smsCalendarUrl: null,
+    })
+  })
+
+  it('skips the calendar mint entirely when there is no ics url', async () => {
+    const delivery = makeClaimedDelivery({ channel: NotificationChannel.SMS })
+    mockGetOrCreateShortLink.mockResolvedValue({ code: 'HrefCode1' })
+    mockBuildShortLinkUrl.mockReturnValue('https://tovis.me/s/HrefCode1')
+
+    const result = await resolveSmsLinkOverrides({
+      delivery,
+      calendarLinks: {
+        googleUrl: 'https://calendar.google.com/calendar/render?action=TEMPLATE',
+        icsUrl: null,
+      },
+    })
+
+    expect(result).toEqual({
+      smsHref: 'https://tovis.me/s/HrefCode1',
+      smsCalendarUrl: null,
+    })
+    expect(mockGetOrCreateShortLink).toHaveBeenCalledTimes(1)
   })
 })
