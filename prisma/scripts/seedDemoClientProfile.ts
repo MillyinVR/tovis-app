@@ -25,6 +25,7 @@
 //     of bug this walkthrough exists to find.
 import {
   AftercareRebookMode,
+  BookingCheckoutStatus,
   BookingSource,
   BookingStatus,
   BoardVisibility,
@@ -59,6 +60,8 @@ import {
 } from '@prisma/client'
 
 import { refreshClientCreatorStats } from '@/lib/clients/creatorTier'
+import { refreshClientLookTrendStats } from '@/lib/clients/lookTrend'
+import { mintCreatorCreditOnCompletion } from '@/lib/credit/clientCredit'
 import { normalizeHandle } from '@/lib/handles'
 import {
   addDaysToYMD,
@@ -235,6 +238,16 @@ const FOLLOWING_COUNT = 18
  */
 const BACKGROUND_CREATOR_COUNT = 30
 const BACKGROUND_LOOKS_EACH = 3
+
+/**
+ * The look the whole background field saves this week — the one the trending
+ * banner names ("Your Lived-in blonde is trending").
+ *
+ * One look, not all six, on purpose: the read picks the client's BEST-moving
+ * look, and a fixture where every look moved identically cannot tell a working
+ * "best" from an arbitrary first row.
+ */
+const TRENDING_LOOK_KEY = 'lived-in-blonde'
 
 type DemoPro = {
   key: string
@@ -1702,6 +1715,15 @@ async function main(): Promise<void> {
             isPublicProfile: true,
           }
         : {}),
+      // 🔴 The background field shows the SAME city as Maya, and without this the
+      // per-look trending banner can never render its city clause: the city
+      // percentile is scoped by `ClientProfile.publicCity`, so with the field
+      // city-less Brooklyn held only Maya's own six looks — far under
+      // TREND_MIN_RANKED_CITY_LOOKS — and "top N% in Brooklyn" was correctly
+      // refused on every look forever. Which looks exactly like a feature nobody
+      // built. Same lesson as the ranked-population floor above: a field to be
+      // top OF has to exist before a rank can be earned.
+      ...(i < BACKGROUND_CREATOR_COUNT ? { publicCity: CREATOR.city } : {}),
     })),
   })
 
@@ -1958,6 +1980,41 @@ async function main(): Promise<void> {
   await prisma.mediaAsset.createMany({ data: bgMedia })
   await prisma.lookPost.createMany({ data: bgLooks })
 
+  // ── this week's saves (the trending banner) ────────────────────────────────
+  // 🔴 A save IS a `BoardItem` row, and the trending signal counts the rows
+  // created inside the trailing week (lib/clients/lookTrend.ts). Maya's boards
+  // contribute 13 of them across six looks — under the per-look floor — so
+  // before this the banner correctly rendered NOTHING on every look she owns,
+  // which is indistinguishable from a feature that was never built.
+  //
+  // `LookPost.saveCount` is deliberately NOT touched here: the scorer counts the
+  // rows, and a hand-written counter that disagrees with them is the exact
+  // drift the "count the same unit" rule exists to stop. The boards are the
+  // fans' own, one apiece, so every row is a distinct person saving the look.
+  const trendingBoards: Prisma.BoardCreateManyInput[] = []
+  const trendingSaves: Prisma.BoardItemCreateManyInput[] = []
+  for (let c = 0; c < BACKGROUND_CREATOR_COUNT; c += 1) {
+    const fanId = `${P}fan-${String(c).padStart(4, '0')}`
+    trendingBoards.push({
+      id: `${P}board-fan-${c}`,
+      clientId: fanId,
+      name: 'Saved looks',
+      slug: 'saved-looks',
+      visibility: BoardVisibility.PRIVATE,
+    })
+    trendingSaves.push({
+      id: `${P}boarditem-trending-${c}`,
+      boardId: `${P}board-fan-${c}`,
+      lookPostId: lookId(TRENDING_LOOK_KEY),
+      // Spread across the last six days rather than all stamped `now()`: the
+      // window is a rolling seven days, and a fixture where every row lands on
+      // one instant cannot tell a working cutoff from an ignored one.
+      createdAt: new Date(NOW.getTime() - ((c % 6) * 24 + 1) * HOUR_MS),
+    })
+  }
+  await prisma.board.createMany({ data: trendingBoards })
+  await prisma.boardItem.createMany({ data: trendingSaves })
+
   // ── attributed bookings ("N recreated this") ───────────────────────────────
   // Real Booking rows citing the look as their source, so the count on the card
   // is derived from the same data the pro's creator analytics reads — not a
@@ -2041,6 +2098,32 @@ async function main(): Promise<void> {
     })
   }
   await prisma.booking.createMany({ data: bookingRows })
+
+  // ── the creator credit those bookings earned ───────────────────────────────
+  // 🔴 Runs the REAL mint (lib/credit/clientCredit.ts) rather than writing
+  // ledger rows by hand. Credit is minted on the COMPLETION transition, and
+  // these rows are created already-COMPLETED — they never transitioned — so
+  // without this the ledger is empty, the activity banner renders nothing and
+  // the checkout toggle never appears, which is indistinguishable from an
+  // unbuilt feature.
+  //
+  // Using the real function is also what makes the fixture honest: the amounts
+  // are 3% of each booking's own subtotal, computed by the same code the
+  // completion path runs, and the database's own once-per-booking constraint is
+  // exercised rather than assumed. A pro-authored source look mints nothing, so
+  // those rows simply return NO_CREATOR.
+  let mintedCredits = 0
+  for (const row of bookingRows) {
+    const result = await mintCreatorCreditOnCompletion(prisma, {
+      // ⚠️ Stamped with the booking's OWN date, not the seed's `NOW`. The
+      // activity banner names the client's MOST RECENT credit, and 43 rows
+      // sharing one instant make "most recent" an arbitrary id tiebreak — a
+      // fixture that cannot tell a working `orderBy` from an ignored one.
+      now: row.scheduledFor as Date,
+      bookingId: String(row.id),
+    })
+    if (result.reason === 'MINTED') mintedCredits += 1
+  }
 
   // ── the creator's OWN appointments (screen 4) ──────────────────────────────
   // One upcoming (the prep screen) and one completed with a published care plan
@@ -2237,6 +2320,14 @@ async function main(): Promise<void> {
       ...ownBookingBase,
       id: `${P}booking-own-past`,
       status: BookingStatus.COMPLETED,
+      // 🔴 READY, not the default NOT_READY. The pro's own closeout is what
+      // promotes a checkout to READY in the real product, and this fixture
+      // writes the aftercare directly without ever running it — so the row sat
+      // in a state a real aftercare-sent booking is never left in. iOS gates its
+      // whole checkout card on READY/PARTIALLY_PAID, so the client checkout (and
+      // with it the platform-credit toggle) rendered on web and was INVISIBLE on
+      // the phone, which reads as an unbuilt half rather than a stale fixture.
+      checkoutStatus: BookingCheckoutStatus.READY,
       sourceLookPostId: lookId('lived-in-blonde'),
       createdAt: new Date(pastAt.getTime() - 12 * 24 * 60 * 60 * 1000),
       scheduledFor: pastAt,
@@ -2654,6 +2745,19 @@ async function main(): Promise<void> {
       venmoHandle: '@noor-haddad',
       acceptZelle: true,
       zelleHandle: 'noor@studiolumen.example',
+      // 🔴 Card, and a connected account that is actually chargeable.
+      //
+      // Without this the demo pro takes no card at all — and the platform credit
+      // is card-ONLY (the pro is made whole by a platform→pro Stripe transfer,
+      // which needs a connected account). So the checkout's credit toggle could
+      // never render on ANY seeded booking, which is indistinguishable from a
+      // feature nobody built. The account id is a test-mode-shaped sentinel: no
+      // charge is ever made against it locally, but every gate that asks
+      // "is this pro chargeable?" now answers honestly.
+      acceptStripeCard: true,
+      stripeAccountId: 'acct_demoseed_noor',
+      stripeChargesEnabled: true,
+      stripePayoutsEnabled: true,
       tipsEnabled: true,
       allowCustomTip: true,
       tipSuggestions: [{ label: '18%', percent: 18 }, { label: '22%', percent: 22 }, { label: '25%', percent: 25 }],
@@ -2939,6 +3043,10 @@ async function main(): Promise<void> {
   // hourly cron runs. Seeding a tier directly would let the fixture disagree
   // with what production would actually compute from this data.
   const stats = await refreshClientCreatorStats(prisma, NOW)
+  // Same reasoning for the per-look trending momentum: run the REAL scorer the
+  // hourly cron runs, so the fixture's "+N saves this week · top N% in Brooklyn"
+  // is computed from the BoardItem rows above rather than asserted.
+  const trends = await refreshClientLookTrendStats(prisma, NOW)
 
   console.log(
     `[seedDemoClientProfile] seeded @${CREATOR.handle}: ` +
@@ -2949,7 +3057,10 @@ async function main(): Promise<void> {
       `${FAVORITE_SERVICE_KEYS.length} favourited services, ` +
       `${WAITLIST.length} waitlist places, ${OPENINGS.length} last-minute openings, ` +
       `${VIRAL.live.length + 1} viral looks; ` +
-      `creator tiers: ${stats.ranked} ranked of ${stats.scored} scored.`,
+      `creator tiers: ${stats.ranked} ranked of ${stats.scored} scored; ` +
+      `trending looks: ${trends.ranked} city-ranked of ${trends.trending}; ` +
+      `creator credits minted: ${mintedCredits} of ${bookingRows.length} ` +
+      `attributed bookings (the rest cite a pro-authored look, which mints none).`,
   )
   console.log('  → http://localhost:3000/u/' + CREATOR.handle)
 }

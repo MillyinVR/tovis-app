@@ -18,6 +18,8 @@ export default async function ClientActivityPage() {
       items={data.items}
       unreadCount={data.unreadCount}
       markReadEventKeys={data.markReadEventKeys}
+      trend={data.trend}
+      credit={data.credit}
     />
   )
 }

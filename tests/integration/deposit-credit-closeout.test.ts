@@ -440,7 +440,7 @@ describe('closeout at zero', () => {
 
     const prepared = await prepare(bookingId)
 
-    expect(prepared.outcome).toBe('SETTLED_BY_DEPOSIT')
+    expect(prepared.outcome).toBe('SETTLED_NOTHING_DUE')
     expect(prepared.depositCreditCents).toBe(TOTAL_CENTS)
 
     const row = await readBooking(bookingId)
@@ -511,7 +511,7 @@ describe('closeout at zero', () => {
 
     const prepared = await prepare(bookingId)
 
-    expect(prepared.outcome).toBe('SETTLED_BY_DEPOSIT')
+    expect(prepared.outcome).toBe('SETTLED_NOTHING_DUE')
     // Credited $200 against a $200 bill, not $250. The extra $50 is money the
     // pro still holds and the refund rail owns returning it — a checkout path
     // must never quietly hand it back.
@@ -862,8 +862,8 @@ describe('K10 — a prepay-required service is paid in full up front', () => {
 
     const prepared = await prepare(row.id)
 
-    expect(prepared.outcome).toBe('SETTLED_BY_DEPOSIT')
-    if (prepared.outcome !== 'SETTLED_BY_DEPOSIT') return
+    expect(prepared.outcome).toBe('SETTLED_NOTHING_DUE')
+    if (prepared.outcome !== 'SETTLED_NOTHING_DUE') return
     expect(prepared.depositCreditCents).toBe(BASE_PRICE_CENTS)
 
     const settled = await readBooking(row.id)

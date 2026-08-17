@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   prismaBookingFindUnique: vi.fn(),
   prismaBookingFindFirst: vi.fn(),
   prismaAftercareFindFirst: vi.fn(),
+  prismaCreditAggregate: vi.fn(),
   prismaReviewFindFirst: vi.fn(),
   loadBookingBeforeAfterThumbsFor: vi.fn(),
   renderMediaUrlsBatch: vi.fn(),
@@ -34,6 +35,12 @@ vi.mock('@/lib/prisma', () => ({
     },
     review: {
       findFirst: mocks.prismaReviewFindFirst,
+    },
+    // The route reads the client's platform-credit balance for the checkout
+    // toggle. Two aggregates (earned, then spent) — both empty here, so the
+    // balance is 0 and the toggle is correctly absent from these fixtures.
+    clientCreditEntry: {
+      aggregate: mocks.prismaCreditAggregate,
     },
   },
 }))
@@ -126,6 +133,9 @@ describe('app/api/v1/client/bookings/[id]/aftercare/route.ts', () => {
     mocks.prismaBookingFindFirst.mockResolvedValue(null)
     // No existing client review by default.
     mocks.prismaReviewFindFirst.mockResolvedValue(null)
+    // No platform credit by default — the balance is a sum over two aggregates
+    // (earned, then spent), and an empty ledger sums to null on both.
+    mocks.prismaCreditAggregate.mockResolvedValue({ _sum: { amount: null } })
     mocks.loadBookingBeforeAfterThumbsFor.mockResolvedValue(EMPTY_BEFORE_AFTER)
     // Deterministic render URLs from each asset's storage pointers (public-bucket
     // review media resolves synchronously in prod; here we mirror the shape).
@@ -204,6 +214,7 @@ describe('app/api/v1/client/bookings/[id]/aftercare/route.ts', () => {
         reviewEligible: false,
         // COMPLETED locks product editing even though the surface shows.
         checkoutProductsEditable: false,
+        creatorCreditBalanceCents: 0,
       },
     })
   })
@@ -348,6 +359,7 @@ describe('app/api/v1/client/bookings/[id]/aftercare/route.ts', () => {
         reviewEligible: false,
         // ACCEPTED + sent aftercare + no payment yet ⇒ editable.
         checkoutProductsEditable: true,
+        creatorCreditBalanceCents: 0,
       },
     })
   })
@@ -401,6 +413,7 @@ describe('app/api/v1/client/bookings/[id]/aftercare/route.ts', () => {
         existingReview: null,
         reviewEligible: false,
         checkoutProductsEditable: false,
+        creatorCreditBalanceCents: 0,
       },
     })
   })
@@ -456,6 +469,7 @@ describe('app/api/v1/client/bookings/[id]/aftercare/route.ts', () => {
         existingReview: null,
         reviewEligible: false,
         checkoutProductsEditable: false,
+        creatorCreditBalanceCents: 0,
       },
     })
   })
@@ -513,6 +527,7 @@ describe('app/api/v1/client/bookings/[id]/aftercare/route.ts', () => {
         existingReview: null,
         reviewEligible: false,
         checkoutProductsEditable: false,
+        creatorCreditBalanceCents: 0,
       },
     })
   })
@@ -538,6 +553,7 @@ describe('app/api/v1/client/bookings/[id]/aftercare/route.ts', () => {
         reviewEligible: false,
         // No sent aftercare ⇒ not editable.
         checkoutProductsEditable: false,
+        creatorCreditBalanceCents: 0,
       },
     })
   })
@@ -632,6 +648,7 @@ describe('app/api/v1/client/bookings/[id]/aftercare/route.ts', () => {
         reviewEligible: true,
         // Payment collected ⇒ product editing locked.
         checkoutProductsEditable: false,
+        creatorCreditBalanceCents: 0,
       },
     })
   })

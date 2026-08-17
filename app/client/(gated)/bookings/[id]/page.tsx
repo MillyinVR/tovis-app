@@ -754,6 +754,7 @@ export default async function ClientBookingPage(props: {
     paymentSettings,
     rebookedNextBooking,
     depositCredit,
+    creatorCreditBalanceCents,
     checkoutProductItems,
     prep,
     boards,
@@ -1691,6 +1692,7 @@ export default async function ClientBookingPage(props: {
                     discountAmount={booking.checkout.discountAmount}
                     totalAmount={booking.checkout.totalAmount}
                     depositCreditCents={depositCredit.creditCents}
+                    creatorCreditBalanceCents={creatorCreditBalanceCents}
                     acceptedMethods={acceptedMethods}
                     tipsEnabled={paymentSettings?.tipsEnabled ?? true}
                     allowCustomTip={paymentSettings?.allowCustomTip ?? true}

@@ -48,6 +48,8 @@ export default async function ClientActivityModalPage() {
             items={data.items}
             unreadCount={data.unreadCount}
             markReadEventKeys={data.markReadEventKeys}
+            trend={data.trend}
+            credit={data.credit}
           />
         </div>
       </div>

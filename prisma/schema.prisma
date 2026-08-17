@@ -1784,6 +1784,12 @@ model ClientProfile {
   // refresh job has scored this client; absence renders as "no tier", never as
   // tier zero. See lib/clients/creatorTier.ts.
   creatorStat     ClientCreatorStat?
+  // Per-look weekly momentum, written by the same hourly job. Only the looks
+  // that actually moved this week have a row. See lib/clients/lookTrend.ts.
+  lookTrendStats  ClientLookTrendStat[]
+  // Platform-funded credit movements. The balance is a SUM over these and is
+  // deliberately not denormalized anywhere. See lib/credit/clientCredit.ts.
+  creditEntries   ClientCreditEntry[]
 
   // Cards this client has saved on file (card-on-file / no-show protection).
   paymentMethods ClientPaymentMethod[]
@@ -3842,6 +3848,12 @@ model Booking {
   referralTrigger Referral? @relation("ReferralTriggerBooking")
   referralReward  Referral? @relation("ReferralRewardBooking")
 
+  /// Platform-funded credit movements anchored to this booking: at most one
+  /// EARNED row (its completion minted credit for the look's author) and at most
+  /// one SPENT row (its client put their balance against this bill). Deliberately
+  /// NOT the referral rail above — different funder, different direction.
+  creditEntries ClientCreditEntry[]
+
   // Live holds placed to move THIS booking to a new time (B3). Short-lived;
   // cascades so a deleted booking cannot leave a reservation behind.
   rescheduleHolds BookingHold[] @relation("BookingHoldRescheduleTarget")
@@ -5423,6 +5435,11 @@ model LookPost {
   // §4.2 per-look booking-conversion aggregate (written hourly by the
   // look-conversion-stats job; absent until the look has driven >=1 booking).
   conversionStat        LookPostConversionStat?
+  // Trailing-week save momentum (written hourly by the client-creator-stats
+  // job; absent unless the look moved this week). See lib/clients/lookTrend.ts.
+  trendStat             ClientLookTrendStat?
+  // Credit a client earned because someone booked THIS look and completed.
+  creditEntries         ClientCreditEntry[]        @relation("LookPostCreditEntries")
   // User-facing hashtags / style tags parsed from the caption at publish
   // (social-first D1). Implicit M2M; banned tags are dropped at publish and
   // their tag pages 404. See lib/looks/tags.ts.
@@ -5748,6 +5765,133 @@ model ClientCreatorStat {
 
   @@index([tier])
   @@index([savePercentile])
+}
+
+/// Per-look weekly save momentum — the "Your Lived-in blonde is trending ·
+/// +84 saves this week · top 3% in Brooklyn" banner on /client/activity.
+///
+/// Written by the SAME hourly job that scores ClientCreatorStat
+/// (/api/internal/jobs/client-creator-stats), and replaced wholesale on every
+/// run. A row exists only while a look actually moved in the trailing week, so
+/// ABSENCE is the honest "not trending" — there is no zero row for a reader to
+/// render as a flattering number.
+model ClientLookTrendStat {
+  lookPostId String @id
+
+  /// The look's author. Every read is "this client's best look this week", so
+  /// the lookup is keyed here rather than joined back through LookPost.
+  clientId String
+
+  /// BoardItem rows created inside the trailing window. The SAME unit
+  /// LookPost.saveCount counts — plain rows, not distinct clients — so the
+  /// headline save total and this delta can never disagree about what a save is.
+  weeklySaves Int
+
+  /// Percentile of `weeklySaves` among the eligible public looks of creators who
+  /// show the same public city, 0-100 inclusive. Null whenever the author shows
+  /// no city, or that city's ranked population is below the floor: a percentile
+  /// over four Brooklyn creators is noise wearing a statistic's clothes.
+  cityPercentile Int?
+  /// The city the percentile was computed in, spelled as the author shows it.
+  /// Null exactly when `cityPercentile` is.
+  city           String?
+
+  /// Start of the trailing window `weeklySaves` counted over. A deliberate
+  /// rolling 7x24h instant, never a local calendar week — an instant subtraction
+  /// involves no timezone at all, so the number cannot silently be computed in
+  /// the server's zone (UTC on Vercel).
+  windowStart DateTime
+  computedAt  DateTime
+
+  lookPost LookPost      @relation(fields: [lookPostId], references: [id], onDelete: Cascade)
+  client   ClientProfile @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, weeklySaves])
+}
+
+/// Why one credit ledger row exists.
+///
+/// 🔴 This is NOT the referral reward. `Referral` +
+/// `ProfessionalPaymentSettings.referralReward*` is pro-configured, PRO-FUNDED,
+/// client-to-client and per-pro opt-in, and it writes one `rewardValue` onto one
+/// booking. This ledger is PLATFORM-funded, universal, and a running spendable
+/// balance. Sharing the two would collapse two different funders into one rail.
+enum ClientCreditEntryKind {
+  /// Someone else's booking, made from a look this client authored, COMPLETED.
+  /// Minted from a terminal state on purpose: there is no clawback, no
+  /// reversal, no negative balance and no already-spent-it problem.
+  EARNED_LOOK_BOOKING
+  /// Balance the client chose to put against one of their own bookings at
+  /// checkout. Always a deliberate per-booking act — credit is never auto-applied.
+  SPENT_ON_BOOKING
+}
+
+/// Where a ledger row sits in the balance.
+///
+/// EARNED rows are born APPLIED and never move — a completed booking cannot
+/// un-complete. Only SPENT rows have a lifecycle, and it exists for exactly one
+/// reason: the charge is sized when the checkout session is prepared but only
+/// settles later, so the balance has to be committed against for that whole
+/// window or the same dollar could be quoted twice on two bookings.
+enum ClientCreditEntryStatus {
+  /// Quoted into a checkout that has not settled. Counts AGAINST the balance.
+  PENDING
+  /// The payment settled. Terminal.
+  APPLIED
+  /// The client re-prepared or abandoned that checkout. Counts for nothing;
+  /// the balance is spendable again.
+  RELEASED
+}
+
+/// One movement of platform-funded client credit. Append-mostly: a row is
+/// written once and only a SPENT row's status / top-up columns ever change.
+///
+/// The balance is a SUM over these rows and is never denormalized onto
+/// ClientProfile — a stored balance is a number that can silently disagree with
+/// the entries that produced it. An unspent balance is a legitimate steady
+/// state (redemption is a manual per-booking toggle), so nothing may assume the
+/// ledger drains.
+model ClientCreditEntry {
+  id       String                  @id @default(cuid())
+  clientId String
+  kind     ClientCreditEntryKind
+  status   ClientCreditEntryStatus @default(APPLIED)
+
+  /// Always POSITIVE — the direction is `kind`, never a sign. A signed column
+  /// would let one bad write turn a spend into a mint.
+  amount Decimal @db.Decimal(10, 2)
+
+  /// EARNED: the booking whose completion minted this. SPENT: the booking the
+  /// balance was put against. Required for both, and the anchor of the
+  /// mint-exactly-once guarantee below.
+  bookingId        String
+  /// EARNED only: the authored look that booking was made from — what the
+  /// activity banner names ("Jade booked your Lived-in blonde").
+  sourceLookPostId String?
+
+  /// SPENT only: the platform's own transfer that made the pro whole again.
+  /// The client is charged the bill MINUS this credit, so without the top-up the
+  /// pro's payout would silently be short by exactly `amount` — the one thing
+  /// "platform-funded" means. Null until the drain job settles it; a row sitting
+  /// APPLIED with a null `platformTopUpAt` IS the outstanding platform liability.
+  platformTopUpAt         DateTime?
+  platformTopUpTransferId String?   @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client         ClientProfile @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  booking        Booking       @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  sourceLookPost LookPost?     @relation("LookPostCreditEntries", fields: [sourceLookPostId], references: [id], onDelete: SetNull)
+
+  /// 🔴 Mint-exactly-once, and spend-at-most-once, enforced by the DATABASE.
+  /// The completion path runs more than once for the same booking (pro closeout,
+  /// aftercare send, the Stripe webhook), and application bookkeeping that
+  /// "checks first" races itself. One EARNED row and one SPENT row per booking,
+  /// or the write fails.
+  @@unique([bookingId, kind])
+  @@index([clientId, status])
+  @@index([kind, status, platformTopUpAt])
 }
 
 model ClientFollow {

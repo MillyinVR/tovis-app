@@ -28,6 +28,7 @@ export type ExportedUserData = {
     bookingSeries: unknown[]
     clientChartShares: unknown[]
     clientActionTokens: unknown[]
+    clientCreditEntries: unknown[]
     aftercareSummaries: unknown[]
     clientConsentRecords: unknown[]
     clientAllergies: unknown[]
@@ -220,6 +221,29 @@ const bookingSeriesExportSelect = {
   createdAt: true,
   updatedAt: true,
 } satisfies Prisma.BookingSeriesSelect
+
+/**
+ * The client's platform-credit ledger.
+ *
+ * Exported rather than omitted-as-derived: unlike ClientCreatorStat this is not
+ * an aggregate a job rebuilds, it is spendable money the client holds, and
+ * "what am I owed and what did I spend" is precisely what a person asking for
+ * their data means by a balance.
+ *
+ * `platformTopUpTransferId` is deliberately NOT selected. That id identifies a
+ * transfer from the platform to the PROFESSIONAL — the pro's settlement, not
+ * the client's money — and it belongs to the pro's side of the ledger.
+ */
+const clientCreditEntryExportSelect = {
+  id: true,
+  kind: true,
+  status: true,
+  amount: true,
+  bookingId: true,
+  sourceLookPostId: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Prisma.ClientCreditEntrySelect
 
 const clientActionTokenExportSelect = {
   id: true,
@@ -574,6 +598,7 @@ export async function exportUserData(
     bookingSeries,
     clientChartShares,
     clientActionTokens,
+    clientCreditEntries,
     aftercareSummaries,
     clientConsentRecords,
     clientAllergies,
@@ -599,6 +624,7 @@ export async function exportUserData(
     findBookingSeries(input.db, clientProfileId, professionalProfileId),
     findClientChartShares(input.db, clientProfileId, professionalProfileId),
     findClientActionTokens(input.db, clientProfileId),
+    findClientCreditEntries(input.db, clientProfileId),
     findAftercareSummaries(input.db, clientProfileId, professionalProfileId),
     findClientConsentRecords(input.db, clientProfileId, professionalProfileId),
     findClientAllergies(input.db, clientProfileId),
@@ -670,6 +696,7 @@ export async function exportUserData(
       bookingSeries: normalizeJsonArray(bookingSeries),
       clientChartShares: normalizeJsonArray(clientChartShares),
       clientActionTokens: normalizeJsonArray(clientActionTokens),
+      clientCreditEntries: normalizeJsonArray(clientCreditEntries),
       aftercareSummaries: normalizeJsonArray(aftercareSummaries),
       clientConsentRecords: normalizeJsonArray(clientConsentRecords),
       clientAllergies: normalizeJsonArray(clientAllergies),
@@ -846,6 +873,19 @@ async function findClientActionTokens(
     where: { clientId: clientProfileId },
     orderBy: { createdAt: 'asc' },
     select: clientActionTokenExportSelect,
+  })
+}
+
+async function findClientCreditEntries(
+  db: PrismaClient | Prisma.TransactionClient,
+  clientProfileId: string | null,
+): Promise<unknown[]> {
+  if (!clientProfileId) return []
+
+  return db.clientCreditEntry.findMany({
+    where: { clientId: clientProfileId },
+    orderBy: { createdAt: 'asc' },
+    select: clientCreditEntryExportSelect,
   })
 }
 

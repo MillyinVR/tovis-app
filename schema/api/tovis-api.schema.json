@@ -2440,9 +2440,17 @@
           ],
           "type": "object"
         },
+        "creatorCreditCents": {
+          "description": "Platform credit applied to this bill, in cents. Subtracted from the amount charged alongside the deposit; 0 when the client did not apply any.",
+          "type": "number"
+        },
         "depositCreditCents": {
           "description": "Deposit money credited against this bill, in cents. On the charge branch this is what was subtracted from the total to get the amount charged; 0 when no deposit applies.",
           "type": "number"
+        },
+        "settledByCredit": {
+          "description": "The client's platform CREDIT closed the remaining balance, so there is nothing to charge. Distinct from `settledByDeposit` on purpose: they are different money from different funders, and a surface that says \"your deposit covered it\" when the client spent their own credit is telling them the wrong thing about where their money went. Both are false on the charge branch, and at most one is ever true.",
+          "type": "boolean"
         },
         "settledByDeposit": {
           "description": "The deposit covered the entire bill: checkout is already PAID, no session was created, and the client owes nothing. `stripeCheckout.url` is null on this branch — a client that only reads the url still behaves correctly (it has nowhere to send them) rather than charging a stale amount.",
@@ -2456,7 +2464,9 @@
         "booking",
         "stripeCheckout",
         "settledByDeposit",
-        "depositCreditCents"
+        "settledByCredit",
+        "depositCreditCents",
+        "creatorCreditCents"
       ],
       "type": "object"
     },
@@ -2560,8 +2570,50 @@
       ],
       "type": "string"
     },
+    "ClientActivityCredit": {
+      "description": "The \"You earned $7.50 credit · $30.00 banked total\" banner.\n\nNull on a zero balance. A currency glyph over \"$0.00 banked\" is a bright promise about nothing, which is the `incentiveLabel` bug wearing a new icon.",
+      "properties": {
+        "balanceLabel": {
+          "description": "\"$30.00\" — spendable balance.",
+          "type": "string"
+        },
+        "earnedDetail": {
+          "description": "\"@jade booked your Lived-in blonde\" — PII-safe, handles only.",
+          "type": "string"
+        },
+        "earnedLabel": {
+          "description": "\"$7.50\" — the most recent mint.",
+          "type": "string"
+        },
+        "useHref": {
+          "description": "Where \"Use\" goes. Null when there is no open checkout to spend it on.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "earnedLabel",
+        "earnedDetail",
+        "balanceLabel",
+        "useHref"
+      ],
+      "type": "object"
+    },
     "ClientActivityFeedDTO": {
       "properties": {
+        "credit": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ClientActivityCredit"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The credit banner, or null on a zero balance. Also null for a client who has never earned any, which is most of them."
+        },
         "items": {
           "items": {
             "$ref": "#/definitions/ClientActivityItem"
@@ -2575,6 +2627,17 @@
           },
           "type": "array"
         },
+        "trend": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ClientActivityTrend"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The trending banner, or null when nothing of the client's actually moved this week. 🔴 Null is the ORDINARY case and the honest one — a client with no momentum sees no banner rather than \"+0 saves this week\"."
+        },
         "unreadCount": {
           "description": "Unread activity events — the same count that badges the Me header bell.",
           "type": "number"
@@ -2583,7 +2646,9 @@
       "required": [
         "items",
         "unreadCount",
-        "markReadEventKeys"
+        "markReadEventKeys",
+        "trend",
+        "credit"
       ],
       "type": "object"
     },
@@ -2643,6 +2708,38 @@
         "unread",
         "href",
         "followBack"
+      ],
+      "type": "object"
+    },
+    "ClientActivityTrend": {
+      "description": "The \"Your Lived-in blonde is trending\" banner.\n\nNull whenever nothing of the client's actually moved this week — the whole honest-signals rule for this surface lives in the ABSENCE of a `ClientLookTrendStat` row (see lib/clients/lookTrend.ts), so there is no floor re-implemented here to forget.\n\n`lookName` travels separately from `detail` on purpose: each client wraps the name in its own \"Your … is trending\" headline, but the NUMBERS — the only part that could disagree between platforms — are composed once, here.",
+      "properties": {
+        "detail": {
+          "description": "\"+84 saves this week · top 3% in Brooklyn\" — the city half only when real.",
+          "type": "string"
+        },
+        "href": {
+          "type": "string"
+        },
+        "imageUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lookName": {
+          "type": "string"
+        },
+        "lookPostId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "lookPostId",
+        "lookName",
+        "imageUrl",
+        "detail",
+        "href"
       ],
       "type": "object"
     },
@@ -2841,6 +2938,10 @@
           "description": "Whether the client may edit their checkout-product selection right now — mirrors the write path's `assertClientCanEditBookingCheckoutProducts` gate (finalized aftercare, not yet in/through payment, not completed/cancelled). When false the native + web pickers render read-only.",
           "type": "boolean"
         },
+        "creatorCreditBalanceCents": {
+          "description": "The client's spendable platform-credit balance, in CENTS, already discounting any reservation THIS booking's own checkout is holding.\n\n0 renders no toggle at all — an \"apply my credit\" switch for a client with no credit is a control that can only disappoint. It rides this per-booking read rather than the booking list DTO because the balance is a property of the CLIENT, not of a booking, and the list carries up to 300 rows that would each repeat the same number.",
+          "type": "number"
+        },
         "existingReview": {
           "anyOf": [
             {
@@ -2884,7 +2985,8 @@
         "rebook",
         "existingReview",
         "reviewEligible",
-        "checkoutProductsEditable"
+        "checkoutProductsEditable",
+        "creatorCreditBalanceCents"
       ],
       "type": "object"
     },

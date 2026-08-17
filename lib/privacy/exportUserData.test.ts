@@ -32,6 +32,9 @@ const mocks = vi.hoisted(() => ({
     clientActionToken: {
       findMany: vi.fn(),
     },
+    clientCreditEntry: {
+      findMany: vi.fn(),
+    },
     aftercareSummary: {
       findMany: vi.fn(),
     },
@@ -153,6 +156,7 @@ function resetFindManyMocks() {
   mocks.db.bookingSeries.findMany.mockResolvedValue([])
   mocks.db.clientChartShare.findMany.mockResolvedValue([])
   mocks.db.clientActionToken.findMany.mockResolvedValue([])
+  mocks.db.clientCreditEntry.findMany.mockResolvedValue([])
   mocks.db.aftercareSummary.findMany.mockResolvedValue([])
   mocks.db.clientConsentRecord.findMany.mockResolvedValue([])
   mocks.db.clientAllergy.findMany.mockResolvedValue([])
@@ -577,6 +581,7 @@ describe('exportUserData', () => {
             createdAt: '2026-04-06T00:00:00.000Z',
           },
         ],
+        clientCreditEntries: [],
         aftercareSummaries: [
           expect.objectContaining({
             id: 'aftercare_1',

@@ -94,6 +94,13 @@ function makeTx(bookingOverrides: Record<string, unknown> = {}) {
       findFirst: vi.fn(async () => null),
       create: vi.fn(async () => ({ id: 'scn_1' })),
     },
+    // The payment path commits any credit reservation this charge was sized
+    // with (lib/credit/clientCredit.ts). Nothing is reserved in these fixtures,
+    // so the updateMany matches nothing — but the delegate has to exist.
+    clientCreditEntry: {
+      updateMany: vi.fn(async () => ({ count: 0 })),
+      createMany: vi.fn(async () => ({ count: 0 })),
+    },
   }
 
   return { tx: asTestTransactionClient(tx), update }

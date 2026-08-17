@@ -66,6 +66,13 @@ function makeDepositTx(args: {
     notificationDispatch: {
       updateMany: vi.fn(async () => ({ count: 0 })),
     },
+    // The payment path commits any credit reservation this charge was sized
+    // with (lib/credit/clientCredit.ts). Nothing is reserved in these fixtures,
+    // so the updateMany matches nothing — but the delegate has to exist.
+    clientCreditEntry: {
+      updateMany: vi.fn(async () => ({ count: 0 })),
+      createMany: vi.fn(async () => ({ count: 0 })),
+    },
   })
 
   return { tx, update }
@@ -203,6 +210,12 @@ function makeServiceTx(args: {
       update,
     },
     bookingCloseoutAuditLog: { create: vi.fn(), createMany: vi.fn() },
+    // The payment path commits any credit reservation this charge was sized
+    // with; nothing is reserved here, but the delegate has to exist.
+    clientCreditEntry: {
+      updateMany: vi.fn(async () => ({ count: 0 })),
+      createMany: vi.fn(async () => ({ count: 0 })),
+    },
   })
 
   return { tx, update }

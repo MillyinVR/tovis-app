@@ -257,6 +257,12 @@ import {
 } from '@/lib/waitlist/offerLiveness'
 import { scheduleReviewRequestOnCompletion } from '@/lib/notifications/reviewRequests'
 import {
+  applyClientCreditForBooking,
+  mintCreatorCreditOnCompletion,
+  releaseClientCreditForBooking,
+  reserveClientCreditForBooking,
+} from '@/lib/credit/clientCredit'
+import {
   buildAuxRefundDiscriminator,
   emitPaymentActionRequiredNotifications,
   emitPaymentCollectedNotifications,
@@ -859,6 +865,14 @@ type PrepareClientStripeCheckoutSessionArgs = {
   bookingId: string
   clientId: string
   tipAmount?: Prisma.Decimal | string | number | null
+  /**
+   * Whether to put the client's platform credit balance against this bill.
+   *
+   * Absent / false is a RELEASE, not a no-op: re-preparing with the toggle off
+   * has to hand back a balance the previous attempt was holding, or a client who
+   * changed their mind keeps their own credit locked until the sweep expires it.
+   */
+  applyCreatorCredit?: boolean
   requestId?: string | null
   idempotencyKey?: string | null
 }
@@ -902,18 +916,25 @@ type PrepareClientStripeCheckoutSessionResult =
       }
       /** Deposit money this charge already accounts for (0 when there is none). */
       depositCreditCents: number
+      /**
+       * Platform credit this charge already accounts for (0 when the client did
+       * not apply any). 🔴 The pro is transferred the CHARGE, so this is exactly
+       * how much the platform owes them on top — see the settlement job.
+       */
+      creatorCreditCents: number
       meta: MutationMeta
     }
   | {
       /**
-       * The deposit covered the entire bill: checkout was settled PAID inside
-       * this same locked transaction and NO Stripe session may be opened.
-       * Charging $0 is not a thing Stripe will do, and charging the total would
-       * bill the client a second time.
+       * The deposit, the client's credit, or the two together covered the entire
+       * bill: checkout was settled PAID inside this same locked transaction and
+       * NO Stripe session may be opened. Charging $0 is not a thing Stripe will
+       * do, and charging the total would bill the client a second time.
        */
-      outcome: 'SETTLED_BY_DEPOSIT'
+      outcome: 'SETTLED_NOTHING_DUE'
       booking: PreparedClientCheckoutBooking
       depositCreditCents: number
+      creatorCreditCents: number
       meta: MutationMeta
     }
 
@@ -3134,6 +3155,16 @@ async function maybeCompleteBookingCloseout(args: {
   // idempotent per booking via dedupeKey, re-validated at drain time.
   await scheduleReviewRequestOnCompletion({
     tx: args.tx,
+    bookingId: args.booking.id,
+    now: args.now,
+  })
+
+  // Platform-funded creator credit (Tori, 2026-08-17): 3% of the service
+  // subtotal to the client whose look this booking was made from. Same tx, and
+  // idempotent by a database unique constraint rather than by checking first —
+  // this function is reached from four call sites and `upsertBookingAftercare`
+  // completes a booking on its own path too.
+  await mintCreatorCreditOnCompletion(args.tx, {
     bookingId: args.booking.id,
     now: args.now,
   })
@@ -13643,6 +13674,16 @@ await createUpdateClientNotification({
         finishedAt: updatedBooking.finishedAt,
       }
 
+      // ⚠️ This is the SECOND place a booking becomes COMPLETED — it writes the
+      // transition inline rather than going through `maybeCompleteBookingCloseout`
+      // — so the credit mint has to be repeated here or a booking completed by
+      // sending aftercare would silently never pay its creator. Same helper,
+      // same tx, same database-enforced once-per-booking guarantee.
+      await mintCreatorCreditOnCompletion(args.tx, {
+        bookingId: booking.id,
+        now,
+      })
+
       bookingFinished = true
     }
   }
@@ -18932,6 +18973,7 @@ async function performLockedPrepareClientStripeCheckoutSession(args: {
   bookingId: string
   clientId: string
   tipAmount?: Prisma.Decimal | string | number | null
+  applyCreatorCredit: boolean
   requestId?: string | null
   idempotencyKey?: string | null
 }): Promise<PrepareClientStripeCheckoutSessionResult> {
@@ -19008,18 +19050,53 @@ async function performLockedPrepareClientStripeCheckoutSession(args: {
     totalAmount: rollup.totalAmount,
   })
 
-  const amountCents = depositCredit.amountDueCents
+  // Platform-funded creator credit, applied ONLY when the client asked for it
+  // on this booking — it is a manual per-booking toggle, never auto-applied
+  // (Tori, 2026-08-17).
+  //
+  // Sized against what the DEPOSIT left due, not against the total: crediting
+  // past a bill a deposit already covered would reserve balance for money nobody
+  // owes and then owe the pro a top-up for it. `reserveClientCreditForBooking`
+  // returns 0 for an empty balance, which is an ordinary answer.
+  //
+  // Turning the toggle OFF is a release, not a no-op — otherwise a client who
+  // changed their mind would still have the balance held against this booking.
+  let creatorCreditCents = 0
+  if (args.applyCreatorCredit) {
+    creatorCreditCents = await reserveClientCreditForBooking(args.tx, {
+      clientId: booking.clientId,
+      bookingId: booking.id,
+      maxApplicableCents: depositCredit.amountDueCents,
+      now: args.now,
+    })
+  } else {
+    await releaseClientCreditForBooking(args.tx, {
+      bookingId: booking.id,
+      now: args.now,
+    })
+  }
+
+  const amountCents = Math.max(
+    0,
+    depositCredit.amountDueCents - creatorCreditCents,
+  )
 
   // Closeout at zero. `coversTotal` is false for a zero/absent total, so a bill
   // with nothing on it still falls through to the refusal below rather than
-  // closing itself out.
-  if (depositCredit.coversTotal) {
-    return settleClientCheckoutCoveredByDeposit({
+  // closing itself out. Credit can close the same gap the deposit does — a $5
+  // balance on a $4 bill leaves nothing to charge, and Stripe has no $0 charge.
+  const nothingLeftToCharge =
+    depositCredit.coversTotal ||
+    (depositCredit.totalCents > 0 && amountCents <= 0)
+
+  if (nothingLeftToCharge) {
+    return settleClientCheckoutWithNothingDue({
       tx: args.tx,
       now: args.now,
       booking,
       rollup,
       depositCredit,
+      creatorCreditCents,
       requestId: args.requestId ?? null,
       idempotencyKey: args.idempotencyKey ?? null,
     })
@@ -19138,16 +19215,19 @@ async function performLockedPrepareClientStripeCheckoutSession(args: {
       connectedAccountId: paymentSettings.stripeAccountId,
     },
     depositCreditCents: depositCredit.creditCents,
+    creatorCreditCents,
     meta: buildMeta(mutated),
   }
 }
 
 /**
- * Closeout at zero (K10-A): the client's paid deposit covers the entire final
- * bill, so there is nothing left to charge. Settles the checkout PAID in the
- * SAME locked transaction that discovered it, stamping `depositCreditedAt` —
- * the column whose schema comment ("when the deposit was applied against the
- * final total") described a write that did not exist until now.
+ * Closeout at zero (K10-A): the client's paid deposit — and, since the creator
+ * credit shipped, any balance they chose to put against the rest — covers the
+ * entire final bill, so there is nothing left to charge. Settles the checkout
+ * PAID in the SAME locked transaction that discovered it, stamping
+ * `depositCreditedAt` — the column whose schema comment ("when the deposit was
+ * applied against the final total") described a write that did not exist until
+ * K10-A.
  *
  * 🔴 No Stripe session is created and no PaymentIntent is touched. The deposit
  * charge already settled to the pro on its own PaymentIntent; the money has
@@ -19160,13 +19240,21 @@ async function performLockedPrepareClientStripeCheckoutSession(args: {
  * `paymentProvider`/`selectedPaymentMethod` are deliberately NOT stamped
  * STRIPE_CARD: the client did not present a card for this bill. Leaving them
  * alone keeps M2's abandoned-checkout residual rule intact.
+ *
+ * 🔴 When CREDIT closed the gap, the client's balance is committed here (there
+ * is no later webhook on this path to do it) and the platform now owes this
+ * pro the credited amount — settled by the top-up drain, which finds the row by
+ * its null `platformTopUpAt`. Without that commit the client would pay nothing
+ * and keep the balance too.
  */
-async function settleClientCheckoutCoveredByDeposit(args: {
+async function settleClientCheckoutWithNothingDue(args: {
   tx: Prisma.TransactionClient
   now: Date
   booking: ClientStripeCheckoutBookingRecord
   rollup: Awaited<ReturnType<typeof buildBookingCheckoutRollupUpdate>>
   depositCredit: ReturnType<typeof deriveDepositCredit>
+  /** Balance the client put against this bill (0 when the deposit alone did it). */
+  creatorCreditCents: number
   requestId: string | null
   idempotencyKey: string | null
 }): Promise<PrepareClientStripeCheckoutSessionResult> {
@@ -19186,6 +19274,17 @@ async function settleClientCheckoutCoveredByDeposit(args: {
     paymentCollectedAt: booking.paymentCollectedAt,
   })
 
+  // The bill is closing right here, so the reservation has to become a real
+  // spend now: this path opens no Stripe session, so no webhook will ever come
+  // back to commit it, and a PENDING row left behind would be handed back by the
+  // settlement sweep as if the client had never spent it.
+  if (args.creatorCreditCents > 0) {
+    await applyClientCreditForBooking(args.tx, {
+      bookingId: booking.id,
+      now: args.now,
+    })
+  }
+
   const updated = await args.tx.booking.update({
     where: { id: booking.id },
     data: {
@@ -19199,7 +19298,12 @@ async function settleClientCheckoutCoveredByDeposit(args: {
       checkoutStatus: BookingCheckoutStatus.PAID,
       paymentAuthorizedAt: booking.paymentAuthorizedAt ?? args.now,
       paymentCollectedAt: args.now,
-      depositCreditedAt: booking.depositCreditedAt ?? args.now,
+      // Only stamp the DEPOSIT's own column when a deposit actually did the
+      // covering. A bill closed by credit alone never had a deposit applied to
+      // it, and dating one would be a false entry in the money trail.
+      ...(args.depositCredit.creditCents > 0
+        ? { depositCreditedAt: booking.depositCreditedAt ?? args.now }
+        : {}),
     },
     select: {
       id: true,
@@ -19238,7 +19342,7 @@ async function settleClientCheckoutCoveredByDeposit(args: {
     bookingId: booking.id,
     professionalId: booking.professionalId,
     route:
-      'lib/booking/writeBoundary.ts:settleClientCheckoutCoveredByDeposit',
+      'lib/booking/writeBoundary.ts:settleClientCheckoutWithNothingDue',
     requestId: args.requestId,
     idempotencyKey: args.idempotencyKey,
     oldState,
@@ -19246,7 +19350,7 @@ async function settleClientCheckoutCoveredByDeposit(args: {
   })
 
   return {
-    outcome: 'SETTLED_BY_DEPOSIT',
+    outcome: 'SETTLED_NOTHING_DUE',
     booking: {
       id: updated.id,
       professionalId: updated.professionalId,
@@ -19262,6 +19366,7 @@ async function settleClientCheckoutCoveredByDeposit(args: {
       paymentProvider: updated.paymentProvider,
     },
     depositCreditCents: args.depositCredit.creditCents,
+    creatorCreditCents: args.creatorCreditCents,
     meta: buildMeta(!areAuditValuesEqual(oldState, newState)),
   }
 }
@@ -19428,6 +19533,7 @@ export async function prepareClientStripeCheckoutSession(
         bookingId: args.bookingId,
         clientId: args.clientId,
         tipAmount: args.tipAmount,
+        applyCreatorCredit: args.applyCreatorCredit === true,
         requestId: args.requestId ?? null,
         idempotencyKey: args.idempotencyKey ?? null,
       }),
@@ -20048,6 +20154,19 @@ async function performLockedApplyStripePaymentSucceeded(args: {
       paymentAuthorizedAt: true,
       paymentCollectedAt: true,
     } satisfies Prisma.BookingSelect,
+  })
+
+  // 🔴 The charge that just settled was sized with the client's credit already
+  // taken off it, so the reservation is now genuinely spent — commit it in the
+  // same transaction that records the payment. This is also the moment the
+  // platform's debt to the pro becomes real: the destination charge transferred
+  // only what the client paid, and the settlement job pays the rest.
+  //
+  // Idempotent by its own `where` (only PENDING/RELEASED rows move), so a
+  // replayed webhook cannot double-spend a balance.
+  await applyClientCreditForBooking(args.tx, {
+    bookingId: booking.id,
+    now: args.now,
   })
 
   let bookingCompleted = booking.status === BookingStatus.COMPLETED
