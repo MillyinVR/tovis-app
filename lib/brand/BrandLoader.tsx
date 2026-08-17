@@ -10,6 +10,8 @@
 //   'inline'     — fills its container (section/route-segment loading states)
 import type { CSSProperties } from 'react'
 import BrandWordmark from './BrandWordmark'
+import { TOVIS_EYE_GLINT, TOVIS_EYE_PATH } from './eyeSvg'
+import { TovisEyeGradient } from './TovisEye'
 
 type BrandLoaderProps = {
   variant?: 'fullscreen' | 'inline'
@@ -88,23 +90,14 @@ export default function BrandLoader({
             style={{ overflow: 'visible' }}
             aria-hidden="true"
           >
-            <defs>
-              <radialGradient id="tovisLoaderEye" cx="48%" cy="40%" r="64%">
-                <stop offset="0%" stopColor="#FFF6E2" />
-                <stop offset="22%" stopColor="#F2B43E" />
-                <stop offset="48%" stopColor="#15C9A8" />
-                <stop offset="74%" stopColor="#1574C4" />
-                <stop offset="100%" stopColor="#6B4BE6" />
-              </radialGradient>
-            </defs>
-            <path
-              d="M50 4 C78 27 78 73 50 96 C22 73 22 27 50 4 Z"
-              fill="url(#tovisLoaderEye)"
-            />
+            <TovisEyeGradient id="tovisLoaderEye" />
+            <path d={TOVIS_EYE_PATH} fill="url(#tovisLoaderEye)" />
+            {/* The splash's glint pulses, and is a brighter white than the
+                mark's resting cream so it reads through the breathing glow. */}
             <circle
-              cx="42"
-              cy="38"
-              r="6.5"
+              cx={TOVIS_EYE_GLINT.cx}
+              cy={TOVIS_EYE_GLINT.cy}
+              r={TOVIS_EYE_GLINT.r}
               fill="#FFFFFF"
               style={{
                 transformBox: 'fill-box',
