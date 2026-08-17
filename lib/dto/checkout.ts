@@ -77,11 +77,25 @@ export type CheckoutStripeSessionResponseDTO = {
    */
   settledByDeposit: boolean
   /**
+   * The client's platform CREDIT closed the remaining balance, so there is
+   * nothing to charge. Distinct from `settledByDeposit` on purpose: they are
+   * different money from different funders, and a surface that says "your
+   * deposit covered it" when the client spent their own credit is telling them
+   * the wrong thing about where their money went. Both are false on the charge
+   * branch, and at most one is ever true.
+   */
+  settledByCredit: boolean
+  /**
    * Deposit money credited against this bill, in cents. On the charge branch
    * this is what was subtracted from the total to get the amount charged; 0
    * when no deposit applies.
    */
   depositCreditCents: number
+  /**
+   * Platform credit applied to this bill, in cents. Subtracted from the amount
+   * charged alongside the deposit; 0 when the client did not apply any.
+   */
+  creatorCreditCents: number
 }
 
 // POST /api/v1/client/bookings/[id]/checkout — confirm a non-card payment

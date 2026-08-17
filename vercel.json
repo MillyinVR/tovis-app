@@ -126,6 +126,10 @@
       "schedule": "40 * * * *"
     },
     {
+      "path": "/api/internal/jobs/client-credit-settlement",
+      "schedule": "15 * * * *"
+    },
+    {
       "path": "/api/internal/jobs/client-creator-stats",
       "schedule": "55 * * * *"
     },

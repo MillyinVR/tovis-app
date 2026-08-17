@@ -8,6 +8,7 @@ import { prisma } from '@/lib/prisma'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { CLIENT_CONFIRMATION_SELECT } from '@/lib/booking/clientConfirmation'
 import { deriveDepositCredit } from '@/lib/booking/depositCredit'
+import { getClientCreditBalanceCents } from '@/lib/credit/clientCredit'
 import { isPrepWritableStatus, resolvePrepForBooking } from '@/lib/booking/prep'
 import {
   BOARD_SHARE_TILE_COUNT,
@@ -549,8 +550,19 @@ export async function loadClientBookingPage(bookingId: string) {
   // from the amount the server actually collects.
   const depositCredit = deriveDepositCredit(raw)
 
+  // The client's spendable platform credit, discounting any reservation THIS
+  // booking's own checkout is already holding — otherwise re-opening a checkout
+  // that has credit applied would offer the client a balance their own pending
+  // reservation had already taken off it (see getClientCreditBalanceCents).
+  const creatorCreditBalanceCents = await getClientCreditBalanceCents(
+    prisma,
+    raw.clientId,
+    { excludeBookingId: raw.id },
+  )
+
   return {
     user,
+    creatorCreditBalanceCents,
     raw,
     aftercare,
     existingReview,

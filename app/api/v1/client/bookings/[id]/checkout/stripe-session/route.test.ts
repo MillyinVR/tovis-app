@@ -219,6 +219,7 @@ function makeAttached(overrides?: {
 function expectedIdempotencyBody(overrides?: {
   tipAmountProvided?: boolean
   tipAmount?: string | null
+  applyCreatorCredit?: boolean
 }) {
   return {
     bookingId: 'booking_1',
@@ -229,6 +230,9 @@ function expectedIdempotencyBody(overrides?: {
     tipAmountProvided: overrides?.tipAmountProvided ?? false,
     tipAmount:
       overrides && 'tipAmount' in overrides ? overrides.tipAmount : null,
+    // Part of the hashed body: flipping the credit toggle is a DIFFERENT charge
+    // and must not dedupe against the previous attempt's key.
+    applyCreatorCredit: overrides?.applyCreatorCredit ?? false,
   }
 }
 
@@ -506,6 +510,7 @@ describe('POST /api/v1/client/bookings/[id]/checkout/stripe-session', () => {
       bookingId: 'booking_1',
       clientId: 'client_1',
       tipAmount: '20.00',
+      applyCreatorCredit: false,
       requestId: null,
       idempotencyKey: 'idem_full_1',
     })

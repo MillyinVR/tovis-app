@@ -171,6 +171,12 @@ export async function POST(req: Request, ctx: RouteContext<{ token: string }>) {
           bookingId,
           clientId,
           tipAmount: parsedTip.tipAmount,
+          // 🔴 Deliberately never applies platform credit. This route is
+          // authenticated by a REBOOK TOKEN out of an email, not by a session —
+          // anyone holding the link can reach it, and spending a balance is not
+          // a thing a link may do on a client's behalf. Credit is applied from
+          // the signed-in checkout, where the client can see what they own.
+          applyCreatorCredit: false,
           requestId: null,
           idempotencyKey: idem.idempotencyKey,
         })
@@ -179,7 +185,9 @@ export async function POST(req: Request, ctx: RouteContext<{ token: string }>) {
         // the write boundary settled it PAID and there is nothing to charge.
         // Same branch as the authenticated checkout route — this token flow
         // reaches the identical write boundary and must not open a session.
-        if (prepared.outcome === 'SETTLED_BY_DEPOSIT') {
+        // Credit can never be what closed it here (see above), so the
+        // deposit-worded field is the honest one on this surface.
+        if (prepared.outcome === 'SETTLED_NOTHING_DUE') {
           const settledBody: JsonObjectPayload = {
             booking: {
               id: prepared.booking.id,

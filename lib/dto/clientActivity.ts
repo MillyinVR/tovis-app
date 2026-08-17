@@ -16,7 +16,11 @@
 // field added for the page's benefit can never leak onto the wire unannounced.
 import type { NotificationEventKey } from '@prisma/client'
 
-import type { ClientActivityPageData } from '@/app/client/(gated)/activity/_data/loadClientActivityPage'
+import type {
+  ClientActivityCredit,
+  ClientActivityPageData,
+  ClientActivityTrend,
+} from '@/app/client/(gated)/activity/_data/loadClientActivityPage'
 import type { ClientActivityItem } from '@/lib/notifications/activityFeed'
 
 export type ClientActivityFeedDTO = {
@@ -25,6 +29,17 @@ export type ClientActivityFeedDTO = {
   unreadCount: number
   /** The event keys "Mark all read" should clear (the activity allowlist). */
   markReadEventKeys: NotificationEventKey[]
+  /**
+   * The trending banner, or null when nothing of the client's actually moved
+   * this week. 🔴 Null is the ORDINARY case and the honest one — a client with
+   * no momentum sees no banner rather than "+0 saves this week".
+   */
+  trend: ClientActivityTrend | null
+  /**
+   * The credit banner, or null on a zero balance. Also null for a client who has
+   * never earned any, which is most of them.
+   */
+  credit: ClientActivityCredit | null
 }
 
 export function serializeClientActivityFeed(
@@ -34,5 +49,7 @@ export function serializeClientActivityFeed(
     items: data.items,
     unreadCount: data.unreadCount,
     markReadEventKeys: data.markReadEventKeys,
+    trend: data.trend,
+    credit: data.credit,
   }
 }

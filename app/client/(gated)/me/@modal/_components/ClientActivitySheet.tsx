@@ -4,6 +4,10 @@ import { useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 
 import ClientActivityFrame from '@/app/client/(gated)/activity/ClientActivityFrame'
+import type {
+  ClientActivityCredit,
+  ClientActivityTrend,
+} from '@/app/client/(gated)/activity/_data/loadClientActivityPage'
 import type { ClientActivityItem } from '@/lib/notifications/activityFeed'
 
 /**
@@ -25,10 +29,14 @@ export default function ClientActivitySheet({
   items,
   unreadCount,
   markReadEventKeys,
+  trend,
+  credit,
 }: {
   items: ClientActivityItem[]
   unreadCount: number
   markReadEventKeys: string[]
+  trend: ClientActivityTrend | null
+  credit: ClientActivityCredit | null
 }) {
   const router = useRouter()
 
@@ -45,6 +53,8 @@ export default function ClientActivitySheet({
       items={items}
       unreadCount={unreadCount}
       markReadEventKeys={markReadEventKeys}
+      trend={trend}
+      credit={credit}
       presentation="sheet"
       onDone={onDone}
     />

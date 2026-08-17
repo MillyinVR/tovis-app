@@ -6,6 +6,8 @@ import Link from 'next/link'
 import {
   Bookmark,
   Camera,
+  CircleDollarSign,
+  Flame,
   Heart,
   MessageCircle,
   Repeat2,
@@ -16,12 +18,17 @@ import {
 } from 'lucide-react'
 
 import EmptyState from '@/app/_components/boundaries/EmptyState'
+import RemoteImage from '@/app/_components/media/RemoteImage'
 import { COPY } from '@/lib/copy'
 import { formatRelativeTimeAgo } from '@/lib/time'
 
 import ClientMarkAllReadButton from '../_components/ClientMarkAllReadButton'
 import ClientPage from '../_components/ClientPage'
 
+import type {
+  ClientActivityCredit,
+  ClientActivityTrend,
+} from './_data/loadClientActivityPage'
 import type {
   ActivityIconKind,
   ClientActivityItem,
@@ -49,6 +56,13 @@ type ClientActivityFrameProps = {
   items: ClientActivityItem[]
   unreadCount: number
   markReadEventKeys: string[]
+  /**
+   * The trending banner. Null is the ordinary case: a client whose looks did not
+   * actually move this week sees nothing here, never "+0 saves this week".
+   */
+  trend?: ClientActivityTrend | null
+  /** The credit banner. Null on a zero balance — never "$0.00 banked". */
+  credit?: ClientActivityCredit | null
   presentation?: ClientActivityPresentation
   /** Dismisses the sheet. Required for `sheet`, ignored for `page`. */
   onDone?: () => void
@@ -147,6 +161,106 @@ function FollowBackButton({ handle }: { handle: string }) {
   )
 }
 
+/**
+ * "Your Lived-in blonde is trending · +84 saves this week · top 3% in Brooklyn".
+ *
+ * Every number in `detail` is composed server-side from a `ClientLookTrendStat`
+ * row (lib/clients/lookTrend.ts), so the two platforms cannot word the same
+ * momentum differently — and the row only exists because the look cleared a real
+ * floor, which is why this component has no "is it worth showing?" branch of its
+ * own. The city half is simply absent from `detail` when the scorer declined to
+ * rank the city.
+ */
+function TrendBanner({ trend }: { trend: ClientActivityTrend }) {
+  return (
+    <div className="mb-4 flex items-center gap-3 rounded-[18px] border border-accentPrimary/30 bg-accentPrimary/8 px-4 py-3.5">
+      <div className="grid h-[42px] w-[42px] flex-none place-items-center overflow-hidden rounded-[12px] bg-accentPrimary/15">
+        {trend.imageUrl ? (
+          <RemoteImage
+            src={trend.imageUrl}
+            alt={trend.lookName}
+            className="h-full w-full object-cover"
+            loading="lazy"
+            width={84}
+            height={84}
+          />
+        ) : (
+          <Flame
+            className="h-[18px] w-[18px] text-accentPrimary"
+            strokeWidth={2.2}
+            aria-hidden="true"
+          />
+        )}
+      </div>
+
+      <div className="min-w-0 flex-1">
+        <div className="text-[14px] font-bold leading-snug text-textPrimary">
+          {COPY.clientActivity.trendHeadlinePrefix}{' '}
+          <span className="text-accentPrimary">{trend.lookName}</span>{' '}
+          {COPY.clientActivity.trendHeadlineSuffix}
+        </div>
+        <div className="mt-0.5 text-[12.5px] text-textSecondary">
+          {trend.detail}
+        </div>
+      </div>
+
+      <Link
+        href={trend.href}
+        className="brand-focus flex-none rounded-full bg-accentPrimary px-3.5 py-2 text-[11.5px] font-bold text-onAccent transition hover:opacity-90"
+      >
+        {COPY.clientActivity.trendCta}
+      </Link>
+    </div>
+  )
+}
+
+/**
+ * "You earned $7.50 credit · @jade booked your Lived-in blonde · $30.00 banked
+ * total".
+ *
+ * The booker is named only when they are publicly addressable — the same PII
+ * rule every row above follows, and the answer to the question the design's own
+ * §7 left open.
+ *
+ * The "Use" pill renders ONLY when there is an open checkout to spend the
+ * balance on. An affordance that says "Use" and leads to nothing to use it on is
+ * a dead end, and an unspent balance is a perfectly ordinary steady state:
+ * redemption is a manual per-booking choice, so nothing here nags.
+ */
+function CreditBanner({ credit }: { credit: ClientActivityCredit }) {
+  return (
+    <div className="mb-5 flex items-center gap-3 rounded-[16px] border border-toneWarn/30 bg-toneWarn/8 px-4 py-3.5">
+      <div
+        className="grid h-10 w-10 flex-none place-items-center rounded-full bg-toneWarn/15"
+        aria-hidden="true"
+      >
+        <CircleDollarSign className="h-[19px] w-[19px] text-toneWarn" strokeWidth={2.2} />
+      </div>
+
+      <div className="min-w-0 flex-1">
+        <div className="text-[14px] font-bold leading-snug text-textPrimary">
+          {COPY.clientActivity.creditHeadlinePrefix}{' '}
+          <span className="text-toneWarn">{credit.earnedLabel}</span>{' '}
+          {COPY.clientActivity.creditHeadlineSuffix}
+        </div>
+        <div className="mt-0.5 text-[12.5px] text-textSecondary">
+          {credit.earnedDetail} · {credit.balanceLabel}{' '}
+          {COPY.clientActivity.creditBankedSuffix}
+        </div>
+      </div>
+
+      {credit.useHref ? (
+        <Link
+          href={credit.useHref}
+          className="brand-focus flex-none rounded-full border border-textPrimary/15 px-3 py-1.5 text-[11.5px] font-bold text-textSecondary transition hover:border-textPrimary/30 hover:text-textPrimary"
+        >
+          {COPY.clientActivity.creditCta}
+        </Link>
+      ) : null}
+    </div>
+  )
+}
+
 function ActivityRow({
   item,
   withDivider,
@@ -208,6 +322,8 @@ export default function ClientActivityFrame({
   items,
   unreadCount,
   markReadEventKeys,
+  trend = null,
+  credit = null,
   presentation = 'page',
   onDone,
 }: ClientActivityFrameProps) {
@@ -242,24 +358,40 @@ export default function ClientActivityFrame({
     />
   )
 
-  const body =
-    rows.length > 0 ? (
-      <div className="flex flex-col">
-        {rows.map((item, index) => (
-          <ActivityRow
-            key={item.id}
-            item={item}
-            withDivider={index !== lastIndex}
-          />
-        ))}
-      </div>
-    ) : (
-      <EmptyState
-        title={COPY.clientActivity.emptyTitle}
-        description={COPY.clientActivity.emptyBody}
-        action={{ label: COPY.clientActivity.emptyCta, href: '/looks' }}
-      />
-    )
+  // The two banners sit ABOVE the feed and outside its empty state: they are
+  // standings, not events. A client with no unread rows can still be trending
+  // and still hold a balance, and hiding either behind "No activity yet" would
+  // make a true thing invisible for an unrelated reason.
+  const banners =
+    trend || credit ? (
+      <>
+        {trend ? <TrendBanner trend={trend} /> : null}
+        {credit ? <CreditBanner credit={credit} /> : null}
+      </>
+    ) : null
+
+  const body = (
+    <>
+      {banners}
+      {rows.length > 0 ? (
+        <div className="flex flex-col">
+          {rows.map((item, index) => (
+            <ActivityRow
+              key={item.id}
+              item={item}
+              withDivider={index !== lastIndex}
+            />
+          ))}
+        </div>
+      ) : (
+        <EmptyState
+          title={COPY.clientActivity.emptyTitle}
+          description={COPY.clientActivity.emptyBody}
+          action={{ label: COPY.clientActivity.emptyCta, href: '/looks' }}
+        />
+      )}
+    </>
+  )
 
   if (presentation === 'sheet') {
     return (

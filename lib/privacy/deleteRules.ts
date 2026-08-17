@@ -575,6 +575,20 @@ export const DELETE_RULES: readonly DeleteRule[] = [
     where: (s) => (s.clientProfileId ? { clientId: s.clientProfileId } : null),
   }),
   deleteRule({
+    model: 'ClientLookTrendStat',
+    notes:
+      'Derived weekly momentum, one row per look that moved. Rebuilt hourly, but it names a look and a city, so it goes now rather than at the next job run.',
+    delegate: (db) => db.clientLookTrendStat,
+    where: (s) => (s.clientProfileId ? { clientId: s.clientProfileId } : null),
+  }),
+  deleteRule({
+    model: 'ClientCreditEntry',
+    notes:
+      "The client's platform-credit ledger, both directions. Unspendable once the account is gone; the professional-side settlement of any spend already happened at Stripe and is untouched by this.",
+    delegate: (db) => db.clientCreditEntry,
+    where: (s) => (s.clientProfileId ? { clientId: s.clientProfileId } : null),
+  }),
+  deleteRule({
     model: 'ClientFollow',
     notes: 'Both directions (follower and followed).',
     delegate: (db) => db.clientFollow,

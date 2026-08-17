@@ -65,6 +65,7 @@ function buildIdempotencyRequestBody(args: {
   clientId: string
   actorUserId: string
   tipAmount: string | null | undefined
+  applyCreatorCredit: boolean
 }): JsonObjectPayload {
   return {
     bookingId: args.bookingId,
@@ -74,6 +75,9 @@ function buildIdempotencyRequestBody(args: {
     method: PaymentMethod.STRIPE_CARD,
     tipAmountProvided: args.tipAmount !== undefined,
     tipAmount: args.tipAmount ?? null,
+    // Part of the hashed body: flipping the credit toggle produces a DIFFERENT
+    // charge, so it must not dedupe against the previous attempt's key.
+    applyCreatorCredit: args.applyCreatorCredit,
   }
 }
 
@@ -117,6 +121,11 @@ export async function POST(req: NextRequest, props: RouteContext) {
       return jsonFail(400, parsedTip.error)
     }
 
+    // Opt-in only — the client has to ask for their credit on THIS booking.
+    // Anything but an explicit `true` means "do not apply it", which the write
+    // boundary treats as a release of any balance a previous attempt was holding.
+    const applyCreatorCredit = body.applyCreatorCredit === true
+
     const native = isNativeCheckoutReturn(req)
 
     return await withRouteIdempotency<JsonObjectPayload>(
@@ -133,6 +142,7 @@ export async function POST(req: NextRequest, props: RouteContext) {
           clientId: auth.clientId,
           actorUserId,
           tipAmount: parsedTip.tipAmount,
+          applyCreatorCredit,
         }),
         messages: {
           missingKey: 'Missing idempotency key.',
@@ -148,15 +158,17 @@ export async function POST(req: NextRequest, props: RouteContext) {
           bookingId,
           clientId: auth.clientId,
           tipAmount: parsedTip.tipAmount,
+          applyCreatorCredit,
           requestId: null,
           idempotencyKey: idem.idempotencyKey,
         })
 
-        // K10-A closeout at zero: the client's deposit already covered the
-        // whole bill, so the write boundary settled the checkout PAID and there
-        // is nothing to charge. Opening a Stripe session here would either fail
-        // (Stripe has no $0 charge) or bill the deposit a second time.
-        if (prepared.outcome === 'SETTLED_BY_DEPOSIT') {
+        // K10-A closeout at zero: the deposit already paid, the credit the
+        // client applied, or the two together covered the whole bill, so the
+        // write boundary settled the checkout PAID and there is nothing to
+        // charge. Opening a Stripe session here would either fail (Stripe has no
+        // $0 charge) or bill money that has already moved a second time.
+        if (prepared.outcome === 'SETTLED_NOTHING_DUE') {
           const settledBody: JsonObjectPayload = {
             booking: {
               id: prepared.booking.id,
@@ -175,8 +187,13 @@ export async function POST(req: NextRequest, props: RouteContext) {
             // No session to send the client to — the null url is the signal to
             // every client (web and iOS) that there is nothing left to pay.
             stripeCheckout: { sessionId: null, url: null },
-            settledByDeposit: true,
+            // Which money closed the bill, said honestly. Credit wins the label
+            // whenever the client spent any, because that is the balance THEY
+            // will see go down; a deposit-only settle keeps the original wording.
+            settledByDeposit: prepared.creatorCreditCents <= 0,
+            settledByCredit: prepared.creatorCreditCents > 0,
             depositCreditCents: prepared.depositCreditCents,
+            creatorCreditCents: prepared.creatorCreditCents,
           } satisfies CheckoutStripeSessionResponseDTO
 
           return { status: 200, body: settledBody }
@@ -284,7 +301,9 @@ export async function POST(req: NextRequest, props: RouteContext) {
             url: nullableString(session.url),
           },
           settledByDeposit: false,
+          settledByCredit: false,
           depositCreditCents: prepared.depositCreditCents,
+          creatorCreditCents: prepared.creatorCreditCents,
         } satisfies CheckoutStripeSessionResponseDTO
 
         return { status: 200, body: responseBody }

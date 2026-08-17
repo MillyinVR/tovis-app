@@ -143,6 +143,31 @@ export const COPY = {
       // never claim there's “nothing else to do” while a rebook is waiting (PF6).
       awaitingConfirmationBodyWithRebook:
         'Once your pro confirms they received payment, your booking will close out. In the meantime, your pro suggested a time to rebook — you can book your next appointment now.',
+
+      // The platform-credit toggle. Composed as
+      // `Use my $30.00 credit on this booking`.
+      creditToggleLabel: 'Use my',
+      creditToggleSuffix: 'credit on this booking',
+      /**
+       * 🔴 States the two things a client would otherwise have to discover the
+       * hard way: the credit is theirs to spend whenever they like (it does not
+       * expire into this booking), and it is the platform's money, not a
+       * discount taken out of their pro's payment.
+       */
+      creditToggleHelp:
+        'Your credit is applied to this appointment only, and your pro is still paid in full. Leave it off to save it for another time.',
+      /** The summary line, when credit is coming off this bill. */
+      creditAppliedLabel: 'Credit applied',
+      /**
+       * Shown when the client HAS credit but is not on the card method, so the
+       * toggle is hidden. Composed as
+       * `You have $30.00 credit — choose card to use it on this booking.`
+       * Never shown for a pro who takes no card at all: that would be advice the
+       * client cannot act on.
+       */
+      creditNeedsCardPrefix: 'You have',
+      creditNeedsCardSuffix:
+        'credit — choose card as your payment method to use it on this booking.',
     },
 
     status: {
@@ -371,6 +396,33 @@ export const COPY = {
     emptyBody:
       'When someone follows you or engages with your looks, it’ll show up here.',
     emptyCta: 'Browse looks',
+
+    // ── the trending banner ──
+    /** Composed as `Your {look name} is trending`. */
+    trendHeadlinePrefix: 'Your',
+    trendHeadlineSuffix: 'is trending',
+    /** Composed as `+84 saves this week · top 3% in Brooklyn`. */
+    trendSaves: 'saves',
+    trendSaveOne: 'save',
+    trendThisWeek: 'this week',
+    trendInCity: 'in',
+    /** A look whose caption carries no name still has to be addressable. */
+    trendFallbackLookName: 'look',
+    trendCta: 'View',
+
+    // ── the credit banner ──
+    /** Composed as `You earned $7.50 credit`. */
+    creditHeadlinePrefix: 'You earned',
+    creditHeadlineSuffix: 'credit',
+    /** Composed as `@jade booked your Lived-in blonde`. */
+    creditBookedYour: 'booked your',
+    /** Used when the look behind the credit has since been removed. */
+    creditBookedOneOfYourLooks: 'booked one of your looks',
+    /** A booker who is not publicly addressable is never named. */
+    creditSomeone: 'Someone',
+    /** Composed as `$30.00 banked total`. */
+    creditBankedSuffix: 'banked total',
+    creditCta: 'Use',
   },
 
   /** The client's OWN dashboard, `/client/me`. */

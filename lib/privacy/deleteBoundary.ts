@@ -214,6 +214,23 @@ export const DELETE_BOUNDARY: Readonly<Record<string, DeleteDisposition>> = {
     reason:
       "The deleted client's derived creator standing. Nothing else references it, and leaving a tier row keyed to a removed profile would let a deleted account keep occupying a rank.",
   },
+  ClientLookTrendStat: {
+    status: 'DELETE',
+    reason:
+      "The deleted client's per-look weekly momentum. Wholly derived and rebuilt hourly, but the row names a look and a city and is keyed to the profile, so it goes with the account rather than waiting for the next job run to notice.",
+  },
+  // 🔴 SPENDABLE MONEY, and the only row in this registry where DELETE is the
+  // debatable answer. It is right for two reasons: the balance is worthless the
+  // moment the account it belongs to is gone (nothing can spend it), and the
+  // rows cascade from ClientProfile anyway. What must NOT be inferred from this
+  // is that the platform's own obligation disappears — an already-APPLIED spend
+  // has either been topped up to the pro or is still owed, and that is recorded
+  // on the pro's Stripe transfer, outside this subject's data.
+  ClientCreditEntry: {
+    status: 'DELETE',
+    reason:
+      "The deleted client's credit ledger: what they earned when others booked their looks, and what they spent. Unspendable once the account is gone, and it names the bookings and looks behind each movement. The professional-side settlement of any spend already happened at Stripe and is unaffected.",
+  },
   Board: {
     status: 'DELETE',
     reason: "The client's own saved boards; cascades to their saved items.",

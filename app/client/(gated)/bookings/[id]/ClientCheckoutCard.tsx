@@ -73,6 +73,16 @@ type Props = {
    * server collects cannot drift. 0 when no deposit applies.
    */
   depositCreditCents?: number | null
+  /**
+   * The client's spendable platform credit, in CENTS, already excluding any
+   * reservation this booking's own checkout is holding.
+   *
+   * Absent / 0 renders no toggle at all — an "apply my credit" switch for a
+   * client with no credit is a control that can only ever disappoint. The public
+   * (token-authenticated) aftercare page never passes it: spending a balance is
+   * not something a link out of an email may do on someone's behalf.
+   */
+  creatorCreditBalanceCents?: number | null
 
   acceptedMethods: AcceptedMethod[]
 
@@ -282,6 +292,7 @@ async function submitCheckout(args: {
 async function createStripeCheckoutSession(args: {
   endpoints: ClientCheckoutEndpoints
   tipAmount: string
+  applyCreatorCredit: boolean
 }): Promise<StripeSessionResponse> {
   const idempotencyKey = buildClientIdempotencyKey({
     scope: args.endpoints.stripeIdempotencyScope,
@@ -289,8 +300,10 @@ async function createStripeCheckoutSession(args: {
     action: 'create-stripe-session',
     // Re-initiating with a changed tip (e.g. after returning from Stripe)
     // is a distinct body under one key; nonce on the tip avoids a 409 while
-    // an identical re-initiate still dedupes.
-    nonce: args.tipAmount,
+    // an identical re-initiate still dedupes. The credit toggle rides the same
+    // nonce for the same reason: flipping it is a DIFFERENT charge, and without
+    // it the second attempt would 409 on a body-hash conflict.
+    nonce: `${args.tipAmount}|${args.applyCreatorCredit ? 'credit' : 'nocredit'}`,
   })
 
   const response = await fetch(args.endpoints.stripeSessionUrl, {
@@ -301,6 +314,7 @@ async function createStripeCheckoutSession(args: {
     },
     body: JSON.stringify({
       tipAmount: args.tipAmount,
+      applyCreatorCredit: args.applyCreatorCredit,
     }),
   })
 
@@ -483,6 +497,52 @@ export default function ClientCheckoutCard(props: Props) {
     [props.depositCreditCents],
   )
 
+  // The client's spendable platform credit, in dollars.
+  const creditBalance = useMemo(
+    () => Math.max(0, (props.creatorCreditBalanceCents ?? 0) / 100),
+    [props.creatorCreditBalanceCents],
+  )
+
+  // 🔴 Credit is offered on the CARD path only. The pro is made whole by a
+  // platform→pro Stripe transfer (lib/credit/creditSettlement.ts), and that rail
+  // only exists for a pro with a connected account taking a card charge. Letting
+  // a client hand their Venmo-paying pro less cash "because I had credit" would
+  // take the discount straight out of that pro's pocket with nothing to put it
+  // back — the one thing platform-funded is defined not to do.
+  const creditOffered = creditBalance > 0 && selectedMethodIsStripe
+
+  /**
+   * The client HAS credit, this pro does take card, but they are currently on a
+   * different method — so the toggle is (correctly) hidden.
+   *
+   * 🔴 Found by looking: without this, a client who followed "Use" from the
+   * activity banner arrived at a checkout with no mention of the balance
+   * anywhere, and would have had to change the payment dropdown to discover the
+   * feature existed at all. Says nothing when the pro takes no card, because
+   * "pay by card" would then be advice they cannot act on.
+   */
+  const creditNeedsCard =
+    creditBalance > 0 &&
+    !selectedMethodIsStripe &&
+    props.acceptedMethods.some((method) => method.key === STRIPE_METHOD_KEY)
+
+  const [applyCredit, setApplyCredit] = useState(false)
+
+  // What the toggle actually takes off THIS bill: never more than is left after
+  // the deposit, and never more than the balance. The server re-derives the same
+  // cap inside the locked transaction — this is the quote, not the authority.
+  const creditApplied = useMemo(() => {
+    if (!creditOffered || !applyCredit) return 0
+    const afterDeposit = Math.max(0, livePreviewTotal - depositCredit)
+    return Math.min(creditBalance, afterDeposit)
+  }, [
+    creditOffered,
+    applyCredit,
+    creditBalance,
+    livePreviewTotal,
+    depositCredit,
+  ])
+
   // 🔴 What the client actually still owes. Everything the client is shown or
   // handed — the Amount-due row, the CTA, and the pre-filled Venmo/Zelle
   // deep-link amount — reads THIS, never `livePreviewTotal`. Quoting the full
@@ -490,8 +550,8 @@ export default function ClientCheckoutCard(props: Props) {
   // deposit to send it a second time, and there is no charge object to correct
   // it afterwards: they just send the money.
   const amountDue = useMemo(
-    () => Math.max(0, livePreviewTotal - depositCredit),
-    [livePreviewTotal, depositCredit],
+    () => Math.max(0, livePreviewTotal - depositCredit - creditApplied),
+    [livePreviewTotal, depositCredit, creditApplied],
   )
   const payAction = useMemo(
     () =>
@@ -606,6 +666,10 @@ export default function ClientCheckoutCard(props: Props) {
         void createStripeCheckoutSession({
           endpoints,
           tipAmount: tipAmount.toFixed(2),
+          // Sent on every attempt, false included: a `false` is a RELEASE
+          // server-side, so a client who turns the toggle back off gets their
+          // balance freed instead of leaving it held against this booking.
+          applyCreatorCredit: creditOffered && applyCredit,
         })
           .then((data) => {
             const checkoutUrl = data.stripeCheckout?.url?.trim()
@@ -763,18 +827,70 @@ export default function ClientCheckoutCard(props: Props) {
             value={formatMoneyFromUnknown(livePreviewTotal) || '$0.00'}
           />
           {depositCredit > 0 ? (
-            <>
-              <SummaryRow
-                label="Deposit already paid"
-                value={`−${formatMoneyFromUnknown(depositCredit) || '$0.00'}`}
-              />
-              <SummaryRow
-                label="Amount due"
-                value={formatMoneyFromUnknown(amountDue) || '$0.00'}
-              />
-            </>
+            <SummaryRow
+              label="Deposit already paid"
+              value={`−${formatMoneyFromUnknown(depositCredit) || '$0.00'}`}
+            />
+          ) : null}
+          {creditApplied > 0 ? (
+            <SummaryRow
+              label={COPY.bookings.checkout.creditAppliedLabel}
+              value={`−${formatMoneyFromUnknown(creditApplied) || '$0.00'}`}
+            />
+          ) : null}
+          {/* The "Amount due" row exists to explain a total the client is NOT
+              being charged. With nothing coming off the bill it would just
+              restate the line above it. */}
+          {depositCredit > 0 || creditApplied > 0 ? (
+            <SummaryRow
+              label="Amount due"
+              value={formatMoneyFromUnknown(amountDue) || '$0.00'}
+            />
           ) : null}
         </div>
+
+        {/*
+          The credit toggle. Rendered only when there is real balance AND a card
+          is selected — see `creditOffered`. Off by default: Tori's call is a
+          MANUAL per-booking choice, so nothing here spends a balance for the
+          client, and an untouched checkout charges the full bill exactly as it
+          did before this shipped.
+        */}
+        {creditNeedsCard ? (
+          <div className="mt-3 rounded-card border border-toneWarn/30 bg-toneWarn/8 p-3 text-[12px] font-semibold text-textSecondary">
+            {COPY.bookings.checkout.creditNeedsCardPrefix}{' '}
+            <span className="font-black text-textPrimary">
+              {formatMoneyFromUnknown(creditBalance) || '$0.00'}
+            </span>{' '}
+            {COPY.bookings.checkout.creditNeedsCardSuffix}
+          </div>
+        ) : null}
+
+        {creditOffered ? (
+          <label className="mt-3 flex cursor-pointer items-start gap-3 rounded-card border border-toneWarn/30 bg-toneWarn/8 p-3">
+            <input
+              type="checkbox"
+              checked={applyCredit}
+              disabled={controlsFrozen || isPending}
+              onChange={(event) => {
+                setError(null)
+                setSuccess(null)
+                setApplyCredit(event.target.checked)
+              }}
+              className="mt-0.5 h-4 w-4 flex-none accent-toneWarn disabled:cursor-not-allowed disabled:opacity-50"
+            />
+            <span className="min-w-0">
+              <span className="block text-[12px] font-black text-textPrimary">
+                {COPY.bookings.checkout.creditToggleLabel}{' '}
+                {formatMoneyFromUnknown(creditBalance) || '$0.00'}{' '}
+                {COPY.bookings.checkout.creditToggleSuffix}
+              </span>
+              <span className="mt-1 block text-[12px] font-semibold text-textSecondary">
+                {COPY.bookings.checkout.creditToggleHelp}
+              </span>
+            </span>
+          </label>
+        ) : null}
       </div>
 
       <div className="rounded-card border border-textPrimary/10 bg-bgPrimary p-3">

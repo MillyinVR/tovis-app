@@ -226,6 +226,17 @@ export type ClientAftercareDetailDTO = {
    * When false the native + web pickers render read-only.
    */
   checkoutProductsEditable: boolean
+  /**
+   * The client's spendable platform-credit balance, in CENTS, already
+   * discounting any reservation THIS booking's own checkout is holding.
+   *
+   * 0 renders no toggle at all — an "apply my credit" switch for a client with
+   * no credit is a control that can only disappoint. It rides this per-booking
+   * read rather than the booking list DTO because the balance is a property of
+   * the CLIENT, not of a booking, and the list carries up to 300 rows that would
+   * each repeat the same number.
+   */
+  creatorCreditBalanceCents: number
 }
 
 /** A recommendation row as selected from the sent aftercare summary. */
@@ -340,6 +351,12 @@ export function buildClientAftercareDetailDTO(input: {
       createdAt: Date
     }>
   } | null
+  /**
+   * The client's spendable platform credit in cents, already excluding this
+   * booking's own live reservation. Resolved by the caller (it is a query, and
+   * this builder is a pure transform).
+   */
+  creatorCreditBalanceCents: number
 }): ClientAftercareDetailDTO {
   const aftercare = input.aftercare
     ? {
@@ -421,5 +438,9 @@ export function buildClientAftercareDetailDTO(input: {
       paymentCollectedAt: input.paymentCollectedAt,
       aftercareSentAt: input.aftercare?.sentToClientAt ?? null,
     }),
+    // Floored here rather than trusted: a negative balance is not a thing the
+    // ledger can produce, and a negative on the wire would render as a control
+    // offering to take money away.
+    creatorCreditBalanceCents: Math.max(0, input.creatorCreditBalanceCents),
   }
 }

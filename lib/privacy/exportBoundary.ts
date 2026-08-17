@@ -310,6 +310,20 @@ export const EXPORT_BOUNDARY: Readonly<Record<string, ExportDisposition>> = {
     reason:
       'Derived aggregate of already-dispositioned rows (the client’s public looks, their saves, and bookings attributed to them); recomputed by a job and surfaced live on the profile rather than stored about the person.',
   },
+  // Same reasoning as ClientCreatorStat directly above: wholly derived, rebuilt
+  // hourly from the client's own looks and other people's saves — both already
+  // dispositioned — and it describes a trailing seven days that will not be true
+  // by the time an export is read.
+  ClientLookTrendStat: {
+    status: 'OMITTED',
+    reason:
+      'Derived weekly aggregate of already-dispositioned rows (the client’s public looks and the saves on them), rebuilt hourly and surfaced live; a snapshot of a seven-day window would be stale before it was read.',
+  },
+  // 🔴 NOT derived, and NOT omissible on the reasoning above: this is money the
+  // client holds and money they spent. It is exactly what a person asking for
+  // "my data" would expect a balance to be backed by, so it is exported rather
+  // than reasoned away.
+  ClientCreditEntry: { status: 'EXPORTED', keys: ['clientCreditEntries'] },
   ClientFollow: { status: 'PENDING', note: PENDING_NOTE },
   ClientIntentEvent: { status: 'PENDING', note: PENDING_NOTE },
   ClientNotificationPreference: { status: 'PENDING', note: PENDING_NOTE },
