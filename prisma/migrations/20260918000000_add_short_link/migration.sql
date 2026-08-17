@@ -29,3 +29,8 @@ CREATE UNIQUE INDEX "ShortLink_createdForType_createdForId_key"
 
 -- The expiry sweep / early-refuse check on resolve.
 CREATE INDEX "ShortLink_expiresAt_idx" ON "ShortLink"("expiresAt");
+
+-- Deny-all lock (no policies), matching every other app table since
+-- 20260901000000_enable_rls_and_pin_function_search_path — only the
+-- bypassing service role (this app's own Prisma connection) can read/write.
+ALTER TABLE "ShortLink" ENABLE ROW LEVEL SECURITY;
