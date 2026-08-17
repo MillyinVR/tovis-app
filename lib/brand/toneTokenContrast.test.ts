@@ -144,13 +144,13 @@ describe('status tone tokens', () => {
   // gold had to become readable. They are separate fields on BrandTokens and
   // they are separate on purpose: `colorAmber` drives --tone-warn/--tone-pending
   // and must clear AA as text; `microAccent` drives --micro-accent/--gold, is
-  // the brand's second colour, and raising it is a visual decision Tori has not
-  // made. Re-unifying them would silently undo the fix, so pin the split.
+  // the brand's second colour. Both are now raised, to DIFFERENT values, so
+  // re-unifying them would silently undo either fix — pin the split.
   it('splits the status gold from the brand gold in light mode', () => {
     const { colorAmber, microAccent } = tovisBrand.tokensByMode.light.colors
 
     expect(colorAmber).not.toBe(microAccent)
-    expect(microAccent).toBe('183 131 31')
+    expect(microAccent).toBe('117 84 21')
   })
 
   it('leaves them identical in dark, where both already clear AA', () => {
@@ -177,7 +177,7 @@ describe('status tone tokens', () => {
     }
 
     // and the brand gold did NOT move with them
-    expect(light['--micro-accent']).toBe('183 131 31')
+    expect(light['--micro-accent']).toBe('117 84 21')
     expect(light['--tone-warn']).not.toBe(light['--micro-accent'])
   })
 

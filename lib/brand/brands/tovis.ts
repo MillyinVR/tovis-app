@@ -88,12 +88,21 @@ export const tovisBrand: BrandConfig = createBrandConfig({
       // fixed. This pair keeps a 1.47 step, against today's 1.51.
       accentPrimary: '10 115 99', // #0A7363 — paper 5.06, band 4.71, white-on 5.76
       accentPrimaryHover: '8 87 75', // #08574B — paper 7.45, white-on 8.48
-      // The BRAND gold (→ --micro-accent / --gold). Deliberately NOT moved with
-      // `colorAmber` below, which used to share this exact triplet: 2.93 on
-      // paper is below AA, but this token is the brand's second colour and
-      // raising it is a visual decision, not a contrast fix. Its 42 text sites
-      // are a separate call — see the register's role count.
-      microAccent: '183 131 31', // #B7831F gold-ink — 🔴 2.93 on paper, TEXT sites still below AA
+      // The BRAND gold (→ --micro-accent / --gold). Was #B7831F, 2.93 on paper
+      // and below AA on all 42 TEXT sites (the governing role — 371 of 373
+      // tone-token text sites across the app run at full opacity). ✅ Raised
+      // [approved by Tori 2026-08-16], same rule #935 used for `colorAmber`:
+      // nearest AA-compliant shade preserving this token's own hue (39°).
+      // Unlike colorAmber's fix (which jumped to full saturation), this one
+      // holds saturation within 1.5% of the original — Δhue 0.1°, ΔL -14.9% —
+      // so the two golds stay visually distinct rather than merely
+      // numerically unequal. Worst reading 4.92 (inside its own /10 notice on
+      // the section band); the `/15` tint `ProPortfolioTile` actually uses is
+      // 4.60. Also checked (new, `microaccentcandidates.mjs`): the ONE site
+      // that paints microAccent as a SOLID fill with real text on it —
+      // `SearchMapClient`'s filter-count badge (`bg-gold text-onAccent`, a 9px
+      // digit) — 6.92, clear.
+      microAccent: '117 84 21', // #755415 gold-ink — paper 6.07, band notice 4.92
       onAccent: '255 255 255', // white reads on light-mode teal
 
       colorAcid: '91 60 214', // #5B3CD6 iris (light)
@@ -121,10 +130,10 @@ export const tovisBrand: BrandConfig = createBrandConfig({
       // 🔴 `colorAmber` and `microAccent` carried the same triplet but are
       // SEPARATE tokens: this one drives --tone-warn / --tone-pending / --amber,
       // microAccent drives --micro-accent / --gold. They are split here on
-      // purpose. The status gold has to be readable as text; the BRAND gold is a
-      // visual decision and is deliberately left at #B7831F. Same hue (39°) as
-      // the brand gold, at nearly double its chroma — the most saturated amber
-      // that still clears AA inside its own tint.
+      // purpose — both are now raised, to DIFFERENT values (see microAccent's
+      // own comment above), so they stay visually distinct. This one is the
+      // most saturated amber at their shared hue (39°) that still clears AA
+      // inside its own tint.
       colorAmber: '130 84 0', // #825400 status amber (light) — paper 5.73, notice 4.97
     },
   },
