@@ -83,13 +83,42 @@ export const tovisBrand: BrandConfig = createBrandConfig({
       // fixed. This pair keeps a 1.47 step, against today's 1.51.
       accentPrimary: '10 115 99', // #0A7363 — paper 5.06, band 4.71, white-on 5.76
       accentPrimaryHover: '8 87 75', // #08574B — paper 7.45, white-on 8.48
-      microAccent: '183 131 31', // #B7831F gold-ink (readable gold)
+      // The BRAND gold (→ --micro-accent / --gold). Deliberately NOT moved with
+      // `colorAmber` below, which used to share this exact triplet: 2.93 on
+      // paper is below AA, but this token is the brand's second colour and
+      // raising it is a visual decision, not a contrast fix. Its 42 text sites
+      // are a separate call — see the register's role count.
+      microAccent: '183 131 31', // #B7831F gold-ink — 🔴 2.93 on paper, TEXT sites still below AA
       onAccent: '255 255 255', // white reads on light-mode teal
 
       colorAcid: '91 60 214', // #5B3CD6 iris (light)
       colorFern: '11 111 102', // #0B6F66 emerald (light)
-      colorEmber: '225 29 84', // #E11D54 like (light)
-      colorAmber: '183 131 31', // #B7831F gold-ink (readable on paper — matches microAccent; drives warn/pending tones)
+      // 🔴 Both were below AA as TEXT, which is the role they mostly play. The
+      // role count (rolecount.mjs, on 72def5a7) found ember painting 238 text
+      // sites against 277 fills and borders, and the gold 135 against 203 — and
+      // 371 of those 373 text sites are at FULL opacity, while the fills are
+      // `/10` and the borders `/20`–`/50`. So the token's own value is the
+      // governing number for exactly the role that was failing.
+      //
+      // ⚠️ Measure the PATTERN, not the token on paper. The app's canonical
+      // notice is `bg-toneX/10 text-toneX`, and in light mode that tint LIGHTENS
+      // the box: ember read 4.09 on paper but 3.52 inside its own notice, across
+      // 62 call sites in 46 files. Both values below clear 4.5:1 on paper, on
+      // the section band, on a card AND inside the tint on all of them.
+      //
+      // ⚠️ `--like` is `var(--color-ember)`, so the ♥ moves with this. On the
+      // looks feed that is invisible — `(main)/looks/page.tsx` pins the subtree
+      // `data-mode="dark"` — but the hearts on `/professionals/[id]` do darken
+      // in light mode. They are icons, so they owe 3:1, which both values clear.
+      colorEmber: '180 23 67', // #B41743 like (light) — paper 5.86, notice 4.96
+      // 🔴 `colorAmber` and `microAccent` carried the same triplet but are
+      // SEPARATE tokens: this one drives --tone-warn / --tone-pending / --amber,
+      // microAccent drives --micro-accent / --gold. They are split here on
+      // purpose. The status gold has to be readable as text; the BRAND gold is a
+      // visual decision and is deliberately left at #B7831F. Same hue (39°) as
+      // the brand gold, at nearly double its chroma — the most saturated amber
+      // that still clears AA inside its own tint.
+      colorAmber: '130 84 0', // #825400 status amber (light) — paper 5.73, notice 4.97
     },
   },
 })

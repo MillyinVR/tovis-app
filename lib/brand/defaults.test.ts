@@ -10,36 +10,15 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { CALENDAR_SWATCH_IDS } from '@/lib/calendar/eventColor'
+import {
+  NON_TEXT_CONTRAST_FLOOR,
+  channels,
+  contrastRatio,
+  relativeLuminance,
+} from './contrast'
 import { DEFAULT_CALENDAR_SWATCHES } from './defaults'
 import { tovisBrand } from './brands/tovis'
-import type { BrandMode, RgbTriplet } from './types'
-
-function channels(triplet: RgbTriplet): number[] {
-  return triplet.split(' ').map((value) => Number(value))
-}
-
-const WCAG_WEIGHTS = [0.2126, 0.7152, 0.0722]
-
-function relativeLuminance(triplet: RgbTriplet): number {
-  return channels(triplet).reduce((total, value, index) => {
-    const channel = value / 255
-    const linear =
-      channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
-
-    return total + linear * (WCAG_WEIGHTS[index] ?? 0)
-  }, 0)
-}
-
-function contrastRatio(a: RgbTriplet, b: RgbTriplet): number {
-  const la = relativeLuminance(a)
-  const lb = relativeLuminance(b)
-  const [hi, lo] = la > lb ? [la, lb] : [lb, la]
-
-  return (hi + 0.05) / (lo + 0.05)
-}
-
-/** WCAG 2.1 SC 1.4.11 — non-text contrast. The stripe carries meaning. */
-const NON_TEXT_CONTRAST_FLOOR = 3
+import type { BrandMode } from './types'
 
 const MODES: BrandMode[] = ['dark', 'light']
 
