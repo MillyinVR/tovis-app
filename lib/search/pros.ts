@@ -47,6 +47,7 @@ import { membershipEnforcementEnabled } from '@/lib/membership/enforcement'
 import { entitledStatuses, planKeysGranting } from '@/lib/pro/entitlements'
 import { prismaRead } from '@/lib/prisma'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
+import { formatProfessionLabel } from '@/lib/profiles/publicProfileFormatting'
 import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
 import { searchIndexVisibilitySql } from '@/lib/tenant'
 import type { TenantContext } from '@/lib/tenant'
@@ -560,6 +561,7 @@ export async function searchPros(
       }),
     handle: entry.row.handle,
     professionType: entry.row.professionType,
+    professionLabel: formatProfessionLabel(entry.row.professionType),
     avatarUrl: entry.row.avatarUrl,
     locationLabel: buildDiscoveryLocationLabel({
       location: entry.closest,

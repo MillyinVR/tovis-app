@@ -22,12 +22,16 @@ import { prisma } from '@/lib/prisma'
 export const dynamic = 'force-dynamic'
 
 const PUBLIC_BIO_MAX = 280
+// A city label, not an address — long enough for "Saint John's, NL" and short
+// enough that it cannot become a street.
+const PUBLIC_CITY_MAX = 80
 
 const clientPublicProfileSelect = {
   id: true,
   handle: true,
   isPublicProfile: true,
   publicBio: true,
+  publicCity: true,
 } satisfies Prisma.ClientProfileSelect
 
 function prismaErrorToResponse(e: unknown): Response | null {
@@ -102,6 +106,22 @@ export async function PATCH(req: Request) {
       nextBio = trimmed ? trimmed : null
     }
 
+    // Public city (optional; empty string clears it).
+    //
+    // This column was rendered in the standing line on /u/[handle] from the day
+    // it shipped, and the ONLY thing that had ever written it was the demo seed
+    // — so it displayed a value no client could set, change or remove. Opt-in by
+    // construction: null until the client types one.
+    const cityRaw = typeof body.publicCity === 'string' ? body.publicCity : undefined
+    let nextCity: string | null | undefined
+    if (cityRaw !== undefined) {
+      const trimmed = cityRaw.trim()
+      if (trimmed.length > PUBLIC_CITY_MAX) {
+        return jsonFail(400, `City must be ${PUBLIC_CITY_MAX} characters or fewer.`)
+      }
+      nextCity = trimmed ? trimmed : null
+    }
+
     // Public toggle.
     const wantsPublicUpdate = typeof body.isPublicProfile === 'boolean'
     const nextIsPublic = wantsPublicUpdate
@@ -128,6 +148,7 @@ export async function PATCH(req: Request) {
         ? { handle: nextHandle, handleNormalized: nextHandleNormalized }
         : {}),
       ...(nextBio !== undefined ? { publicBio: nextBio } : {}),
+      ...(nextCity !== undefined ? { publicCity: nextCity } : {}),
       ...(nextIsPublic !== undefined ? { isPublicProfile: nextIsPublic } : {}),
     }
 

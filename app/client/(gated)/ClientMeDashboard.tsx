@@ -2,8 +2,12 @@
 'use client'
 
 import Link from 'next/link'
-import { useMemo, useState } from 'react'
-import { Bell, Settings } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { useCallback, useMemo, useState } from 'react'
+import { Bell, Camera, Settings } from 'lucide-react'
+
+import { COPY } from '@/lib/copy'
+import { useProFollow } from '@/app/(main)/looks/_components/useProFollow'
 
 import { cn } from '@/lib/utils'
 import type { BoardVisibility } from '@prisma/client'
@@ -51,6 +55,7 @@ type UpcomingNotificationBooking = {
   scheduledFor: string
   timeZone: string | null
   totalLabel: string | null
+  heroImageUrl: string | null
 } | null
 
 type BoardCardItem = {
@@ -189,6 +194,52 @@ function ProfileAvatar(props: {
   )
 }
 
+/**
+ * The photo standing for a booking — the after-shot, or the look it was booked
+ * from (resolved server-side by `loadBookingHeroImageUrls`).
+ *
+ * With no image it renders a plain branded tile and NOTHING ELSE. It used to
+ * print the visit's label and title inside the tile, which the card then printed
+ * again immediately underneath — every photo-less visit read "UPCOMING /
+ * Balayage" followed by "Balayage / UPCOMING". The caption belongs to the card;
+ * this is only ever the picture.
+ */
+function BookingHeroImage(props: {
+  src: string | null
+  alt: string
+  className: string
+  width: number
+  height: number
+}) {
+  // A visit genuinely can have no photo — an upcoming booking made straight from
+  // a service rather than from a look has neither an after-shot nor a source
+  // look. A bare panel reads as a broken image, so say "no photo yet" with a
+  // glyph rather than with words the card is about to print anyway.
+  if (!props.src) {
+    return (
+      <div
+        className={cn('grid place-items-center bg-bgSecondary', props.className)}
+        aria-hidden="true"
+      >
+        <Camera className="h-5 w-5 text-textSecondary/40" strokeWidth={1.8} />
+      </div>
+    )
+  }
+
+  return (
+    <div className={cn('overflow-hidden bg-bgSecondary', props.className)}>
+      <RemoteImage
+        src={props.src}
+        alt={props.alt}
+        className="h-full w-full object-cover"
+        loading="lazy"
+        width={props.width}
+        height={props.height}
+      />
+    </div>
+  )
+}
+
 function Stat(props: { label: string; value: number }) {
   return (
     <div className="min-w-[54px]">
@@ -282,7 +333,13 @@ function UpcomingCard(props: {
             underline={false}
             className="pointer-events-auto shrink-0 rounded-[16px]"
           >
-            <div className="h-[58px] w-[58px] shrink-0 rounded-[16px] border border-textPrimary/10 bg-bgSecondary" />
+            <BookingHeroImage
+              src={booking.heroImageUrl}
+              alt={booking.title}
+              className="h-[58px] w-[58px] shrink-0 rounded-[16px] border border-textPrimary/10"
+              width={116}
+              height={116}
+            />
           </ProProfileLink>
 
           <div className="min-w-0 flex-1">
@@ -344,35 +401,90 @@ function BoardCard(props: { board: BoardCardItem }) {
   )
 }
 
+/**
+ * The Following/Follow pill on a row of the client's own Following list.
+ *
+ * There was no way to unfollow from the one screen that lists who you follow —
+ * you had to open the pro's profile to find the control. Backed by the shared
+ * `useProFollow` (same hook, same endpoint as the profile hero and the feed), so
+ * there is one follow implementation rather than a third.
+ *
+ * `initialFollowing` is true because every row on THIS list is, by definition, a
+ * pro the viewer follows — without it each row would GET its own state on mount.
+ */
+function FollowingToggle(props: { professionalId: string; name: string }) {
+  const router = useRouter()
+
+  const onRequireAuth = useCallback(() => {
+    router.push('/login?from=/client/me')
+  }, [router])
+
+  const { following, toggle } = useProFollow({
+    professionalId: props.professionalId,
+    onRequireAuth,
+    initialFollowing: true,
+  })
+
+  return (
+    <button
+      type="button"
+      aria-pressed={following}
+      aria-label={
+        following ? `Unfollow ${props.name}` : `Follow ${props.name}`
+      }
+      onClick={(event) => {
+        // The row behind this is a link; without both, tapping the pill would
+        // open the pro instead of unfollowing them.
+        event.preventDefault()
+        event.stopPropagation()
+        toggle()
+      }}
+      className={cn(
+        'tap-target-keep brand-focus shrink-0 rounded-full border px-3 py-1.5 text-[11.5px] font-bold transition',
+        following
+          ? 'border-textPrimary/15 text-textSecondary hover:border-textPrimary/30 hover:text-textPrimary'
+          : 'border-accentPrimary/40 bg-accentPrimary/10 text-accentPrimary',
+      )}
+    >
+      {following ? COPY.publicProfile.following : COPY.publicProfile.follow}
+    </button>
+  )
+}
+
 function FollowingCard(props: { item: FollowingItem }) {
   const { item } = props
 
   return (
-    <Link
-      href={item.href}
-      className="flex items-center gap-3 rounded-[22px] border border-textPrimary/10 px-3 py-3 transition hover:border-textPrimary/20"
-    >
-      <ProfileAvatar
-        displayName={item.name}
-        avatarUrl={item.avatarUrl}
-        sizeClassName="h-14 w-14"
-        textClassName="text-lg"
-      />
+    <div className="relative flex items-center gap-3 rounded-[22px] border border-textPrimary/10 px-3 py-3 transition hover:border-textPrimary/20">
+      <CardLinkOverlay href={item.href} label={item.name} />
 
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-[14px] font-black text-textPrimary">
-          {item.name}
-        </div>
-        {item.handle ? (
-          <div className="mt-1 text-[12px] text-textSecondary">@{item.handle}</div>
-        ) : null}
-        {item.subtitle ? (
-          <div className="mt-1 truncate text-[12px] text-textSecondary">
-            {item.subtitle}
+      <div className="pointer-events-none relative z-10 flex w-full items-center gap-3">
+        <ProfileAvatar
+          displayName={item.name}
+          avatarUrl={item.avatarUrl}
+          sizeClassName="h-14 w-14"
+          textClassName="text-lg"
+        />
+
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[14px] font-black text-textPrimary">
+            {item.name}
           </div>
-        ) : null}
+          {item.handle ? (
+            <div className="mt-1 text-[12px] text-textSecondary">@{item.handle}</div>
+          ) : null}
+          {item.subtitle ? (
+            <div className="mt-1 truncate text-[12px] text-textSecondary">
+              {item.subtitle}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="pointer-events-auto">
+          <FollowingToggle professionalId={item.id} name={item.name} />
+        </div>
       </div>
-    </Link>
+    </div>
   )
 }
 
@@ -382,31 +494,13 @@ function HistoryCard(props: { item: HistoryItem }) {
   return (
     <div className="block">
       <Link href={item.href} className="block">
-        <div className="overflow-hidden rounded-[24px] border border-textPrimary/10">
-          <div className="aspect-[1.18/1] bg-bgSecondary">
-            {item.heroImageUrl ? (
-              <RemoteImage
-                src={item.heroImageUrl}
-                alt={item.title}
-                className="h-full w-full object-cover"
-                loading="lazy"
-                width={472}
-                height={400}
-              />
-            ) : (
-              <div className="grid h-full place-items-center px-5 text-center">
-                <div>
-                  <div className="text-[11px] font-black tracking-[0.12em] text-textSecondary">
-                    {item.label}
-                  </div>
-                  <div className="mt-2 text-[15px] font-black text-textPrimary">
-                    {item.title}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+        <BookingHeroImage
+          src={item.heroImageUrl}
+          alt={item.title}
+          className="aspect-[1.18/1] rounded-[24px] border border-textPrimary/10"
+          width={472}
+          height={400}
+        />
 
         <div className="mt-3">
           <div className="truncate text-[14px] font-black text-textPrimary">

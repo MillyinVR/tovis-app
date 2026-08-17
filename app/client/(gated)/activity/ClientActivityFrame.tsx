@@ -16,6 +16,7 @@ import {
 } from 'lucide-react'
 
 import EmptyState from '@/app/_components/boundaries/EmptyState'
+import { COPY } from '@/lib/copy'
 import { formatRelativeTimeAgo } from '@/lib/time'
 
 import ClientMarkAllReadButton from '../_components/ClientMarkAllReadButton'
@@ -208,8 +209,8 @@ export default function ClientActivityFrame({
 
   return (
     <ClientPage
-      eyebrow="Activity"
-      title="Who engaged with you"
+      eyebrow={COPY.clientActivity.eyebrow}
+      title={COPY.clientActivity.title}
       back={{ href: '/client', label: 'Home' }}
       action={
         <ClientMarkAllReadButton
@@ -235,9 +236,9 @@ export default function ClientActivityFrame({
         </div>
       ) : (
         <EmptyState
-          title="No activity yet"
-          description="When someone follows you or engages with your looks, it’ll show up here."
-          action={{ label: 'Browse looks', href: '/looks' }}
+          title={COPY.clientActivity.emptyTitle}
+          description={COPY.clientActivity.emptyBody}
+          action={{ label: COPY.clientActivity.emptyCta, href: '/looks' }}
         />
       )}
     </ClientPage>

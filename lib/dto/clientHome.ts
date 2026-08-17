@@ -11,6 +11,7 @@ import { mapPublicIncentiveDto } from '@/lib/lastMinute/openingDto'
 import { resolveViralCoverImage } from '@/lib/viralRequests/contracts'
 import { pickRecipientTierPlan } from '@/lib/lastMinute/pickTierPlan'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
+import { formatProfessionLabel } from '@/lib/profiles/publicProfileFormatting'
 import type { BookingBeforeAfterThumbs } from '@/lib/media/bookingBeforeAfter'
 import type {
   ClientHomeAftercare,
@@ -183,6 +184,8 @@ export type ClientHomeLastMinuteInviteDTO = {
       handle: string | null
       avatarUrl: string | null
       professionType: string | null
+      /** Human label for {@link professionType} — see LooksProProfilePreviewDto. */
+      professionLabel: string
       location: string | null
       timeZone: string | null
     }
@@ -293,6 +296,8 @@ export type ClientHomeFavoriteProDTO = {
     handle: string | null
     avatarUrl: string | null
     professionType: string | null
+    /** Human label for {@link professionType} — see LooksProProfilePreviewDto. */
+    professionLabel: string
     location: string | null
   } | null
 }
@@ -520,6 +525,9 @@ function serializeInvite(
         handle: opening.professional.handle ?? null,
         avatarUrl: opening.professional.avatarUrl ?? null,
         professionType: opening.professional.professionType ?? null,
+        professionLabel: formatProfessionLabel(
+          opening.professional.professionType ?? null,
+        ),
         location: opening.professional.location ?? null,
         timeZone: opening.professional.timeZone ?? null,
       },
@@ -636,6 +644,9 @@ function serializeFavoritePro(
           handle: fav.professional.handle ?? null,
           avatarUrl: fav.professional.avatarUrl ?? null,
           professionType: fav.professional.professionType ?? null,
+          professionLabel: formatProfessionLabel(
+            fav.professional.professionType ?? null,
+          ),
           location: fav.professional.location ?? null,
         }
       : null,

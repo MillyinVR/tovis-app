@@ -35,6 +35,7 @@ import type {
   LooksTagDto,
 } from '@/lib/looks/types'
 import { mapLooksProProfilePreviewToDto } from '@/lib/looks/profilePreview'
+import { formatProfessionLabel } from '@/lib/profiles/publicProfileFormatting'
 import {
   boardEventDateToYmd,
   normalizeBoardAnswers,
@@ -452,6 +453,9 @@ export async function mapLooksFeedMediaToDto(args: {
           handle: item.professional.handle ?? null,
           nameDisplay: item.professional.nameDisplay ?? null,
           professionType: item.professional.professionType ?? null,
+          professionLabel: formatProfessionLabel(
+            item.professional.professionType ?? null,
+          ),
           avatarUrl: item.professional.avatarUrl ?? null,
           location: item.professional.location ?? null,
           followerCount: item.professional._count?.followers ?? 0,

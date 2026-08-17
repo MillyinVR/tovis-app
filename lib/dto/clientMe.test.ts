@@ -92,6 +92,7 @@ function makePageData(args: {
     },
     counts: { boards: 0, saved: 0, booked: 0, following: 0, followers: 0 },
     upcomingNotificationBooking: null,
+    upcomingNotificationHeroImageUrl: null,
     history: [],
     myLooks: [],
     activityUnreadCount: 0,

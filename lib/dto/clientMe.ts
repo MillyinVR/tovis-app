@@ -77,6 +77,8 @@ export type ClientMePageDTO = {
   following: ClientMePageData['following']
   counts: ClientMePageData['counts']
   upcomingNotificationBooking: ClientBookingDTO | null
+  /** Hero photo for the upcoming card — same resolver the history cards use. */
+  upcomingNotificationHeroImageUrl: string | null
   history: ClientMeHistoryItemDTO[]
   myLooks: ClientMePageData['myLooks']
   activityUnreadCount: number
@@ -135,6 +137,7 @@ export function serializeClientMePageData(
     following: data.following,
     counts: data.counts,
     upcomingNotificationBooking: data.upcomingNotificationBooking,
+    upcomingNotificationHeroImageUrl: data.upcomingNotificationHeroImageUrl,
     history: data.history.map((item) => ({
       kind: item.kind,
       label: item.label,

@@ -40,6 +40,8 @@ export type LooksProfessionalDto = {
   handle: string | null
   nameDisplay: ProNameDisplay | null
   professionType: ProfessionType | null
+  /** Human label for {@link professionType} — see LooksProProfilePreviewDto. */
+  professionLabel: string
   avatarUrl: string | null
   location: string | null
   followerCount: number
@@ -482,6 +484,15 @@ export type LooksProProfilePreviewDto = {
   nameDisplay: ProNameDisplay | null
   avatarUrl: string | null
   professionType: ProfessionType | null
+  /**
+   * The human label for {@link professionType} — "Manicurist", never the raw
+   * `MANICURIST`. Composed server-side by `formatProfessionLabel` so the
+   * enum→label map has exactly ONE home: every client that used to derive this
+   * itself (web's Me › Following, and five iOS call sites doing `.capitalized`,
+   * which also leaked the underscore in `MASSAGE_THERAPIST`) renders it verbatim
+   * instead. Falls back to the neutral noun, so it is never empty.
+   */
+  professionLabel: string
   location: string | null
   verificationStatus: VerificationStatus
   isPremium: boolean

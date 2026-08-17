@@ -237,6 +237,7 @@ function makeDetailItem(): LooksDetailItemDto {
       nameDisplay: ProNameDisplay.BUSINESS_NAME,
       avatarUrl: null,
       professionType: 'BARBER',
+      professionLabel: 'Barber',
       location: 'San Diego, CA',
       verificationStatus: 'APPROVED',
       isPremium: true,

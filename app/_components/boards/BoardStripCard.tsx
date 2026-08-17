@@ -26,6 +26,8 @@ export type BoardStripCardProps = {
    * Owner surfaces only. On the public profile every listed board is shared by
    * definition, so a badge there would be true of every row and tell the
    * visitor nothing.
+   *
+   * ⚠️ Ignored when {@link action} is present — see the render below.
    */
   shared?: boolean
   /** Rendered over the strip's right side — the owner's visibility control. */
@@ -41,6 +43,13 @@ export default function BoardStripCard({
   action,
 }: BoardStripCardProps) {
   const tiles = tileImageUrls.slice(0, 4)
+
+  // The visibility switch already SAYS "Shared", eight pixels above this line —
+  // rendering the badge too printed the same fact about the same board twice on
+  // every owner card. The control wins: it states the value AND changes it,
+  // which a badge cannot. Surfaces with no control (the public profile passes
+  // no `action`) still get the badge.
+  const showSharedBadge = Boolean(shared) && !action
 
   return (
     <div className="relative">
@@ -92,7 +101,7 @@ export default function BoardStripCard({
                 ? COPY.publicProfile.boardLooksOne
                 : COPY.publicProfile.boardLooksMany}
             </span>
-            {shared ? (
+            {showSharedBadge ? (
               <>
                 <span aria-hidden="true" className="text-textSecondary/50">
                   ·
