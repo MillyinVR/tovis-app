@@ -22,6 +22,28 @@ export function requireEnv(name: string): string {
 }
 
 /**
+ * True when a boolean feature flag is switched on.
+ *
+ * Unset, blank, or anything other than the three affirmatives is OFF — which is
+ * `.env.example`'s stated contract for this block ("Feature flags (default OFF
+ * unless set)") and means a typo'd value fails CLOSED rather than quietly
+ * opening a rail nobody meant to open.
+ *
+ * Single source of truth for the parse. `platformFeesEnabled`,
+ * `isProMigrationEnabled`, `isServicePermissionFilterEnabled`,
+ * `globalTechnicalRecordFlag` and `clientCreditSpendEnabled` all delegate here.
+ * The first four were byte-identical copies of the same four lines and
+ * `clientCreditSpendEnabled` would have been a fifth — which is exactly the
+ * drift the no-duplicate-logic rule exists to stop.
+ */
+export function envFlagEnabled(name: string): boolean {
+  const raw = readOptionalEnv(name)
+  if (raw === null) return false
+  const value = raw.toLowerCase()
+  return value === '1' || value === 'true' || value === 'yes'
+}
+
+/**
  * True on any deployed Vercel surface — production OR preview. Both are real,
  * internet-facing deployments. Local dev (`next dev`) and CI/tests leave
  * VERCEL_ENV unset and return false; `vercel dev` reports 'development' and also

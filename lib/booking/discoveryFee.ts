@@ -31,6 +31,8 @@
 
 import { BookingDiscoveryProvenance } from '@prisma/client'
 
+import { envFlagEnabled } from '@/lib/env'
+
 /**
  * Master switch for CHARGING the platform fees. Off (unset) => both fees resolve to
  * 0 and the deposit is collected on its own, which is the behaviour every booking has
@@ -43,10 +45,7 @@ import { BookingDiscoveryProvenance } from '@prisma/client'
  * both (there is nothing to waive while the fees are off).
  */
 export function platformFeesEnabled(): boolean {
-  const raw = process.env.ENABLE_PLATFORM_FEES
-  if (typeof raw !== 'string') return false
-  const v = raw.trim().toLowerCase()
-  return v === '1' || v === 'true' || v === 'yes'
+  return envFlagEnabled('ENABLE_PLATFORM_FEES')
 }
 
 /** Client convenience fee: this percent of the DEPOSIT (not the service price). */

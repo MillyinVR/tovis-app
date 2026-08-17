@@ -8,7 +8,7 @@ import { prisma } from '@/lib/prisma'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { CLIENT_CONFIRMATION_SELECT } from '@/lib/booking/clientConfirmation'
 import { deriveDepositCredit } from '@/lib/booking/depositCredit'
-import { getClientCreditBalanceCents } from '@/lib/credit/clientCredit'
+import { getOfferableClientCreditBalanceCents } from '@/lib/credit/clientCredit'
 import { isPrepWritableStatus, resolvePrepForBooking } from '@/lib/booking/prep'
 import {
   BOARD_SHARE_TILE_COUNT,
@@ -554,7 +554,7 @@ export async function loadClientBookingPage(bookingId: string) {
   // booking's own checkout is already holding — otherwise re-opening a checkout
   // that has credit applied would offer the client a balance their own pending
   // reservation had already taken off it (see getClientCreditBalanceCents).
-  const creatorCreditBalanceCents = await getClientCreditBalanceCents(
+  const creatorCreditBalanceCents = await getOfferableClientCreditBalanceCents(
     prisma,
     raw.clientId,
     { excludeBookingId: raw.id },

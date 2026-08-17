@@ -38,9 +38,45 @@ import {
 } from '@prisma/client'
 
 import { decimalToCents, parseMoney } from '@/lib/money'
+import { envFlagEnabled } from '@/lib/env'
 import { normalizeRequiredId } from '@/lib/guards'
 
 type CreditDb = PrismaClient | Prisma.TransactionClient
+
+// ── the master switch ────────────────────────────────────────────────────────
+
+/**
+ * Master switch for SPENDING client credit (Tori, 2026-08-17). Off (unset) =>
+ * no balance is offered anywhere, no toggle renders, and nothing can be reserved
+ * against a bill.
+ *
+ * Modelled on `platformFeesEnabled` (lib/booking/discoveryFee.ts) — this repo's
+ * only other money rail — and default OFF for the same reason: flipping a rail
+ * that changes what a client is charged should be a deliberate, Tori-only act,
+ * and `.env.example`'s flag block is "default OFF unless set". Without it the
+ * only way to stop credit was a revert.
+ *
+ * 🔴 GATES THE SPEND HALF ONLY. Three things deliberately do NOT consult it:
+ *
+ *  1. `mintCreatorCreditOnCompletion` — the earn path keeps running, so balances
+ *     accrue honestly while the rail is shut and are simply correct on the day
+ *     it opens. Gating the mint instead would silently under-credit every
+ *     booking that completed while the switch was off, leaving no record it
+ *     ever happened and no way to reconstruct one.
+ *  2. `applyClientCreditForBooking` — it records a payment that ALREADY settled
+ *     at a reduced amount. A switch able to suppress that would turn a charge
+ *     that happened into a ledger entry that never did.
+ *  3. The settlement job (lib/credit/creditSettlement.ts) — it pays professionals
+ *     back the platform's top-up. Gating it would strand a pro who was
+ *     short-paid while the rail was open, which is the one failure this whole
+ *     feature is built to prevent.
+ *
+ * In short: the switch can stop new spending, and can never orphan money that
+ * already moved.
+ */
+export function clientCreditSpendEnabled(): boolean {
+  return envFlagEnabled('ENABLE_CLIENT_CREDIT')
+}
 
 /** Tori's rate: 3% of the booking's service subtotal. */
 export const CREATOR_CREDIT_RATE_PERCENT = 3
@@ -134,6 +170,29 @@ export async function getClientCreditBalanceCents(
   const spentCents = decimalToCents(spent._sum.amount) ?? 0
 
   return Math.max(0, earnedCents - spentCents)
+}
+
+/**
+ * What may be OFFERED to spend right now: the balance above, or 0 while the
+ * master switch is off.
+ *
+ * Separate from `getClientCreditBalanceCents` on purpose, and the distinction is
+ * the whole point of the switch. The balance read stays honest — the activity
+ * banner still shows a creator what they have earned, because they did earn it —
+ * while every surface that invites a client to SPEND asks this one instead.
+ *
+ * It exists as a named function rather than a flag check at each call site so
+ * that the next surface to offer credit inherits the gate by using the obvious
+ * helper. A half-wired switch that covers two of three offer sites is worse than
+ * none: it reads as "credit is off" while one screen still spends it.
+ */
+export async function getOfferableClientCreditBalanceCents(
+  db: CreditDb,
+  clientIdInput: string,
+  options: { excludeBookingId?: string | null } = {},
+): Promise<number> {
+  if (!clientCreditSpendEnabled()) return 0
+  return getClientCreditBalanceCents(db, clientIdInput, options)
 }
 
 // ── earn ─────────────────────────────────────────────────────────────────────
@@ -282,7 +341,13 @@ export async function reserveClientCreditForBooking(
   }
 
   const cap = Math.max(0, Math.trunc(args.maxApplicableCents))
-  const available = await getClientCreditBalanceCents(tx, clientId, {
+  // 🔴 The OFFERABLE balance, not the raw one — this is where the master switch
+  // reaches the write. With it off this resolves to 0 and falls through to the
+  // release branch below; it deliberately does NOT return early. Flipping the
+  // switch off has to hand back the reservations it had already taken, or a
+  // client's own balance sits PENDING against a bill they can no longer spend it
+  // on, invisible to them, until the settlement sweep's TTL expires it.
+  const available = await getOfferableClientCreditBalanceCents(tx, clientId, {
     // This booking's own live reservation is not somebody else's money.
     excludeBookingId: bookingId,
   })
@@ -412,6 +477,12 @@ export async function findSpendableCheckoutBookingId(
   clientIdInput: string,
 ): Promise<string | null> {
   const clientId = normalizeRequiredId('clientId', clientIdInput)
+
+  // 🔴 With the master switch off there is no spendable checkout, by definition:
+  // the toggle this href exists to reach does not render. Leaving the link alive
+  // would land the client on a checkout with no credit control anywhere on it —
+  // the exact dead end the `?step=aftercare` note below was written to close.
+  if (!clientCreditSpendEnabled()) return null
 
   const booking = await db.booking.findFirst({
     where: {

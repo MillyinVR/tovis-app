@@ -4,9 +4,8 @@
 // ENABLE_PRO_MIGRATION unset → the pages redirect and the import endpoints 404.
 // Flip the env var on (1/true/yes) to expose the flow.
 
+import { envFlagEnabled } from '@/lib/env'
+
 export function isProMigrationEnabled(): boolean {
-  const raw = process.env.ENABLE_PRO_MIGRATION
-  if (typeof raw !== 'string') return false
-  const v = raw.trim().toLowerCase()
-  return v === '1' || v === 'true' || v === 'yes'
+  return envFlagEnabled('ENABLE_PRO_MIGRATION')
 }

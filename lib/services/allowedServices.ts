@@ -7,6 +7,7 @@
 
 import { Prisma, type ProfessionType } from '@prisma/client'
 
+import { envFlagEnabled } from '@/lib/env'
 import { moneyToString } from '@/lib/money'
 import { prisma } from '@/lib/prisma'
 
@@ -37,10 +38,7 @@ function toAllowedServiceDto(svc: ServiceWithCategory): AllowedServiceDto {
 }
 
 function isServicePermissionFilterEnabled(): boolean {
-  const raw = process.env.ENABLE_SERVICE_PERMISSION_FILTER
-  if (typeof raw !== 'string') return false
-  const v = raw.trim().toLowerCase()
-  return v === '1' || v === 'true' || v === 'yes'
+  return envFlagEnabled('ENABLE_SERVICE_PERMISSION_FILTER')
 }
 
 // Service IDs this pro is licensed for: every service with a matching ALLOW
