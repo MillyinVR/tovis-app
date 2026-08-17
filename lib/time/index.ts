@@ -61,10 +61,11 @@ export {
   utcFromDayAndMinutesInTimeZone,
 } from '@/lib/timeZone'
 
-// 5. The display locale. `Intl` resolves an omitted locale to the RUNTIME's
-// default — the server's LANG, and the VISITOR's browser locale in the client
-// bundle — which is the same failure as an omitted timeZone, one axis over.
-// The formatters below default their `locale` argument to this.
+// 5. Which locale. `Intl` resolves an OMITTED locale to the RUNTIME's default —
+// the server's LANG, and the VISITOR's browser locale in the client bundle —
+// which is the same failure as an omitted timeZone, one axis over. The display
+// formatters below default their `locale` argument to this, and
+// `check:locale-pinned` keeps it the only home.
 export { DISPLAY_LOCALE } from '@/lib/locale'
 
 // 2. Display formatting (sanitized + explicit timeZone, pinned locale)
