@@ -30,6 +30,7 @@ import {
   noShowFeeAmountToCents,
 } from '@/lib/noShowProtection/fee'
 import { parseCancellationPolicySnapshot } from '@/lib/noShowProtection/policyDisclosure'
+import { resolveChargeCurrencyLower } from '@/lib/payments/resolveChargeCurrency'
 
 /**
  * The resolved fee terms used for a charge — either the client's agreed snapshot
@@ -317,7 +318,7 @@ export async function assessAndChargeNoShowFee(args: {
     const intent = await stripe.paymentIntents.create(
       {
         amount: amountCents,
-        currency: 'usd',
+        currency: resolveChargeCurrencyLower(),
         customer: customerId,
         payment_method: defaultCard.stripePaymentMethodId,
         off_session: true,

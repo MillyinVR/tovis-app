@@ -169,4 +169,15 @@ describe('formatCents', () => {
   it('defaults a nullish currency to USD', () => {
     expect(formatCents(8000, { currency: null, style: 'code' })).toBe('80.00 USD')
   })
+
+  // Booking.stripeCurrency holds both casings in production, and the pro
+  // booking page hands whatever is stored straight to this formatter. What it
+  // renders must not depend on which write path stamped the column.
+  it('renders the same string whichever case the currency arrives in', () => {
+    for (const style of ['symbol', 'code'] as const) {
+      expect(formatCents(8000, { currency: 'usd', style })).toBe(
+        formatCents(8000, { currency: 'USD', style }),
+      )
+    }
+  })
 })

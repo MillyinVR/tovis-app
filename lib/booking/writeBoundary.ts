@@ -49,6 +49,7 @@ import {
   acceptedPaymentMethodsSelect,
   buildAcceptedPaymentMethods,
 } from '@/lib/payments/acceptedMethods'
+import { DEFAULT_CHARGE_CURRENCY } from '@/lib/payments/resolveChargeCurrency'
 import { computeLastMinuteDiscount } from '@/lib/lastMinutePricing'
 import { formatMoneyFromUnknown, parseMoney } from '@/lib/money'
 import {
@@ -18851,7 +18852,7 @@ export async function nudgeAftercareRebook(
 // Stripe checkout — single internal boundary
 // ---------------------------------------------------------------------------
 
-const STRIPE_DEFAULT_CURRENCY = 'USD'
+const STRIPE_DEFAULT_CURRENCY = DEFAULT_CHARGE_CURRENCY
 
 function normalizeStripeCurrency(value: string | null | undefined): string {
   if (typeof value !== 'string') return STRIPE_DEFAULT_CURRENCY

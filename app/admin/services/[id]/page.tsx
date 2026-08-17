@@ -16,6 +16,7 @@ import {
 import AdminGuard from '../../_components/AdminGuard'
 import { prisma } from '@/lib/prisma'
 import { moneyToString } from '@/lib/money'
+import { resolveChargeCurrency } from '@/lib/payments/resolveChargeCurrency'
 import { DISPLAY_LOCALE } from '@/lib/locale'
 
 export const dynamic = 'force-dynamic'
@@ -33,7 +34,7 @@ function formatUsd(value: Parameters<typeof moneyToString>[0]): string {
 
   return new Intl.NumberFormat(DISPLAY_LOCALE, {
     style: 'currency',
-    currency: 'USD',
+    currency: resolveChargeCurrency(),
   }).format(numeric)
 }
 
