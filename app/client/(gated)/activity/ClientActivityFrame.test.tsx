@@ -115,3 +115,62 @@ describe('ClientActivityFrame — mark all read wiring', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 })
+
+// Screen 7 (Tori, 2026-08-17): the Me bell opens Activity as an OVERVIEW —
+// "the pop up and done buttons on the iOS version so it feels like its an
+// overview not a full page". One component serves both presentations so the
+// optimistic mark-all-read has a single implementation; these pin that the
+// two presentations actually differ where they are supposed to.
+describe('ClientActivityFrame — presentation', () => {
+  it('renders a Done button in the sheet and calls back to dismiss', () => {
+    const onDone = vi.fn()
+
+    render(
+      <ClientActivityFrame
+        items={[item()]}
+        unreadCount={1}
+        markReadEventKeys={EVENT_KEYS}
+        presentation="sheet"
+        onDone={onDone}
+      />,
+    )
+
+    const done = screen.getByRole('button', { name: 'Done' })
+    fireEvent.click(done)
+    expect(onDone).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps Mark all read in the sheet — dismissing is not the same as reading', () => {
+    render(
+      <ClientActivityFrame
+        items={[item()]}
+        unreadCount={1}
+        markReadEventKeys={EVENT_KEYS}
+        presentation="sheet"
+        onDone={() => {}}
+      />,
+    )
+
+    expect(
+      screen.getByRole('button', { name: /1 unread notifications as read/i }),
+    ).toBeEnabled()
+  })
+
+  it('renders the full page with its back link and NO Done button by default', () => {
+    // The standalone route is reached by deep link and push taps, where the
+    // back affordance is the only way out of a non-tab client page on web.
+    render(
+      <ClientActivityFrame
+        items={[item()]}
+        unreadCount={1}
+        markReadEventKeys={EVENT_KEYS}
+      />,
+    )
+
+    expect(screen.queryByRole('button', { name: 'Done' })).toBeNull()
+    expect(screen.getByRole('link', { name: /home/i })).toHaveAttribute(
+      'href',
+      '/client',
+    )
+  })
+})

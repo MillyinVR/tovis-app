@@ -16,6 +16,8 @@ export const COPY = {
     notProvided: 'Not provided',
     professionalFallback: 'Professional',
     emDash: '—',
+    /** Dismisses a sheet. The labelled affordance iOS uses, never a bare ×. */
+    done: 'Done',
   },
 
   /**
@@ -369,6 +371,49 @@ export const COPY = {
     emptyBody:
       'When someone follows you or engages with your looks, it’ll show up here.',
     emptyCta: 'Browse looks',
+  },
+
+  /** The client's OWN dashboard, `/client/me`. */
+  clientMe: {
+    /** Section heading over the creator metrics + level. */
+    influenceEyebrow: 'Your influence',
+    savesStatLabel: 'Saves on your looks',
+    bookedStatLabel: 'Booked from you',
+    /** Composed as `Lvl 3`. */
+    levelPrefix: 'Lvl',
+    /**
+     * Composed as `125 saves to Lvl 4` / `5 bookings to Lvl 3`.
+     *
+     * The unit names WHICH ladder is being climbed, because level is the higher
+     * of two (`lib/clients/creatorLevel.ts`) and "125 to Lvl 4" alone would not
+     * say 125 of what.
+     */
+    levelProgressJoin: 'to',
+    levelUnitSaves: 'saves',
+    levelUnitSavesOne: 'save',
+    levelUnitBookings: 'bookings',
+    levelUnitBookingsOne: 'booking',
+    /** Shown instead of the progress line once the top rung is reached. */
+    levelMaxed: 'Top level reached',
+    // NOTE: the header's Share control reuses `app/professionals/[id]/ShareButton`
+    // (native share → clipboard → prompt, brand-aware title) rather than
+    // carrying its own copy — house rule: no duplicate logic.
+  },
+
+  /**
+   * The client's own authored looks, as they appear folded onto the history
+   * cards on `/client/me` (screen 7 dropped the separate "Your looks" grid).
+   */
+  clientLooks: {
+    /** Accessible name for the per-look visibility switch. */
+    visibilityToggleLabel: 'Look visibility',
+    visibilityPublic: 'Public',
+    visibilityPrivate: 'Private',
+    makePublicHint: 'Anyone can find this look on your profile.',
+    makePrivateHint: 'Only you can see this look.',
+    visibilityError: 'Could not change that look’s visibility. Try again.',
+    /** Shown on a completed visit that has no look posted from it yet. */
+    shareCta: 'Share your look',
   },
 
   boards: {
