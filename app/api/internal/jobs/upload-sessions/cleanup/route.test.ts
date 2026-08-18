@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   expireStaleUploadSessions: vi.fn(),
   runConsultCapturePurgeSweep: vi.fn(),
+  runConsultInspirationPurgeSweep: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -25,6 +26,9 @@ vi.mock('@/lib/media/uploadSession', () => ({
 }))
 vi.mock('@/lib/consult/capturePurge', () => ({
   runConsultCapturePurgeSweep: mocks.runConsultCapturePurgeSweep,
+}))
+vi.mock('@/lib/consult/inspirationPurge', () => ({
+  runConsultInspirationPurgeSweep: mocks.runConsultInspirationPurgeSweep,
 }))
 
 vi.mock('@/lib/security/logging', () => ({ safeError: (e: unknown) => e }))
@@ -51,6 +55,11 @@ describe('POST /api/internal/jobs/upload-sessions/cleanup', () => {
       purged: 2,
       failed: 1,
     })
+    mocks.runConsultInspirationPurgeSweep.mockResolvedValue({
+      considered: 2,
+      purged: 2,
+      failed: 0,
+    })
   })
 
   afterEach(() => {
@@ -70,9 +79,11 @@ describe('POST /api/internal/jobs/upload-sessions/cleanup', () => {
       ok: true,
       expired: 4,
       consultRaw: { considered: 3, purged: 2, failed: 1 },
+      inspirationRaw: { considered: 2, purged: 2, failed: 0 },
     })
     expect(mocks.expireStaleUploadSessions).toHaveBeenCalledTimes(1)
     expect(mocks.runConsultCapturePurgeSweep).toHaveBeenCalledTimes(1)
+    expect(mocks.runConsultInspirationPurgeSweep).toHaveBeenCalledTimes(1)
   })
 
   it('accepts the x-internal-job-secret header too', async () => {
@@ -97,6 +108,7 @@ describe('POST /api/internal/jobs/upload-sessions/cleanup', () => {
       ok: true,
       expired: 4,
       consultRaw: { considered: 3, purged: 2, failed: 1 },
+      inspirationRaw: { considered: 2, purged: 2, failed: 0 },
     })
     expect(mocks.expireStaleUploadSessions).toHaveBeenCalledTimes(1)
   })

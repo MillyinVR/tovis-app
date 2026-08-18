@@ -6,6 +6,7 @@
 
 import type {
   ConsultAgreementKind,
+  ConsultInspirationSource,
   ConsultSessionStatus,
 } from '@prisma/client'
 
@@ -179,6 +180,180 @@ export type ConsultIntakeStateResponseDTO = {
 
 export type ConsultIntakeSubmitResponseDTO = ConsultIntakeStateResponseDTO & {
   replayed: boolean
+}
+
+export type ConsultInspirationSourceDTO = 'NONE' | ConsultInspirationSource
+
+export type ConsultInspirationQuestionKeyDTO =
+  | 'favorite_colors'
+  | 'avoid_colors'
+  | 'length_goal'
+  | 'fullness_goal'
+  | 'current_styling'
+  | 'styling_walkthrough'
+  | 'other_detail'
+
+export type ConsultInspirationQuestionOptionDTO = {
+  value: string
+  label: string
+}
+
+export type ConsultInspirationQuestionDTO = {
+  key: ConsultInspirationQuestionKeyDTO
+  label: string
+  helpText: string | null
+  kind: 'SINGLE_SELECT' | 'MULTI_SELECT' | 'TEXT'
+  options: ConsultInspirationQuestionOptionDTO[]
+  minSelections: number
+  maxSelections: number
+  allowText: boolean
+}
+
+export type ConsultInspirationAnswerDTO = {
+  questionKey: ConsultInspirationQuestionKeyDTO
+  selectedValues: string[]
+  text: string | null
+  sentiment: 'GOOD' | 'BAD' | 'BOTH' | 'NONE' | null
+}
+
+export type ConsultInspirationExactDetailDTO = {
+  questionKey: ConsultInspirationQuestionKeyDTO
+  value: string
+  clientWords: string
+  sentiment: 'LIKE' | 'DISLIKE' | 'GOAL' | 'CONTEXT'
+}
+
+export type ConsultInspirationPossibleInterpretationDTO = {
+  clientDetailValue: string
+  possibleMeaning: string
+  confidence: 'POSSIBLE'
+  evidence: 'CLIENT_SELECTION'
+}
+
+export type ConsultInspirationCatalogGuidanceDTO = {
+  detail: 'LENGTH' | 'FULLNESS' | 'STYLING'
+  message: string
+  contextOnly: true
+  automaticallyAdded: false
+}
+
+export type ConsultInspirationSourceStateDTO = {
+  inspirationId: string
+  source: Exclude<ConsultInspirationSourceDTO, 'NONE'>
+  lookPostId: string | null
+  imageReadEndpoint: string
+  imageAvailable: boolean
+  useExpiresAt: string | null
+}
+
+export type ConsultInspirationReviewDTO = {
+  revisionId: string
+  revision: number
+  schemaVersion: number
+  source: ConsultInspirationSourceDTO
+  inspirationId: string | null
+  complete: boolean
+  answers: ConsultInspirationAnswerDTO[]
+  exactClientDetails: ConsultInspirationExactDetailDTO[]
+  possibleProfessionalInterpretation: ConsultInspirationPossibleInterpretationDTO[]
+  catalogGuidance: ConsultInspirationCatalogGuidanceDTO[]
+  createdAt: string
+}
+
+export type ConsultInspirationStateDTO = {
+  consultId: string
+  status: ConsultSessionStatus
+  schemaVersion: number
+  introduction: string
+  referenceNote: string
+  reflectionPrompt: string
+  source: ConsultInspirationSourceStateDTO | null
+  progress: {
+    currentQuestion: ConsultInspirationQuestionDTO | null
+    answeredQuestionCount: number
+    specificDetailCount: number
+    requiredSpecificDetailCount: 3
+    canComplete: boolean
+    blocker:
+      | 'SOURCE_DECISION_REQUIRED'
+      | 'QUESTIONS_REMAINING'
+      | 'AT_LEAST_THREE_DETAILS_REQUIRED'
+      | null
+  }
+  latestReview: ConsultInspirationReviewDTO | null
+}
+
+export type ConsultInspirationStateResponseDTO = {
+  inspiration: ConsultInspirationStateDTO
+}
+
+export type ConsultInspirationSelectLookRequestDTO = {
+  idempotencyKey: string
+  source: Extract<
+    ConsultInspirationSource,
+    'PLATFORM_LOOK' | 'BOOKED_PRO_LOOK'
+  >
+  lookPostId: string
+  schemaVersion: number
+}
+
+export type ConsultInspirationSkipRequestDTO = {
+  idempotencyKey: string
+  source: 'NONE'
+  schemaVersion: number
+}
+
+export type ConsultInspirationMutationResponseDTO =
+  ConsultInspirationStateResponseDTO & {
+    replayed: boolean
+  }
+
+export type ConsultInspirationIssueUploadRequestDTO = {
+  idempotencyKey: string
+  schemaVersion: number
+  contentType: 'image/jpeg' | 'image/png' | 'image/webp'
+  sizeBytes: number
+  checksumSha256?: string
+}
+
+export type ConsultInspirationUploadDTO = {
+  inspirationId: string
+  schemaVersion: number
+  contentType: 'image/jpeg' | 'image/png' | 'image/webp'
+  maxBytes: number
+  expiresAt: string
+  useExpiresAt: string
+  token: string
+  signedUrl: string | null
+}
+
+export type ConsultInspirationIssueUploadResponseDTO = {
+  upload: ConsultInspirationUploadDTO
+  replayed: boolean
+}
+
+export type ConsultInspirationAttachRequestDTO = {
+  idempotencyKey: string
+  inspirationId: string
+  schemaVersion: number
+}
+
+export type ConsultInspirationAnswerRequestDTO = {
+  idempotencyKey: string
+  schemaVersion: number
+  questionKey: ConsultInspirationQuestionKeyDTO
+  selectedValues: string[]
+  text?: string
+  sentiment?: 'GOOD' | 'BAD' | 'BOTH' | 'NONE'
+}
+
+export type ConsultInspirationDeleteResponseDTO = {
+  deleted: true
+}
+
+export type ConsultInspirationSignedReadResponseDTO = {
+  url: string
+  expiresInSeconds: number
 }
 
 export type ConsultCaptureShotKeyDTO =
@@ -464,6 +639,18 @@ export type ConsultBriefRecommendationDirectionDTO = {
   discussWithProfessional: true
 }
 
+export type ConsultBriefInspirationDTO = {
+  revisionId: string | null
+  source: ConsultInspirationSourceDTO
+  inspirationId: string | null
+  lookPostId: string | null
+  mediaEndpoint: string | null
+  referenceNote: string
+  exactClientDetails: ConsultInspirationExactDetailDTO[]
+  possibleProfessionalInterpretation: ConsultInspirationPossibleInterpretationDTO[]
+  catalogGuidance: ConsultInspirationCatalogGuidanceDTO[]
+}
+
 export type ConsultBriefFeedbackRatingDTO = 'ACCURATE_USEFUL' | 'OFF'
 
 export type ConsultBriefFeedbackDTO = {
@@ -481,6 +668,7 @@ export type ConsultProBriefDTO = {
   sourceAnalysisRevisionId: string
   sourceAnalysisRevision: number
   intakeRevisionId: string
+  inspiration: ConsultBriefInspirationDTO
   clientIntake: ConsultBriefClientIntakeItemDTO[]
   aiObservations: ConsultBriefAiObservationsDTO
   safetyFlags: ConsultAnalysisPayloadDTO['safetyFlags']
@@ -593,6 +781,16 @@ export type ConsultAgreementErrorCode =
   | 'CONSULT_ANALYSIS_PROMPT_VERSION_MISMATCH'
   | 'CONSULT_ANALYSIS_PREREQUISITES_REQUIRED'
   | 'CONSULT_ANALYSIS_UNAVAILABLE'
+  | 'CONSULT_INSPIRATION_SCHEMA_VERSION_MISMATCH'
+  | 'CONSULT_INSPIRATION_LOOK_UNAVAILABLE'
+  | 'CONSULT_INSPIRATION_SOURCE_REQUIRED'
+  | 'CONSULT_INSPIRATION_SOURCE_UNAVAILABLE'
+  | 'CONSULT_INSPIRATION_UPLOAD_EXPIRED'
+  | 'CONSULT_INSPIRATION_UPLOAD_MISMATCH'
+  | 'CONSULT_INSPIRATION_OBJECT_INVALID'
+  | 'CONSULT_INSPIRATION_STORAGE_UNAVAILABLE'
+  | 'CONSULT_INSPIRATION_INVALID_ANSWER'
+  | 'CONSULT_INSPIRATION_QUESTION_OUT_OF_ORDER'
 
 export type ConsultAgreementErrorDTO = {
   ok: false

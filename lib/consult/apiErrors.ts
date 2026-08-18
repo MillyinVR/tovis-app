@@ -188,5 +188,25 @@ export function consultWriteErrorResponse(error: unknown): Response | null {
         'Consult analysis is unavailable.',
         'CONSULT_ANALYSIS_UNAVAILABLE',
       )
+    case 'INSPIRATION_SCHEMA_VERSION_MISMATCH':
+      return consultAgreementFail(409, 'The inspiration schema version is no longer current.', 'CONSULT_INSPIRATION_SCHEMA_VERSION_MISMATCH')
+    case 'INSPIRATION_LOOK_UNAVAILABLE':
+      return consultAgreementFail(404, 'The selected Look is unavailable.', 'CONSULT_INSPIRATION_LOOK_UNAVAILABLE')
+    case 'INSPIRATION_SOURCE_REQUIRED':
+      return consultAgreementFail(409, 'Choose an inspiration source before continuing.', 'CONSULT_INSPIRATION_SOURCE_REQUIRED')
+    case 'INSPIRATION_SOURCE_UNAVAILABLE':
+      return consultAgreementFail(409, 'The inspiration source is no longer available.', 'CONSULT_INSPIRATION_SOURCE_UNAVAILABLE')
+    case 'INSPIRATION_UPLOAD_EXPIRED':
+      return consultAgreementFail(410, 'The inspiration upload has expired.', 'CONSULT_INSPIRATION_UPLOAD_EXPIRED')
+    case 'INSPIRATION_UPLOAD_MISMATCH':
+      return consultAgreementFail(409, 'The inspiration upload does not match this request.', 'CONSULT_INSPIRATION_UPLOAD_MISMATCH')
+    case 'INSPIRATION_OBJECT_INVALID':
+      return consultAgreementFail(422, 'The uploaded inspiration is missing or malformed.', 'CONSULT_INSPIRATION_OBJECT_INVALID')
+    case 'INSPIRATION_STORAGE_UNAVAILABLE':
+      return consultAgreementFail(503, 'Private inspiration storage is unavailable.', 'CONSULT_INSPIRATION_STORAGE_UNAVAILABLE')
+    case 'INSPIRATION_INVALID_ANSWER':
+      return consultAgreementFail(400, 'Invalid inspiration answer.', 'CONSULT_INSPIRATION_INVALID_ANSWER')
+    case 'INSPIRATION_QUESTION_OUT_OF_ORDER':
+      return consultAgreementFail(409, 'Answer the current inspiration question first.', 'CONSULT_INSPIRATION_QUESTION_OUT_OF_ORDER')
   }
 }

@@ -284,6 +284,11 @@ export const EXPORT_BOUNDARY: Readonly<Record<string, ExportDisposition>> = {
     status: 'EXPORTED',
     keys: ['consultSessions'],
   },
+  ConsultInspiration: {
+    status: 'OMITTED',
+    reason:
+      'Exported transitively inside consultSessions with source and retention metadata only; private storage pointers and integrity/idempotency hashes are excluded.',
+  },
   ConsultBriefFeedback: {
     status: 'OMITTED',
     reason:

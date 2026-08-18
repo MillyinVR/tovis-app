@@ -39,6 +39,10 @@ import {
   validateHairColorIntakeAnswers,
   normalizeHairColorIntakePayload,
 } from './intakePack'
+import {
+  CONSULT_INSPIRATION_REFERENCE_NOTE,
+  normalizeStoredInspirationPayload,
+} from './inspirationPack'
 
 type ClientActor = {
   readonly type: typeof ConsultActorType.CLIENT
@@ -437,12 +441,13 @@ export async function appendConsultRevision(args: {
   actor: ConsultActor
 }) {
   if (
+    args.kind === ConsultRevisionKind.INSPIRATION ||
     args.kind === ConsultRevisionKind.ANALYSIS ||
     args.kind === ConsultRevisionKind.BRIEF
   ) {
     throw new ConsultWriteError(
       'INVALID_STATE',
-      'Analysis and brief revisions must use their canonical generation boundaries.',
+      'Inspiration, analysis, and brief revisions must use their canonical generation boundaries.',
     )
   }
   return prisma.$transaction(async (tx) => {
@@ -492,6 +497,65 @@ export async function appendConsultRevision(args: {
 
     return revision
   })
+}
+
+/**
+ * Canonical locked writer for immutable guided-inspiration revisions. Callers
+ * own the ConsultSession row lock; this boundary owns sequence, revision,
+ * idempotency, and content-free audit writes as one transaction unit.
+ */
+export async function appendLockedConsultInspirationRevision(
+  tx: Prisma.TransactionClient,
+  args: {
+    consultSessionId: string
+    payload: Prisma.InputJsonValue
+    schemaVersion: number
+    idempotencyKey: string
+    requestHash: string
+    actor: ClientActor
+  },
+) {
+  const existing = await tx.consultRevision.findFirst({
+    where: {
+      consultSessionId: args.consultSessionId,
+      idempotencyKey: args.idempotencyKey,
+    },
+  })
+  if (existing) {
+    if (
+      existing.kind !== ConsultRevisionKind.INSPIRATION ||
+      existing.requestHash !== args.requestHash
+    ) {
+      throw new ConsultWriteError('IDEMPOTENCY_CONFLICT', 'Idempotency conflict.')
+    }
+    return { revision: existing, replayed: true }
+  }
+  const sequenced = await tx.consultSession.update({
+    where: { id: args.consultSessionId },
+    data: { revisionSequence: { increment: 1 } },
+    select: { revisionSequence: true },
+  })
+  const revision = await tx.consultRevision.create({
+    data: {
+      consultSessionId: args.consultSessionId,
+      revision: sequenced.revisionSequence,
+      kind: ConsultRevisionKind.INSPIRATION,
+      payload: args.payload,
+      schemaVersion: args.schemaVersion,
+      idempotencyKey: args.idempotencyKey,
+      requestHash: args.requestHash,
+    },
+  })
+  await tx.consultAuditEvent.create({
+    data: {
+      consultSessionId: args.consultSessionId,
+      action: ConsultAuditAction.REVISION_CREATED,
+      actorType: args.actor.type,
+      actorId: args.actor.id,
+      revisionId: revision.id,
+    },
+  })
+  return { revision, replayed: false }
 }
 
 /**
@@ -594,12 +658,61 @@ export async function finalizeLockedHairColorAnalysis(
     )
   }
 
+  const inspirationRevision = await tx.consultRevision.findFirst({
+    where: {
+      consultSessionId: args.consultSessionId,
+      kind: ConsultRevisionKind.INSPIRATION,
+    },
+    select: { id: true, payload: true },
+    orderBy: [{ revision: 'desc' }, { id: 'desc' }],
+  })
+  const inspiration = inspirationRevision
+    ? normalizeStoredInspirationPayload(inspirationRevision.payload)
+    : null
+  if (!inspirationRevision || !inspiration?.complete) {
+    throw new ConsultWriteError(
+      'ANALYSIS_PREREQUISITES_REQUIRED',
+      'Guided inspiration is incomplete.',
+    )
+  }
+  const inspirationSource = inspiration.inspirationId
+    ? await tx.consultInspiration.findFirst({
+        where: {
+          id: inspiration.inspirationId,
+          consultSessionId: args.consultSessionId,
+          status: 'ATTACHED',
+        },
+        select: { sourceLookPostId: true },
+      })
+    : null
+  if (inspiration.inspirationId && !inspirationSource) {
+    throw new ConsultWriteError(
+      'ANALYSIS_PREREQUISITES_REQUIRED',
+      'Guided inspiration source changed.',
+    )
+  }
+
   const briefPayload = buildHairColorProBriefPayload({
     intakeRevisionId: intakeRevision.id,
     intakeAnswers: intake.answers,
     analysisRevisionId: revision.id,
     analysisRevision: revision.revision,
     analysis: normalizeStoredHairColorAnalysisPayload(revision.payload),
+    inspiration: {
+      revisionId: inspirationRevision.id,
+      source: inspiration.source,
+      inspirationId: inspiration.inspirationId,
+      lookPostId: inspirationSource?.sourceLookPostId ?? null,
+      mediaEndpoint:
+        inspiration.source === 'EXTERNAL_UPLOAD'
+          ? `/api/v1/pro/consults/${encodeURIComponent(args.consultSessionId)}/inspiration/media`
+          : null,
+      referenceNote: CONSULT_INSPIRATION_REFERENCE_NOTE,
+      exactClientDetails: inspiration.exactClientDetails,
+      possibleProfessionalInterpretation:
+        inspiration.possibleProfessionalInterpretation,
+      catalogGuidance: inspiration.catalogGuidance,
+    },
   })
   const briefSequence = await tx.consultSession.update({
     where: { id: args.consultSessionId },

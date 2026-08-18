@@ -113,6 +113,14 @@
       ],
       "type": "string"
     },
+    "$Enums.ConsultInspirationSource": {
+      "enum": [
+        "PLATFORM_LOOK",
+        "BOOKED_PRO_LOOK",
+        "EXTERNAL_UPLOAD"
+      ],
+      "type": "string"
+    },
     "$Enums.ConsultSessionStatus": {
       "enum": [
         "CONSENT_REQUIRED",
@@ -7058,7 +7066,17 @@
         "CONSULT_ANALYSIS_SCHEMA_VERSION_MISMATCH",
         "CONSULT_ANALYSIS_PROMPT_VERSION_MISMATCH",
         "CONSULT_ANALYSIS_PREREQUISITES_REQUIRED",
-        "CONSULT_ANALYSIS_UNAVAILABLE"
+        "CONSULT_ANALYSIS_UNAVAILABLE",
+        "CONSULT_INSPIRATION_SCHEMA_VERSION_MISMATCH",
+        "CONSULT_INSPIRATION_LOOK_UNAVAILABLE",
+        "CONSULT_INSPIRATION_SOURCE_REQUIRED",
+        "CONSULT_INSPIRATION_SOURCE_UNAVAILABLE",
+        "CONSULT_INSPIRATION_UPLOAD_EXPIRED",
+        "CONSULT_INSPIRATION_UPLOAD_MISMATCH",
+        "CONSULT_INSPIRATION_OBJECT_INVALID",
+        "CONSULT_INSPIRATION_STORAGE_UNAVAILABLE",
+        "CONSULT_INSPIRATION_INVALID_ANSWER",
+        "CONSULT_INSPIRATION_QUESTION_OUT_OF_ORDER"
       ],
       "type": "string"
     },
@@ -7924,6 +7942,70 @@
       ],
       "type": "object"
     },
+    "ConsultBriefInspirationDTO": {
+      "properties": {
+        "catalogGuidance": {
+          "items": {
+            "$ref": "#/definitions/ConsultInspirationCatalogGuidanceDTO"
+          },
+          "type": "array"
+        },
+        "exactClientDetails": {
+          "items": {
+            "$ref": "#/definitions/ConsultInspirationExactDetailDTO"
+          },
+          "type": "array"
+        },
+        "inspirationId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lookPostId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mediaEndpoint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "possibleProfessionalInterpretation": {
+          "items": {
+            "$ref": "#/definitions/ConsultInspirationPossibleInterpretationDTO"
+          },
+          "type": "array"
+        },
+        "referenceNote": {
+          "type": "string"
+        },
+        "revisionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "$ref": "#/definitions/ConsultInspirationSourceDTO"
+        }
+      },
+      "required": [
+        "revisionId",
+        "source",
+        "inspirationId",
+        "lookPostId",
+        "mediaEndpoint",
+        "referenceNote",
+        "exactClientDetails",
+        "possibleProfessionalInterpretation",
+        "catalogGuidance"
+      ],
+      "type": "object"
+    },
     "ConsultBriefRecommendationDirectionDTO": {
       "properties": {
         "direction": {
@@ -8509,6 +8591,540 @@
       ],
       "type": "object"
     },
+    "ConsultInspirationAnswerDTO": {
+      "properties": {
+        "questionKey": {
+          "$ref": "#/definitions/ConsultInspirationQuestionKeyDTO"
+        },
+        "selectedValues": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "sentiment": {
+          "enum": [
+            "GOOD",
+            "BAD",
+            "BOTH",
+            "NONE",
+            null
+          ],
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "questionKey",
+        "selectedValues",
+        "text",
+        "sentiment"
+      ],
+      "type": "object"
+    },
+    "ConsultInspirationCatalogGuidanceDTO": {
+      "properties": {
+        "automaticallyAdded": {
+          "const": false,
+          "type": "boolean"
+        },
+        "contextOnly": {
+          "const": true,
+          "type": "boolean"
+        },
+        "detail": {
+          "enum": [
+            "LENGTH",
+            "FULLNESS",
+            "STYLING"
+          ],
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "detail",
+        "message",
+        "contextOnly",
+        "automaticallyAdded"
+      ],
+      "type": "object"
+    },
+    "ConsultInspirationDeleteResponseDTO": {
+      "properties": {
+        "deleted": {
+          "const": true,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "deleted"
+      ],
+      "type": "object"
+    },
+    "ConsultInspirationExactDetailDTO": {
+      "properties": {
+        "clientWords": {
+          "type": "string"
+        },
+        "questionKey": {
+          "$ref": "#/definitions/ConsultInspirationQuestionKeyDTO"
+        },
+        "sentiment": {
+          "enum": [
+            "LIKE",
+            "DISLIKE",
+            "GOAL",
+            "CONTEXT"
+          ],
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "questionKey",
+        "value",
+        "clientWords",
+        "sentiment"
+      ],
+      "type": "object"
+    },
+    "ConsultInspirationIssueUploadResponseDTO": {
+      "properties": {
+        "replayed": {
+          "type": "boolean"
+        },
+        "upload": {
+          "$ref": "#/definitions/ConsultInspirationUploadDTO"
+        }
+      },
+      "required": [
+        "upload",
+        "replayed"
+      ],
+      "type": "object"
+    },
+    "ConsultInspirationMutationResponseDTO": {
+      "properties": {
+        "inspiration": {
+          "$ref": "#/definitions/ConsultInspirationStateDTO"
+        },
+        "replayed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "inspiration",
+        "replayed"
+      ],
+      "type": "object"
+    },
+    "ConsultInspirationPossibleInterpretationDTO": {
+      "properties": {
+        "clientDetailValue": {
+          "type": "string"
+        },
+        "confidence": {
+          "const": "POSSIBLE",
+          "type": "string"
+        },
+        "evidence": {
+          "const": "CLIENT_SELECTION",
+          "type": "string"
+        },
+        "possibleMeaning": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "clientDetailValue",
+        "possibleMeaning",
+        "confidence",
+        "evidence"
+      ],
+      "type": "object"
+    },
+    "ConsultInspirationQuestionDTO": {
+      "properties": {
+        "allowText": {
+          "type": "boolean"
+        },
+        "helpText": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "key": {
+          "$ref": "#/definitions/ConsultInspirationQuestionKeyDTO"
+        },
+        "kind": {
+          "enum": [
+            "SINGLE_SELECT",
+            "MULTI_SELECT",
+            "TEXT"
+          ],
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "maxSelections": {
+          "type": "number"
+        },
+        "minSelections": {
+          "type": "number"
+        },
+        "options": {
+          "items": {
+            "$ref": "#/definitions/ConsultInspirationQuestionOptionDTO"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "key",
+        "label",
+        "helpText",
+        "kind",
+        "options",
+        "minSelections",
+        "maxSelections",
+        "allowText"
+      ],
+      "type": "object"
+    },
+    "ConsultInspirationQuestionKeyDTO": {
+      "enum": [
+        "favorite_colors",
+        "avoid_colors",
+        "length_goal",
+        "fullness_goal",
+        "current_styling",
+        "styling_walkthrough",
+        "other_detail"
+      ],
+      "type": "string"
+    },
+    "ConsultInspirationQuestionOptionDTO": {
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "value",
+        "label"
+      ],
+      "type": "object"
+    },
+    "ConsultInspirationReviewDTO": {
+      "properties": {
+        "answers": {
+          "items": {
+            "$ref": "#/definitions/ConsultInspirationAnswerDTO"
+          },
+          "type": "array"
+        },
+        "catalogGuidance": {
+          "items": {
+            "$ref": "#/definitions/ConsultInspirationCatalogGuidanceDTO"
+          },
+          "type": "array"
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "exactClientDetails": {
+          "items": {
+            "$ref": "#/definitions/ConsultInspirationExactDetailDTO"
+          },
+          "type": "array"
+        },
+        "inspirationId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "possibleProfessionalInterpretation": {
+          "items": {
+            "$ref": "#/definitions/ConsultInspirationPossibleInterpretationDTO"
+          },
+          "type": "array"
+        },
+        "revision": {
+          "type": "number"
+        },
+        "revisionId": {
+          "type": "string"
+        },
+        "schemaVersion": {
+          "type": "number"
+        },
+        "source": {
+          "$ref": "#/definitions/ConsultInspirationSourceDTO"
+        }
+      },
+      "required": [
+        "revisionId",
+        "revision",
+        "schemaVersion",
+        "source",
+        "inspirationId",
+        "complete",
+        "answers",
+        "exactClientDetails",
+        "possibleProfessionalInterpretation",
+        "catalogGuidance",
+        "createdAt"
+      ],
+      "type": "object"
+    },
+    "ConsultInspirationSignedReadResponseDTO": {
+      "properties": {
+        "expiresInSeconds": {
+          "type": "number"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "url",
+        "expiresInSeconds"
+      ],
+      "type": "object"
+    },
+    "ConsultInspirationSource": {
+      "$ref": "#/definitions/%24Enums.ConsultInspirationSource"
+    },
+    "ConsultInspirationSourceDTO": {
+      "anyOf": [
+        {
+          "const": "NONE",
+          "type": "string"
+        },
+        {
+          "$ref": "#/definitions/ConsultInspirationSource"
+        }
+      ]
+    },
+    "ConsultInspirationSourceStateDTO": {
+      "properties": {
+        "imageAvailable": {
+          "type": "boolean"
+        },
+        "imageReadEndpoint": {
+          "type": "string"
+        },
+        "inspirationId": {
+          "type": "string"
+        },
+        "lookPostId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "$ref": "#/definitions/ConsultInspirationSource"
+        },
+        "useExpiresAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "inspirationId",
+        "source",
+        "lookPostId",
+        "imageReadEndpoint",
+        "imageAvailable",
+        "useExpiresAt"
+      ],
+      "type": "object"
+    },
+    "ConsultInspirationStateDTO": {
+      "properties": {
+        "consultId": {
+          "type": "string"
+        },
+        "introduction": {
+          "type": "string"
+        },
+        "latestReview": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultInspirationReviewDTO"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "progress": {
+          "properties": {
+            "answeredQuestionCount": {
+              "type": "number"
+            },
+            "blocker": {
+              "enum": [
+                "SOURCE_DECISION_REQUIRED",
+                "QUESTIONS_REMAINING",
+                "AT_LEAST_THREE_DETAILS_REQUIRED",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "canComplete": {
+              "type": "boolean"
+            },
+            "currentQuestion": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ConsultInspirationQuestionDTO"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "requiredSpecificDetailCount": {
+              "const": 3,
+              "type": "number"
+            },
+            "specificDetailCount": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "currentQuestion",
+            "answeredQuestionCount",
+            "specificDetailCount",
+            "requiredSpecificDetailCount",
+            "canComplete",
+            "blocker"
+          ],
+          "type": "object"
+        },
+        "referenceNote": {
+          "type": "string"
+        },
+        "reflectionPrompt": {
+          "type": "string"
+        },
+        "schemaVersion": {
+          "type": "number"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultInspirationSourceStateDTO"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "$ref": "#/definitions/ConsultSessionStatus"
+        }
+      },
+      "required": [
+        "consultId",
+        "status",
+        "schemaVersion",
+        "introduction",
+        "referenceNote",
+        "reflectionPrompt",
+        "source",
+        "progress",
+        "latestReview"
+      ],
+      "type": "object"
+    },
+    "ConsultInspirationStateResponseDTO": {
+      "properties": {
+        "inspiration": {
+          "$ref": "#/definitions/ConsultInspirationStateDTO"
+        }
+      },
+      "required": [
+        "inspiration"
+      ],
+      "type": "object"
+    },
+    "ConsultInspirationUploadDTO": {
+      "properties": {
+        "contentType": {
+          "enum": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string"
+        },
+        "inspirationId": {
+          "type": "string"
+        },
+        "maxBytes": {
+          "type": "number"
+        },
+        "schemaVersion": {
+          "type": "number"
+        },
+        "signedUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "token": {
+          "type": "string"
+        },
+        "useExpiresAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "inspirationId",
+        "schemaVersion",
+        "contentType",
+        "maxBytes",
+        "expiresAt",
+        "useExpiresAt",
+        "token",
+        "signedUrl"
+      ],
+      "type": "object"
+    },
     "ConsultIntakeAnswerMapDTO": {
       "additionalProperties": {
         "type": "string"
@@ -8910,6 +9526,9 @@
             }
           ]
         },
+        "inspiration": {
+          "$ref": "#/definitions/ConsultBriefInspirationDTO"
+        },
         "intakeRevisionId": {
           "type": "string"
         },
@@ -8965,6 +9584,7 @@
         "sourceAnalysisRevisionId",
         "sourceAnalysisRevision",
         "intakeRevisionId",
+        "inspiration",
         "clientIntake",
         "aiObservations",
         "safetyFlags",

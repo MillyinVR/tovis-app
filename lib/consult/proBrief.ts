@@ -86,6 +86,7 @@ async function loadSessionBrief(
     sourceAnalysisRevisionId: payload.sourceAnalysisRevisionId,
     sourceAnalysisRevision: payload.sourceAnalysisRevision,
     intakeRevisionId: payload.intakeRevisionId,
+    inspiration: payload.inspiration,
     clientIntake: payload.clientIntake,
     aiObservations: payload.aiObservations,
     safetyFlags: payload.safetyFlags,

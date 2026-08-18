@@ -14,6 +14,7 @@ import { isAuthorizedJobRequest } from '@/app/api/_utils/auth/internalJob'
 import { prisma } from '@/lib/prisma'
 import { expireStaleUploadSessions } from '@/lib/media/uploadSession'
 import { runConsultCapturePurgeSweep } from '@/lib/consult/capturePurge'
+import { runConsultInspirationPurgeSweep } from '@/lib/consult/inspirationPurge'
 import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
@@ -27,11 +28,12 @@ async function runJob(req: Request) {
 
   try {
     const now = new Date()
-    const [expired, consultRaw] = await Promise.all([
+    const [expired, consultRaw, inspirationRaw] = await Promise.all([
       expireStaleUploadSessions(prisma, now),
       runConsultCapturePurgeSweep(now),
+      runConsultInspirationPurgeSweep(now),
     ])
-    return jsonOk({ expired, consultRaw })
+    return jsonOk({ expired, consultRaw, inspirationRaw })
   } catch (error: unknown) {
     console.error('/api/internal/jobs/upload-sessions/cleanup error', {
       error: safeError(error),

@@ -6964,6 +6964,7 @@ enum ConsultSessionStatus {
 
 enum ConsultRevisionKind {
   INTAKE
+  INSPIRATION
   ANALYSIS
   BRIEF
 }
@@ -6990,6 +6991,11 @@ enum ConsultAuditAction {
   CAPTURE_QUALITY_CHECKED
   CAPTURE_DELETED
   RAW_OBJECT_PURGED
+  INSPIRATION_SOURCE_SELECTED
+  INSPIRATION_UPLOAD_ISSUED
+  INSPIRATION_UPLOAD_ATTACHED
+  INSPIRATION_REMOVED
+  INSPIRATION_RAW_PURGED
   BRIEF_FEEDBACK_RECORDED
   // C7 singular client measurement facts. A partial unique index in the C7
   // migration permits each action at most once per consult; the session lock
@@ -7007,6 +7013,19 @@ enum ConsultCaptureStatus {
   ATTACHED
   ACCEPTED
   REJECTED
+}
+
+enum ConsultInspirationSource {
+  PLATFORM_LOOK
+  BOOKED_PRO_LOOK
+  EXTERNAL_UPLOAD
+}
+
+enum ConsultInspirationStatus {
+  UPLOAD_PENDING
+  ATTACHED
+  REPLACED
+  REMOVED
 }
 
 /// A client's pre-visit AI consult (ai-consult.md). Phase 0 is booking-attached
@@ -7056,6 +7075,7 @@ model ConsultSession {
   auditEvents          ConsultAuditEvent[]
   briefFeedback        ConsultBriefFeedback?
   captures             ConsultCapture[]
+  inspirations         ConsultInspiration[]
   uploadSessions       UploadSession[]
 
   createdAt DateTime @default(now())
@@ -7064,6 +7084,53 @@ model ConsultSession {
   @@index([clientId, createdAt])
   @@index([professionalId, status])
   @@index([serviceCategoryId])
+}
+
+/// One source attachment for optional guided inspiration. Existing Looks are
+/// linked by id and never copied. External bytes use a separate temporary
+/// private object whose pointer is erased only after verified deletion; this
+/// is not chart media and never becomes MediaAsset.
+model ConsultInspiration {
+  id String @id @default(cuid())
+
+  consultSessionId String
+  consultSession   ConsultSession @relation(fields: [consultSessionId], references: [id], onDelete: Cascade)
+
+  source ConsultInspirationSource
+  status ConsultInspirationStatus
+
+  // Snapshot link rather than an FK: deleting or unpublishing a Look must keep
+  // its existing ownership/publication semantics and must not be blocked by a
+  // consultation. Reads re-run the canonical Look authorization policy.
+  sourceLookPostId String?
+
+  storageBucket  String?
+  storagePath    String?
+  contentType    String? @db.VarChar(64)
+  sizeBytes      Int?
+  checksumSha256 String? @db.Char(64)
+
+  sourceIdempotencyKey String  @db.VarChar(128)
+  sourceRequestHash    String  @db.Char(64)
+  attachIdempotencyKey String? @db.VarChar(128)
+  attachRequestHash    String? @db.Char(64)
+
+  uploadExpiresAt  DateTime?
+  useExpiresAt     DateTime?
+  purgeEligibleAt  DateTime?
+  purgeRequestedAt DateTime?
+  purgedAt         DateTime?
+
+  auditEvents ConsultAuditEvent[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([consultSessionId, sourceIdempotencyKey])
+  @@unique([consultSessionId, attachIdempotencyKey])
+  @@index([consultSessionId, createdAt])
+  @@index([status, purgedAt, purgeEligibleAt, uploadExpiresAt, useExpiresAt])
+  @@index([sourceLookPostId])
 }
 
 /// Ephemeral raw-photo processing state for one hair-color shot. The storage
@@ -7249,16 +7316,21 @@ model ConsultAuditEvent {
   captureId String?
   capture   ConsultCapture? @relation(fields: [captureId], references: [id], onDelete: Cascade)
 
+  inspirationId String?
+  inspiration   ConsultInspiration? @relation(fields: [inspirationId], references: [id], onDelete: Cascade)
+
   briefFeedbackId String?               @unique
   briefFeedback   ConsultBriefFeedback? @relation(fields: [briefFeedbackId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
 
   @@unique([captureId, action])
+  @@unique([inspirationId, action])
   // CLIENT_RESULTS_SERVED and ME_CARD_TEASER_TAPPED additionally have a
   // partial unique (consultSessionId, action) index in the C7 migration.
   @@index([consultSessionId, createdAt])
   @@index([agreementAcceptanceId])
   @@index([revisionId])
   @@index([captureId])
+  @@index([inspirationId])
 }

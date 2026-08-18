@@ -60,6 +60,7 @@ import {
   HAIR_COLOR_INTAKE_SCHEMA_VERSION,
   normalizeHairColorIntakePayload,
 } from './intakePack'
+import { requireCompletedConsultInspiration } from './inspirationContract'
 import { purgeConsultCaptureRawObject } from './capturePurge'
 import {
   CONSULT_SAFETY_SERVICE_BOOKING_RULES,
@@ -154,6 +155,7 @@ function requestHash(args: {
   schemaVersion: number
   promptVersion: string
   intakeRevisionId: string
+  inspirationRevisionId: string
   captures: readonly AnalysisCapture[]
 }): string {
   return createHash('sha256')
@@ -162,6 +164,7 @@ function requestHash(args: {
         schemaVersion: args.schemaVersion,
         promptVersion: args.promptVersion,
         intakeRevisionId: args.intakeRevisionId,
+        inspirationRevisionId: args.inspirationRevisionId,
         captures: args.captures.map((capture) => ({
           id: capture.id,
           shotKey: capture.shotKey,
@@ -743,6 +746,12 @@ export async function runConsultAnalysis(args: {
         await requireCurrentConsultAgreementAcceptances(tx, session.id)
         const input = validInput(await args.loadInput())
         const intake = await currentCompletedIntake(tx, session.id)
+        const inspiration = await requireCompletedConsultInspiration(tx, {
+          consultSessionId: session.id,
+          clientId: session.clientId,
+          professionalId: session.professionalId,
+          now: startedAt,
+        })
         const intakeRouting = determineHairColorSafetyRouting({
           intake: intake.payload.answers,
           visibleCondition: 'UNKNOWN',
@@ -785,6 +794,7 @@ export async function runConsultAnalysis(args: {
           schemaVersion: input.schemaVersion,
           promptVersion: input.promptVersion,
           intakeRevisionId: intake.revision.id,
+          inspirationRevisionId: inspiration.revisionId,
           captures,
         })
         if (session.status !== ConsultSessionStatus.ANALYSIS_PENDING) {
@@ -829,6 +839,12 @@ export async function runConsultAnalysis(args: {
           throw new ConsultWriteError('INVALID_STATE', 'Analysis was cancelled.')
         }
         const finalIntake = await currentCompletedIntake(tx, session.id)
+        const finalInspiration = await requireCompletedConsultInspiration(tx, {
+          consultSessionId: session.id,
+          clientId: session.clientId,
+          professionalId: session.professionalId,
+          now: finalizedAt,
+        })
         const finalCaptures = await currentCaptures(tx, session, finalizedAt)
         if (
           finalIntake.revision.id !== intake.revision.id ||
@@ -836,6 +852,7 @@ export async function runConsultAnalysis(args: {
             schemaVersion: input.schemaVersion,
             promptVersion: input.promptVersion,
             intakeRevisionId: finalIntake.revision.id,
+            inspirationRevisionId: finalInspiration.revisionId,
             captures: finalCaptures,
           }) !== hash
         ) {
