@@ -8,12 +8,20 @@ import { isRecord } from '@/lib/guards'
 import { normalizeStoredHairColorAnalysisPayload } from './analysisRevision'
 import {
   buildHairColorProBriefPayload,
+  buildLegacyHairColorProBriefPayload,
   CONSULT_PRO_BRIEF_PROMPT_VERSION,
   CONSULT_PRO_BRIEF_SCHEMA_VERSION,
+  LEGACY_CONSULT_PRO_BRIEF_PROMPT_VERSION,
+  LEGACY_CONSULT_PRO_BRIEF_SCHEMA_VERSION,
   toBriefJsonPayload,
+  toLegacyBriefJsonPayload,
   type HairColorProBriefPayload,
 } from './briefContract'
 import { normalizeHairColorIntakePayload } from './intakePack'
+import {
+  CONSULT_INSPIRATION_REFERENCE_NOTE,
+  normalizeStoredInspirationPayload,
+} from './inspirationPack'
 
 export class ImmutableConsultResultError extends Error {
   constructor() {
@@ -64,6 +72,7 @@ export async function loadLatestImmutableConsultResult(
       kind: {
         in: [
           ConsultRevisionKind.INTAKE,
+          ConsultRevisionKind.INSPIRATION,
           ConsultRevisionKind.ANALYSIS,
           ConsultRevisionKind.BRIEF,
         ],
@@ -88,32 +97,97 @@ export async function loadLatestImmutableConsultResult(
   )
   if (!analysis || !intake) throw new ImmutableConsultResultError()
 
+  const brief = selectLatestConsultRevision(
+    revisions.filter(
+      (revision) =>
+        revision.kind === ConsultRevisionKind.BRIEF &&
+        sourceAnalysisId(revision.payload) === analysis.id &&
+        ((revision.schemaVersion === CONSULT_PRO_BRIEF_SCHEMA_VERSION &&
+          revision.promptVersion === CONSULT_PRO_BRIEF_PROMPT_VERSION) ||
+          (revision.schemaVersion === LEGACY_CONSULT_PRO_BRIEF_SCHEMA_VERSION &&
+            revision.promptVersion === LEGACY_CONSULT_PRO_BRIEF_PROMPT_VERSION)),
+    ),
+  )
+  if (!brief) throw new ImmutableConsultResultError()
+
   const normalizedIntake = normalizeHairColorIntakePayload(intake.payload)
   if (!normalizedIntake?.complete) throw new ImmutableConsultResultError()
 
   let payload: HairColorProBriefPayload
   try {
-    payload = buildHairColorProBriefPayload({
+    const buildArgs = {
       intakeRevisionId: intake.id,
       intakeAnswers: normalizedIntake.answers,
       analysisRevisionId: analysis.id,
       analysisRevision: analysis.revision,
       analysis: normalizeStoredHairColorAnalysisPayload(analysis.payload),
-    })
+    }
+    if (brief.schemaVersion === LEGACY_CONSULT_PRO_BRIEF_SCHEMA_VERSION) {
+      const legacy = buildLegacyHairColorProBriefPayload(buildArgs)
+      if (!isDeepStrictEqual(brief.payload, toLegacyBriefJsonPayload(legacy))) {
+        throw new ImmutableConsultResultError()
+      }
+      payload = {
+        ...legacy,
+        inspiration: {
+          revisionId: null,
+          source: 'NONE',
+          inspirationId: null,
+          lookPostId: null,
+          mediaEndpoint: null,
+          referenceNote: CONSULT_INSPIRATION_REFERENCE_NOTE,
+          exactClientDetails: [],
+          possibleProfessionalInterpretation: [],
+          catalogGuidance: [],
+        },
+      }
+    } else {
+      const inspirationRevision = selectLatestConsultRevision(
+        revisions.filter(
+          (revision) => revision.kind === ConsultRevisionKind.INSPIRATION,
+        ),
+      )
+      if (!inspirationRevision) throw new ImmutableConsultResultError()
+      const inspiration = normalizeStoredInspirationPayload(
+        inspirationRevision.payload,
+      )
+      if (!inspiration?.complete) throw new ImmutableConsultResultError()
+      const source = inspiration.inspirationId
+        ? await tx.consultInspiration.findFirst({
+            where: {
+              id: inspiration.inspirationId,
+              consultSessionId,
+              status: 'ATTACHED',
+            },
+            select: { sourceLookPostId: true },
+          })
+        : null
+      if (inspiration.inspirationId && !source) {
+        throw new ImmutableConsultResultError()
+      }
+      payload = buildHairColorProBriefPayload({
+        ...buildArgs,
+        inspiration: {
+          revisionId: inspirationRevision.id,
+          source: inspiration.source,
+          inspirationId: inspiration.inspirationId,
+          lookPostId: source?.sourceLookPostId ?? null,
+          mediaEndpoint:
+            inspiration.source === 'EXTERNAL_UPLOAD'
+              ? `/api/v1/pro/consults/${encodeURIComponent(consultSessionId)}/inspiration/media`
+              : null,
+          referenceNote: CONSULT_INSPIRATION_REFERENCE_NOTE,
+          exactClientDetails: inspiration.exactClientDetails,
+          possibleProfessionalInterpretation:
+            inspiration.possibleProfessionalInterpretation,
+          catalogGuidance: inspiration.catalogGuidance,
+        },
+      })
+      if (!isDeepStrictEqual(brief.payload, toBriefJsonPayload(payload))) {
+        throw new ImmutableConsultResultError()
+      }
+    }
   } catch {
-    throw new ImmutableConsultResultError()
-  }
-
-  const brief = selectLatestConsultRevision(
-    revisions.filter(
-      (revision) =>
-        revision.kind === ConsultRevisionKind.BRIEF &&
-        revision.schemaVersion === CONSULT_PRO_BRIEF_SCHEMA_VERSION &&
-        revision.promptVersion === CONSULT_PRO_BRIEF_PROMPT_VERSION &&
-        sourceAnalysisId(revision.payload) === analysis.id,
-    ),
-  )
-  if (!brief || !isDeepStrictEqual(brief.payload, toBriefJsonPayload(payload))) {
     throw new ImmutableConsultResultError()
   }
 

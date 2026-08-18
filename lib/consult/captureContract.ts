@@ -52,6 +52,7 @@ import {
   evaluateAiConsultBookingEligibility,
 } from './eligibility'
 import { ConsultWriteError } from './errors'
+import { advanceLockedConsultToAnalysisIfReady } from './inspirationContract'
 import { transitionLockedConsultSession } from './writeBoundary'
 
 export const CONSULT_CAPTURE_RAW_TTL_MS = 24 * 60 * 60 * 1000
@@ -826,26 +827,13 @@ export async function checkConsultCaptureQuality(args: {
       })
 
       if (quality.accepted) {
-        const accepted = await tx.consultCapture.findMany({
-          where: {
-            consultSessionId: session.id,
-            status: ConsultCaptureStatus.ACCEPTED,
-            purgedAt: null,
-            rawExpiresAt: { gt: now },
-          },
-          select: { shotKey: true },
+        await advanceLockedConsultToAnalysisIfReady(tx, {
+          consultSessionId: session.id,
+          clientId: session.clientId,
+          professionalId: session.professionalId,
+          actor: args.actor,
+          now: finalizedAt,
         })
-        const acceptedKeys = new Set(accepted.map((item) => item.shotKey))
-        if (
-          HAIR_COLOR_CAPTURE_SHOT_KEYS.every((shotKey) => acceptedKeys.has(shotKey))
-        ) {
-          await transitionLockedConsultSession(tx, {
-            consultSessionId: session.id,
-            actor: args.actor,
-            fromStatus: ConsultSessionStatus.MEDIA_READY,
-            toStatus: ConsultSessionStatus.ANALYSIS_PENDING,
-          })
-        }
       }
       return {
         quality: qualityDto(updated),

@@ -255,6 +255,11 @@ export const DELETE_BOUNDARY: Readonly<Record<string, DeleteDisposition>> = {
     reason:
       'Ephemeral consult capture metadata. Provider bytes are purged before the owning consult can be deleted.',
   },
+  ConsultInspiration: {
+    status: 'DELETE',
+    reason:
+      'Guided inspiration metadata. External provider bytes are verified absent before the owning consult can be deleted; Look bytes were never copied.',
+  },
   LookPost: {
     status: 'DELETE',
     reason:

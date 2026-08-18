@@ -532,6 +532,22 @@ const consultSessionExportSelect = {
     },
     orderBy: { acceptedAt: 'asc' },
   },
+  inspirations: {
+    select: {
+      id: true,
+      source: true,
+      status: true,
+      sourceLookPostId: true,
+      uploadExpiresAt: true,
+      useExpiresAt: true,
+      purgeEligibleAt: true,
+      purgeRequestedAt: true,
+      purgedAt: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+    orderBy: { createdAt: 'asc' },
+  },
   auditEvents: {
     select: {
       id: true,
@@ -542,6 +558,7 @@ const consultSessionExportSelect = {
       toStatus: true,
       agreementAcceptanceId: true,
       revisionId: true,
+      inspirationId: true,
       createdAt: true,
     },
     orderBy: { createdAt: 'asc' },

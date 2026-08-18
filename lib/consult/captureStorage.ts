@@ -57,6 +57,7 @@ export interface ConsultCaptureStorage {
     expectedContentType: ConsultCaptureMediaType
     maxBytes: number
   }): Promise<ConsultCaptureImage>
+  createSignedRead(path: string, expiresInSeconds: number): Promise<string>
   purgeObject(path: string): Promise<void>
 }
 
@@ -221,6 +222,15 @@ export const consultCaptureStorage: ConsultCaptureStorage = {
       base64: Buffer.from(downloaded.bytes).toString('base64'),
       mediaType: downloaded.contentType,
     }
+  },
+
+  async createSignedRead(path, expiresInSeconds) {
+    const { data, error } = await (await admin())
+      .storage.from(CONSULT_CAPTURE_BUCKET)
+      .createSignedUrl(path, expiresInSeconds)
+    const url = signedUrl(data)
+    if (error || !url) throw new ConsultCaptureStorageError('unavailable')
+    return url
   },
 
   async purgeObject(path) {

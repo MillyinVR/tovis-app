@@ -6,12 +6,18 @@ import {
   ConsultBriefFeedbackRating,
   ConsultCaptureStatus,
   ConsultSessionStatus,
+  LookPostStatus,
+  LookPostVisibility,
+  MediaType,
+  MediaVisibility,
+  ModerationStatus,
   Prisma,
   PrismaClient,
   ProfessionalLocationType,
   Role,
   ServiceLocationType,
   UploadSessionStatus,
+  VerificationStatus,
 } from '@prisma/client'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -81,6 +87,10 @@ vi.mock('@/lib/consult/captureStorage', () => {
           token: 'signed-upload-secret',
           signedUrl: 'https://storage.test/signed-upload-secret',
         }
+      },
+      async createSignedRead(path: string, expiresInSeconds: number) {
+        fake.signedPaths.push(path)
+        return `https://storage.test/read/${expiresInSeconds}`
       },
       async inspectObject(args: {
         path: string
@@ -229,6 +239,7 @@ import {
 } from '@/lib/consult/capturePurge'
 import {
   acceptConsultAgreement,
+  appendLockedConsultInspirationRevision,
   appendHairColorIntakeRevision,
   revokeConsultAgreement,
   transitionLockedConsultSession,
@@ -237,6 +248,18 @@ import {
   HAIR_COLOR_INTAKE_PACK_VERSION,
   HAIR_COLOR_INTAKE_SCHEMA_VERSION,
 } from '@/lib/consult/intakePack'
+import {
+  answerConsultInspirationQuestion,
+  attachConsultInspirationUpload,
+  chooseConsultInspirationLook,
+  issueConsultInspirationUpload,
+  loadClientInspirationSignedRead,
+  loadConsultInspirationState,
+  loadProInspirationSignedRead,
+  requireCompletedConsultInspiration,
+  skipConsultInspiration,
+} from '@/lib/consult/inspirationContract'
+import { runConsultInspirationPurgeSweep } from '@/lib/consult/inspirationPurge'
 
 const databaseUrl = process.env.DATABASE_URL
 if (!databaseUrl) throw new Error('Run with pnpm test:integration')
@@ -257,7 +280,10 @@ const userIds: string[] = []
 const clientIds: string[] = []
 const bookingIds: string[] = []
 const sessionIds: string[] = []
-const safetyServiceIds: string[] = []
+const auxiliaryServiceIds: string[] = []
+const lookAssetIds: string[] = []
+const auxiliaryProfessionalIds: string[] = []
+const auxiliaryUserIds: string[] = []
 let bookingSequence = 0
 
 type ReadyConsult = {
@@ -319,6 +345,7 @@ function validIssue(idempotencyKey: string, shotKey: string) {
 async function createReadyConsult(
   label: string,
   answerOverrides: Record<string, string> = {},
+  options: { skipInspiration?: boolean } = {},
 ): Promise<ReadyConsult> {
   const user = await db.user.create({
     data: { email: `${tag}_${label}@example.com`, password: 'x', role: Role.CLIENT },
@@ -397,6 +424,17 @@ async function createReadyConsult(
       answers: { ...completeAnswers, ...answerOverrides },
     }),
   })
+  if (options.skipInspiration !== false) {
+    await skipConsultInspiration({
+      consultSessionId: session.id,
+      clientId: client.id,
+      actor: { type: ConsultActorType.CLIENT, id: user.id },
+      input: {
+        idempotencyKey: `skip-inspiration-${label}`,
+        schemaVersion: 1,
+      },
+    })
+  }
   return { userId: user.id, clientId: client.id, bookingId: booking.id, sessionId: session.id }
 }
 
@@ -413,7 +451,7 @@ async function createSafetyOffering(args: {
     },
     select: { id: true },
   })
-  safetyServiceIds.push(service.id)
+  auxiliaryServiceIds.push(service.id)
   await db.professionalServiceOffering.create({
     data: {
       professionalId,
@@ -529,6 +567,40 @@ async function completeCapturePack(consult: ReadyConsult, suffix: string) {
   }
 }
 
+async function attachExternalInspiration(consult: ReadyConsult, suffix: string) {
+  const issued = await issueConsultInspirationUpload({
+    consultSessionId: consult.sessionId,
+    clientId: consult.clientId,
+    actor: { type: ConsultActorType.CLIENT, id: consult.userId },
+    input: {
+      idempotencyKey: `${suffix}-issue`,
+      schemaVersion: 1,
+      contentType: 'image/jpeg',
+      sizeBytes: 100,
+      checksumSha256: null,
+    },
+  })
+  const row = await db.consultInspiration.findUniqueOrThrow({
+    where: { id: issued.upload.inspirationId },
+  })
+  fake.objects.set(row.storagePath!, {
+    contentType: 'image/jpeg',
+    sizeBytes: 100,
+    checksumSha256: null,
+  })
+  await attachConsultInspirationUpload({
+    consultSessionId: consult.sessionId,
+    clientId: consult.clientId,
+    actor: { type: ConsultActorType.CLIENT, id: consult.userId },
+    input: {
+      idempotencyKey: `${suffix}-attach`,
+      inspirationId: row.id,
+      schemaVersion: 1,
+    },
+  })
+  return row
+}
+
 function analysisRequest(consult: ReadyConsult, idempotencyKey: string) {
   return startAnalysis(
     jsonRequest(`/api/v1/client/consult/${consult.sessionId}/analysis`, {
@@ -559,6 +631,7 @@ beforeAll(async () => {
       firstName: 'Capture',
       lastName: 'Professional',
       timeZone: 'America/Los_Angeles',
+      verificationStatus: VerificationStatus.APPROVED,
     },
     select: { id: true },
   })
@@ -647,15 +720,20 @@ afterAll(async () => {
   await db.booking.deleteMany({ where: { id: { in: bookingIds } } })
   await db.professionalLocation.deleteMany({ where: { id: locationId } })
   await db.professionalServiceOffering.deleteMany({
-    where: { serviceId: { in: [serviceId, ...safetyServiceIds] } },
+    where: { serviceId: { in: [serviceId, ...auxiliaryServiceIds] } },
   })
+  await db.mediaAsset.deleteMany({ where: { id: { in: lookAssetIds } } })
   await db.service.deleteMany({
-    where: { id: { in: [serviceId, ...safetyServiceIds] } },
+    where: { id: { in: [serviceId, ...auxiliaryServiceIds] } },
   })
   await db.serviceCategory.deleteMany({ where: { id: categoryId } })
   await db.clientProfile.deleteMany({ where: { id: { in: clientIds } } })
-  await db.professionalProfile.deleteMany({ where: { id: professionalId } })
-  await db.user.deleteMany({ where: { id: { in: [...userIds, proUserId] } } })
+  await db.professionalProfile.deleteMany({
+    where: { id: { in: [professionalId, ...auxiliaryProfessionalIds] } },
+  })
+  await db.user.deleteMany({
+    where: { id: { in: [...userIds, proUserId, ...auxiliaryUserIds] } },
+  })
   await db.tenant.deleteMany({ where: { id: tenantId } })
   delete process.env.ENABLE_AI_CONSULT
   await db.$disconnect()
@@ -1086,6 +1164,22 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
         answers: completeAnswers,
       }),
     })
+    await expect(
+      db.$transaction((tx) =>
+        requireCompletedConsultInspiration(tx, {
+          consultSessionId: consult.sessionId,
+          clientId: consult.clientId,
+          professionalId,
+          now: new Date(),
+        }),
+      ),
+    ).rejects.toMatchObject({ code: 'ANALYSIS_PREREQUISITES_REQUIRED' })
+    await skipConsultInspiration({
+      consultSessionId: consult.sessionId,
+      clientId: consult.clientId,
+      actor: { type: ConsultActorType.CLIENT, id: consult.userId },
+      input: { idempotencyKey: 'fresh-inspiration-after-reconsent', schemaVersion: 1 },
+    })
     const fresh = await issue(consult, 'hair_right', 'fresh-consent')
     expect(fresh.status).toBe(200)
     expect(
@@ -1343,8 +1437,8 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
     })
     expect(brief).toMatchObject({
       revision: revisions[0]!.revision + 1,
-      schemaVersion: 1,
-      promptVersion: 'hair-color-pro-brief-v1',
+      schemaVersion: 2,
+      promptVersion: 'hair-color-pro-brief-v2',
       model: null,
       idempotencyKey: null,
       requestHash: null,
@@ -1352,6 +1446,12 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
         sourceAnalysisRevisionId: revisions[0]!.id,
         sourceAnalysisRevision: revisions[0]!.revision,
         intakeRevisionId: expect.any(String),
+        inspiration: expect.objectContaining({
+          source: 'NONE',
+          inspirationId: null,
+          exactClientDetails: [],
+          possibleProfessionalInterpretation: [],
+        }),
         clientIntake: expect.any(Array),
         aiObservations: expect.any(Object),
         safetyFlags: expect.arrayContaining([
@@ -1844,6 +1944,608 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
         },
       }),
     ).rejects.toThrow('invalid versioned hair-color analysis payload')
+  })
+
+  it('keeps inspiration optional but requires an explicit fresh decision before analysis', async () => {
+    const consult = await createReadyConsult('inspiration-skip-last', {}, {
+      skipInspiration: false,
+    })
+    authenticate(consult)
+    await completeCapturePack(consult, 'inspiration-skip-last')
+
+    expect(
+      (await db.consultSession.findUniqueOrThrow({
+        where: { id: consult.sessionId },
+        select: { status: true },
+      })).status,
+    ).toBe(ConsultSessionStatus.MEDIA_READY)
+    await expect(
+      db.consultSession.update({
+        where: { id: consult.sessionId },
+        data: { status: ConsultSessionStatus.ANALYSIS_PENDING },
+      }),
+    ).rejects.toThrow()
+
+    const first = await skipConsultInspiration({
+      consultSessionId: consult.sessionId,
+      clientId: consult.clientId,
+      actor: { type: ConsultActorType.CLIENT, id: consult.userId },
+      input: { idempotencyKey: 'skip-last', schemaVersion: 1 },
+    })
+    expect(first.state.status).toBe(ConsultSessionStatus.ANALYSIS_PENDING)
+    expect(first.state.latestReview).toMatchObject({
+      source: 'NONE',
+      complete: true,
+      answers: [],
+    })
+  })
+
+  it('rejects a forged complete review with fewer than three specifics at the database boundary', async () => {
+    const consult = await createReadyConsult('inspiration-db-payload', {}, {
+      skipInspiration: false,
+    })
+    await expect(
+      db.$transaction(async (tx) => {
+        await tx.$queryRaw(Prisma.sql`
+          SELECT "id" FROM "ConsultSession"
+          WHERE "id" = ${consult.sessionId}
+          FOR UPDATE
+        `)
+        return appendLockedConsultInspirationRevision(tx, {
+          consultSessionId: consult.sessionId,
+          schemaVersion: 1,
+          idempotencyKey: 'forged-inspiration-review',
+          requestHash: 'f'.repeat(64),
+          actor: { type: ConsultActorType.CLIENT, id: consult.userId },
+          payload: {
+            contractId: 'hair-color-guided-inspiration',
+            contractVersion: 1,
+            schemaVersion: 1,
+            source: 'EXTERNAL_UPLOAD',
+            inspirationId: 'forged-source',
+            complete: true,
+            answers: [
+              { questionKey: 'favorite_colors', selectedValues: ['not-sure'], text: null, sentiment: null },
+              { questionKey: 'avoid_colors', selectedValues: ['none'], text: null, sentiment: null },
+              { questionKey: 'length_goal', selectedValues: ['not-part-of-goal'], text: null, sentiment: null },
+              { questionKey: 'fullness_goal', selectedValues: ['not-sure'], text: null, sentiment: null },
+              { questionKey: 'current_styling', selectedValues: ['not-sure'], text: null, sentiment: null },
+              { questionKey: 'styling_walkthrough', selectedValues: ['yes'], text: null, sentiment: null },
+              { questionKey: 'other_detail', selectedValues: ['nothing-else'], text: null, sentiment: 'NONE' },
+            ],
+            exactClientDetails: [],
+            possibleProfessionalInterpretation: [],
+            catalogGuidance: [],
+          },
+        })
+      }),
+    ).rejects.toThrow('invalid guided inspiration review')
+  })
+
+  it('links a currently authorized booked-pro Look without copying media bytes', async () => {
+    const consult = await createReadyConsult('inspiration-look', {}, {
+      skipInspiration: false,
+    })
+    const media = await db.mediaAsset.create({
+      data: {
+        professionalId,
+        proTenantId: tenantId,
+        primaryServiceId: serviceId,
+        mediaType: MediaType.IMAGE,
+        visibility: MediaVisibility.PUBLIC,
+        storageBucket: 'media-public',
+        storagePath: `${tag}/booked-pro-look.jpg`,
+      },
+      select: { id: true },
+    })
+    lookAssetIds.push(media.id)
+    const look = await db.lookPost.create({
+      data: {
+        professionalId,
+        primaryMediaAssetId: media.id,
+        serviceId,
+        status: LookPostStatus.PUBLISHED,
+        visibility: LookPostVisibility.UNLISTED,
+        moderationStatus: ModerationStatus.APPROVED,
+        publishedAt: new Date(),
+      },
+      select: { id: true },
+    })
+    const mediaCount = await db.mediaAsset.count()
+
+    const selected = await chooseConsultInspirationLook({
+      consultSessionId: consult.sessionId,
+      clientId: consult.clientId,
+      actor: { type: ConsultActorType.CLIENT, id: consult.userId },
+      input: {
+        idempotencyKey: 'select-booked-look',
+        schemaVersion: 1,
+        source: 'BOOKED_PRO_LOOK',
+        lookPostId: look.id,
+      },
+    })
+    expect(selected.state.source).toMatchObject({
+      source: 'BOOKED_PRO_LOOK',
+      lookPostId: look.id,
+      imageAvailable: true,
+    })
+    expect(await db.mediaAsset.count()).toBe(mediaCount)
+    expect(
+      await db.consultInspiration.findFirstOrThrow({
+        where: { consultSessionId: consult.sessionId },
+        select: { storageBucket: true, storagePath: true },
+      }),
+    ).toEqual({ storageBucket: null, storagePath: null })
+
+    const forgedScope = await createReadyConsult(
+      'inspiration-forged-look-source',
+      {},
+      { skipInspiration: false },
+    )
+    await expect(
+      db.consultInspiration.create({
+        data: {
+          consultSessionId: forgedScope.sessionId,
+          source: 'PLATFORM_LOOK',
+          status: 'ATTACHED',
+          sourceLookPostId: look.id,
+          sourceIdempotencyKey: 'forged-classification',
+          sourceRequestHash: 'f'.repeat(64),
+        },
+      }),
+    ).rejects.toThrow()
+
+    await db.lookPost.update({
+      where: { id: look.id },
+      data: { status: LookPostStatus.ARCHIVED },
+    })
+    const state = await loadConsultInspirationState({
+      consultSessionId: consult.sessionId,
+      clientId: consult.clientId,
+      actorUserId: consult.userId,
+    })
+    expect(state.source?.imageAvailable).toBe(false)
+    const rls = await db.$queryRaw<Array<{ relrowsecurity: boolean }>>(Prisma.sql`
+      SELECT relrowsecurity FROM pg_class WHERE oid = '"ConsultInspiration"'::regclass
+    `)
+    expect(rls).toEqual([{ relrowsecurity: true }])
+  })
+
+  it('rechecks platform Look visibility and follow authorization without taking ownership', async () => {
+    const consult = await createReadyConsult('inspiration-platform-look', {}, {
+      skipInspiration: false,
+    })
+    const ownerUser = await db.user.create({
+      data: {
+        email: `${tag}_platform_look_owner@example.com`,
+        password: 'x',
+        role: Role.PRO,
+      },
+      select: { id: true },
+    })
+    auxiliaryUserIds.push(ownerUser.id)
+    const owner = await db.professionalProfile.create({
+      data: {
+        userId: ownerUser.id,
+        homeTenantId: tenantId,
+        firstName: 'Platform',
+        lastName: 'Owner',
+        verificationStatus: VerificationStatus.APPROVED,
+      },
+      select: { id: true },
+    })
+    auxiliaryProfessionalIds.push(owner.id)
+    const media = await db.mediaAsset.create({
+      data: {
+        professionalId: owner.id,
+        proTenantId: tenantId,
+        primaryServiceId: serviceId,
+        mediaType: MediaType.IMAGE,
+        visibility: MediaVisibility.PUBLIC,
+        storageBucket: 'media-public',
+        storagePath: `${tag}/platform-look.jpg`,
+      },
+      select: { id: true },
+    })
+    lookAssetIds.push(media.id)
+    const look = await db.lookPost.create({
+      data: {
+        professionalId: owner.id,
+        primaryMediaAssetId: media.id,
+        serviceId,
+        status: LookPostStatus.PUBLISHED,
+        visibility: LookPostVisibility.PUBLIC,
+        moderationStatus: ModerationStatus.APPROVED,
+        publishedAt: new Date(),
+      },
+      select: { id: true },
+    })
+    const selected = await chooseConsultInspirationLook({
+      consultSessionId: consult.sessionId,
+      clientId: consult.clientId,
+      actor: { type: ConsultActorType.CLIENT, id: consult.userId },
+      input: {
+        idempotencyKey: 'select-platform-look',
+        schemaVersion: 1,
+        source: 'PLATFORM_LOOK',
+        lookPostId: look.id,
+      },
+    })
+    expect(selected.state.source).toMatchObject({
+      source: 'PLATFORM_LOOK',
+      lookPostId: look.id,
+      imageAvailable: true,
+    })
+
+    await db.lookPost.update({
+      where: { id: look.id },
+      data: { visibility: LookPostVisibility.FOLLOWERS_ONLY },
+    })
+    expect(
+      (await loadConsultInspirationState({
+        consultSessionId: consult.sessionId,
+        clientId: consult.clientId,
+        actorUserId: consult.userId,
+      })).source?.imageAvailable,
+    ).toBe(false)
+    await db.proFollow.create({
+      data: { clientId: consult.clientId, professionalId: owner.id },
+    })
+    expect(
+      (await loadConsultInspirationState({
+        consultSessionId: consult.sessionId,
+        clientId: consult.clientId,
+        actorUserId: consult.userId,
+      })).source?.imageAvailable,
+    ).toBe(false)
+  })
+
+  it('serializes concurrent external issue and attach retries without duplicate evidence', async () => {
+    const consult = await createReadyConsult('inspiration-concurrent', {}, {
+      skipInspiration: false,
+    })
+    const issueArgs = {
+      consultSessionId: consult.sessionId,
+      clientId: consult.clientId,
+      actor: { type: ConsultActorType.CLIENT, id: consult.userId } as const,
+      input: {
+        idempotencyKey: 'concurrent-issue',
+        schemaVersion: 1,
+        contentType: 'image/jpeg',
+        sizeBytes: 100,
+        checksumSha256: null,
+      },
+    }
+    const issued = await Promise.all([
+      issueConsultInspirationUpload(issueArgs),
+      issueConsultInspirationUpload(issueArgs),
+    ])
+    expect(new Set(issued.map(({ upload }) => upload.inspirationId)).size).toBe(1)
+    expect(issued.map(({ replayed }) => replayed).sort()).toEqual([false, true])
+    const row = await db.consultInspiration.findUniqueOrThrow({
+      where: { id: issued[0]!.upload.inspirationId },
+    })
+    fake.objects.set(row.storagePath!, {
+      contentType: 'image/jpeg',
+      sizeBytes: 100,
+      checksumSha256: null,
+    })
+    const attachArgs = {
+      consultSessionId: consult.sessionId,
+      clientId: consult.clientId,
+      actor: { type: ConsultActorType.CLIENT, id: consult.userId } as const,
+      input: {
+        idempotencyKey: 'concurrent-attach',
+        inspirationId: row.id,
+        schemaVersion: 1,
+      },
+    }
+    const attached = await Promise.all([
+      attachConsultInspirationUpload(attachArgs),
+      attachConsultInspirationUpload(attachArgs),
+    ])
+    expect(attached.map(({ replayed }) => replayed).sort()).toEqual([false, true])
+    expect(
+      await db.consultInspiration.count({
+        where: { consultSessionId: consult.sessionId },
+      }),
+    ).toBe(1)
+    expect(
+      await db.consultAuditEvent.count({
+        where: {
+          inspirationId: row.id,
+          action: ConsultAuditAction.INSPIRATION_UPLOAD_ATTACHED,
+        },
+      }),
+    ).toBe(1)
+  })
+
+  it('keeps an external image private and completes seven ordered answers with bounded guidance', async () => {
+    const consult = await createReadyConsult('inspiration-external', {}, {
+      skipInspiration: false,
+    })
+    const itemCountBefore = await db.bookingServiceItem.count({
+      where: { bookingId: consult.bookingId },
+    })
+    const stylingService = await db.service.create({
+      data: {
+        name: `${tag} Style Finish`,
+        categoryId,
+        defaultDurationMinutes: 20,
+        minPrice: new Prisma.Decimal('30.00'),
+      },
+      select: { id: true },
+    })
+    auxiliaryServiceIds.push(stylingService.id)
+    await db.professionalServiceOffering.create({
+      data: {
+        professionalId,
+        serviceId: stylingService.id,
+        isActive: true,
+        offersInSalon: true,
+        salonPriceStartingAt: new Prisma.Decimal('30.00'),
+        salonDurationMinutes: 20,
+      },
+    })
+    const row = await attachExternalInspiration(consult, 'external')
+    expect(row.storageBucket).toBe('media-private')
+    expect(row.storagePath).toMatch(/^consult-inspiration\/v1\/[0-9a-f-]+\.jpg$/)
+    expect(row.storagePath).not.toContain(consult.clientId)
+    await expect(
+      answerConsultInspirationQuestion({
+        consultSessionId: consult.sessionId,
+        clientId: consult.clientId,
+        actor: { type: ConsultActorType.CLIENT, id: consult.userId },
+        input: {
+          idempotencyKey: 'out-of-order',
+          schemaVersion: 1,
+          questionKey: 'avoid_colors',
+          selectedValues: ['none'],
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'INSPIRATION_QUESTION_OUT_OF_ORDER' })
+
+    const answers = [
+      ['favorite_colors', ['cool-smoky'], undefined, undefined],
+      ['avoid_colors', ['none'], undefined, undefined],
+      ['length_goal', ['yes-same-length'], undefined, undefined],
+      ['fullness_goal', ['more-full'], undefined, undefined],
+      ['current_styling', ['not-sure'], undefined, undefined],
+      ['styling_walkthrough', ['no'], undefined, undefined],
+      ['other_detail', ['nothing-else'], undefined, 'NONE'],
+    ] as const
+    let completed: Awaited<ReturnType<typeof answerConsultInspirationQuestion>> | null = null
+    for (const [questionKey, selectedValues, text, sentiment] of answers) {
+      try {
+        completed = await answerConsultInspirationQuestion({
+        consultSessionId: consult.sessionId,
+        clientId: consult.clientId,
+        actor: { type: ConsultActorType.CLIENT, id: consult.userId },
+        input: {
+          idempotencyKey: `answer-${questionKey}`,
+          schemaVersion: 1,
+          questionKey,
+          selectedValues: [...selectedValues],
+          text,
+          sentiment,
+        },
+        })
+      } catch (error) {
+        throw new Error(`Failed guided answer ${questionKey}`, { cause: error })
+      }
+    }
+    expect(completed?.state.latestReview).toMatchObject({
+      complete: true,
+      source: 'EXTERNAL_UPLOAD',
+      answers: expect.arrayContaining([expect.objectContaining({ questionKey: 'other_detail' })]),
+      exactClientDetails: expect.arrayContaining([
+        expect.objectContaining({ clientWords: 'The cool or smoky colors' }),
+      ]),
+      possibleProfessionalInterpretation: expect.arrayContaining([
+        expect.objectContaining({ confidence: 'POSSIBLE', evidence: 'CLIENT_SELECTION' }),
+      ]),
+      catalogGuidance: [
+        expect.objectContaining({
+          detail: 'STYLING',
+          contextOnly: true,
+          automaticallyAdded: false,
+          message: expect.stringContaining('nothing was added'),
+        }),
+      ],
+    })
+    expect(completed?.state.progress).toMatchObject({
+      answeredQuestionCount: 7,
+      specificDetailCount: 3,
+      canComplete: true,
+    })
+    expect(
+      (await answerConsultInspirationQuestion({
+        consultSessionId: consult.sessionId,
+        clientId: consult.clientId,
+        actor: { type: ConsultActorType.CLIENT, id: consult.userId },
+        input: {
+          idempotencyKey: 'answer-favorite_colors',
+          schemaVersion: 1,
+          questionKey: 'favorite_colors',
+          selectedValues: ['cool-smoky'],
+        },
+      })).replayed,
+    ).toBe(true)
+    await expect(
+      answerConsultInspirationQuestion({
+        consultSessionId: consult.sessionId,
+        clientId: consult.clientId,
+        actor: { type: ConsultActorType.CLIENT, id: consult.userId },
+        input: {
+          idempotencyKey: 'answer-favorite_colors',
+          schemaVersion: 1,
+          questionKey: 'favorite_colors',
+          selectedValues: ['warm-golden'],
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' })
+    expect(
+      await db.bookingServiceItem.count({ where: { bookingId: consult.bookingId } }),
+    ).toBe(itemCountBefore)
+    const read = await loadClientInspirationSignedRead({
+      consultSessionId: consult.sessionId,
+      clientId: consult.clientId,
+      actorUserId: consult.userId,
+    })
+    expect(read).toEqual({
+      url: 'https://storage.test/read/600',
+      expiresInSeconds: 600,
+    })
+    await expect(
+      loadProInspirationSignedRead({
+        consultSessionId: consult.sessionId,
+        professionalId,
+      }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    expect(await db.mediaAsset.count({ where: { storagePath: row.storagePath! } })).toBe(0)
+    authenticate(consult)
+    await completeCapturePack(consult, 'external-brief')
+    expect((await analysisRequest(consult, 'external-brief-analysis')).status).toBe(200)
+    const brief = await db.consultRevision.findFirstOrThrow({
+      where: { consultSessionId: consult.sessionId, kind: 'BRIEF' },
+      orderBy: [{ revision: 'desc' }, { id: 'desc' }],
+      select: { schemaVersion: true, promptVersion: true, payload: true },
+    })
+    expect(brief).toMatchObject({
+      schemaVersion: 2,
+      promptVersion: 'hair-color-pro-brief-v2',
+      payload: expect.objectContaining({
+        inspiration: expect.objectContaining({
+          source: 'EXTERNAL_UPLOAD',
+          inspirationId: row.id,
+          exactClientDetails: expect.arrayContaining([
+            expect.objectContaining({ clientWords: 'The cool or smoky colors' }),
+          ]),
+          possibleProfessionalInterpretation: expect.arrayContaining([
+            expect.objectContaining({ confidence: 'POSSIBLE' }),
+          ]),
+        }),
+      }),
+    })
+    expect(JSON.stringify(brief.payload)).not.toMatch(
+      /storagePath|storageBucket|signedUrl|base64/,
+    )
+    await expect(
+      loadProInspirationSignedRead({
+        consultSessionId: consult.sessionId,
+        professionalId,
+      }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    await expect(
+      loadProInspirationSignedRead({
+        consultSessionId: consult.sessionId,
+        professionalId: 'foreign-professional',
+      }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' })
+  })
+
+  it('purges replaced, cancelled, and revoked external inspiration with verified retry', async () => {
+    const replaced = await createReadyConsult('inspiration-replaced', {}, {
+      skipInspiration: false,
+    })
+    const replacedRow = await attachExternalInspiration(replaced, 'replace')
+    await skipConsultInspiration({
+      consultSessionId: replaced.sessionId,
+      clientId: replaced.clientId,
+      actor: { type: ConsultActorType.CLIENT, id: replaced.userId },
+      input: { idempotencyKey: 'replace-with-skip', schemaVersion: 1 },
+    })
+    expect(fake.objects.has(replacedRow.storagePath!)).toBe(false)
+    expect(
+      await db.consultInspiration.findUniqueOrThrow({
+        where: { id: replacedRow.id },
+        select: { status: true, storagePath: true, purgedAt: true },
+      }),
+    ).toMatchObject({ status: 'REPLACED', storagePath: null, purgedAt: expect.any(Date) })
+
+    const cancelled = await createReadyConsult('inspiration-cancelled', {}, {
+      skipInspiration: false,
+    })
+    const cancelledRow = await attachExternalInspiration(cancelled, 'cancel')
+    const rescheduledFor = new Date(future.getTime() + 20 * 24 * 60 * 60 * 1000)
+    await db.booking.update({
+      where: { id: cancelled.bookingId },
+      data: { scheduledFor: rescheduledFor },
+    })
+    expect(
+      (await db.consultInspiration.findUniqueOrThrow({
+        where: { id: cancelledRow.id },
+        select: { useExpiresAt: true },
+      })).useExpiresAt,
+    ).toEqual(new Date(rescheduledFor.getTime() + 25 * 60 * 60 * 1000))
+    await db.booking.update({
+      where: { id: cancelled.bookingId },
+      data: { status: BookingStatus.CANCELLED },
+    })
+    expect(
+      await db.consultInspiration.findUniqueOrThrow({
+        where: { id: cancelledRow.id },
+        select: { purgeEligibleAt: true, purgeRequestedAt: true },
+      }),
+    ).toMatchObject({
+      purgeEligibleAt: expect.any(Date),
+      purgeRequestedAt: expect.any(Date),
+    })
+    expect(await runConsultInspirationPurgeSweep()).toMatchObject({
+      considered: 1,
+      purged: 1,
+      failed: 0,
+    })
+
+    const revoked = await createReadyConsult('inspiration-revoked', {}, {
+      skipInspiration: false,
+    })
+    const revokedRow = await attachExternalInspiration(revoked, 'revoke')
+    const acceptance = await db.consultAgreementAcceptance.findFirstOrThrow({
+      where: {
+        consultSessionId: revoked.sessionId,
+        kind: ConsultAgreementKind.SENSITIVE_DATA_CONSENT,
+        revokedAt: null,
+      },
+    })
+    await revokeConsultAgreement({
+      consultSessionId: revoked.sessionId,
+      acceptanceId: acceptance.id,
+      reason: 'External inspiration purge retry fixture.',
+      actor: { type: ConsultActorType.CLIENT, id: revoked.userId },
+    })
+    fake.failPurgePaths.add(revokedRow.storagePath!)
+    expect(await runConsultInspirationPurgeSweep()).toMatchObject({
+      considered: 1,
+      purged: 0,
+      failed: 1,
+    })
+    expect(
+      await db.consultInspiration.findUniqueOrThrow({
+        where: { id: revokedRow.id },
+        select: { storagePath: true, purgedAt: true },
+      }),
+    ).toEqual({ storagePath: revokedRow.storagePath, purgedAt: null })
+    expect(await runConsultInspirationPurgeSweep()).toMatchObject({
+      considered: 1,
+      purged: 1,
+      failed: 0,
+    })
+    expect(
+      await db.consultAuditEvent.count({
+        where: {
+          inspirationId: revokedRow.id,
+          action: ConsultAuditAction.INSPIRATION_RAW_PURGED,
+        },
+      }),
+    ).toBe(1)
+    await expect(
+      loadClientInspirationSignedRead({
+        consultSessionId: revoked.sessionId,
+        clientId: revoked.clientId,
+        actorUserId: revoked.userId,
+      }),
+    ).rejects.toMatchObject({ code: 'INVALID_STATE' })
   })
 
   it('rejects conflicting analysis keys and direct database completion/revision bypasses', async () => {

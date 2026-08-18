@@ -6,6 +6,7 @@ import type {
   ConsultBriefAiObservationsDTO,
   ConsultBriefClientIntakeItemDTO,
   ConsultBriefRecommendationDirectionDTO,
+  ConsultBriefInspirationDTO,
 } from '@/lib/dto/consult'
 
 import {
@@ -13,10 +14,12 @@ import {
   type HairColorIntakeQuestionKey,
 } from './intakePack'
 
-export const CONSULT_PRO_BRIEF_SCHEMA_VERSION = 1
-export const CONSULT_PRO_BRIEF_PROMPT_VERSION = 'hair-color-pro-brief-v1'
+export const CONSULT_PRO_BRIEF_SCHEMA_VERSION = 2
+export const CONSULT_PRO_BRIEF_PROMPT_VERSION = 'hair-color-pro-brief-v2'
+export const LEGACY_CONSULT_PRO_BRIEF_SCHEMA_VERSION = 1
+export const LEGACY_CONSULT_PRO_BRIEF_PROMPT_VERSION = 'hair-color-pro-brief-v1'
 
-export type HairColorProBriefPayload = {
+type HairColorProBriefCore = {
   schemaVersion: number
   sourceAnalysisRevisionId: string
   sourceAnalysisRevision: number
@@ -26,6 +29,11 @@ export type HairColorProBriefPayload = {
   safetyFlags: ConsultAnalysisPayloadDTO['safetyFlags']
   achievabilityDirection: ConsultBriefAchievabilityDirectionDTO
   recommendationDirections: ConsultBriefRecommendationDirectionDTO[]
+}
+
+export type LegacyHairColorProBriefPayload = HairColorProBriefCore
+export type HairColorProBriefPayload = HairColorProBriefCore & {
+  inspiration: ConsultBriefInspirationDTO
 }
 
 function intakeItems(
@@ -53,20 +61,25 @@ function intakeItems(
  * C3 object material: every field comes from the normalized C2 intake pack or
  * the normalized C4 hair-only analysis DTO.
  */
-export function buildHairColorProBriefPayload(args: {
+type HairColorProBriefBuildArgs = {
   intakeRevisionId: string
   intakeAnswers: Readonly<Record<string, string>>
   analysisRevisionId: string
   analysisRevision: number
   analysis: ConsultAnalysisPayloadDTO
-}): HairColorProBriefPayload {
+}
+
+function buildHairColorProBriefCore(
+  args: HairColorProBriefBuildArgs,
+  schemaVersion: number,
+): HairColorProBriefCore {
   const clientIntake = intakeItems(args.intakeAnswers)
   if (clientIntake.length === 0) {
     throw new Error('Consult brief intake is unavailable.')
   }
 
   return {
-    schemaVersion: CONSULT_PRO_BRIEF_SCHEMA_VERSION,
+    schemaVersion,
     sourceAnalysisRevisionId: args.analysisRevisionId,
     sourceAnalysisRevision: args.analysisRevision,
     intakeRevisionId: args.intakeRevisionId,
@@ -108,8 +121,48 @@ export function buildHairColorProBriefPayload(args: {
   }
 }
 
+export function buildHairColorProBriefPayload(
+  args: HairColorProBriefBuildArgs & { inspiration: ConsultBriefInspirationDTO },
+): HairColorProBriefPayload {
+  return {
+    ...buildHairColorProBriefCore(args, CONSULT_PRO_BRIEF_SCHEMA_VERSION),
+    inspiration: args.inspiration,
+  }
+}
+
+export function buildLegacyHairColorProBriefPayload(
+  args: HairColorProBriefBuildArgs,
+): LegacyHairColorProBriefPayload {
+  return buildHairColorProBriefCore(
+    args,
+    LEGACY_CONSULT_PRO_BRIEF_SCHEMA_VERSION,
+  )
+}
+
 export function toBriefJsonPayload(
   payload: HairColorProBriefPayload,
+): Prisma.InputJsonValue {
+  return {
+    ...payload,
+    clientIntake: payload.clientIntake.map((item) => ({ ...item })),
+    inspiration: {
+      ...payload.inspiration,
+      exactClientDetails: payload.inspiration.exactClientDetails.map((item) => ({ ...item })),
+      possibleProfessionalInterpretation: payload.inspiration.possibleProfessionalInterpretation.map((item) => ({ ...item })),
+      catalogGuidance: payload.inspiration.catalogGuidance.map((item) => ({ ...item })),
+    },
+    aiObservations: { ...payload.aiObservations },
+    safetyFlags: payload.safetyFlags.map((flag) => ({ ...flag })),
+    achievabilityDirection: { ...payload.achievabilityDirection },
+    recommendationDirections: payload.recommendationDirections.map((item) => ({
+      ...item,
+      reference: { ...item.reference },
+    })),
+  }
+}
+
+export function toLegacyBriefJsonPayload(
+  payload: LegacyHairColorProBriefPayload,
 ): Prisma.InputJsonValue {
   return {
     ...payload,

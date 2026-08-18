@@ -628,6 +628,16 @@ export const DELETE_RULES: readonly DeleteRule[] = [
         : null,
   }),
   deleteRule({
+    model: 'ConsultInspiration',
+    notes:
+      'External provider objects are verified absent before this metadata row can be deleted; referenced Look bytes remain governed by the Look owner.',
+    delegate: (db) => db.consultInspiration,
+    where: (s) =>
+      s.clientProfileId
+        ? { consultSession: { clientId: s.clientProfileId } }
+        : null,
+  }),
+  deleteRule({
     model: 'ConsultSession',
     notes:
       "The client's own booking-attached AI consult. Revisions, legal evidence, bounded capture rows and audits cascade only after raw objects are verified absent.",

@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest'
 
 import type { ConsultAnalysisPayloadDTO } from '@/lib/dto/consult'
 
-import { buildHairColorProBriefPayload, toBriefJsonPayload } from './briefContract'
+import {
+  buildHairColorProBriefPayload,
+  buildLegacyHairColorProBriefPayload,
+  toBriefJsonPayload,
+  toLegacyBriefJsonPayload,
+} from './briefContract'
 
 function analysis(): ConsultAnalysisPayloadDTO {
   const confidence = { min: 0.4, max: 0.7 }
@@ -58,6 +63,18 @@ function analysis(): ConsultAnalysisPayloadDTO {
 }
 
 describe('hair-color pro brief contract', () => {
+  const inspiration = {
+    revisionId: 'inspiration_1',
+    source: 'NONE' as const,
+    inspirationId: null,
+    lookPostId: null,
+    mediaEndpoint: null,
+    referenceNote: 'An inspiration image is a reference, not a guarantee.',
+    exactClientDetails: [],
+    possibleProfessionalInterpretation: [],
+    catalogGuidance: [],
+  }
+
   it('puts client intake first, AI observations second, and safety in a separate always-present field', () => {
     const payload = buildHairColorProBriefPayload({
       intakeRevisionId: 'intake_1',
@@ -68,6 +85,7 @@ describe('hair-color pro brief contract', () => {
       analysisRevisionId: 'analysis_1',
       analysisRevision: 4,
       analysis: analysis(),
+      inspiration,
     })
 
     expect(Object.keys(payload).indexOf('clientIntake')).toBeLessThan(
@@ -90,6 +108,7 @@ describe('hair-color pro brief contract', () => {
       analysisRevisionId: 'analysis_1',
       analysisRevision: 4,
       analysis: analysis(),
+      inspiration,
     })
     const framing = JSON.stringify({
       achievabilityDirection: payload.achievabilityDirection,
@@ -116,6 +135,7 @@ describe('hair-color pro brief contract', () => {
           analysisRevisionId: 'analysis_1',
           analysisRevision: 4,
           analysis: analysis(),
+          inspiration,
         }),
       ),
     )
@@ -134,5 +154,22 @@ describe('hair-color pro brief contract', () => {
     ]) {
       expect(json).not.toContain(forbidden)
     }
+  })
+
+  it('retains the exact v1 projection for immutable historical briefs', () => {
+    const legacy = buildLegacyHairColorProBriefPayload({
+      intakeRevisionId: 'intake_1',
+      intakeAnswers: { desired_color: 'red' },
+      analysisRevisionId: 'analysis_1',
+      analysisRevision: 4,
+      analysis: analysis(),
+    })
+
+    expect(toLegacyBriefJsonPayload(legacy)).toMatchObject({
+      schemaVersion: 1,
+      sourceAnalysisRevisionId: 'analysis_1',
+      intakeRevisionId: 'intake_1',
+    })
+    expect(toLegacyBriefJsonPayload(legacy)).not.toHaveProperty('inspiration')
   })
 })

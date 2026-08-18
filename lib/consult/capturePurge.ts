@@ -17,6 +17,7 @@ import {
   consultCaptureStorage,
   type ConsultCaptureStorage,
 } from './captureStorage'
+import { purgeConsultSessionInspirationObjects } from './inspirationPurge'
 
 import type { PrismaClient } from '@prisma/client'
 
@@ -312,6 +313,11 @@ export async function purgeConsultSessionRawObjects(
   now = new Date(),
   storage: ConsultCaptureStorage = consultCaptureStorage,
 ): Promise<ConsultCapturePurgeSweepResult> {
+  const inspiration = await purgeConsultSessionInspirationObjects(
+    consultSessionId,
+    now,
+    storage,
+  )
   await prisma.$transaction([
     prisma.consultCapture.updateMany({
       where: { consultSessionId, purgedAt: null },
@@ -353,7 +359,11 @@ export async function purgeConsultSessionRawObjects(
     if (!result.ok) failed += 1
     else if (result.changed) purged += 1
   }
-  return { considered: captures.length + uploads.length, purged, failed }
+  return {
+    considered: captures.length + uploads.length + inspiration.considered,
+    purged: purged + inspiration.purged,
+    failed: failed + inspiration.failed,
+  }
 }
 
 /** Account-deletion preflight. Raw objects are provider state and must be

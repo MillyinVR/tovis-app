@@ -16,6 +16,17 @@ const brief: ConsultProBriefDTO = {
   sourceAnalysisRevisionId: 'analysis_1',
   sourceAnalysisRevision: 4,
   intakeRevisionId: 'intake_1',
+  inspiration: {
+    revisionId: 'inspiration_1',
+    source: 'NONE',
+    inspirationId: null,
+    lookPostId: null,
+    mediaEndpoint: null,
+    referenceNote: 'An inspiration image is a reference, not a guarantee.',
+    exactClientDetails: [],
+    possibleProfessionalInterpretation: [],
+    catalogGuidance: [],
+  },
   clientIntake: [
     {
       questionKey: 'desired_color',
