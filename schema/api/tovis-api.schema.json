@@ -3420,6 +3420,10 @@
           "description": "The discovery deposit charge is under (or lost) a Stripe dispute.",
           "type": "boolean"
         },
+        "depositRefundedCents": {
+          "description": "Cumulative cents refunded against the DEPOSIT charge (0 when none). A PARTIAL deposit refund leaves `depositStatus` on PAID and only accumulates here, so a surface that sizes the deposit credit from the status alone over-credits the client — the same input web's `DEPOSIT_CREDIT_SELECT` feeds `deriveNetDepositHeldCents`. Populated wherever the source query selects the deposit columns (the client bookings list route + the booking-detail loader); 0 elsewhere.",
+          "type": "number"
+        },
         "depositStatus": {
           "description": "Discovery deposit lifecycle (BookingDepositStatus): NONE · PENDING · PAID · REFUNDED · FAILED. A deposit is OWED-and-unpaid exactly when this is \"PENDING\" — that's the gate for a \"Pay deposit\" CTA. Populated only where the source query selects the deposit columns (the client bookings list route); null elsewhere.",
           "type": [
@@ -3517,7 +3521,8 @@
         "paymentDisputed",
         "paymentRefundedCents",
         "paymentFullyRefunded",
-        "depositDisputed"
+        "depositDisputed",
+        "depositRefundedCents"
       ],
       "type": "object"
     },

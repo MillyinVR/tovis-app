@@ -55,6 +55,7 @@ function makeBooking(overrides?: Partial<ClientBookingDTO>): ClientBookingDTO {
       paymentRefundedCents: 0,
       paymentFullyRefunded: false,
       depositDisputed: false,
+      depositRefundedCents: 0,
     },
     locationType: 'SALON',
     locationId: 'loc_1',

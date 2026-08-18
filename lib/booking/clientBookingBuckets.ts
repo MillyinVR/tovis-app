@@ -92,6 +92,10 @@ export const clientBookingListSelect = {
   stripeAmountTotal: true,
   stripeAmountRefunded: true,
   depositDisputedAt: true,
+  // Sizes the deposit CREDIT this booking's bill gets (K10-A): a PARTIALLY
+  // refunded deposit stays PAID and only accumulates here, so without this the
+  // native quote credits the whole deposit and under-states what's still owed.
+  depositRefundedCents: true,
 
   // Client media-use consent (B3b) — lets the client see/toggle whether the pro
   // may feature this session's media publicly.

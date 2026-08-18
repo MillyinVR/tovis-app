@@ -113,6 +113,16 @@ export type ClientBookingCheckoutDTO = {
   paymentFullyRefunded: boolean
   /** The discovery deposit charge is under (or lost) a Stripe dispute. */
   depositDisputed: boolean
+  /**
+   * Cumulative cents refunded against the DEPOSIT charge (0 when none). A
+   * PARTIAL deposit refund leaves `depositStatus` on PAID and only accumulates
+   * here, so a surface that sizes the deposit credit from the status alone
+   * over-credits the client — the same input web's `DEPOSIT_CREDIT_SELECT`
+   * feeds `deriveNetDepositHeldCents`. Populated wherever the source query
+   * selects the deposit columns (the client bookings list route + the
+   * booking-detail loader); 0 elsewhere.
+   */
+  depositRefundedCents: number
 }
 
 export type ClientBookingPaymentMethodDTO = {
@@ -593,6 +603,8 @@ type ClientBookingRefundDisputeFields = {
   stripeAmountTotal?: number | null
   stripeAmountRefunded?: number | null
   depositDisputedAt?: Date | null
+  /** Cumulative cents refunded against the deposit charge; absent → 0. */
+  depositRefundedCents?: number | null
 }
 
 export async function buildClientBookingDTO(input: {
@@ -835,6 +847,7 @@ export async function buildClientBookingDTO(input: {
         (b.stripeAmountTotal ?? 0) > 0 &&
         (b.stripeAmountRefunded ?? 0) >= (b.stripeAmountTotal ?? 0),
       depositDisputed: b.depositDisputedAt != null,
+      depositRefundedCents: b.depositRefundedCents ?? 0,
     },
 
     locationType: b.locationType != null ? String(b.locationType) : null,
