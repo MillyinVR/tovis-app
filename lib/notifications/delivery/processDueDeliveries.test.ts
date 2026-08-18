@@ -18,6 +18,11 @@ const mockClaimDeliveries = vi.hoisted(() => vi.fn())
 const mockCompleteDeliveryAttempt = vi.hoisted(() => vi.fn())
 const mockGetOrCreateShortLink = vi.hoisted(() => vi.fn())
 const mockBuildShortLinkUrl = vi.hoisted(() => vi.fn())
+const mockPrisma = vi.hoisted(() => ({
+  notificationDelivery: {
+    findFirst: vi.fn(),
+  },
+}))
 
 vi.mock('./claimDeliveries', () => ({
   claimDeliveries: mockClaimDeliveries,
@@ -25,6 +30,14 @@ vi.mock('./claimDeliveries', () => ({
 
 vi.mock('./completeDeliveryAttempt', () => ({
   completeDeliveryAttempt: mockCompleteDeliveryAttempt,
+}))
+
+// Left resolving `null` by default (see beforeEach) — "no prior SENT/DELIVERED
+// SMS to this destination" — so resolveIsFirstSmsToDestination defaults to
+// true. No existing test in this file asserts the rendered SMS text, so that
+// default doesn't affect them; tests that care configure it explicitly.
+vi.mock('@/lib/prisma', () => ({
+  prisma: mockPrisma,
 }))
 
 // Left UNCONFIGURED by default (resolves to undefined) in most tests below —
@@ -39,6 +52,7 @@ vi.mock('@/lib/shortLink/shortLinkService', () => ({
 
 import {
   processDueDeliveries,
+  resolveIsFirstSmsToDestination,
   resolveSmsLinkOverrides,
 } from './processDueDeliveries'
 
@@ -202,6 +216,8 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
     mockCompleteDeliveryAttempt.mockResolvedValue(undefined)
     mockGetOrCreateShortLink.mockReset()
     mockBuildShortLinkUrl.mockReset()
+    mockPrisma.notificationDelivery.findFirst.mockReset()
+    mockPrisma.notificationDelivery.findFirst.mockResolvedValue(null)
   })
 
   afterEach(() => {
@@ -363,6 +379,100 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
         },
       ],
     })
+  })
+
+  // End-to-end wiring assertions: the renderer and the first-send resolver are
+  // each unit-tested in isolation, but only these two prove processDueDeliveries
+  // actually connects them — i.e. that the text handed to Twilio carries (or
+  // omits) the opt-out disclosure. Wiring the flag to a wrong/renamed field
+  // would leave every other test in this file green.
+  it('sends the opt-out disclosure in the real SMS text on a first send to a destination', async () => {
+    const now = new Date('2026-04-09T12:00:00.000Z')
+    const { providers, smsSend } = makeProviders()
+
+    // No prior SENT/DELIVERED SMS for this destination → first send.
+    mockPrisma.notificationDelivery.findFirst.mockResolvedValue(null)
+
+    mockClaimDeliveries.mockResolvedValue({
+      now,
+      claimedAt: now,
+      leaseExpiresAt: new Date(now.getTime() + 60_000),
+      deliveries: [
+        makeClaimedDelivery({
+          id: 'delivery_sms_first',
+          channel: NotificationChannel.SMS,
+          provider: NotificationProvider.TWILIO,
+          destination: '+15551234567',
+          templateKey: 'booking_confirmed',
+        }),
+      ],
+    })
+
+    smsSend.mockResolvedValue({
+      ok: true,
+      providerMessageId: 'SM_first',
+      providerStatus: 'queued',
+      responseMeta: { source: 'sendSms' },
+    })
+
+    await processDueDeliveries({
+      providers,
+      tenantContext: rootTenantContext('tenant_root'),
+      claim: { now },
+    })
+
+    expect(smsSend).toHaveBeenCalledTimes(1)
+    const sentRequest = smsSend.mock.calls[0]?.[0]
+    expect(sentRequest?.content).toMatchObject({
+      channel: NotificationChannel.SMS,
+    })
+    expect(
+      (sentRequest?.content as { text: string }).text,
+    ).toContain('Reply STOP to opt out, HELP for help.')
+  })
+
+  it('omits the opt-out disclosure in the real SMS text once the destination has been texted before', async () => {
+    const now = new Date('2026-04-09T12:00:00.000Z')
+    const { providers, smsSend } = makeProviders()
+
+    // A prior SENT SMS exists for this destination → not a first send.
+    mockPrisma.notificationDelivery.findFirst.mockResolvedValue({
+      id: 'prior_delivery_1',
+    })
+
+    mockClaimDeliveries.mockResolvedValue({
+      now,
+      claimedAt: now,
+      leaseExpiresAt: new Date(now.getTime() + 60_000),
+      deliveries: [
+        makeClaimedDelivery({
+          id: 'delivery_sms_repeat',
+          channel: NotificationChannel.SMS,
+          provider: NotificationProvider.TWILIO,
+          destination: '+15551234567',
+          templateKey: 'booking_confirmed',
+        }),
+      ],
+    })
+
+    smsSend.mockResolvedValue({
+      ok: true,
+      providerMessageId: 'SM_repeat',
+      providerStatus: 'queued',
+      responseMeta: { source: 'sendSms' },
+    })
+
+    await processDueDeliveries({
+      providers,
+      tenantContext: rootTenantContext('tenant_root'),
+      claim: { now },
+    })
+
+    expect(smsSend).toHaveBeenCalledTimes(1)
+    const sentRequest = smsSend.mock.calls[0]?.[0]
+    expect((sentRequest?.content as { text: string }).text).not.toContain(
+      'Reply STOP',
+    )
   })
 
   it('processes a successful email delivery through the email provider', async () => {
@@ -1266,5 +1376,58 @@ describe('lib/notifications/delivery/processDueDeliveries — resolveSmsLinkOver
       smsCalendarUrl: null,
     })
     expect(mockGetOrCreateShortLink).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('lib/notifications/delivery/processDueDeliveries — resolveIsFirstSmsToDestination', () => {
+  beforeEach(() => {
+    mockPrisma.notificationDelivery.findFirst.mockReset()
+  })
+
+  it('returns false without querying for a non-SMS channel', async () => {
+    const delivery = makeClaimedDelivery({ channel: NotificationChannel.IN_APP })
+
+    expect(await resolveIsFirstSmsToDestination(delivery)).toBe(false)
+    expect(mockPrisma.notificationDelivery.findFirst).not.toHaveBeenCalled()
+  })
+
+  it('returns false without querying when the delivery has no destination', async () => {
+    const delivery = makeClaimedDelivery({
+      channel: NotificationChannel.SMS,
+      destination: '',
+    })
+
+    expect(await resolveIsFirstSmsToDestination(delivery)).toBe(false)
+    expect(mockPrisma.notificationDelivery.findFirst).not.toHaveBeenCalled()
+  })
+
+  it('returns true when no prior SENT/DELIVERED SMS exists for the destination', async () => {
+    const delivery = makeClaimedDelivery({
+      channel: NotificationChannel.SMS,
+      destination: '+15551234567',
+    })
+    mockPrisma.notificationDelivery.findFirst.mockResolvedValueOnce(null)
+
+    expect(await resolveIsFirstSmsToDestination(delivery)).toBe(true)
+    expect(mockPrisma.notificationDelivery.findFirst).toHaveBeenCalledWith({
+      where: {
+        channel: NotificationChannel.SMS,
+        destination: '+15551234567',
+        status: { in: [NotificationDeliveryStatus.SENT, NotificationDeliveryStatus.DELIVERED] },
+      },
+      select: { id: true },
+    })
+  })
+
+  it('returns false when a prior SENT/DELIVERED SMS already exists for the destination', async () => {
+    const delivery = makeClaimedDelivery({
+      channel: NotificationChannel.SMS,
+      destination: '+15551234567',
+    })
+    mockPrisma.notificationDelivery.findFirst.mockResolvedValueOnce({
+      id: 'prior_delivery_1',
+    })
+
+    expect(await resolveIsFirstSmsToDestination(delivery)).toBe(false)
   })
 })

@@ -27,6 +27,9 @@ function makeDispatch(
     ...(overrides.smsCalendarUrl !== undefined
       ? { smsCalendarUrl: overrides.smsCalendarUrl }
       : {}),
+    ...(overrides.isFirstSmsToDestination !== undefined
+      ? { isFirstSmsToDestination: overrides.isFirstSmsToDestination }
+      : {}),
   }
 }
 
@@ -121,6 +124,73 @@ describe('lib/notifications/delivery/renderNotificationContent', () => {
     expect(result.text).toBe(
       'TOVIS: Appointment confirmed Your appointment has been confirmed. https://tovis.test/client/bookings/booking_1',
     )
+  })
+
+  it('omits the opt-out disclosure by default (not the first SMS to this destination)', () => {
+    const result = renderNotificationContent({
+      tenantContext: rootTenantContext('tenant_root'),
+      channel: NotificationChannel.SMS,
+      templateKey: 'booking_confirmed',
+      dispatch: makeDispatch(),
+    })
+
+    if (result.channel !== NotificationChannel.SMS) {
+      throw new Error('expected SMS content')
+    }
+
+    expect(result.text).not.toContain('Reply STOP')
+  })
+
+  it('appends the CTIA opt-out disclosure when this is the first SMS to the destination', () => {
+    const result = renderNotificationContent({
+      tenantContext: rootTenantContext('tenant_root'),
+      channel: NotificationChannel.SMS,
+      templateKey: 'booking_confirmed',
+      dispatch: makeDispatch({ isFirstSmsToDestination: true }),
+    })
+
+    if (result.channel !== NotificationChannel.SMS) {
+      throw new Error('expected SMS content')
+    }
+
+    expect(result.text).toBe(
+      'TOVIS: Appointment confirmed Your appointment has been confirmed. https://tovis.test/client/bookings/booking_1 Reply STOP to opt out, HELP for help.',
+    )
+  })
+
+  it('appends the opt-out disclosure after the calendar link, still intact', () => {
+    const result = renderNotificationContent({
+      tenantContext: rootTenantContext('tenant_root'),
+      channel: NotificationChannel.SMS,
+      templateKey: 'booking_confirmed',
+      dispatch: makeDispatch({
+        isFirstSmsToDestination: true,
+        calendarLinks: {
+          googleUrl:
+            'https://calendar.google.com/calendar/render?action=TEMPLATE',
+          icsUrl: 'https://tovis.test/api/v1/calendar/ics/v1.abc.def',
+        },
+      }),
+    })
+
+    if (result.channel !== NotificationChannel.SMS) {
+      throw new Error('expected SMS content')
+    }
+
+    expect(result.text).toContain(
+      'Add to calendar: https://tovis.test/api/v1/calendar/ics/v1.abc.def Reply STOP to opt out, HELP for help.',
+    )
+  })
+
+  it('never appends the opt-out disclosure to non-SMS channels', () => {
+    const inApp = renderNotificationContent({
+      tenantContext: rootTenantContext('tenant_root'),
+      channel: NotificationChannel.IN_APP,
+      templateKey: 'booking_confirmed',
+      dispatch: makeDispatch({ isFirstSmsToDestination: true }),
+    })
+
+    expect(JSON.stringify(inApp)).not.toContain('Reply STOP')
   })
 
   const calendarLinks = {

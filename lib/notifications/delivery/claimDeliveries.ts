@@ -11,6 +11,7 @@ import {
 } from '@prisma/client'
 
 import { isRecord } from '@/lib/guards'
+import { isPhoneOptedOutOfSms } from '@/lib/notifications/optOut/smsOptOutStore'
 
 import { type NotificationPreferenceLike } from '../channelPolicy'
 import { getNotificationEventDefinition } from '../eventKeys'
@@ -85,6 +86,7 @@ const runtimePolicyCandidateSelect = {
   id: true,
   channel: true,
   status: true,
+  destination: true,
   nextAttemptAt: true,
   claimedAt: true,
   leaseExpiresAt: true,
@@ -263,6 +265,83 @@ function buildQuietHoursDeferredEvent(args: {
   }
 }
 
+function buildOptOutSuppressedEvent(args: {
+  deliveryId: string
+  suppressedAt: Date
+}): Prisma.NotificationDeliveryEventCreateInput {
+  return {
+    type: NotificationDeliveryEventType.SUPPRESSED,
+    fromStatus: NotificationDeliveryStatus.PENDING,
+    toStatus: NotificationDeliveryStatus.SUPPRESSED,
+    message: 'Delivery suppressed: recipient opted out of SMS.',
+    payload: {
+      source: 'claimDeliveries',
+      channel: NotificationChannel.SMS,
+      suppressedAt: args.suppressedAt.toISOString(),
+      reason: 'RECIPIENT_OPTED_OUT',
+    },
+    delivery: {
+      connect: {
+        id: args.deliveryId,
+      },
+    },
+  }
+}
+
+/**
+ * The SMS opt-out send-gate: a terminal check, not a defer. An opted-out
+ * destination never becomes sendable again on its own (only a fresh inbound
+ * START clears it — see lib/notifications/optOut/smsOptOutStore.ts), so
+ * unlike quiet hours there is nothing to retry. This is the single choke
+ * point for the gate: every SMS delivery passes through claimDeliveries
+ * before it can ever reach the provider (lib/notifications/delivery/sendSms.ts).
+ */
+async function maybeSuppressCandidateForOptOut(args: {
+  tx: Prisma.TransactionClient
+  candidate: RuntimePolicyCandidateDelivery
+  now: Date
+}): Promise<boolean> {
+  if (args.candidate.channel !== NotificationChannel.SMS) {
+    return false
+  }
+
+  const optedOut = await isPhoneOptedOutOfSms({
+    phone: args.candidate.destination,
+    tx: args.tx,
+  })
+
+  if (!optedOut) {
+    return false
+  }
+
+  const suppressResult = await args.tx.notificationDelivery.updateMany({
+    where: buildGuardedCandidateWhere({
+      deliveryId: args.candidate.id,
+      now: args.now,
+    }),
+    data: {
+      status: NotificationDeliveryStatus.SUPPRESSED,
+      suppressedAt: args.now,
+      claimedAt: null,
+      leaseExpiresAt: null,
+      leaseToken: null,
+    },
+  })
+
+  if (suppressResult.count !== 1) {
+    return true
+  }
+
+  await args.tx.notificationDeliveryEvent.create({
+    data: buildOptOutSuppressedEvent({
+      deliveryId: args.candidate.id,
+      suppressedAt: args.now,
+    }),
+  })
+
+  return true
+}
+
 async function loadPreferenceForCandidate(args: {
   tx: Prisma.TransactionClient
   candidate: RuntimePolicyCandidateDelivery
@@ -427,6 +506,8 @@ async function maybeDeferCandidateForQuietHours(args: {
  * - rows are claimed one-by-one inside a single transaction using guarded updates
  * - competing workers cannot both successfully claim the same row
  * - SMS/EMAIL deliveries can be deferred at runtime for quiet hours
+ * - SMS deliveries to a phone that has opted out (STOP) are suppressed
+ *   terminally rather than deferred — see maybeSuppressCandidateForOptOut
  * - deferred rows do not starve later sendable rows in the same due queue
  *
  * Important:
@@ -465,6 +546,16 @@ export async function claimDeliveries(
       for (const candidate of candidates) {
         if (claimedIds.length >= batchSize) {
           break
+        }
+
+        const wasSuppressedForOptOut = await maybeSuppressCandidateForOptOut({
+          tx,
+          candidate,
+          now,
+        })
+
+        if (wasSuppressedForOptOut) {
+          continue
         }
 
         const wasDeferred = await maybeDeferCandidateForQuietHours({

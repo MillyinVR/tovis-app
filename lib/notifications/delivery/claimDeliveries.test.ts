@@ -34,6 +34,14 @@ vi.mock('@/lib/prisma', () => ({
   prisma: mockPrisma,
 }))
 
+const mockOptOutStore = vi.hoisted(() => ({
+  isPhoneOptedOutOfSms: vi.fn(),
+}))
+
+vi.mock('@/lib/notifications/optOut/smsOptOutStore', () => ({
+  isPhoneOptedOutOfSms: mockOptOutStore.isPhoneOptedOutOfSms,
+}))
+
 import { claimDeliveries } from './claimDeliveries'
 
 function resetMockGroup(group: Record<string, ReturnType<typeof vi.fn>>) {
@@ -65,6 +73,7 @@ function makeRuntimePolicyCandidate(args: {
   recipientTimeZone?: string | null
   eventKey?: NotificationEventKey
   nextAttemptAt?: Date
+  destination?: string | null
   /** Appointment instant for the short-lead reminder cap (dispatch payload). */
   appointmentStartsAt?: Date
 }) {
@@ -74,6 +83,12 @@ function makeRuntimePolicyCandidate(args: {
     id: args.id,
     channel: args.channel ?? NotificationChannel.SMS,
     status: NotificationDeliveryStatus.PENDING,
+    destination:
+      args.destination !== undefined
+        ? args.destination
+        : (args.channel ?? NotificationChannel.SMS) === NotificationChannel.SMS
+          ? '+15551234567'
+          : 'client@example.com',
     nextAttemptAt: now,
     lastAttemptAt: null,
     claimedAt: null,
@@ -200,6 +215,9 @@ describe('lib/notifications/delivery/claimDeliveries', () => {
     mockTransaction.professionalNotificationPreference.findUnique.mockResolvedValue(
       null,
     )
+
+    mockOptOutStore.isPhoneOptedOutOfSms.mockReset()
+    mockOptOutStore.isPhoneOptedOutOfSms.mockResolvedValue(false)
   })
 
   it('claims due deliveries and stamps lease fields plus CLAIMED events', async () => {
@@ -379,6 +397,166 @@ describe('lib/notifications/delivery/claimDeliveries', () => {
         expect.objectContaining({ id: 'delivery_1' }),
         expect.objectContaining({ id: 'delivery_2' }),
       ]),
+    })
+  })
+
+  describe('SMS opt-out suppression', () => {
+    it('suppresses a claimed SMS candidate whose destination has opted out, without claiming it', async () => {
+      // 19:00 UTC = 12:00 PDT — outside the default quiet-hours window, so a
+      // failure here can only be the opt-out gate, not quiet hours.
+      const now = new Date('2026-04-09T19:00:00.000Z')
+
+      mockTransaction.notificationDelivery.findMany
+        .mockResolvedValueOnce([
+          makeRuntimePolicyCandidate({
+            id: 'delivery_optout_1',
+            channel: NotificationChannel.SMS,
+            destination: '+15559990000',
+            nextAttemptAt: now,
+          }),
+        ])
+        .mockResolvedValueOnce([])
+
+      mockOptOutStore.isPhoneOptedOutOfSms.mockResolvedValueOnce(true)
+
+      mockTransaction.notificationDelivery.updateMany.mockResolvedValueOnce({
+        count: 1,
+      })
+
+      mockTransaction.notificationDeliveryEvent.create.mockResolvedValueOnce({
+        id: 'event_optout_1',
+      })
+
+      const result = await claimDeliveries({ now, batchSize: 1 })
+
+      expect(mockOptOutStore.isPhoneOptedOutOfSms).toHaveBeenCalledWith({
+        phone: '+15559990000',
+        tx: mockTransaction,
+      })
+
+      // The opt-out gate runs before quiet hours — an opted-out phone never
+      // needs a preference lookup at all.
+      expect(
+        mockTransaction.clientNotificationPreference.findUnique,
+      ).not.toHaveBeenCalled()
+
+      expect(mockTransaction.notificationDelivery.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'delivery_optout_1',
+          status: NotificationDeliveryStatus.PENDING,
+          cancelledAt: null,
+          suppressedAt: null,
+          failedAt: null,
+          sentAt: null,
+          deliveredAt: null,
+          nextAttemptAt: {
+            lte: now,
+          },
+          OR: [
+            { claimedAt: null },
+            { leaseExpiresAt: null },
+            { leaseExpiresAt: { lte: now } },
+          ],
+          dispatch: {
+            cancelledAt: null,
+          },
+        },
+        data: {
+          status: NotificationDeliveryStatus.SUPPRESSED,
+          suppressedAt: now,
+          claimedAt: null,
+          leaseExpiresAt: null,
+          leaseToken: null,
+        },
+      })
+
+      expect(
+        requireDefined(mockTransaction.notificationDeliveryEvent.create.mock.calls[0])[0],
+      ).toEqual({
+        data: {
+          type: NotificationDeliveryEventType.SUPPRESSED,
+          fromStatus: NotificationDeliveryStatus.PENDING,
+          toStatus: NotificationDeliveryStatus.SUPPRESSED,
+          message: 'Delivery suppressed: recipient opted out of SMS.',
+          payload: {
+            source: 'claimDeliveries',
+            channel: NotificationChannel.SMS,
+            suppressedAt: now.toISOString(),
+            reason: 'RECIPIENT_OPTED_OUT',
+          },
+          delivery: {
+            connect: {
+              id: 'delivery_optout_1',
+            },
+          },
+        },
+      })
+
+      expect(result).toEqual({
+        now,
+        claimedAt: now,
+        leaseExpiresAt: new Date(now.getTime() + 60_000),
+        deliveries: [],
+      })
+    })
+
+    it('never checks opt-out state for a non-SMS candidate', async () => {
+      const now = new Date('2026-04-09T19:00:00.000Z')
+
+      mockTransaction.notificationDelivery.findMany
+        .mockResolvedValueOnce([
+          makeRuntimePolicyCandidate({
+            id: 'delivery_email_1',
+            channel: NotificationChannel.EMAIL,
+            destination: 'client@example.com',
+            nextAttemptAt: now,
+          }),
+        ])
+        .mockResolvedValueOnce([])
+
+      mockTransaction.notificationDelivery.updateMany.mockResolvedValueOnce({
+        count: 1,
+      })
+
+      await claimDeliveries({ now, batchSize: 1 })
+
+      expect(mockOptOutStore.isPhoneOptedOutOfSms).not.toHaveBeenCalled()
+    })
+
+    it('claims a non-opted-out SMS candidate normally, after checking the gate', async () => {
+      const now = new Date('2026-04-09T19:00:00.000Z')
+
+      mockTransaction.notificationDelivery.findMany
+        .mockResolvedValueOnce([
+          makeRuntimePolicyCandidate({
+            id: 'delivery_ok_1',
+            channel: NotificationChannel.SMS,
+            destination: '+15551234567',
+            nextAttemptAt: now,
+          }),
+        ])
+        .mockResolvedValueOnce([
+          makeClaimedDelivery({
+            id: 'delivery_ok_1',
+            leaseToken: 'token_ok_1',
+            claimedAt: now,
+            leaseExpiresAt: new Date(now.getTime() + 60_000),
+          }),
+        ])
+
+      mockTransaction.notificationDelivery.updateMany.mockResolvedValueOnce({
+        count: 1,
+      })
+
+      const result = await claimDeliveries({ now, batchSize: 1 })
+
+      expect(mockOptOutStore.isPhoneOptedOutOfSms).toHaveBeenCalledWith({
+        phone: '+15551234567',
+        tx: mockTransaction,
+      })
+
+      expect(result.deliveries).toHaveLength(1)
+      expect(requireDefined(result.deliveries[0]).id).toBe('delivery_ok_1')
     })
   })
 

@@ -4,6 +4,7 @@ import { readAppOriginFromEnv } from '@/lib/appUrl'
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import type { BookingCalendarLinks } from '@/lib/calendar/bookingInvite'
 import type { TenantContext } from '@/lib/tenant/context'
+import { buildSmsOptOutDisclosureSuffix } from '@/lib/transactionalSmsPolicy'
 
 import { type NotificationTemplateKey } from '../eventKeys'
 
@@ -34,6 +35,14 @@ export type NotificationRenderDispatchLike = {
   // access), which is why the derivation fallback stays in sms() below.
   smsHref?: string | null
   smsCalendarUrl?: string | null
+  // True when this destination phone has never received a SENT/DELIVERED SMS
+  // from the notification engine before (resolved by processDueDeliveries via
+  // a NotificationDelivery lookup). The sms() renderer appends the CTIA
+  // opt-out disclosure ONLY on this first send — every later send to the same
+  // destination omits it, keeping the recurring segment budget intact.
+  // Defaults to false (no suffix) when absent, matching every existing
+  // renderNotificationContent test that doesn't pass it.
+  isFirstSmsToDestination?: boolean
 }
 
 export type RenderedInAppNotificationContent = {
@@ -332,11 +341,20 @@ function buildStandardTemplateRenderer(ctaLabel: string): TemplateRendererSet {
         dispatch.calendarLinks?.googleUrl ??
         null
 
+      const withCalendar = calendarUrl
+        ? `${base} ${CALENDAR_SMS_LABEL}: ${calendarUrl}`
+        : base
+
+      // Appended unclipped, like the calendar link above — a disclosure
+      // required by CTIA guidance must never be silently truncated by the
+      // length-cap logic that protects the CTA href.
+      const text = dispatch.isFirstSmsToDestination
+        ? `${withCalendar} ${buildSmsOptOutDisclosureSuffix()}`
+        : withCalendar
+
       return {
         channel: NotificationChannel.SMS,
-        text: calendarUrl
-          ? `${base} ${CALENDAR_SMS_LABEL}: ${calendarUrl}`
-          : base,
+        text,
       }
     },
 

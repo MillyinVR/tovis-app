@@ -2,6 +2,7 @@
 
 import {
   NotificationChannel,
+  NotificationDeliveryStatus,
   NotificationProvider,
 } from '@prisma/client'
 
@@ -14,6 +15,7 @@ import {
   type BookingCalendarLinks,
 } from '@/lib/calendar/bookingInvite'
 import { isRecord } from '@/lib/guards'
+import { prisma } from '@/lib/prisma'
 import { getOrCreateShortLink, buildShortLinkUrl } from '@/lib/shortLink/shortLinkService'
 import {
   claimDeliveries,
@@ -279,15 +281,48 @@ export async function resolveSmsLinkOverrides(args: {
   return { smsHref, smsCalendarUrl }
 }
 
+/**
+ * Whether this destination phone has never received a SENT/DELIVERED SMS from
+ * the notification engine before — the CTIA opt-out disclosure
+ * (lib/transactionalSmsPolicy.buildSmsOptOutDisclosureSuffix) is appended only
+ * on this first send (see renderNotificationContent's sms() renderer), so
+ * later sends to an already-notified recipient keep their single-segment
+ * budget. Exported so tests can exercise it directly against a mocked
+ * lib/prisma rather than through the full claim/render/send pipeline. Always
+ * false for a non-SMS delivery or a destination-less row — neither needs the
+ * lookup.
+ */
+export async function resolveIsFirstSmsToDestination(
+  delivery: ClaimedNotificationDelivery,
+): Promise<boolean> {
+  if (delivery.channel !== NotificationChannel.SMS || !delivery.destination) {
+    return false
+  }
+
+  const priorSend = await prisma.notificationDelivery.findFirst({
+    where: {
+      channel: NotificationChannel.SMS,
+      destination: delivery.destination,
+      status: {
+        in: [NotificationDeliveryStatus.SENT, NotificationDeliveryStatus.DELIVERED],
+      },
+    },
+    select: { id: true },
+  })
+
+  return priorSend === null
+}
+
 async function buildProviderRequest(
   delivery: ClaimedNotificationDelivery,
   tenantContext: TenantContext,
   calendarLinks: BookingCalendarLinks | null,
 ): Promise<ProviderSendRequest> {
-  const { smsHref, smsCalendarUrl } = await resolveSmsLinkOverrides({
-    delivery,
-    calendarLinks,
-  })
+  const [{ smsHref, smsCalendarUrl }, isFirstSmsToDestination] =
+    await Promise.all([
+      resolveSmsLinkOverrides({ delivery, calendarLinks }),
+      resolveIsFirstSmsToDestination(delivery),
+    ])
 
   const content = renderNotificationContent({
     channel: delivery.channel,
@@ -303,6 +338,7 @@ async function buildProviderRequest(
       calendarLinks,
       smsHref,
       smsCalendarUrl,
+      isFirstSmsToDestination,
     },
   })
 
