@@ -82,7 +82,7 @@ function buildInviteBody(args: {
     const lead = invitedName ? `${invitedName}, your` : 'Your'
     const withWhom = args.proName ?? args.brandName
     const service = args.serviceName?.trim() || 'appointment'
-    return `${lead} ${service} with ${withWhom}${args.whenClause} is booked. Tap to view details and set up your profile.`
+    return `${lead} ${service} with ${withWhom}${args.whenClause} is booked. Tap to view and set up your profile.`
   }
 
   // Booking-less, pro attributed: a pro added/imported this client.

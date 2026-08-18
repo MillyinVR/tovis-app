@@ -14,6 +14,7 @@ import {
   type BookingCalendarLinks,
 } from '@/lib/calendar/bookingInvite'
 import { isRecord } from '@/lib/guards'
+import { getOrCreateShortLink, buildShortLinkUrl } from '@/lib/shortLink/shortLinkService'
 import {
   claimDeliveries,
   type ClaimDeliveriesArgs,
@@ -164,6 +165,25 @@ function readBookingIdFromPayload(payload: unknown): string | null {
 }
 
 /**
+ * The underlying ClientActionToken's expiry, when the dispatch payload carries
+ * one (aftercare/deposit/consultation/consent all stamp `expiresAt` onto their
+ * payload at mint time — see each createXDelivery). Used to align the SHORT
+ * LINK's own expiry to its destination's, so a dead token starts refusing
+ * quickly instead of the short code outliving what it points to. The
+ * destination route re-checks its own token expiry independently regardless —
+ * this only bounds how long the short link ITSELF resolves. Null (no expiry)
+ * for templates whose href isn't a token — e.g. the login-gated booking page —
+ * which is the correct behavior for content that doesn't expire either.
+ */
+function readExpiresAtFromPayload(payload: unknown): Date | null {
+  if (!isRecord(payload)) return null
+  const value = payload.expiresAt
+  if (typeof value !== 'string') return null
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
+/**
  * For email/SMS deliveries of appointment notifications, resolve the "Add to
  * calendar" links from the payload's bookingId. Best-effort: returns null (link
  * omitted) for other channels, non-calendar templates, or any resolution miss —
@@ -189,11 +209,86 @@ async function resolveDeliveryCalendarLinks(
   return resolveBookingCalendarLinks(bookingId)
 }
 
-function buildProviderRequest(
+/**
+ * Path (pathname + search) of an absolute same-origin app URL. `calendarLinks
+ * .icsUrl` is always `${appOrigin}${path}` (lib/calendar/bookingInvite.ts), so
+ * re-parsing it back apart is safe — it is never attacker-influenced.
+ */
+function pathFromAbsoluteAppUrl(absoluteUrl: string): string | null {
+  try {
+    const parsed = new URL(absoluteUrl)
+    return `${parsed.pathname}${parsed.search}`
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Best-effort: mint (or reuse) short links for the SMS-bound href and, when
+ * present, the calendar link — logging and falling back to the un-shortened
+ * URL on any failure rather than blocking the send. Only SMS gets these; every
+ * other channel keeps using the full app link untouched. Exported so tests can
+ * exercise this directly against a mocked lib/shortLink/shortLinkService
+ * rather than through the full claim/render/send pipeline.
+ */
+export async function resolveSmsLinkOverrides(args: {
+  delivery: ClaimedNotificationDelivery
+  calendarLinks: BookingCalendarLinks | null
+}): Promise<{ smsHref: string | null; smsCalendarUrl: string | null }> {
+  if (args.delivery.channel !== NotificationChannel.SMS) {
+    return { smsHref: null, smsCalendarUrl: null }
+  }
+
+  let smsHref: string | null = null
+  try {
+    const link = await getOrCreateShortLink({
+      destinationPath: args.delivery.dispatch.href,
+      createdForType: 'notification_dispatch_href',
+      createdForId: args.delivery.dispatch.id,
+      expiresAt: readExpiresAtFromPayload(args.delivery.dispatch.payload),
+    })
+    smsHref = buildShortLinkUrl(link.code)
+  } catch (error) {
+    console.error('processDueDeliveries: short link mint failed for href', {
+      dispatchId: args.delivery.dispatch.id,
+      error,
+    })
+  }
+
+  let smsCalendarUrl: string | null = null
+  const icsUrl = args.calendarLinks?.icsUrl ?? null
+  if (icsUrl) {
+    const calendarPath = pathFromAbsoluteAppUrl(icsUrl)
+    if (calendarPath) {
+      try {
+        const link = await getOrCreateShortLink({
+          destinationPath: calendarPath,
+          createdForType: 'notification_dispatch_calendar',
+          createdForId: args.delivery.dispatch.id,
+        })
+        smsCalendarUrl = buildShortLinkUrl(link.code)
+      } catch (error) {
+        console.error(
+          'processDueDeliveries: short link mint failed for calendar link',
+          { dispatchId: args.delivery.dispatch.id, error },
+        )
+      }
+    }
+  }
+
+  return { smsHref, smsCalendarUrl }
+}
+
+async function buildProviderRequest(
   delivery: ClaimedNotificationDelivery,
   tenantContext: TenantContext,
   calendarLinks: BookingCalendarLinks | null,
-): ProviderSendRequest {
+): Promise<ProviderSendRequest> {
+  const { smsHref, smsCalendarUrl } = await resolveSmsLinkOverrides({
+    delivery,
+    calendarLinks,
+  })
+
   const content = renderNotificationContent({
     channel: delivery.channel,
     templateKey: getTemplateKeyForDelivery(delivery),
@@ -206,6 +301,8 @@ function buildProviderRequest(
       href: delivery.dispatch.href,
       payload: delivery.dispatch.payload,
       calendarLinks,
+      smsHref,
+      smsCalendarUrl,
     },
   })
 
@@ -484,7 +581,7 @@ async function processClaimedDelivery(args: {
 
   try {
     const calendarLinks = await resolveDeliveryCalendarLinks(args.delivery)
-    const request = buildProviderRequest(
+    const request = await buildProviderRequest(
       args.delivery,
       args.tenantContext,
       calendarLinks,

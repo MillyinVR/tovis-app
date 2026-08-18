@@ -36,6 +36,7 @@ export type RateLimitBucket =
   | 'support:tickets:create'
   | 'nfc:tap'
   | 'nfc:code'
+  | 'short-link:resolve'
   | 'auth:login'
   | 'auth:login:identity'
   | 'auth:apple'
@@ -339,6 +340,18 @@ export const RATE_LIMITS: Record<RateLimitBucket, RateLimitConfig> = {
     limit: 15,
     windowSeconds: 5 * 60,
     prefix: 'rl:nfc:code',
+    mode: 'redis-only',
+  },
+
+  // Public SMS/email short-link resolver (/s/[code]). Tapped from a link, not
+  // hand-typed — codes are 8-char base62 (~2.18e14 possibilities), so this is
+  // defense-in-depth against enumeration/scraping rather than a realistic
+  // brute-force ceiling. Sized like nfc:tap (a real person taps a handful of
+  // times). Fail-open so a Redis outage never blocks a legitimate tap.
+  'short-link:resolve': {
+    limit: 30,
+    windowSeconds: 60,
+    prefix: 'rl:short-link:resolve',
     mode: 'redis-only',
   },
 

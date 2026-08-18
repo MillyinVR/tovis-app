@@ -125,10 +125,12 @@ export function buildConsentSignatureBody(args: {
 
   // Names the document rather than saying "a form": a client who cannot tell
   // what they are being asked to sign from the message is a client who does not
-  // tap the link.
+  // tap the link. Straight quotes and no em dash on purpose — GSM-7 has
+  // neither, so either one anywhere here forces the whole SMS into UCS-2 and
+  // roughly halves the single-segment budget.
   return (
-    `Your appointment${withWhom} needs ${named ? `“${named}”` : 'a consent form'} signed. ` +
-    `Use this secure link to read it and sign — it only takes a moment.`
+    `Your appointment${withWhom} needs ${named ? `"${named}"` : 'a consent form'} signed. ` +
+    `Use this secure link to read it and sign. It only takes a moment.`
   )
 }
 

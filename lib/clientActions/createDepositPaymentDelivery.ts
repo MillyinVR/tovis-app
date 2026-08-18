@@ -118,10 +118,12 @@ export function buildDepositPaymentBody(args: {
 }): string {
   const withWhom = args.professionalName ? ` with ${args.professionalName}` : ''
 
+  // No em dash on purpose — GSM-7 has none, so one anywhere here forces the
+  // whole SMS into UCS-2 and roughly halves the single-segment budget.
   return (
     `Your appointment${withWhom} is booked. ` +
-    `Use this secure link to pay the deposit by ${args.payByLabel} — ` +
-    `the booking is released automatically if it stays unpaid.`
+    `Use this secure link to pay the deposit by ${args.payByLabel}. ` +
+    `The booking is released automatically if it stays unpaid.`
   )
 }
 
@@ -141,11 +143,13 @@ export function buildDepositPaymentNudgeBody(args: {
 
   // Tighter than the initial-send body ON PURPOSE: this rides SMS where the
   // render caps the message and clips prose around the link — the deadline and
-  // the consequence must survive a real-world professionalName.
+  // the consequence must survive a real-world professionalName. No em dash —
+  // GSM-7 has none, so one here forces UCS-2 and roughly halves the
+  // single-segment budget.
   return (
     `Your appointment${withWhom} is still waiting on its deposit. ` +
-    `Pay by ${args.payByLabel} — ` +
-    `the booking is released automatically if it stays unpaid.`
+    `Pay by ${args.payByLabel}. ` +
+    `The booking is released automatically if it stays unpaid.`
   )
 }
 
