@@ -18,6 +18,11 @@ const mockClaimDeliveries = vi.hoisted(() => vi.fn())
 const mockCompleteDeliveryAttempt = vi.hoisted(() => vi.fn())
 const mockGetOrCreateShortLink = vi.hoisted(() => vi.fn())
 const mockBuildShortLinkUrl = vi.hoisted(() => vi.fn())
+const mockPrisma = vi.hoisted(() => ({
+  notificationDelivery: {
+    findFirst: vi.fn(),
+  },
+}))
 
 vi.mock('./claimDeliveries', () => ({
   claimDeliveries: mockClaimDeliveries,
@@ -25,6 +30,14 @@ vi.mock('./claimDeliveries', () => ({
 
 vi.mock('./completeDeliveryAttempt', () => ({
   completeDeliveryAttempt: mockCompleteDeliveryAttempt,
+}))
+
+// Left resolving `null` by default (see beforeEach) — "no prior SENT/DELIVERED
+// SMS to this destination" — so resolveIsFirstSmsToDestination defaults to
+// true. No existing test in this file asserts the rendered SMS text, so that
+// default doesn't affect them; tests that care configure it explicitly.
+vi.mock('@/lib/prisma', () => ({
+  prisma: mockPrisma,
 }))
 
 // Left UNCONFIGURED by default (resolves to undefined) in most tests below —
@@ -39,6 +52,7 @@ vi.mock('@/lib/shortLink/shortLinkService', () => ({
 
 import {
   processDueDeliveries,
+  resolveIsFirstSmsToDestination,
   resolveSmsLinkOverrides,
 } from './processDueDeliveries'
 
@@ -202,6 +216,8 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
     mockCompleteDeliveryAttempt.mockResolvedValue(undefined)
     mockGetOrCreateShortLink.mockReset()
     mockBuildShortLinkUrl.mockReset()
+    mockPrisma.notificationDelivery.findFirst.mockReset()
+    mockPrisma.notificationDelivery.findFirst.mockResolvedValue(null)
   })
 
   afterEach(() => {
@@ -1266,5 +1282,58 @@ describe('lib/notifications/delivery/processDueDeliveries — resolveSmsLinkOver
       smsCalendarUrl: null,
     })
     expect(mockGetOrCreateShortLink).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('lib/notifications/delivery/processDueDeliveries — resolveIsFirstSmsToDestination', () => {
+  beforeEach(() => {
+    mockPrisma.notificationDelivery.findFirst.mockReset()
+  })
+
+  it('returns false without querying for a non-SMS channel', async () => {
+    const delivery = makeClaimedDelivery({ channel: NotificationChannel.IN_APP })
+
+    expect(await resolveIsFirstSmsToDestination(delivery)).toBe(false)
+    expect(mockPrisma.notificationDelivery.findFirst).not.toHaveBeenCalled()
+  })
+
+  it('returns false without querying when the delivery has no destination', async () => {
+    const delivery = makeClaimedDelivery({
+      channel: NotificationChannel.SMS,
+      destination: '',
+    })
+
+    expect(await resolveIsFirstSmsToDestination(delivery)).toBe(false)
+    expect(mockPrisma.notificationDelivery.findFirst).not.toHaveBeenCalled()
+  })
+
+  it('returns true when no prior SENT/DELIVERED SMS exists for the destination', async () => {
+    const delivery = makeClaimedDelivery({
+      channel: NotificationChannel.SMS,
+      destination: '+15551234567',
+    })
+    mockPrisma.notificationDelivery.findFirst.mockResolvedValueOnce(null)
+
+    expect(await resolveIsFirstSmsToDestination(delivery)).toBe(true)
+    expect(mockPrisma.notificationDelivery.findFirst).toHaveBeenCalledWith({
+      where: {
+        channel: NotificationChannel.SMS,
+        destination: '+15551234567',
+        status: { in: [NotificationDeliveryStatus.SENT, NotificationDeliveryStatus.DELIVERED] },
+      },
+      select: { id: true },
+    })
+  })
+
+  it('returns false when a prior SENT/DELIVERED SMS already exists for the destination', async () => {
+    const delivery = makeClaimedDelivery({
+      channel: NotificationChannel.SMS,
+      destination: '+15551234567',
+    })
+    mockPrisma.notificationDelivery.findFirst.mockResolvedValueOnce({
+      id: 'prior_delivery_1',
+    })
+
+    expect(await resolveIsFirstSmsToDestination(delivery)).toBe(false)
   })
 })

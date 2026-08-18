@@ -1154,6 +1154,10 @@ model NotificationDelivery {
   @@index([status, nextAttemptAt])
   @@index([leaseExpiresAt])
   @@index([provider, providerMessageId])
+  // Used by the SMS opt-out send-gate and the first-message-per-recipient
+  // opt-out-disclosure check (lib/notifications/delivery/claimDeliveries.ts,
+  // processDueDeliveries.ts) to look up prior deliveries by destination phone.
+  @@index([channel, destination])
 }
 
 model NotificationDeliveryEvent {
@@ -1181,6 +1185,32 @@ model NotificationDeliveryEvent {
 
   @@index([deliveryId, createdAt])
   @@index([type, createdAt])
+}
+
+// SMS opt-out state, keyed by the same HMAC phone lookup hash used by
+// User.phoneHashV2 / ClientProfile.phoneHashV2 (lib/security/crypto/hashLookup
+// phoneLookupHashV2), so the send-time gate works for ANY destination phone —
+// including pro-entered clients who have no User row and therefore no
+// transactionalSmsConsentAt to revoke.
+//
+// One row per phone that has ever sent an opt keyword. `optedOutAt` null means
+// currently opted back in (a START after an earlier STOP) — the row is kept,
+// not deleted, so lastKeyword/lastEventAt remain a record of the most recent
+// event either way.
+model SmsOptOut {
+  id String @id @default(cuid())
+
+  phoneHashV2 String  @unique @db.VarChar(128)
+  phone       String? @db.VarChar(32)
+
+  optedOutAt  DateTime?
+  lastKeyword String    @db.VarChar(32)
+  lastEventAt DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([optedOutAt])
 }
 
 model ProfessionalNotificationPreference {
