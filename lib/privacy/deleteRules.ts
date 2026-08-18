@@ -419,6 +419,16 @@ export const DELETE_RULES: readonly DeleteRule[] = [
     },
   }),
   deleteRule({
+    model: 'MediaCaptureAttestation',
+    notes:
+      'Cascades automatically when its MediaAsset is deleted (onDelete: Cascade); matched here too by professionalId so coverage is proved, not inferred from the cascade.',
+    delegate: (db) => db.mediaCaptureAttestation,
+    where: (s) =>
+      s.professionalProfileId
+        ? { professionalId: s.professionalProfileId }
+        : null,
+  }),
+  deleteRule({
     model: 'PracticeShot',
     notes: STORAGE_BYTES_NOTE,
     delegate: (db) => db.practiceShot,

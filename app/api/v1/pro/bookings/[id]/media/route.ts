@@ -38,6 +38,8 @@ import {
 } from '@/app/api/_utils/jsonPayload'
 import { uploadProBookingMedia } from '@/lib/booking/writeBoundary'
 import { resolveFocalPoint } from '@/lib/media/focalPoint'
+import { parseCapturedAtClaimed, parseSha256Hex } from '@/lib/media/captureClaim'
+import { attestMediaCapture } from '@/lib/media/attestCapture'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
@@ -279,6 +281,8 @@ export async function POST(req: Request, ctx: RouteContext) {
       mediaType?: unknown
       focalX?: unknown
       focalY?: unknown
+      capturedAt?: unknown
+      checksumSha256?: unknown
     }
 
     const uploadSessionId = pickString(body.uploadSessionId)
@@ -318,6 +322,13 @@ export async function POST(req: Request, ctx: RouteContext) {
       typeof body.focalY === 'number' ? body.focalY : null,
     )
 
+    // Optional capture-attestation claims from the device: when it captured
+    // the photo, and the sha256 it computed locally. Both are lenient — see
+    // lib/media/captureClaim.ts — and only claims; the server hashes the
+    // uploaded bytes itself for the record it actually trusts.
+    const capturedAtClaimed = parseCapturedAtClaimed(body.capturedAt)
+    const clientChecksumSha256 = parseSha256Hex(body.checksumSha256)
+
     const { requestId } = readRequestMeta(req)
 
     // Idempotency is keyed on the upload session (not the storage pointer, which
@@ -343,6 +354,8 @@ export async function POST(req: Request, ctx: RouteContext) {
         mediaType,
         focalX: focal?.x ?? null,
         focalY: focal?.y ?? null,
+        capturedAt: capturedAtClaimed?.toISOString() ?? null,
+        checksumSha256: clientChecksumSha256,
       },
       messages: {
         missingKey: 'Missing idempotency key.',
@@ -503,6 +516,35 @@ export async function POST(req: Request, ctx: RouteContext) {
       requestId,
       idempotencyKey: req.headers.get('idempotency-key'),
     })
+
+    // Capture attestation: hash the uploaded bytes server-side and write the
+    // append-only evidence record for this asset (lib/media/attestCapture.ts).
+    // Best-effort — a hashing hiccup here must not cost the pro their photo.
+    // A MediaAsset with no attestation is a disclosed gap (see the migration's
+    // backfill note), not a silent one: the evidence-bundle export says so.
+    try {
+      await attestMediaCapture({
+        mediaAssetId: result.created.id,
+        bookingId,
+        professionalId,
+        storageBucket,
+        storagePath,
+        capturedAtClaimed,
+        clientChecksumSha256,
+        now: new Date(),
+      })
+    } catch (attestError: unknown) {
+      console.error('POST /api/v1/pro/bookings/[id]/media attest', {
+        error: safeError(attestError),
+      })
+      captureBookingException({
+        error: attestError,
+        route: 'POST /api/v1/pro/bookings/[id]/media',
+        event: 'capture_attestation_failed',
+        bookingId,
+        professionalId,
+      })
+    }
 
     // Mark the upload session CONSUMED and link it to the created asset. The
     // MediaAsset (bucket,path) unique index already guarantees a single asset

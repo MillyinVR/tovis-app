@@ -109,6 +109,7 @@ const mocks = vi.hoisted(() => ({
   createSignedUrl: vi.fn(),
 
   uploadProBookingMedia: vi.fn(),
+  attestMediaCapture: vi.fn(),
 
   validateUploadSession: vi.fn(),
   consumeUploadSession: vi.fn(),
@@ -158,6 +159,10 @@ vi.mock('@/lib/supabaseAdmin', () => ({
 
 vi.mock('@/lib/booking/writeBoundary', () => ({
   uploadProBookingMedia: mocks.uploadProBookingMedia,
+}))
+
+vi.mock('@/lib/media/attestCapture', () => ({
+  attestMediaCapture: mocks.attestMediaCapture,
 }))
 
 vi.mock('@/lib/media/uploadSession', () => {
@@ -385,6 +390,11 @@ describe('app/api/v1/pro/bookings/[id]/media/route.ts', () => {
 
     mocks.validateUploadSession.mockResolvedValue(validSession)
     mocks.consumeUploadSession.mockResolvedValue(undefined)
+
+    mocks.attestMediaCapture.mockResolvedValue({
+      sha256Server: 'a'.repeat(64),
+      hashMismatch: false,
+    })
   })
 
   afterEach(() => {
@@ -836,6 +846,8 @@ describe('app/api/v1/pro/bookings/[id]/media/route.ts', () => {
         mediaType: MediaType.IMAGE,
         focalX: null,
         focalY: null,
+        capturedAt: null,
+        checksumSha256: null,
       },
       messages: {
         missingKey: 'Missing idempotency key.',
@@ -984,6 +996,8 @@ describe('app/api/v1/pro/bookings/[id]/media/route.ts', () => {
         mediaType: MediaType.IMAGE,
         focalX: null,
         focalY: null,
+        capturedAt: null,
+        checksumSha256: null,
       },
       messages: {
         missingKey: 'Missing idempotency key.',
@@ -1023,6 +1037,17 @@ describe('app/api/v1/pro/bookings/[id]/media/route.ts', () => {
       idempotencyKey: 'idem_media_success_1',
     })
 
+    expect(mocks.attestMediaCapture).toHaveBeenCalledWith({
+      mediaAssetId: 'media_1',
+      bookingId: 'booking_1',
+      professionalId: 'pro_1',
+      storageBucket: BUCKETS.mediaPrivate,
+      storagePath: 'bookings/booking_1/before/main.jpg',
+      capturedAtClaimed: null,
+      clientChecksumSha256: null,
+      now: expect.any(Date),
+    })
+
     expect(mocks.consumeUploadSession).toHaveBeenCalledWith(expect.anything(), {
       uploadSessionId: 'us_1',
       mediaAssetId: 'media_1',
@@ -1049,6 +1074,82 @@ describe('app/api/v1/pro/bookings/[id]/media/route.ts', () => {
       ok: true,
       ...expectedPostResponseBody,
     })
+  })
+
+  it('POST parses capturedAt and checksumSha256 claims through to attestMediaCapture', async () => {
+    const claimedChecksum = 'c'.repeat(64)
+
+    await POST(
+      makeIdempotentPostRequest({
+        key: 'idem_media_claims_1',
+        body: {
+          ...validBody,
+          capturedAt: '2026-08-15T09:00:00.000Z',
+          checksumSha256: claimedChecksum.toUpperCase(),
+        },
+      }),
+      makeCtx(),
+    )
+
+    expect(mocks.attestMediaCapture).toHaveBeenCalledWith(
+      expect.objectContaining({
+        capturedAtClaimed: new Date('2026-08-15T09:00:00.000Z'),
+        clientChecksumSha256: claimedChecksum,
+      }),
+    )
+  })
+
+  it('POST ignores a malformed capturedAt/checksumSha256 claim and still saves the photo', async () => {
+    await POST(
+      makeIdempotentPostRequest({
+        key: 'idem_media_bad_claims_1',
+        body: {
+          ...validBody,
+          capturedAt: 'not-a-real-date',
+          checksumSha256: 'not-hex',
+        },
+      }),
+      makeCtx(),
+    )
+
+    expect(mocks.attestMediaCapture).toHaveBeenCalledWith(
+      expect.objectContaining({
+        capturedAtClaimed: null,
+        clientChecksumSha256: null,
+      }),
+    )
+  })
+
+  it('POST still saves the photo and returns 200 when attestMediaCapture fails (fail-open)', async () => {
+    mocks.attestMediaCapture.mockRejectedValueOnce(new Error('storage hiccup'))
+
+    const result = await POST(
+      makeIdempotentPostRequest({ key: 'idem_media_attest_fail_1' }),
+      makeCtx(),
+    )
+
+    expect(result.status).toBe(200)
+    await expect(result.json()).resolves.toEqual({
+      ok: true,
+      ...expectedPostResponseBody,
+    })
+
+    // The upload session still gets consumed and idempotency still completes —
+    // a hashing hiccup must not cost the pro their photo or wedge the request.
+    expect(mocks.consumeUploadSession).toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+      responseStatus: 200,
+      responseBody: expectedPostResponseBody,
+    })
+    expect(mocks.captureBookingException).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: 'POST /api/v1/pro/bookings/[id]/media',
+        event: 'capture_attestation_failed',
+        bookingId: 'booking_1',
+        professionalId: 'pro_1',
+      }),
+    )
   })
 
   it('POST threads a valid focal point (camera C6) through to the write boundary', async () => {

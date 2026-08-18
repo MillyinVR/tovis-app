@@ -171,6 +171,11 @@ export const EXPORT_BOUNDARY: Readonly<Record<string, ExportDisposition>> = {
   ClientActionToken: { status: 'EXPORTED', keys: ['clientActionTokens'] },
   AftercareSummary: { status: 'EXPORTED', keys: ['aftercareSummaries'] },
   MediaAsset: { status: 'EXPORTED', keys: ['mediaAssets'] },
+  MediaCaptureAttestation: {
+    status: 'OMITTED',
+    reason:
+      "Technical integrity metadata about the media (hashes, server receipt time), not user content — settled out of scope for the self-serve export. Revisit alongside MediaAsset's own export entry if that changes.",
+  },
   // The pro's own out-of-session camera shots. Single-subject by construction —
   // a practice shot has no booking and no client — so there is nothing to
   // withhold from the pro whose photos they are.

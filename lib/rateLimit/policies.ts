@@ -22,6 +22,7 @@ export type RateLimitBucket =
   | 'client:appointment:answer'
   | 'pro:bookings:write'
   | 'pro:media:write'
+  | 'pro:media:evidence-bundle'
   | 'pro:offerings:write'
   | 'pro:locations:write'
   | 'pro:working-hours:write'
@@ -226,6 +227,14 @@ export const RATE_LIMITS: Record<RateLimitBucket, RateLimitConfig> = {
     limit: 30,
     windowSeconds: 60,
     prefix: 'rl:pro:media:write',
+    mode: 'redis-only',
+  },
+  // Tighter than pro:media:write: each request downloads every asset in the
+  // booking from storage and renders a PDF, so it's real work per call.
+  'pro:media:evidence-bundle': {
+    limit: 10,
+    windowSeconds: 60,
+    prefix: 'rl:pro:media:evidence-bundle',
     mode: 'redis-only',
   },
   // Keyed per (pro, client) so a pro can batch-invite many DIFFERENT clients

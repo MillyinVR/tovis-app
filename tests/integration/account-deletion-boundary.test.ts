@@ -25,6 +25,8 @@ import {
   AccountDeletionRequestStatus,
   BookingStatus,
   DevicePlatform,
+  MediaType,
+  MediaVisibility,
   Prisma,
   PrismaClient,
   ProfessionalLocationType,
@@ -65,6 +67,8 @@ type Fixtures = {
   clientUserId: string
   clientProfileId: string
   bookingId: string
+  mediaAssetId: string
+  mediaCaptureAttestationId: string
 }
 
 let fx: Fixtures
@@ -197,6 +201,35 @@ beforeAll(async () => {
     select: { id: true },
   })
 
+  // A booking-session photo and its capture attestation — proves the FK
+  // cascade actually deletes MediaCaptureAttestation against real Postgres
+  // (a mocked delegate would happily "succeed" even with the cascade missing
+  // from the schema; see this file's header comment for why that's the bug
+  // class this suite exists to catch).
+  const mediaAsset = await db.mediaAsset.create({
+    data: {
+      professionalId: pro.id,
+      bookingId: booking.id,
+      primaryServiceId: service.id,
+      mediaType: MediaType.IMAGE,
+      visibility: MediaVisibility.PRO_CLIENT,
+      storageBucket: 'media-private',
+      storagePath: `${tag}/before.jpg`,
+    },
+    select: { id: true },
+  })
+
+  const mediaCaptureAttestation = await db.mediaCaptureAttestation.create({
+    data: {
+      mediaAssetId: mediaAsset.id,
+      bookingId: booking.id,
+      professionalId: pro.id,
+      sha256Server: 'a'.repeat(64),
+      receivedAt: new Date(),
+    },
+    select: { id: true },
+  })
+
   const proHandle = `${tag}handle`.slice(0, 24)
 
   // Rows that keep ACTING on the account if they survive.
@@ -262,6 +295,8 @@ beforeAll(async () => {
     clientUserId: clientUser.id,
     clientProfileId: client.id,
     bookingId: booking.id,
+    mediaAssetId: mediaAsset.id,
+    mediaCaptureAttestationId: mediaCaptureAttestation.id,
   }
 }, 60_000)
 
@@ -459,6 +494,11 @@ describe('executing a due deletion for a pro who has taken a booking', () => {
         where: { professionalId: fx.proProfileId },
       }),
     ).toBe(1)
+    expect(
+      await db.mediaCaptureAttestation.count({
+        where: { id: fx.mediaCaptureAttestationId },
+      }),
+    ).toBe(1)
 
     const location = await db.professionalLocation.findUniqueOrThrow({
       where: { id: fx.proLocationId },
@@ -518,6 +558,19 @@ describe('executing a due deletion for a pro who has taken a booking', () => {
     expect(
       await db.professionalSearchIndex.count({
         where: { professionalId: fx.proProfileId },
+      }),
+    ).toBe(0)
+
+    // The booking-session photo, and — the point of this fixture — its capture
+    // attestation cascading away with it. This is exactly what a mocked
+    // deleteMany can't prove: the FK's `onDelete: Cascade` has to actually be
+    // in the schema and applied, not just claimed.
+    expect(
+      await db.mediaAsset.count({ where: { id: fx.mediaAssetId } }),
+    ).toBe(0)
+    expect(
+      await db.mediaCaptureAttestation.count({
+        where: { id: fx.mediaCaptureAttestationId },
       }),
     ).toBe(0)
 
