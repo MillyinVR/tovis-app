@@ -89,8 +89,10 @@ type Fixtures = {
   addOnId: string
   /** 5 min on the link — below the platform's 15-minute floor. */
   shortAddOnId: string
-  /** Stores a non-positive duration; unbookable, and must read as such. */
+  /** Stores a negative duration; unbookable, and must read as such. */
   brokenAddOnId: string
+  /** Stores an exact 0 — a legal instant/retail add-on, adds no time. */
+  zeroMinuteAddOnId: string
 }
 
 let fx: Fixtures
@@ -327,6 +329,7 @@ beforeAll(async () => {
     addOnId: '',
     shortAddOnId: '',
     brokenAddOnId: '',
+    zeroMinuteAddOnId: '',
   }
 
   fx.addOnId = await createAddOnLink({
@@ -343,11 +346,23 @@ beforeAll(async () => {
     sortOrder: 2,
   })
 
+  // A stored NEGATIVE duration is still unusable data — `??` only skips
+  // null/undefined, so this never falls through to `defaultDurationMinutes`.
   fx.brokenAddOnId = await createAddOnLink({
     serviceName: 'Broken',
+    durationOverrideMinutes: -5,
+    defaultDurationMinutes: 15,
+    sortOrder: 3,
+  })
+
+  // An EXACT 0 is the add-on-specific legal exception (an instant/retail
+  // add-on that adds no time) — distinct from the genuinely-broken negative
+  // case above.
+  fx.zeroMinuteAddOnId = await createAddOnLink({
+    serviceName: 'Take-home kit',
     durationOverrideMinutes: 0,
     defaultDurationMinutes: 0,
-    sortOrder: 3,
+    sortOrder: 4,
   })
 })
 
@@ -475,7 +490,7 @@ describe('hold reserves base + add-ons (real DB)', () => {
     expect(created.hold.durationMinutes).toBe(BASE_DURATION_MINUTES + 15)
   })
 
-  it('refuses an add-on with a non-positive duration on BOTH sides', async () => {
+  it('refuses an add-on with a negative duration on BOTH sides', async () => {
     const start = futureLocal(11, 12)
 
     const offered = await resolveDurationWithAddOns({
@@ -494,6 +509,43 @@ describe('hold reserves base + add-ons (real DB)', () => {
     expect(
       await refusalCode(() => hold({ start, addOnIds: [fx.brokenAddOnId] })),
     ).toBe('ADDONS_INVALID')
+  })
+
+  /**
+   * The add-on-specific exception, driven against real Postgres: an EXACT
+   * zero (an instant/retail add-on like a take-home product) is legal on
+   * BOTH sides and adds no time — distinct from the negative case above,
+   * which stays refused.
+   */
+  it('accepts an add-on with an exact 0 duration on BOTH sides, adding no time', async () => {
+    const start = futureLocal(11, 12)
+
+    const offered = await resolveDurationWithAddOns({
+      client: db,
+      professionalId: fx.professionalId,
+      offeringId: fx.offeringId,
+      addOnIds: [fx.zeroMinuteAddOnId],
+      locationType: ServiceLocationType.SALON,
+      baseDurationMinutes: BASE_DURATION_MINUTES,
+    })
+
+    expect(offered.ok).toBe(true)
+    if (offered.ok) {
+      expect(offered.addOnDurationTotal).toBe(0)
+      expect(offered.durationMinutes).toBe(BASE_DURATION_MINUTES)
+    }
+
+    const created = await hold({ start, addOnIds: [fx.zeroMinuteAddOnId] })
+    expect(created.hold.durationMinutes).toBe(BASE_DURATION_MINUTES)
+
+    const persisted = await resolveBookingAddOns({
+      client: db,
+      professionalId: fx.professionalId,
+      offeringId: fx.offeringId,
+      addOnIds: [fx.zeroMinuteAddOnId],
+      locationType: ServiceLocationType.SALON,
+    })
+    expect(persisted[0]?.durationMinutesSnapshot).toBe(0)
   })
 })
 
