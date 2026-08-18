@@ -168,7 +168,7 @@ export default function ProfileIdentityRail({
         </div>
 
         {header.bio ? (
-          <p className="mt-4 text-[15px] leading-[1.55] text-textSecondary">
+          <p className="mt-4 max-w-[480px] text-[15px] leading-[1.55] text-textSecondary">
             {header.bio}
           </p>
         ) : null}
