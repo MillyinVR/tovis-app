@@ -1423,6 +1423,21 @@ select {
   }
 }
 
+/* The two-column body (352px rail + content) used to switch on together with
+   the desktop-only spacing bumps below, all gated at 1100px. That left BOTH
+   standard tablet breakpoints (768px and 1024px) on the single-column body,
+   where the bio paragraph has nothing bounding its line length — exactly the
+   "cramped phone UI stretched wider" failure the acceptance bar rules out
+   (client-parity-brief.md finding #3). The rail switch only needs enough
+   width for its own 352px + 44px gap to leave a readable content column
+   (~450px+, not ~320px) — 900px clears that; 1100px doesn't need to. */
+@media (min-width: 900px) {
+  .brand-pp-page {
+    --pp-rail: 352px minmax(0, 1fr);
+    --pp-rail-gap: 44px;
+  }
+}
+
 @media (min-width: 1100px) {
   .brand-pp-page {
     --pp-pad: 40px;
@@ -1431,8 +1446,6 @@ select {
     /* At width the grid sits inside the content column, so it no longer needs
        to escape the page padding. */
     --pp-bleed: 0px;
-    --pp-rail: 352px minmax(0, 1fr);
-    --pp-rail-gap: 44px;
     --pp-shell: 1180px;
     --pp-name: 40px;
   }
