@@ -1,0 +1,19 @@
+-- 20260913000001_ai_consult_c10_w2_inspiration created this index with its
+-- schema-derived name, which is 83 bytes -- over Postgres's 63-byte
+-- (NAMEDATALEN-1) identifier limit. Postgres silently truncated it at CREATE
+-- time to the first 63 bytes, dropping the "_idx" suffix entirely:
+--   ConsultInspiration_status_purgedAt_purgeEligibleAt_uploadExpire
+-- Prisma's own name-truncation algorithm (used when computing the expected
+-- name from the unmapped @@index in schema.prisma) instead preserves the
+-- suffix, truncating the field-derived portion further to fit:
+--   ConsultInspiration_status_purgedAt_purgeEligibleAt_uploadEx_idx
+-- The mismatch between what Postgres actually created and what Prisma
+-- expects is what makes `prisma migrate diff` report drift. This migration
+-- is a same-index, catalog-only rename to Prisma's expected name -- no data
+-- or query behavior changes. It must run AFTER 20260913000001 (which is
+-- guaranteed by directory-name ordering) rather than editing that already-
+-- applied migration file, since editing an applied file's SQL would not
+-- rename the index that already exists in any database that ran it, and
+-- would change the file's checksum against what `_prisma_migrations` has on
+-- record there.
+ALTER INDEX "ConsultInspiration_status_purgedAt_purgeEligibleAt_uploadExpire" RENAME TO "ConsultInspiration_status_purgedAt_purgeEligibleAt_uploadEx_idx";
