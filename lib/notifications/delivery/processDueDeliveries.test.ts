@@ -381,6 +381,100 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
     })
   })
 
+  // End-to-end wiring assertions: the renderer and the first-send resolver are
+  // each unit-tested in isolation, but only these two prove processDueDeliveries
+  // actually connects them — i.e. that the text handed to Twilio carries (or
+  // omits) the opt-out disclosure. Wiring the flag to a wrong/renamed field
+  // would leave every other test in this file green.
+  it('sends the opt-out disclosure in the real SMS text on a first send to a destination', async () => {
+    const now = new Date('2026-04-09T12:00:00.000Z')
+    const { providers, smsSend } = makeProviders()
+
+    // No prior SENT/DELIVERED SMS for this destination → first send.
+    mockPrisma.notificationDelivery.findFirst.mockResolvedValue(null)
+
+    mockClaimDeliveries.mockResolvedValue({
+      now,
+      claimedAt: now,
+      leaseExpiresAt: new Date(now.getTime() + 60_000),
+      deliveries: [
+        makeClaimedDelivery({
+          id: 'delivery_sms_first',
+          channel: NotificationChannel.SMS,
+          provider: NotificationProvider.TWILIO,
+          destination: '+15551234567',
+          templateKey: 'booking_confirmed',
+        }),
+      ],
+    })
+
+    smsSend.mockResolvedValue({
+      ok: true,
+      providerMessageId: 'SM_first',
+      providerStatus: 'queued',
+      responseMeta: { source: 'sendSms' },
+    })
+
+    await processDueDeliveries({
+      providers,
+      tenantContext: rootTenantContext('tenant_root'),
+      claim: { now },
+    })
+
+    expect(smsSend).toHaveBeenCalledTimes(1)
+    const sentRequest = smsSend.mock.calls[0]?.[0]
+    expect(sentRequest?.content).toMatchObject({
+      channel: NotificationChannel.SMS,
+    })
+    expect(
+      (sentRequest?.content as { text: string }).text,
+    ).toContain('Reply STOP to opt out, HELP for help.')
+  })
+
+  it('omits the opt-out disclosure in the real SMS text once the destination has been texted before', async () => {
+    const now = new Date('2026-04-09T12:00:00.000Z')
+    const { providers, smsSend } = makeProviders()
+
+    // A prior SENT SMS exists for this destination → not a first send.
+    mockPrisma.notificationDelivery.findFirst.mockResolvedValue({
+      id: 'prior_delivery_1',
+    })
+
+    mockClaimDeliveries.mockResolvedValue({
+      now,
+      claimedAt: now,
+      leaseExpiresAt: new Date(now.getTime() + 60_000),
+      deliveries: [
+        makeClaimedDelivery({
+          id: 'delivery_sms_repeat',
+          channel: NotificationChannel.SMS,
+          provider: NotificationProvider.TWILIO,
+          destination: '+15551234567',
+          templateKey: 'booking_confirmed',
+        }),
+      ],
+    })
+
+    smsSend.mockResolvedValue({
+      ok: true,
+      providerMessageId: 'SM_repeat',
+      providerStatus: 'queued',
+      responseMeta: { source: 'sendSms' },
+    })
+
+    await processDueDeliveries({
+      providers,
+      tenantContext: rootTenantContext('tenant_root'),
+      claim: { now },
+    })
+
+    expect(smsSend).toHaveBeenCalledTimes(1)
+    const sentRequest = smsSend.mock.calls[0]?.[0]
+    expect((sentRequest?.content as { text: string }).text).not.toContain(
+      'Reply STOP',
+    )
+  })
+
   it('processes a successful email delivery through the email provider', async () => {
     const now = new Date('2026-04-09T12:00:00.000Z')
     const { providers, inAppSend, smsSend, emailSend } = makeProviders()
