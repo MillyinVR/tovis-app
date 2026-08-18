@@ -9,9 +9,7 @@ import {
   buildClientIdempotencyKey,
   idempotencyHeaders,
 } from '@/lib/idempotency/client'
-import { safeJson } from '@/lib/http'
-import { isRecord } from '@/lib/guards'
-import { pickString } from '@/lib/pick'
+import { errorFromResponse, safeJson } from '@/lib/http'
 import { COPY } from '@/lib/copy'
 
 type Props = {
@@ -19,16 +17,6 @@ type Props = {
   bookingId: string
   size?: ButtonSize
   fullWidth?: boolean
-}
-
-function errorFrom(res: Response, data: unknown): string {
-  if (isRecord(data)) {
-    const fromError = pickString(data.error)
-    if (fromError) return fromError
-    const fromMessage = pickString(data.message)
-    if (fromMessage) return fromMessage
-  }
-  return COPY.proBookingCheckout.confirmError
 }
 
 /**
@@ -74,7 +62,11 @@ export default function ConfirmPaymentReceivedButton({
       const data = await safeJson(res)
 
       if (!res.ok) {
-        setError(errorFrom(res, data))
+        setError(
+          errorFromResponse(res, data, {
+            fallback: COPY.proBookingCheckout.confirmError,
+          }),
+        )
         return
       }
 

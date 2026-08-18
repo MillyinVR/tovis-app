@@ -110,3 +110,57 @@ export function safeJsonParse(input: string | null | undefined): unknown | null 
     return null
   }
 }
+
+/**
+ * Copy for the two statuses every signed-in surface can hit, in the wording
+ * most of this app already used before these readers were consolidated.
+ *
+ * Exported so a caller can spread it rather than re-type it — and so a surface
+ * that deliberately says something else has to say so at its own call site,
+ * which is what makes the drift visible.
+ */
+export const HTTP_STATUS_COPY: Readonly<Partial<Record<number, string>>> = Object.freeze({
+  401: 'Please log in to continue.',
+  403: 'You don’t have access to do that.',
+})
+
+/**
+ * Turn a failed `Response` — plus its ALREADY-PARSED body — into a line a
+ * person can read. Twenty-four surfaces had re-typed this under three names
+ * (`errorFromResponse`, `errorFrom`, `getErrorMessage`), each with its own
+ * subtly different payload read; this is the one shape.
+ *
+ * Order, and why:
+ *   1. the payload, via `readAnyErrorMessage` — `error` first (the USER-facing
+ *      string every `jsonFail` writes), then `message` (the internal one the
+ *      booking envelope carries alongside it). Reading `message` first shows a
+ *      pro copy written for a log line.
+ *   2. `byStatus[res.status]`, for a surface that can say something more useful
+ *      about a specific refusal than the server's generic line.
+ *   3. `fallback`, defaulting to `Request failed (<status>).`
+ *
+ * The body is a parameter rather than read here because a caller that already
+ * did `await safeJson(res)` cannot read the stream twice.
+ *
+ * NOTE: this deliberately takes no `userMessage` branch. `userMessage` is an
+ * internal field name — every route hands it to `jsonFail` as the `error` arg,
+ * so it reaches the wire AS `error` and never under its own key.
+ */
+export function errorFromResponse(
+  res: Response,
+  data: unknown,
+  options?: {
+    /** Per-status copy, consulted only when the payload carried nothing. */
+    byStatus?: Readonly<Partial<Record<number, string>>>
+    /** Last resort. Defaults to `Request failed (<status>).` */
+    fallback?: string
+  },
+): string {
+  const fromPayload = readAnyErrorMessage(data)
+  if (fromPayload) return fromPayload
+
+  const forStatus = options?.byStatus?.[res.status]
+  if (forStatus) return forStatus
+
+  return options?.fallback ?? `Request failed (${res.status}).`
+}

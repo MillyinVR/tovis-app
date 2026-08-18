@@ -9,7 +9,7 @@ import AftercareRebookButton from './AftercareRebookButton'
 import { COPY } from '@/lib/copy'
 import { friendlyTimeZoneLabel } from '@/lib/timeZone'
 import { formatInTimeZone } from '@/lib/time'
-import { safeJson } from '@/lib/http'
+import { errorFromResponse, safeJson } from '@/lib/http'
 import {
   buildClientIdempotencyKey,
   idempotencyHeaders,
@@ -48,16 +48,6 @@ function formatWhen(iso: string, timeZone: string): string {
     hour: 'numeric',
     minute: '2-digit',
   })
-}
-
-function errorFrom(res: Response, data: unknown): string {
-  const error =
-    isRecord(data) && typeof data.error === 'string' && data.error.trim()
-      ? data.error.trim()
-      : null
-  if (error) return error
-  if (res.status === 409) return COPY.bookings.aftercare.nextAppointmentUnavailable
-  return COPY.bookings.aftercare.nextAppointmentError
 }
 
 export default function AftercareNextAppointmentCard({
@@ -101,7 +91,16 @@ export default function AftercareNextAppointmentCard({
       )
 
       const data = await safeJson(res)
-      if (!res.ok) throw new Error(errorFrom(res, data))
+      if (!res.ok) {
+        throw new Error(
+          errorFromResponse(res, data, {
+            byStatus: {
+              409: COPY.bookings.aftercare.nextAppointmentUnavailable,
+            },
+            fallback: COPY.bookings.aftercare.nextAppointmentError,
+          }),
+        )
+      }
 
       if (action === 'CONFIRM') {
         const newId =

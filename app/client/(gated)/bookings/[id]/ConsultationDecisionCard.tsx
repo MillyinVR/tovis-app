@@ -5,26 +5,21 @@ import { useRouter } from 'next/navigation'
 import { useMemo, useState } from 'react'
 import { moneyToString } from '@/lib/money'
 import { COPY } from '@/lib/copy'
-import { safeJson } from '@/lib/http'
+import { errorFromResponse, safeJson } from '@/lib/http'
 import {
   buildClientIdempotencyKey,
   idempotencyHeaders,
 } from '@/lib/idempotency/client'
 import { isRecord } from '@/lib/guards'
 
-function readString(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() ? value.trim() : null
+const STATUS_COPY = {
+  401: 'Please log in again.',
+  403: 'You don’t have access to do that.',
+  409: 'This consultation can’t be changed right now.',
 }
 
-function errorFrom(res: Response, data: unknown): string {
-  const error = isRecord(data) ? readString(data.error) : null
-  if (error) return error
-
-  if (res.status === 401) return 'Please log in again.'
-  if (res.status === 403) return 'You don’t have access to do that.'
-  if (res.status === 409) return 'This consultation can’t be changed right now.'
-
-  return `Request failed (${res.status}).`
+function readString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
 type ProposedItem = {
@@ -136,7 +131,7 @@ export default function ConsultationDecisionCard(props: {
       )
 
       const data = await safeJson(res)
-      if (!res.ok) throw new Error(errorFrom(res, data))
+      if (!res.ok) throw new Error(errorFromResponse(res, data, { byStatus: STATUS_COPY }))
 
       setDone(action)
 

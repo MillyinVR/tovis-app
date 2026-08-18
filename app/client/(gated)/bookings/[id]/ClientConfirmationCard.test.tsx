@@ -30,7 +30,11 @@ vi.mock('next/navigation', () => ({
 }))
 
 const httpMocks = vi.hoisted(() => ({ safeJson: vi.fn() }))
-vi.mock('@/lib/http', () => ({ safeJson: httpMocks.safeJson }))
+// Partial mock: only safeJson is stubbed, so errorFromResponse stays real.
+vi.mock('@/lib/http', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/http')>()),
+  safeJson: httpMocks.safeJson,
+}))
 
 import ClientConfirmationCard from './ClientConfirmationCard'
 
@@ -126,9 +130,14 @@ describe('ClientConfirmationCard', () => {
   })
 
   it('surfaces the server’s own refusal wording rather than a generic error', async () => {
+    // `error`, not `userMessage`: this route refuses through jsonFail /
+    // bookingJsonFail, both of which write the human copy under `error`
+    // (`userMessage` is the internal name of the ARGUMENT, and never reaches
+    // the wire under its own key). The fixture used to say `userMessage` and
+    // passed only because the component carried a matching dead branch.
     httpMocks.safeJson.mockResolvedValue({
       ok: false,
-      userMessage: 'This appointment can no longer be confirmed or declined.',
+      error: 'This appointment can no longer be confirmed or declined.',
     })
     vi.stubGlobal(
       'fetch',

@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { BookingStatus, SessionStep } from '@prisma/client'
 import { DEFAULT_TIME_ZONE, sanitizeTimeZone } from '@/lib/timeZone'
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
-import { safeJson } from '@/lib/http'
+import { errorFromResponse, safeJson } from '@/lib/http'
 import {
   buildClientIdempotencyKey,
   idempotencyHeaders,
@@ -16,6 +16,12 @@ import {
   lateChangeConfirmCopy,
   type LifecycleAction,
 } from '@/lib/booking/lifecycleActionViewModel'
+
+const STATUS_COPY = {
+  401: 'Please log in again.',
+  403: 'You do not have access to do that.',
+  409: 'That request could not be completed.',
+}
 
 type BookingLocationType = 'SALON' | 'MOBILE' | null
 
@@ -68,21 +74,6 @@ function cancelRefundMessage(data: unknown): string | null {
   if (!refund || typeof refund !== 'object') return null
   const message = (refund as { message?: unknown }).message
   return typeof message === 'string' && message.trim() ? message : null
-}
-
-function errorFromResponse(res: Response, data: unknown) {
-  const rec =
-    data && typeof data === 'object' ? (data as Record<string, unknown>) : null
-
-  if (typeof rec?.error === 'string') return rec.error
-  if (res.status === 401) return 'Please log in again.'
-  if (res.status === 403) return 'You do not have access to do that.'
-  if (res.status === 409) {
-    return typeof rec?.error === 'string'
-      ? rec.error
-      : 'That request could not be completed.'
-  }
-  return `Request failed (${res.status}).`
 }
 
 function pillClass(on: boolean) {
@@ -195,7 +186,9 @@ export default function BookingActions({
       })
 
       const data = await safeJson(res)
-      if (!res.ok) throw new Error(errorFromResponse(res, data))
+      if (!res.ok) {
+        throw new Error(errorFromResponse(res, data, { byStatus: STATUS_COPY }))
+      }
 
       // A client cancel carries an honest refund summary; show it verbatim so the
       // client learns the money outcome. Every other action keeps the plain ack.

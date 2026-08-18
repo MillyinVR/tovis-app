@@ -12,7 +12,7 @@ import {
   sanitizeTimeZone,
 } from '@/lib/timeZone'
 import { partsToUtcIsoStrict, WALL_TIME_ERROR_MESSAGE } from '@/lib/time'
-import { safeJson } from '@/lib/http'
+import { readAnyErrorMessageOr, safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
 import { parseHHMM } from '@/lib/scheduling/workingHours'
 import { CALENDAR_MS_PER_MINUTE } from '@/lib/calendar/constants'
@@ -256,12 +256,6 @@ function requiredString(value: unknown, errorMessage: string): string {
   return stringValue
 }
 
-function errorFromResponse(data: unknown, fallback: string): string {
-  if (!isRecord(data)) return fallback
-
-  return optionalString(data.error) ?? optionalString(data.message) ?? fallback
-}
-
 function parseCreatedBlock(
   data: unknown,
   copy: BlockTimeModalCopy,
@@ -490,7 +484,7 @@ export default function BlockTimeModal(props: BlockTimeModalProps) {
       const data: unknown = await safeJson(response)
 
       if (!response.ok) {
-        throw new Error(errorFromResponse(data, copy.createFailedError))
+        throw new Error(readAnyErrorMessageOr(data, copy.createFailedError))
       }
 
       const createdBlock = parseCreatedBlock(data, copy)

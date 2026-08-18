@@ -61,7 +61,7 @@ function isGoogleGeocodeResult(value: unknown): value is GoogleGeocodeResult {
   return typeof value === 'object' && value !== null
 }
 
-function getErrorMessage(data: GoogleGeocodeResponse, fallback: string): string {
+function googleErrorMessage(data: GoogleGeocodeResponse, fallback: string): string {
   return typeof data.error_message === 'string' && data.error_message.trim()
     ? data.error_message
     : fallback
@@ -99,7 +99,7 @@ export async function GET(req: Request) {
     const status = typeof data.status === 'string' ? data.status : ''
 
     if (status !== 'OK') {
-      return jsonFail(400, getErrorMessage(data, `Google status: ${status}`), {
+      return jsonFail(400, googleErrorMessage(data, `Google status: ${status}`), {
         details: data,
       })
     }

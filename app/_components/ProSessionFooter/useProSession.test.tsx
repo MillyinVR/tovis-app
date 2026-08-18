@@ -34,7 +34,11 @@ vi.mock('next/navigation', () => ({
   usePathname: () => navMocks.pathnameMock(),
 }))
 
-vi.mock('@/lib/http', () => ({
+// Partial mock: only safeJson is stubbed. errorFromResponse/HTTP_STATUS_COPY
+// come from the real module, so this test exercises the shipped copy ladder
+// rather than a second implementation of it.
+vi.mock('@/lib/http', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/http')>()),
   safeJson: async (res: Response) => res.json(),
 }))
 

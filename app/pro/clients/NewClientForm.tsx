@@ -4,33 +4,20 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
-import { isAbortError, safeJson } from '@/lib/http'
-import { isRecord } from '@/lib/guards'
+import {
+  errorFromResponse,
+  HTTP_STATUS_COPY,
+  isAbortError,
+  safeJson,
+} from '@/lib/http'
 import { loginHrefFromHere } from '@/lib/clientNavigation'
 import { Button } from '@/app/_components/ui'
-
-type ApiErrorPayload = {
-  error?: unknown
-}
 
 function redirectToLogin(
   router: ReturnType<typeof useRouter>,
   reason?: string,
 ): void {
   router.push(loginHrefFromHere('/pro', reason))
-}
-
-function errorFromResponse(res: Response, data: unknown): string {
-  const payload: ApiErrorPayload = isRecord(data) ? data : {}
-
-  if (typeof payload.error === 'string' && payload.error.trim()) {
-    return payload.error.trim()
-  }
-
-  if (res.status === 401) return 'Please log in to continue.'
-  if (res.status === 403) return 'You don’t have access to do that.'
-
-  return `Request failed (${res.status}).`
 }
 
 export default function NewClientForm() {
@@ -99,7 +86,7 @@ export default function NewClientForm() {
       const data: unknown = await safeJson(res)
 
       if (!res.ok) {
-        setError(errorFromResponse(res, data))
+        setError(errorFromResponse(res, data, { byStatus: HTTP_STATUS_COPY }))
         return
       }
 

@@ -13,8 +13,8 @@ import type {
 } from '@/lib/brand/types'
 
 import {
+  errorFromResponse,
   errorMessageFromUnknown,
-  readErrorMessage,
   safeJson,
 } from '@/lib/http'
 import { parseHHMM } from '@/lib/scheduling/workingHours'
@@ -480,27 +480,6 @@ function workingHoursEndpoint(
   return `/api/v1/pro/working-hours?${params.toString()}`
 }
 
-function errorFromResponse(args: {
-  response: Response
-  data: unknown
-  fallback: string
-}): string {
-  const { response, data, fallback } = args
-  const message = readErrorMessage(data)
-
-  if (message) return message
-
-  if (isRecord(data)) {
-    const rawMessage = data.message
-
-    if (typeof rawMessage === 'string' && rawMessage.trim()) {
-      return rawMessage.trim()
-    }
-  }
-
-  return `${fallback} (${response.status})`
-}
-
 function locationCopy(args: {
   locationType: LocationType
   copy: BrandWorkingHoursCopy
@@ -601,10 +580,8 @@ export default function WorkingHoursForm(props: WorkingHoursFormProps) {
 
         if (!response.ok) {
           setError(
-            errorFromResponse({
-              response,
-              data,
-              fallback: copy.status.failedLoadHours,
+            errorFromResponse(response, data, {
+              fallback: `${copy.status.failedLoadHours} (${response.status})`,
             }),
           )
           setState(hydrateFromApi(null))
@@ -690,10 +667,8 @@ export default function WorkingHoursForm(props: WorkingHoursFormProps) {
 
       if (!response.ok) {
         setError(
-          errorFromResponse({
-            response,
-            data,
-            fallback: copy.status.failedSave,
+          errorFromResponse(response, data, {
+            fallback: `${copy.status.failedSave} (${response.status})`,
           }),
         )
         return

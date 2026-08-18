@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
-import { safeJson, readErrorMessage } from '@/lib/http'
+import { errorFromResponse, readErrorMessage, safeJson } from '@/lib/http'
 import {
   buildClientIdempotencyKey,
   idempotencyHeaders,
@@ -61,6 +61,11 @@ import {
 import OpenSlotPicker from './OpenSlotPicker'
 import BookingOverridePromptCard from '@/app/pro/_components/BookingOverridePromptCard'
 import { controlClassName } from '@/app/_components/ui'
+
+const STATUS_COPY = {
+  401: 'Please log in to continue.',
+  403: 'You do not have access to do that.',
+}
 
 type CancelMode = 'href' | 'back'
 type ClientMode = 'existing' | 'new'
@@ -217,14 +222,6 @@ function overrideBodyFromFlags(
     allowFarFuture: flags.includes('allowFarFuture'),
     allowOutsideWorkingHours: flags.includes('allowOutsideWorkingHours'),
   }
-}
-
-function errorFromResponse(res: Response, data: unknown) {
-  const msg = readErrorMessage(data)
-  if (msg) return msg
-  if (res.status === 401) return 'Please log in to continue.'
-  if (res.status === 403) return 'You do not have access to do that.'
-  return `Request failed (${res.status}).`
 }
 
 function defaultDatetimeLocal(): string {
@@ -1610,7 +1607,7 @@ export default function NewBookingForm({
       return
     }
 
-    setError(errorFromResponse(res, data))
+    setError(errorFromResponse(res, data, { byStatus: STATUS_COPY }))
     return
   }
 

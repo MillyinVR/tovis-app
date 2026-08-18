@@ -14,7 +14,7 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
-import { readErrorMessage, safeJson } from '@/lib/http'
+import { errorFromResponse, HTTP_STATUS_COPY, safeJson } from '@/lib/http'
 import { formatIsoDateShort } from '@/lib/time'
 
 const SEVERITIES = ['LOW', 'MODERATE', 'HIGH', 'CRITICAL'] as const
@@ -37,14 +37,6 @@ export type ClientNoteItem = {
   title: string | null
   body: string
   createdAt: string
-}
-
-function errorFromResponse(res: Response, data: unknown): string {
-  const message = readErrorMessage(data)
-  if (message) return message
-  if (res.status === 401) return 'Please log in to continue.'
-  if (res.status === 403) return 'You don’t have access to do that.'
-  return `Request failed (${res.status}).`
 }
 
 const inputClass =
@@ -96,7 +88,7 @@ function AllergyForm({ clientId }: { clientId: string }) {
       )
       const data = await safeJson(res)
       if (!res.ok) {
-        setError(errorFromResponse(res, data))
+        setError(errorFromResponse(res, data, { byStatus: HTTP_STATUS_COPY }))
         return
       }
       setLabel('')
@@ -209,7 +201,7 @@ function NoteForm({ clientId }: { clientId: string }) {
       )
       const data = await safeJson(res)
       if (!res.ok) {
-        setError(errorFromResponse(res, data))
+        setError(errorFromResponse(res, data, { byStatus: HTTP_STATUS_COPY }))
         return
       }
       setTitle('')
