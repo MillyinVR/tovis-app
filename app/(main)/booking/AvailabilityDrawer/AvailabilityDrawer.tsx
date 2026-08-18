@@ -390,6 +390,9 @@ function buildDayScrollerModel(
       labelBottom: bottom,
       supplyLabel: daySupplyLabel(day.slotCount),
       supplyScarce: daySupplyIsScarce(day.slotCount),
+      // A Full day stays in the strip in its real calendar position, dimmed
+      // and unenterable, rather than vanishing (Tori, 2026-08-18).
+      disabled: day.slotCount <= 0,
     }
   })
 }

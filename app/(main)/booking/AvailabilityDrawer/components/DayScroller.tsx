@@ -9,10 +9,12 @@ type DayScrollerDay = {
   ymd: string
   labelTop: string
   labelBottom: string
-  /** "6 open" / "2 left" — how much of this day is still bookable. */
+  /** "6 open" / "2 left" / "Full" — how much of this day is still bookable. */
   supplyLabel: string
   /** Down to the last couple of starts: worth drawing the eye to. */
   supplyScarce: boolean
+  /** Zero slots left — shown in its real calendar position, but not enterable. */
+  disabled: boolean
 }
 
 type DayScrollerProps = {
@@ -45,6 +47,8 @@ const DayButton = memo(function DayButton({
   active,
   onSelectDay,
 }: DayButtonProps) {
+  const disabled = day.disabled
+
   return (
     <button
       type="button"
@@ -53,11 +57,16 @@ const DayButton = memo(function DayButton({
       // took every name-matching e2e selector with it. The testid does not move
       // when the copy does.
       data-testid={dayChipTestId(day.ymd)}
-      onClick={() => onSelectDay(day.ymd)}
+      // The native `disabled` attribute is the whole mechanism here — it
+      // blocks both pointer and keyboard activation on its own, so a Full day
+      // never needs its own guard in the click handler.
+      disabled={disabled}
+      onClick={disabled ? undefined : () => onSelectDay(day.ymd)}
+      title={disabled ? 'Full — no openings' : undefined}
       // Spelled out rather than left to the three stacked text nodes, which
       // would announce as "Fri1412 open".
       aria-label={`${day.labelTop} ${day.labelBottom}, ${day.supplyLabel}`}
-      aria-pressed={active}
+      aria-pressed={disabled ? undefined : active}
       style={{
         flexShrink: 0,
         minWidth: 54,
@@ -65,7 +74,8 @@ const DayButton = memo(function DayButton({
         borderRadius: 14,
         border: active ? 'none' : '1px solid rgb(var(--surface-glass) / 0.12)',
         background: active ? 'rgb(var(--accent-primary))' : 'rgb(var(--surface-glass) / 0.06)',
-        cursor: 'pointer',
+        opacity: disabled ? 0.4 : 1,
+        cursor: disabled ? 'not-allowed' : 'pointer',
         textAlign: 'center',
         transition: 'background 0.15s ease',
       }}

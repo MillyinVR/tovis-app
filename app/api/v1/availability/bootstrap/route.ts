@@ -329,7 +329,9 @@ function pickAvailableDays(value: unknown): SummaryAvailableDay[] {
     const slotCount = pickNumber(row.slotCount)
 
     if (!date) continue
-    if (slotCount == null || slotCount <= 0) continue
+    // A day resolving to exactly 0 is a legitimate Full day, kept in the
+    // strip — only a missing/negative count is unusable cached data.
+    if (slotCount == null || slotCount < 0) continue
 
     normalized.push({
       date,
@@ -876,15 +878,19 @@ export async function GET(req: Request) {
         }
 
         const slotCount = row.result.slots.length
-        if (slotCount <= 0) continue
-
         const date = ymdToString(row.ymd)
         const slots = row.result.slots.slice()
 
+        // A day stays in the strip even at zero slots (Tori, 2026-08-18: a
+        // full day renders explicitly rather than vanishing from the scroller)
+        // — but it can never become the selected day, so the two blocks below
+        // stay gated on slotCount > 0.
         availableDays.push({
           date,
           slotCount,
         })
+
+        if (slotCount <= 0) continue
 
         if (date === todayDate && !todaySelectedDay) {
           todaySelectedDay = {

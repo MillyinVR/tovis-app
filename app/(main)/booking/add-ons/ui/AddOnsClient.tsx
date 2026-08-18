@@ -84,11 +84,14 @@ function parseCommaIds(raw: string | null, max: number): string[] {
   return result
 }
 
-function buildRecommendedMap(addOns: AddOnDTO[]): Record<string, boolean> {
+// The pro's own opt-in for "starts ticked" — independent of `isRecommended`,
+// which only drives the "Recommended" badge (Tori, 2026-08-14: a recommended
+// add-on does not auto pre-select).
+function buildPreselectedMap(addOns: AddOnDTO[]): Record<string, boolean> {
   const next: Record<string, boolean> = {}
 
   for (const addOn of addOns) {
-    if (addOn.isRecommended) {
+    if (addOn.isPreselected) {
       next[addOn.id] = true
     }
   }
@@ -315,7 +318,7 @@ export default function AddOnsClient({
     }
   }, [holdId])
 
-  const recommendedMap = useMemo(() => buildRecommendedMap(addOns), [addOns])
+  const preselectedMap = useMemo(() => buildPreselectedMap(addOns), [addOns])
 
   const urlSelectedIds = useMemo(() => {
     return parseCommaIds(urlAddOnIdsRaw, MAX_ADD_ON_IDS)
@@ -330,8 +333,8 @@ export default function AddOnsClient({
       return buildSelectedMapFromIds(addOns, urlSelectedIds)
     }
 
-    return recommendedMap
-  }, [addOns, initialSelectedIds, urlSelectedIds, recommendedMap])
+    return preselectedMap
+  }, [addOns, initialSelectedIds, urlSelectedIds, preselectedMap])
 
   const [selected, setSelected] =
     useState<Record<string, boolean>>(initialSelectedMap)

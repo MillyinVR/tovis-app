@@ -361,7 +361,12 @@ const SERVICES: DemoService[] = [
 // nothing at all without them, and the dev DB has zero `OfferingAddOn` rows.
 // Two are `isRecommended` and two are not, because the design groups them into
 // "Recommended for you" vs "Make it a moment": a fixture where every add-on is
-// recommended would never exercise the second group.
+// recommended would never exercise the second group. `isPreselected` mirrors
+// the same two, so the demo keeps pre-ticking them exactly as before —
+// `isRecommended` alone no longer auto-selects (Tori, 2026-08-14: whether a
+// recommended add-on starts ticked is the pro's own opt-in, not a platform
+// default), so without this the seed would silently start every add-on
+// unticked.
 //
 // `group` on the wire DTO is the add-on service's `addOnGroup`, and
 // `GET /api/v1/offerings/add-ons` only returns services with
@@ -370,14 +375,10 @@ const SERVICES: DemoService[] = [
 // now" with the rows sitting in the database, which is indistinguishable from a
 // pro who simply offers none.
 //
-// ⚠️ An add-on's duration cannot be under 15 minutes. The route drops anything
-// resolving to <= 0, and `normalizePositiveMinutesOrNull` then
-// `clampInt(minutes, 15, …)` raises everything else to a 15-minute floor — seed
-// the kit at 5 and the API returns 15, so the fixture would silently disagree
-// with the screen. Consequence for the design: a pure retail item (its
-// "Take-home gloss kit", priced with no "+N min" line) cannot be expressed
-// today; it is seeded at the floor and flagged in the PR rather than papered
-// over.
+// The "Take-home gloss kit" is seeded at 0 minutes — a pure retail item, priced
+// with no "+N min" line — now that add-ons have their own legal-zero duration
+// path (`resolveAddOnDurationMinutes`); the shared service/rebook duration
+// floor of 15 minutes is untouched.
 type DemoAddOn = {
   key: string
   name: string
@@ -389,14 +390,16 @@ type DemoAddOn = {
   priceStartingAt: number
   minutes: number
   isRecommended: boolean
+  /** The pro's own "starts ticked" opt-in — independent of `isRecommended`. */
+  isPreselected: boolean
   sortOrder: number
 }
 
 const ADD_ONS: DemoAddOn[] = [
-  { key: 'bond-builder', name: 'Olaplex bond builder', group: 'Treatment', categoryName: 'Treatment', categorySlug: 'treatment', priceStartingAt: 30, minutes: 15, isRecommended: true, sortOrder: 1 },
-  { key: 'toner-gloss', name: 'Toner & gloss', group: 'Treatment', categoryName: 'Treatment', categorySlug: 'treatment', priceStartingAt: 40, minutes: 30, isRecommended: true, sortOrder: 2 },
-  { key: 'scalp-massage', name: 'Scalp + neck massage', group: 'Make it a moment', categoryName: 'Extras', categorySlug: 'extras', priceStartingAt: 20, minutes: 15, isRecommended: false, sortOrder: 3 },
-  { key: 'gloss-kit', name: 'Take-home gloss kit', group: 'Make it a moment', categoryName: 'Extras', categorySlug: 'extras', priceStartingAt: 35, minutes: 15, isRecommended: false, sortOrder: 4 },
+  { key: 'bond-builder', name: 'Olaplex bond builder', group: 'Treatment', categoryName: 'Treatment', categorySlug: 'treatment', priceStartingAt: 30, minutes: 15, isRecommended: true, isPreselected: true, sortOrder: 1 },
+  { key: 'toner-gloss', name: 'Toner & gloss', group: 'Treatment', categoryName: 'Treatment', categorySlug: 'treatment', priceStartingAt: 40, minutes: 30, isRecommended: true, isPreselected: true, sortOrder: 2 },
+  { key: 'scalp-massage', name: 'Scalp + neck massage', group: 'Make it a moment', categoryName: 'Extras', categorySlug: 'extras', priceStartingAt: 20, minutes: 15, isRecommended: false, isPreselected: false, sortOrder: 3 },
+  { key: 'gloss-kit', name: 'Take-home gloss kit', group: 'Make it a moment', categoryName: 'Extras', categorySlug: 'extras', priceStartingAt: 35, minutes: 0, isRecommended: false, isPreselected: false, sortOrder: 4 },
 ]
 
 /** Which offering (`proKey:serviceKey`) the add-ons above hang off. */
@@ -1462,6 +1465,7 @@ async function main(): Promise<void> {
         addOnServiceId,
         isActive: true,
         isRecommended: addOn.isRecommended,
+        isPreselected: addOn.isPreselected,
         sortOrder: addOn.sortOrder,
         priceOverride: money(addOn.priceStartingAt),
         durationOverrideMinutes: addOn.minutes,

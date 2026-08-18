@@ -94,6 +94,28 @@ export function normalizePositiveDurationMinutes(value: unknown): number | null 
   return clampInt(minutes, 15, MAX_SLOT_DURATION_MINUTES)
 }
 
+/**
+ * The minutes a PERSISTED `BookingServiceItem.durationMinutesSnapshot` counts
+ * for when a booking is CLONED (the aftercare rebook).
+ *
+ * An exact 0 is legitimate and preserved: an instant/retail add-on (see
+ * `resolveAddOnDurationMinutes`) genuinely adds no time, and inflating it to
+ * the 60-minute fallback would make every rebook of such a booking a full hour
+ * wider than the appointment it clones — reserving an hour of the pro's day
+ * that nothing needs. Anything else non-positive (null, negative, NaN) is
+ * unusable data and keeps the pre-existing 60-minute fallback.
+ *
+ * 🔴 Shared deliberately: the OFFER (`computeRebookCloneDurationMinutes`, which
+ * sizes the day slots) and the COMMIT (`performLockedCreateRebookedBooking`,
+ * which writes the item rows) must apply the identical rule, or the offer
+ * promises a width the commit won't take — the exact drift
+ * `lib/booking/addOnDuration.ts` was created to end.
+ */
+export function clonedItemDurationMinutes(value: unknown): number {
+  if (value === 0) return 0
+  return normalizePositiveDurationMinutes(value) ?? 60
+}
+
 export function sumDecimal(values: Prisma.Decimal[]): Prisma.Decimal {
   return values.reduce((acc, value) => acc.add(value), new Prisma.Decimal(0))
 }

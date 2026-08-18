@@ -3,7 +3,10 @@
 import { Prisma, ServiceLocationType } from '@prisma/client'
 
 import { MAX_SLOT_DURATION_MINUTES } from '@/lib/booking/constants'
-import { normalizePositiveDurationMinutes } from '@/lib/booking/serviceItems'
+import {
+  clonedItemDurationMinutes,
+  normalizePositiveDurationMinutes,
+} from '@/lib/booking/serviceItems'
 import { clampInt } from '@/lib/pick'
 
 /**
@@ -34,10 +37,17 @@ export type RebookSourceWidthRecord = {
  * number both sides use ([[promise-site-runs-the-commit-site-gate]],
  * [[offer-reserve-commit-are-three-windows]]).
  *
- * It intentionally mirrors the commit's fallbacks: a snapshot-less item counts
- * as 60 minutes, and an item-less booking falls back to the row's own
- * `totalDurationMinutes` (the commit refuses item-less bookings outright, so
- * that fallback only ever sizes an offer whose save will be refused anyway).
+ * It intentionally mirrors the commit's fallbacks via `clonedItemDurationMinutes`:
+ * a snapshot-less item counts as 60 minutes, an EXACT 0 on an ADD_ON (an
+ * instant/retail add-on) stays 0 rather than inflating to 60, and an
+ * item-less booking falls back to the row's own `totalDurationMinutes` (the
+ * commit refuses item-less bookings outright, so that fallback only ever
+ * sizes an offer whose save will be refused anyway).
+ *
+ * 🔴 The BASE item (index 0 — `orderBy: sortOrder asc` matches the commit's
+ * own indexing) never gets the exact-zero exception: a base service can't be
+ * an instant/retail item, so a 0 there is corrupt data, not a real add-on, and
+ * must fall back to 60 exactly like the commit does for it.
  *
  * Lives here rather than in `writeBoundary` because the OFFER is a read path —
  * availability must be able to ask what the commit will take without importing
@@ -47,8 +57,11 @@ export function computeRebookCloneDurationMinutes(
   source: RebookSourceWidthRecord,
 ): number {
   const totalFromItems = source.serviceItems.reduce(
-    (sum, item) =>
-      sum + (normalizePositiveDurationMinutes(item.durationMinutesSnapshot) ?? 60),
+    (sum, item, index) =>
+      sum +
+      (index === 0
+        ? normalizePositiveDurationMinutes(item.durationMinutesSnapshot) ?? 60
+        : clonedItemDurationMinutes(item.durationMinutesSnapshot)),
     0,
   )
 

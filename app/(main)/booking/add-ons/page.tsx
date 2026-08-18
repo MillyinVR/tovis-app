@@ -93,13 +93,14 @@ function coerceAddOn(x: unknown): AddOnDTO | null {
   const minutes = typeof x.minutes === 'number' ? x.minutes : null
   const sortOrder = typeof x.sortOrder === 'number' ? x.sortOrder : null
   const isRecommended = typeof x.isRecommended === 'boolean' ? x.isRecommended : false
+  const isPreselected = typeof x.isPreselected === 'boolean' ? x.isPreselected : false
   const group = typeof x.group === 'string' ? x.group : x.group == null ? null : null
 
   if (!id || !serviceId || !title || !price) return null
   if (minutes == null || !Number.isFinite(minutes)) return null
   if (sortOrder == null || !Number.isFinite(sortOrder)) return null
 
-  return { id, serviceId, title, group, price, minutes, sortOrder, isRecommended }
+  return { id, serviceId, title, group, price, minutes, sortOrder, isRecommended, isPreselected }
 }
 
 function parseAddOnsApiResponse(x: unknown): AddOnsApiResponse | null {
@@ -233,9 +234,11 @@ export default async function BookingAddOnsPage({
 
     if (filteredFromUrl.length) return filteredFromUrl
 
-    // If URL has nothing valid, fall back to recommended defaults
-    const recommended = addOns.filter((a) => a.isRecommended).map((a) => a.id)
-    return recommended
+    // If URL has nothing valid, fall back to the pro's own pre-select opt-in
+    // — independent of isRecommended, which only drives the badge (Tori,
+    // 2026-08-14).
+    const preselected = addOns.filter((a) => a.isPreselected).map((a) => a.id)
+    return preselected
   })()
 
   return (

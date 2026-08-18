@@ -230,6 +230,47 @@ describe('GET /api/v1/availability/bootstrap', () => {
     )
   })
 
+  it('keeps a zero-slot day in availableDays as Full, but never selects it (Tori, 2026-08-18)', async () => {
+    let call = 0
+    mocks.computeDaySlotsFast.mockImplementation(async () => {
+      call += 1
+      // First day scanned is fully booked; every day after it has openings.
+      if (call === 1) {
+        return {
+          ok: true,
+          dayStartUtc: new Date('2030-01-01T00:00:00.000Z'),
+          dayEndExclusiveUtc: new Date('2030-01-02T00:00:00.000Z'),
+          slots: [],
+        }
+      }
+      return {
+        ok: true,
+        dayStartUtc: new Date('2030-01-02T00:00:00.000Z'),
+        dayEndExclusiveUtc: new Date('2030-01-03T00:00:00.000Z'),
+        slots: ['2030-01-02T09:00:00.000Z', '2030-01-02T10:00:00.000Z'],
+      }
+    })
+
+    const response = await getBootstrap({
+      professionalId: 'pro-1',
+      serviceId: 'service-1',
+    })
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.availableDays).toEqual(
+      expect.arrayContaining([expect.objectContaining({ slotCount: 0 })]),
+    )
+    expect(body.availableDays.length).toBeGreaterThan(1)
+
+    // The Full day must never be the one the sheet opens to.
+    expect(body.selectedDay).not.toBeNull()
+    const fullDay = body.availableDays.find(
+      (d: { slotCount: number }) => d.slotCount === 0,
+    )
+    expect(body.selectedDay.date).not.toBe(fullDay?.date)
+  })
+
   it('returns bookable salon location options for salon mode', async () => {
     mocks.professionalLocationFindMany.mockResolvedValue([
       {

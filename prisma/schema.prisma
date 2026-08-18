@@ -2999,6 +2999,10 @@ model OfferingAddOn {
   isActive      Boolean @default(true)
   sortOrder     Int     @default(0)
   isRecommended Boolean @default(false)
+  /// Whether this add-on starts pre-ticked in the booking flow. The pro's own
+  /// opt-in, independent of `isRecommended` (which only controls the
+  /// "Recommended" badge) — a recommended add-on does NOT auto pre-select.
+  isPreselected Boolean @default(false)
 
   priceOverride           Decimal? @db.Decimal(10, 2)
   durationOverrideMinutes Int?

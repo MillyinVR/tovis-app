@@ -420,9 +420,11 @@ function normalizeAddOns(data: unknown): OfferingAddOnItemDTO[] {
       typeof item.serviceId === 'string' ? item.serviceId.trim() : ''
     const title = typeof item.title === 'string' ? item.title.trim() : ''
     const price = typeof item.price === 'string' ? item.price.trim() : ''
-    const minutes = typeof item.minutes === 'number' ? item.minutes : 0
+    // 0 is a legal, intentional add-on duration (instant/retail add-on) —
+    // only a negative/missing minutes value means the entry is unusable.
+    const minutes = typeof item.minutes === 'number' ? item.minutes : -1
 
-    if (!id || !serviceId || !title || !price || minutes <= 0) continue
+    if (!id || !serviceId || !title || !price || minutes < 0) continue
 
     out.push({
       id,
@@ -433,6 +435,7 @@ function normalizeAddOns(data: unknown): OfferingAddOnItemDTO[] {
       minutes,
       sortOrder: typeof item.sortOrder === 'number' ? item.sortOrder : 0,
       isRecommended: item.isRecommended === true,
+      isPreselected: item.isPreselected === true,
     })
   }
 
@@ -1997,7 +2000,8 @@ export default function NewBookingForm({
                       ) : null}
                     </span>
                     <span className="whitespace-nowrap text-right text-[12px] font-black text-textSecondary">
-                      +${addOn.price} · {addOn.minutes} min
+                      +${addOn.price}
+                      {addOn.minutes > 0 ? ` · ${addOn.minutes} min` : ''}
                     </span>
                   </label>
                 )

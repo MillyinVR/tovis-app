@@ -83,28 +83,43 @@ describe('resolveAddOnDurationMinutes', () => {
   })
 
   /**
-   * The other half of the drift: a non-positive stored duration was silently
-   * 0 minutes on the availability side and a thrown refusal on the write side.
-   * `null` is the contract — callers must refuse, never substitute a zero, or a
-   * link that cannot say how long it takes reserves no time at all.
+   * A non-positive stored duration used to be silently 0 minutes on the
+   * availability side and a thrown refusal on the write side. `null` is the
+   * contract for anything the chain cannot price at all — negative, NaN, or
+   * genuinely missing. Callers must refuse, never substitute a zero.
    */
-  it('answers null — never 0 — for a duration it cannot price', () => {
-    expect(resolve({ defaultDurationMinutes: 0 })).toBeNull()
+  it('answers null for a duration it cannot price at all', () => {
     expect(resolve({ defaultDurationMinutes: -30 })).toBeNull()
     expect(resolve({ defaultDurationMinutes: Number.NaN })).toBeNull()
     expect(resolve({})).toBeNull()
   })
 
-  it('does not fall through when the override itself is unusable', () => {
-    // `??` only skips null/undefined, so a stored 0 override is a REFUSAL,
-    // not an invitation to quietly use the pro's offering instead.
+  /**
+   * The add-on-specific exception: a chain that resolves to an EXACT zero is
+   * legal — an instant/retail add-on (e.g. a take-home product) that adds no
+   * time to the appointment. `??` only skips null/undefined, so landing on 0
+   * anywhere in the chain was deliberate, not a fall-through waiting to
+   * happen — it must return 0 outright, never silently promote to a later,
+   * larger fallback.
+   */
+  it('treats an exact zero as a legal, intentional add-on duration', () => {
+    expect(resolve({ defaultDurationMinutes: 0 })).toBe(0)
+
     expect(
       resolve({
         durationOverrideMinutes: 0,
         proOffering: { salonDurationMinutes: 60, mobileDurationMinutes: 60 },
         defaultDurationMinutes: 30,
       }),
-    ).toBeNull()
+    ).toBe(0)
+
+    expect(
+      resolve({
+        proOffering: { salonDurationMinutes: 0, mobileDurationMinutes: 60 },
+        defaultDurationMinutes: 30,
+        locationType: ServiceLocationType.SALON,
+      }),
+    ).toBe(0)
   })
 
   it('truncates a fractional duration rather than rounding it up', () => {

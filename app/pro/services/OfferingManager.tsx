@@ -125,6 +125,7 @@ type AttachedAddOn = {
   group: string | null
   isActive: boolean
   isRecommended: boolean
+  isPreselected: boolean
   sortOrder: number
   locationType: 'SALON' | 'MOBILE' | null
   priceOverride: string | null
@@ -139,6 +140,7 @@ type AddOnSaveItem = {
   addOnServiceId: string
   isActive: boolean
   isRecommended: boolean
+  isPreselected: boolean
   sortOrder: number
   locationType: 'SALON' | 'MOBILE' | null
   priceOverride: string | null
@@ -1029,6 +1031,7 @@ function AddOnsManager(props: {
 
   const [selected, setSelected] = useState<Record<string, boolean>>({})
   const [recommended, setRecommended] = useState<Record<string, boolean>>({})
+  const [preselected, setPreselected] = useState<Record<string, boolean>>({})
 
   function parseEligibleList(v: unknown): EligibleAddOn[] {
     if (!Array.isArray(v)) return []
@@ -1065,14 +1068,17 @@ function AddOnsManager(props: {
 
       const nextSel: Record<string, boolean> = {}
       const nextRec: Record<string, boolean> = {}
+      const nextPre: Record<string, boolean> = {}
 
       for (const a of at) {
         nextSel[a.addOnServiceId] = true
         if (a.isRecommended) nextRec[a.addOnServiceId] = true
+        if (a.isPreselected) nextPre[a.addOnServiceId] = true
       }
 
       setSelected(nextSel)
       setRecommended(nextRec)
+      setPreselected(nextPre)
     } catch {
       onError('Network error loading add-ons.')
     } finally {
@@ -1110,6 +1116,7 @@ function AddOnsManager(props: {
         addOnServiceId,
         isActive: true,
         isRecommended: Boolean(recommended[addOnServiceId]),
+        isPreselected: Boolean(preselected[addOnServiceId]),
         sortOrder: existingSort.get(addOnServiceId) ?? idx * 10,
         locationType: null,
         priceOverride: null,
@@ -1193,7 +1200,10 @@ function AddOnsManager(props: {
                         onChange={(e) => {
                           const checked = e.target.checked
                           setSelected((prev) => ({ ...prev, [s.id]: checked }))
-                          if (!checked) setRecommended((prev) => ({ ...prev, [s.id]: false }))
+                          if (!checked) {
+                            setRecommended((prev) => ({ ...prev, [s.id]: false }))
+                            setPreselected((prev) => ({ ...prev, [s.id]: false }))
+                          }
                         }}
                         className="mt-1 h-4 w-4 accent-[rgb(var(--accent-primary))]"
                       />
@@ -1207,21 +1217,40 @@ function AddOnsManager(props: {
                       </div>
                     </label>
 
-                    <button
-                      type="button"
-                      disabled={disabled || !isOn}
-                      onClick={() => setRecommended((prev) => ({ ...prev, [s.id]: !prev[s.id] }))}
-                      className={cn(
-                        'shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black transition',
-                        !isOn
-                          ? 'border-surfaceGlass/10 bg-bgSecondary text-textSecondary opacity-60'
-                          : recommended[s.id]
-                            ? 'border-accentPrimary/40 bg-accentPrimary/10 text-textPrimary'
-                            : 'border-surfaceGlass/10 bg-bgSecondary text-textSecondary hover:border-surfaceGlass/20',
-                      )}
-                    >
-                      {recommended[s.id] ? 'Recommended' : 'Recommend'}
-                    </button>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <button
+                        type="button"
+                        disabled={disabled || !isOn}
+                        onClick={() => setRecommended((prev) => ({ ...prev, [s.id]: !prev[s.id] }))}
+                        className={cn(
+                          'shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black transition',
+                          !isOn
+                            ? 'border-surfaceGlass/10 bg-bgSecondary text-textSecondary opacity-60'
+                            : recommended[s.id]
+                              ? 'border-accentPrimary/40 bg-accentPrimary/10 text-textPrimary'
+                              : 'border-surfaceGlass/10 bg-bgSecondary text-textSecondary hover:border-surfaceGlass/20',
+                        )}
+                      >
+                        {recommended[s.id] ? 'Recommended' : 'Recommend'}
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={disabled || !isOn}
+                        onClick={() => setPreselected((prev) => ({ ...prev, [s.id]: !prev[s.id] }))}
+                        title="Whether this add-on starts ticked for the client, independent of Recommend"
+                        className={cn(
+                          'shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black transition',
+                          !isOn
+                            ? 'border-surfaceGlass/10 bg-bgSecondary text-textSecondary opacity-60'
+                            : preselected[s.id]
+                              ? 'border-accentPrimary/40 bg-accentPrimary/10 text-textPrimary'
+                              : 'border-surfaceGlass/10 bg-bgSecondary text-textSecondary hover:border-surfaceGlass/20',
+                        )}
+                      >
+                        {preselected[s.id] ? 'Pre-selected' : 'Pre-select'}
+                      </button>
+                    </div>
                   </div>
                 )
               })}

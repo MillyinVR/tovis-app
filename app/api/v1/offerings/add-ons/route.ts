@@ -3,11 +3,8 @@ import { prisma } from '@/lib/prisma'
 import { ServiceLocationType } from '@prisma/client'
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { moneyToString } from '@/lib/money'
-import {
-  normalizeLocationType,
-  pickModeDurationMinutes,
-} from '@/lib/booking/locationContext'
-import { DEFAULT_DURATION_MINUTES } from '@/lib/booking/constants'
+import { normalizeLocationType } from '@/lib/booking/locationContext'
+import { resolveAddOnDurationMinutes } from '@/lib/booking/addOnDuration'
 import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
 import { getProNoShowSettings } from '@/lib/noShowProtection/settings'
 import { cancellationPolicyDisclosure } from '@/lib/noShowProtection/policyDisclosure'
@@ -97,6 +94,7 @@ export async function GET(req: Request) {
         addOnServiceId: true,
         sortOrder: true,
         isRecommended: true,
+        isPreselected: true,
         priceOverride: true,
         durationOverrideMinutes: true,
         addOnService: {
@@ -156,20 +154,15 @@ export async function GET(req: Request) {
       }
       const proOffering = proOfferingByServiceId.get(service.id) ?? null
 
-      const durationMinutes = pickModeDurationMinutes({
+      // The same resolver booking/finalize use for this exact link (§
+      // lib/booking/addOnDuration.ts) — so what the client sees here is
+      // guaranteed to match what they'd actually be booked for, including a
+      // legitimate 0 for an instant/retail add-on.
+      const durationMinutes = resolveAddOnDurationMinutes({
+        durationOverrideMinutes: link.durationOverrideMinutes,
+        proOffering,
+        defaultDurationMinutes: service.defaultDurationMinutes,
         locationType,
-        salonDurationMinutes:
-          link.durationOverrideMinutes ??
-          proOffering?.salonDurationMinutes ??
-          service.defaultDurationMinutes ??
-          null,
-        mobileDurationMinutes:
-          link.durationOverrideMinutes ??
-          proOffering?.mobileDurationMinutes ??
-          service.defaultDurationMinutes ??
-          null,
-        fallbackDurationMinutes:
-          service.defaultDurationMinutes ?? DEFAULT_DURATION_MINUTES,
       })
 
       const priceRaw =
@@ -179,7 +172,7 @@ export async function GET(req: Request) {
           : proOffering?.salonPriceStartingAt) ??
         service.minPrice
 
-      if (priceRaw == null || durationMinutes <= 0) {
+      if (priceRaw == null || durationMinutes == null) {
         return []
       }
 
@@ -196,6 +189,7 @@ export async function GET(req: Request) {
           group: service.addOnGroup ?? null,
           sortOrder: link.sortOrder ?? 0,
           isRecommended: Boolean(link.isRecommended),
+          isPreselected: Boolean(link.isPreselected),
           minutes: durationMinutes,
           price,
         } satisfies OfferingAddOnItemDTO,
