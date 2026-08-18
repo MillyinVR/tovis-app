@@ -14,6 +14,7 @@ type ParsedItem = {
   addOnServiceId: string
   isActive: boolean
   isRecommended: boolean
+  isPreselected: boolean
   sortOrder: number
   locationType: ServiceLocationType | null
   priceOverride: string | null
@@ -171,6 +172,7 @@ export async function GET(_req: Request, ctx: RouteContext) {
           addOnServiceId: true,
           isActive: true,
           isRecommended: true,
+          isPreselected: true,
           sortOrder: true,
           locationType: true,
           priceOverride: true,
@@ -203,6 +205,7 @@ export async function GET(_req: Request, ctx: RouteContext) {
         group: item.addOnService?.addOnGroup ?? null,
         isActive: Boolean(item.isActive),
         isRecommended: Boolean(item.isRecommended),
+        isPreselected: Boolean(item.isPreselected),
         sortOrder: item.sortOrder ?? 0,
         locationType: item.locationType ?? null,
         priceOverride: item.priceOverride == null ? null : String(item.priceOverride),
@@ -293,6 +296,7 @@ export async function PUT(req: Request, ctx: RouteContext) {
         addOnServiceId,
         isActive: parseBool(entry.isActive, true),
         isRecommended: parseBool(entry.isRecommended, false),
+        isPreselected: parseBool(entry.isPreselected, false),
         sortOrder: parseSortOrder(entry.sortOrder, index),
         locationType: locationTypeResult.value,
         priceOverride: priceResult.value,
@@ -349,6 +353,7 @@ export async function PUT(req: Request, ctx: RouteContext) {
           addOnServiceId: item.addOnServiceId,
           isActive: item.isActive,
           isRecommended: item.isRecommended,
+          isPreselected: item.isPreselected,
           sortOrder: item.sortOrder,
           locationType: item.locationType,
           priceOverride: item.priceOverride,

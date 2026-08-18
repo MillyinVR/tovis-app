@@ -192,6 +192,7 @@ import {
 import {
   type RequestedServiceItemInput,
   buildNormalizedBookingItemsFromRequestedOfferings,
+  clonedItemDurationMinutes,
   computeBookingItemLikeTotals,
   normalizePositiveDurationMinutes,
   snapToStepMinutes,
@@ -11350,8 +11351,14 @@ assertCanCreateRebookFromSourceBooking({
     serviceId: item.serviceId,
     offeringId: item.offeringId,
     priceSnapshot: item.priceSnapshot ?? new Prisma.Decimal(0),
+    // The BASE item (index 0) never legally snapshots at 0 — only an ADD_ON
+    // can be an instant/retail item, so only add-ons get the exact-zero
+    // exception `clonedItemDurationMinutes` carries. A corrupt BASE snapshot
+    // still falls back to 60, exactly as before.
     durationMinutesSnapshot:
-      normalizePositiveDurationMinutes(item.durationMinutesSnapshot) ?? 60,
+      index === 0
+        ? normalizePositiveDurationMinutes(item.durationMinutesSnapshot) ?? 60
+        : clonedItemDurationMinutes(item.durationMinutesSnapshot),
     itemType:
       index === 0
         ? BookingServiceItemType.BASE

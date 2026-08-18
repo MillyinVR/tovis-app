@@ -25,6 +25,8 @@ export type OfferingAddOnItemDTO = {
   minutes: number
   sortOrder: number
   isRecommended: boolean
+  /** Whether this add-on starts pre-ticked — the pro's own opt-in, independent of `isRecommended`. */
+  isPreselected: boolean
 }
 
 export type OfferingAddOnsServiceDTO = {

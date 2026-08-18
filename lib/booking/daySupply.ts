@@ -6,11 +6,10 @@
 //
 // The iOS twin is `BookingSheetPresentation.daySupplyLabel` (TovisKit).
 //
-// ⚠️ "Full" is currently unreachable from `GET /api/v1/availability/bootstrap`:
-// the route skips any day whose slot count is zero (`if (slotCount <= 0)
-// continue`), so a full day is absent from `availableDays` rather than present
-// with a zero. The branch exists because the function has to be total, not
-// because the server sends that shape today.
+// A zero-slot day is a real "Full" day (Tori, 2026-08-18): the bootstrap
+// route keeps it in `availableDays` at `slotCount: 0` rather than dropping it,
+// and the day scroller renders it dimmed and disabled — never auto-selected,
+// but visible in its real calendar position instead of silently vanishing.
 
 /** At or below this, a day reads as scarcity ("2 left") rather than supply. */
 const SCARCE_SLOT_COUNT = 2

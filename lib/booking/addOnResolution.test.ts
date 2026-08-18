@@ -149,10 +149,10 @@ describe('resolveBookingAddOns', () => {
     )
   })
 
-  it('throws ADDONS_INVALID when the resolved duration is not positive', async () => {
+  it('throws ADDONS_INVALID when the resolved duration cannot be priced at all', async () => {
     mocks.offeringAddOnFindMany.mockResolvedValue([
       link({
-        durationOverrideMinutes: 0,
+        durationOverrideMinutes: null,
         addOnService: {
           id: 'svc_addon_1',
           defaultDurationMinutes: null,
@@ -172,5 +172,30 @@ describe('resolveBookingAddOns', () => {
     ).rejects.toSatisfy(
       (err) => isBookingError(err) && err.code === 'ADDONS_INVALID',
     )
+  })
+
+  it('resolves an explicit zero override to a legitimate 0-minute snapshot (instant/retail add-on)', async () => {
+    mocks.offeringAddOnFindMany.mockResolvedValue([
+      link({
+        durationOverrideMinutes: 0,
+        priceOverride: new Prisma.Decimal('35'),
+        addOnService: {
+          id: 'svc_addon_1',
+          defaultDurationMinutes: null,
+          minPrice: new Prisma.Decimal('20'),
+        },
+      }),
+    ])
+    mocks.proOfferingFindMany.mockResolvedValue([])
+
+    const [addOn] = await resolveBookingAddOns({
+      professionalId: PROFESSIONAL_ID,
+      offeringId: OFFERING_ID,
+      addOnIds: ['oa_1'],
+      locationType: ServiceLocationType.SALON,
+    })
+
+    expect(addOn?.durationMinutesSnapshot).toBe(0)
+    expect(addOn?.priceSnapshot.toString()).toBe('35')
   })
 })

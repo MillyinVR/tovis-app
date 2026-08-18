@@ -44,9 +44,18 @@ export function buildOfferingAddOnWhere(args: {
  * offering for that add-on service (mode-specific) → the service's catalog
  * default.
  *
- * Returns `null` when the chain lands on a non-positive / unusable number.
- * Callers must refuse rather than substitute a zero: a link that cannot say how
- * long it takes would otherwise reserve less time than the appointment needs.
+ * Returns `null` when the chain lands on a negative/NaN/missing number.
+ * Callers must refuse rather than substitute a zero themselves: a link that
+ * cannot say how long it takes would otherwise reserve less time than the
+ * appointment needs.
+ *
+ * An EXACT zero is the one add-on-specific exception: an instant/retail
+ * add-on (e.g. a take-home product) legitimately adds no time. `??` only
+ * skips null/undefined, so a chain that lands on 0 got there deliberately —
+ * it never silently fell through to a later, larger fallback. This is
+ * intentionally add-on-only: `normalizePositiveDurationMinutes` itself stays
+ * untouched because it's shared with real service/rebook durations, which
+ * must never collapse to a 0-minute appointment.
  */
 export function resolveAddOnDurationMinutes(args: {
   durationOverrideMinutes: number | null
@@ -63,6 +72,8 @@ export function resolveAddOnDurationMinutes(args: {
       ? args.proOffering?.mobileDurationMinutes
       : args.proOffering?.salonDurationMinutes) ??
     args.defaultDurationMinutes
+
+  if (raw === 0) return 0
 
   return normalizePositiveDurationMinutes(raw)
 }

@@ -11821,6 +11821,10 @@
           "description": "OfferingAddOn link id — the value to send back in finalize's `addOnIds`.",
           "type": "string"
         },
+        "isPreselected": {
+          "description": "Whether this add-on starts pre-ticked — the pro's own opt-in, independent of `isRecommended`.",
+          "type": "boolean"
+        },
         "isRecommended": {
           "type": "boolean"
         },
@@ -11850,7 +11854,8 @@
         "price",
         "minutes",
         "sortOrder",
-        "isRecommended"
+        "isRecommended",
+        "isPreselected"
       ],
       "type": "object"
     },
