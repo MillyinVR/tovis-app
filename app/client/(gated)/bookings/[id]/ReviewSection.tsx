@@ -8,7 +8,12 @@ import { compressImageForUpload } from '@/lib/media/processImageForUpload'
 import { zClass } from '@/lib/zIndex'
 import { isRecord } from '@/lib/guards'
 import { pickStringOrEmpty } from '@/lib/pick'
-import { safeJsonRecord, readErrorMessage, errorMessageFromUnknown } from '@/lib/http'
+import {
+  safeJsonRecord,
+  errorMessageFromUnknown,
+  errorFromResponse,
+  HTTP_STATUS_COPY,
+} from '@/lib/http'
 import { loginHrefFromHere } from '@/lib/clientNavigation'
 import {
   buildClientIdempotencyKey,
@@ -75,14 +80,6 @@ const APPT_SELECT_MAX = 6 // appointment media attached to review
 
 function redirectToLogin(router: ReturnType<typeof useRouter>, reason?: string) {
   router.push(loginHrefFromHere('/', reason))
-}
-
-function errorFromResponse(res: Response, data: unknown) {
-  const msg = readErrorMessage(data)
-  if (msg) return msg
-  if (res.status === 401) return 'Please log in to continue.'
-  if (res.status === 403) return 'You don’t have access to do that.'
-  return `Request failed (${res.status}).`
 }
 
 function btnBase(disabled?: boolean) {
@@ -348,7 +345,12 @@ export default function ReviewSection({
     }
 
     const data = await safeJsonRecord(res)
-    if (!res.ok) return { ok: false, error: errorFromResponse(res, data) }
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: errorFromResponse(res, data, { byStatus: HTTP_STATUS_COPY }),
+      }
+    }
     return { ok: true, data }
   }
 
@@ -439,7 +441,12 @@ export default function ReviewSection({
     }
 
     const data = await safeJsonRecord(res)
-    if (!res.ok) return { ok: false as const, error: errorFromResponse(res, data) }
+    if (!res.ok) {
+      return {
+        ok: false as const,
+        error: errorFromResponse(res, data, { byStatus: HTTP_STATUS_COPY }),
+      }
+    }
 
     const init = parseSignedUploadInit(data)
     if (!init) return { ok: false as const, error: 'Upload init failed (missing bucket/path/token).' }

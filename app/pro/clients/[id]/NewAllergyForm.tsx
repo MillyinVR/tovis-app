@@ -4,7 +4,12 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
-import { isAbortError, readErrorMessage, safeJson } from '@/lib/http'
+import {
+  errorFromResponse,
+  HTTP_STATUS_COPY,
+  isAbortError,
+  safeJson,
+} from '@/lib/http'
 import { loginHrefFromHere } from '@/lib/clientNavigation'
 
 type Props = { clientId: string }
@@ -14,16 +19,6 @@ type Severity = (typeof SEVERITIES)[number]
 
 function redirectToLogin(router: ReturnType<typeof useRouter>, reason?: string) {
   router.push(loginHrefFromHere('/pro', reason))
-}
-
-function errorFromResponse(res: Response, data: unknown) {
-  const apiError = readErrorMessage(data)
-  if (apiError) return apiError
-
-  if (res.status === 401) return 'Please log in to continue.'
-  if (res.status === 403) return 'You don’t have access to do that.'
-
-  return `Request failed (${res.status}).`
 }
 
 function isSeverity(value: string): value is Severity {
@@ -92,7 +87,7 @@ export default function NewAllergyForm({ clientId }: Props) {
       const data = await safeJson(res)
 
       if (!res.ok) {
-        setError(errorFromResponse(res, data))
+        setError(errorFromResponse(res, data, { byStatus: HTTP_STATUS_COPY }))
         return
       }
 

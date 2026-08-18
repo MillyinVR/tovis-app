@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import ClickableMedia from '@/app/_components/media/ClickableMedia'
 import { sanitizeTimeZone } from '@/lib/timeZone'
 import { getZonedParts } from '@/lib/time'
-import { safeJson, readErrorMessage } from '@/lib/http'
+import { errorFromResponse, HTTP_STATUS_COPY, safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
 import { loginHrefFromHere } from '@/lib/clientNavigation'
 import {
@@ -137,20 +137,6 @@ function redirectToLogin(
   reason?: string,
 ) {
   router.push(loginHrefFromHere('/pro', reason))
-}
-
-function errorFromResponse(res: Response, data: unknown) {
-  const msg = readErrorMessage(data)
-  if (msg) return msg
-
-  if (isRecord(data)) {
-    const m = data.message
-    if (typeof m === 'string' && m.trim()) return m.trim()
-  }
-
-  if (res.status === 401) return 'Please log in to continue.'
-  if (res.status === 403) return 'You don’t have access to do that.'
-  return `Request failed (${res.status}).`
 }
 
 function clampInt(n: number, min: number, max: number, fallback: number) {
@@ -1046,7 +1032,7 @@ export default function AftercareForm({
           return
         }
 
-        const nextError = errorFromResponse(res, data)
+        const nextError = errorFromResponse(res, data, { byStatus: HTTP_STATUS_COPY })
         setError(nextError)
 
         if (nextError.toLowerCase().includes('out of date')) {

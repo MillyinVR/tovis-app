@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { BookingStatus, SessionStep } from '@prisma/client'
 import { pickTimeZoneOrNull } from '@/lib/timeZone'
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
-import { safeJson } from '@/lib/http'
+import { errorFromResponse, safeJson } from '@/lib/http'
 import {
   buildClientIdempotencyKey,
   idempotencyHeaders,
@@ -15,7 +15,13 @@ import {
   buildLifecycleActionViewModel,
   type LifecycleAction,
 } from '@/lib/booking/lifecycleActionViewModel'
-import { isRecord } from '@/lib/guards'
+
+const STATUS_COPY = {
+  401: 'Please log in to continue.',
+  403: 'You do not have access to do that.',
+  404: 'Not found.',
+  409: 'That action is not allowed right now.',
+}
 
 type Props = {
   bookingId: string
@@ -38,10 +44,6 @@ type Props = {
   noShowFeatureEnabled?: boolean
 }
 
-function readString(v: unknown): string | null {
-  return typeof v === 'string' && v.trim() ? v.trim() : null
-}
-
 function parseIso(iso?: string | null): Date | null {
   if (!iso || typeof iso !== 'string') return null
   const d = new Date(iso)
@@ -56,21 +58,6 @@ function formatWhen(iso: string | null | undefined, timeZone?: string | null) {
   if (!tz) return null
 
   return formatAppointmentWhen(d, tz)
-}
-
-function errorFromResponse(res: Response, data: unknown) {
-  const root = isRecord(data) ? data : null
-  const error = root ? readString(root.error) : null
-  if (error) return error
-
-  const message = root ? readString(root.message) : null
-  if (message) return message
-
-  if (res.status === 401) return 'Please log in to continue.'
-  if (res.status === 403) return 'You do not have access to do that.'
-  if (res.status === 404) return 'Not found.'
-  if (res.status === 409) return 'That action is not allowed right now.'
-  return `Request failed (${res.status}).`
 }
 
 export default function BookingActions({
@@ -167,7 +154,7 @@ export default function BookingActions({
       const data: unknown = await safeJson(res)
 
       if (!res.ok) {
-        setError(errorFromResponse(res, data))
+        setError(errorFromResponse(res, data, { byStatus: STATUS_COPY }))
         return
       }
 

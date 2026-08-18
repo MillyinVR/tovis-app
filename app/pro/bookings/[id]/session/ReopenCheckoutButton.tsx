@@ -9,22 +9,10 @@ import {
   buildClientIdempotencyKey,
   idempotencyHeaders,
 } from '@/lib/idempotency/client'
-import { safeJson } from '@/lib/http'
-import { isRecord } from '@/lib/guards'
-import { pickString } from '@/lib/pick'
+import { errorFromResponse, safeJson } from '@/lib/http'
 
 type Props = {
   bookingId: string
-}
-
-function errorFrom(res: Response, data: unknown): string {
-  if (isRecord(data)) {
-    const fromError = pickString(data.error)
-    if (fromError) return fromError
-    const fromMessage = pickString(data.message)
-    if (fromMessage) return fromMessage
-  }
-  return `Could not reopen checkout (${res.status}).`
 }
 
 /**
@@ -67,7 +55,11 @@ export default function ReopenCheckoutButton({ bookingId }: Props) {
       const data = await safeJson(res)
 
       if (!res.ok) {
-        setError(errorFrom(res, data))
+        setError(
+          errorFromResponse(res, data, {
+            fallback: `Could not reopen checkout (${res.status}).`,
+          }),
+        )
         return
       }
 

@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import MediaLoading from '@/app/_components/media/MediaLoading'
 import { cn } from '@/lib/utils'
-import { safeJson } from '@/lib/http'
+import { errorFromResponse, safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
 import { pickString } from '@/lib/pick'
 import {
@@ -19,6 +19,11 @@ import {
 import { UPLOAD_MAX_BYTES, UPLOAD_MAX_MB } from '@/lib/media/uploadLimits'
 import { uploadWithProgress } from '@/lib/media/uploadWithProgress'
 import type { MediaType } from '@prisma/client'
+
+const STATUS_COPY = {
+  401: 'Please log in again.',
+  403: 'You don’t have access to do that.',
+}
 
 type Phase = 'BEFORE' | 'AFTER' | 'OTHER'
 type UploadState = 'IDLE' | 'COMPRESSING' | 'UPLOADING' | 'SAVING'
@@ -46,20 +51,6 @@ type SignedUploadResponse = {
   isPublic: boolean | null
   cacheBuster: number | null
   uploadSessionId: string | null
-}
-
-function errorFrom(res: Response, data: unknown): string {
-  if (isRecord(data)) {
-    const message = pickString(data.message)
-    if (message) return message
-
-    const error = pickString(data.error)
-    if (error) return error
-  }
-
-  if (res.status === 401) return 'Please log in again.'
-  if (res.status === 403) return 'You don’t have access to do that.'
-  return `Request failed (${res.status}).`
 }
 
 function guessMediaType(file: File): MediaType {
@@ -318,7 +309,7 @@ export default function MediaUploader({
       const signDataUnknown: unknown = await safeJson(signRes)
 
       if (!signRes.ok) {
-        setError(errorFrom(signRes, signDataUnknown))
+        setError(errorFromResponse(signRes, signDataUnknown, { byStatus: STATUS_COPY }))
         setStatus('IDLE')
         return
       }
@@ -384,7 +375,7 @@ export default function MediaUploader({
       const data: unknown = await safeJson(res)
 
       if (!res.ok) {
-        setError(errorFrom(res, data))
+        setError(errorFromResponse(res, data, { byStatus: STATUS_COPY }))
         setStatus('IDLE')
         return
       }

@@ -6,8 +6,7 @@ import { useEffect, useState } from 'react'
 import RebookSlotPicker, {
   type SelectedRebookSlot,
 } from '@/app/pro/bookings/[id]/aftercare/RebookSlotPicker'
-import { safeJson } from '@/lib/http'
-import { isRecord } from '@/lib/guards'
+import { errorFromResponse, safeJson } from '@/lib/http'
 import { ymdInTimeZone } from '@/lib/time'
 import {
   buildClientIdempotencyKey,
@@ -30,16 +29,6 @@ type Props = {
   serviceName: string
   /** Called after a successful offer so the caller can reload the calendar. */
   onOffered: () => void
-}
-
-function errorFrom(res: Response, data: unknown): string {
-  if (isRecord(data) && typeof data.error === 'string' && data.error.trim()) {
-    return data.error.trim()
-  }
-  if (res.status === 409) {
-    return 'That time is no longer available. Pick another.'
-  }
-  return 'Could not send the offer. Please try again.'
 }
 
 export default function WaitlistOfferModal({
@@ -111,7 +100,14 @@ export default function WaitlistOfferModal({
       )
 
       const data = await safeJson(res)
-      if (!res.ok) throw new Error(errorFrom(res, data))
+      if (!res.ok) {
+        throw new Error(
+          errorFromResponse(res, data, {
+            byStatus: { 409: 'That time is no longer available. Pick another.' },
+            fallback: 'Could not send the offer. Please try again.',
+          }),
+        )
+      }
 
       onOffered()
       onClose()

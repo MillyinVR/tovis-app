@@ -36,14 +36,18 @@ import type {
   ProBookingSeriesOccurrenceDetailDTO,
   ProBookingSeriesUntouchedReason,
 } from '@/lib/dto/proBookingSeries'
-import { isRecord } from '@/lib/guards'
-import { safeJson } from '@/lib/http'
+import { errorFromResponse, safeJson } from '@/lib/http'
 import {
   buildClientIdempotencyKey,
   idempotencyHeaders,
 } from '@/lib/idempotency/client'
 import { formatCents } from '@/lib/money'
 import { formatDatedAppointmentWhen } from '@/lib/time'
+
+const STATUS_COPY = {
+  401: 'Please log in to continue.',
+  404: 'That recurring appointment could not be found.',
+}
 
 type PendingScope = {
   scope: ProBookingSeriesCancelScope
@@ -66,18 +70,6 @@ const UNTOUCHED_COPY: Record<ProBookingSeriesUntouchedReason, string> = {
  */
 const REASON_NOT_IMPLIED_BY_STATUS: ReadonlySet<ProBookingSeriesUntouchedReason> =
   new Set(['IN_PAST', 'OUT_OF_SCOPE'])
-
-function errorFromResponse(res: Response, data: unknown): string {
-  const root = isRecord(data) ? data : null
-  const error =
-    root && typeof root.error === 'string' && root.error.trim()
-      ? root.error.trim()
-      : null
-  if (error) return error
-  if (res.status === 401) return 'Please log in to continue.'
-  if (res.status === 404) return 'That recurring appointment could not be found.'
-  return `Request failed (${res.status}).`
-}
 
 export default function SeriesCancelControls({
   series,
@@ -167,7 +159,7 @@ export default function SeriesCancelControls({
       )
 
       if (!res.ok) {
-        setError(errorFromResponse(res, await safeJson(res)))
+        setError(errorFromResponse(res, await safeJson(res), { byStatus: STATUS_COPY }))
         return
       }
 

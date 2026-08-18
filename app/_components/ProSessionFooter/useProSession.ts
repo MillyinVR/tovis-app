@@ -11,7 +11,7 @@ import type {
   UiSessionMode,
 } from '@/lib/proSession/types'
 import { isRecord } from '@/lib/guards'
-import { safeJson } from '@/lib/http'
+import { errorFromResponse, HTTP_STATUS_COPY, safeJson } from '@/lib/http'
 import { currentPathWithQuery, loginHrefFromHere } from '@/lib/clientNavigation'
 import {
   buildClientIdempotencyKey,
@@ -36,6 +36,12 @@ const DEFAULT_CENTER: CenterState = {
   label: 'Start',
   action: 'NONE',
   href: null,
+}
+
+const SESSION_STATUS_COPY = {
+  ...HTTP_STATUS_COPY,
+  404: 'Not found.',
+  409: 'That action isn’t allowed right now.',
 }
 
 function getString(x: unknown): string | null {
@@ -63,21 +69,6 @@ function isSafeInternalHref(href: unknown): href is string {
 
 function redirectToLogin(router: ReturnType<typeof useRouter>, reason?: string): void {
   router.push(loginHrefFromHere('/', reason))
-}
-
-function errorFromResponse(res: Response, data: unknown): string {
-  const e = getStringProp(data, 'error')
-  if (e) return e
-
-  const m = getStringProp(data, 'message')
-  if (m) return m
-
-  if (res.status === 401) return 'Please log in to continue.'
-  if (res.status === 403) return 'You don’t have access to do that.'
-  if (res.status === 404) return 'Not found.'
-  if (res.status === 409) return 'That action isn’t allowed right now.'
-
-  return `Request failed (${res.status}).`
 }
 
 function normalizeMode(v: unknown): UiSessionMode {
@@ -283,7 +274,7 @@ export function useProSession() {
     setPickerOpen(false)
 
     if (!opts?.silent && res) {
-      setError(errorFromResponse(res, data))
+      setError(errorFromResponse(res, data, { byStatus: SESSION_STATUS_COPY }))
     }
   }, [])
 
@@ -521,7 +512,7 @@ export function useProSession() {
         const data = await safeJson(res)
 
         if (!res.ok) {
-          setError(errorFromResponse(res, data))
+          setError(errorFromResponse(res, data, { byStatus: SESSION_STATUS_COPY }))
           await loadSession({ silent: true, force: true })
           return
         }
@@ -588,7 +579,7 @@ export function useProSession() {
         const data = await safeJson(res)
 
         if (!res.ok) {
-          setError(errorFromResponse(res, data))
+          setError(errorFromResponse(res, data, { byStatus: SESSION_STATUS_COPY }))
           await loadSession({ silent: true, force: true })
           return
         }
@@ -634,7 +625,7 @@ export function useProSession() {
         const data = await safeJson(res)
 
         if (!res.ok) {
-          setError(errorFromResponse(res, data))
+          setError(errorFromResponse(res, data, { byStatus: SESSION_STATUS_COPY }))
           await loadSession({ silent: true, force: true })
           return
         }

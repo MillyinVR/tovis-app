@@ -7,9 +7,10 @@ import { useRouter } from 'next/navigation'
 import { BookingServiceItemType } from '@prisma/client'
 
 import {
+  errorFromResponse,
   errorMessageFromUnknown,
+  HTTP_STATUS_COPY,
   isAbortError,
-  readErrorMessage,
   safeJson,
 } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
@@ -162,21 +163,6 @@ function readScheduleNotice(data: unknown): string | null {
       : null
 
   return scheduleNoticeFor(outlook, endsAtLabel)
-}
-
-function errorFromResponse(response: Response, data: unknown): string {
-  const readableMessage = readErrorMessage(data)
-  if (readableMessage) return readableMessage
-
-  if (isRecord(data)) {
-    const message = pickString(data.message)
-    if (message) return message
-  }
-
-  if (response.status === 401) return 'Please log in to continue.'
-  if (response.status === 403) return 'You don’t have access to do that.'
-
-  return `Request failed (${response.status}).`
 }
 
 function normalizeMoneyInput(raw: string): NormalizedInput {
@@ -451,7 +437,7 @@ export default function ConsultationForm({
         const data: unknown = await safeJson(response)
 
         if (!response.ok) {
-          throw new Error(errorFromResponse(response, data))
+          throw new Error(errorFromResponse(response, data, { byStatus: HTTP_STATUS_COPY }))
         }
 
         const serviceOptions = parseServiceOptions(data)
@@ -687,7 +673,7 @@ export default function ConsultationForm({
       const data: unknown = await safeJson(response)
 
       if (!response.ok) {
-        setError(errorFromResponse(response, data))
+        setError(errorFromResponse(response, data, { byStatus: HTTP_STATUS_COPY }))
         return
       }
 

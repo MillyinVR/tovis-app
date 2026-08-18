@@ -9,24 +9,12 @@ import {
   buildClientIdempotencyKey,
   idempotencyHeaders,
 } from '@/lib/idempotency/client'
-import { safeJson } from '@/lib/http'
-import { isRecord } from '@/lib/guards'
-import { pickString } from '@/lib/pick'
+import { errorFromResponse, safeJson } from '@/lib/http'
 import type { ManualCollectablePaymentMethod } from '@/lib/payments/acceptedMethods'
 
 type Props = {
   bookingId: string
   methods: ManualCollectablePaymentMethod[]
-}
-
-function errorFrom(res: Response, data: unknown): string {
-  if (isRecord(data)) {
-    const fromError = pickString(data.error)
-    if (fromError) return fromError
-    const fromMessage = pickString(data.message)
-    if (fromMessage) return fromMessage
-  }
-  return `Could not record payment (${res.status}).`
 }
 
 /**
@@ -77,7 +65,11 @@ export default function MarkPaidButton({ bookingId, methods }: Props) {
       const data = await safeJson(res)
 
       if (!res.ok) {
-        setError(errorFrom(res, data))
+        setError(
+          errorFromResponse(res, data, {
+            fallback: `Could not record payment (${res.status}).`,
+          }),
+        )
         return
       }
 

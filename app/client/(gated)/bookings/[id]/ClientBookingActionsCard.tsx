@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 
 import BookingActions from './BookingActions'
 import AvailabilityDrawer from '@/app/(main)/booking/AvailabilityDrawer/AvailabilityDrawer'
-import { safeJson } from '@/lib/http'
+import { errorFromResponse, safeJson } from '@/lib/http'
 import {
   buildClientIdempotencyKey,
   idempotencyHeaders,
@@ -17,6 +17,13 @@ import type {
   DrawerContext,
   ServiceLocationType,
 } from '@/app/(main)/booking/AvailabilityDrawer/types'
+
+const STATUS_COPY = {
+  401: 'Please log in again.',
+  403: 'You do not have access to do that.',
+  404: 'That booking could not be found.',
+  409: 'That time is no longer available.',
+}
 
 type BookingLocationType = 'SALON' | 'MOBILE' | null
 
@@ -39,22 +46,6 @@ type Props = {
   locationType?: BookingLocationType
   hasAftercareLink?: boolean
   drawerContext: DrawerContext
-}
-
-function errorFromResponse(res: Response, data: unknown) {
-  const rec =
-    data && typeof data === 'object' ? (data as Record<string, unknown>) : null
-
-  if (typeof rec?.error === 'string' && rec.error.trim()) return rec.error
-  if (res.status === 401) return 'Please log in again.'
-  if (res.status === 403) return 'You do not have access to do that.'
-  if (res.status === 404) return 'That booking could not be found.'
-  if (res.status === 409) {
-    return typeof rec?.error === 'string'
-      ? rec.error
-      : 'That time is no longer available.'
-  }
-  return `Request failed (${res.status}).`
 }
 
 export default function ClientBookingActionsCard({
@@ -119,7 +110,7 @@ export default function ClientBookingActionsCard({
 
     const data = await safeJson(res)
     if (!res.ok) {
-      throw new Error(errorFromResponse(res, data))
+      throw new Error(errorFromResponse(res, data, { byStatus: STATUS_COPY }))
     }
 
     setSelectedHold(null)

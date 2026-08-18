@@ -20,8 +20,7 @@
 import { useRouter } from 'next/navigation'
 import { useState, useTransition } from 'react'
 
-import { isRecord } from '@/lib/guards'
-import { safeJson } from '@/lib/http'
+import { errorFromResponse, safeJson } from '@/lib/http'
 
 type Answer = 'CONFIRM' | 'DECLINE'
 
@@ -40,19 +39,6 @@ const PRIMARY_BUTTON =
 
 const SECONDARY_BUTTON =
   'brand-focus inline-flex items-center justify-center rounded-full border border-textPrimary/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass/10 disabled:cursor-not-allowed disabled:opacity-60'
-
-function errorFrom(data: unknown): string {
-  if (isRecord(data)) {
-    const message =
-      typeof data.userMessage === 'string' && data.userMessage.trim()
-        ? data.userMessage.trim()
-        : typeof data.error === 'string' && data.error.trim()
-          ? data.error.trim()
-          : null
-    if (message) return message
-  }
-  return 'Something went wrong. Please try again.'
-}
 
 export default function ClientConfirmationCard(props: Props) {
   const router = useRouter()
@@ -90,7 +76,13 @@ export default function ClientConfirmationCard(props: Props) {
       )
 
       const data = await safeJson(res)
-      if (!res.ok) throw new Error(errorFrom(data))
+      if (!res.ok) {
+        throw new Error(
+          errorFromResponse(res, data, {
+            fallback: 'Something went wrong. Please try again.',
+          }),
+        )
+      }
 
       // The state lives on the server row — re-read it rather than guessing
       // locally, so a refusal the route made (already started, cancelled) can
