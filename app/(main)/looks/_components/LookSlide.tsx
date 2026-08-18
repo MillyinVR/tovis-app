@@ -62,7 +62,7 @@ export default function LookSlide(props: {
       onTouchEnd={onTouchEndLike}
     >
       <div className="relative h-full w-full">
-        <div className="mx-auto h-full w-full max-w-560px md:max-w-520px lg:max-w-560px xl:max-w-600px">
+        <div className="mx-auto h-full w-full max-w-[560px] md:max-w-[520px] lg:max-w-[560px] xl:max-w-[600px]">
           <div className="relative h-full w-full overflow-hidden md:rounded-[18px]">
             <LookMedia item={item} isActive={isActive} />
 

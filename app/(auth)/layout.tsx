@@ -13,7 +13,7 @@ export default function AuthLayout({ children }: { children: ReactNode }) {
         </div>
       </div>
 
-      <div className="relative mx-auto flex min-h-dvh w-full max-w-540px flex-col px-4 pb-10 pt-10">
+      <div className="relative mx-auto flex min-h-dvh w-full max-w-[540px] flex-col px-4 pb-10 pt-10">
         <div className="flex-1">{children}</div>
         <AuthFooter />
       </div>

@@ -46,7 +46,7 @@ export default async function AdminBookingMoneyTrailPage(props: {
   const shortId = id.slice(-6).toUpperCase()
 
   return (
-    <main className="mx-auto w-full max-w-960px px-4 py-6 text-textPrimary">
+    <main className="mx-auto w-full max-w-[960px] px-4 py-6 text-textPrimary">
       <div className="mb-5">
         <Link
           href="/admin"

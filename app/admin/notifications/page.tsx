@@ -39,7 +39,7 @@ export default async function AdminNotificationsPage() {
   const hasUnread = items.some((n) => n.readAt === null)
 
   return (
-    <main className="mx-auto w-full max-w-1100px px-4 py-6 text-textPrimary">
+    <main className="mx-auto w-full max-w-[1100px] px-4 py-6 text-textPrimary">
       <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
         <div className="flex flex-col gap-2">
           <h1 className="text-[22px] font-black">Notifications</h1>

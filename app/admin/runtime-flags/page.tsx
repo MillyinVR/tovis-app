@@ -93,7 +93,7 @@ export default async function AdminRuntimeFlagsPage() {
   }))
 
   return (
-    <main className="mx-auto w-full max-w-1100px px-4 py-6 text-textPrimary">
+    <main className="mx-auto w-full max-w-[1100px] px-4 py-6 text-textPrimary">
       <div className="mb-5 grid gap-2">
         <h1 className="text-[22px] font-black">Runtime flags</h1>
         <p className="text-[13px] text-textSecondary">
