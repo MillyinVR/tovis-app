@@ -59,7 +59,7 @@ export default async function AdminSupportPage(props: { searchParams?: SearchPar
   const tabOff = 'border-surfaceGlass/10 bg-bgPrimary/35 text-textSecondary hover:border-surfaceGlass/18 hover:bg-bgPrimary/55'
 
   return (
-    <main className="mx-auto w-full max-w-1100px px-4 py-6 text-textPrimary">
+    <main className="mx-auto w-full max-w-[1100px] px-4 py-6 text-textPrimary">
       <div className="mb-5 flex flex-col gap-2">
         <h1 className="text-[22px] font-black">Support / Issues</h1>
         <p className="text-[13px] text-textSecondary">Incoming reports from clients and professionals.</p>

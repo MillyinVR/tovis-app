@@ -48,7 +48,7 @@ export default async function AdminLogsPage() {
       from="/admin/logs"
       allowedRoles={[AdminPermissionRole.SUPER_ADMIN]}
     >
-      <main className="mx-auto w-full max-w-960px px-4 pb-10 pt-6">
+      <main className="mx-auto w-full max-w-[960px] px-4 pb-10 pt-6">
         <div className="tovis-glass rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4">
           <div className="flex flex-wrap items-baseline justify-between gap-3">
             <h1 className="m-0 text-[18px] font-black text-textPrimary">

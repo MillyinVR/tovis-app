@@ -15,7 +15,7 @@ export default async function AdminReviewsPage() {
   if (user.role !== Role.ADMIN) redirect('/forbidden')
 
   return (
-    <main className="mx-auto w-full max-w-1100px px-4 py-6 text-textPrimary">
+    <main className="mx-auto w-full max-w-[1100px] px-4 py-6 text-textPrimary">
       <div className="mb-5">
         <h1 className="text-[22px] font-black">Review moderation</h1>
         <p className="mt-1 text-[13px] text-textSecondary">

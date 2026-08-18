@@ -223,7 +223,7 @@ export default async function ServicesManagerSection({
     isCategoryActive: Boolean(o.service.category?.isActive ?? false),
   }))
 
-  const outer = variant === 'page' ? 'mx-auto max-w-960px px-4 pb-28 pt-6' : 'mx-auto max-w-5xl pt-4'
+  const outer = variant === 'page' ? 'mx-auto max-w-[960px] px-4 pb-28 pt-6' : 'mx-auto max-w-5xl pt-4'
 
   return (
     <section className={outer}>
@@ -231,7 +231,7 @@ export default async function ServicesManagerSection({
         <header className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             {title ? <h1 className="text-[22px] font-black text-textPrimary">{title}</h1> : null}
-            {resolvedSubtitle ? <p className="mt-1 max-w-680px text-[13px] text-textSecondary">{resolvedSubtitle}</p> : null}
+            {resolvedSubtitle ? <p className="mt-1 max-w-[680px] text-[13px] text-textSecondary">{resolvedSubtitle}</p> : null}
           </div>
 
           {backHref ? (

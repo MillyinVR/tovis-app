@@ -84,7 +84,7 @@ export default async function AdminProfessionalDetailPage({ params }: PageProps)
         from={fromHref}
         allowedRoles={[AdminPermissionRole.SUPER_ADMIN, AdminPermissionRole.REVIEWER]}
       >
-        <main className="mx-auto w-full max-w-960px px-4 pb-10 pt-6">
+        <main className="mx-auto w-full max-w-[960px] px-4 pb-10 pt-6">
           <div className="tovis-glass rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4 text-[13px] font-semibold text-textSecondary">
             Missing professional id.
           </div>
@@ -159,7 +159,7 @@ export default async function AdminProfessionalDetailPage({ params }: PageProps)
         allowedRoles={[AdminPermissionRole.SUPER_ADMIN, AdminPermissionRole.REVIEWER]}
         scope={{ professionalId: id }}
       >
-        <main className="mx-auto w-full max-w-960px px-4 pb-10 pt-6">
+        <main className="mx-auto w-full max-w-[960px] px-4 pb-10 pt-6">
           <div className="tovis-glass rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4 text-[13px] font-semibold text-textSecondary">
             Professional not found.
           </div>
@@ -197,11 +197,11 @@ export default async function AdminProfessionalDetailPage({ params }: PageProps)
       allowedRoles={[AdminPermissionRole.SUPER_ADMIN, AdminPermissionRole.REVIEWER]}
       scope={{ professionalId: proId }}
     >
-      <main className="mx-auto w-full max-w-960px px-4 pb-10 pt-6">
+      <main className="mx-auto w-full max-w-[960px] px-4 pb-10 pt-6">
         <div className="grid gap-4">
           <section className={card}>
             <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="min-w-240px">
+              <div className="min-w-[240px]">
                 <div className="text-[16px] font-black text-textPrimary">{proName}</div>
                 <div className={`${hint} mt-1`}>{email}</div>
 

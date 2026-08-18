@@ -39,7 +39,7 @@ export default function AuthShell({
         className="pointer-events-none absolute inset-0 bg-[radial-gradient(1200px_circle_at_50%_30%,transparent_55%,rgb(var(--bg-primary)/0.85))]"
       />
 
-      <div className="relative mx-auto w-full max-w-420px">
+      <div className="relative mx-auto w-full max-w-[420px]">
         {/* Wordmark header */}
         <div className="mb-7 flex items-center justify-center">
           <div className="grid place-items-center gap-1.5 text-center">

@@ -20,7 +20,7 @@ export default function GlobalError({
   return (
     <html>
       <body className="bg-bgPrimary text-textPrimary">
-        <main className="mx-auto flex min-h-screen max-w-720px flex-col items-center justify-center gap-4 px-6 text-center">
+        <main className="mx-auto flex min-h-screen max-w-[720px] flex-col items-center justify-center gap-4 px-6 text-center">
           <h1 className="text-2xl font-black">{brand.displayName} hit an unexpected error.</h1>
           <p className="text-sm text-textSecondary">
             The error was reported. Try again once. If it keeps happening, treat
