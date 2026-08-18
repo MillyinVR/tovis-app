@@ -73,7 +73,13 @@ jobs:
 
       # Private-repo runners are 2-core/7GB (public repos get 4-core/16GB);
       # Node's default heap cap there (~2GB) OOMs the `next build` step.
-      NODE_OPTIONS: --max-old-space-size=4096
+      # Bumped 4096->6144 (2026-08-17): `next build`'s own typecheck pass (which
+      # additionally validates .next/types/** route shims, unlike bare
+      # `tsc --noEmit` in the unit-tests job) started hitting the 4096 ceiling as
+      # the Prisma schema grew — a new relation on an already densely-connected
+      # model (MediaAsset) was enough to tip it over. 6144 leaves ~1GB of the 7GB
+      # box for the OS/other overhead.
+      NODE_OPTIONS: --max-old-space-size=6144
 
       # Keep the availability perf sampler out of the functional e2e gate: it
       # saturates the single shared `next start` server for ~3min and times out
