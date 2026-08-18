@@ -2444,6 +2444,49 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
     ).rejects.toMatchObject({ code: 'NOT_FOUND' })
   })
 
+  it('never mutates the Booking row across the seven-question external inspiration flow', async () => {
+    const consult = await createReadyConsult('inspiration-booking-snapshot', {}, {
+      skipInspiration: false,
+    })
+    const before = await db.booking.findUniqueOrThrow({ where: { id: consult.bookingId } })
+
+    await attachExternalInspiration(consult, 'booking-snapshot')
+    const answers = [
+      ['favorite_colors', ['cool-smoky'], undefined, undefined],
+      ['avoid_colors', ['none'], undefined, undefined],
+      ['length_goal', ['yes-same-length'], undefined, undefined],
+      ['fullness_goal', ['more-full'], undefined, undefined],
+      ['current_styling', ['not-sure'], undefined, undefined],
+      ['styling_walkthrough', ['no'], undefined, undefined],
+      ['other_detail', ['nothing-else'], undefined, 'NONE'],
+    ] as const
+    let completed: Awaited<ReturnType<typeof answerConsultInspirationQuestion>> | null = null
+    for (const [questionKey, selectedValues, text, sentiment] of answers) {
+      completed = await answerConsultInspirationQuestion({
+        consultSessionId: consult.sessionId,
+        clientId: consult.clientId,
+        actor: { type: ConsultActorType.CLIENT, id: consult.userId },
+        input: {
+          idempotencyKey: `booking-snapshot-answer-${questionKey}`,
+          schemaVersion: 1,
+          questionKey,
+          selectedValues: [...selectedValues],
+          text,
+          sentiment,
+        },
+      })
+    }
+    // Guards against a vacuous pass: confirm the flow actually completed
+    // before asserting nothing else moved.
+    expect(completed?.state.progress).toMatchObject({
+      answeredQuestionCount: 7,
+      canComplete: true,
+    })
+
+    const after = await db.booking.findUniqueOrThrow({ where: { id: consult.bookingId } })
+    expect(after).toEqual(before)
+  })
+
   it('purges replaced, cancelled, and revoked external inspiration with verified retry', async () => {
     const replaced = await createReadyConsult('inspiration-replaced', {}, {
       skipInspiration: false,
