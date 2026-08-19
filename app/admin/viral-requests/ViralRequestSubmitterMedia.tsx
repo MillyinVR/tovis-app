@@ -12,6 +12,12 @@
 // Video can be attached and watched here, but cannot BE the cover: the surfaces
 // that show a viral look draw a still image. A reviewer watching a video picks a
 // cover by uploading a frame of their own.
+//
+// "Remove" is the way back out. Rejecting a request stopped FURTHER attachments
+// but left the ones already on it in a PUBLIC bucket with no affordance to take
+// them down — and a submission can carry someone else's photograph. It deletes
+// the object as well as the row entry, so it asks first, and it asks
+// differently when the attachment is the live cover.
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
@@ -22,6 +28,7 @@ import {
   readErrorMessage,
   safeJson,
 } from '@/lib/http'
+import { isSameUrlIgnoringQuery } from '@/lib/url'
 
 const VIDEO_EXTENSIONS = ['.mp4', '.mov', '.m4v', '.webm']
 
@@ -33,18 +40,25 @@ function isVideo(url: string): boolean {
 export default function ViralRequestSubmitterMedia({
   requestId,
   media,
+  coverImage = null,
 }: {
   requestId: string
   media: string[]
+  /** The published cover, so removing it can warn before it clears one. */
+  coverImage?: string | null
 }) {
   const router = useRouter()
-  const [busy, setBusy] = useState<string | null>(null)
+  // Which URL is in flight AND which action — one shared `busy` string made
+  // "Use this" light up the Remove button's own label instead.
+  const [busy, setBusy] = useState<{ url: string; action: 'cover' | 'remove' } | null>(
+    null,
+  )
   const [err, setErr] = useState<string | null>(null)
 
   if (media.length === 0) return null
 
   async function promoteToCover(url: string) {
-    setBusy(url)
+    setBusy({ url, action: 'cover' })
     setErr(null)
     try {
       const res = await fetch('/api/v1/admin/uploads', {
@@ -65,6 +79,41 @@ export default function ViralRequestSubmitterMedia({
       router.refresh()
     } catch (e: unknown) {
       setErr(errorMessageFromUnknown(e, 'Could not set the cover.'))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function removeAttachment(url: string) {
+    // Clearing a cover is a client-facing change on an approved look, not
+    // bookkeeping — so it is the one case that asks first.
+    const message = isSameUrlIgnoringQuery(coverImage, url)
+      ? 'This attachment is the look’s cover. Removing it deletes the file and clears the cover, so the look will show no picture. Continue?'
+      : 'Remove this attachment? The file is deleted from storage and cannot be recovered.'
+
+    if (!window.confirm(message)) return
+
+    setBusy({ url, action: 'remove' })
+    setErr(null)
+    try {
+      const res = await fetch(
+        `/api/v1/admin/viral-service-requests/${encodeURIComponent(requestId)}/media`,
+        {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mediaUrl: url }),
+        },
+      )
+      const raw = await safeJson(res)
+      if (!res.ok) {
+        throw new Error(
+          readErrorMessage(raw) ??
+            `Could not remove the attachment (${res.status}).`,
+        )
+      }
+      router.refresh()
+    } catch (e: unknown) {
+      setErr(errorMessageFromUnknown(e, 'Could not remove the attachment.'))
     } finally {
       setBusy(null)
     }
@@ -98,20 +147,36 @@ export default function ViralRequestSubmitterMedia({
                   />
                 )}
               </div>
-              {video ? (
-                <span className="text-[10px] text-textMuted">
-                  Video — upload a still to use as the cover
-                </span>
-              ) : (
+              <div className="flex flex-wrap items-center gap-1.5">
+                {video ? (
+                  <span className="text-[10px] text-textMuted">
+                    Video — upload a still to use as the cover
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={busy !== null}
+                    onClick={() => void promoteToCover(url)}
+                    className="rounded-full border border-surfaceGlass/20 px-2.5 py-1 text-[10.5px] font-black text-textSecondary transition hover:text-textPrimary disabled:opacity-50"
+                  >
+                    {busy?.url === url && busy.action === 'cover'
+                      ? 'Setting…'
+                      : 'Use this'}
+                  </button>
+                )}
+                {/* Available for video too — a video is exactly the kind of
+                    attachment that has no "Use this" and so had no way out. */}
                 <button
                   type="button"
                   disabled={busy !== null}
-                  onClick={() => void promoteToCover(url)}
-                  className="rounded-full border border-surfaceGlass/20 px-2.5 py-1 text-[10.5px] font-black text-textSecondary transition hover:text-textPrimary disabled:opacity-50"
+                  onClick={() => void removeAttachment(url)}
+                  className="rounded-full border border-toneDanger/40 px-2.5 py-1 text-[10.5px] font-black text-toneDanger transition hover:border-toneDanger/70 disabled:opacity-50"
                 >
-                  {busy === url ? 'Setting…' : 'Use this'}
+                  {busy?.url === url && busy.action === 'remove'
+                    ? 'Removing…'
+                    : 'Remove'}
                 </button>
-              )}
+              </div>
             </div>
           )
         })}

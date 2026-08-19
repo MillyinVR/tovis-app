@@ -163,6 +163,7 @@ export default async function AdminViralRequestsPage() {
                       <ViralRequestSubmitterMedia
                         requestId={row.id}
                         media={submitted}
+                        coverImage={cover}
                       />
                     </div>
 
