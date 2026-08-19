@@ -6,6 +6,7 @@ import {
   Prisma,
 } from '@prisma/client'
 import { isRecord } from '@/lib/guards'
+import { pickNonEmptyString } from '@/lib/pick'
 import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
 import { buildLookPostSpotlightEligibilityWhere } from '@/lib/looks/spotlight'
 import { proDiscoveryVisibilityFilter } from '@/lib/tenant'
@@ -64,13 +65,6 @@ export type LooksFeedCursor =
   | StandardLooksFeedCursor
   | SpotlightLooksFeedCursor
   | RankedLooksFeedCursor
-
-function pickNonEmptyString(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') return null
-
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : null
-}
 
 function pickDistinctIds(
   ids: readonly string[] | null | undefined,

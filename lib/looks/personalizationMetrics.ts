@@ -40,6 +40,7 @@ import {
   type PrismaClient,
 } from '@prisma/client'
 
+import { clampInt } from '@/lib/pick'
 import {
   getNotificationCategoriesForAudience,
   type NotificationCategoryKey,
@@ -250,11 +251,6 @@ export type PersonalizationMetrics = {
   hideRate: HideRateMetric
   rebook: RebookMetric
   notificationOptOut: NotificationOptOutMetric
-}
-
-function clampInt(value: number, min: number, max: number): number {
-  if (!Number.isFinite(value)) return min
-  return Math.min(max, Math.max(min, Math.trunc(value)))
 }
 
 /** UTC-midnight lower bound covering the last `windowDays` whole days. */

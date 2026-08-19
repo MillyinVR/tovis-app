@@ -23,7 +23,14 @@ import {
 
 export type NotificationAudience = 'client' | 'pro'
 
-/** UI-presented quiet-hours default window (10:00 PM → 08:00 AM local). */
+/**
+ * Default quiet-hours window (recipient-local, 10:00 PM → 08:00 AM).
+ *
+ * Both the window the settings UI presents AND the one the delivery engine
+ * actually applies when a recipient has no preference row
+ * (`delivery/runtimeChannelPolicy`). Changing it moves real send behaviour, not
+ * just a default shown in the UI.
+ */
 export const DEFAULT_QUIET_HOURS_START_MINUTES = 22 * 60 // 1320
 export const DEFAULT_QUIET_HOURS_END_MINUTES = 8 * 60 // 480
 

@@ -19,6 +19,7 @@ import {
   sanitizeTimeZone,
   zonedTimeToUtc,
 } from '@/lib/time'
+import { relativeDayPhrase } from './relativeWhen'
 
 export type AppointmentReminderPayload = {
   /**
@@ -102,9 +103,11 @@ function humanizeLeadTime(offsetMinutes: number): {
 } {
   if (offsetMinutes % MINUTES_PER_DAY === 0) {
     const days = offsetMinutes / MINUTES_PER_DAY
-    if (days === 1) return { relativeWhen: 'tomorrow', isTomorrow: true }
+    // Deliberate local wording: a 7-day lead reads "in one week" here, while the
+    // expiry warnings read the same gap as "in 7 days". Left as-is — that is a
+    // copy decision, not a bug for this consolidation to settle.
     if (days === 7) return { relativeWhen: 'in one week', isTomorrow: false }
-    return { relativeWhen: `in ${days} days`, isTomorrow: false }
+    return { relativeWhen: relativeDayPhrase(days), isTomorrow: days === 1 }
   }
 
   if (offsetMinutes % MINUTES_PER_HOUR === 0) {

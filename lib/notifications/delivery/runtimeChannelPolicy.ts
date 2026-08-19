@@ -8,6 +8,10 @@ import {
   type NotificationPreferenceLike,
 } from '../channelPolicy'
 import { getNotificationEventDefinition } from '../eventKeys'
+import {
+  DEFAULT_QUIET_HOURS_END_MINUTES,
+  DEFAULT_QUIET_HOURS_START_MINUTES,
+} from '../preferenceCategories'
 import { pickTimeZoneOrNull } from '@/lib/timeZone'
 import { getZonedParts } from '@/lib/time'
 
@@ -60,17 +64,6 @@ type QuietHoursWindow = {
 }
 
 /**
- * Platform default quiet-hours window (recipient-local), applied when a
- * recipient has NO preference row. 22:00 → 08:00.
- *
- * Once a per-user preference row exists it fully overrides this default,
- * including disabling quiet hours entirely (null/unset window, or a window
- * whose start equals its end).
- */
-const DEFAULT_QUIET_HOURS_START_MINUTES = 22 * 60
-const DEFAULT_QUIET_HOURS_END_MINUTES = 8 * 60
-
-/**
  * Conservative quiet-hours fallback zone for recipients we have NO timezone for
  * (unclaimed / phone-only clients whose profile and booking-location zones are
  * both absent). Used ONLY to gate quiet hours — never for scheduling truth.
@@ -110,7 +103,10 @@ function normalizeMinuteOfDay(value: number | null | undefined): number | null {
 function getQuietHoursWindow(
   preference: NotificationPreferenceLike | null | undefined,
 ): QuietHoursWindow | null {
-  // No preference row on file → apply the platform default quiet-hours window.
+  // No preference row on file → apply the platform default quiet-hours window
+  // (recipient-local, 22:00 → 08:00). A row, once it exists, fully overrides
+  // this default — including disabling quiet hours entirely, which is what the
+  // null/unset and start-equals-end branches below mean.
   if (preference == null) {
     return {
       quietHoursStartMinutes: DEFAULT_QUIET_HOURS_START_MINUTES,

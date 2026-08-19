@@ -6,6 +6,7 @@ import type { CurrentUser } from '@/lib/currentUser'
 
 import { MediaType } from '@prisma/client'
 
+import { pickStringOrEmpty } from '@/lib/pick'
 import { prisma } from '@/lib/prisma'
 import { mapPairedBeforeToDto, type PairedBeforeDto } from '@/lib/media/pairedBefore'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
@@ -42,10 +43,6 @@ export type ProReviewListItem = {
   mediaTiles: ProReviewMediaTile[]
   /** The pro's own public response (null until they reply). */
   proReply: { body: string; repliedAtISO: string } | null
-}
-
-function pickNonEmptyString(v: unknown): string {
-  return typeof v === 'string' ? v.trim() : ''
 }
 
 export async function loadProReviewsList(args: {
@@ -90,8 +87,8 @@ export async function loadProReviewsList(args: {
 
   return Promise.all(
     reviews.map(async (rev) => {
-      const first = pickNonEmptyString(rev.client?.firstName)
-      const last = pickNonEmptyString(rev.client?.lastName)
+      const first = pickStringOrEmpty(rev.client?.firstName)
+      const last = pickStringOrEmpty(rev.client?.lastName)
       const clientName = `${first} ${last}`.trim() || 'Client'
       const clientHref = rev.client
         ? resolveClientProfileHref(

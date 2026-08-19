@@ -6,6 +6,7 @@ import {
   NotificationProvider,
 } from '@prisma/client'
 
+import { readOptionalEnv } from '@/lib/env'
 import { asTrimmedString } from '@/lib/guards'
 import {
   LOAD_TEST_SUPPRESSED_STATUS,
@@ -63,10 +64,6 @@ function normalizeRequiredString(value: string, fieldName: string): string {
   }
 
   return normalized
-}
-
-function readOptionalEnv(name: string): string | null {
-  return asTrimmedString(process.env[name])
 }
 
 function readDefaultStatusCallbackUrl(): string | null {

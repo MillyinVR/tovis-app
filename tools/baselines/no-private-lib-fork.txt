@@ -31,7 +31,6 @@ app/api/v1/availability/bootstrap/route.ts|pickString
 app/api/v1/availability/bootstrap/route.ts|pickStringArray
 app/api/v1/availability/other-pros/route.ts|LOCATION_SELECT
 app/api/v1/availability/other-pros/route.ts|buildOfferingSnapshot
-app/api/v1/availability/other-pros/route.ts|normalizeAddress
 app/api/v1/availability/other-pros/route.ts|resolveAvailabilityPlacement
 app/api/v1/client/bookings/[id]/review/route.ts|mediaTypeFromContentType
 app/api/v1/client/footer/route.ts|clampSmallCount
@@ -94,7 +93,6 @@ app/client/_public/CreateAccountInviteCard.tsx|COPY
 app/client/consultation/[token]/page.tsx|formatDurationMinutes
 app/client/consultation/[token]/page.tsx|upper
 app/nfc/invalid/page.tsx|COPY
-app/pro/bookings/[id]/aftercare/AftercareForm.tsx|clampInt
 app/pro/bookings/[id]/aftercare/AftercareForm.tsx|pickString
 app/pro/bookings/series/[id]/page.tsx|cadenceLabel
 app/pro/calendar/_components/BookingModal.tsx|DEFAULT_DURATION_MINUTES
@@ -110,8 +108,6 @@ app/pro/services/OfferingManager.tsx|isOkTrue
 app/pro/services/OfferingManager.tsx|pickString
 lib/analytics/proMonthlyAnalytics.ts|decimalToCents
 lib/auth/emailVerification.ts|sanitizeInternalPath
-lib/availability/core/placement.ts|normalizeAddress
-lib/availability/data/otherPros.ts|normalizeAddress
 lib/booking/clientBookingBuckets.ts|upper
 lib/booking/createProBookingWithClient.ts|inferPreferredContactMethod
 lib/booking/dateTime.ts|addDaysToYmd
@@ -123,25 +119,16 @@ lib/clientAddresses/placesAutocomplete.ts|pickString
 lib/discovery/nearbyPros.ts|LOCATION_SELECT
 lib/idempotency/idempotencyLedger.ts|addMinutes
 lib/loadTestDelivery.ts|isProductionRuntime
-lib/looks/feed.ts|pickNonEmptyString
 lib/looks/mappers.ts|pickString
 lib/looks/parsers.ts|isLookPostVisibility
 lib/looks/parsers.ts|pickNumber
 lib/looks/parsers.ts|pickString
-lib/looks/personalizationMetrics.ts|clampInt
 lib/looks/reporting.ts|normalizeRequiredId
-lib/looks/serviceOwnership.ts|pickNonEmptyString
-lib/looks/velocityAnomaly.ts|clampInt
 lib/media/uploadWithProgress.ts|readErrorMessage
 lib/migration/serviceImportServer.ts|asNumber
-lib/notifications/delivery/runtimeChannelPolicy.ts|DEFAULT_QUIET_HOURS_END_MINUTES
-lib/notifications/delivery/runtimeChannelPolicy.ts|DEFAULT_QUIET_HOURS_START_MINUTES
 lib/notifications/delivery/sendEmail.ts|readPostmarkErrorCode
-lib/notifications/delivery/sendSms.ts|readOptionalEnv
-lib/notifications/socialDigest/runDigest.ts|clampInt
 lib/payments/clientPaymentOptions.ts|normalizeHandle
 lib/pro/cameraQuota.ts|monthKey
-lib/pro/loadProReviewsList.ts|pickNonEmptyString
 lib/pro/proBookingsList.ts|sumDecimal
 lib/supabaseAdmin.ts|mustGetEnv
 

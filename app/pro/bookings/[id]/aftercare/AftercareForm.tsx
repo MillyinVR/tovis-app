@@ -8,6 +8,7 @@ import { sanitizeTimeZone } from '@/lib/timeZone'
 import { getZonedParts } from '@/lib/time'
 import { errorFromResponse, HTTP_STATUS_COPY, safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
+import { clampInt } from '@/lib/pick'
 import { loginHrefFromHere } from '@/lib/clientNavigation'
 import {
   buildClientIdempotencyKey,
@@ -137,11 +138,6 @@ function redirectToLogin(
   reason?: string,
 ) {
   router.push(loginHrefFromHere('/pro', reason))
-}
-
-function clampInt(n: number, min: number, max: number, fallback: number) {
-  if (!Number.isFinite(n)) return fallback
-  return Math.max(min, Math.min(max, Math.trunc(n)))
 }
 
 function isRebookMode(x: unknown): x is RebookMode {
@@ -870,9 +866,9 @@ export default function AftercareForm({
         rebookMode === 'BOOKED_NEXT_APPOINTMENT' && !!rebookISO
           ? createRebookReminder
           : false,
-      rebookReminderDaysBefore: clampInt(daysBeforeRaw, 1, 30, 2),
+      rebookReminderDaysBefore: clampInt(daysBeforeRaw, 2, 1, 30),
       createProductReminder,
-      productReminderDaysAfter: clampInt(daysAfterRaw, 1, 180, 7),
+      productReminderDaysAfter: clampInt(daysAfterRaw, 7, 1, 180),
       sendToClient,
       timeZone: tz,
       version: version ?? existingVersion ?? null,
