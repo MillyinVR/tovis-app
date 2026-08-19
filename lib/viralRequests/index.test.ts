@@ -20,6 +20,7 @@ vi.mock('@/lib/notifications/social', () => ({
 
 import {
   attachClientViralRequestMedia,
+  removeViralRequestMedia,
   buildViralRequestCoverTargetPath,
   buildViralRequestUploadPublicUrl,
   buildViralRequestUploadTargetPath,
@@ -1087,6 +1088,201 @@ describe('lib/viralRequests/index.ts', () => {
           requestId: 'request_1',
         }),
       ).resolves.toEqual({ ok: false, reason: 'NOT_FOUND' })
+    })
+  })
+
+  describe('removeViralRequestMedia', () => {
+    const supabaseBaseUrl = 'https://project.supabase.co'
+    const path = 'viral-requests/request_1/uploads/inspo.jpg'
+    const mediaUrl = buildViralRequestUploadPublicUrl({ supabaseBaseUrl, path })
+    const otherUrl = buildViralRequestUploadPublicUrl({
+      supabaseBaseUrl,
+      path: 'viral-requests/request_1/uploads/second.jpg',
+    })
+
+    function mockRequest(args: {
+      mediaUrlsJson: unknown
+      coverImageUrl?: string | null
+    }) {
+      const db = makeDb()
+      db.viralServiceRequest.findUnique.mockResolvedValue({
+        id: 'request_1',
+        coverImageUrl: args.coverImageUrl ?? null,
+        mediaUrlsJson: args.mediaUrlsJson,
+      })
+      db.viralServiceRequest.update.mockResolvedValue(makeViralRequestRow())
+      return db
+    }
+
+    it('drops just that URL and reports the object to delete', async () => {
+      const db = mockRequest({ mediaUrlsJson: [mediaUrl, otherUrl] })
+
+      const result = await removeViralRequestMedia(asTransactionClient(db), {
+        requestId: 'request_1',
+        mediaUrl,
+        supabaseBaseUrl,
+      })
+
+      expect(result.ok).toBe(true)
+      expect(db.viralServiceRequest.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'request_1' },
+          data: { mediaUrlsJson: [otherUrl] },
+        }),
+      )
+      // The bucket-relative path, not the whole URL — what storage.remove takes.
+      expect(result.ok && result.storagePath).toBe(path)
+      expect(result.ok && result.clearedCover).toBe(false)
+    })
+
+    // 🔴 The dangling cover. "Use this" copies the attachment's URL into
+    // coverImageUrl rather than copying the bytes, so deleting the object under a
+    // promoted attachment leaves every client surface rendering a 404.
+    it('clears the cover when the removed attachment IS the cover', async () => {
+      const db = mockRequest({
+        mediaUrlsJson: [mediaUrl],
+        coverImageUrl: mediaUrl,
+      })
+
+      const result = await removeViralRequestMedia(asTransactionClient(db), {
+        requestId: 'request_1',
+        mediaUrl,
+        supabaseBaseUrl,
+      })
+
+      expect(result.ok && result.clearedCover).toBe(true)
+      expect(db.viralServiceRequest.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { mediaUrlsJson: [], coverImageUrl: null },
+        }),
+      )
+    })
+
+    // ⚠️ And the cover is stored WITH a `?v=` cache-buster that the attachment
+    // URL never carries — `withCacheBuster` runs after the candidate check, and
+    // an attachment URL with a query string is refused outright. A raw string
+    // compare says "not the cover" about exactly this pair.
+    it('recognises the cover through its cache-buster', async () => {
+      const db = mockRequest({
+        mediaUrlsJson: [mediaUrl],
+        coverImageUrl: `${mediaUrl}?v=1755500000000`,
+      })
+
+      const result = await removeViralRequestMedia(asTransactionClient(db), {
+        requestId: 'request_1',
+        mediaUrl,
+        supabaseBaseUrl,
+      })
+
+      expect(result.ok && result.clearedCover).toBe(true)
+      expect(db.viralServiceRequest.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { mediaUrlsJson: [], coverImageUrl: null },
+        }),
+      )
+    })
+
+    it('leaves a cover that is a different object alone', async () => {
+      const db = mockRequest({
+        mediaUrlsJson: [mediaUrl],
+        coverImageUrl: buildViralRequestUploadPublicUrl({
+          supabaseBaseUrl,
+          path: 'viral-requests/request_1/cover.jpg',
+        }),
+      })
+
+      const result = await removeViralRequestMedia(asTransactionClient(db), {
+        requestId: 'request_1',
+        mediaUrl,
+        supabaseBaseUrl,
+      })
+
+      expect(result.ok && result.clearedCover).toBe(false)
+      expect(db.viralServiceRequest.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { mediaUrlsJson: [] } }),
+      )
+    })
+
+    // The same gate the attach path applies — without it a crafted URL would aim
+    // the caller's storage delete at an object outside this request's folder.
+    it.each([
+      ['a foreign host', 'https://evil.example.com/photo.jpg'],
+      [
+        'another request’s folder',
+        buildViralRequestUploadPublicUrl({
+          supabaseBaseUrl: 'https://project.supabase.co',
+          path: 'viral-requests/request_2/uploads/inspo.jpg',
+        }),
+      ],
+      ['a traversal', 'https://project.supabase.co/storage/v1/object/public/media-public/viral-requests/request_1/uploads/../../cover.jpg'],
+      ['junk', 'not a url'],
+    ])('refuses %s without touching the row', async (_label, url) => {
+      const db = mockRequest({ mediaUrlsJson: [mediaUrl] })
+
+      await expect(
+        removeViralRequestMedia(asTransactionClient(db), {
+          requestId: 'request_1',
+          mediaUrl: url,
+          supabaseBaseUrl,
+        }),
+      ).resolves.toEqual({ ok: false, reason: 'INVALID_MEDIA_URL' })
+
+      expect(db.viralServiceRequest.findUnique).not.toHaveBeenCalled()
+      expect(db.viralServiceRequest.update).not.toHaveBeenCalled()
+    })
+
+    it('refuses a URL that is valid but not attached to this request', async () => {
+      const db = mockRequest({ mediaUrlsJson: [otherUrl] })
+
+      await expect(
+        removeViralRequestMedia(asTransactionClient(db), {
+          requestId: 'request_1',
+          mediaUrl,
+          supabaseBaseUrl,
+        }),
+      ).resolves.toEqual({ ok: false, reason: 'MEDIA_NOT_ATTACHED' })
+
+      expect(db.viralServiceRequest.update).not.toHaveBeenCalled()
+    })
+
+    it('reports a missing request rather than writing', async () => {
+      const db = makeDb()
+      db.viralServiceRequest.findUnique.mockResolvedValue(null)
+
+      await expect(
+        removeViralRequestMedia(asTransactionClient(db), {
+          requestId: 'request_1',
+          mediaUrl,
+          supabaseBaseUrl,
+        }),
+      ).resolves.toEqual({ ok: false, reason: 'NOT_FOUND' })
+
+      expect(db.viralServiceRequest.update).not.toHaveBeenCalled()
+    })
+
+    // Removing exists FOR the finalized case: rejecting stops further attaches
+    // but left everything already on the row in a public bucket. Unlike the
+    // attach path, this must not refuse on status.
+    it.each([
+      ViralServiceRequestStatus.APPROVED,
+      ViralServiceRequestStatus.REJECTED,
+    ])('works on a %s request', async (status) => {
+      const db = makeDb()
+      db.viralServiceRequest.findUnique.mockResolvedValue({
+        id: 'request_1',
+        coverImageUrl: null,
+        mediaUrlsJson: [mediaUrl],
+        status,
+      })
+      db.viralServiceRequest.update.mockResolvedValue(makeViralRequestRow())
+
+      const result = await removeViralRequestMedia(asTransactionClient(db), {
+        requestId: 'request_1',
+        mediaUrl,
+        supabaseBaseUrl,
+      })
+
+      expect(result.ok).toBe(true)
     })
   })
 

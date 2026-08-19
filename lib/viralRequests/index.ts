@@ -16,6 +16,7 @@ import { platformCrossTenantProVisibilityFilter } from '@/lib/tenant'
 import { readViralSubmitterMedia } from '@/lib/viralRequests/contracts'
 import { canTransitionViralRequestStatus } from '@/lib/viralRequests/status'
 import { asTrimmedString, normalizeRequiredId } from '@/lib/guards'
+import { isSameUrlIgnoringQuery } from '@/lib/url'
 
 export type ViralRequestsDb = PrismaClient | Prisma.TransactionClient
 
@@ -131,6 +132,27 @@ export type DeleteClientViralRequestArgs = {
   clientId: string
   requestId: string
 }
+
+export type RemoveViralRequestMediaArgs = {
+  requestId: string
+  mediaUrl: string
+  supabaseBaseUrl: string
+}
+
+export type RemoveViralRequestMediaResult =
+  | {
+      ok: true
+      request: ViralRequestListRow
+      /** The object to delete from storage — the row no longer references it. */
+      storagePath: string
+      /**
+       * True when this attachment WAS the published cover and the cover was
+       * cleared with it. The caller surfaces this: on an approved look it is a
+       * client-facing change, not bookkeeping.
+       */
+      clearedCover: boolean
+    }
+  | { ok: false; reason: 'NOT_FOUND' | 'MEDIA_NOT_ATTACHED' | 'INVALID_MEDIA_URL' }
 
 export type UpdateViralRequestStatusArgs = {
   requestId: string
@@ -1208,6 +1230,116 @@ export async function attachClientViralRequestMedia(
   })
 
   return { ok: true, request: updated }
+}
+
+/**
+ * A reviewer detaches one of the submitter's uploads.
+ *
+ * The counterpart of `attachClientViralRequestMedia`, and deliberately NOT its
+ * mirror image on two points:
+ *
+ * 1. **It works on a finalized request.** Attaching refuses once a request is
+ *    APPROVED or REJECTED; removing exists precisely for that state. Rejecting a
+ *    submission stopped further attachments but left the ones already there on
+ *    the row and their bytes in a PUBLIC bucket, with no way to take them down.
+ * 2. **It is admin-only** — the actor is the reviewer, not the submitter, so
+ *    there is no client-ownership check here. The route enforces the admin
+ *    scope, the same bar that promoting a cover requires.
+ *
+ * 🔴 THE COVER. "Use this" copies the attachment's URL straight into
+ * `coverImageUrl` — it does not copy the bytes to a separate object (see
+ * `VIRAL_REQUEST_COVER_IMAGE_PUBLIC_FINALIZE`). So deleting the object under a
+ * promoted attachment would leave every client surface rendering a cover that
+ * 404s. When the removed attachment IS the cover, the cover is cleared in the
+ * same write.
+ *
+ * ⚠️ And the cover may carry a `?v=` cache-buster that the attachment URL never
+ * has (`withCacheBuster` runs AFTER the candidate check, and an attachment URL
+ * with a query string is refused outright by `isViralRequestUploadPublicUrl`).
+ * Comparing the two raw strings therefore MISSES the match and reintroduces the
+ * dangling cover, so the comparison drops the query on both sides.
+ *
+ * Storage deletion is the caller's job, from `storagePath`, and must happen
+ * AFTER this returns: if it fails, an orphaned object is harmless, whereas a
+ * deleted object still referenced by a live row is not.
+ */
+export async function removeViralRequestMedia(
+  db: ViralRequestsDb,
+  args: RemoveViralRequestMediaArgs,
+): Promise<RemoveViralRequestMediaResult> {
+  const requestId = normalizeRequiredId('requestId', args.requestId)
+
+  let mediaUrl: string | null
+  try {
+    mediaUrl = normalizeHttpUrl(args.mediaUrl, 'mediaUrl')
+  } catch {
+    return { ok: false, reason: 'INVALID_MEDIA_URL' }
+  }
+
+  // Same gate the attach path applies, for the same reason: only an object this
+  // server minted for THIS request is addressable here, so a crafted URL cannot
+  // aim the storage delete that follows at someone else's object.
+  if (
+    !mediaUrl ||
+    !isViralRequestUploadPublicUrl({
+      supabaseBaseUrl: args.supabaseBaseUrl,
+      requestId,
+      url: mediaUrl,
+    })
+  ) {
+    return { ok: false, reason: 'INVALID_MEDIA_URL' }
+  }
+
+  const request = await db.viralServiceRequest.findUnique({
+    where: { id: requestId },
+    select: { id: true, coverImageUrl: true, mediaUrlsJson: true },
+  })
+
+  if (!request) return { ok: false, reason: 'NOT_FOUND' }
+
+  const existing = readViralSubmitterMedia(request)
+  if (!existing.includes(mediaUrl)) {
+    return { ok: false, reason: 'MEDIA_NOT_ATTACHED' }
+  }
+
+  const clearedCover = isSameUrlIgnoringQuery(request.coverImageUrl, mediaUrl)
+
+  const updated = await db.viralServiceRequest.update({
+    where: { id: requestId },
+    data: {
+      mediaUrlsJson: existing.filter((url) => url !== mediaUrl),
+      ...(clearedCover ? { coverImageUrl: null } : {}),
+    },
+    select: viralRequestListSelect,
+  })
+
+  return {
+    ok: true,
+    request: updated,
+    storagePath: storagePathFromViralUploadUrl({
+      supabaseBaseUrl: args.supabaseBaseUrl,
+      url: mediaUrl,
+    }),
+    clearedCover,
+  }
+}
+
+/**
+ * The bucket-relative path inside a public URL this server minted.
+ *
+ * Only ever called on a URL `isViralRequestUploadPublicUrl` has already
+ * accepted, so the prefix is known to be present.
+ */
+function storagePathFromViralUploadUrl(args: {
+  supabaseBaseUrl: string
+  url: string
+}): string {
+  const prefix = buildViralRequestUploadPublicUrl({
+    supabaseBaseUrl: args.supabaseBaseUrl,
+    path: '',
+  })
+
+  return args.url.startsWith(prefix) ? args.url.slice(prefix.length) : args.url
 }
 
 /**
