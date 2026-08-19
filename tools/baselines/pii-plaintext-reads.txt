@@ -547,10 +547,10 @@ lib/notifications/proNotifications.ts:Prisma select/include plaintext field:emai
 lib/notifications/proNotifications.ts:Prisma select/include plaintext field:phone: true,
 lib/notifications/proNotifications.ts:direct property read:const profilePhone = normNullableString(professional.phone, 64)
 lib/notifications/proNotifications.ts:direct property read:const userPhone = normNullableString(professional.user.phone, 64)
-lib/pro/loadProReviewsList.ts:direct property read:const first = pickNonEmptyString(rev.client?.firstName)
-lib/pro/loadProReviewsList.ts:direct property read:const last = pickNonEmptyString(rev.client?.lastName)
-lib/pro/loadProReviewsList.ts:optional direct property read:const first = pickNonEmptyString(rev.client?.firstName)
-lib/pro/loadProReviewsList.ts:optional direct property read:const last = pickNonEmptyString(rev.client?.lastName)
+lib/pro/loadProReviewsList.ts:direct property read:const first = pickStringOrEmpty(rev.client?.firstName)
+lib/pro/loadProReviewsList.ts:direct property read:const last = pickStringOrEmpty(rev.client?.lastName)
+lib/pro/loadProReviewsList.ts:optional direct property read:const first = pickStringOrEmpty(rev.client?.firstName)
+lib/pro/loadProReviewsList.ts:optional direct property read:const last = pickStringOrEmpty(rev.client?.lastName)
 lib/pro/proBookingsList.ts:Prisma select/include plaintext field:firstName: true,
 lib/pro/proBookingsList.ts:Prisma select/include plaintext field:lastName: true,
 lib/pro/proBookingsList.ts:Prisma select/include plaintext field:phone: true,

@@ -23,6 +23,7 @@ import { resolveUserPublicNames } from '@/lib/notifications/social/resolveActorP
 import { platformCrossTenantProVisibilityFilter } from '@/lib/tenant'
 import { readPostmarkEmailConfig } from '@/lib/notifications/config'
 import { createEmailDeliveryProvider } from '@/lib/notifications/delivery/sendEmail'
+import { clampInt } from '@/lib/pick'
 import { prisma } from '@/lib/prisma'
 import { safeError } from '@/lib/security/logging'
 import { TOVIS_ROOT_TENANT_SLUG } from '@/lib/tenant/constants'
@@ -111,11 +112,6 @@ type PreparedRecipient = {
   managePreferencesPath: string
   rows: DigestNotificationRow[]
   prefsByKey: Map<NotificationEventKey, boolean>
-}
-
-function clampInt(value: number, min: number, max: number): number {
-  if (!Number.isFinite(value)) return min
-  return Math.max(min, Math.min(max, Math.trunc(value)))
 }
 
 function trimToNull(value: string | null | undefined): string | null {

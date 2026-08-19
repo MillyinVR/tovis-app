@@ -15,6 +15,10 @@ import 'server-only'
 import { NotificationEventKey, VerificationStatus } from '@prisma/client'
 import type { ProfessionType } from '@prisma/client'
 
+import {
+  relativeDayPhrase,
+  wholeDaysUntil,
+} from '@/lib/notifications/relativeWhen'
 import { prisma } from '@/lib/prisma'
 import { createProNotification } from '@/lib/notifications/proNotifications'
 import { requiresLicense } from '@/lib/licensing/licenseRequirement'
@@ -92,11 +96,9 @@ async function warnExpiringLicenses(args: {
   for (const pro of candidates) {
     if (!isLicenseGated(pro)) continue
 
-    const daysRemaining = Math.max(
-      1,
-      Math.ceil((pro.licenseExpiry.getTime() - args.now.getTime()) / MS_PER_DAY),
+    const whenPhrase = relativeDayPhrase(
+      wholeDaysUntil(pro.licenseExpiry, args.now),
     )
-    const whenPhrase = daysRemaining === 1 ? 'tomorrow' : `in ${daysRemaining} days`
 
     await createProNotification({
       professionalId: pro.id,

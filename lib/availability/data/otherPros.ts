@@ -64,10 +64,6 @@ export type LoadOtherProsNearbyCachedArgs = LoadOtherProsNearbyArgs & {
   cacheEnabled: boolean
 }
 
-function normalizeAddress(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() ? value.trim() : null
-}
-
 function parseProNameDisplay(value: unknown): ProNameDisplay | null {
   return value === ProNameDisplay.BUSINESS_NAME ||
     value === ProNameDisplay.REAL_NAME ||
@@ -217,7 +213,7 @@ export async function loadOtherProsNearby(
 
     if (
       locationType === ServiceLocationType.SALON &&
-      !normalizeAddress(location.formattedAddress)
+      !pickString(location.formattedAddress)
     ) {
       continue
     }
@@ -235,7 +231,7 @@ export async function loadOtherProsNearby(
         createdAt: location.createdAt,
         city: location.city ?? null,
         state: location.state ?? null,
-        formattedAddress: normalizeAddress(location.formattedAddress),
+        formattedAddress: pickString(location.formattedAddress),
       })
       continue
     }
@@ -258,7 +254,7 @@ export async function loadOtherProsNearby(
         createdAt: location.createdAt,
         city: location.city ?? null,
         state: location.state ?? null,
-        formattedAddress: normalizeAddress(location.formattedAddress),
+        formattedAddress: pickString(location.formattedAddress),
       })
     }
   }

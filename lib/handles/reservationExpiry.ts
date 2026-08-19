@@ -10,6 +10,10 @@ import 'server-only'
 
 import { NotificationEventKey } from '@prisma/client'
 
+import {
+  relativeDayPhrase,
+  wholeDaysUntil,
+} from '@/lib/notifications/relativeWhen'
 import { prisma } from '@/lib/prisma'
 import { createProNotification } from '@/lib/notifications/proNotifications'
 import { vanityLinkFor } from '@/lib/handles'
@@ -82,14 +86,9 @@ async function warnExpiringReservations(args: {
     // past graceDays; releaseCutoff = now − graceDays, so the release instant is
     // handleReservedAt + graceDays and the days left reduce to (reservedAt −
     // releaseCutoff). One day left reads as "tomorrow".
-    const daysRemaining = Math.max(
-      1,
-      Math.ceil(
-        (pro.handleReservedAt.getTime() - args.releaseCutoff.getTime()) /
-          MS_PER_DAY,
-      ),
+    const whenPhrase = relativeDayPhrase(
+      wholeDaysUntil(pro.handleReservedAt, args.releaseCutoff),
     )
-    const whenPhrase = daysRemaining === 1 ? 'tomorrow' : `in ${daysRemaining} days`
 
     await createProNotification({
       professionalId: pro.id,

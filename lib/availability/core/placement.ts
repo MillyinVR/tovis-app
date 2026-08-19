@@ -208,10 +208,6 @@ function emitPlacementTiming(
   )
 }
 
-function normalizeAddress(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() ? value.trim() : null
-}
-
 export function parseCachedPlacement(raw: unknown): CachedPlacement | null {
   if (!isRecord(raw)) return null
 
@@ -275,7 +271,7 @@ export function parseCachedPlacement(raw: unknown): CachedPlacement | null {
     maxAdvanceDays: raw.maxAdvanceDays,
     durationMinutes: raw.durationMinutes,
     priceStartingAt: raw.priceStartingAt,
-    formattedAddress: normalizeAddress(raw.formattedAddress),
+    formattedAddress: pickString(raw.formattedAddress),
     lat,
     lng,
     proBusinessName: pickString(raw.proBusinessName) ?? null,
@@ -497,7 +493,7 @@ async function validateAvailabilityPlacement(args: {
   }
 
   const context = validated.context
-  const formattedAddress = normalizeAddress(context.formattedAddress)
+  const formattedAddress = pickString(context.formattedAddress)
 
   if (
     args.locationType === ServiceLocationType.MOBILE &&

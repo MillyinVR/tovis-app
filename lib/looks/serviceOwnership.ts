@@ -1,5 +1,7 @@
 // lib/looks/serviceOwnership.ts
 
+import { pickNonEmptyString } from '@/lib/pick'
+
 export type LookServiceCategoryShape = {
   name: string
   slug: string
@@ -36,13 +38,6 @@ export type LookPrimaryServiceSummary = {
   name: string | null
   categoryName: string | null
   categorySlug: string | null
-}
-
-function pickNonEmptyString(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') return null
-
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : null
 }
 
 function buildStableServiceIds(args: {

@@ -33,6 +33,7 @@ import {
   type PrismaClient,
 } from '@prisma/client'
 
+import { clampInt } from '@/lib/pick'
 import { platformCrossTenantProVisibilityFilter } from '@/lib/tenant'
 
 // ---------------------------------------------------------------------------
@@ -223,11 +224,6 @@ export type DetectLookVelocityAnomaliesResult = {
   /** How many candidate looks the window scan evaluated (before flagging). */
   scannedCount: number
   anomalies: LookVelocityAnomalyFinding[]
-}
-
-function clampInt(value: number, min: number, max: number): number {
-  if (!Number.isFinite(value)) return min
-  return Math.min(max, Math.max(min, Math.trunc(value)))
 }
 
 /** UTC-midnight lower bound covering the last `windowDays` whole days. */

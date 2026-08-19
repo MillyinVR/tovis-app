@@ -111,10 +111,6 @@ type PlacementCacheValue =
       error: string
     }
 
-function normalizeAddress(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() ? value.trim() : null
-}
-
 function locationTypeForLocation(
   location: Pick<AvailabilityLocation, 'type'>,
 ): ServiceLocationType {
@@ -220,7 +216,7 @@ async function validateAvailabilityPlacement(args: {
   }
 
   const context = validated.context
-  const formattedAddress = normalizeAddress(context.formattedAddress)
+  const formattedAddress = pickString(context.formattedAddress)
 
   if (
     args.locationType === ServiceLocationType.MOBILE &&
