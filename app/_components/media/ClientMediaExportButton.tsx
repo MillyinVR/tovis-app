@@ -66,7 +66,11 @@ export function parseIdentity(data: unknown): ClientExportIdentity | null {
     handle: pickString(header.handle) ?? null,
     businessName: pickString(header.businessName) ?? null,
     enabled: clientExport.enabled === true,
-    dropsPlatformMark: clientExport.dropsPlatformMark !== false,
+    // Both coercions fail CLOSED. `dropsPlatformMark` read `!== false` while an
+    // unbranded export was everyone's default and the mark was cosmetic; it is
+    // now a paid perk gated on the entitlement alone (`lib/pro/socialExportMark.ts`),
+    // so a field this parse cannot see must not grant it.
+    dropsPlatformMark: clientExport.dropsPlatformMark === true,
   }
 }
 
