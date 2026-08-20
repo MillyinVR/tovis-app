@@ -1,6 +1,11 @@
 // lib/health/stripe.ts
 
 import { getStripe } from '@/lib/stripe/server'
+import {
+  stripeKeyMode,
+  stripeKeyModesAgree,
+  type StripeKeyMode,
+} from '@/lib/stripe/keyMode'
 
 import { errorMessageFromUnknown } from '@/lib/http'
 import {
@@ -49,6 +54,44 @@ async function pingStripe(): Promise<void> {
   await stripe.balance.retrieve()
 }
 
+/**
+ * The Stripe key modes, for the readiness payload. Reported on EVERY branch of
+ * the check below — including the unconfigured one — because "which mode is this
+ * environment in?" is exactly the question you are asking when Stripe looks
+ * broken, and a branch that omits it sends you back to guessing.
+ *
+ * Both env vars are read as STATIC references: Next only inlines a
+ * `NEXT_PUBLIC_*` var where it is spelled out literally, so a computed
+ * `process.env[name]` lookup would read as undefined in a built client bundle.
+ *
+ * Modes only — never the keys. See lib/stripe/keyMode.ts.
+ *
+ * ⚠️ /api/health/ready is UNAUTHENTICATED, so weigh what this discloses. It is a
+ * mode, never key material — and a working Stripe integration must have matching
+ * modes (Stripe rejects a cross-mode pair), so `secretKeyMode` reveals nothing
+ * that the publishable key, which Next inlines into a public client chunk, does
+ * not already give away. The one case it does add signal is precisely the broken
+ * one — a mismatched pair — which the operator needs to see more than an outsider
+ * benefits from knowing. If that trade stops holding, gate these three fields
+ * rather than dropping them: the whole point is that the mode is askable.
+ */
+function stripeKeyModeDetails(): Readonly<{
+  secretKeyMode: StripeKeyMode
+  publishableKeyMode: StripeKeyMode
+  keyModesAgree: boolean | null
+}> {
+  const secretKeyMode = stripeKeyMode(process.env.STRIPE_SECRET_KEY)
+  const publishableKeyMode = stripeKeyMode(
+    process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY,
+  )
+
+  return {
+    secretKeyMode,
+    publishableKeyMode,
+    keyModesAgree: stripeKeyModesAgree(secretKeyMode, publishableKeyMode),
+  }
+}
+
 export async function checkStripeHealth(
   options: StripeHealthOptions = {},
 ): Promise<HealthCheckResult> {
@@ -56,6 +99,7 @@ export async function checkStripeHealth(
   const timeoutMs = options.timeoutMs ?? DEFAULT_PROVIDER_HEALTH_TIMEOUT_MS
   const liveCheckEnabled =
     options.liveCheckEnabled ?? isLiveProviderCheckEnabled()
+  const keyModes = stripeKeyModeDetails()
 
   if (!hasStripeSecretKey()) {
     return {
@@ -67,6 +111,7 @@ export async function checkStripeHealth(
       details: {
         timeoutMs,
         liveCheckEnabled,
+        ...keyModes,
       },
     }
   }
@@ -81,6 +126,7 @@ export async function checkStripeHealth(
       details: {
         timeoutMs,
         liveCheckEnabled,
+        ...keyModes,
       },
     }
   }
@@ -97,6 +143,7 @@ export async function checkStripeHealth(
       details: {
         timeoutMs,
         liveCheckEnabled,
+        ...keyModes,
       },
     }
   } catch (error: unknown) {
@@ -109,6 +156,7 @@ export async function checkStripeHealth(
       details: {
         timeoutMs,
         liveCheckEnabled,
+        ...keyModes,
       },
     }
   }
