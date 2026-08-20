@@ -151,6 +151,22 @@ export const EXPORT_BOUNDARY: Readonly<Record<string, ExportDisposition>> = {
     reason:
       'Surfaced live in the app on the account-deletion screen; the row exists as evidence the request was honoured rather than as a description of the user.',
   },
+  // The person blocks the user made and received (App Store guideline 1.2).
+  // Omitted for the same reason AccountDeletionRequest is — the half that
+  // describes the user is already shown to them live, in Settings → Blocked
+  // accounts, where they can also lift it.
+  //
+  // 🔴 The other half must NOT be exported at any point. A UserBlock row is
+  // symmetric in effect but directional in storage, so the model also holds
+  // blocks OTHER people made against this user. Putting those in a file the
+  // subject downloads would tell them exactly who blocked them, which is the
+  // one thing a block exists to withhold. If this is ever moved to EXPORTED,
+  // it must be scoped to `blockerUserId = subject` and never the other column.
+  UserBlock: {
+    status: 'OMITTED',
+    reason:
+      'Surfaced live in the app under Settings → Blocked accounts, where it can also be lifted. The reverse direction (who blocked the subject) must never be disclosed.',
+  },
   ClientAddress: { status: 'EXPORTED', keys: ['clientAddresses'] },
   ProfessionalLocation: { status: 'EXPORTED', keys: ['professionalLocations'] },
   Booking: {

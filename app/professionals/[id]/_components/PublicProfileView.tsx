@@ -24,7 +24,12 @@ import JsonLdScript from '@/app/_components/seo/JsonLdScript'
 import BrandWordmark from '@/lib/brand/BrandWordmark'
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import { loadClientLinkViewer } from '@/lib/clientVisibility'
+import {
+  loadViewerBlockId,
+  resolveBlockTargetByProfessionalId,
+} from '@/lib/blocks/blockTargets'
 import { getCurrentUser } from '@/lib/currentUser'
+import { prisma } from '@/lib/prisma'
 import { messageStartHref } from '@/lib/messages'
 import { loadProProfileSeoById } from '@/lib/profiles/proProfileSeo'
 import { absoluteUrl } from '@/lib/seo/absoluteUrl'
@@ -138,6 +143,21 @@ export default async function PublicProfileView({
     null,
   )
 
+  // Guideline 1.2: can this viewer block this pro, and do they already?
+  // Hidden for a guest (no one to block for) and for the pro's own profile.
+  const blockTarget = viewer
+    ? await resolveBlockTargetByProfessionalId(prisma, professionalId)
+    : null
+  const blockState =
+    viewer && blockTarget && blockTarget.userId !== viewer.id
+      ? {
+          blockId: await loadViewerBlockId(prisma, {
+            viewerUserId: viewer.id,
+            blockedUserId: blockTarget.userId,
+          }),
+        }
+      : null
+
   const bookBar = buildPublicProfileBookBar({
     isPendingVerification,
     isSignedIn: Boolean(viewer),
@@ -215,6 +235,7 @@ export default async function PublicProfileView({
               fromPath={fromPath}
               acceptedPayments={acceptedPayments}
               signals={signals}
+              block={blockState}
             />
           }
           portfolio={

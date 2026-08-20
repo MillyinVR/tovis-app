@@ -8,6 +8,7 @@ import {
 import { isRecord } from '@/lib/guards'
 import { pickNonEmptyString } from '@/lib/pick'
 import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
+import { buildLookPostBlockFilter } from '@/lib/blocks/userBlocks'
 import { buildLookPostSpotlightEligibilityWhere } from '@/lib/looks/spotlight'
 import { proDiscoveryVisibilityFilter } from '@/lib/tenant'
 import type { TenantContext } from '@/lib/tenant'
@@ -40,6 +41,13 @@ export type BuildLooksFeedWhereArgs = {
   // Restrict to looks carrying this hashtag/style tag (social-first D1). Powers
   // the /looks/tags/[slug] pages; banned tags never match.
   tagSlug?: string | null
+  // Both directions of the viewer's person blocks (App Store guideline 1.2) —
+  // load with `loadBlockedUserIds`. Absent/empty for a signed-out viewer, who
+  // has no blocks and cannot be blocked. Threaded through the SHARED where
+  // builder rather than bolted onto each feed so a new discovery surface gets
+  // the block for free; a feed that does not honour a block is a promise the
+  // product does not keep.
+  blockedUserIds?: readonly string[] | null
 }
 
 export type BuildLooksMediaFeedWhereArgs = BuildLooksFeedWhereArgs
@@ -252,6 +260,13 @@ export function buildLooksFeedWhere(
 
   if (q) {
     and.push(buildLooksSearchFilter(q))
+  }
+
+  const blockFilter = buildLookPostBlockFilter(
+    pickDistinctIds(args.blockedUserIds),
+  )
+  if (blockFilter) {
+    and.push(blockFilter)
   }
 
   return {

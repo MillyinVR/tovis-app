@@ -175,6 +175,10 @@ export const DELETE_BOUNDARY: Readonly<Record<string, DeleteDisposition>> = {
   LookViewerImpressionStat: { status: 'DELETE', reason: R_ENGAGEMENT },
   LookLike: { status: 'DELETE', reason: R_ENGAGEMENT },
   LookHide: { status: 'DELETE', reason: R_ENGAGEMENT },
+  UserBlock: {
+    status: 'DELETE',
+    reason: `${R_ENGAGEMENT} BOTH directions go: blocks the subject made, and blocks OTHER users made against the subject. The second half matters — a block row pointing at a deleted account can never be lifted by the person who made it, and it would keep filtering feeds against a user id nobody holds.`,
+  },
   LookCommentLike: { status: 'DELETE', reason: R_ENGAGEMENT },
   MediaLike: { status: 'DELETE', reason: R_ENGAGEMENT },
   ReviewHelpful: { status: 'DELETE', reason: R_ENGAGEMENT },

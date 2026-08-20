@@ -24,6 +24,10 @@ import {
   recomputeLookPostCommentCount,
 } from '@/lib/looks/counters'
 import { mapLooksCommentToDto } from '@/lib/looks/mappers'
+import {
+  buildLookCommentBlockFilter,
+  loadBlockedUserIds,
+} from '@/lib/blocks/userBlocks'
 import { buildLookCommentSelect } from '@/lib/looks/commentSelect'
 import { buildLookPolicyInput, loadLookAccess } from '@/lib/looks/access'
 import { loadClientLinkViewer } from '@/lib/clientVisibility'
@@ -82,6 +86,15 @@ export async function GET(req: Request, ctx: RouteContext) {
     const viewerIsAdmin = viewer?.role === Role.ADMIN
     const clientLinkViewer = await loadClientLinkViewer(viewer)
 
+    // Guideline 1.2: a blocked person's comments are invisible to the viewer,
+    // in both directions of the block. Signed-out viewers have none — skip the
+    // query. `?? {}` spreads to nothing when there is nothing to filter, so an
+    // unblocked viewer's query is byte-identical to the pre-block one.
+    const blockedUserIds = viewerUserId
+      ? await loadBlockedUserIds(prisma, { userId: viewerUserId })
+      : []
+    const commentBlockFilter = buildLookCommentBlockFilter(blockedUserIds) ?? {}
+
     // Top-level comments only; replies are loaded on demand per thread. The
     // look's stored commentCount already includes replies (matches IG/TikTok),
     // so we count all approved rows for the header, not just top-level ones.
@@ -91,6 +104,7 @@ export async function GET(req: Request, ctx: RouteContext) {
           lookPostId,
           parentCommentId: null,
           moderationStatus: ModerationStatus.APPROVED,
+          ...commentBlockFilter,
         },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: limit,
@@ -100,6 +114,9 @@ export async function GET(req: Request, ctx: RouteContext) {
         where: {
           lookPostId,
           moderationStatus: ModerationStatus.APPROVED,
+          // Counted with the SAME filter as the rows: a header that disagrees
+          // with the list it heads reads as a bug.
+          ...commentBlockFilter,
         },
       }),
     ])

@@ -47,6 +47,7 @@ import {
   type LooksFeedCursor,
 } from '@/lib/looks/feed'
 import { looksFeedSelect, type LooksFeedRow } from '@/lib/looks/selects'
+import { loadBlockedUserIds } from '@/lib/blocks/userBlocks'
 import { loadHiddenLookIds } from '@/lib/looks/hides'
 import {
   rankBoardFeedRows,
@@ -173,7 +174,7 @@ export async function buildBoardFeedPage(args: {
 
   // A board recommends looks the owner hasn't already saved to it, and never a
   // look the owner explicitly hid (§2.2).
-  const [savedItems, hiddenLookIds] = await Promise.all([
+  const [savedItems, hiddenLookIds, blockedUserIds] = await Promise.all([
     prisma.boardItem.findMany({
       where: { boardId: args.board.id },
       orderBy: { createdAt: 'desc' },
@@ -183,13 +184,22 @@ export async function buildBoardFeedPage(args: {
     args.viewerUserId
       ? loadHiddenLookIds(prisma, { userId: args.viewerUserId })
       : Promise.resolve<string[]>([]),
+    // Guideline 1.2: a board recommendation is a feed, so it honours the
+    // viewer's person blocks like every other feed.
+    args.viewerUserId
+      ? loadBlockedUserIds(prisma, { userId: args.viewerUserId })
+      : Promise.resolve<string[]>([]),
   ])
   const savedLookIds = savedItems.map((item) => item.lookPostId)
 
   const seenIds = [...args.seenLookIds].slice(0, SEEN_IDS_CAP)
   const excludeIds = [...new Set([...savedLookIds, ...seenIds, ...hiddenLookIds])]
 
-  const baseWhere = buildLooksFeedWhere({ kind: 'ALL', tenant: args.tenant })
+  const baseWhere = buildLooksFeedWhere({
+    kind: 'ALL',
+    tenant: args.tenant,
+    blockedUserIds,
+  })
   const exclusion: Prisma.LookPostWhereInput | null =
     excludeIds.length > 0 ? { id: { notIn: excludeIds } } : null
 

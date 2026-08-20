@@ -9,6 +9,10 @@ import {
 import { buildLookPolicyInput, loadLookAccess } from '@/lib/looks/access'
 import { canViewLookPost } from '@/lib/looks/guards'
 import { mapLooksCommentToDto } from '@/lib/looks/mappers'
+import {
+  buildLookCommentBlockFilter,
+  loadBlockedUserIds,
+} from '@/lib/blocks/userBlocks'
 import { buildLookCommentSelect } from '@/lib/looks/commentSelect'
 import { loadClientLinkViewer } from '@/lib/clientVisibility'
 import { ModerationStatus, Role } from '@prisma/client'
@@ -57,6 +61,13 @@ export async function GET(
     const viewerIsAdmin = viewer?.role === Role.ADMIN
     const clientLinkViewer = await loadClientLinkViewer(viewer)
 
+    // Guideline 1.2: a blocked person's replies are invisible to the viewer,
+    // in both directions of the block — same rule as the parent comment list.
+    const blockedUserIds = viewerUserId
+      ? await loadBlockedUserIds(prisma, { userId: viewerUserId })
+      : []
+    const commentBlockFilter = buildLookCommentBlockFilter(blockedUserIds) ?? {}
+
     // Replies read oldest-first (conversation order), matching IG threads.
     const [rows, replyCount] = await prisma.$transaction([
       prisma.lookComment.findMany({
@@ -64,6 +75,7 @@ export async function GET(
           lookPostId,
           parentCommentId,
           moderationStatus: ModerationStatus.APPROVED,
+          ...commentBlockFilter,
         },
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
         take: limit,
@@ -74,6 +86,8 @@ export async function GET(
           lookPostId,
           parentCommentId,
           moderationStatus: ModerationStatus.APPROVED,
+          // Same filter as the rows — see the comments list route.
+          ...commentBlockFilter,
         },
       }),
     ])

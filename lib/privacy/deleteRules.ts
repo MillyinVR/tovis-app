@@ -488,6 +488,21 @@ export const DELETE_RULES: readonly DeleteRule[] = [
     where: (s) => ({ userId: s.userId }),
   }),
   deleteRule({
+    // Guideline-1.2 person blocks. BOTH directions, matched with an OR rather
+    // than the single-column `userId` the engagement rules above use: the
+    // subject appears as `blockerUserId` on blocks they made and as
+    // `blockedUserId` on blocks made against them.
+    //
+    // 🔴 Deleting only their own would leave rows pointing at a user id nobody
+    // holds — unliftable by the person who created them, and still filtering
+    // that person's feeds forever.
+    model: 'UserBlock',
+    delegate: (db) => db.userBlock,
+    where: (s) => ({
+      OR: [{ blockerUserId: s.userId }, { blockedUserId: s.userId }],
+    }),
+  }),
+  deleteRule({
     model: 'LookViewerImpressionStat',
     delegate: (db) => db.lookViewerImpressionStat,
     where: (s) => ({ userId: s.userId }),

@@ -32,6 +32,7 @@ import {
   type LooksFeedCursor,
 } from '@/lib/looks/feed'
 import { looksFeedSelect, type LooksFeedRow } from '@/lib/looks/selects'
+import { loadBlockedUserIds } from '@/lib/blocks/userBlocks'
 import { HIDDEN_LOOK_IDS_CAP, hideCategorySelect } from '@/lib/looks/hides'
 import { loadCappedLookIds } from '@/lib/looks/viewerImpressionCap'
 import {
@@ -492,6 +493,7 @@ export async function loadPersonalizedAffinity(args: {
   PersonalizedViewerAffinity & {
     hiddenLookIds: string[]
     cappedLookIds: string[]
+    blockedUserIds: string[]
   }
 > {
   const clientId = args.clientId ?? null
@@ -506,6 +508,7 @@ export async function loadPersonalizedAffinity(args: {
     hides,
     bookingSignals,
     cappedLookIds,
+    blockedUserIds,
   ] = await Promise.all([
       clientId
         ? prisma.proFollow.findMany({
@@ -576,6 +579,10 @@ export async function loadPersonalizedAffinity(args: {
       // loaded for any signed-in viewer; empty for a viewer with no exposure
       // history → byte-identical to the pre-cap feed.
       loadCappedLookIds(prisma, { userId: args.userId }),
+      // Guideline 1.2 person blocks, both directions. Keyed by userId like the
+      // hides above, and loaded in the same bounded batch so the personalized
+      // feed cannot end up the one surface that forgot the block.
+      loadBlockedUserIds(prisma, { userId: args.userId }),
     ])
 
   // Behavioral signals decay with age (spec §6.2) so stale taste fades.
@@ -692,6 +699,7 @@ export async function loadPersonalizedAffinity(args: {
     priceBand,
     hiddenLookIds,
     cappedLookIds,
+    blockedUserIds,
   }
 }
 
@@ -846,6 +854,10 @@ export async function buildPersonalizedFeedPage(args: {
   const baseWhere = buildLooksFeedWhere({
     kind: 'ALL',
     tenant: args.tenant,
+    // Guideline 1.2: applied on the BASE where, so it reaches the backbone,
+    // the followed injection, the exploration slot and the widen pass alike —
+    // every one of them composes from this.
+    blockedUserIds: affinity.blockedUserIds,
   })
 
   const seenIds = [...args.seenLookIds]

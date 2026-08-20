@@ -32,6 +32,9 @@ const mocks = vi.hoisted(() => ({
     professionalProfile: {
       findUnique: vi.fn(),
     },
+    userBlock: {
+      findUnique: vi.fn(),
+    },
     review: {
       aggregate: vi.fn(),
       findMany: vi.fn(),
@@ -388,6 +391,8 @@ describe('app/professionals/[id] PublicProfileView', () => {
 
     mockGetCurrentUser.mockResolvedValue(null)
     mockMessageStartHref.mockReturnValue('/messages/start')
+
+    mocks.prisma.userBlock.findUnique.mockResolvedValue(null)
 
     mocks.prisma.professionalProfile.findUnique.mockResolvedValue(
       makePro({ verificationStatus: VerificationStatus.APPROVED }),

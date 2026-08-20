@@ -1936,6 +1936,12 @@ export default async function ClientDetailPage(props: {
             data={publicData}
             followMode="hidden"
             loginHref=""
+            // No Block control here. This is the pro's own CLIENT CHART — an
+            // existing working relationship, reached from their client list,
+            // not a discovery surface. Blocking a client you have bookings
+            // with is a support/relationship question, not a one-tap feed
+            // control. The pro can still block from the public /u/[handle].
+            block={null}
           />
         ) : (
           <Card variant="glass" padding="lg">

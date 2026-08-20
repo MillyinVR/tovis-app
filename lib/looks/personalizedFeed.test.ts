@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
     proFollow: { findMany: vi.fn() },
     lookLike: { findMany: vi.fn() },
     lookHide: { findMany: vi.fn() },
+    userBlock: { findMany: vi.fn() },
     lookViewerImpressionStat: { findMany: vi.fn() },
     boardItem: { findMany: vi.fn() },
     board: { findMany: vi.fn() },
@@ -74,6 +75,7 @@ describe('lib/looks/personalizedFeed', () => {
     mocks.prisma.proFollow.findMany.mockResolvedValue([])
     mocks.prisma.lookLike.findMany.mockResolvedValue([])
     mocks.prisma.lookHide.findMany.mockResolvedValue([])
+    mocks.prisma.userBlock.findMany.mockResolvedValue([])
     mocks.prisma.lookViewerImpressionStat.findMany.mockResolvedValue([])
     mocks.prisma.boardItem.findMany.mockResolvedValue([])
     mocks.prisma.board.findMany.mockResolvedValue([])

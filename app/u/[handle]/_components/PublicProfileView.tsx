@@ -8,6 +8,7 @@ import { ClientCreatorTier } from '@prisma/client'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import BoardStripCard from '@/app/_components/boards/BoardStripCard'
 import CreatorStandingRow from '@/app/_components/clients/CreatorStandingRow'
+import BlockPersonButton from '@/app/_components/blocks/BlockPersonButton'
 import { COPY } from '@/lib/copy'
 import type {
   PublicClientBoard,
@@ -202,10 +203,17 @@ export default function PublicProfileView({
   data,
   followMode,
   loginHref,
+  block,
 }: {
   data: PublicClientProfileData
   followMode: FollowMode
   loginHref: string
+  /**
+   * App Store guideline 1.2. `null` hides the control entirely — a guest, or
+   * the owner looking at their own profile. `{ blockId: null }` means a
+   * signed-in viewer who does not currently block them.
+   */
+  block: { blockId: string | null } | null
 }) {
   const [tab, setTab] = useState<TabKey>('looks')
   const follow = useClientFollow({
@@ -283,6 +291,19 @@ export default function PublicProfileView({
               {follow.error}
             </div>
           ) : null}
+        </div>
+      ) : null}
+
+      {/* App Store guideline 1.2. `block` is null for a guest and for the
+          owner's own profile — a pro reads these looks and comments too, so a
+          pro must be able to block a client. */}
+      {block ? (
+        <div className="mt-3">
+          <BlockPersonButton
+            target={{ handle: data.handle }}
+            displayName={`@${data.handle}`}
+            initialBlockId={block.blockId}
+          />
         </div>
       ) : null}
 
