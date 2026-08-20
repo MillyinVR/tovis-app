@@ -8,6 +8,7 @@ import {
   type LookAuthorRef,
   type LookPartyIdentity,
 } from './lookParty'
+import { isBlockedNotificationParty } from './social/blockedNotificationParty'
 import { resolveLookActorPublicName } from './social/resolveActorPublicName'
 
 /**
@@ -108,6 +109,21 @@ async function notifyLookEngagement(
   // Self-engagement never notifies (liking/saving your own look).
   if (isLookAuthorIdentity(args.actor, args.look)) return
 
+  // Nor does a blocked person — in either direction. Same early return as the
+  // self guard, and for the same reason: this notification should never exist.
+  // Suppressing at CREATION is what also stops the PUSH; a read-time filter
+  // would hide the row after the phone had already buzzed.
+  const recipient = lookAuthorRecipient(args.look)
+  if (
+    await isBlockedNotificationParty({
+      actor: { kind: 'user', userId: args.actor.userId },
+      recipient,
+      db: args.tx,
+    })
+  ) {
+    return
+  }
+
   const lookPostId = normRequired(args.lookPostId, 'lookPostId')
   const actorUserId = normRequired(args.actor.userId, 'actorUserId')
   const actorClientId = args.actor.clientProfileId?.trim() || undefined
@@ -133,8 +149,6 @@ async function notifyLookEngagement(
     data,
     tx: args.tx,
   }
-
-  const recipient = lookAuthorRecipient(args.look)
 
   if (recipient.kind === 'pro') {
     await createProNotification({

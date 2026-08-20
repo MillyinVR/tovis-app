@@ -144,3 +144,59 @@ export function buildLookCommentBlockFilter(
   if (blockedUserIds.length === 0) return null
   return { userId: { notIn: blockedUserIds } }
 }
+
+/**
+ * Minimal db surface for the single-pair check: just `findFirst` on UserBlock.
+ */
+type BlockPairReaderDb = {
+  userBlock: {
+    findFirst: (args: {
+      where: {
+        OR: Array<{ blockerUserId: string; blockedUserId: string }>
+      }
+      select: { id: true }
+    }) => Promise<{ id: string } | null>
+  }
+}
+
+/**
+ * Is there a block between these two people, in EITHER direction?
+ *
+ * The one-pair counterpart to {@link loadBlockedUserIds}, for the write paths
+ * that already know both parties — notification producers ask "may this actor
+ * reach this recipient?" once per emit, and loading a viewer's whole block list
+ * to answer it would be both wasteful and WRONG: that list is truncated at
+ * {@link BLOCKED_USER_IDS_CAP}, so a block past the cap would read as "not
+ * blocked". A single findFirst has no cap and cannot answer stale.
+ *
+ * Both branches match the `@@unique([blockerUserId, blockedUserId])` index, so
+ * this is two index probes, not a scan.
+ *
+ * Symmetric for the same reason `loadBlockedUserIds` unions both directions: a
+ * block must silence the blocked party as well as hide them, or blocking
+ * someone would still leave them able to make your phone buzz.
+ *
+ * An empty or self-referential pair is never blocked — the model's own CHECK
+ * forbids a self-block, and a caller with no id for one party has nobody to
+ * check against.
+ */
+export async function isUserPairBlocked(
+  db: BlockPairReaderDb,
+  args: { userIdA: string; userIdB: string },
+): Promise<boolean> {
+  const a = args.userIdA.trim()
+  const b = args.userIdB.trim()
+  if (!a || !b || a === b) return false
+
+  const row = await db.userBlock.findFirst({
+    where: {
+      OR: [
+        { blockerUserId: a, blockedUserId: b },
+        { blockerUserId: b, blockedUserId: a },
+      ],
+    },
+    select: { id: true },
+  })
+
+  return row !== null
+}

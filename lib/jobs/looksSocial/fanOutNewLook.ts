@@ -8,6 +8,7 @@ import {
   PrismaClient,
 } from '@prisma/client'
 
+import { loadBlockedUserIds } from '@/lib/blocks/userBlocks'
 import {
   createClientNotification,
   type CreateClientNotificationArgs,
@@ -28,6 +29,12 @@ export type ProcessFanOutNewLookNotificationsResult = {
   notifiedCount: number
   /** Followers skipped because they are the pro's own client identity. */
   skippedSelfCount: number
+  /**
+   * Followers skipped because they and the pro have blocked each other. Counted
+   * rather than silently dropped: a fan-out that quietly notifies fewer people
+   * than it has followers should say so.
+   */
+  skippedBlockedCount: number
   skippedReason:
     | 'LOOK_NOT_FOUND'
     | 'LOOK_NOT_ELIGIBLE'
@@ -48,6 +55,9 @@ export const fanOutNewLookSelect = Prisma.validator<Prisma.LookPostSelect>()({
   professional: {
     select: {
       ...professionalPublicDisplayNameSelect,
+      // The block is keyed on User and professionalId is NOT one, so the fan-out
+      // needs the pro's User id to resolve who has blocked them.
+      userId: true,
       user: {
         select: {
           clientProfile: { select: { id: true } },
@@ -149,6 +159,7 @@ export async function processFanOutNewLookNotifications(
       lookPostId,
       notifiedCount: 0,
       skippedSelfCount: 0,
+      skippedBlockedCount: 0,
       skippedReason: 'LOOK_NOT_FOUND',
     }
   }
@@ -158,6 +169,7 @@ export async function processFanOutNewLookNotifications(
       lookPostId,
       notifiedCount: 0,
       skippedSelfCount: 0,
+      skippedBlockedCount: 0,
       skippedReason: 'CLIENT_AUTHORED_LOOK',
     }
   }
@@ -167,13 +179,16 @@ export async function processFanOutNewLookNotifications(
       lookPostId,
       notifiedCount: 0,
       skippedSelfCount: 0,
+      skippedBlockedCount: 0,
       skippedReason: 'LOOK_NOT_ELIGIBLE',
     }
   }
 
   const followers = await db.proFollow.findMany({
     where: { professionalId: look.professionalId },
-    select: { clientId: true },
+    // The follower's User id, because a block is keyed on User — a ClientProfile
+    // nobody has signed into has a NULL userId and can never be party to one.
+    select: { clientId: true, client: { select: { userId: true } } },
     orderBy: [{ createdAt: 'asc' }],
   })
 
@@ -181,15 +196,31 @@ export async function processFanOutNewLookNotifications(
   // self-notification.
   const proOwnClientId = look.professional.user.clientProfile?.id ?? null
 
+  // Blocking a pro you follow must stop "{pro} just posted a new look" too — it
+  // names them and it pushes, and the look itself is already filtered out of
+  // your feed, so the tap would land on nothing. Loaded ONCE for the whole
+  // fan-out (the list helper, not the per-pair one) because this is a batch:
+  // one query for N followers instead of N.
+  const blockedUserIds = new Set(
+    await loadBlockedUserIds(db, { userId: look.professional.userId }),
+  )
+
   // Resolve the pro's PUBLIC display name once for the whole fan-out.
   const proName = pickProfessionalPublicDisplayName(look.professional)
 
   let notifiedCount = 0
   let skippedSelfCount = 0
+  let skippedBlockedCount = 0
 
   for (const follower of followers) {
     if (proOwnClientId && follower.clientId === proOwnClientId) {
       skippedSelfCount += 1
+      continue
+    }
+
+    const followerUserId = follower.client?.userId ?? null
+    if (followerUserId && blockedUserIds.has(followerUserId)) {
+      skippedBlockedCount += 1
       continue
     }
 
@@ -211,6 +242,7 @@ export async function processFanOutNewLookNotifications(
     lookPostId,
     notifiedCount,
     skippedSelfCount,
+    skippedBlockedCount,
     skippedReason: null,
   }
 }

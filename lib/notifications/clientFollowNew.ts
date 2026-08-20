@@ -4,6 +4,7 @@ import {
   createClientNotification,
   type CreateClientNotificationArgs,
 } from './clientNotifications'
+import { isBlockedNotificationParty } from './social/blockedNotificationParty'
 import { resolveLookActorPublicName } from './social/resolveActorPublicName'
 
 export type ClientFollowNotificationData = {
@@ -40,12 +41,29 @@ export function buildClientFollowNotificationDedupeKey(
  * client's inbox. Name-free by design (matches LOOK_FOLLOWER_NEW): the follower
  * is captured by id only, and the activity feed resolves their public handle at
  * render time — strangers are never shown legal names.
+ *
+ * Returns `null` when either party has blocked the other — no row, no push.
+ * Callers discard the result; the widened type exists so "suppressed" is
+ * distinguishable from "created" in tests.
  */
 export async function createClientFollowNotification(
   args: CreateClientFollowNotificationArgs,
 ) {
   const followedClientId = normRequired(args.followedClientId, 'followedClientId')
   const followerClientId = normRequired(args.followerClientId, 'followerClientId')
+
+  // A blocked person following you must not reach your inbox or your phone.
+  // BOTH parties are client profile ids here, so each is resolved to its User
+  // before the pair is checked — a block is keyed on User, never on a profile.
+  if (
+    await isBlockedNotificationParty({
+      actor: { kind: 'client', clientId: followerClientId },
+      recipient: { kind: 'client', clientId: followedClientId },
+      db: args.tx,
+    })
+  ) {
+    return null
+  }
 
   const data: ClientFollowNotificationData = { followerClientId }
 

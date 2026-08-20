@@ -9,6 +9,7 @@ import {
   type LookNotificationRecipient,
   type LookPartyIdentity,
 } from './lookParty'
+import { isBlockedNotificationParty } from './social/blockedNotificationParty'
 import { resolveLookActorPublicName } from './social/resolveActorPublicName'
 
 /**
@@ -193,11 +194,26 @@ export async function notifyLookCommentCreated(
     tx: args.tx,
   }
 
+  // The commenter, for the block guard. Each recipient is checked against them
+  // separately: a reply can reach a parent author you have not blocked while the
+  // look's author has blocked you, and vice versa.
+  const actorParty = { kind: 'user' as const, userId: args.actor.userId }
+
   let parentNotifiedIsLookAuthor = false
 
   if (args.parent && args.parent.userId !== args.actor.userId) {
     const parentRecipient = toLookNotificationRecipient(args.parent)
-    if (parentRecipient) {
+    const parentBlocked =
+      parentRecipient !== null &&
+      (await isBlockedNotificationParty({
+        actor: actorParty,
+        // The parent identity already carries its User id, so this needs no
+        // profile lookup — unlike the look author, who is only an inbox id.
+        recipient: { kind: 'user', userId: args.parent.userId },
+        db: args.tx,
+      }))
+
+    if (parentRecipient && !parentBlocked) {
       await createLookCommentRepliedNotification({
         ...shared,
         recipient: parentRecipient,
@@ -209,9 +225,23 @@ export async function notifyLookCommentCreated(
   const actorIsLookAuthor = isLookAuthorIdentity(args.actor, args.look)
 
   if (!actorIsLookAuthor && !parentNotifiedIsLookAuthor) {
-    await createLookCommentedNotification({
-      ...shared,
-      recipient: lookAuthorRecipient(args.look),
+    // ⚠️ Reachable when the parent author IS the look author and the reply was
+    // suppressed above: `parentNotifiedIsLookAuthor` stays false, so the
+    // one-action-one-notification skip does not fire. That is safe only because
+    // this second guard resolves to the SAME pair of users and suppresses it
+    // too — the block is not re-checked here as a formality.
+    const lookRecipient = lookAuthorRecipient(args.look)
+    const lookAuthorBlocked = await isBlockedNotificationParty({
+      actor: actorParty,
+      recipient: lookRecipient,
+      db: args.tx,
     })
+
+    if (!lookAuthorBlocked) {
+      await createLookCommentedNotification({
+        ...shared,
+        recipient: lookRecipient,
+      })
+    }
   }
 }
