@@ -128,6 +128,25 @@ export function normalizePlanKey(key: string | null | undefined): PlanKey {
 }
 
 /**
+ * Whether a value is one of the four plan keys — WITHOUT collapsing an unknown
+ * one to `free`, which is the whole difference from `normalizePlanKey`.
+ *
+ * 🔴 It exists because a caller that needs "is this a plan key I recognise?"
+ * must be able to say NO and fall through to another source. The Stripe webhook
+ * is exactly that caller: it prefers `subscription.metadata.planKey` and falls
+ * back to looking the price id up in the plan catalog. It used to hand-write the
+ * list as `'pro' | 'studio' | 'free'` and **`premium` was missing**, so a
+ * Premium subscriber's own metadata was ignored and the fallback became
+ * load-bearing. Derived from PLAN_ENTITLEMENTS so the list cannot drift again.
+ */
+export function isPlanKey(value: unknown): value is PlanKey {
+  return (
+    typeof value === 'string' &&
+    Object.prototype.hasOwnProperty.call(PLAN_ENTITLEMENTS, value)
+  )
+}
+
+/**
  * Plan keys whose ENTITLED holders carry this entitlement — for call sites that
  * must express the entitlement check in SQL (e.g. the search index priority
  * boost). Keeps the matrix here as the single source of truth.
