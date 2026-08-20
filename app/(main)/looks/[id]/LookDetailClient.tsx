@@ -28,6 +28,10 @@ import { resolveFocalPoint } from '@/lib/media/focalPoint'
 
 import CommentsDrawer from '../_components/CommentsDrawer'
 import RightActionRail from '../_components/RightActionRail'
+import {
+  reportLookPost,
+  type LookReportResult,
+} from '../_components/reportLookPost'
 import { useProFollow } from '../_components/useProFollow'
 import { trackLookView } from '../_lib/viewTracker'
 
@@ -102,6 +106,14 @@ export default function LookDetailClient({
     },
     [item.id, router],
   )
+
+  // Same contract as the feed's: the shared helper owns the request, this owns
+  // the guest redirect, and the rail owns the idle/pending/done label.
+  const reportLook = useCallback(async (): Promise<LookReportResult> => {
+    const result = await reportLookPost(item.id)
+    if (result === 'auth') redirectToLogin('report')
+    return result
+  }, [item.id, redirectToLogin])
 
   const {
     following,
@@ -414,6 +426,7 @@ export default function LookDetailClient({
             onToggleLike={() => void toggleLike()}
             onOpenComments={() => setCommentsOpen(true)}
             onShare={() => void shareLook()}
+            onReport={reportLook}
             onSaveStateChange={(state) => {
               setItem((prev) => ({
                 ...prev,

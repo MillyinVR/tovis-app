@@ -11,6 +11,7 @@ import LooksTopBar from './LooksTopBar'
 import LookSlide from './LookSlide'
 import CommentsDrawer from './CommentsDrawer'
 import RightActionRail from './RightActionRail'
+import { reportLookPost, type LookReportResult } from './reportLookPost'
 import EmptyState from '@/app/_components/boundaries/EmptyState'
 import { safeJson } from '@/lib/http'
 import { loginHrefFromHere } from '@/lib/clientNavigation'
@@ -760,6 +761,19 @@ export default function LooksFeed() {
     [redirectToLogin],
   )
 
+  // Unlike hide, a report does NOT remove the look from the feed: the reporter
+  // is telling us about it, not asking to stop seeing it (that is what "Not for
+  // me" beside it is for). The rail owns the idle/pending/done label; this only
+  // owns the request and the guest redirect.
+  const reportLook = useCallback(
+    async (lookPostId: string): Promise<LookReportResult> => {
+      const result = await reportLookPost(lookPostId)
+      if (result === 'auth') redirectToLogin('report')
+      return result
+    },
+    [redirectToLogin],
+  )
+
   const likeOnly = useCallback(
     (lookPostId: string) => {
       const item = items.find((value) => value.id === lookPostId)
@@ -943,6 +957,7 @@ export default function LooksFeed() {
                 onOpenComments={() => setOpenCommentsFor(item.id)}
                 onShare={() => void shareLook(item)}
                 onHide={() => void hideLook(item.id)}
+                onReport={() => reportLook(item.id)}
                 onSaveStateChange={(state) =>
                   setItems((prev) =>
                     prev.map((feedItem) =>

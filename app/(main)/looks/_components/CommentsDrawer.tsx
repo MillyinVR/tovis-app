@@ -11,6 +11,7 @@ import { initialsForName } from '@/lib/initials'
 import { formatRelativeTimeCompact } from '@/lib/time/relativeTime'
 import { zClass } from '@/lib/zIndex'
 import { useLookComments } from './useLookComments'
+import { REPORT_LABEL, type ReportState } from './reportState'
 import type { UiComment } from './lookTypes'
 
 const LIKED_COLOR = 'rgb(var(--color-ember))'
@@ -65,9 +66,7 @@ function CommentRow({
   onDelete: (comment: UiComment) => void
   onReport: (comment: UiComment) => Promise<'ok' | 'auth' | 'error'>
 }) {
-  const [reportState, setReportState] = useState<'idle' | 'pending' | 'done'>(
-    'idle',
-  )
+  const [reportState, setReportState] = useState<ReportState>('idle')
 
   async function handleReport() {
     if (reportState !== 'idle') return
@@ -161,11 +160,7 @@ function CommentRow({
               disabled={reportState !== 'idle'}
               className="disabled:opacity-60 hover:text-textPrimary"
             >
-              {reportState === 'done'
-                ? 'Reported'
-                : reportState === 'pending'
-                  ? 'Reporting…'
-                  : 'Report'}
+              {REPORT_LABEL[reportState]}
             </button>
           )}
         </div>
