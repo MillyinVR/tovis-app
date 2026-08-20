@@ -22,13 +22,21 @@
 //   Tori flips the flag.
 //
 // There is a legitimate argument for gating this one on the entitlement ALONE,
-// ignoring the flag: the flag exists so that turning enforcement on never TAKES
-// AWAY something pros already have, and social export does not exist yet, so there
-// is nothing to take away. The platform mark is also marketing rather than a
-// restriction — a free pro's export is how a salon down the street first hears the
-// name. Flipping to that behaviour is a one-line change here (drop the
-// `enforcementEnabled` short-circuit) plus its test. Tori's call, recorded in
-// tovis-ios docs/design/camera-excellence-plan.md D1.
+// ignoring the flag: the platform mark is marketing rather than a restriction — a
+// free pro's export is how a salon down the street first hears the name. Flipping
+// to that behaviour is a one-line change here (drop the `enforcementEnabled`
+// short-circuit) plus its test. Tori's call, recorded in tovis-ios
+// docs/design/camera-excellence-plan.md D1.
+//
+// 🔴 The OTHER half of that argument has expired — do not repeat it. This comment
+// used to add "and social export does not exist yet, so there is nothing to take
+// away". It exists now: tovis-ios renders it (TovisKit SocialExport/) and ships it
+// on real surfaces — ProSocialExportSheet, ProVideoExportSheet, ProMediaExport —
+// which draw the mark straight from this resolver's boolean as
+// `ExportWatermark.showsPlatformMark`. So flipping ENABLE_MEMBERSHIP_ENFORCEMENT
+// DOES take something away: every free pro's exports start carrying the mark the
+// day it flips. That is an argument for deciding this deliberately, not for
+// assuming it is free.
 
 import { membershipEnforcementEnabled } from '@/lib/membership/enforcement'
 import type { Entitlement } from '@/lib/pro/entitlements'
