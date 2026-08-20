@@ -30,6 +30,7 @@ import {
   BookingStatus,
   BoardVisibility,
   ClientAddressKind,
+  ClientChartShareStatus,
   ClientClaimStatus,
   LastMinuteOfferType,
   LastMinuteRecipientStatus,
@@ -40,6 +41,7 @@ import {
   MediaPhase,
   MediaType,
   MediaVisibility,
+  MessageThreadContextType,
   ModerationStatus,
   NotificationEventKey,
   OpeningStatus,
@@ -1227,18 +1229,38 @@ async function clean(): Promise<void> {
   await prisma.handleRegistration.deleteMany({
     where: { handleNormalized: { in: [normalizeHandle(CREATOR.handle)] } },
   })
+  // Chart shares cascade from BOTH the client and the pro, so `--clean` would
+  // take them anyway — removed explicitly for the same reason as proFollow
+  // above, and keyed on the demo client/pro rather than the id prefix because a
+  // pro can raise a REQUESTED row from the app while the fixture is being
+  // driven, and that row is not one this script named.
+  await prisma.clientChartShare.deleteMany({
+    where: {
+      OR: [{ clientId: idPrefix }, { professionalId: idPrefix }],
+    },
+  })
   // 🔴 Threads the APP created against demo rows, which this script did not
   // write and so cannot match by id prefix. `MessageThread.clientId` is a
   // required relation (RESTRICT), so a single thread opened while driving the
   // fixture — e.g. the client home's "Message" button — permanently blocks
   // `--clean` from removing the client. Keyed on the demo client/pro instead of
   // the row's own id for exactly that reason.
-  // Messages + participants cascade from the thread.
-  await prisma.messageThread.deleteMany({
-    where: {
-      OR: [{ clientId: idPrefix }, { professionalId: idPrefix }],
-    },
+  // 🔴 Only PARTICIPANTS cascade from the thread. `MessageThreadParticipant`
+  // declares `onDelete: Cascade`; `Message`, `MessageAttachment` and `Quote` do
+  // NOT, so their required relations RESTRICT and deleting a thread that holds
+  // any of them fails with `Message_threadId_fkey` (P2003). This comment used to
+  // claim messages cascaded, and it was never wrong in practice for one reason:
+  // no thread in the dev DB had ever HELD a message. Seeding conversations made
+  // the latent bug reachable on the very first `--clean`.
+  const demoThreads = {
+    OR: [{ clientId: idPrefix }, { professionalId: idPrefix }],
+  }
+  await prisma.messageAttachment.deleteMany({
+    where: { message: { thread: demoThreads } },
   })
+  await prisma.message.deleteMany({ where: { thread: demoThreads } })
+  await prisma.quote.deleteMany({ where: { thread: demoThreads } })
+  await prisma.messageThread.deleteMany({ where: demoThreads })
   // Before the client profile (cascade would take it, but the bookings above
   // RESTRICT-reference it, so order is load-bearing either way).
   await prisma.clientAddress.deleteMany({ where: { id: idPrefix } })
@@ -3160,6 +3182,141 @@ async function main(): Promise<void> {
       createdAt: new Date(NOW.getTime() - (index + 1) * 60 * 60 * 1000),
     })),
   })
+
+  // ── messages + chart sharing ───────────────────────────────────────────────
+  //
+  // The dev DB held ZERO `MessageThread` rows and ZERO `ClientChartShare` rows,
+  // so /messages, every thread, and the chart-sharing settings screen could only
+  // ever be looked at EMPTY — on web and on iOS alike. That is the same blind
+  // spot as the empty activity feed above: an empty state is indistinguishable
+  // in a screenshot from a screen nobody built.
+  //
+  // The thread header's chart-access row reads a share row for the pro the
+  // client is talking to, so without one it is unreachable BY CONSTRUCTION —
+  // seeding the threads without the shares would have proved nothing.
+  //
+  // 🔴 All four statuses are seeded, and the two threads deliberately carry
+  // DIFFERENT ones: GRANTED is a quiet fact and REQUESTED is an open ask that
+  // wants the client's attention, and they render differently. A fixture holding
+  // only one renders the other branch nowhere.
+  const CHART_SHARES: { proId: string; status: ClientChartShareStatus }[] = [
+    { proId: proId('noor'), status: ClientChartShareStatus.GRANTED },
+    { proId: proId('sasha'), status: ClientChartShareStatus.REQUESTED },
+    { proId: proId('mara'), status: ClientChartShareStatus.REVOKED },
+    // The extra portfolio pros are created directly and never enter proIdByKey,
+    // so `proId()` cannot resolve them — their ids are the same shape.
+    { proId: `${P}pro-${PORTFOLIO_LAUNCH_PRO.key}`, status: ClientChartShareStatus.DECLINED },
+  ]
+
+  await prisma.clientChartShare.createMany({
+    data: CHART_SHARES.map(({ proId: professionalId, status }, index) => ({
+      id: `${P}chartshare-${professionalId.slice(`${P}pro-`.length)}`,
+      clientId: creator.id,
+      professionalId,
+      status,
+      // A REQUESTED row is the pro asking; the answered ones also carry the
+      // client's reply. GRANTED unprompted keeps `requestedAt` null, which is
+      // the case the settings screen's copy is written for.
+      requestedAt:
+        status === ClientChartShareStatus.GRANTED
+          ? null
+          : new Date(NOW.getTime() - (index + 2) * DAY_MS),
+      respondedAt:
+        status === ClientChartShareStatus.REQUESTED
+          ? null
+          : new Date(NOW.getTime() - (index + 1) * DAY_MS),
+      revokedAt:
+        status === ClientChartShareStatus.REVOKED
+          ? new Date(NOW.getTime() - index * DAY_MS)
+          : null,
+      createdAt: new Date(NOW.getTime() - (index + 3) * DAY_MS),
+    })),
+  })
+
+  // Two conversations. The booking-context one hangs off the visit that already
+  // has the aftercare, which is what a real thread with a pro looks like; the
+  // profile-context one is the "asked about a service" shape and is the thread
+  // whose pro has an OPEN chart request.
+  const THREADS = [
+    {
+      key: 'noor',
+      professionalId: proId('noor'),
+      proUserId: `${P}user-pro-noor`,
+      contextType: MessageThreadContextType.BOOKING,
+      contextId: pastBooking.id,
+      bookingId: pastBooking.id,
+      messages: [
+        { fromPro: false, body: 'Thank you for today — the colour is exactly what I wanted.', hoursAgo: 52 },
+        { fromPro: true, body: 'So glad! Give it 48 hours before you wash, and use the bond builder twice a week.', hoursAgo: 51 },
+        { fromPro: false, body: 'Noted. Should I book the gloss now or wait?', hoursAgo: 50 },
+        { fromPro: true, body: 'Wait until about week six — I put the window in your aftercare.', hoursAgo: 49 },
+      ],
+    },
+    {
+      key: 'sasha',
+      professionalId: proId('sasha'),
+      proUserId: `${P}user-pro-sasha`,
+      contextType: MessageThreadContextType.PRO_PROFILE,
+      contextId: proId('sasha'),
+      bookingId: null,
+      messages: [
+        { fromPro: false, body: 'Hi! Do you have anything for a lash lift in the next two weeks?', hoursAgo: 8 },
+        { fromPro: true, body: 'I do — Thursday afternoon or the Saturday after. Happy to hold one for you.', hoursAgo: 7 },
+      ],
+    },
+  ]
+
+  for (const thread of THREADS) {
+    const lastMessage = thread.messages[thread.messages.length - 1]
+    if (!lastMessage) {
+      // The inbox row's preview and sort key both read the LAST message, so a
+      // message-less thread renders as a blank row that sorts to the bottom.
+      throw new Error(
+        `[seedDemoClientProfile] thread "${thread.key}" has no messages.`,
+      )
+    }
+    const lastMessageAt = new Date(NOW.getTime() - lastMessage.hoursAgo * 60 * 60 * 1000)
+
+    await prisma.messageThread.create({
+      data: {
+        id: `${P}thread-${thread.key}`,
+        clientId: creator.id,
+        professionalId: thread.professionalId,
+        contextType: thread.contextType,
+        contextId: thread.contextId,
+        bookingId: thread.bookingId,
+        lastMessageAt,
+        lastMessagePreview: lastMessage.body,
+        createdAt: new Date(NOW.getTime() - (lastMessage.hoursAgo + 4) * 60 * 60 * 1000),
+        participants: {
+          create: [
+            {
+              id: `${P}threadpart-${thread.key}-client`,
+              userId: `${P}user-client-maya`,
+              role: Role.CLIENT,
+              // The client has read everything; the PRO has not read the last
+              // client message, so the read receipt has something to say.
+              lastReadAt: lastMessageAt,
+            },
+            {
+              id: `${P}threadpart-${thread.key}-pro`,
+              userId: thread.proUserId,
+              role: Role.PRO,
+              lastReadAt: new Date(lastMessageAt.getTime() - 60 * 60 * 1000),
+            },
+          ],
+        },
+        messages: {
+          create: thread.messages.map((message, index) => ({
+            id: `${P}msg-${thread.key}-${String(index).padStart(2, '0')}`,
+            senderUserId: message.fromPro ? thread.proUserId : `${P}user-client-maya`,
+            body: message.body,
+            createdAt: new Date(NOW.getTime() - message.hoursAgo * 60 * 60 * 1000),
+          })),
+        },
+      },
+    })
+  }
 
   // Score the creator tier from the rows just written, using the SAME job the
   // hourly cron runs. Seeding a tier directly would let the fixture disagree
