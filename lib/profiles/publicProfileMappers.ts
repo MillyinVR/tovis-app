@@ -443,10 +443,24 @@ export async function renderPublicProfileCoverUrl(
   return rendered.url ?? rendered.thumbUrl
 }
 
+/**
+ * 🔴 Both trailing arguments are REQUIRED on purpose — neither may be defaulted.
+ *
+ * `dropsPlatformMark` used to default to `true`, from a time when every pro's
+ * exports were unbranded and the mark was cosmetic. It is now a paid perk that
+ * `exportsDropPlatformMark` gates on the entitlement ALONE, independently of
+ * ENABLE_MEMBERSHIP_ENFORCEMENT (see `lib/pro/socialExportMark.ts`, decided
+ * 2026-08-20). A default therefore GRANTS that perk to whoever forgets the
+ * argument, which is exactly the accident the resolver dropped its own flag
+ * parameter to prevent. Callers resolve the entitlement and say so.
+ *
+ * `coverUrl` follows for the same reason in miniature: a silent `null` reads as
+ * "this pro has no cover photo" rather than "the caller didn't ask".
+ */
 export function mapPublicProfileHeaderToDto(
   profile: PublicProfessionalProfileRow,
-  coverUrl: string | null = null,
-  dropsPlatformMark: boolean = true,
+  coverUrl: string | null,
+  dropsPlatformMark: boolean,
 ): PublicProfileHeaderDto {
   const businessName = formatBusinessName(profile.businessName)
   const handle = pickString(profile.handle)

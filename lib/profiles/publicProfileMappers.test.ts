@@ -102,23 +102,35 @@ describe('mapPublicProfileHeaderToDto clientExport', () => {
   it('reads clientExport.enabled from the pro-owned toggle', () => {
     const enabled = mapPublicProfileHeaderToDto(
       makeProfileRow({ clientMediaExportEnabled: true }),
+      null,
+      false,
     )
     const disabled = mapPublicProfileHeaderToDto(
       makeProfileRow({ clientMediaExportEnabled: false }),
+      null,
+      false,
     )
 
     expect(enabled.clientExport.enabled).toBe(true)
     expect(disabled.clientExport.enabled).toBe(false)
   })
 
-  it('threads dropsPlatformMark through from the caller-resolved entitlement, defaulting true', () => {
-    const withDefault = mapPublicProfileHeaderToDto(makeProfileRow())
+  it('threads dropsPlatformMark through from the caller-resolved entitlement', () => {
     const branded = mapPublicProfileHeaderToDto(makeProfileRow(), null, false)
     const unbranded = mapPublicProfileHeaderToDto(makeProfileRow(), null, true)
 
-    expect(withDefault.clientExport.dropsPlatformMark).toBe(true)
     expect(branded.clientExport.dropsPlatformMark).toBe(false)
     expect(unbranded.clientExport.dropsPlatformMark).toBe(true)
+  })
+
+  // The perk is gated on the entitlement alone, so an omitted argument must not
+  // be able to grant it. `@ts-expect-error` IS the assertion: it fails the build
+  // if a default ever comes back, which no runtime expectation could catch.
+  it('has no default for dropsPlatformMark — omitting it is a type error', () => {
+    // @ts-expect-error — dropsPlatformMark is required
+    const omitted = mapPublicProfileHeaderToDto(makeProfileRow(), null)
+
+    expect(omitted.clientExport.dropsPlatformMark).toBeUndefined()
   })
 })
 

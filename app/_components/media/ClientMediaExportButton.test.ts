@@ -32,11 +32,22 @@ describe('parseIdentity', () => {
     expect(parseIdentity(data)?.enabled).toBe(false)
   })
 
-  it('treats a missing dropsPlatformMark as true — the cosmetic mark fails generous', () => {
+  // Was "fails generous" while an unbranded export was everyone's default. It is
+  // a paid perk now, so an absent field must not hand it out.
+  it('treats a missing dropsPlatformMark as false — the paid perk fails CLOSED', () => {
     const data = {
       professional: { header: { clientExport: { enabled: true } } },
     }
-    expect(parseIdentity(data)?.dropsPlatformMark).toBe(true)
+    expect(parseIdentity(data)?.dropsPlatformMark).toBe(false)
+  })
+
+  it('treats a non-boolean dropsPlatformMark as false rather than truthy', () => {
+    const data = {
+      professional: {
+        header: { clientExport: { enabled: true, dropsPlatformMark: 'yes' } },
+      },
+    }
+    expect(parseIdentity(data)?.dropsPlatformMark).toBe(false)
   })
 
   it('returns null for a response missing header.clientExport entirely (older backend)', () => {

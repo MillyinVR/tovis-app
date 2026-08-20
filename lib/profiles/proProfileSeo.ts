@@ -64,7 +64,13 @@ async function loadByWhere(
   ])
 
   return {
-    header: mapPublicProfileHeaderToDto(profileRow),
+    // No cover render and no entitlement lookup: this header feeds
+    // `buildProProfileMetadata` + `buildProProfileJsonLd` only, and neither
+    // reads `coverUrl` or `clientExport`. `false` is the non-granting value for
+    // `dropsPlatformMark` — if a crawler-facing surface ever does start reading
+    // it, it shows the platform mark rather than silently handing a free pro a
+    // paid perk. Resolve the real entitlement here before relying on it.
+    header: mapPublicProfileHeaderToDto(profileRow, null, false),
     reviewCount: reviewStats._count._all,
     averageRating: reviewStats._avg.rating ?? null,
     city: primaryLocation?.city?.trim() || null,
