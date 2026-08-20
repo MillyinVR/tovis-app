@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   createProNotification: vi.fn(),
   createClientNotification: vi.fn(),
   resolveLookActorPublicName: vi.fn(),
+  isBlockedNotificationParty: vi.fn(),
 }))
 
 vi.mock('./proNotifications', () => ({
@@ -18,6 +19,10 @@ vi.mock('./clientNotifications', () => ({
 
 vi.mock('./social/resolveActorPublicName', () => ({
   resolveLookActorPublicName: mocks.resolveLookActorPublicName,
+}))
+
+vi.mock('./social/blockedNotificationParty', () => ({
+  isBlockedNotificationParty: mocks.isBlockedNotificationParty,
 }))
 
 import {
@@ -67,6 +72,8 @@ describe('notifyLookLiked / notifyLookSaved', () => {
     mocks.createClientNotification.mockResolvedValue({ id: 'n2' })
     // Default: no public identity → name-free titles (historical behavior).
     mocks.resolveLookActorPublicName.mockResolvedValue(null)
+    // Default: no block between the two parties.
+    mocks.isBlockedNotificationParty.mockResolvedValue(false)
   })
 
   it('notifies the pro with a singular title on the first like', async () => {
@@ -235,5 +242,91 @@ describe('notifyLookLiked / notifyLookSaved', () => {
         data: expect.objectContaining({ count: 1 }),
       }),
     )
+  })
+})
+
+describe('notifyLookLiked / notifyLookSaved — the block guard', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.createProNotification.mockResolvedValue({ id: 'n1' })
+    mocks.createClientNotification.mockResolvedValue({ id: 'n2' })
+    mocks.resolveLookActorPublicName.mockResolvedValue(null)
+    mocks.isBlockedNotificationParty.mockResolvedValue(false)
+  })
+
+  it('creates NOTHING when the actor and the look author have blocked each other', async () => {
+    mocks.isBlockedNotificationParty.mockResolvedValue(true)
+
+    await notifyLookLiked({
+      lookPostId: 'look_1',
+      look: PRO_LOOK,
+      actor: client('client_2', 'user_2'),
+      count: 1,
+      now: NOW,
+    })
+
+    // No row AND no push: suppressing at creation is the only place that stops
+    // both. Blocking someone must stop them making your phone buzz.
+    expect(mocks.createProNotification).not.toHaveBeenCalled()
+    expect(mocks.createClientNotification).not.toHaveBeenCalled()
+  })
+
+  it('suppresses a save that would land in a CLIENT author inbox too', async () => {
+    mocks.isBlockedNotificationParty.mockResolvedValue(true)
+
+    await notifyLookSaved({
+      lookPostId: 'look_1',
+      look: CLIENT_LOOK,
+      actor: pro('pro_9', 'user_9'),
+      count: 3,
+      now: NOW,
+    })
+
+    // ClientNotification has NO actor column — the actor lives in its data Json
+    // blob — so a read-time filter could not have covered this recipient.
+    expect(mocks.createClientNotification).not.toHaveBeenCalled()
+    expect(mocks.createProNotification).not.toHaveBeenCalled()
+  })
+
+  it('checks the actor against the look AUTHOR, not the look', async () => {
+    await notifyLookLiked({
+      lookPostId: 'look_1',
+      look: CLIENT_LOOK,
+      actor: client('client_2', 'user_2'),
+      count: 1,
+      now: NOW,
+    })
+
+    expect(mocks.isBlockedNotificationParty).toHaveBeenCalledWith({
+      actor: { kind: 'user', userId: 'user_2' },
+      recipient: { kind: 'client', clientId: 'client_author' },
+      db: undefined,
+    })
+  })
+
+  it('never asks about a self-engagement — the self guard returns first', async () => {
+    await notifyLookLiked({
+      lookPostId: 'look_1',
+      look: PRO_LOOK,
+      actor: pro('pro_1', 'user_1'),
+      count: 1,
+      now: NOW,
+    })
+
+    expect(mocks.isBlockedNotificationParty).not.toHaveBeenCalled()
+  })
+
+  it('does not resolve a name or build a payload once suppressed', async () => {
+    mocks.isBlockedNotificationParty.mockResolvedValue(true)
+
+    await notifyLookSaved({
+      lookPostId: 'look_1',
+      look: PRO_LOOK,
+      actor: client('client_2', 'user_2'),
+      count: 1,
+      now: NOW,
+    })
+
+    expect(mocks.resolveLookActorPublicName).not.toHaveBeenCalled()
   })
 })

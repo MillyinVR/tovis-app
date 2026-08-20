@@ -4,6 +4,7 @@ import {
   createProNotification,
   type ProNotificationCreateResult,
 } from './proNotifications'
+import { isBlockedNotificationParty } from './social/blockedNotificationParty'
 import { resolveUserActorPublicName } from './social/resolveActorPublicName'
 
 export type LookFollowerNewNotificationData = {
@@ -34,11 +35,28 @@ export function buildLookFollowerNewProNotificationDedupeKey(
   return `look-follower:${normRequired(followerUserId, 'followerUserId')}`
 }
 
+/**
+ * Returns `null` when the follow is between two people one of whom has blocked
+ * the other — no inbox row and no push. Callers discard the result; the widened
+ * type exists so "suppressed" is distinguishable from "created" in tests.
+ */
 export async function createLookFollowerNewProNotification(
   args: CreateLookFollowerNewProNotificationArgs,
-): Promise<ProNotificationCreateResult> {
+): Promise<ProNotificationCreateResult | null> {
   const professionalId = normRequired(args.professionalId, 'professionalId')
   const followerUserId = normRequired(args.followerUserId, 'followerUserId')
+
+  // A blocked person following you must not reach your inbox or your phone.
+  // Checked at CREATION so the push is suppressed too, not just the row.
+  if (
+    await isBlockedNotificationParty({
+      actor: { kind: 'user', userId: followerUserId },
+      recipient: { kind: 'pro', professionalId },
+      db: args.tx,
+    })
+  ) {
+    return null
+  }
 
   const data: LookFollowerNewNotificationData = {
     followerUserId,

@@ -5,6 +5,7 @@ import {
   BLOCKED_USER_IDS_CAP,
   buildLookCommentBlockFilter,
   buildLookPostBlockFilter,
+  isUserPairBlocked,
   loadBlockedUserIds,
 } from '@/lib/blocks/userBlocks'
 
@@ -114,5 +115,79 @@ describe('buildLookCommentBlockFilter', () => {
     expect(buildLookCommentBlockFilter(['a', 'b'])).toEqual({
       userId: { notIn: ['a', 'b'] },
     })
+  })
+})
+
+describe('isUserPairBlocked', () => {
+  function pairDb(row: { id: string } | null) {
+    return { userBlock: { findFirst: vi.fn().mockResolvedValue(row) } }
+  }
+
+  it('probes BOTH ordered pairs, so a block silences the blocked party too', async () => {
+    const db = pairDb(null)
+
+    await expect(
+      isUserPairBlocked(db, { userIdA: ' me ', userIdB: ' them ' }),
+    ).resolves.toBe(false)
+
+    // Both branches match @@unique([blockerUserId, blockedUserId]) — two index
+    // probes, not a scan — and the ids are trimmed before they reach the query.
+    expect(db.userBlock.findFirst).toHaveBeenCalledWith({
+      where: {
+        OR: [
+          { blockerUserId: 'me', blockedUserId: 'them' },
+          { blockerUserId: 'them', blockedUserId: 'me' },
+        ],
+      },
+      select: { id: true },
+    })
+  })
+
+  it('is true when a row exists in either direction', async () => {
+    await expect(
+      isUserPairBlocked(pairDb({ id: 'block_1' }), {
+        userIdA: 'me',
+        userIdB: 'them',
+      }),
+    ).resolves.toBe(true)
+  })
+
+  it('answers false without querying when either id is missing', async () => {
+    const db = pairDb({ id: 'block_1' })
+
+    await expect(
+      isUserPairBlocked(db, { userIdA: '', userIdB: 'them' }),
+    ).resolves.toBe(false)
+    await expect(
+      isUserPairBlocked(db, { userIdA: 'me', userIdB: '   ' }),
+    ).resolves.toBe(false)
+
+    expect(db.userBlock.findFirst).not.toHaveBeenCalled()
+  })
+
+  it('never reports a person as blocked from themselves', async () => {
+    // The model's own CHECK forbids a self-block; answering true here would let
+    // a self-pair suppress a notification that has nothing to do with a block.
+    const db = pairDb({ id: 'block_1' })
+
+    await expect(
+      isUserPairBlocked(db, { userIdA: 'me', userIdB: ' me ' }),
+    ).resolves.toBe(false)
+    expect(db.userBlock.findFirst).not.toHaveBeenCalled()
+  })
+
+  it('does NOT load the capped list — a block past the cap must still count', async () => {
+    // loadBlockedUserIds truncates at BLOCKED_USER_IDS_CAP; reusing it for a
+    // per-notification check would answer "not blocked" for a prolific blocker.
+    const db = {
+      userBlock: {
+        findFirst: vi.fn().mockResolvedValue({ id: 'block_1' }),
+        findMany: vi.fn(),
+      },
+    }
+
+    await isUserPairBlocked(db, { userIdA: 'me', userIdB: 'them' })
+
+    expect(db.userBlock.findMany).not.toHaveBeenCalled()
   })
 })

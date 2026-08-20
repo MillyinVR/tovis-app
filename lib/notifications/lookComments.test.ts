@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   createProNotification: vi.fn(),
   createClientNotification: vi.fn(),
   resolveLookActorPublicName: vi.fn(),
+  isBlockedNotificationParty: vi.fn(),
 }))
 
 vi.mock('./proNotifications', () => ({
@@ -18,6 +19,10 @@ vi.mock('./clientNotifications', () => ({
 
 vi.mock('./social/resolveActorPublicName', () => ({
   resolveLookActorPublicName: mocks.resolveLookActorPublicName,
+}))
+
+vi.mock('./social/blockedNotificationParty', () => ({
+  isBlockedNotificationParty: mocks.isBlockedNotificationParty,
 }))
 
 import { notifyLookCommentCreated } from './lookComments'
@@ -48,6 +53,8 @@ describe('notifyLookCommentCreated', () => {
     mocks.createClientNotification.mockResolvedValue({ id: 'n2' })
     // Default: no public identity → name-free titles (historical behavior).
     mocks.resolveLookActorPublicName.mockResolvedValue(null)
+    // Default: no block between the two parties.
+    mocks.isBlockedNotificationParty.mockResolvedValue(false)
   })
 
   it('notifies the pro on a top-level comment from a stranger', async () => {
@@ -217,5 +224,97 @@ describe('notifyLookCommentCreated', () => {
     }
     expect(call.body.length).toBeLessThanOrEqual(140)
     expect(call.body.endsWith('…')).toBe(true)
+  })
+})
+
+describe('notifyLookCommentCreated — the block guard', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.createProNotification.mockResolvedValue({ id: 'n1' })
+    mocks.createClientNotification.mockResolvedValue({ id: 'n2' })
+    mocks.resolveLookActorPublicName.mockResolvedValue(null)
+    mocks.isBlockedNotificationParty.mockResolvedValue(false)
+  })
+
+  it('creates NOTHING when the commenter and the look author have blocked each other', async () => {
+    mocks.isBlockedNotificationParty.mockResolvedValue(true)
+
+    await notifyLookCommentCreated({
+      lookPostId: 'look_1',
+      look: PRO_LOOK,
+      comment: COMMENT,
+      parent: null,
+      actor: client('client_2', 'user_2'),
+    })
+
+    expect(mocks.createProNotification).not.toHaveBeenCalled()
+    expect(mocks.createClientNotification).not.toHaveBeenCalled()
+  })
+
+  it('checks the LOOK AUTHOR by inbox id and the PARENT by user id', async () => {
+    await notifyLookCommentCreated({
+      lookPostId: 'look_1',
+      look: PRO_LOOK,
+      comment: COMMENT,
+      parent: client('client_3', 'user_3'),
+      actor: client('client_2', 'user_2'),
+    })
+
+    // The parent identity already carries a User id; the look author is only an
+    // inbox id and has to be resolved. Both must be checked, not one.
+    expect(mocks.isBlockedNotificationParty).toHaveBeenCalledWith({
+      actor: { kind: 'user', userId: 'user_2' },
+      recipient: { kind: 'user', userId: 'user_3' },
+      db: undefined,
+    })
+    expect(mocks.isBlockedNotificationParty).toHaveBeenCalledWith({
+      actor: { kind: 'user', userId: 'user_2' },
+      recipient: { kind: 'pro', professionalId: 'pro_1' },
+      db: undefined,
+    })
+  })
+
+  it('suppresses only the blocked half — a reply to a blocked parent still notifies the look author', async () => {
+    mocks.isBlockedNotificationParty.mockImplementation(
+      async (args: { recipient: { kind: string; userId?: string } }) =>
+        args.recipient.kind === 'user' && args.recipient.userId === 'user_3',
+    )
+
+    await notifyLookCommentCreated({
+      lookPostId: 'look_1',
+      look: PRO_LOOK,
+      comment: COMMENT,
+      parent: client('client_3', 'user_3'),
+      actor: client('client_2', 'user_2'),
+    })
+
+    // One notification, and it is the LOOK_COMMENTED one to the pro author.
+    expect(mocks.createProNotification).toHaveBeenCalledTimes(1)
+    expect(mocks.createProNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventKey: NotificationEventKey.LOOK_COMMENTED,
+        professionalId: 'pro_1',
+      }),
+    )
+    expect(mocks.createClientNotification).not.toHaveBeenCalled()
+  })
+
+  it('does not leak a LOOK_COMMENTED row when the blocked parent IS the look author', async () => {
+    // The trap: suppressing the reply leaves parentNotifiedIsLookAuthor false,
+    // so the one-action-one-notification skip does not fire and the look-author
+    // branch is entered. It is safe ONLY because the second guard covers the
+    // same pair of users — remove that guard and this test catches it.
+    mocks.isBlockedNotificationParty.mockResolvedValue(true)
+
+    await notifyLookCommentCreated({
+      lookPostId: 'look_1',
+      look: PRO_LOOK,
+      comment: COMMENT,
+      parent: pro('pro_1', 'user_1'),
+      actor: client('client_2', 'user_2'),
+    })
+
+    expect(mocks.createProNotification).not.toHaveBeenCalled()
+    expect(mocks.createClientNotification).not.toHaveBeenCalled()
   })
 })
