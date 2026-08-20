@@ -8,7 +8,7 @@ import { Prisma, SubscriptionStatus } from '@prisma/client'
 
 import { applyCustomHandleBackfill } from '@/lib/membership/customHandleBackfill'
 import { configuredPriceIds } from '@/lib/membership/plans'
-import { resolveEffectiveEntitlements } from '@/lib/pro/entitlements'
+import { isPlanKey, resolveEffectiveEntitlements } from '@/lib/pro/entitlements'
 
 export type StripeSubscriptionLike = {
   id: string
@@ -52,10 +52,20 @@ function unixToDate(seconds: number | null | undefined): Date | null {
     : null
 }
 
-/** Resolve the plan key: prefer metadata, else infer from the subscription's price. */
-function resolvePlanKey(sub: StripeSubscriptionLike): string | null {
+/**
+ * Resolve the plan key: prefer metadata, else infer from the subscription's price.
+ *
+ * 🔴 The metadata check goes through `isPlanKey`, not a hand-written list. It was
+ * `'pro' | 'studio' | 'free'` — **`premium` was missing** — so a Premium
+ * subscriber's own `metadata.planKey` was ignored and the price-id fallback
+ * silently became the only thing keeping them off the free tier. If
+ * `STRIPE_PREMIUM_*_PRICE_ID` were unset or rotated when the webhook fired, the
+ * `?? existing.planKey` below would have recorded a paying Premium pro as
+ * `free` (the column's schema default), with no error anywhere.
+ */
+export function resolvePlanKey(sub: StripeSubscriptionLike): string | null {
   const metaPlan = sub.metadata?.planKey
-  if (metaPlan === 'pro' || metaPlan === 'studio' || metaPlan === 'free') {
+  if (isPlanKey(metaPlan)) {
     return metaPlan
   }
 
