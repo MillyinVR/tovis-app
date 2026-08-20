@@ -27,6 +27,9 @@ const mocks = vi.hoisted(() => {
     lookHide: {
       findMany: vi.fn(),
     },
+    userBlock: {
+      findMany: vi.fn(),
+    },
     boardItem: {
       findMany: vi.fn(),
     },
@@ -234,6 +237,7 @@ describe('app/api/v1/looks/route.ts', () => {
     mocks.prisma.lookPost.findMany.mockResolvedValue([])
     mocks.prisma.lookLike.findMany.mockResolvedValue([])
     mocks.prisma.lookHide.findMany.mockResolvedValue([])
+    mocks.prisma.userBlock.findMany.mockResolvedValue([])
     mocks.prisma.boardItem.findMany.mockResolvedValue([])
     mocks.prisma.proFollow.findMany.mockResolvedValue([])
     mocks.prisma.clientFollow.findMany.mockResolvedValue([])
@@ -284,6 +288,7 @@ describe('app/api/v1/looks/route.ts', () => {
       tagSlug: null,
       followingProfessionalIds: [],
       followingClientIds: [],
+      blockedUserIds: [],
     })
 
     expect(mocks.buildLooksFeedCursorWhere).toHaveBeenCalledWith({
@@ -459,6 +464,7 @@ describe('app/api/v1/looks/route.ts', () => {
       tagSlug: null,
       followingProfessionalIds: ['pro_1', 'pro_2'],
       followingClientIds: ['client_2'],
+      blockedUserIds: [],
     })
 
     expect(mocks.buildLooksFeedCursorWhere).toHaveBeenCalledWith({
@@ -528,6 +534,7 @@ describe('app/api/v1/looks/route.ts', () => {
       tagSlug: null,
       followingProfessionalIds: [],
       followingClientIds: [],
+      blockedUserIds: [],
     })
 
     expect(mocks.buildLooksFeedOrderBy).toHaveBeenCalledWith({
@@ -593,6 +600,7 @@ describe('app/api/v1/looks/route.ts', () => {
       tagSlug: null,
       followingProfessionalIds: [],
       followingClientIds: [],
+      blockedUserIds: [],
     })
 
     expect(mocks.buildLooksFeedCursorWhere).toHaveBeenCalledWith({
@@ -703,6 +711,40 @@ describe('app/api/v1/looks/route.ts', () => {
     )
   })
 
+  it('passes BOTH directions of the viewer\'s blocks into the shared feed where', async () => {
+    mocks.getCurrentUser.mockResolvedValue({
+      id: 'user_1',
+      clientProfile: { id: 'client_1' },
+    })
+    // One block the viewer made, one they received. Both must reach the query:
+    // enforcing only the outgoing direction would let someone who blocked this
+    // viewer keep appearing in their feed.
+    mocks.prisma.userBlock.findMany.mockResolvedValue([
+      { blockerUserId: 'user_1', blockedUserId: 'blocked_by_me' },
+      { blockerUserId: 'blocked_me', blockedUserId: 'user_1' },
+    ])
+
+    const res = await GET(makeRequest('/api/v1/looks'))
+
+    expect(res.status).toBe(200)
+    const call = mocks.buildLooksFeedWhere.mock.calls[0]?.[0]
+    expect(new Set(call.blockedUserIds)).toEqual(
+      new Set(['blocked_by_me', 'blocked_me']),
+    )
+    // The viewer is one end of every row and must never filter themselves out.
+    expect(call.blockedUserIds).not.toContain('user_1')
+  })
+
+  it('does not query blocks for a signed-out viewer', async () => {
+    mocks.getCurrentUser.mockResolvedValue(null)
+
+    const res = await GET(makeRequest('/api/v1/looks'))
+
+    expect(res.status).toBe(200)
+    expect(mocks.prisma.userBlock.findMany).not.toHaveBeenCalled()
+    expect(mocks.buildLooksFeedWhere.mock.calls[0]?.[0].blockedUserIds).toEqual([])
+  })
+
   it('filters by tag through the shared feed where, slugified like the tag page', async () => {
     const res = await GET(makeRequest('/api/v1/looks?tag=%23Money-Piece'))
 
@@ -719,6 +761,7 @@ describe('app/api/v1/looks/route.ts', () => {
       tagSlug: 'moneypiece',
       followingProfessionalIds: [],
       followingClientIds: [],
+      blockedUserIds: [],
     })
     expect(mocks.prisma.lookPost.findMany).toHaveBeenCalled()
   })

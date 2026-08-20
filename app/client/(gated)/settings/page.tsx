@@ -27,6 +27,7 @@ import {
   Sparkles,
   Trash2,
   UserCircle,
+  UserX,
 } from 'lucide-react'
 
 import ThemeToggle from '@/lib/brand/ThemeToggle'
@@ -107,6 +108,17 @@ export default async function ClientSettingsPage() {
             title="Notifications"
             subtitle="Channels & quiet hours"
             legacyAnchorId="notifications"
+          />
+          {/*
+            App Store guideline 1.2 requires a UGC app to let a user block
+            abusive users. The block is made from a person's public profile;
+            this row is where it can be seen and lifted.
+          */}
+          <SettingsRow
+            href="/client/settings/blocked"
+            icon={UserX}
+            title="Blocked accounts"
+            subtitle="People you’ve blocked from seeing you"
           />
           {/*
             App Store guideline 5.1.1(v) requires account deletion to be

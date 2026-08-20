@@ -7,6 +7,7 @@
 
 import { Prisma } from '@prisma/client'
 
+import { loadBlockedUserIds } from '@/lib/blocks/userBlocks'
 import { buildLooksFeedWhere } from '@/lib/looks/feed'
 import { slugifyLookTag } from '@/lib/looks/tags'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
@@ -46,6 +47,13 @@ export async function loadLookTagPage(args: {
   slug: string
   tenant: TenantContext
   limit?: number
+  /**
+   * The signed-in viewer, so the tag browse honours their person blocks
+   * (guideline 1.2) like every other look-listing surface. Omit for a
+   * signed-out viewer or a viewer-less caller (metadata, sitemap) — a tag page
+   * is public, and without a viewer there is nothing to filter.
+   */
+  viewerUserId?: string | null
 }): Promise<LookTagPageData | null> {
   const slug = slugifyLookTag(args.slug)
   if (slug.length < 2) return null
@@ -56,8 +64,17 @@ export async function loadLookTagPage(args: {
   })
   if (!tag || tag.bannedAt !== null) return null
 
+  const blockedUserIds = args.viewerUserId
+    ? await loadBlockedUserIds(prisma, { userId: args.viewerUserId })
+    : []
+
   const rows = await prisma.lookPost.findMany({
-    where: buildLooksFeedWhere({ kind: 'ALL', tenant: args.tenant, tagSlug: slug }),
+    where: buildLooksFeedWhere({
+      kind: 'ALL',
+      tenant: args.tenant,
+      tagSlug: slug,
+      blockedUserIds,
+    }),
     select: {
       id: true,
       caption: true,

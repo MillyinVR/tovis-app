@@ -7,6 +7,12 @@ import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 import { getCurrentUser } from '@/lib/currentUser'
 import { buildLoginHref } from '@/lib/profiles/publicProfileFormatting'
+import {
+  loadViewerBlockId,
+  resolveBlockTargetByHandle,
+} from '@/lib/blocks/blockTargets'
+import { prisma } from '@/lib/prisma'
+
 import { loadPublicClientProfile } from './_data/loadPublicClientProfile'
 import { type FollowMode } from './_components/followState'
 import PublicProfileView from './_components/PublicProfileView'
@@ -60,6 +66,26 @@ export default async function PublicClientProfilePage({
   const data = await loadPublicClientProfile(handle, { viewerClientId })
   if (!data) notFound()
 
+  // Guideline 1.2 — every signed-in user can block, not just a client. A pro
+  // sees client-authored looks and comments in the same feeds.
+  //
+  // Resolved HERE rather than inside loadPublicClientProfile because that
+  // loader's return type is re-exported from lib/dto/index.ts and is therefore
+  // part of the iOS wire contract — see loadViewerBlockId.
+  const blockTarget = viewer ? await resolveBlockTargetByHandle(prisma, handle) : null
+  const viewerBlockId =
+    viewer && blockTarget
+      ? await loadViewerBlockId(prisma, {
+          viewerUserId: viewer.id,
+          blockedUserId: blockTarget.userId,
+        })
+      : null
+  // A signed-in viewer who is not the person themselves can block them.
+  const blockState =
+    viewer && blockTarget && blockTarget.userId !== viewer.id
+      ? { blockId: viewerBlockId }
+      : null
+
   // Only signed-in clients can follow. The owner gets no control; a signed-in
   // non-client (pro/admin) sees nothing; a guest gets a CTA that routes to login.
   const followMode: FollowMode = data.viewer.isOwn
@@ -80,6 +106,7 @@ export default async function PublicClientProfilePage({
           data={data}
           followMode={followMode}
           loginHref={buildLoginHref(`/u/${data.handle}`)}
+          block={blockState}
         />
       </div>
     </main>

@@ -1530,6 +1530,9 @@ model User {
   lookPostReports    LookPostReport[]
   lookCommentReports LookCommentReport[]
 
+  blocksMade     UserBlock[] @relation("UserBlocksMade")
+  blocksReceived UserBlock[] @relation("UserBlocksReceived")
+
   reviewedLookPosts          LookPost[]                  @relation("LookPostReviewedByUser")
   reviewedLookComments       LookComment[]               @relation("LookCommentReviewedByUser")
   viralServiceRequestReports ViralServiceRequestReport[]
@@ -6881,6 +6884,39 @@ model HandleRegistration {
 
   professional  ProfessionalProfile? @relation(fields: [professionalId], references: [id], onDelete: Cascade)
   clientProfile ClientProfile?       @relation(fields: [clientProfileId], references: [id], onDelete: Cascade)
+}
+
+/// One viewer blocking one person (App Store guideline 1.2 — a UGC app must let
+/// a user block abusive users).
+///
+/// A block is DIRECTIONAL as stored (`blockerUserId` blocked `blockedUserId`)
+/// but SYMMETRIC as enforced: the read helpers in `lib/blocks/userBlocks.ts`
+/// union both directions, so neither party sees the other's looks or comments.
+/// Storing it one-way keeps "who initiated" answerable — needed to decide who
+/// may lift it — while the symmetric read is what makes the block a promise the
+/// product actually keeps. A block the feed query does not honour is worse than
+/// no block at all.
+///
+/// Keyed on `User`, not on a profile: a person is one user, and the same human
+/// can hold a ClientProfile and a ProfessionalProfile. Blocking the pro and
+/// still seeing their client-authored comments would be the same person leaking
+/// through the block.
+model UserBlock {
+  id            String @id @default(cuid())
+  blockerUserId String
+  blockedUserId String
+
+  createdAt DateTime @default(now())
+
+  blocker User @relation("UserBlocksMade", fields: [blockerUserId], references: [id], onDelete: Cascade)
+  blocked User @relation("UserBlocksReceived", fields: [blockedUserId], references: [id], onDelete: Cascade)
+
+  /// One block per ordered pair — a re-block is idempotent, not a second row.
+  @@unique([blockerUserId, blockedUserId])
+  /// Both directions are read on every feed and comment query, so both are
+  /// indexed: `blocker` for "who have I blocked", `blocked` for "who blocked me".
+  @@index([blockerUserId, createdAt])
+  @@index([blockedUserId, createdAt])
 }
 
 /// A user's own request to delete their account (App Store guideline 5.1.1(v)).

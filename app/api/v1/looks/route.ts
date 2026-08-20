@@ -25,6 +25,7 @@ import { attachLookBadges } from '@/lib/looks/badges/attach'
 import { personalizedFeedEnabled } from '@/lib/looks/personalizedFlag'
 import { buildPersonalizedFeedPage, parseSeenLookIds } from '@/lib/looks/personalizedFeed'
 import { parseSessionIntent } from '@/lib/looks/feedComposition'
+import { loadBlockedUserIds } from '@/lib/blocks/userBlocks'
 import { loadHiddenLookIds } from '@/lib/looks/hides'
 import { slugifyLookTag } from '@/lib/looks/tags'
 import {
@@ -231,6 +232,16 @@ export async function GET(req: Request) {
             ])
           : [[], []]
 
+      // §2.2 hides and the guideline-1.2 person block are both per-viewer and
+      // both empty for a signed-out viewer, so they load together — one round
+      // trip, and neither can be forgotten without the other going missing too.
+      const [hiddenLookIds, blockedUserIds] = user
+        ? await Promise.all([
+            loadHiddenLookIds(prisma, { userId: user.id }),
+            loadBlockedUserIds(prisma, { userId: user.id }),
+          ])
+        : [[], []]
+
       const where = buildLooksFeedWhere({
         kind,
         tenant,
@@ -239,14 +250,11 @@ export async function GET(req: Request) {
         tagSlug,
         followingProfessionalIds,
         followingClientIds,
+        // Applied inside the shared builder, so it covers every non-personalized
+        // feed at once: following / spotlight / category / search / sort=recent.
+        blockedUserIds,
       })
 
-      // §2.2: exclude the signed-in viewer's hidden looks from every
-      // non-personalized feed too (following / spotlight / category / search /
-      // sort=recent). Signed-out viewers have no hides — skip the query.
-      const hiddenLookIds = user
-        ? await loadHiddenLookIds(prisma, { userId: user.id })
-        : []
       chronoHiddenExcludedCount = user ? hiddenLookIds.length : null
 
       const cursorWhere = buildLooksFeedCursorWhere({

@@ -9,6 +9,7 @@ import { notFound } from 'next/navigation'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import { resolveFocalPoint } from '@/lib/media/focalPoint'
+import { getOptionalUser } from '@/app/api/_utils/auth/getOptionalUser'
 import { loadLookTagPage } from '@/lib/looks/tagPage'
 import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 
@@ -50,7 +51,15 @@ export default async function LookTagPage({
 }) {
   const { slug } = await params
   const tenant = await resolveTenantContextForLayout()
-  const data = await loadLookTagPage({ slug, tenant })
+  // Guideline 1.2: the tag browse is a look-listing surface, so it honours the
+  // viewer's blocks. getOptionalUser (not getCurrentUser) — the page is public
+  // and must still render for a signed-out visitor.
+  const viewer = await getOptionalUser()
+  const data = await loadLookTagPage({
+    slug,
+    tenant,
+    viewerUserId: viewer?.id ?? null,
+  })
   if (!data) notFound()
 
   return (

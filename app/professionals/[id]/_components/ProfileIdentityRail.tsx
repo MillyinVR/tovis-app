@@ -27,6 +27,7 @@ import type { ProProfileSignalsDto } from '@/lib/profiles/proProfileSignals'
 
 import FavoriteButton from '../FavoriteButton'
 import FollowButton from '../FollowButton'
+import BlockPersonButton from '@/app/_components/blocks/BlockPersonButton'
 import ShareButton from '../ShareButton'
 
 type ProfileIdentityRailProps = {
@@ -40,6 +41,12 @@ type ProfileIdentityRailProps = {
   fromPath: string
   acceptedPayments: PublicAcceptedMethod[]
   signals: ProProfileSignalsDto
+  /**
+   * App Store guideline 1.2. `null` hides the control entirely — a guest, or
+   * the pro looking at their own profile. `{ blockId: null }` means a signed-in
+   * viewer who does not currently block them.
+   */
+  block: { blockId: string | null } | null
 }
 
 export default function ProfileIdentityRail({
@@ -53,6 +60,7 @@ export default function ProfileIdentityRail({
   fromPath,
   acceptedPayments,
   signals,
+  block,
 }: ProfileIdentityRailProps) {
   // Tori's standing rule: every address on either client is a maps link. This
   // one is a display city ("Williamsburg, Brooklyn"), so it searches by name —
@@ -202,6 +210,18 @@ export default function ProfileIdentityRail({
             variant="row"
           />
         </div>
+
+        {/* App Store guideline 1.2. Targeted by ProfessionalProfile id, not
+            handle: a pro's handle is nullable, and blocking must not depend on
+            them having claimed one. */}
+        {block ? (
+          <BlockPersonButton
+            className="mt-3"
+            target={{ professionalId: header.id }}
+            displayName={header.displayName}
+            initialBlockId={block.blockId}
+          />
+        ) : null}
 
         <SocialLinkChips
           instagramHandle={header.instagramHandle}
