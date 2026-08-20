@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { afterEach, describe, it, expect } from 'vitest'
 import { SubscriptionStatus } from '@prisma/client'
 
 import { resolveEntitlements } from '@/lib/pro/entitlements'
@@ -18,20 +18,20 @@ const STUDIO = resolveEntitlements({
   status: SubscriptionStatus.ACTIVE,
 })
 
-describe('exportsDropPlatformMark — enforcement ON', () => {
+describe('exportsDropPlatformMark', () => {
   // 🔴 Both directions, every tier. This is the whole member perk: get either
   // direction wrong and either a paying pro's exports carry a mark they paid to
   // remove, or the mark never ships at all and the perk is a lie on the pricing
   // page. Neither failure is visible anywhere else in this repo — the render is on
   // the device.
-  it('free pros keep the Tovis mark', () => {
-    expect(exportsDropPlatformMark(FREE, true)).toBe(false)
+  it('free pros keep the platform mark', () => {
+    expect(exportsDropPlatformMark(FREE)).toBe(false)
   })
 
-  it('every paid tier drops the Tovis mark', () => {
-    expect(exportsDropPlatformMark(PRO, true)).toBe(true)
-    expect(exportsDropPlatformMark(PREMIUM, true)).toBe(true)
-    expect(exportsDropPlatformMark(STUDIO, true)).toBe(true)
+  it('every paid tier drops the platform mark', () => {
+    expect(exportsDropPlatformMark(PRO)).toBe(true)
+    expect(exportsDropPlatformMark(PREMIUM)).toBe(true)
+    expect(exportsDropPlatformMark(STUDIO)).toBe(true)
   })
 
   it('a lapsed paid plan is back to the mark (collapses to free)', () => {
@@ -41,7 +41,7 @@ describe('exportsDropPlatformMark — enforcement ON', () => {
       SubscriptionStatus.INCOMPLETE,
     ]) {
       const ents = resolveEntitlements({ planKey: 'premium', status })
-      expect(exportsDropPlatformMark(ents, true)).toBe(false)
+      expect(exportsDropPlatformMark(ents)).toBe(false)
     }
   })
 
@@ -50,35 +50,48 @@ describe('exportsDropPlatformMark — enforcement ON', () => {
       planKey: 'pro',
       status: SubscriptionStatus.TRIALING,
     })
-    expect(exportsDropPlatformMark(ents, true)).toBe(true)
+    expect(exportsDropPlatformMark(ents)).toBe(true)
   })
 
   it('reads the entitlement itself, not the plan key', () => {
-    expect(exportsDropPlatformMark([SOCIAL_EXPORT_UNBRANDED], true)).toBe(true)
-    expect(exportsDropPlatformMark(['tax_export'], true)).toBe(false)
+    expect(exportsDropPlatformMark([SOCIAL_EXPORT_UNBRANDED])).toBe(true)
+    expect(exportsDropPlatformMark(['tax_export'])).toBe(false)
   })
 })
 
-describe('exportsDropPlatformMark — enforcement OFF (production today)', () => {
-  // 🔴 The honest statement of what ships right now. Every other paid gate in the
-  // repo resolves as granted while the master switch is off, and this follows them.
-  // Pinned as a test so the behaviour is a decision on the record rather than an
-  // accident someone "fixes" later without noticing they changed what free pros get.
-  it('grants everybody the unbranded export — free and paid render identically', () => {
-    expect(exportsDropPlatformMark(FREE, false)).toBe(true)
-    expect(exportsDropPlatformMark(PRO, false)).toBe(true)
-    expect(exportsDropPlatformMark([], false)).toBe(true)
-  })
-})
+describe('the enforcement flag must NOT change the answer', () => {
+  // 🔴 This is the regression guard for the 2026-08-20 decision, and it is the
+  // only thing standing between the current behaviour and a well-meaning revert.
+  //
+  // This gate used to short-circuit to `true` whenever ENABLE_MEMBERSHIP_ENFORCEMENT
+  // was off — i.e. free and paying pros exported identically until the master switch
+  // flipped. Tori settled it the other way: the platform mark is marketing, so it
+  // ships on free pros' exports NOW, independent of the switch. Every other paid
+  // gate in the repo still follows the switch, which makes this the one deliberate
+  // exception — and therefore the one most likely to be "fixed" back into line by
+  // someone restoring consistency without reading the header.
+  //
+  // Asserted by driving the real env var, not by passing a parameter: the parameter
+  // was deliberately removed so no call site can reintroduce the short-circuit.
+  const original = process.env.ENABLE_MEMBERSHIP_ENFORCEMENT
 
-describe('the flag is what changes the answer', () => {
-  it('a free pro flips from unbranded to marked the moment enforcement turns on', () => {
-    expect(exportsDropPlatformMark(FREE, false)).toBe(true)
-    expect(exportsDropPlatformMark(FREE, true)).toBe(false)
+  afterEach(() => {
+    if (original === undefined) delete process.env.ENABLE_MEMBERSHIP_ENFORCEMENT
+    else process.env.ENABLE_MEMBERSHIP_ENFORCEMENT = original
   })
 
-  it('a paying pro is unbranded either way — the flag never costs a member', () => {
-    expect(exportsDropPlatformMark(PRO, false)).toBe(true)
-    expect(exportsDropPlatformMark(PRO, true)).toBe(true)
+  for (const flag of ['1', 'true', 'yes', '0', 'false', ''] as const) {
+    it(`is identical with ENABLE_MEMBERSHIP_ENFORCEMENT=${JSON.stringify(flag)}`, () => {
+      process.env.ENABLE_MEMBERSHIP_ENFORCEMENT = flag
+      expect(exportsDropPlatformMark(FREE)).toBe(false)
+      expect(exportsDropPlatformMark(PRO)).toBe(true)
+    })
+  }
+
+  it('is identical with the flag entirely unset (production today)', () => {
+    delete process.env.ENABLE_MEMBERSHIP_ENFORCEMENT
+    expect(exportsDropPlatformMark(FREE)).toBe(false)
+    expect(exportsDropPlatformMark(PRO)).toBe(true)
+    expect(exportsDropPlatformMark([])).toBe(false)
   })
 })
