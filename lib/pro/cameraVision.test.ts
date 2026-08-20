@@ -113,10 +113,16 @@ describe('enhanceReferenceLook', () => {
           { kind: 'someFutureRuleKind', tip: 'Unknown kind is dropped' },
           { kind: 'shouldersTilted', tip: '   ' },
         ],
-        directionLines: [
-          ' Chin down a touch, eyes up to the lens ',
-          '',
-          'Turn their face toward the window light',
+        directions: [
+          { trigger: 'ready', line: ' Hold it — shooting now ' },
+          { trigger: 'opening', line: ' Chin down a touch, eyes up to the lens ' },
+          { trigger: 'someFutureTrigger', line: 'Unknown trigger is dropped' },
+          { trigger: 'opening', line: 'A second opening line is ignored' },
+          { trigger: 'poseUnmet', line: '' },
+          {
+            trigger: 'subjectTooFar',
+            line: 'Turn their face toward the window light',
+          },
         ],
       }),
     )
@@ -136,9 +142,18 @@ describe('enhanceReferenceLook', () => {
           tip: 'Bring their hand up to graze the jaw',
         },
       ],
+      directions: [
+        { trigger: 'opening', line: 'Chin down a touch, eyes up to the lens' },
+        {
+          trigger: 'subjectTooFar',
+          line: 'Turn their face toward the window light',
+        },
+        { trigger: 'ready', line: 'Hold it — shooting now' },
+      ],
       directionLines: [
         'Chin down a touch, eyes up to the lens',
         'Turn their face toward the window light',
+        'Hold it — shooting now',
       ],
     })
 
@@ -159,6 +174,7 @@ describe('enhanceReferenceLook', () => {
     expect(content[1].text).toContain('Balayage')
     expect(content[1].text).toContain('shoulders tilted 8 degrees')
     expect(content[1].text).toContain('faceNearShoulder')
+    expect(content[1].text).toContain('subjectTooClose')
     expect(options).toMatchObject({ timeout: expect.any(Number) })
   })
 
@@ -168,7 +184,7 @@ describe('enhanceReferenceLook', () => {
       textMessage({
         summary: 'x',
         poseRules: [],
-        directionLines: ['Keep it soft'],
+        directions: [{ trigger: 'opening', line: 'Keep it soft' }],
       }),
     )
 
@@ -209,7 +225,14 @@ describe('enhanceReferenceLook', () => {
 
   it('rejects a brief with no usable direction lines', async () => {
     mocks.create.mockResolvedValue(
-      textMessage({ summary: 'x', poseRules: [], directionLines: ['  ', ''] }),
+      textMessage({
+        summary: 'x',
+        poseRules: [],
+        directions: [
+          { trigger: 'opening', line: '   ' },
+          { trigger: 'unknownTrigger', line: 'dropped' },
+        ],
+      }),
     )
 
     await expect(enhanceReferenceLook({ image: IMAGE })).rejects.toMatchObject({
