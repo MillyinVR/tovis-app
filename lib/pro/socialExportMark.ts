@@ -10,40 +10,42 @@
 // tier rule in one place instead of re-deriving `entitlements.includes(...)` inside
 // an app binary that ships on Apple's schedule rather than ours.
 //
-// 🔴 The enforcement-flag convention, and the decision hiding inside it.
+// 🔴 DECIDED 2026-08-20 (Tori): this gate reads the ENTITLEMENT ALONE and
+// deliberately ignores ENABLE_MEMBERSHIP_ENFORCEMENT.
 //
-// While ENABLE_MEMBERSHIP_ENFORCEMENT is off, every other paid gate in this repo
-// resolves as GRANTED — the tax-export gate, the retention-insights gate, the
-// camera quota. This follows them, because inventing a third rule for one feature
-// is how gates drift. The consequence is worth saying out loud rather than burying:
+// It is the ONE paid gate in this repo that does not follow the master switch, so
+// the exception is written down here rather than inferred. Every other gate — tax
+// export, retention insights, the camera quota — resolves as GRANTED while the
+// switch is off, because the switch exists so that turning enforcement on never
+// takes away something pros already have. This one is different on purpose:
 //
-//   TODAY, WITH THE FLAG OFF, A FREE PRO AND A PAYING PRO EXPORT THE SAME
-//   UNBRANDED IMAGE. The perk is real in code and invisible in production until
-//   Tori flips the flag.
+//   The platform mark is MARKETING, not a restriction. A free pro's marked export
+//   is how the salon down the street first hears the name. Withholding it until
+//   the master switch flips gives that reach away for nothing.
 //
-// There is a legitimate argument for gating this one on the entitlement ALONE,
-// ignoring the flag: the flag exists so that turning enforcement on never TAKES
-// AWAY something pros already have, and social export does not exist yet, so there
-// is nothing to take away. The platform mark is also marketing rather than a
-// restriction — a free pro's export is how a salon down the street first hears the
-// name. Flipping to that behaviour is a one-line change here (drop the
-// `enforcementEnabled` short-circuit) plus its test. Tori's call, recorded in
-// tovis-ios docs/design/camera-excellence-plan.md D1.
+// ⚠️ Be honest about the cost, because it is real and it was weighed: the social
+// export SHIPS. tovis-ios renders it (TovisKit SocialExport/) on
+// ProSocialExportSheet, ProVideoExportSheet and ProMediaExport, all fed by this
+// resolver's boolean as `ExportWatermark.showsPlatformMark`. So this change DOES
+// take something away from free pros — their exports gain the mark. That cost was
+// accepted at ~2 pros and 0 paying, and it only grows from here, which is exactly
+// why it was settled now rather than bundled into the enforcement flip later.
+//
+// A paying pro is unaffected in every state: they had unbranded exports before and
+// they have them now. Recorded in tovis-ios docs/design/camera-excellence-plan.md D1.
 
-import { membershipEnforcementEnabled } from '@/lib/membership/enforcement'
 import type { Entitlement } from '@/lib/pro/entitlements'
 
 export const SOCIAL_EXPORT_UNBRANDED: Entitlement = 'social_export_unbranded'
 
 /**
  * Whether this pro's social exports drop the platform mark, given the entitlements
- * already resolved for them. Pure — the caller supplies the entitlement list and
- * (in tests) the flag state.
+ * already resolved for them. Pure, and a pure function of the entitlements alone —
+ * there is deliberately no flag parameter to pass, so no call site can reintroduce
+ * the master-switch short-circuit by accident. See the header for why.
  */
 export function exportsDropPlatformMark(
   entitlements: readonly Entitlement[],
-  enforcementEnabled: boolean = membershipEnforcementEnabled(),
 ): boolean {
-  if (!enforcementEnabled) return true
   return entitlements.includes(SOCIAL_EXPORT_UNBRANDED)
 }

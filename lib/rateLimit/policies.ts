@@ -284,7 +284,9 @@ export const RATE_LIMITS: Record<RateLimitBucket, RateLimitConfig> = {
   // Net effect vs. the old numbers: the per-day image ceiling drops 125 → 120, but
   // the cheap single-image call (look-brief) gets more headroom and the expensive
   // 10-photo call (set-critique) gets less, which is where the cost actually is.
-  // The real tightening for free pros is the 20/month quota, not this bucket.
+  // The real tightening for free pros is the 10/month quota, not this bucket
+  // (CAMERA_IMAGES_PER_MONTH.free in lib/pro/entitlements.ts — Tori's final call;
+  // the brief had proposed 20 and this comment kept quoting the proposal).
   'pro:camera:look-brief': {
     limit: 40,
     windowSeconds: 24 * 60 * 60,
