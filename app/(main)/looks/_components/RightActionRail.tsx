@@ -10,11 +10,14 @@ import {
   Upload,
   CalendarDays,
   EyeOff,
+  Flag,
 } from 'lucide-react'
 
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import SaveToBoardModal from './SaveToBoardModal'
 import { formatCompactCount } from '@/lib/format/compactCount'
+import type { LookReportResult } from './reportLookPost'
+import { REPORT_LABEL, type ReportState } from './reportState'
 import type { LooksSaveStateResponseDto } from '@/lib/looks/types'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 
@@ -60,6 +63,11 @@ type RightActionRailProps = {
   onShare: () => void
   // One-tap "not for me" hide (spec §2.2). Absent → the control isn't rendered.
   onHide?: () => void
+  // Report the LOOK itself (App Store guideline 1.2 — the photo is the likelier
+  // objectionable object in a beauty app, and the comment path already had a
+  // report). Absent → the control isn't rendered, which is how an owner-viewed
+  // surface suppresses it.
+  onReport?: () => Promise<LookReportResult>
   onSaveStateChange?: (state: LooksSaveStateResponseDto) => void
 }
 
@@ -70,6 +78,7 @@ function RailButton({
   onClick,
   ariaLabel,
   testId,
+  disabled = false,
 }: {
   children: React.ReactNode
   count?: number | null
@@ -77,6 +86,7 @@ function RailButton({
   onClick: () => void
   ariaLabel: string
   testId?: string
+  disabled?: boolean
 }) {
   const footerText =
     label ??
@@ -87,6 +97,7 @@ function RailButton({
       type="button"
       data-testid={testId}
       onClick={onClick}
+      disabled={disabled}
       aria-label={ariaLabel}
       title={ariaLabel}
       style={{
@@ -97,7 +108,8 @@ function RailButton({
         border: 'none',
         padding: 0,
         margin: 0,
-        cursor: 'pointer',
+        cursor: disabled ? 'default' : 'pointer',
+        opacity: disabled ? 0.6 : 1,
       }}
       className="active:scale-95 transition-transform"
     >
@@ -137,10 +149,12 @@ export default function RightActionRail({
   onOpenComments,
   onShare,
   onHide,
+  onReport,
   onSaveStateChange,
 }: RightActionRailProps) {
   const [isSaveModalOpen, setIsSaveModalOpen] = useState(false)
   const [saved, setSaved] = useState(viewerSaved)
+  const [reportState, setReportState] = useState<ReportState>('idle')
 
   // The rail avatar credits the poster: the publishing client on a
   // client-authored look (server-resolved link — /u/[handle], or the pro chart
@@ -171,6 +185,18 @@ export default function RightActionRail({
     onSaveStateChange?.(state)
   }
 
+  // Fire-and-settle, mirroring the comment row: the route is idempotent by
+  // unique constraint so a repeat is a 200 rather than an error, but there is
+  // no server-side rate limit — leaving `idle` IS the debounce, and the button
+  // is disabled for anything but `idle`. A failure falls back to "Report" so it
+  // stays visible and retryable rather than hijacking the surface with an error.
+  async function handleReport() {
+    if (!onReport || reportState !== 'idle') return
+    setReportState('pending')
+    const result = await onReport()
+    setReportState(result === 'ok' ? 'done' : 'idle')
+  }
+
   return (
     <>
       <div
@@ -179,7 +205,13 @@ export default function RightActionRail({
           right,
           bottom,
           display: 'grid',
-          gap: 18,
+          // 16, not the original 18: the rail grows UPWARD from `bottom`, and
+          // adding the Report control made it 57px taller, which pushed the
+          // poster avatar off the top of a 568px-tall viewport (measured
+          // before/after: railTop +43 → −14). Tightening the seven gaps by 2px
+          // each gives back exactly that 14px. Imperceptible at a glance, and it
+          // keeps every control — and the avatar — on screen at 320×568.
+          gap: 16,
           justifyItems: 'center',
         }}
       >
@@ -358,6 +390,25 @@ export default function RightActionRail({
             onClick={onHide}
           >
             <EyeOff size={26} style={{ color: PAPER }} />
+          </RailButton>
+        ) : null}
+
+        {onReport ? (
+          <RailButton
+            // Idle gets the more descriptive name (a lone flag icon does not
+            // say WHAT it reports); once acting, the accessible name tracks the
+            // visible label so the two never disagree.
+            ariaLabel={
+              reportState === 'idle'
+                ? 'Report this look'
+                : REPORT_LABEL[reportState]
+            }
+            testId="report-look-button"
+            label={REPORT_LABEL[reportState]}
+            onClick={() => void handleReport()}
+            disabled={reportState !== 'idle'}
+          >
+            <Flag size={26} style={{ color: PAPER }} />
           </RailButton>
         ) : null}
       </div>
