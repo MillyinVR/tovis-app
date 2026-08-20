@@ -1,8 +1,16 @@
 // lib/clients/clientChartShareStatus.ts
 //
 // The CLIENT-facing reading of a `ClientChartShare.status` — the wording a
-// client sees about one of their pros, and the single answer to "does this
-// status actually open the chart?".
+// client sees about one of their pros, and what that status means on its own.
+//
+// 🔴 PRESENTATION ONLY. This is NOT the authorization gate and must never be
+// used as one. Whether a pro may actually open a client's chart is decided
+// server-side by `getProClientVisibility` / `assertProCanViewClient`
+// (`lib/clientVisibility`), which also grants access off the BOOKING
+// relationship — a pro the client has booked can read the chart with no
+// `ClientChartShare` row at all. `clientChartShareGrantsAccess` answers the
+// narrower question "does this STATUS, by itself, mean shared?", which is the
+// right question for a label and the wrong one for a guard.
 //
 // Two surfaces need the same four sentences: the chart-sharing settings screen
 // (`ClientChartSharingSettings`), which owns the controls, and the message
@@ -56,9 +64,11 @@ export function clientChartShareIsOpenAsk(value: unknown): boolean {
 }
 
 /**
- * Does this status let the pro read the chart? `GRANTED` and nothing else.
+ * Does this STATUS, on its own, mean the chart is shared? `GRANTED` and
+ * nothing else.
  *
- * Fails CLOSED: an unrecognised value is not access.
+ * Fails CLOSED: an unrecognised value is not access. 🔴 Not an authorization
+ * check — see the file header. Use `getProClientVisibility` to gate a read.
  */
 export function clientChartShareGrantsAccess(value: unknown): boolean {
   return value === ClientChartShareStatus.GRANTED
