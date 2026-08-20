@@ -8,6 +8,11 @@ import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { liveChannelForUser } from '@/lib/live/broadcast'
 import { getProClientVisibility } from '@/lib/clientVisibility'
+import {
+  CLIENT_CHART_SHARE_STATUS_COPY,
+  clientChartShareIsOpenAsk,
+} from '@/lib/clients/clientChartShareStatus'
+import { CHART_SHARE_SETTINGS_HREF } from '@/lib/notifications/chartAccessNotifications'
 import { resolveThreadContextNav } from '@/lib/messages/contextNav'
 import { resolveThreadCounterparty } from '@/lib/messages/counterparty'
 import {
@@ -231,6 +236,38 @@ export default async function MessageThreadPage(props: PageProps) {
       ? await getProClientVisibility(thread.professional.id, thread.client.id)
       : null
 
+  // The CLIENT's mirror of the pro-facing link above: where the pro gets "view /
+  // request this client's chart", the client gets told where THIS pro stands on
+  // reading theirs — the one place they already know who the pro is. Ported from
+  // iOS `ThreadView.clientChartAccessRow` (#300), which web never had.
+  //
+  // Absent row = nothing beyond the baseline, and it renders nothing at all —
+  // the same silence the settings screen shows. A pro who can read the chart
+  // only because the client booked them has no share row, so this deliberately
+  // does not claim "no access"; it stays quiet and links to the surface that
+  // holds the whole truth.
+  //
+  // 🔴 Gated on the viewer BEING the thread's client, not merely on their not
+  // being the pro. The page admits any participant, and `MessageThreadParticipant`
+  // does not restrict membership to the two principals — a third participant
+  // would satisfy `!viewerIsThreadPro` and be shown someone else's chart-access
+  // state. Derived from the user id for the same reason `viewerIsThreadPro` is.
+  const viewerIsThreadClient =
+    thread.client?.userId != null && thread.client.userId === user.id
+
+  const clientChartShare =
+    viewerIsThreadClient && counterpartyProId && thread.client?.id
+      ? await prisma.clientChartShare.findUnique({
+          where: {
+            clientId_professionalId: {
+              clientId: thread.client.id,
+              professionalId: counterpartyProId,
+            },
+          },
+          select: { status: true },
+        })
+      : null
+
   const clientChartLink = (() => {
     if (!proClientVisibility || !thread.client?.id) return null
 
@@ -330,6 +367,27 @@ export default async function MessageThreadPage(props: PageProps) {
                   className="font-display text-[12px] font-semibold text-accentPrimary hover:opacity-80"
                 >
                   {clientChartLink.label}
+                </Link>
+              </div>
+            ) : null}
+
+            {clientChartShare ? (
+              <div className="mt-2">
+                <Link
+                  href={CHART_SHARE_SETTINGS_HREF}
+                  aria-label={`${title}: ${
+                    CLIENT_CHART_SHARE_STATUS_COPY[clientChartShare.status]
+                  }. Manage chart access.`}
+                  // Only an OPEN ASK is highlighted. Granted is a fact, and
+                  // declined/revoked are answers the client already gave — all
+                  // three stay quiet, as they do on iOS.
+                  className={`font-display text-[12px] font-semibold hover:opacity-80 ${
+                    clientChartShareIsOpenAsk(clientChartShare.status)
+                      ? 'text-accentPrimary'
+                      : 'text-textSecondary'
+                  }`}
+                >
+                  {CLIENT_CHART_SHARE_STATUS_COPY[clientChartShare.status]} →
                 </Link>
               </div>
             ) : null}

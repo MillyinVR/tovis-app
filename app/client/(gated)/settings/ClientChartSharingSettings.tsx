@@ -13,28 +13,24 @@
 
 import { useCallback, useEffect, useState } from 'react'
 
+import type { ClientChartShareStatus } from '@prisma/client'
+
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import ProProfileLink from '@/app/_components/ProProfileLink'
 import Button from '@/app/_components/ui/Button'
+import {
+  CLIENT_CHART_SHARE_STATUS_COPY,
+  clientChartShareGrantsAccess,
+  isClientChartShareStatus,
+} from '@/lib/clients/clientChartShareStatus'
 import { isRecord } from '@/lib/guards'
 import { readErrorMessage, safeJson } from '@/lib/http'
-
-type ShareStatus = 'REQUESTED' | 'GRANTED' | 'DECLINED' | 'REVOKED'
 
 type ChartShare = {
   professionalId: string
   professionalName: string
   avatarUrl: string | null
-  status: ShareStatus
-}
-
-function parseStatus(value: unknown): ShareStatus | null {
-  return value === 'REQUESTED' ||
-    value === 'GRANTED' ||
-    value === 'DECLINED' ||
-    value === 'REVOKED'
-    ? value
-    : null
+  status: ClientChartShareStatus
 }
 
 function parseShares(payload: unknown): ChartShare[] {
@@ -45,8 +41,8 @@ function parseShares(payload: unknown): ChartShare[] {
     if (!isRecord(item)) continue
     const professionalId =
       typeof item.professionalId === 'string' ? item.professionalId : null
-    const status = parseStatus(item.status)
-    if (!professionalId || !status) continue
+    if (!professionalId || !isClientChartShareStatus(item.status)) continue
+    const status = item.status
 
     out.push({
       professionalId,
@@ -59,13 +55,6 @@ function parseShares(payload: unknown): ChartShare[] {
     })
   }
   return out
-}
-
-const STATUS_COPY: Record<ShareStatus, string> = {
-  GRANTED: 'Can see your chart',
-  REQUESTED: 'Asked to see your chart',
-  DECLINED: 'You said no',
-  REVOKED: 'You turned this off',
 }
 
 export default function ClientChartSharingSettings() {
@@ -174,13 +163,13 @@ export default function ClientChartSharingSettings() {
                 />
               </div>
               <div className="text-[12px] font-semibold text-textSecondary">
-                {STATUS_COPY[share.status]}
+                {CLIENT_CHART_SHARE_STATUS_COPY[share.status]}
               </div>
             </div>
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
-            {share.status === 'GRANTED' ? (
+            {clientChartShareGrantsAccess(share.status) ? (
               <Button
                 variant="danger"
                 size="sm"
