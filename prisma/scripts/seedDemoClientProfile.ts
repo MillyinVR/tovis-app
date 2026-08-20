@@ -202,6 +202,41 @@ function assertHistoryLookBranches(args: {
   }
 }
 
+/**
+ * Every aftercare this fixture marks as SENT must carry its inbox row.
+ *
+ * The write boundary raises the AFTERCARE_READY notification in the SAME
+ * transaction that sets `sentToClientAt`, so the two cannot diverge in the real
+ * product — but a fixture writes them separately and CAN. When it does, the
+ * aftercare is visible on the client's home dashboard (which reads the summary)
+ * and the inbox at /client/aftercare — plus the native iOS inbox, which shares
+ * `loadClientAftercareInbox` — renders "Nothing yet", which is indistinguishable
+ * from a screen that was never built. This fixture shipped in exactly that state
+ * (7 sent summaries, 0 notifications) and it was read as an app bug twice.
+ */
+async function assertAftercareInboxPairing(): Promise<void> {
+  const orphans = await prisma.aftercareSummary.findMany({
+    where: {
+      id: { startsWith: P },
+      sentToClientAt: { not: null },
+      clientNotifications: {
+        none: { eventKey: NotificationEventKey.AFTERCARE_READY },
+      },
+    },
+    select: { id: true },
+  })
+
+  if (orphans.length > 0) {
+    throw new Error(
+      `[seedDemoClientProfile] ${orphans.length} sent aftercare summary/ies ` +
+        `carry no AFTERCARE_READY notification (${orphans
+          .map((o) => o.id)
+          .join(', ')}). The client's aftercare inbox reads the notification, ` +
+        'not the summary, so these would render "Nothing yet".',
+    )
+  }
+}
+
 const DAY_MS = 24 * 60 * 60 * 1000
 
 /**
@@ -356,6 +391,13 @@ const SERVICES: DemoService[] = [
   { key: 'lash', name: 'Lash Lift & Tint', categoryName: 'Lash', categorySlug: 'lash', minPrice: 90, durationMinutes: 60 },
   { key: 'brow', name: 'Brow Lamination', categoryName: 'Brow', categorySlug: 'brow', minPrice: 70, durationMinutes: 45 },
 ]
+
+/** The catalogue row for `key`, or a loud failure — never a silent `undefined`. */
+function requireService(key: string): DemoService {
+  const svc = SERVICES.find((s) => s.key === key)
+  if (!svc) throw new Error(`[seedDemoClientProfile] unknown service key "${key}"`)
+  return svc
+}
 
 // Add-ons for the balayage offering — the booking flow's second step renders
 // nothing at all without them, and the dev DB has zero `OfferingAddOn` rows.
@@ -1012,6 +1054,53 @@ function workingHoursJson() {
 }
 
 /**
+ * The AFTERCARE_READY inbox row that the write boundary raises in the SAME
+ * transaction as `sentToClientAt` (`sendExistingAftercareDraft` and the
+ * aftercare upsert path, `lib/booking/writeBoundary.ts`).
+ *
+ * 🔴 The client's aftercare inbox is keyed on THIS row, not on the summary:
+ * `loadClientAftercareInbox` — shared by `/client/aftercare` and the native iOS
+ * inbox — reads `ClientNotification` where `eventKey = AFTERCARE_READY`, while
+ * the home dashboard's aftercare card reads `AftercareSummary.sentToClientAt`.
+ * A fixture that writes the summary alone therefore renders a live aftercare
+ * card on home AND "Nothing yet" in the inbox — a state the boundary can never
+ * produce, because it writes both or neither. (Prod, read-only 2026-08-19: 17
+ * sent summaries / 17 AFTERCARE_READY rows. This fixture had 7 / 0.)
+ *
+ * Mirrors the boundary's row exactly, including `readAt: null` — a just-sent
+ * aftercare is unread, and that is what lights the unread markers in
+ * `clientBookingBuckets` and the booking page's aftercare step.
+ */
+function aftercareReadyNotification(args: {
+  key: string
+  clientId: string
+  bookingId: string
+  aftercareId: string
+  serviceName: string
+  sentAt: Date
+}): Prisma.ClientNotificationCreateManyInput {
+  return {
+    id: `${P}notif-aftercare-${args.key}`,
+    clientId: args.clientId,
+    eventKey: NotificationEventKey.AFTERCARE_READY,
+    title: 'Your aftercare is ready',
+    body: `Your pro added aftercare notes and rebooking for your ${args.serviceName}. Tap to view.`,
+    href: `/client/bookings/${args.bookingId}?step=aftercare`,
+    bookingId: args.bookingId,
+    aftercareId: args.aftercareId,
+    data: {
+      bookingId: args.bookingId,
+      aftercareId: args.aftercareId,
+      notificationReason: 'AFTERCARE_SENT',
+    },
+    // `client_aftercare:<bookingId>` — makeAftercareClientNotifDedupeKey.
+    dedupeKey: `client_aftercare:${args.bookingId}`,
+    readAt: null,
+    createdAt: args.sentAt,
+  }
+}
+
+/**
  * Removes every row this script has ever created, in FK-safe order. Keyed
  * entirely on the `demoseed-` id prefix, so it can never touch another
  * fixture's data. Bookings/board items/follows cascade from their parents, but
@@ -1384,8 +1473,7 @@ async function main(): Promise<void> {
     if (offeringSeen.has(key)) continue
     offeringSeen.add(key)
 
-    const svc = SERVICES.find((s) => s.key === look.serviceKey)
-    if (!svc) throw new Error(`[seedDemoClientProfile] unknown service key "${look.serviceKey}"`)
+    const svc = requireService(look.serviceKey)
 
     const mobile = MOBILE_OFFERINGS[key] ?? null
 
@@ -2039,8 +2127,7 @@ async function main(): Promise<void> {
     recreated: number
     sourceLookPostId: string
   }): void => {
-    const svc = SERVICES.find((s) => s.key === args.serviceKey)
-    if (!svc) throw new Error(`[seedDemoClientProfile] unknown service key "${args.serviceKey}"`)
+    const svc = requireService(args.serviceKey)
 
     for (let i = 0; i < args.recreated; i += 1) {
       // 🔴 Booking is not merely @@unique([professionalId, scheduledFor]) — it
@@ -2497,6 +2584,20 @@ async function main(): Promise<void> {
     },
   })
 
+  // …and the inbox row the boundary raises alongside it. Without this the
+  // aftercare is visible on the home dashboard and INVISIBLE at
+  // /client/aftercare (and in the iOS inbox) — see aftercareReadyNotification.
+  await prisma.clientNotification.create({
+    data: aftercareReadyNotification({
+      key: 'own-past',
+      clientId: creator.id,
+      bookingId: pastBooking.id,
+      aftercareId: `${P}aftercare-own-past`,
+      serviceName: requireService(OWN_APPOINTMENTS.serviceKey).name,
+      sentAt: finalizedAt,
+    }),
+  })
+
   // ── reviews + cancellation policy (the booking sheet's trust row) ──────────
   // The sheet's three chips read `lib/booking/trustSignals`: an approved
   // verification, a COMPLETED-booking count, and the pro's own late-cancel
@@ -2615,10 +2716,7 @@ async function main(): Promise<void> {
       minute: opening.minute,
       timeZone: TIME_ZONE,
     })
-    const svc = SERVICES.find((s) => s.key === opening.serviceKey)
-    if (!svc) {
-      throw new Error(`[seedDemoClientProfile] unknown service key "${opening.serviceKey}"`)
-    }
+    const svc = requireService(opening.serviceKey)
 
     await prisma.lastMinuteOpening.create({
       data: {
@@ -2789,7 +2887,8 @@ async function main(): Promise<void> {
   // ADDITIVE — no existing public asset is demoted, because screens 1–6 render
   // from those.
   const libraryProId = proId('noor')
-  const libraryServiceId = serviceId('balayage')
+  const libraryServiceKey = 'balayage'
+  const libraryServiceId = serviceId(libraryServiceKey)
   const libraryLocationId = locationId('noor')
 
   // 🔴 300+ days back, one day apart. `Booking` carries an exclusion constraint
@@ -2862,30 +2961,48 @@ async function main(): Promise<void> {
   // `nudgeAftercareRebook` throws AFTERCARE_NOT_COMPLETED without a
   // `sentToClientAt`, so seeding one for every booking would make the sheet's
   // other branch unreachable AND hide a button that 500s.
-  await prisma.aftercareSummary.createMany({
-    data: libraryClients
-      // 🔴 The booking index comes from the ORIGINAL position, not the filtered
-      // one — `.filter().map((_, i) => …)` would re-number the survivors and
-      // stamp an aftercare hours BEFORE the appointment it belongs to.
-      .map((client, index) => ({ client, index }))
-      .filter(
-        ({ client }) =>
-          !PORTFOLIO_HELD.some((held) => held.key === client.key && !held.aftercareSent),
-      )
-      .map(({ client, index }) => {
-        const sentAt = new Date(libraryBookingAt(index).getTime() + 4 * 60 * 60 * 1000)
+  const librarySentAftercare = libraryClients
+    // 🔴 The booking index comes from the ORIGINAL position, not the filtered
+    // one — `.filter().map((_, i) => …)` would re-number the survivors and
+    // stamp an aftercare hours BEFORE the appointment it belongs to.
+    .map((client, index) => ({ client, index }))
+    .filter(
+      ({ client }) =>
+        !PORTFOLIO_HELD.some((held) => held.key === client.key && !held.aftercareSent),
+    )
+    .map(({ client, index }) => ({
+      client,
+      sentAt: new Date(libraryBookingAt(index).getTime() + 4 * 60 * 60 * 1000),
+    }))
 
-        return {
-          id: `${P}libaftercare-${client.key}`,
-          bookingId: `${P}libbooking-${client.key}`,
-          notes: 'Sulphate-free shampoo, and book the gloss at six weeks.',
-          rebookMode: AftercareRebookMode.NONE,
-          draftSavedAt: sentAt,
-          sentToClientAt: sentAt,
-          lastEditedAt: sentAt,
-          createdAt: sentAt,
-        }
+  await prisma.aftercareSummary.createMany({
+    data: librarySentAftercare.map(({ client, sentAt }) => ({
+      id: `${P}libaftercare-${client.key}`,
+      bookingId: `${P}libbooking-${client.key}`,
+      notes: 'Sulphate-free shampoo, and book the gloss at six weeks.',
+      rebookMode: AftercareRebookMode.NONE,
+      draftSavedAt: sentAt,
+      sentToClientAt: sentAt,
+      lastEditedAt: sentAt,
+      createdAt: sentAt,
+    })),
+  })
+
+  // Every `sentToClientAt` above pairs with the inbox row the write boundary
+  // raises in the same transaction — same set, same timestamps, so these
+  // clients' aftercare is reachable from the inbox and not only from the
+  // summary. See aftercareReadyNotification.
+  await prisma.clientNotification.createMany({
+    data: librarySentAftercare.map(({ client, sentAt }) =>
+      aftercareReadyNotification({
+        key: `lib-${client.key}`,
+        clientId: `${P}libclient-${client.key}`,
+        bookingId: `${P}libbooking-${client.key}`,
+        aftercareId: `${P}libaftercare-${client.key}`,
+        serviceName: requireService(libraryServiceKey).name,
+        sentAt,
       }),
+    ),
   })
 
   await prisma.mediaAsset.createMany({
@@ -3075,6 +3192,9 @@ async function main(): Promise<void> {
   const indexedLocations = await prisma.professionalSearchIndex.count({
     where: { professionalId: { startsWith: P } },
   })
+
+  // Read back what was actually written, not what the code above intended.
+  await assertAftercareInboxPairing()
 
   console.log(
     `[seedDemoClientProfile] seeded @${CREATOR.handle}: ` +
