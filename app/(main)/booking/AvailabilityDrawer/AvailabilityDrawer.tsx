@@ -62,6 +62,10 @@ import {
   getZonedParts,
   ymdInTimeZone,
 } from '@/lib/time'
+import {
+  buildClientIdempotencyKey,
+  idempotencyHeaders,
+} from '@/lib/idempotency/client'
 
 const FALLBACK_TZ = 'UTC' as const
 /**
@@ -1481,6 +1485,26 @@ export default function AvailabilityDrawer(props: {
         headers: {
           'Content-Type': 'application/json',
           Accept: 'application/json',
+          // A hold reserves a real slot, so a double-tap must not take two.
+          // The action carries every field that distinguishes the request:
+          // the key buckets on 60s, and a key reused with a DIFFERENT body is
+          // a 409, so picking another slot within the minute has to produce a
+          // different key rather than replaying the first one.
+          ...idempotencyHeaders(
+            buildClientIdempotencyKey({
+              scope: 'hold',
+              entityId: effectiveOfferingId,
+              action: [
+                slotISO,
+                activeLocationType,
+                locationId ?? '',
+                activeLocationType === 'MOBILE'
+                  ? (selectedClientAddressId ?? '')
+                  : '',
+                rescheduleBookingId ?? '',
+              ].join('|'),
+            }),
+          ),
         },
         body: JSON.stringify({
           offeringId: effectiveOfferingId,

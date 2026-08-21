@@ -1,7 +1,7 @@
 // app/api/v1/holds/route.ts
 
 import { NextRequest } from 'next/server'
-import { ServiceLocationType } from '@prisma/client'
+import { Role, ServiceLocationType } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requireClient } from '@/app/api/_utils'
@@ -25,6 +25,16 @@ import {
   toCreateHoldOffering,
 } from '@/lib/booking/holdCreateOffering'
 import type { BookingHoldCreateResponseDTO } from '@/lib/dto/holds'
+import {
+  beginIdempotency,
+  completeIdempotency,
+  failIdempotency,
+  IDEMPOTENCY_ROUTES,
+} from '@/lib/idempotency'
+import {
+  idempotencyConflictFail,
+  idempotencyInProgressFail,
+} from '@/lib/idempotency/responses'
 import {
   bookingEntryPointFromHoldContext,
   parseBookingEntryPointSource,
@@ -190,6 +200,7 @@ export async function POST(req: NextRequest) {
   let afterAuthAndBodyMs = startedAtMs
   let afterOfferingLookupMs = startedAtMs
   let afterCreateHoldMs = startedAtMs
+  let idempotencyRecordId: string | null = null
 
   const buildServerTimingMetrics = () => [
     {
@@ -266,6 +277,59 @@ export async function POST(req: NextRequest) {
       return withServerTiming(parsed, buildServerTimingMetrics())
     }
 
+    // Idempotency is OPT-IN on this route, and deliberately so. Every other
+    // route in IDEMPOTENCY_ROUTES refuses without a key; this one cannot,
+    // because both web callers shipped before the key existed and a client
+    // already in someone's browser must keep booking. A caller that sends one
+    // gets replay protection; a caller that does not gets exactly the old
+    // behaviour, which is what it has today anyway.
+    const idempotencyKey = req.headers.get('Idempotency-Key')
+
+    if (idempotencyKey?.trim()) {
+      const idempotency = await beginIdempotency<BookingHoldCreateResponseDTO>({
+        actor: { actorUserId: auth.user.id, actorRole: Role.CLIENT },
+        route: IDEMPOTENCY_ROUTES.HOLD_CREATE,
+        key: idempotencyKey,
+        requestBody: {
+          clientId: auth.clientId,
+          offeringId: parsed.offeringId,
+          requestedStart: parsed.requestedStart.toISOString(),
+          locationType: parsed.locationType,
+          requestedLocationId: parsed.requestedLocationId,
+          clientAddressId: parsed.clientAddressId,
+          addOnIds: parsed.addOnIds,
+          rescheduleBookingId: parsed.rescheduleBookingId,
+        },
+      })
+
+      if (idempotency.kind === 'in_progress') {
+        return withServerTiming(
+          idempotencyInProgressFail('hold'),
+          buildServerTimingMetrics(),
+        )
+      }
+
+      if (idempotency.kind === 'conflict') {
+        return withServerTiming(
+          idempotencyConflictFail(),
+          buildServerTimingMetrics(),
+        )
+      }
+
+      if (idempotency.kind === 'replay') {
+        return withServerTiming(
+          jsonOk(idempotency.responseBody, idempotency.responseStatus),
+          buildServerTimingMetrics(),
+        )
+      }
+
+      // 'missing_key' is unreachable inside this branch (the key is non-empty),
+      // and is the no-op case anyway.
+      if (idempotency.kind === 'started') {
+        idempotencyRecordId = idempotency.idempotencyRecordId
+      }
+    }
+
     const offering = await prisma.professionalServiceOffering.findUnique({
       where: { id: parsed.offeringId },
       select: HOLD_CREATE_OFFERING_SELECT,
@@ -275,6 +339,11 @@ export async function POST(req: NextRequest) {
     afterCreateHoldMs = afterOfferingLookupMs
 
     if (!offering || !offering.isActive) {
+      if (idempotencyRecordId) {
+        await failIdempotency({ idempotencyRecordId })
+        idempotencyRecordId = null
+      }
+
       return withServerTiming(
         bookingJsonFail('OFFERING_NOT_FOUND'),
         buildServerTimingMetrics(),
@@ -308,28 +377,43 @@ export async function POST(req: NextRequest) {
 
     afterCreateHoldMs = nowMs()
 
+    const responseBody = {
+      hold: {
+        id: result.hold.id,
+        expiresAt: result.hold.expiresAt.toISOString(),
+        scheduledFor: result.hold.scheduledFor.toISOString(),
+        locationType: result.hold.locationType,
+        locationId: result.hold.locationId,
+        locationTimeZone: result.hold.locationTimeZone,
+        clientAddressId: result.hold.clientAddressId,
+        clientAddressSnapshot: result.hold.clientAddressSnapshot,
+        durationMinutes: result.hold.durationMinutes,
+      },
+      meta: result.meta,
+    } satisfies BookingHoldCreateResponseDTO
+
+    if (idempotencyRecordId) {
+      await completeIdempotency({
+        idempotencyRecordId,
+        responseStatus: 201,
+        responseBody,
+      })
+      idempotencyRecordId = null
+    }
+
     return withServerTiming(
-      jsonOk(
-        {
-          hold: {
-            id: result.hold.id,
-            expiresAt: result.hold.expiresAt.toISOString(),
-            scheduledFor: result.hold.scheduledFor.toISOString(),
-            locationType: result.hold.locationType,
-            locationId: result.hold.locationId,
-            locationTimeZone: result.hold.locationTimeZone,
-            clientAddressId: result.hold.clientAddressId,
-            clientAddressSnapshot: result.hold.clientAddressSnapshot,
-            durationMinutes: result.hold.durationMinutes,
-          },
-          meta: result.meta,
-        } satisfies BookingHoldCreateResponseDTO,
-        201,
-      ),
+      jsonOk(responseBody, 201),
       buildServerTimingMetrics(),
     )
   } catch (error: unknown) {
     afterCreateHoldMs = nowMs()
+
+    // Release the lock, or the client's retry of a failed hold is refused as
+    // "already in progress" for the whole two-minute lock window.
+    if (idempotencyRecordId) {
+      await failIdempotency({ idempotencyRecordId })
+      idempotencyRecordId = null
+    }
 
     if (isBookingError(error)) {
       return withServerTiming(

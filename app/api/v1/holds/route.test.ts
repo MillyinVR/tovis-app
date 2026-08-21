@@ -22,6 +22,10 @@ const mocks = vi.hoisted(() => ({
   enforceRateLimit: vi.fn(),
   clientRateLimitKey: vi.fn(),
   rateLimitExceededResponse: vi.fn(),
+
+  beginIdempotency: vi.fn(),
+  completeIdempotency: vi.fn(),
+  failIdempotency: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -59,6 +63,13 @@ vi.mock('@/lib/rateLimit/response', () => ({
   rateLimitExceededResponse: mocks.rateLimitExceededResponse,
 }))
 
+vi.mock('@/lib/idempotency', () => ({
+  beginIdempotency: mocks.beginIdempotency,
+  completeIdempotency: mocks.completeIdempotency,
+  failIdempotency: mocks.failIdempotency,
+  IDEMPOTENCY_ROUTES: { HOLD_CREATE: 'POST /api/v1/holds' },
+}))
+
 import { POST } from './route'
 
 function makeJsonResponse(
@@ -75,6 +86,16 @@ function makeRequest(body: unknown): NextRequest {
   const req = new Request('http://localhost/api/v1/holds', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+
+  return req as NextRequest
+}
+
+function makeRequestWithKey(body: unknown, key: string): NextRequest {
+  const req = new Request('http://localhost/api/v1/holds', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
     body: JSON.stringify(body),
   })
 
@@ -202,6 +223,11 @@ describe('POST /api/v1/holds', () => {
         status,
       ),
     )
+
+    mocks.beginIdempotency.mockResolvedValue({
+      kind: 'started',
+      idempotencyRecordId: 'idem_1',
+    })
 
     mocks.pickString.mockImplementation((value: unknown) =>
       typeof value === 'string' && value.trim() ? value.trim() : null,
@@ -839,5 +865,98 @@ describe('POST /api/v1/holds', () => {
     expect(mocks.createHold).toHaveBeenCalledWith(
       expect.objectContaining({ rescheduleBookingId: null }),
     )
+  })
+
+  describe('POST /api/v1/holds — idempotency', () => {
+    // The load-bearing one. Both web callers shipped before the key existed, and
+    // a browser holding an old bundle must keep booking. If this ever goes red,
+    // the route started REQUIRING a key and every in-flight client breaks.
+    it('does not touch the ledger when no Idempotency-Key is sent', async () => {
+      mocks.professionalServiceOfferingFindUnique.mockResolvedValue(offering)
+
+      const res = await POST(makeRequest(makeValidSalonBody()))
+
+      expect(res.status).toBe(201)
+      expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+      expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+    })
+
+    it('replays the first response instead of holding the slot twice', async () => {
+      mocks.beginIdempotency.mockResolvedValue({
+        kind: 'replay',
+        responseStatus: 201,
+        responseBody: { hold: { id: 'hold_first' } },
+      })
+
+      const res = await POST(
+        makeRequestWithKey(makeValidSalonBody(), 'hold:offering_1:slot:1'),
+      )
+
+      expect(res.status).toBe(201)
+      await expect(readJson(res)).resolves.toMatchObject({
+        hold: { id: 'hold_first' },
+      })
+      // The whole point: the second tap never reaches the write boundary.
+      expect(mocks.createHold).not.toHaveBeenCalled()
+    })
+
+    it('refuses a key reused with a different body', async () => {
+      mocks.beginIdempotency.mockResolvedValue({ kind: 'conflict' })
+
+      const res = await POST(
+        makeRequestWithKey(makeValidSalonBody(), 'hold:offering_1:slot:1'),
+      )
+
+      expect(res.status).toBe(409)
+      expect(mocks.createHold).not.toHaveBeenCalled()
+    })
+
+    it('refuses while an identical request is still running', async () => {
+      mocks.beginIdempotency.mockResolvedValue({ kind: 'in_progress' })
+
+      const res = await POST(
+        makeRequestWithKey(makeValidSalonBody(), 'hold:offering_1:slot:1'),
+      )
+
+      expect(res.status).toBe(409)
+      expect(mocks.createHold).not.toHaveBeenCalled()
+    })
+
+    it('completes the ledger entry on success', async () => {
+      mocks.professionalServiceOfferingFindUnique.mockResolvedValue(offering)
+
+      const res = await POST(
+        makeRequestWithKey(makeValidSalonBody(), 'hold:offering_1:slot:1'),
+      )
+
+      expect(res.status).toBe(201)
+      expect(mocks.completeIdempotency).toHaveBeenCalledWith(
+        expect.objectContaining({ idempotencyRecordId: 'idem_1', responseStatus: 201 }),
+      )
+    })
+
+    // Without this the client's retry of a failed hold is refused as "already in
+    // progress" for the whole two-minute lock window.
+    it('releases the lock when the write throws', async () => {
+      mocks.professionalServiceOfferingFindUnique.mockResolvedValue(offering)
+      mocks.createHold.mockRejectedValue(new Error('boom'))
+
+      await POST(makeRequestWithKey(makeValidSalonBody(), 'hold:offering_1:slot:1'))
+
+      expect(mocks.failIdempotency).toHaveBeenCalledWith({
+        idempotencyRecordId: 'idem_1',
+      })
+    })
+
+    it('releases the lock when the offering refusal short-circuits', async () => {
+      mocks.professionalServiceOfferingFindUnique.mockResolvedValue(null)
+
+      await POST(makeRequestWithKey(makeValidSalonBody(), 'hold:offering_1:slot:1'))
+
+      expect(mocks.failIdempotency).toHaveBeenCalledWith({
+        idempotencyRecordId: 'idem_1',
+      })
+      expect(mocks.createHold).not.toHaveBeenCalled()
+    })
   })
 })

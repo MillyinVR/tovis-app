@@ -92,7 +92,25 @@ export default function ClaimClient(props: Props) {
       // 1) Hold the fixed opening slot.
       const holdRes = await fetch('/api/v1/holds', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          // See AvailabilityDrawer: the action must carry everything that
+          // distinguishes the request, or a second claim inside the 60s bucket
+          // collides with the first one's body and 409s.
+          ...idempotencyHeaders(
+            buildClientIdempotencyKey({
+              scope: 'hold',
+              entityId: props.offeringId,
+              action: [
+                props.scheduledFor,
+                props.locationType,
+                props.locationType === 'SALON'
+                  ? (props.locationId ?? '')
+                  : (props.defaultAddressId ?? ''),
+              ].join('|'),
+            }),
+          ),
+        },
         body: JSON.stringify({
           offeringId: props.offeringId,
           scheduledFor: props.scheduledFor,

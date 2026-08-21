@@ -34,6 +34,11 @@ import {
   failIdempotency,
   IDEMPOTENCY_ROUTES,
 } from '@/lib/idempotency'
+import {
+  idempotencyConflictFail,
+  idempotencyInProgressFail,
+  idempotencyMissingKeyFail,
+} from '@/lib/idempotency/responses'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { safeError, safeLogMeta } from '@/lib/security/logging'
 
@@ -91,31 +96,8 @@ type RequestMeta = {
   idempotencyKey: string | null
 }
 
-function idempotencyMissingKeyFail(): Response {
-  return jsonFail(400, 'Missing idempotency key.', {
-    code: 'IDEMPOTENCY_KEY_REQUIRED',
-  })
-}
 
-function idempotencyInProgressFail(): Response {
-  return jsonFail(
-    409,
-    'A matching final review request is already in progress.',
-    {
-      code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
-    },
-  )
-}
 
-function idempotencyConflictFail(): Response {
-  return jsonFail(
-    409,
-    'This idempotency key was already used with a different request body.',
-    {
-      code: 'IDEMPOTENCY_KEY_CONFLICT',
-    },
-  )
-}
 
 function asTrimmedString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
@@ -430,7 +412,7 @@ export async function POST(req: Request, ctx: RouteContext) {
     }
 
     if (idempotency.kind === 'in_progress') {
-      return idempotencyInProgressFail()
+      return idempotencyInProgressFail('final review')
     }
 
     if (idempotency.kind === 'conflict') {

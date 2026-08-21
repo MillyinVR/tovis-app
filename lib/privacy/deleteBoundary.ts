@@ -370,9 +370,9 @@ export const DELETE_BOUNDARY: Readonly<Record<string, DeleteDisposition>> = {
       'Session-security record. Deleting it would UN-revoke sessions that were deliberately killed — the opposite of what a deletion should do.',
   },
   IdempotencyKey: {
-    status: 'RETAIN',
+    status: 'ANONYMIZE',
     reason:
-      'Short-lived request-dedupe infrastructure that expires on its own; the actor id is part of the dedupe scope, so clearing it would let a replay through.',
+      '⚠️ Was RETAIN until 2026-08-21, justified as "short-lived infrastructure that expires on its own". That was FALSE: the model has no expiry column and nothing purged the table, so `responseBodyJson` — a verbatim copy of a real API response, containing the identity fields deletion clears everywhere else — survived a deletion request indefinitely. The row is still kept, because the actor id is part of the dedupe scope and removing it would let a replay of a pre-deletion request through; only the response body is cleared. General (non-deletion) retention is handled by the idempotency-retention job.',
   },
 
   LookPostReport: { status: 'RETAIN', reason: R_MODERATION },

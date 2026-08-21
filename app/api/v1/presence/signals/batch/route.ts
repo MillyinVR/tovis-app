@@ -4,6 +4,9 @@ import {
   getPresenceSignalsBatch,
   type PresenceBatchItem,
 } from '@/lib/presence/presenceSignals'
+import { enforceRateLimit } from '@/lib/rateLimit/enforce'
+import { clientRateLimitKey } from '@/lib/rateLimit/identity'
+import { rateLimitExceededResponse } from '@/lib/rateLimit/response'
 
 export const dynamic = 'force-dynamic'
 
@@ -33,6 +36,17 @@ function parseItem(raw: unknown): PresenceBatchItem | null {
 }
 
 export async function POST(req: Request) {
+  // Same reasoning as the single-resource route, at half the ceiling: MAX_ITEMS
+  // means one request here is worth up to 50 of those.
+  const rateLimit = await enforceRateLimit({
+    bucket: 'presence:signals:batch',
+    key: clientRateLimitKey({ request: req }),
+  })
+
+  if (!rateLimit.allowed) {
+    return rateLimitExceededResponse(rateLimit)
+  }
+
   const body = await readJsonRecord(req)
   const rawItems = Array.isArray(body.items) ? body.items : null
 
