@@ -56,6 +56,8 @@ export type RateLimitBucket =
   | 'auth:sms-phone-day'
   | 'auth:session-handoff:issue'
   | 'auth:session-handoff:exchange'
+  | 'presence:signals'
+  | 'presence:signals:batch'
 
 export type RateLimitMode = 'redis-only' | 'auth-critical'
 
@@ -67,6 +69,30 @@ export type RateLimitConfig = {
 }
 
 export const RATE_LIMITS: Record<RateLimitBucket, RateLimitConfig> = {
+  // Presence is the only unauthenticated read surface with a Postgres query
+  // behind it: every call counts ACTIVE waitlist entries for a professional, on
+  // top of a Redis read. It is reachable with no session because the public
+  // offering page renders it for anonymous visitors, so the key is the IP and
+  // the ceiling is what bounds both the DB load and a competitor scraping any
+  // pro's waitlist depth.
+  //
+  // Sizing: the hook polls every 15s while active, so one open tab is 4/min.
+  // 120 leaves room for ~30 concurrent viewers behind one NAT'd IP (a salon on
+  // shared wifi) while still capping a scraper at 2 requests a second.
+  'presence:signals': {
+    limit: 120,
+    windowSeconds: 60,
+    prefix: 'rl:presence:signals',
+    mode: 'redis-only',
+  },
+  // Half the ceiling, because one batch request fans out to up to MAX_ITEMS (50)
+  // resources — so the same number of requests is up to 50x the work.
+  'presence:signals:batch': {
+    limit: 60,
+    windowSeconds: 60,
+    prefix: 'rl:presence:signals:batch',
+    mode: 'redis-only',
+  },
   'holds:create': {
     limit: 12,
     windowSeconds: 60,

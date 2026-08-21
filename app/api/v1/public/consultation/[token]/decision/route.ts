@@ -72,31 +72,8 @@ function invalidTokenFail(): Response {
   })
 }
 
-function idempotencyMissingKeyFail(): Response {
-  return jsonFail(400, 'Missing idempotency key.', {
-    code: 'IDEMPOTENCY_KEY_REQUIRED',
-  })
-}
 
-function idempotencyInProgressFail(): Response {
-  return jsonFail(
-    409,
-    'A matching consultation decision request is already in progress.',
-    {
-      code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
-    },
-  )
-}
 
-function idempotencyConflictFail(): Response {
-  return jsonFail(
-    409,
-    'This idempotency key was already used with a different request body.',
-    {
-      code: 'IDEMPOTENCY_KEY_CONFLICT',
-    },
-  )
-}
 
 async function getToken(ctx: RouteContext<{ token: string }>): Promise<string | null> {
   const params = await resolveRouteParams(ctx)

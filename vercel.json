@@ -156,6 +156,10 @@
     {
       "path": "/api/internal/jobs/re-engagement-dispatch",
       "schedule": "50 10 * * *"
+    },
+    {
+      "path": "/api/internal/jobs/idempotency-retention",
+      "schedule": "40 9 * * *"
     }
   ]
 }

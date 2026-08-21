@@ -839,6 +839,14 @@ export const DELETE_RULES: readonly DeleteRule[] = [
     }),
     data: { actorUserId: null, creditedUserId: null },
   }),
+  anonymizeRule({
+    model: 'IdempotencyKey',
+    notes:
+      'The ROW survives so a replay of a pre-deletion request still short-circuits (the actor id is part of the dedupe scope, so deleting it would let one through). Only the stored RESPONSE BODY is cleared — it is a verbatim copy of a real API response and can contain the very identity fields deletion just removed everywhere else.',
+    delegate: (db) => db.idempotencyKey,
+    where: (s) => ({ actorUserId: s.userId }),
+    data: { responseBodyJson: Prisma.DbNull },
+  }),
 ]
 
 /**

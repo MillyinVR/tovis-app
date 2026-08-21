@@ -3,6 +3,13 @@
 export const IDEMPOTENCY_ROUTES = {
   BOOKING_FINALIZE: 'POST /api/v1/bookings/finalize',
 
+  // The client's double-tap. A hold reserves a real slot on a real pro's
+  // calendar, so two of them from one impatient tap is a slot silently held
+  // twice. The key is OPTIONAL here, unlike every other route in this registry:
+  // both web callers predate it and an installed client that does not send one
+  // must keep working exactly as before. See the route for that branch.
+  HOLD_CREATE: 'POST /api/v1/holds',
+
   PRO_BOOKING_CREATE: 'POST /api/v1/pro/bookings',
   // K18: creating a series materializes up to a dozen bookings, so a
   // double-submit is expensive even though the second attempt would refuse at
