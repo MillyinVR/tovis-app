@@ -60,6 +60,34 @@ export type ShotPackPoseRule = {
   tip: string
 }
 
+/** Coach states a look brief's direction lines can be bound to, so the line the
+ * coach speaks is CHOSEN by what the lens currently sees rather than played in
+ * sequence. Every kind is derived from a signal the coach already computes for
+ * the current `ShotPackStep` — nothing here needs a new on-device measurement:
+ *  - opening — the step just began (no measurement)
+ *  - subjectTooFar — subject fill is below the step's `fillBandMin`
+ *  - subjectTooClose — subject fill is above the step's `fillBandMax`
+ *  - faceMissing — the step's `face` is 'required' and no face is detected
+ *  - eyesClosed — a blink is detected and the step's `allowsClosedEyes` is false
+ *  - poseUnmet — at least one of the step's `pose` rules is unmet
+ *  - ready — every gate is satisfied; the line spoken on the settle
+ *
+ * Same forward-compat contract as POSE_RULE_KINDS: the app SKIPS trigger kinds
+ * it doesn't recognize, so new vocabulary can ship here ahead of older builds.
+ * Declaration order is also the canonical coaching order — the legacy
+ * `directionLines` script is projected from it (see lib/pro/cameraVision.ts). */
+export const DIRECTION_TRIGGER_KINDS = [
+  'opening',
+  'subjectTooFar',
+  'subjectTooClose',
+  'faceMissing',
+  'eyesClosed',
+  'poseUnmet',
+  'ready',
+] as const
+
+export type DirectionTriggerKind = (typeof DIRECTION_TRIGGER_KINDS)[number]
+
 export type ShotPackStep = {
   title: string
   hint: string
