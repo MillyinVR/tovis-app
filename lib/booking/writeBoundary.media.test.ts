@@ -45,7 +45,10 @@ vi.mock('@/lib/booking/closeoutAudit', () => ({
   areAuditValuesEqual: mocks.areAuditValuesEqual,
 }))
 
-import { uploadProBookingMedia } from './writeBoundary'
+import {
+  SESSION_MEDIA_POST_CLOSEOUT_GRACE_MS,
+  uploadProBookingMedia,
+} from './writeBoundary'
 
 const tx = {
   booking: {
@@ -466,12 +469,14 @@ describe('lib/booking/writeBoundary media lifecycle invariants', () => {
     expect(mocks.txBookingUpdate).not.toHaveBeenCalled()
   })
 
-  it('rejects media uploads for completed bookings', async () => {
+  it('rejects media uploads for bookings completed longer ago than the grace window', async () => {
     mocks.txBookingFindUnique.mockResolvedValueOnce(
       makeBooking({
         status: BookingStatus.COMPLETED,
         sessionStep: SessionStep.DONE,
-        finishedAt: TEST_NOW,
+        finishedAt: new Date(
+          TEST_NOW.getTime() - SESSION_MEDIA_POST_CLOSEOUT_GRACE_MS - 1_000,
+        ),
       }),
     )
 
@@ -488,5 +493,121 @@ describe('lib/booking/writeBoundary media lifecycle invariants', () => {
     expect(mocks.txMediaAssetCreate).not.toHaveBeenCalled()
     expect(mocks.createBookingCloseoutAuditLog).not.toHaveBeenCalled()
     expect(mocks.txBookingUpdate).not.toHaveBeenCalled()
+  })
+
+  // The post-closeout grace window.
+  //
+  // 🔴 The case these pin, in the pro's words: "it should save the pictures even
+  // if the phone is offline, and let me continue and close out the session."
+  // Closing out sets COMPLETED + DONE + finishedAt in ONE write, and both the
+  // status gate and the phase/step gate then refuse — so an AFTER photo still
+  // uploading when the pro hit wrap-up was rejected outright and never reached
+  // the session. That is the bug, moved rather than fixed.
+
+  it('accepts an AFTER photo still arriving just after close-out', async () => {
+    mocks.txBookingFindUnique.mockResolvedValueOnce(
+      makeBooking({
+        status: BookingStatus.COMPLETED,
+        // ⚠️ DONE satisfies NO phase in `canUploadBookingMediaPhase`, so this
+        // also pins the second gate: relaxing only the status check would swap
+        // this for STEP_MISMATCH and lose the photo just the same.
+        sessionStep: SessionStep.DONE,
+        finishedAt: new Date(TEST_NOW.getTime() - 30_000),
+      }),
+    )
+
+    const created = makeCreatedMedia({
+      phase: MediaPhase.AFTER,
+      caption: 'After photo',
+      storagePath: 'bookings/booking_1/after.jpg',
+    })
+    mocks.txMediaAssetCreate.mockResolvedValueOnce(created)
+
+    const result = await uploadProBookingMedia(
+      makeUploadArgs({ phase: MediaPhase.AFTER }),
+    )
+
+    expect(result.created).toEqual(created)
+    // A straggler must not move a finished session's step back off DONE.
+    expect(result.advancedTo).toBeNull()
+    expect(mocks.txBookingUpdate).not.toHaveBeenCalled()
+  })
+
+  it('accepts a BEFORE photo stranded offline and delivered a day later', async () => {
+    mocks.txBookingFindUnique.mockResolvedValueOnce(
+      makeBooking({
+        status: BookingStatus.COMPLETED,
+        sessionStep: SessionStep.DONE,
+        finishedAt: new Date(TEST_NOW.getTime() - 24 * 60 * 60 * 1000),
+      }),
+    )
+
+    const created = makeCreatedMedia({
+      phase: MediaPhase.BEFORE,
+      caption: 'Before photo',
+      storagePath: 'bookings/booking_1/before.jpg',
+    })
+    mocks.txMediaAssetCreate.mockResolvedValueOnce(created)
+
+    const result = await uploadProBookingMedia(makeUploadArgs())
+
+    expect(result.created).toEqual(created)
+    expect(mocks.txBookingUpdate).not.toHaveBeenCalled()
+  })
+
+  it('grants no window to a completed booking that has no finishedAt to measure', async () => {
+    mocks.txBookingFindUnique.mockResolvedValueOnce(
+      makeBooking({
+        status: BookingStatus.COMPLETED,
+        sessionStep: SessionStep.DONE,
+        finishedAt: null,
+      }),
+    )
+
+    await expect(
+      uploadProBookingMedia(makeUploadArgs({ phase: MediaPhase.AFTER })),
+    ).rejects.toMatchObject({
+      code: 'BOOKING_CANNOT_EDIT_COMPLETED',
+    })
+
+    expect(mocks.txMediaAssetCreate).not.toHaveBeenCalled()
+  })
+
+  it('grants no window to a booking whose finishedAt is in the future', async () => {
+    // Clock skew must not hand out an unbounded window.
+    mocks.txBookingFindUnique.mockResolvedValueOnce(
+      makeBooking({
+        status: BookingStatus.COMPLETED,
+        sessionStep: SessionStep.DONE,
+        finishedAt: new Date(TEST_NOW.getTime() + 60_000),
+      }),
+    )
+
+    await expect(
+      uploadProBookingMedia(makeUploadArgs({ phase: MediaPhase.AFTER })),
+    ).rejects.toMatchObject({
+      code: 'BOOKING_CANNOT_EDIT_COMPLETED',
+    })
+
+    expect(mocks.txMediaAssetCreate).not.toHaveBeenCalled()
+  })
+
+  it('still refuses a CANCELLED booking inside the same window', async () => {
+    // The window is about a session that FINISHED, never about one called off.
+    mocks.txBookingFindUnique.mockResolvedValueOnce(
+      makeBooking({
+        status: BookingStatus.CANCELLED,
+        sessionStep: SessionStep.DONE,
+        finishedAt: new Date(TEST_NOW.getTime() - 30_000),
+      }),
+    )
+
+    await expect(
+      uploadProBookingMedia(makeUploadArgs({ phase: MediaPhase.AFTER })),
+    ).rejects.toMatchObject({
+      code: 'BOOKING_CANNOT_EDIT_CANCELLED',
+    })
+
+    expect(mocks.txMediaAssetCreate).not.toHaveBeenCalled()
   })
 })

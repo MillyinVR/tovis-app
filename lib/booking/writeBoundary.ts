@@ -3366,6 +3366,43 @@ function getBookingMediaUploadAuditAction(
   return null
 }
 
+/**
+ * How long after a booking is closed out its own session photos may still land.
+ *
+ * 🔴 Why this exists: closing out a session (the pro's wrap-up) sets
+ * `status = COMPLETED`, `sessionStep = DONE` and `finishedAt = now` in one
+ * transaction — and the two gates below then refuse all further session media.
+ * That is correct for editing a finished booking, and wrong for the photos of
+ * the very session being finished: the pro shoots the AFTER set and closes out
+ * seconds later, while those uploads are still in flight. Before this window,
+ * every straggler was refused with BOOKING_CANNOT_EDIT_COMPLETED and the shoot
+ * simply lost them.
+ *
+ * 48 hours covers a phone that left the salon with no signal and reconnected the
+ * next day (iOS uploads these in the background, retrying with backoff), while
+ * still being a bounded, auditable window rather than "any past booking, ever".
+ *
+ * ⚠️ Scope: this relaxes the MEDIA gates only. Money, schedule and status
+ * transitions stay locked on a completed booking exactly as before.
+ */
+export const SESSION_MEDIA_POST_CLOSEOUT_GRACE_MS = 48 * 60 * 60 * 1000
+
+/**
+ * Whether a completed booking is still inside the window in which the session's
+ * own photos may arrive.
+ *
+ * Deliberately keyed on `finishedAt`, not on `status`: a booking marked
+ * COMPLETED with no `finishedAt` has no window to measure, so it gets none.
+ */
+function isWithinPostCloseoutMediaGrace(
+  finishedAt: Date | null | undefined,
+  now: Date,
+): boolean {
+  if (!finishedAt) return false
+  const elapsed = now.getTime() - finishedAt.getTime()
+  return elapsed >= 0 && elapsed <= SESSION_MEDIA_POST_CLOSEOUT_GRACE_MS
+}
+
 function canUploadBookingMediaPhase(
   sessionStep: SessionStep | null | undefined,
   phase: MediaPhase,
@@ -7780,6 +7817,11 @@ async function performLockedTransitionSessionStep(args: {
 
 async function performLockedUploadProBookingMedia(args: {
   tx: Prisma.TransactionClient
+  /// The transaction's clock, used only to measure the post-closeout media
+  /// grace window. Optional so the existing locked-transaction test harnesses
+  /// (which hand the callback a `tx` alone) keep working; they run under fake
+  /// timers, so the fallback is just as deterministic.
+  now?: Date
   bookingId: string
   professionalId: string
   uploadedByUserId: string
@@ -7795,6 +7837,8 @@ async function performLockedUploadProBookingMedia(args: {
   requestId?: string | null
   idempotencyKey?: string | null
 }): Promise<UploadProBookingMediaResult> {
+  const now = args.now ?? new Date()
+
   const booking: BookingMediaUploadRecord | null = await args.tx.booking.findUnique({
     where: { id: args.bookingId },
     select: BOOKING_MEDIA_UPLOAD_SELECT,
@@ -7822,14 +7866,24 @@ async function performLockedUploadProBookingMedia(args: {
     })
   }
 
-  if (booking.status === BookingStatus.COMPLETED || booking.finishedAt) {
+  // A photo from the session being closed out may still be in flight when the
+  // wrap-up lands. Both gates below have to know that, not just the first:
+  // close-out sets `sessionStep = DONE` in the same write as `finishedAt`, and
+  // DONE satisfies no phase, so relaxing only the status check would swap
+  // BOOKING_CANNOT_EDIT_COMPLETED for STEP_MISMATCH and lose the photo anyway.
+  const withinCloseoutGrace = isWithinPostCloseoutMediaGrace(booking.finishedAt, now)
+
+  if (
+    (booking.status === BookingStatus.COMPLETED || booking.finishedAt) &&
+    !withinCloseoutGrace
+  ) {
     throw bookingError('BOOKING_CANNOT_EDIT_COMPLETED', {
       message: 'This booking is completed. Media uploads are locked.',
       userMessage: 'This booking is completed. Media uploads are locked.',
     })
   }
 
-  if (!canUploadBookingMediaPhase(booking.sessionStep, args.phase)) {
+  if (!withinCloseoutGrace && !canUploadBookingMediaPhase(booking.sessionStep, args.phase)) {
     const step = booking.sessionStep ?? SessionStep.NONE
     throw bookingError('STEP_MISMATCH', {
       message: `You can’t upload ${args.phase} media at session step: ${String(step)}.`,
@@ -15655,9 +15709,10 @@ export async function uploadProBookingMedia(
 
   return withLockedProfessionalTransaction(
     args.professionalId,
-    async ({ tx }) =>
+    async ({ tx, now }) =>
       performLockedUploadProBookingMedia({
         tx,
+        now,
         bookingId: args.bookingId,
         professionalId: args.professionalId,
         uploadedByUserId: args.uploadedByUserId,
