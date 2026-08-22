@@ -2192,6 +2192,37 @@ describe('app/api/v1/auth/register/route', () => {
     await flushWaitUntilTasks()
   })
 
+  // 🔴 Without this row the pro accepts NO payment method — the session
+  // wrap-up shows no "Mark as paid" control and their first booking can never
+  // be closed out — while their own Payment settings screen reads
+  // "Currently enabled: 1 · Cash" off the same schema defaults. Created empty
+  // on purpose: every column takes its default, which is what that screen has
+  // always displayed.
+  it('creates a payment-settings row for a new pro so their first booking can be closed out', async () => {
+    const tx = makeSuccessfulRegisterTx({
+      userId: 'user_pro_payment_settings',
+      email: 'pro@example.com',
+      role: Role.PRO,
+    })
+
+    mockPrisma.$transaction.mockImplementation(
+      async (fn: (txArg: typeof tx) => Promise<unknown>) => fn(tx),
+    )
+
+    const result = await POST(makeRequest(makeProSignupBody()))
+
+    expect(result.status).toBe(201)
+
+    const createCall = tx.user.create.mock.calls[0]?.[0]
+    expect(createCall?.data?.professionalProfile?.create).toEqual(
+      expect.objectContaining({
+        paymentSettings: { create: {} },
+      }),
+    )
+
+    await flushWaitUntilTasks()
+  })
+
   it('returns 500 when the app URL cannot be resolved', async () => {
     mockGetAppUrlFromRequest.mockReturnValue(null)
 

@@ -1271,6 +1271,21 @@ export async function POST(request: Request) {
                           ),
                         }
                       : undefined,
+
+                    // 🔴 A pro with NO payment-settings row accepts no payment
+                    // method at all: buildAcceptedPaymentMethods(null) and
+                    // listPublicAcceptedMethods(null) both return empty, so the
+                    // session wrap-up offers no "Mark as paid" control and the
+                    // very first booking can never be closed out. The pro's own
+                    // Payment settings screen meanwhile showed "Currently
+                    // enabled: 1 · Cash", because the editor falls back to these
+                    // same schema defaults — so the app told them to turn on a
+                    // method that already looked on. Create the row here (empty
+                    // = every Prisma default, which is exactly what that screen
+                    // has always displayed) so the two agree from the pro's
+                    // first minute. Existing pros are covered by
+                    // `pnpm backfill:pro-payment-settings`.
+                    paymentSettings: { create: {} },
                   },
                 }
               : undefined,

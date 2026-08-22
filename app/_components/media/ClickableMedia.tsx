@@ -89,7 +89,17 @@ export default function ClickableMedia({
         }}
         title="View full size"
         className={cn(
-          'group relative block overflow-hidden',
+          // 🔴 `w-full` is load-bearing, not decoration. The trigger is a
+          // <button>, and a button's `width: auto` is shrink-to-fit even at
+          // `display: block` — the thumbnail inside is absolutely positioned, so
+          // there is no in-flow content to size it. A caller that styles the
+          // tile with an aspect ratio alone (`aspect-square`,
+          // `.brand-pro-session-photo-tile`) collapsed to its 2px border box and
+          // the photo vanished, while its absolutely-positioned overlay siblings
+          // stayed put and landed on top of the next control. Callers that need
+          // a fixed width still win: `cn` is tailwind-merge, so a caller's
+          // `w-32` replaces this.
+          'group relative block w-full overflow-hidden',
           'focus:outline-none focus:ring-2 focus:ring-accentPrimary/35',
           className,
         )}

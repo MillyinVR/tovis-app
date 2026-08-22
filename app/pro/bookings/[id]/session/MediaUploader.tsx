@@ -418,7 +418,9 @@ export default function MediaUploader({
 
   const hint = (() => {
     if (!file) {
-      return `Choose a ${phase.toLowerCase()} photo — it uploads automatically.`
+      // "AFTER" needs "an" — the shared template read "Choose a after photo".
+      const article = /^[aeiou]/i.test(phase) ? 'an' : 'a'
+      return `Choose ${article} ${phase.toLowerCase()} photo — it uploads automatically.`
     }
 
     if (file.size > maxBytes) {
