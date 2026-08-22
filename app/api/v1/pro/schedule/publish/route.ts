@@ -45,20 +45,16 @@ export async function POST() {
     if (draftLocations.length === 0) {
       const readiness = await checkProReadiness(professionalId)
 
-      if (!readiness.ok) {
-        return jsonFail(
-          422,
-          'Schedule cannot be published until all blockers are resolved.',
-          {
-            blockers: readiness.blockers,
-          },
-        )
-      }
-
+      // Nothing to publish is not a failure to publish. This branch is what a
+      // pro hits on their SECOND click, once the first one already flipped
+      // every draft location — returning 4xx here made the app say
+      // "Couldn't publish" about a request that had nothing to refuse.
+      // Remaining readiness blockers ride along as information.
       return jsonOk({
-        liveModes: readiness.liveModes,
+        liveModes: readiness.ok ? readiness.liveModes : [],
         locationsPublished: 0,
         scheduleConfigVersion: null,
+        blockers: readiness.ok ? [] : readiness.blockers,
       })
     }
 
@@ -118,24 +114,23 @@ export async function POST() {
 
     const readiness = await checkProReadiness(professionalId)
 
-    if (!readiness.ok) {
-      return jsonFail(
-        422,
-        'Locations were published, but the professional is still not ready for booking.',
-        {
-          locationsPublished: result.locationsPublished,
-          scheduleConfigVersion: result.scheduleConfigVersion,
-          blockers: readiness.blockers,
-          blockedLocations,
-        },
-      )
-    }
-
+    // The transaction above has ALREADY COMMITTED — the locations are bookable
+    // and `scheduleConfigVersion` is bumped. Reporting a failure status for a
+    // write that succeeded is what made the pro's own app tell them
+    // "Couldn't publish" (and the web client skip its `refresh()`, so the page
+    // kept rendering the stale draft state) over a blocker that has nothing to
+    // do with locations — typically "you have no services yet".
+    //
+    // A publish that published is a success. Whether the pro is *bookable* is a
+    // separate question, answered by `blockers`, which is empty when they are.
+    // Genuine refusals — no publishable location at all — still return 422
+    // above, because nothing was written in those.
     return jsonOk({
-      liveModes: readiness.liveModes,
+      liveModes: readiness.ok ? readiness.liveModes : [],
       locationsPublished: result.locationsPublished,
       scheduleConfigVersion: result.scheduleConfigVersion,
       blockedLocations,
+      blockers: readiness.ok ? [] : readiness.blockers,
     })
   } catch (error) {
     captureBookingException({ error, route: 'POST /api/v1/pro/schedule/publish' })
