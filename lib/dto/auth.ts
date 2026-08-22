@@ -120,20 +120,6 @@ export type AuthVerificationStatusResponseDTO = {
   token: string | null
 }
 
-// POST /api/v1/auth/resend-phone-code — `to` is masked.
-export type AuthResendPhoneCodeResponseDTO = {
-  ok: true
-  to: string
-  status: string
-}
-
-// POST /api/v1/auth/verify-phone-code — `phone` is masked.
-export type AuthVerifyPhoneCodeResponseDTO = {
-  ok: true
-  phone: string
-  status: string
-}
-
 // POST /api/v1/workspace/switch — re-minted token carries the new acting role.
 export type WorkspaceSwitchResponseDTO = {
   workspace: Role

@@ -155,8 +155,6 @@ export type {
   AuthPhoneLoginSendResponseDTO,
   AuthPhoneVerifyResponseDTO,
   AuthEmailVerifyResponseDTO,
-  AuthResendPhoneCodeResponseDTO,
-  AuthVerifyPhoneCodeResponseDTO,
   WorkspaceSwitchResponseDTO,
 } from '@/lib/dto/auth'
 
