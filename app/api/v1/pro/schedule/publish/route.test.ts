@@ -201,7 +201,7 @@ describe('POST /api/v1/pro/schedule/publish', () => {
     expect(mocks.checkProReadiness).not.toHaveBeenCalled()
   })
 
-  it('returns readiness blockers when there are no draft locations and the pro is not ready', async () => {
+  it('succeeds with zero published and reports blockers when there are no draft locations and the pro is not ready', async () => {
     mocks.professionalLocation.findMany.mockResolvedValueOnce([])
     mocks.checkProReadiness.mockResolvedValueOnce({
       ok: false,
@@ -211,11 +211,15 @@ describe('POST /api/v1/pro/schedule/publish', () => {
     const result = await POST()
     const body = await readJson(result)
 
-    expect(result.status).toBe(422)
+    // Nothing to publish is not a failure to publish — this is the SECOND
+    // click, after the first one already flipped every draft location.
+    expect(result.status).toBe(200)
 
     expect(body).toEqual({
-      ok: false,
-      error: 'Schedule cannot be published until all blockers are resolved.',
+      ok: true,
+      liveModes: [],
+      locationsPublished: 0,
+      scheduleConfigVersion: null,
       blockers: ['NO_ACTIVE_OFFERING', 'NO_BOOKABLE_LOCATION'],
     })
 
@@ -259,6 +263,7 @@ describe('POST /api/v1/pro/schedule/publish', () => {
       liveModes: ['SALON'],
       locationsPublished: 0,
       scheduleConfigVersion: null,
+      blockers: [],
     })
 
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
@@ -379,10 +384,11 @@ describe('POST /api/v1/pro/schedule/publish', () => {
       locationsPublished: 1,
       scheduleConfigVersion: 43,
       blockedLocations: [blockedResult],
+      blockers: [],
     })
   })
 
-  it('returns 422 when locations publish but full pro readiness still fails', async () => {
+  it('returns 200 — NOT a failure — when locations publish but full pro readiness still fails', async () => {
     const blockedResult = {
       ok: false,
       locationId: 'loc_blocked',
@@ -417,7 +423,11 @@ describe('POST /api/v1/pro/schedule/publish', () => {
     const result = await POST()
     const body = await readJson(result)
 
-    expect(result.status).toBe(422)
+    // The transaction has already committed: the location IS bookable. A
+    // failure status here made both clients tell the pro "Couldn't publish"
+    // about a write that succeeded, and made the web client skip its refresh
+    // so the page kept showing the stale draft state.
+    expect(result.status).toBe(200)
 
     expect(mocks.professionalLocation.updateMany).toHaveBeenCalledWith({
       where: {
@@ -440,13 +450,12 @@ describe('POST /api/v1/pro/schedule/publish', () => {
     )
 
     expect(body).toEqual({
-      ok: false,
-      error:
-        'Locations were published, but the professional is still not ready for booking.',
+      ok: true,
+      liveModes: [],
       locationsPublished: 1,
       scheduleConfigVersion: 44,
-      blockers: ['NO_ACTIVE_OFFERING'],
       blockedLocations: [blockedResult],
+      blockers: ['NO_ACTIVE_OFFERING'],
     })
   })
 
@@ -522,6 +531,7 @@ describe('POST /api/v1/pro/schedule/publish', () => {
       locationsPublished: 2,
       scheduleConfigVersion: 45,
       blockedLocations: [],
+      blockers: [],
     })
   })
 

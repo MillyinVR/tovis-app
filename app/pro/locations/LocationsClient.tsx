@@ -70,30 +70,44 @@ function publishBlockerLabel(code: string): string {
   return PUBLISH_BLOCKER_LABELS[code] ?? code.replaceAll('_', ' ').toLowerCase()
 }
 
-function readPublishBlockers(data: unknown): string[] {
+function labelCodes(value: unknown, out: string[]): void {
+  if (!Array.isArray(value)) return
+  for (const code of value) {
+    if (typeof code === 'string') out.push(publishBlockerLabel(code))
+  }
+}
+
+/**
+ * Readiness blockers — reasons the PRO is not bookable overall (no services
+ * yet, verification pending). These are NOT reasons a location failed to
+ * publish, and a successful publish can carry them.
+ */
+function readReadinessBlockers(data: unknown): string[] {
   if (typeof data !== 'object' || data === null) return []
-
-  const record = data as Record<string, unknown>
   const out: string[] = []
-
-  if (Array.isArray(record.blockers)) {
-    for (const blocker of record.blockers) {
-      if (typeof blocker === 'string') out.push(publishBlockerLabel(blocker))
-    }
-  }
-
-  if (Array.isArray(record.blockedLocations)) {
-    for (const entry of record.blockedLocations) {
-      if (typeof entry !== 'object' || entry === null) continue
-      const blockers = (entry as Record<string, unknown>).blockers
-      if (!Array.isArray(blockers)) continue
-      for (const blocker of blockers) {
-        if (typeof blocker === 'string') out.push(publishBlockerLabel(blocker))
-      }
-    }
-  }
-
+  labelCodes((data as Record<string, unknown>).blockers, out)
   return [...new Set(out)]
+}
+
+/** Reasons individual LOCATIONS were left unpublished. */
+function readSkippedLocationBlockers(data: unknown): string[] {
+  if (typeof data !== 'object' || data === null) return []
+  const out: string[] = []
+  const entries = (data as Record<string, unknown>).blockedLocations
+  if (Array.isArray(entries)) {
+    for (const entry of entries) {
+      if (typeof entry !== 'object' || entry === null) continue
+      labelCodes((entry as Record<string, unknown>).blockers, out)
+    }
+  }
+  return [...new Set(out)]
+}
+
+/** Both kinds together — for a genuine refusal, where the split doesn't help. */
+function readPublishBlockers(data: unknown): string[] {
+  return [
+    ...new Set([...readReadinessBlockers(data), ...readSkippedLocationBlockers(data)]),
+  ]
 }
 
 function ConfirmModal(props: {
@@ -617,7 +631,18 @@ async function updateAdvanceNotice(
           ? Number((data as Record<string, unknown>).locationsPublished)
           : 0
 
-      const skipped = readPublishBlockers(data)
+      // Two different things, kept apart on purpose: locations that could not
+      // be published, and reasons the pro is still not bookable overall. The
+      // server now returns 200 with `blockers` when the publish itself worked
+      // but something unrelated (usually "no services yet") still stands.
+      const skipped = readSkippedLocationBlockers(data)
+      const stillBlocked = readReadinessBlockers(data)
+
+      const notes: string[] = []
+      if (skipped.length) notes.push(`Some locations were skipped: ${skipped.join(', ')}.`)
+      if (stillBlocked.length) {
+        notes.push(`You’re not bookable yet — still to do: ${stillBlocked.join(', ')}.`)
+      }
 
       showToast(
         {
@@ -625,9 +650,9 @@ async function updateAdvanceNotice(
           title: published
             ? `Published ${published} location${published === 1 ? '' : 's'}`
             : 'Nothing to publish',
-          body: skipped.length ? `Some locations were skipped: ${skipped.join(', ')}.` : null,
+          body: notes.length ? notes.join(' ') : null,
         },
-        skipped.length ? 5000 : 2200,
+        notes.length ? 5000 : 2200,
       )
       await refresh()
     } catch (e: unknown) {
