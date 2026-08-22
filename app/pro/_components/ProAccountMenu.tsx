@@ -266,10 +266,18 @@ export default function ProAccountMenu(props: Props) {
           borderColor: 'var(--line)',
           boxShadow: 'var(--shadow-strong)',
           // The panel is anchored to the ⋯ button inside the fixed pro header
-          // (reserved height `--pro-header-h`). Bound it to the space below so a
+          // (measured height `--pro-header-h`). Bound it to the space below so a
           // tall list scrolls internally instead of painting Sign out off-screen.
           // `dvh` tracks the mobile viewport as the address bar shows/hides.
-          maxHeight: 'calc(100dvh - var(--pro-header-h) - 12px)',
+          //
+          // The footer bar has to come out of that space too. The pro header
+          // sits in its own stacking context BELOW the global footer nav
+          // (Z.footer), by design — so any part of the panel that reaches under
+          // the footer is painted over and dead to a tap, which is exactly what
+          // was happening to Sign out. `--app-footer-space` is the footer's
+          // measured height, published by FooterShell.
+          maxHeight:
+            'calc(100dvh - var(--pro-header-h) - var(--app-footer-space, 0px) - env(safe-area-inset-bottom) - 12px)',
         }}
         role="menu"
         aria-label="Account actions"

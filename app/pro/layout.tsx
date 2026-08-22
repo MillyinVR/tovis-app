@@ -118,10 +118,29 @@ export default async function ProRootLayout({
           formsEnabled={isClientTechnicalRecordEnabled(pro.id)}
           workspaceOptions={workspaceOptions}
         />
-        <ProComplianceBanner />
-        <ProReadinessBanner />
 
-        <main className="brand-pro-layout-main">{children}</main>
+        {/*
+          The banners live INSIDE the scrolling content, below the space `main`
+          reserves for the fixed header — not pinned alongside it.
+
+          Pinning them is what hid them: the compliance banner cleared a
+          hard-coded `top: 48px` and the readiness banner cleared nothing at all,
+          so both rendered behind a 146px header with their links unclickable.
+          Pinning them *correctly* is no better on a phone — an unready pro can
+          show both at once (the gate deliberately lets unready pros reach
+          /pro/calendar to edit working hours), and 444px of pinned chrome on a
+          375x667 screen leaves 223px of calendar and pushes the view tabs off
+          the bottom.
+
+          In flow they are fully visible and clickable, and they scroll away, so
+          the page below always gets the viewport minus the header.
+        */}
+        <main className="brand-pro-layout-main">
+          <ProComplianceBanner />
+          <ProReadinessBanner />
+
+          {children}
+        </main>
 
         {modal}
       </LiveRefresh>

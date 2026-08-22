@@ -1,11 +1,12 @@
 // app/pro/ProHeader.tsx
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
 import { useBrand } from '@/lib/brand/BrandProvider'
+import { useElementHeightCssVar } from '@/lib/ui/useElementHeightCssVar'
 import { PRO_PUBLIC_PROFILE_PATH } from '@/lib/routes'
 import type { WorkspaceOption } from '@/lib/auth/workspaces'
 import ProAccountMenu from './_components/ProAccountMenu'
@@ -127,6 +128,12 @@ export default function ProHeader({
   const pathname = usePathname()
   const { brand } = useBrand()
   const [hasUnread, setHasUnread] = useState(false)
+  const headerRef = useRef<HTMLElement | null>(null)
+
+  // The account menu bounds its panel to the space below the header, so this has
+  // to be the header's REAL height. The 132px previously hard-coded in
+  // proOverview.css was 14px short of the 146px this actually renders at.
+  useElementHeightCssVar(headerRef, '--pro-header-h')
 
   useEffect(() => {
     if (!pathname?.startsWith('/pro')) return
@@ -163,7 +170,7 @@ export default function ProHeader({
   const title = titleFromPath(pathname, brand.displayName)
 
   return (
-    <header className="brand-pro-app-header">
+    <header ref={headerRef} className="brand-pro-app-header">
       <div className="brand-pro-app-header-shell">
         <div className="brand-pro-overview-header">
           <div className="brand-pro-overview-header-row">

@@ -506,8 +506,18 @@
    Real fixed pro app header
 ────────────────────────────────────────────────────────────────── */
 
+/*
+  Pre-hydration fallback only. ProHeader republishes this from a real
+  measurement as soon as it mounts (lib/ui/useElementHeightCssVar). It is
+  deliberately the header's actual rendered height rather than the 132px that
+  used to be hard-coded here: 132px reserved 14px less than the header occupies,
+  so the top of every pro page sat underneath it — and anything positioned
+  against it (the compliance banner's old `top: 48px`) sat under it too. Erring
+  large costs a sliver of blank space for one frame; erring small hides
+  controls.
+*/
 :root {
-  --pro-header-h: 132px;
+  --pro-header-h: 146px;
 }
 
 .brand-pro-app-header {
@@ -534,7 +544,11 @@
 
 .brand-pro-layout-main {
   min-height: 100dvh;
-  padding-top: calc(var(--pro-header-h) + var(--pro-banner-h, 0px));
+  /* The header's MEASURED height. Previously a hard-coded 132px plus a separate
+     `--pro-banner-h` — which the readiness banner never contributed to, because
+     it sat in flow at y=0 behind the header. Both banners now render inside
+     this element, so their space is reserved by normal flow. */
+  padding-top: var(--pro-header-h);
 }
 
 .brand-pro-layout-main > * {

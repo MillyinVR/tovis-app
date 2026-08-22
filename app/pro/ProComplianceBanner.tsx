@@ -2,7 +2,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 type BannerKind = 'MISSING_DOC' | 'PENDING_REVIEW' | 'EXPIRING_SOON' | 'EXPIRED'
 
@@ -36,13 +36,6 @@ function isSummaryOk(value: unknown): value is SummaryOk {
     (typeof expiresInDays === 'number' && Number.isFinite(expiresInDays))
 
   return validKind && validExpiresInDays
-}
-
-function setBannerPx(px: number): void {
-  document.documentElement.style.setProperty(
-    '--pro-banner-h',
-    `${Math.max(0, Math.round(px))}px`,
-  )
 }
 
 function readDismissed(dismissKey: string | null): boolean {
@@ -102,8 +95,6 @@ function toneForKind(kind: BannerKind): string {
 }
 
 export default function ProComplianceBanner() {
-  const ref = useRef<HTMLDivElement | null>(null)
-
   const [summary, setSummary] = useState<SummaryOk | null>(null)
 
   /**
@@ -160,29 +151,6 @@ export default function ProComplianceBanner() {
   const visible =
     Boolean(kind) && (!dismissible || (!persistedDismissed && !locallyDismissed))
 
-  useEffect(() => {
-    const el = ref.current
-
-    if (!visible || !el) {
-      setBannerPx(0)
-      return
-    }
-
-    const update = () => {
-      setBannerPx(el.getBoundingClientRect().height)
-    }
-
-    update()
-
-    const resizeObserver = new ResizeObserver(update)
-    resizeObserver.observe(el)
-
-    return () => {
-      resizeObserver.disconnect()
-      setBannerPx(0)
-    }
-  }, [visible])
-
   if (!visible || !kind) return null
 
   const msg = messageForKind({
@@ -194,13 +162,14 @@ export default function ProComplianceBanner() {
 
   return (
     <div
-      ref={ref}
       className={[
-        'fixed left-0 right-0 z-45',
+        // In normal flow at the top of `.brand-pro-layout-main`, below the
+        // space reserved for the fixed header. It used to pin itself at
+        // `top: 48px`, which put it behind the 146px header where its Upload
+        // and dismiss controls could not be tapped.
         'border-b backdrop-blur-xl shadow-[0_8px_30px_rgb(var(--shadow-color)/0.25)]',
         tone,
       ].join(' ')}
-      style={{ top: 48 }}
     >
       <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-3 py-2">
         <div className="text-xs font-semibold text-textPrimary">{msg}</div>
@@ -227,7 +196,8 @@ export default function ProComplianceBanner() {
                   })
                 }
 
-                setBannerPx(0)
+                // No height to zero out by hand any more: the banner is in
+                // normal flow, so unmounting it reclaims its own space.
               }}
               className="tap-target rounded-full border border-surfaceGlass/10 bg-bgSecondary px-3 py-1 text-xs font-black text-textPrimary hover:border-surfaceGlass/20"
               aria-label="Dismiss"
