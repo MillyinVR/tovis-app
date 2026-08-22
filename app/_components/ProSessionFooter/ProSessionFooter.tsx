@@ -29,9 +29,28 @@ const ROUTES = {
   profile: '/pro/profile/public-profile',
 }
 
+// The 72px coin fits about eight mono characters. Blind truncation put
+// "FINISH S…", "START SE…" and "AFTERCAR…" on the pro's primary in-session
+// control — every label `resolveCenterAction` produces from the middle of a
+// session onwards is longer than the coin, so the pro spends the whole
+// appointment looking at a word cut in half. Give each one a short form that
+// fits whole; the clamp below stays as the fallback for anything unmapped.
+const CENTER_LABEL_SHORT: Readonly<Record<string, string>> = {
+  'Before photos': 'Before',
+  'Start service': 'Start',
+  'Finish service': 'Finish',
+  'After photos': 'After',
+  // "Wrap-up" is what the session's own step rail and page header call this
+  // step, so the coin matches the screen it opens. The full "Aftercare" stays
+  // the button's accessible name.
+  Aftercare: 'Wrap-up',
+}
+
 function clampCenterLabel(raw: string): string {
   const label = raw.trim()
   if (!label) return 'Start'
+  const short = CENTER_LABEL_SHORT[label]
+  if (short) return short
   if (label.length <= 8) return label
   return `${label.slice(0, 8)}…`
 }

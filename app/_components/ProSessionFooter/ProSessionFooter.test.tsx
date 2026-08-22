@@ -276,6 +276,39 @@ describe('ProSessionFooter', () => {
     expect(screen.getByText('Network error loading session.')).toBeInTheDocument()
   })
 
+  // 🔴 Every label resolveCenterAction produces from mid-session onwards is
+  // longer than the 72px coin, so blind truncation put "FINISH S…" /
+  // "START SE…" / "AFTERCAR…" on the pro's primary in-session control for the
+  // whole appointment. Each one now has a short form that fits whole, and the
+  // full label stays the accessible name.
+  it.each([
+    ['Finish service', 'Finish'],
+    ['Start service', 'Start'],
+    ['Aftercare', 'Wrap-up'],
+  ])('shows %s as %s on the coin without truncating', (label, short) => {
+    mockSession({
+      mode: 'ACTIVE',
+      booking: {
+        id: 'booking_1',
+        serviceName: 'Color',
+        clientName: 'Client One',
+      },
+      center: {
+        label,
+        action: 'NAVIGATE',
+        href: '/pro/bookings/booking_1/session',
+      },
+      centerDisabled: false,
+      displayLabel: label,
+    })
+
+    render(<ProSessionFooter />)
+
+    expect(screen.getByRole('button', { name: label })).toBeInTheDocument()
+    expect(screen.getByText(short)).toBeInTheDocument()
+    expect(screen.queryByText(/…$/)).not.toBeInTheDocument()
+  })
+
   it('clamps long center label visually but keeps full aria label', () => {
     mockSession({
       mode: 'ACTIVE',

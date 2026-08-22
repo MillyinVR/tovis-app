@@ -631,13 +631,13 @@ function ProofCard({
   methodLabel,
   actedAtLabel,
   destination,
-  recordedByUserId,
+  recordedBySelf,
 }: {
   decisionLabel: string | null
   methodLabel: string | null
   actedAtLabel: string | null
   destination: string | null
-  recordedByUserId: string | null
+  recordedBySelf: boolean
 }) {
   return (
     <SessionCard>
@@ -670,9 +670,14 @@ function ProofCard({
           </div>
         ) : null}
 
-        {recordedByUserId ? (
+        {/* This used to print the raw `recordedByUserId` cuid at the pro —
+            "Recorded by user: cmt3lxctr0001povjbv4ud6ez" — which names nobody.
+            The only decision recorded against a user id is the in-person one the
+            pro took on their own device, so say that; anything else stays off
+            the card rather than showing an internal identifier. */}
+        {recordedBySelf ? (
           <div>
-            Recorded by user: <strong>{recordedByUserId}</strong>
+            Recorded by: <strong>you</strong>
           </div>
         ) : null}
       </div>
@@ -1077,7 +1082,8 @@ function ServiceInProgressView({
 
             <div>
               <div className="brand-pro-session-section-title">
-                {beforeCount} before photos saved
+                {beforeCount} before {beforeCount === 1 ? 'photo' : 'photos'}{' '}
+                saved
               </div>
               <div className="brand-pro-session-card-body">
                 Ready for comparison at wrap-up
@@ -1845,7 +1851,10 @@ export default async function ProBookingSessionPage(props: PageProps) {
       methodLabel={proofMethodLabel}
       actedAtLabel={proofActedAtLabel}
       destination={proofDestination}
-      recordedByUserId={consultationProof.recordedByUserId}
+      recordedBySelf={
+        consultationProof.recordedByUserId != null &&
+        consultationProof.recordedByUserId === user?.id
+      }
     />
   ) : null
 
