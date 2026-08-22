@@ -913,7 +913,7 @@
   .brand-pro-calendar-shell[data-device="mobile"][data-calendar-view="week"] {
     display: flex;
     flex-direction: column;
-    height: calc(100dvh - var(--pro-header-h) - var(--pro-banner-h, 0px));
+    height: calc(100dvh - var(--pro-header-h));
   }
 
   .brand-pro-calendar-shell[data-device="mobile"][data-calendar-view="day"] > *,
@@ -1344,10 +1344,48 @@
 }
 
 @media (max-width: 767px) {
+  /*
+    Clearance for the calendar's OWN floating bars, on top of the footer bar and
+    safe-area inset that the app shell's content wrapper (app/layout.tsx)
+    already reserves globally. The tallest bar is the pending tray, pinned at
+    `--app-footer-space + 136px` with a ~62px shell, so it rises ~198px above
+    what the shell reserves — hence 200px.
+
+    This used to re-add `--app-footer-space + env(safe-area-inset-bottom)`,
+    counting the footer and the inset a second time. On a 390x844 phone that was
+    270px of padding where 200px was needed: 70px of page scroll with nothing in
+    it, underneath a shell already sized to fill the viewport exactly. Scrolling
+    that surplus is what dragged the view tabs and date arrows up behind the
+    fixed header.
+  */
   .brand-pro-calendar-page {
-    padding-bottom: calc(
-      var(--app-footer-space, 72px) + 190px + env(safe-area-inset-bottom)
-    );
+    padding-bottom: 200px;
+  }
+
+  /*
+    …except in day/week, where the shell is locked to `100dvh - --pro-header-h`
+    and the timeline scrolls inside it, clearing the floating bars with its own
+    `::after` spacer. Page-level padding there is scrollable emptiness under a
+    pane that already fills the screen — the surplus this whole block is about.
+  */
+  .brand-pro-calendar-page[data-calendar-view="day"],
+  .brand-pro-calendar-page[data-calendar-view="week"] {
+    min-height: 0;
+    padding-bottom: 0;
+  }
+
+  /*
+    Keep the view tabs (Day/Week/Month) and the date arrows reachable no matter
+    how far the page has scrolled. In month view the page legitimately scrolls,
+    and these controls used to scroll up underneath the fixed pro header —
+    still on screen, painted over, and dead to a tap. The only way back was to
+    scroll to the very top, which on a phone is the pull-to-refresh gesture.
+  */
+  .brand-pro-calendar-mobile-controls-bar {
+    position: sticky;
+    top: var(--pro-header-h);
+    z-index: 300;
+    background: rgb(var(--bg-primary));
   }
 
   .brand-pro-calendar-auto-bar {

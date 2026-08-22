@@ -265,7 +265,10 @@ export function ProCalendarClientPage(props: ProCalendarClientPageProps) {
   }, [headerLabel, view])
 
   return (
-    <main className="brand-pro-calendar-page">
+    // The view drives page-level layout, not just the shell's: on mobile,
+    // day/week lock the shell to the viewport and scroll the timeline inside it,
+    // so the page must not add scrollable padding of its own (proCalendar.css).
+    <main className="brand-pro-calendar-page" data-calendar-view={view}>
       {/* Calendar-level errors (failed loads, rejected drag-reschedules) land in
           cal.error; without this toast a rejected move just snaps back silently. */}
       {cal.error ? (

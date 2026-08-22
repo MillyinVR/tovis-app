@@ -135,7 +135,9 @@ export function CalendarMobileShell(props: CalendarMobileShellProps) {
           </div>
         )}
 
-        <div className="px-5 pb-3">
+        {/* Sticks below the fixed pro header so the view tabs and date arrows
+            stay tappable at any scroll position — see proCalendar.css. */}
+        <div className="brand-pro-calendar-mobile-controls-bar px-5 pb-3">
           <MobileCalendarControls
             view={view}
             setView={setView}

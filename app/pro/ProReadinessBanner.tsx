@@ -2,7 +2,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import {
   PRO_BLOCKER_COPY,
@@ -59,8 +59,6 @@ function blockerViewModels(blockers: readonly ProReadinessBlocker[]) {
 }
 
 export default function ProReadinessBanner() {
-  const ref = useRef<HTMLDivElement | null>(null)
-
   const [readiness, setReadiness] = useState<ProReadiness | null>(null)
 
   useEffect(() => {
@@ -96,36 +94,16 @@ export default function ProReadinessBanner() {
     return blockerViewModels(readiness.blockers)
   }, [readiness])
 
-  useEffect(() => {
-    const el = ref.current
-
-    if (!el) return
-
-    const update = () => {
-      document.documentElement.style.setProperty(
-        '--pro-readiness-banner-h',
-        `${Math.max(0, Math.round(el.getBoundingClientRect().height))}px`,
-      )
-    }
-
-    update()
-
-    const resizeObserver = new ResizeObserver(update)
-    resizeObserver.observe(el)
-
-    return () => {
-      resizeObserver.disconnect()
-      document.documentElement.style.setProperty('--pro-readiness-banner-h', '0px')
-    }
-  }, [blockers.length])
-
   if (!readiness || readiness.ok || blockers.length === 0) return null
 
   return (
-    <div
-      ref={ref}
-      className="border-b border-toneWarn/35 bg-bgSecondary/98 px-4 py-3 text-sm shadow-sm"
-    >
+    // In normal flow at the top of `.brand-pro-layout-main`, below the space
+    // reserved for the fixed header. It used to sit OUTSIDE that element, so it
+    // was the first in-flow node on the page and rendered at y=0 *behind* the
+    // fixed header with its "fix this" links unclickable. The
+    // `--pro-readiness-banner-h` it measured was read by nothing, so its space
+    // was never reserved either.
+    <div className="border-b border-toneWarn/35 bg-bgSecondary/98 px-4 py-3 text-sm shadow-sm">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="font-black text-textPrimary">
