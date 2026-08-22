@@ -4,6 +4,10 @@ import { ContactMethod, ProClientInviteStatus } from '@prisma/client'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { requireProBooking } from '@/app/api/_utils/auth/requireProBooking'
 import {
+  enforceRateLimit,
+  tokenRateLimitIdentity,
+} from '@/app/api/_utils/rateLimit'
+import {
   resolveRouteParams,
   type RouteContext,
 } from '@/app/api/_utils/routeContext'
@@ -235,6 +239,29 @@ export async function POST(request: Request, ctx: RouteContext) {
     })
     if (!owned.ok) return owned.res
     const booking = owned.booking
+
+    // Same ceiling, same key, same bucket as the booking-less sibling
+    // (POST /api/v1/pro/clients/[id]/invite): both doors mint a claim link and
+    // deliver it as an SMS/email to a contact taken from the REQUEST BODY, so
+    // sharing one per-(pro,client) budget is the only way the ceiling means
+    // anything — two doors with two keys would just be 2x the spam.
+    //
+    // `tokenRateLimitIdentity` rather than `proRateLimitKey` is deliberate: the
+    // sibling derives `token:<proId>:<clientId>`, and a different derivation
+    // here would land in a DIFFERENT slot of the same bucket, silently doubling
+    // the ceiling instead of sharing it.
+    //
+    // Placed after ownership resolution because the key needs `booking.clientId`.
+    // What that leaves ahead of the limiter is a body parse, input validation and
+    // one indexed lookup — no writes and nothing billable. Everything BELOW it
+    // mints a claim token and enqueues the send.
+    const limited = await enforceRateLimit({
+      bucket: 'pro:client-claim-invite',
+      identity: tokenRateLimitIdentity(
+        `${auth.professionalId}:${booking.clientId}`,
+      ),
+    })
+    if (limited) return limited
 
     const invite = await upsertClientClaimLink({
       professionalId: auth.professionalId,

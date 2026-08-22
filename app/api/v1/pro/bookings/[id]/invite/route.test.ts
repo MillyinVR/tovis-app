@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   bookingFindFirst: vi.fn(),
   upsertClientClaimLink: vi.fn(),
   createClientClaimInviteDelivery: vi.fn(),
+  enforceRateLimit: vi.fn(),
+  tokenRateLimitIdentity: vi.fn(),
   safeError: vi.fn(),
   safeLogMeta: vi.fn(),
 }))
@@ -25,6 +27,11 @@ vi.mock('@/app/api/_utils', () => ({
   requirePro: mocks.requirePro,
   jsonFail: mocks.jsonFail,
   jsonOk: mocks.jsonOk,
+}))
+
+vi.mock('@/app/api/_utils/rateLimit', () => ({
+  enforceRateLimit: mocks.enforceRateLimit,
+  tokenRateLimitIdentity: mocks.tokenRateLimitIdentity,
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -159,6 +166,14 @@ describe('POST /api/v1/pro/bookings/[id]/invite', () => {
       ok: true,
       status,
       data,
+    }))
+
+    // Default: under the ceiling. `enforceRateLimit` returns a Response when it
+    // refuses and null when it allows, so null is "allowed".
+    mocks.enforceRateLimit.mockResolvedValue(null)
+    mocks.tokenRateLimitIdentity.mockImplementation((id: string) => ({
+      kind: 'token' as const,
+      id,
     }))
 
     mocks.bookingFindFirst.mockResolvedValue(makeBooking())
@@ -743,5 +758,40 @@ describe('POST /api/v1/pro/bookings/[id]/invite', () => {
     } finally {
       consoleErrorSpy.mockRestore()
     }
+  })
+
+  // The ceiling on this route only means something if it lands in the SAME slot
+  // as the booking-less sibling (POST /api/v1/pro/clients/[id]/invite). Both
+  // doors mint a claim link and deliver it to a contact from the request body;
+  // two doors keyed differently would be two ceilings, i.e. twice the spam.
+  // `check:claim-invite-guarded` proves a limiter EXISTS on every such route —
+  // it cannot see whether the key matches, so that is pinned here.
+  it('bounds the send with the sibling door\'s exact bucket and key', async () => {
+    await POST(makeRequest({ name: 'Tori Morales', email: 'tori@example.com' }), {
+      params: Promise.resolve({ id: 'booking_1' }),
+    })
+
+    expect(mocks.tokenRateLimitIdentity).toHaveBeenCalledWith(
+      'pro_123:client_123',
+    )
+    expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
+      bucket: 'pro:client-claim-invite',
+      identity: { kind: 'token', id: 'pro_123:client_123' },
+    })
+  })
+
+  it('returns the limiter response and neither mints nor delivers when throttled', async () => {
+    const limited = { ok: false, status: 429, error: 'Too many requests.' }
+    mocks.enforceRateLimit.mockResolvedValueOnce(limited)
+
+    const result = await POST(
+      makeRequest({ name: 'Tori Morales', phone: '+15551234567' }),
+      { params: Promise.resolve({ id: 'booking_1' }) },
+    )
+
+    expect(result).toBe(limited)
+    // The whole point: no token is minted and nothing is queued for delivery.
+    expect(mocks.upsertClientClaimLink).not.toHaveBeenCalled()
+    expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
   })
 })
