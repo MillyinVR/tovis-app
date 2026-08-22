@@ -35,6 +35,9 @@ import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotifica
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { hasDuplicateStrings, pickBool, pickInt, pickStringArray } from '@/lib/pick'
 import { safeError, safeLogMeta } from '@/lib/security/logging'
+import { enforceRateLimit } from '@/lib/rateLimit/enforce'
+import { proRateLimitKey } from '@/lib/rateLimit/identity'
+import { rateLimitExceededResponse } from '@/lib/rateLimit/response'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -66,6 +69,26 @@ export async function POST(req: Request) {
         message: 'Authenticated actor user id is required.',
         userMessage: 'You are not allowed to create this appointment.',
       })
+    }
+
+    // Per-pro ceiling on booking writes that notify the client. This bucket
+    // was sized for the aftercare and checkout writes at the END of a booking
+    // and only ever applied there; the head of the same lifecycle — create,
+    // patch, cancel, no-show, final-review, consultation-proposal and the
+    // recurring-series pair — enqueues an SMS/email/push to a real person just
+    // the same, and had no ceiling at all. 30/min per pro is far above
+    // deliberate human use; it bites a loop, not a busy day.
+    const rateLimit = await enforceRateLimit({
+      bucket: 'pro:bookings:write',
+      key: proRateLimitKey({
+        professionalId: auth.professionalId,
+        userId: actorUserId,
+        request: req,
+      }),
+    })
+
+    if (!rateLimit.allowed) {
+      return rateLimitExceededResponse(rateLimit)
     }
 
     const idempotencyKey = pickString(req.headers.get('idempotency-key'))
