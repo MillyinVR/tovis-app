@@ -6,6 +6,7 @@ import {
   pickNonEmptyString,
   requireClient,
 } from '@/app/api/_utils'
+import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import {
   resolveRouteParams,
@@ -47,6 +48,15 @@ export async function POST(req: Request, ctx: RouteContext<Params>) {
   try {
     const auth = await requireClient()
     if (!auth.ok) return auth.res
+
+    // Paid provider call: the vision bucket bounds per-user daily spend, and
+    // the per-session structural cap inside checkConsultCaptureQuality still
+    // holds if Redis is unavailable (redis-only buckets fail open).
+    const limited = await enforceRateLimit({
+      bucket: 'client:consult:vision',
+      identity: await rateLimitIdentity(auth.user.id),
+    })
+    if (limited) return limited
     const { id, captureId } = await resolveRouteParams(ctx)
     if (!id || !captureId) return consultNotFoundResponse()
 

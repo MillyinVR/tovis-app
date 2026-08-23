@@ -4,10 +4,16 @@ const mocks = vi.hoisted(() => ({
   requireClient: vi.fn(),
   loadConsultAnalysisState: vi.fn(),
   runConsultAnalysis: vi.fn(),
+  enforceRateLimit: vi.fn(),
+  rateLimitIdentity: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils/auth/requireClient', () => ({
   requireClient: mocks.requireClient,
+}))
+vi.mock('@/app/api/_utils/rateLimit', () => ({
+  enforceRateLimit: mocks.enforceRateLimit,
+  rateLimitIdentity: mocks.rateLimitIdentity,
 }))
 vi.mock('@/lib/consult/analysisContract', () => ({
   loadConsultAnalysisState: mocks.loadConsultAnalysisState,
@@ -46,6 +52,8 @@ beforeEach(() => {
     user: { id: 'user_1' },
   })
   mocks.loadConsultAnalysisState.mockResolvedValue(state)
+  mocks.rateLimitIdentity.mockResolvedValue({ kind: 'user', id: 'user_1' })
+  mocks.enforceRateLimit.mockResolvedValue(null)
 })
 
 describe('client consult analysis route', () => {
@@ -60,6 +68,22 @@ describe('client consult analysis route', () => {
       clientId: 'client_1',
       actorUserId: 'user_1',
     })
+    // Reads are deliberately not rate limited; only the paid POST is.
+    expect(mocks.enforceRateLimit).not.toHaveBeenCalled()
+  })
+
+  it('refuses a rate-limited POST on the vision bucket before the paid boundary runs', async () => {
+    const limited = new Response('slow down', { status: 429 })
+    mocks.enforceRateLimit.mockResolvedValue(limited)
+
+    expect(await POST(request(validBody), { params: { id: 'consult_1' } })).toBe(
+      limited,
+    )
+    expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
+      bucket: 'client:consult:vision',
+      identity: { kind: 'user', id: 'user_1' },
+    })
+    expect(mocks.runConsultAnalysis).not.toHaveBeenCalled()
   })
 
   it('does not read the body before the locked prerequisite boundary invokes it', async () => {

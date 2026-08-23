@@ -58,6 +58,17 @@ import { transitionLockedConsultSession } from './writeBoundary'
 export const CONSULT_CAPTURE_RAW_TTL_MS = 24 * 60 * 60 * 1000
 export const CONSULT_CAPTURE_UPLOAD_TTL_MS = 60 * 60 * 1000
 
+// Structural ceiling on paid quality checks per consult session. Each check is
+// a provider vision call, and retakes mint a fresh capture row each time, so
+// without a per-session bound a stuck client (or automation) could spend
+// without limit inside one consult. 24 = the 4 pack slots × 6 attempts each —
+// far beyond real use (a client failing six checks on one slot has a lighting
+// problem the retake tips address, not a reason for a seventh paid call), and
+// it holds when the redis-only route bucket fails open, because it is counted
+// in the same transaction that runs the check. Replays of an already-checked
+// capture return before this bound and stay free.
+export const CONSULT_CAPTURE_MAX_QUALITY_CHECKS_PER_SESSION = 24
+
 const CAPTURE_STATES = new Set<ConsultSessionStatus>([
   ConsultSessionStatus.MEDIA_READY,
   ConsultSessionStatus.ANALYSIS_PENDING,
@@ -718,6 +729,15 @@ export async function checkConsultCaptureQuality(args: {
         capture.rawExpiresAt.getTime() <= now.getTime()
       ) {
         throw new ConsultWriteError('CAPTURE_UPLOAD_EXPIRED', 'Capture has expired.')
+      }
+      const priorQualityChecks = await tx.consultCapture.count({
+        where: { consultSessionId: session.id, qualityCheckedAt: { not: null } },
+      })
+      if (priorQualityChecks >= CONSULT_CAPTURE_MAX_QUALITY_CHECKS_PER_SESSION) {
+        throw new ConsultWriteError(
+          'CAPTURE_QUALITY_LIMIT_EXCEEDED',
+          'This consult has reached its photo-check limit.',
+        )
       }
 
       let image

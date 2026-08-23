@@ -16,6 +16,13 @@ const mocks = vi.hoisted(() => ({
   requireClientBookingOwnership: vi.fn(),
   findUniqueBooking: vi.fn(),
   upsertConsultSession: vi.fn(),
+  enforceRateLimit: vi.fn(),
+  rateLimitIdentity: vi.fn(),
+}))
+
+vi.mock('@/app/api/_utils/rateLimit', () => ({
+  enforceRateLimit: mocks.enforceRateLimit,
+  rateLimitIdentity: mocks.rateLimitIdentity,
 }))
 
 vi.mock('@/app/api/_utils', async () => {
@@ -73,6 +80,8 @@ beforeEach(() => {
   vi.clearAllMocks()
   process.env.ENABLE_AI_CONSULT = '1'
   mocks.requireClient.mockResolvedValue({ ok: true, clientId: 'client_1', user: { id: 'user_1' } })
+  mocks.rateLimitIdentity.mockResolvedValue({ kind: 'user', id: 'user_1' })
+  mocks.enforceRateLimit.mockResolvedValue(null)
   mocks.requireClientBookingOwnership.mockResolvedValue({ ok: true })
   mocks.findUniqueBooking.mockResolvedValue({
     status: BookingStatus.ACCEPTED,
@@ -95,6 +104,20 @@ describe('POST /api/v1/client/consult', () => {
   it('400s without a bookingId', async () => {
     const res = await post({})
     expect(res.status).toBe(400)
+    expect(mocks.upsertConsultSession).not.toHaveBeenCalled()
+  })
+
+  it('returns the rate-limit refusal before reading the body or touching the DB', async () => {
+    const limited = { status: 429, message: 'Too many requests.' }
+    mocks.enforceRateLimit.mockResolvedValue(limited)
+
+    const res = await post({ bookingId: 'booking_1' })
+    expect(res).toBe(limited)
+    expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
+      bucket: 'client:consult:write',
+      identity: { kind: 'user', id: 'user_1' },
+    })
+    expect(mocks.requireClientBookingOwnership).not.toHaveBeenCalled()
     expect(mocks.upsertConsultSession).not.toHaveBeenCalled()
   })
 

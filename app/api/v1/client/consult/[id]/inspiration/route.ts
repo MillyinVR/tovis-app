@@ -1,6 +1,7 @@
 import { ConsultActorType } from '@prisma/client'
 
 import { jsonFail, jsonOk, pickNonEmptyString, requireClient } from '@/app/api/_utils'
+import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import { consultNotFoundResponse, consultWriteErrorResponse } from '@/lib/consult/apiErrors'
@@ -54,6 +55,11 @@ export async function POST(request: Request, context: RouteContext) {
     if (!auth.ok) return auth.res
     const { id } = await resolveRouteParams(context)
     if (!id) return consultNotFoundResponse()
+    const limited = await enforceRateLimit({
+      bucket: 'client:consult:write',
+      identity: await rateLimitIdentity(auth.user.id),
+    })
+    if (limited) return limited
     const body = await readJsonRecord(request)
     const idempotencyKey = pickNonEmptyString(body.idempotencyKey)
     const schemaVersion = integer(body.schemaVersion)
@@ -104,6 +110,11 @@ export async function DELETE(_request: Request, context: RouteContext) {
     if (!auth.ok) return auth.res
     const { id } = await resolveRouteParams(context)
     if (!id) return consultNotFoundResponse()
+    const limited = await enforceRateLimit({
+      bucket: 'client:consult:write',
+      identity: await rateLimitIdentity(auth.user.id),
+    })
+    if (limited) return limited
     await removeConsultInspiration({
       consultSessionId: id,
       clientId: auth.clientId,

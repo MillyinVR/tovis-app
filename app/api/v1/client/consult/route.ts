@@ -14,6 +14,7 @@
 import { ConsultActorType, ConsultAuditAction, ConsultSessionStatus } from '@prisma/client'
 
 import { jsonFail, jsonOk, pickNonEmptyString, requireClient } from '@/app/api/_utils'
+import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { requireClientBookingOwnership } from '@/app/api/_utils/auth/requireClientBookingOwnership'
 import {
@@ -31,6 +32,12 @@ export async function POST(req: Request) {
     const auth = await requireClient()
     if (!auth.ok) return auth.res
     const { clientId } = auth
+
+    const limited = await enforceRateLimit({
+      bucket: 'client:consult:write',
+      identity: await rateLimitIdentity(auth.user.id),
+    })
+    if (limited) return limited
 
     const body = await readJsonRecord(req)
     const bookingId = pickNonEmptyString(body.bookingId)

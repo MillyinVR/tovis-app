@@ -158,6 +158,12 @@ export function consultWriteErrorResponse(error: unknown): Response | null {
         'The capture did not pass the quality gate.',
         'CONSULT_CAPTURE_QUALITY_FAILED',
       )
+    case 'CAPTURE_QUALITY_LIMIT_EXCEEDED':
+      return consultAgreementFail(
+        429,
+        'This consult has reached its photo-check limit.',
+        'CONSULT_CAPTURE_QUALITY_LIMIT_EXCEEDED',
+      )
     case 'CAPTURE_STORAGE_UNAVAILABLE':
       return consultAgreementFail(
         503,

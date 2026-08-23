@@ -6,6 +6,7 @@ import {
   pickNonEmptyString,
   requireClient,
 } from '@/app/api/_utils'
+import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import {
   resolveRouteParams,
@@ -84,6 +85,12 @@ export async function POST(req: Request, ctx: RouteContext) {
     if (!auth.ok) return auth.res
     const { id } = await resolveRouteParams(ctx)
     if (!id) return consultNotFoundResponse()
+
+    const limited = await enforceRateLimit({
+      bucket: 'client:consult:write',
+      identity: await rateLimitIdentity(auth.user.id),
+    })
+    if (limited) return limited
 
     const result = await appendHairColorIntakeRevision({
       consultSessionId: id,
