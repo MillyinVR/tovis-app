@@ -18,6 +18,7 @@ import { validateSmsDestinationCountry } from '@/lib/smsCountryPolicy'
 import { getVerificationPhoneLookupValue } from '@/lib/auth/verification'
 import { checkTwilioVerifyPhoneCode } from '@/lib/twilio/verify'
 import { findUserByPhoneForLogin } from '@/lib/auth/findUserByPhone'
+import { markUserPhoneVerified } from '@/lib/auth/contactVerification'
 import { createActiveToken, createVerificationToken } from '@/lib/auth'
 import { setSessionCookie } from '@/app/api/_utils/auth/sessionCookie'
 import { captureAuthException } from '@/lib/observability/authEvents'
@@ -71,12 +72,17 @@ export async function POST(request: Request) {
     if (!check.approved) return rejected()
 
     // Verified control of the number → mark the phone verified if it wasn't.
+    // (The shared write also fans the timestamp to the role profile, which the
+    // inline copy this replaced never did.)
     let phoneVerifiedAt = user.phoneVerifiedAt
     if (!phoneVerifiedAt) {
       const now = new Date()
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { phoneVerifiedAt: now },
+      await prisma.$transaction(async (tx) => {
+        await markUserPhoneVerified(tx, {
+          userId: user.id,
+          role: user.role,
+          verifiedAt: now,
+        })
       })
       phoneVerifiedAt = now
     }

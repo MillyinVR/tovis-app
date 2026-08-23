@@ -22,6 +22,11 @@ export function readStringField(data: unknown, key: string): string | null {
   return typeof v === 'string' && v.trim() ? v.trim() : null
 }
 
+/** Read a boolean field from an unknown payload; anything but `true` is false. */
+export function readBooleanField(data: unknown, key: string): boolean {
+  return isRecord(data) && data[key] === true
+}
+
 /** Read a number field from an unknown payload. */
 export function readNumberField(data: unknown, key: string): number | null {
   if (!isRecord(data)) return null

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  ContactMethod,
   NotificationChannel,
   NotificationDeliveryStatus,
   NotificationEventKey,
@@ -9,6 +10,7 @@ import {
   Prisma,
 } from '@prisma/client'
 
+import { verifyClaimLinkChannel } from '@/lib/clients/claimLinkChannel'
 import { rootTenantContext } from '@/lib/tenant/context'
 import { EmailDeliveryProvider } from './sendEmail'
 import { InAppDeliveryProvider } from './sendInApp'
@@ -473,6 +475,154 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
     expect((sentRequest?.content as { text: string }).text).not.toContain(
       'Reply STOP',
     )
+  })
+
+  it('stamps a claim link with the EMAIL channel marker in the delivered email', async () => {
+    const now = new Date('2026-04-09T12:00:00.000Z')
+    const { providers, emailSend } = makeProviders()
+
+    const delivery = makeClaimedDelivery({
+      id: 'delivery_claim_email',
+      channel: NotificationChannel.EMAIL,
+      provider: NotificationProvider.POSTMARK,
+      destination: 'client@example.com',
+      templateKey: 'client_claim_invite',
+      eventKey: NotificationEventKey.CLIENT_CLAIM_INVITE,
+    })
+    delivery.dispatch.href = '/claim/rawtok_1'
+
+    mockClaimDeliveries.mockResolvedValue({
+      now,
+      claimedAt: now,
+      leaseExpiresAt: new Date(now.getTime() + 60_000),
+      deliveries: [delivery],
+    })
+
+    emailSend.mockResolvedValue({
+      ok: true,
+      providerMessageId: 'email_claim',
+      providerStatus: 'sent',
+      responseMeta: { source: 'sendEmail' },
+    })
+
+    await processDueDeliveries({
+      providers,
+      tenantContext: rootTenantContext('tenant_root'),
+      claim: { now },
+    })
+
+    const content = emailSend.mock.calls[0]?.[0]?.content as {
+      text: string
+      html: string
+    }
+
+    // The link the recipient actually receives carries a signature that
+    // resolves to EMAIL — that is what lets the click count as verification.
+    const match = /\/claim\/rawtok_1\?via=([^&\s]+)&vsig=([^\s"&<]+)/.exec(
+      content.text,
+    )
+    expect(match).not.toBeNull()
+    expect(
+      verifyClaimLinkChannel({
+        rawToken: 'rawtok_1',
+        via: match?.[1] ?? null,
+        sig: match?.[2] ?? null,
+      }),
+    ).toBe(ContactMethod.EMAIL)
+    expect(content.html).toContain('via=email')
+  })
+
+  it('stamps the SMS copy of the same claim link with the SMS marker', async () => {
+    const now = new Date('2026-04-09T12:00:00.000Z')
+    const { providers, smsSend } = makeProviders()
+
+    const delivery = makeClaimedDelivery({
+      id: 'delivery_claim_sms',
+      channel: NotificationChannel.SMS,
+      provider: NotificationProvider.TWILIO,
+      destination: '+15551234567',
+      templateKey: 'client_claim_invite',
+      eventKey: NotificationEventKey.CLIENT_CLAIM_INVITE,
+    })
+    delivery.dispatch.href = '/claim/rawtok_1'
+
+    mockClaimDeliveries.mockResolvedValue({
+      now,
+      claimedAt: now,
+      leaseExpiresAt: new Date(now.getTime() + 60_000),
+      deliveries: [delivery],
+    })
+
+    // Short-link minting is what actually carries the stamped destination for
+    // SMS, so assert on the path handed to it.
+    mockGetOrCreateShortLink.mockResolvedValue({ code: 'Ab3xK9pQ' })
+    mockBuildShortLinkUrl.mockReturnValue('https://tovis.me/s/Ab3xK9pQ')
+
+    smsSend.mockResolvedValue({
+      ok: true,
+      providerMessageId: 'SM_claim',
+      providerStatus: 'queued',
+      responseMeta: { source: 'sendSms' },
+    })
+
+    await processDueDeliveries({
+      providers,
+      tenantContext: rootTenantContext('tenant_root'),
+      claim: { now },
+    })
+
+    const shortLinkArg = mockGetOrCreateShortLink.mock.calls[0]?.[0] as {
+      destinationPath: string
+    }
+    const match = /\/claim\/rawtok_1\?via=([^&]+)&vsig=(.+)$/.exec(
+      shortLinkArg.destinationPath,
+    )
+    expect(match).not.toBeNull()
+    expect(
+      verifyClaimLinkChannel({
+        rawToken: 'rawtok_1',
+        via: match?.[1] ?? null,
+        sig: match?.[2] ?? null,
+      }),
+    ).toBe(ContactMethod.SMS)
+  })
+
+  it('leaves a non-claim href untouched by the channel stamp', async () => {
+    const now = new Date('2026-04-09T12:00:00.000Z')
+    const { providers, emailSend } = makeProviders()
+
+    mockClaimDeliveries.mockResolvedValue({
+      now,
+      claimedAt: now,
+      leaseExpiresAt: new Date(now.getTime() + 60_000),
+      deliveries: [
+        makeClaimedDelivery({
+          id: 'delivery_booking_email',
+          channel: NotificationChannel.EMAIL,
+          provider: NotificationProvider.POSTMARK,
+          destination: 'client@example.com',
+          templateKey: 'booking_confirmed',
+        }),
+      ],
+    })
+
+    emailSend.mockResolvedValue({
+      ok: true,
+      providerMessageId: 'email_booking',
+      providerStatus: 'sent',
+      responseMeta: { source: 'sendEmail' },
+    })
+
+    await processDueDeliveries({
+      providers,
+      tenantContext: rootTenantContext('tenant_root'),
+      claim: { now },
+    })
+
+    const content = emailSend.mock.calls[0]?.[0]?.content as { text: string }
+    expect(content.text).toContain('/client/bookings/booking_1')
+    expect(content.text).not.toContain('via=')
+    expect(content.text).not.toContain('vsig=')
   })
 
   it('processes a successful email delivery through the email provider', async () => {

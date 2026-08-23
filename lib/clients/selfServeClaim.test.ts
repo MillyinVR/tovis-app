@@ -163,10 +163,17 @@ describe('selfServeClaim', () => {
       isRoot: true,
     }
 
+    beforeEach(() => {
+      mocks.createClientClaimInviteDelivery.mockResolvedValue({
+        dispatch: { created: true },
+      })
+    })
+
     it('mints, delivers to the on-file contact, and kicks the drain', async () => {
       mocks.issueClaimLinkForBooking.mockResolvedValueOnce({
         kind: 'ok',
         rawToken: 'rawtok_1',
+        created: true,
         invite: {
           id: 'invite_1',
           professionalId: 'pro_1',
@@ -200,15 +207,49 @@ describe('selfServeClaim', () => {
           invitedEmail: TEST_EMAIL,
           invitedPhone: TEST_PHONE,
           recipientUserId: null,
+          resendMode: 'INITIAL_SEND',
         }),
       )
       expect(mocks.kickNotificationDrain).toHaveBeenCalledTimes(1)
+    })
+
+    it('sends a ROTATED invite as a fresh send cycle (the reported no-message bug)', async () => {
+      mocks.issueClaimLinkForBooking.mockResolvedValueOnce({
+        kind: 'ok',
+        rawToken: 'rawtok_rotated',
+        created: false,
+        invite: {
+          id: 'invite_1',
+          professionalId: 'pro_1',
+          clientId: 'client_1',
+          bookingId: 'booking_1',
+          invitedName: 'Tori Morales',
+          invitedEmail: TEST_EMAIL,
+          invitedPhone: TEST_PHONE,
+          preferredContactMethod: ContactMethod.EMAIL,
+        },
+      })
+
+      const result = await sendSelfServeClaimLink({
+        clientId: 'client_1',
+        bookingId: 'booking_1',
+        tenantContext: tenantContext as never,
+      })
+
+      expect(result).toEqual({ sent: true })
+      expect(mocks.createClientClaimInviteDelivery).toHaveBeenCalledWith(
+        expect.objectContaining({
+          rawToken: 'rawtok_rotated',
+          resendMode: 'RESEND',
+        }),
+      )
     })
 
     it('mints a booking-less, pro-less link when there is no booking', async () => {
       mocks.issueClaimLinkForClient.mockResolvedValueOnce({
         kind: 'ok',
         rawToken: 'rawtok_2',
+        created: true,
         invite: {
           id: 'invite_2',
           professionalId: null,
@@ -258,6 +299,36 @@ describe('selfServeClaim', () => {
 
       expect(result).toEqual({ sent: false })
       expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
+      expect(mocks.kickNotificationDrain).not.toHaveBeenCalled()
+    })
+
+    it('reports sent:false when the dispatch collapsed into an existing send', async () => {
+      mocks.issueClaimLinkForBooking.mockResolvedValueOnce({
+        kind: 'ok',
+        rawToken: 'rawtok_1',
+        created: false,
+        invite: {
+          id: 'invite_1',
+          professionalId: 'pro_1',
+          clientId: 'client_1',
+          bookingId: 'booking_1',
+          invitedName: 'Tori Morales',
+          invitedEmail: TEST_EMAIL,
+          invitedPhone: TEST_PHONE,
+          preferredContactMethod: ContactMethod.EMAIL,
+        },
+      })
+      mocks.createClientClaimInviteDelivery.mockResolvedValueOnce({
+        dispatch: { created: false },
+      })
+
+      const result = await sendSelfServeClaimLink({
+        clientId: 'client_1',
+        bookingId: 'booking_1',
+        tenantContext: tenantContext as never,
+      })
+
+      expect(result).toEqual({ sent: false })
       expect(mocks.kickNotificationDrain).not.toHaveBeenCalled()
     })
   })

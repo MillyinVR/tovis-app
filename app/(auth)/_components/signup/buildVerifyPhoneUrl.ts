@@ -1,5 +1,8 @@
 // app/(auth)/_components/signup/buildVerifyPhoneUrl.ts
-type VerificationSendState = boolean | 'pending'
+// 'skipped' = the channel was verified by the claim-link click, so no
+// verification message exists to retry — only an explicit `false` (attempted
+// and failed) raises the retry flags below.
+type VerificationSendState = boolean | 'pending' | 'skipped'
 
 export function buildVerifyPhoneUrl(args: {
   nextUrl: string | null

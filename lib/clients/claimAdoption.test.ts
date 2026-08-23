@@ -22,12 +22,18 @@ const mocks = vi.hoisted(() => {
     tx,
     getClientClaimLinkByToken: vi.fn(),
     markClientClaimLinkAcceptedAudit: vi.fn(),
+    markUserEmailVerified: vi.fn(),
+    markUserPhoneVerified: vi.fn(),
   }
 })
 
 vi.mock('./clientClaimLinks', () => ({
   getClientClaimLinkByToken: mocks.getClientClaimLinkByToken,
   markClientClaimLinkAcceptedAudit: mocks.markClientClaimLinkAcceptedAudit,
+}))
+vi.mock('@/lib/auth/contactVerification', () => ({
+  markUserEmailVerified: mocks.markUserEmailVerified,
+  markUserPhoneVerified: mocks.markUserPhoneVerified,
 }))
 
 import { adoptClaimInviteDuringRegistration } from './claimAdoption'
@@ -80,6 +86,7 @@ function callAdopt(overrides?: {
   token?: string | null
   registeredEmail?: string | null
   registeredPhone?: string | null
+  verifiedChannel?: ContactMethod | null
 }) {
   return adoptClaimInviteDuringRegistration({
     tx: mocks.tx as never,
@@ -93,6 +100,7 @@ function callAdopt(overrides?: {
       overrides?.registeredPhone !== undefined
         ? overrides.registeredPhone
         : null,
+    verifiedChannel: overrides?.verifiedChannel ?? null,
     now: TEST_NOW,
   })
 }
@@ -233,7 +241,11 @@ describe('adoptClaimInviteDuringRegistration', () => {
       tx: mocks.tx,
     })
 
-    expect(result).toEqual({ adopted: true, clientId: 'client_1' })
+    expect(result).toEqual({
+      adopted: true,
+      clientId: 'client_1',
+      verifiedChannelApplied: null,
+    })
   })
 
   it('adopts the profile when only the phone matches', async () => {
@@ -246,7 +258,11 @@ describe('adoptClaimInviteDuringRegistration', () => {
       registeredPhone: MATCHING_PHONE,
     })
 
-    expect(result).toEqual({ adopted: true, clientId: 'client_1' })
+    expect(result).toEqual({
+      adopted: true,
+      clientId: 'client_1',
+      verifiedChannelApplied: null,
+    })
     expect(mocks.tx.clientProfile.updateMany).toHaveBeenCalledTimes(1)
   })
 
@@ -308,6 +324,70 @@ describe('adoptClaimInviteDuringRegistration', () => {
     expect(mocks.markClientClaimLinkAcceptedAudit).toHaveBeenCalledWith(
       expect.objectContaining({ acceptedAt }),
     )
+  })
+
+  it('credits the claim-click channel as verified when its contact matches', async () => {
+    const result = await callAdopt({
+      registeredEmail: MATCHING_EMAIL,
+      verifiedChannel: ContactMethod.EMAIL,
+    })
+
+    expect(result).toEqual({
+      adopted: true,
+      clientId: 'client_1',
+      verifiedChannelApplied: ContactMethod.EMAIL,
+    })
+    expect(mocks.markUserEmailVerified).toHaveBeenCalledWith(mocks.tx, {
+      userId: 'user_1',
+      verifiedAt: TEST_NOW,
+    })
+    expect(mocks.markUserPhoneVerified).not.toHaveBeenCalled()
+  })
+
+  it('credits an SMS click against the matching registered phone', async () => {
+    mocks.getClientClaimLinkByToken.mockResolvedValueOnce(
+      makeInvite({ invitedEmail: null, invitedPhone: MATCHING_PHONE }),
+    )
+
+    const result = await callAdopt({
+      registeredEmail: 'different@example.com',
+      registeredPhone: MATCHING_PHONE,
+      verifiedChannel: ContactMethod.SMS,
+    })
+
+    expect(result).toEqual({
+      adopted: true,
+      clientId: 'client_1',
+      verifiedChannelApplied: ContactMethod.SMS,
+    })
+    expect(mocks.markUserPhoneVerified).toHaveBeenCalledWith(mocks.tx, {
+      userId: 'user_1',
+      role: 'CLIENT',
+      verifiedAt: TEST_NOW,
+    })
+    expect(mocks.markUserEmailVerified).not.toHaveBeenCalled()
+  })
+
+  it('gives NO channel credit when the click channel contact is not the registered one', async () => {
+    // Adoption matched on phone, but the click came from the email channel —
+    // the registered email differs from the invite's, so no email credit.
+    mocks.getClientClaimLinkByToken.mockResolvedValueOnce(
+      makeInvite({ invitedEmail: MATCHING_EMAIL, invitedPhone: MATCHING_PHONE }),
+    )
+
+    const result = await callAdopt({
+      registeredEmail: 'different@example.com',
+      registeredPhone: MATCHING_PHONE,
+      verifiedChannel: ContactMethod.EMAIL,
+    })
+
+    expect(result).toEqual({
+      adopted: true,
+      clientId: 'client_1',
+      verifiedChannelApplied: null,
+    })
+    expect(mocks.markUserEmailVerified).not.toHaveBeenCalled()
+    expect(mocks.markUserPhoneVerified).not.toHaveBeenCalled()
   })
 
   it('returns lost_race when the guarded claim update matches no rows', async () => {

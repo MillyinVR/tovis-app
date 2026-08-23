@@ -16,6 +16,7 @@ import { buildClientActionLinkForType } from './linkBuilders'
 import { enqueueClientActionDispatch } from './enqueueClientActionDispatch'
 import { orchestrateClientActionDelivery } from './orchestrateClientActionDelivery'
 import {
+  normalizeResendMode,
   requireRecipientProfessionalId,
   resolveClientActionExpiresAt,
 } from './policies'
@@ -53,12 +54,6 @@ export type CreateAftercareAccessDeliveryResult = {
   token: ClientActionIssuedToken
   link: ClientActionBuildLinkResult
   dispatch: Awaited<ReturnType<typeof enqueueClientActionDispatch>>
-}
-
-function normalizeResendMode(
-  value: ClientActionResendMode | null | undefined,
-): ClientActionResendMode {
-  return value ?? 'INITIAL_SEND'
 }
 
 function buildAftercareTitle(): string {

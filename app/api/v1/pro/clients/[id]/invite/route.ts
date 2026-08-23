@@ -132,10 +132,14 @@ export async function POST(request: Request, ctx: RouteContext) {
           preferredContactMethod: invite.preferredContactMethod,
           issuedByUserId: asTrimmedString(auth.user?.id),
           recipientUserId: null,
+          // A rotated invite (re-invite of the same client) needs a fresh send
+          // cycle; INITIAL_SEND would collapse into the first invite's
+          // idempotency key and deliver nothing.
+          resendMode: issued.created ? 'INITIAL_SEND' : 'RESEND',
         })
         inviteDelivery = {
           attempted: true,
-          queued: true,
+          queued: delivery.dispatch.created,
           href: delivery.link.href,
         }
         kickNotificationDrain()

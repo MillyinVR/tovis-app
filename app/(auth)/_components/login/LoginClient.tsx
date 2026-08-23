@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useMemo, useState, type FormEvent } from 'react'
 import { useSearchParams } from 'next/navigation'
 
+import AuthNotice from '../AuthNotice'
 import AuthShell from '../AuthShell'
 import FieldLabel from '../FieldLabel'
 import Input from '../Input'
@@ -258,12 +259,12 @@ export default function LoginClient() {
     >
       <div className="grid gap-4">
         {reasonCopy ? (
-          <div className="rounded-card border border-toneWarn/25 bg-toneWarn/10 px-3 py-2 text-sm font-semibold text-toneWarn">
+          <AuthNotice tone="warn" className="font-semibold">
             <div className="font-black">{reasonCopy.title}</div>
             <div className="mt-0.5 text-[13px] font-semibold text-toneWarn/90">
               {reasonCopy.body}
             </div>
-          </div>
+          </AuthNotice>
         ) : null}
 
         {mode === 'password' ? (
@@ -299,11 +300,7 @@ export default function LoginClient() {
               />
             </label>
 
-            {error ? (
-              <div className="rounded-card border border-toneDanger/25 bg-toneDanger/10 px-3 py-2 text-sm font-bold text-toneDanger">
-                {error}
-              </div>
-            ) : null}
+            {error ? <AuthNotice tone="danger">{error}</AuthNotice> : null}
 
             <div className="grid gap-2 pt-1">
               <PrimaryButton loading={loading} withArrow>

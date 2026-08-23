@@ -11,6 +11,7 @@ import {
 } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 
+import AuthNotice from '../_components/AuthNotice'
 import AuthShell from '../_components/AuthShell'
 import Input from '../_components/Input'
 import PrimaryButton, {
@@ -21,11 +22,27 @@ import {
   formatCooldown,
   readRetryAfterSeconds,
 } from '../_components/otpCooldown'
-import { safeJsonRecord, readErrorMessage, readStringField } from '@/lib/http'
+import {
+  safeJsonRecord,
+  readBooleanField,
+  readErrorMessage,
+  readStringField,
+} from '@/lib/http'
 import { cn } from '@/lib/utils'
 import { useBrand } from '@/lib/brand/BrandProvider'
 
 const NEXT_URL_RECOVERY_DELAY_MS = 3000
+
+/**
+ * Which control a notice reports on, so it renders directly above the button
+ * that was pressed: the code submit ('submit'), the phone resend row
+ * ('phone'), the phone-correction card ('phone-correct'), or the email resend
+ * card ('email'). One shared error state used to dump everything above the
+ * bottom submit button — ~100 lines below the resend buttons that produced it.
+ */
+type NoticeAt = 'submit' | 'phone' | 'phone-correct' | 'email'
+
+type Notice = { at: NoticeAt; message: string }
 
 type VerificationStatus = {
   loaded: boolean
@@ -117,13 +134,6 @@ function buildLoginHref(args: {
   return qs ? `/login?${qs}` : '/login'
 }
 
-function readBooleanField(
-  data: Record<string, unknown> | null,
-  key: string,
-): boolean {
-  return data?.[key] === true
-}
-
 function readUserField(
   data: Record<string, unknown> | null,
   key: string,
@@ -185,8 +195,8 @@ export default function VerifyPhonePage() {
   const [status, setStatus] = useState<VerificationStatus>(EMPTY_STATUS)
   const [recoveredNextUrl, setRecoveredNextUrl] = useState<string | null>(null)
   const [code, setCode] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [info, setInfo] = useState<string | null>(null)
+  const [error, setError] = useState<Notice | null>(null)
+  const [info, setInfo] = useState<Notice | null>(null)
   const [loading, setLoading] = useState(false)
   const [sendingPhone, setSendingPhone] = useState(false)
   const [sendingEmail, setSendingEmail] = useState(false)
@@ -295,9 +305,13 @@ export default function VerifyPhonePage() {
       } catch (e) {
         if (cancelled) return
         console.error(e)
-        setError(
-          e instanceof Error ? e.message : 'Could not load verification status.',
-        )
+        setError({
+          at: 'submit',
+          message:
+            e instanceof Error
+              ? e.message
+              : 'Could not load verification status.',
+        })
         setStatus((prev) => ({ ...prev, loaded: true }))
       }
     }
@@ -373,24 +387,31 @@ export default function VerifyPhonePage() {
         const retryAfterSeconds = readRetryAfterSeconds(data)
         if (retryAfterSeconds != null && retryAfterSeconds > 0) {
           setPhoneCooldownSeconds(retryAfterSeconds)
-          setError(
-            `You already requested a ${brand.displayName} verification code. Wait ${formatCooldown(
+          setError({
+            at: 'phone',
+            message: `You already requested a ${brand.displayName} verification code. Wait ${formatCooldown(
               retryAfterSeconds,
             )} and try again.`,
-          )
+          })
           return
         }
 
-        setError(readErrorMessage(data) ?? 'Could not resend code.')
+        setError({
+          at: 'phone',
+          message: readErrorMessage(data) ?? 'Could not resend code.',
+        })
         return
       }
 
       await refreshStatus()
       setPhoneCooldownSeconds(RESEND_COOLDOWN_SECONDS)
-      setInfo(`We sent a new ${brand.displayName} verification code.`)
+      setInfo({
+        at: 'phone',
+        message: `We sent a new ${brand.displayName} verification code.`,
+      })
     } catch (e) {
       console.error(e)
-      setError('Network error.')
+      setError({ at: 'phone', message: 'Network error.' })
     } finally {
       setSendingPhone(false)
     }
@@ -423,26 +444,32 @@ export default function VerifyPhonePage() {
         const retryAfterSeconds = readRetryAfterSeconds(data)
         if (retryAfterSeconds != null && retryAfterSeconds > 0) {
           setEmailCooldownSeconds(retryAfterSeconds)
-          setError(
-            `You already requested a ${brand.displayName} verification email. Wait ${formatCooldown(
+          setError({
+            at: 'email',
+            message: `You already requested a ${brand.displayName} verification email. Wait ${formatCooldown(
               retryAfterSeconds,
             )} and try again.`,
-          )
+          })
           return
         }
 
-        setError(
-          readErrorMessage(data) ?? 'Could not resend verification email.',
-        )
+        setError({
+          at: 'email',
+          message:
+            readErrorMessage(data) ?? 'Could not resend verification email.',
+        })
         return
       }
 
       await refreshStatus()
       setEmailCooldownSeconds(RESEND_COOLDOWN_SECONDS)
-      setInfo(`${brand.displayName} sent a new verification email. Check your inbox and spam.`)
+      setInfo({
+        at: 'email',
+        message: `${brand.displayName} sent a new verification email. Check your inbox and spam.`,
+      })
     } catch (e) {
       console.error(e)
-      setError('Network error.')
+      setError({ at: 'email', message: 'Network error.' })
     } finally {
       setSendingEmail(false)
     }
@@ -478,15 +505,19 @@ export default function VerifyPhonePage() {
         const retryAfterSeconds = readRetryAfterSeconds(data)
         if (retryAfterSeconds != null && retryAfterSeconds > 0) {
           setPhoneCooldownSeconds(retryAfterSeconds)
-          setError(
-            `You already requested a ${brand.displayName} verification code. Wait ${formatCooldown(
+          setError({
+            at: 'phone-correct',
+            message: `You already requested a ${brand.displayName} verification code. Wait ${formatCooldown(
               retryAfterSeconds,
             )} and try again.`,
-          )
+          })
           return
         }
 
-        setError(readErrorMessage(data) ?? 'Could not update phone number.')
+        setError({
+          at: 'phone-correct',
+          message: readErrorMessage(data) ?? 'Could not update phone number.',
+        })
         return
       }
 
@@ -495,10 +526,15 @@ export default function VerifyPhonePage() {
       setShowPhoneCorrection(false)
       await refreshStatus()
       setPhoneCooldownSeconds(RESEND_COOLDOWN_SECONDS)
-      setInfo(`We updated your ${brand.displayName} phone number and sent a fresh code.`)
+      // 'phone', not 'phone-correct': success collapses the correction card,
+      // so the notice lands in the phone block the user is looking at.
+      setInfo({
+        at: 'phone',
+        message: `We updated your ${brand.displayName} phone number and sent a fresh code.`,
+      })
     } catch (e) {
       console.error(e)
-      setError('Network error.')
+      setError({ at: 'phone-correct', message: 'Network error.' })
     } finally {
       setCorrectingPhone(false)
     }
@@ -513,7 +549,7 @@ export default function VerifyPhonePage() {
 
     const trimmed = code.replace(/[^\d]/g, '')
     if (!/^\d{6}$/.test(trimmed)) {
-      setError('Enter the 6-digit code.')
+      setError({ at: 'submit', message: 'Enter the 6-digit code.' })
       return
     }
 
@@ -529,7 +565,10 @@ export default function VerifyPhonePage() {
       const data = await safeJsonRecord(res)
 
       if (!res.ok) {
-        setError(readErrorMessage(data) ?? 'Verification failed.')
+        setError({
+          at: 'submit',
+          message: readErrorMessage(data) ?? 'Verification failed.',
+        })
         return
       }
 
@@ -546,12 +585,14 @@ export default function VerifyPhonePage() {
         return
       }
 
-      setInfo(
-        'Phone verified. Email verification is still required before full app access.',
-      )
+      setInfo({
+        at: 'submit',
+        message:
+          'Phone verified. Email verification is still required before full app access.',
+      })
     } catch (e) {
       console.error(e)
-      setError('Network error.')
+      setError({ at: 'submit', message: 'Network error.' })
     } finally {
       setLoading(false)
     }
@@ -603,17 +644,17 @@ export default function VerifyPhonePage() {
         </div>
 
         {smsRetryRequested && !status.isPhoneVerified ? (
-          <div className="rounded-card border border-toneWarn/25 bg-toneWarn/10 px-3 py-2 text-sm font-bold text-toneWarn">
+          <AuthNotice tone="warn">
             {brand.displayName} could not send your first verification text. Resend a code or
             fix your phone number below.
-          </div>
+          </AuthNotice>
         ) : null}
 
         {emailRetryRequested && !status.isEmailVerified ? (
-          <div className="rounded-card border border-toneWarn/25 bg-toneWarn/10 px-3 py-2 text-sm font-bold text-toneWarn">
+          <AuthNotice tone="warn">
             {brand.displayName} could not send your first verification email. Resend it, then
             check your inbox and spam.
-          </div>
+          </AuthNotice>
         ) : null}
 
         {!status.isPhoneVerified ? (
@@ -631,6 +672,15 @@ export default function VerifyPhonePage() {
               maxLength={6}
               disabled={loading || sendingPhone || correctingPhone}
             />
+
+            {/* Resend-row outcomes render directly above the buttons that
+                produced them, not at the bottom of the page. */}
+            {info?.at === 'phone' ? (
+              <AuthNotice tone="accent">{info.message}</AuthNotice>
+            ) : null}
+            {error?.at === 'phone' ? (
+              <AuthNotice tone="danger">{error.message}</AuthNotice>
+            ) : null}
 
             <div className="flex items-center justify-between gap-3">
               <span className="text-xs text-textSecondary/80">
@@ -688,6 +738,10 @@ export default function VerifyPhonePage() {
                   disabled={correctingPhone || sendingPhone}
                 />
 
+                {error?.at === 'phone-correct' ? (
+                  <AuthNotice tone="danger">{error.message}</AuthNotice>
+                ) : null}
+
                 <div className="flex items-center justify-end gap-2">
                   <TinyButton
                     onClick={() => {
@@ -719,9 +773,7 @@ export default function VerifyPhonePage() {
             ) : null}
           </label>
         ) : (
-          <div className="rounded-card border border-accentPrimary/25 bg-accentPrimary/10 px-3 py-2 text-sm font-bold text-textPrimary">
-            Your phone is verified.
-          </div>
+          <AuthNotice tone="accent">Your phone is verified.</AuthNotice>
         )}
 
         {!status.isEmailVerified ? (
@@ -731,6 +783,18 @@ export default function VerifyPhonePage() {
               Click the verification link we emailed you. You can resend it here
               if needed.
             </div>
+
+            {info?.at === 'email' ? (
+              <AuthNotice tone="accent" className="mt-3">
+                {info.message}
+              </AuthNotice>
+            ) : null}
+            {error?.at === 'email' ? (
+              <AuthNotice tone="danger" className="mt-3">
+                {error.message}
+              </AuthNotice>
+            ) : null}
+
             <div className="mt-3">
               <TinyButton
                 onClick={resendEmail}
@@ -749,21 +813,15 @@ export default function VerifyPhonePage() {
             </div>
           </div>
         ) : (
-          <div className="rounded-card border border-accentPrimary/25 bg-accentPrimary/10 px-3 py-2 text-sm font-bold text-textPrimary">
-            Your email is verified.
-          </div>
+          <AuthNotice tone="accent">Your email is verified.</AuthNotice>
         )}
 
-        {info ? (
-          <div className="rounded-card border border-accentPrimary/25 bg-accentPrimary/10 px-3 py-2 text-sm font-bold text-textPrimary">
-            {info}
-          </div>
+        {info?.at === 'submit' ? (
+          <AuthNotice tone="accent">{info.message}</AuthNotice>
         ) : null}
 
-        {error ? (
-          <div className="rounded-card border border-toneDanger/25 bg-toneDanger/10 px-3 py-2 text-sm font-bold text-toneDanger">
-            {error}
-          </div>
+        {error?.at === 'submit' ? (
+          <AuthNotice tone="danger">{error.message}</AuthNotice>
         ) : null}
 
         {!status.isPhoneVerified ? (

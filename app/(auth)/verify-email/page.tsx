@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 
+import AuthNotice from '../_components/AuthNotice'
 import AuthShell from '../_components/AuthShell'
 import {
   HeroTopHairline,
@@ -390,11 +391,7 @@ export default function VerifyEmailPage() {
           </div>
         ) : null}
 
-        {error ? (
-          <div className="rounded-card border border-toneDanger/25 bg-toneDanger/10 px-3 py-2 text-sm font-bold text-toneDanger">
-            {error}
-          </div>
-        ) : null}
+        {error ? <AuthNotice tone="danger">{error}</AuthNotice> : null}
 
         {!isSuccess ? (
           <div className="grid gap-2 pt-1">

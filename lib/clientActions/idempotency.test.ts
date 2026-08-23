@@ -373,4 +373,97 @@ describe('lib/clientActions/idempotency', () => {
       ).toEqual([])
     })
   })
+
+  describe('claim-invite rotation (the "no text ever arrives" bug)', () => {
+    // A claim invite ROTATES its token in place, so inviteId — and therefore
+    // the base key — is unchanged across issuances. Before the fix both sends
+    // resolved to 'initial', producing one identical sendKey; the second send
+    // then collided with the FIRST send's dispatch row and was dropped as a
+    // duplicate, while the rotation had already invalidated the link that had
+    // actually been delivered. The client was promised a message that could
+    // never arrive AND left holding a dead link.
+    const claimRefs = {
+      inviteId: 'invite_1',
+      bookingId: 'booking_1',
+      clientId: 'client_1',
+      professionalId: 'pro_1',
+      aftercareId: null,
+      consultationApprovalId: null,
+    }
+    const claimRecipient = {
+      clientId: 'client_1',
+      professionalId: 'pro_1',
+      recipientEmail: 'tori@example.com',
+      recipientPhone: '+16195551234',
+    }
+
+    function claimSendKey(args: {
+      resendMode: 'INITIAL_SEND' | 'RESEND'
+      tokenHash: string
+    }): string {
+      return buildClientActionSendKey({
+        actionType: 'CLIENT_CLAIM_INVITE',
+        refs: claimRefs,
+        recipient: claimRecipient,
+        resendMode: args.resendMode,
+        sendVersion: args.tokenHash,
+      })
+    }
+
+    it('the base key is IDENTICAL across a rotation — which is why the send cycle has to differ', () => {
+      const first = buildClientActionBaseKey({
+        actionType: 'CLIENT_CLAIM_INVITE',
+        refs: claimRefs,
+        recipient: claimRecipient,
+        resendMode: 'INITIAL_SEND',
+      })
+      const second = buildClientActionBaseKey({
+        actionType: 'CLIENT_CLAIM_INVITE',
+        refs: claimRefs,
+        recipient: claimRecipient,
+        resendMode: 'RESEND',
+      })
+
+      expect(first).toBe(second)
+    })
+
+    it('a rotated token yields a DIFFERENT sendKey than the original send', () => {
+      const original = claimSendKey({
+        resendMode: 'INITIAL_SEND',
+        tokenHash: 'hash_of_first_token',
+      })
+      const rotated = claimSendKey({
+        resendMode: 'RESEND',
+        tokenHash: 'hash_of_rotated_token',
+      })
+
+      expect(rotated).not.toBe(original)
+    })
+
+    it('two DIFFERENT rotations never collide with each other', () => {
+      const first = claimSendKey({
+        resendMode: 'RESEND',
+        tokenHash: 'hash_a',
+      })
+      const second = claimSendKey({
+        resendMode: 'RESEND',
+        tokenHash: 'hash_b',
+      })
+
+      expect(first).not.toBe(second)
+    })
+
+    it('a RETRY of the SAME send still collapses — retries must not multiply messages', () => {
+      const send = claimSendKey({
+        resendMode: 'INITIAL_SEND',
+        tokenHash: 'hash_of_first_token',
+      })
+      const retry = claimSendKey({
+        resendMode: 'RETRY',
+        tokenHash: 'hash_of_first_token',
+      } as never)
+
+      expect(retry).toBe(send)
+    })
+  })
 })

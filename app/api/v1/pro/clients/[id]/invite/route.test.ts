@@ -102,6 +102,7 @@ describe('POST /api/v1/pro/clients/[id]/invite', () => {
     mocks.issueClaimLinkForClient.mockResolvedValue({
       kind: 'ok',
       rawToken: 'rawtok_1',
+      created: true,
       invite: {
         id: 'invite_1',
         status: ProClientInviteStatus.PENDING,
@@ -114,6 +115,7 @@ describe('POST /api/v1/pro/clients/[id]/invite', () => {
     })
     mocks.createClientClaimInviteDelivery.mockResolvedValue({
       link: { href: '/claim/rawtok_1' },
+      dispatch: { created: true },
     })
 
     const res = await POST(new Request('http://localhost', { method: 'POST' }), ctx())
@@ -130,6 +132,7 @@ describe('POST /api/v1/pro/clients/[id]/invite', () => {
         bookingId: null,
         inviteId: 'invite_1',
         rawToken: 'rawtok_1',
+        resendMode: 'INITIAL_SEND',
       }),
     )
     expect(mocks.kickNotificationDrain).toHaveBeenCalledTimes(1)
@@ -169,6 +172,86 @@ describe('POST /api/v1/pro/clients/[id]/invite', () => {
 
     expect(res.status).toBe(404)
     expect(mocks.issueClaimLinkForClient).not.toHaveBeenCalled()
+  })
+
+  it('re-inviting a client rotates the token and sends it as a fresh send cycle', async () => {
+    mocks.prisma.clientProfile.findUnique.mockResolvedValue({
+      id: 'client_1',
+      userId: null,
+      claimStatus: ClientClaimStatus.UNCLAIMED,
+      createdByProfessionalId: 'pro_1',
+    })
+    // created:false = an invite already existed and its token was rotated, so
+    // the previously delivered link is now dead; this send must not collapse
+    // into the first invite's idempotency key.
+    mocks.issueClaimLinkForClient.mockResolvedValue({
+      kind: 'ok',
+      rawToken: 'rawtok_rotated',
+      created: false,
+      invite: {
+        id: 'invite_1',
+        status: ProClientInviteStatus.PENDING,
+        clientId: 'client_1',
+        invitedName: 'Imported Client',
+        invitedEmail: 'client@example.com',
+        invitedPhone: null,
+        preferredContactMethod: 'EMAIL',
+      },
+    })
+    mocks.createClientClaimInviteDelivery.mockResolvedValue({
+      link: { href: '/claim/rawtok_rotated' },
+      dispatch: { created: true },
+    })
+
+    const res = await POST(new Request('http://localhost', { method: 'POST' }), ctx())
+
+    expect(res.status).toBe(200)
+    expect(mocks.createClientClaimInviteDelivery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rawToken: 'rawtok_rotated',
+        resendMode: 'RESEND',
+      }),
+    )
+
+    const body = (await res.json()) as {
+      inviteDelivery: { queued: boolean }
+    }
+    expect(body.inviteDelivery.queued).toBe(true)
+  })
+
+  it('reports queued:false when the dispatch collapsed into an existing send', async () => {
+    mocks.prisma.clientProfile.findUnique.mockResolvedValue({
+      id: 'client_1',
+      userId: null,
+      claimStatus: ClientClaimStatus.UNCLAIMED,
+      createdByProfessionalId: 'pro_1',
+    })
+    mocks.issueClaimLinkForClient.mockResolvedValue({
+      kind: 'ok',
+      rawToken: 'rawtok_1',
+      created: false,
+      invite: {
+        id: 'invite_1',
+        status: ProClientInviteStatus.PENDING,
+        clientId: 'client_1',
+        invitedName: 'Imported Client',
+        invitedEmail: 'client@example.com',
+        invitedPhone: null,
+        preferredContactMethod: 'EMAIL',
+      },
+    })
+    mocks.createClientClaimInviteDelivery.mockResolvedValue({
+      link: { href: '/claim/rawtok_1' },
+      dispatch: { created: false },
+    })
+
+    const res = await POST(new Request('http://localhost', { method: 'POST' }), ctx())
+
+    const body = (await res.json()) as {
+      inviteDelivery: { attempted: boolean; queued: boolean }
+    }
+    expect(body.inviteDelivery.attempted).toBe(true)
+    expect(body.inviteDelivery.queued).toBe(false)
   })
 
   it('allows ownership via an existing booking with this pro', async () => {

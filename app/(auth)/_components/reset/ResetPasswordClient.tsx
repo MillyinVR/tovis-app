@@ -4,6 +4,7 @@
 
 import { useState } from 'react'
 import { PASSWORD_MIN_LEN } from '@/lib/passwordPolicyConstants'
+import AuthNotice from '../AuthNotice'
 import AuthShell from '../AuthShell'
 import FieldLabel from '../FieldLabel'
 import PasswordInput from '../PasswordInput'
@@ -63,11 +64,7 @@ export default function ResetPasswordClient({ token }: { token: string }) {
             <span className="text-xs text-textSecondary/80">Use at least {PASSWORD_MIN_LEN} characters.</span>
           </label>
 
-          {error ? (
-            <div className="rounded-card border border-toneDanger/25 bg-toneDanger/10 px-3 py-2 text-sm font-bold text-toneDanger">
-              {error}
-            </div>
-          ) : null}
+          {error ? <AuthNotice tone="danger">{error}</AuthNotice> : null}
 
           <PrimaryButton loading={loading} withArrow>
             {loading ? 'Updating…' : 'Update password'}

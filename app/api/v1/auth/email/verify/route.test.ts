@@ -446,7 +446,8 @@ describe('app/api/v1/auth/email/verify/route', () => {
         updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
       user: {
-        update: vi.fn().mockResolvedValue({
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
           id: 'user_1',
           email: 'user@example.com',
           role: Role.CLIENT,
@@ -499,11 +500,15 @@ describe('app/api/v1/auth/email/verify/route', () => {
       data: { usedAt: expect.any(Date) },
     })
 
-    expect(tx.user.update).toHaveBeenCalledWith({
-      where: { id: 'user_1' },
+    expect(tx.user.updateMany).toHaveBeenCalledWith({
+      where: { id: 'user_1', emailVerifiedAt: null },
       data: {
         emailVerifiedAt: expect.any(Date),
       },
+    })
+
+    expect(tx.user.findUniqueOrThrow).toHaveBeenCalledWith({
+      where: { id: 'user_1' },
       select: {
         id: true,
         email: true,
@@ -553,7 +558,8 @@ describe('app/api/v1/auth/email/verify/route', () => {
         updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
       user: {
-        update: vi.fn().mockResolvedValue({
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
           id: 'user_1',
           email: 'user@example.com',
           role: Role.PRO,
@@ -636,7 +642,8 @@ describe('app/api/v1/auth/email/verify/route', () => {
         updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
       user: {
-        update: vi.fn().mockResolvedValue({
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
           id: 'user_1',
           email: 'user@example.com',
           role: Role.CLIENT,
@@ -718,7 +725,8 @@ describe('app/api/v1/auth/email/verify/route', () => {
         updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
       user: {
-        update: vi.fn().mockResolvedValue({
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
           id: 'user_2',
           email: 'other@example.com',
           role: Role.CLIENT,

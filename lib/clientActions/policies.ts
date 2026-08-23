@@ -126,6 +126,12 @@ export function isIntentionalResend(
   return resendMode === 'RESEND'
 }
 
+export function normalizeResendMode(
+  value: ClientActionResendMode | null | undefined,
+): ClientActionResendMode {
+  return value ?? 'INITIAL_SEND'
+}
+
 export function isRetrySend(
   resendMode: ClientActionResendMode,
 ): boolean {

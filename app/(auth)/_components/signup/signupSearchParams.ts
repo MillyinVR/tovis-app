@@ -60,6 +60,9 @@ export function buildLoginHref(args: {
   next: string | null
   intent: string | null
   inviteToken: string | null
+  /** Claim-link channel marker pair (via/vsig) — forwarded verbatim. */
+  via?: string | null
+  vsig?: string | null
   email: string | null
   phone: string | null
 }): string {
@@ -70,6 +73,8 @@ export function buildLoginHref(args: {
   appendIfPresent(params, 'next', args.next)
   appendIfPresent(params, 'intent', args.intent)
   appendIfPresent(params, 'inviteToken', args.inviteToken)
+  appendIfPresent(params, 'via', args.via ?? null)
+  appendIfPresent(params, 'vsig', args.vsig ?? null)
   appendIfPresent(params, 'email', args.email)
   appendIfPresent(params, 'phone', args.phone)
   params.set('role', args.role)
@@ -84,6 +89,13 @@ export type SignupForwardedParams = {
   nextFromQuery: string | null
   intent: string | null
   inviteToken: string | null
+  /**
+   * Claim-link channel marker (which channel delivered the claim link, plus
+   * its signature). Opaque here — carried through to the register call, where
+   * the server validates the signature before crediting anything.
+   */
+  via: string | null
+  vsig: string | null
   emailPrefill: string
   phonePrefill: string
   nameParts: { firstName: string; lastName: string }
@@ -100,6 +112,8 @@ export function readSignupForwardedParams(
     nextFromQuery: sanitizeNextUrl(sp.get('next')) ?? from,
     intent: normalizeTrimmed(sp.get('intent')),
     inviteToken: normalizeTrimmed(sp.get('inviteToken')),
+    via: normalizeTrimmed(sp.get('via')),
+    vsig: normalizeTrimmed(sp.get('vsig')),
     emailPrefill: normalizeTrimmed(sp.get('email')) ?? '',
     phonePrefill: normalizeTrimmed(sp.get('phone')) ?? '',
     nameParts: splitFullName(normalizeTrimmed(sp.get('name'))),

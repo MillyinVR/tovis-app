@@ -15,15 +15,17 @@
 
 import {
   ClientClaimStatus,
+  ContactMethod,
   Prisma,
   ProClientInviteStatus,
 } from '@prisma/client'
 
 import {
-  normalizeEmail,
-  normalizePhone,
-} from '@/lib/security/contactNormalization'
+  markUserEmailVerified,
+  markUserPhoneVerified,
+} from '@/lib/auth/contactVerification'
 
+import { matchesClaimChannelContact } from './claimChannelVerification'
 import {
   getClientClaimLinkByToken,
   markClientClaimLinkAcceptedAudit,
@@ -39,6 +41,15 @@ export type AdoptClaimInviteDuringRegistrationArgs = {
   /** Already-normalized registering contact (as stored on the new User). */
   registeredEmail: string | null
   registeredPhone: string | null
+  /**
+   * The claim link's signature-proven delivery channel
+   * (lib/clients/claimLinkChannel), or null when the signup didn't arrive
+   * through a stamped link. When the adoption commits AND the registered
+   * contact for this channel equals the invite's destination, the click counts
+   * as verification of that contact — the message went there, and the person
+   * registering holds it.
+   */
+  verifiedChannel: ContactMethod | null
   now: Date
 }
 
@@ -51,7 +62,16 @@ export type AdoptClaimInviteReason =
   | 'lost_race'
 
 export type AdoptClaimInviteDuringRegistrationResult =
-  | { adopted: true; clientId: string }
+  | {
+      adopted: true
+      clientId: string
+      /**
+       * The contact channel credited as verified by the claim-link click, or
+       * null when no (valid) channel marker accompanied the signup or its
+       * contact didn't match the invite's destination.
+       */
+      verifiedChannelApplied: ContactMethod | null
+    }
   | { adopted: false; reason: AdoptClaimInviteReason }
 
 function contactMatchesInvite(args: {
@@ -60,20 +80,22 @@ function contactMatchesInvite(args: {
   invitedEmail: string | null
   invitedPhone: string | null
 }): boolean {
-  const invitedEmail = normalizeEmail(args.invitedEmail)
-  const invitedPhone = normalizePhone(args.invitedPhone)
-
-  const emailMatches =
-    args.registeredEmail != null &&
-    invitedEmail != null &&
-    args.registeredEmail === invitedEmail
-
-  const phoneMatches =
-    args.registeredPhone != null &&
-    invitedPhone != null &&
-    args.registeredPhone === invitedPhone
-
-  return emailMatches || phoneMatches
+  return (
+    matchesClaimChannelContact({
+      channel: ContactMethod.EMAIL,
+      invitedEmail: args.invitedEmail,
+      invitedPhone: args.invitedPhone,
+      email: args.registeredEmail,
+      phone: args.registeredPhone,
+    }) ||
+    matchesClaimChannelContact({
+      channel: ContactMethod.SMS,
+      invitedEmail: args.invitedEmail,
+      invitedPhone: args.invitedPhone,
+      email: args.registeredEmail,
+      phone: args.registeredPhone,
+    })
+  )
 }
 
 /**
@@ -149,6 +171,35 @@ export async function adoptClaimInviteDuringRegistration(
     return { adopted: false, reason: 'lost_race' }
   }
 
+  // The click that led here counts as verification of the channel that carried
+  // the link — but only for the contact the message was actually delivered to,
+  // and only when that is the contact this account registered with.
+  let verifiedChannelApplied: ContactMethod | null = null
+  if (
+    args.verifiedChannel != null &&
+    matchesClaimChannelContact({
+      channel: args.verifiedChannel,
+      invitedEmail: invite.invitedEmail,
+      invitedPhone: invite.invitedPhone,
+      email: args.registeredEmail,
+      phone: args.registeredPhone,
+    })
+  ) {
+    if (args.verifiedChannel === ContactMethod.EMAIL) {
+      await markUserEmailVerified(args.tx, {
+        userId: args.userId,
+        verifiedAt: args.now,
+      })
+    } else {
+      await markUserPhoneVerified(args.tx, {
+        userId: args.userId,
+        role: 'CLIENT',
+        verifiedAt: args.now,
+      })
+    }
+    verifiedChannelApplied = args.verifiedChannel
+  }
+
   // Best-effort acceptance audit — the profile is already claimed above; mirror
   // acceptClientClaimFromLink, which likewise commits the claim regardless of the
   // audit outcome. A thrown DB error rolls back the whole registration.
@@ -159,5 +210,5 @@ export async function adoptClaimInviteDuringRegistration(
     tx: args.tx,
   })
 
-  return { adopted: true, clientId: invite.clientId }
+  return { adopted: true, clientId: invite.clientId, verifiedChannelApplied }
 }

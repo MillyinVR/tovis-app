@@ -11,7 +11,7 @@ const mockCheckTwilioVerifyPhoneCode = vi.hoisted(() => vi.fn())
 const mockLogAuthEvent = vi.hoisted(() => vi.fn())
 const mockCaptureAuthException = vi.hoisted(() => vi.fn())
 
-const mockTxUserUpdate = vi.hoisted(() => vi.fn())
+const mockTxUserUpdateMany = vi.hoisted(() => vi.fn())
 const mockTxClientProfileUpdateMany = vi.hoisted(() => vi.fn())
 const mockTxProfessionalProfileUpdateMany = vi.hoisted(() => vi.fn())
 
@@ -110,7 +110,7 @@ function makeRequest(body: unknown, headers?: Record<string, string>) {
 function arrangeTransaction() {
   const tx = {
     user: {
-      update: mockTxUserUpdate,
+      updateMany: mockTxUserUpdateMany,
     },
     clientProfile: {
       updateMany: mockTxClientProfileUpdateMany,
@@ -138,7 +138,7 @@ describe('app/api/v1/auth/phone/verify/route', () => {
     mockCaptureAuthException.mockReset()
 
     mockPrismaTransaction.mockReset()
-    mockTxUserUpdate.mockReset()
+    mockTxUserUpdateMany.mockReset()
     mockTxClientProfileUpdateMany.mockReset()
     mockTxProfessionalProfileUpdateMany.mockReset()
 
@@ -155,10 +155,7 @@ describe('app/api/v1/auth/phone/verify/route', () => {
       status: 'approved',
     })
 
-    mockTxUserUpdate.mockResolvedValue({
-      id: 'user_1',
-      phoneVerifiedAt: new Date('2026-04-08T10:00:00.000Z'),
-    })
+    mockTxUserUpdateMany.mockResolvedValue({ count: 1 })
     mockTxClientProfileUpdateMany.mockResolvedValue({ count: 1 })
     mockTxProfessionalProfileUpdateMany.mockResolvedValue({ count: 0 })
   })
@@ -504,13 +501,13 @@ describe('app/api/v1/auth/phone/verify/route', () => {
       code: '123456',
     })
 
-    expect(mockTxUserUpdate).toHaveBeenCalledWith({
-      where: { id: 'user_1' },
+    expect(mockTxUserUpdateMany).toHaveBeenCalledWith({
+      where: { id: 'user_1', phoneVerifiedAt: null },
       data: { phoneVerifiedAt: expect.any(Date) },
     })
 
     expect(mockTxClientProfileUpdateMany).toHaveBeenCalledWith({
-      where: { userId: 'user_1' },
+      where: { userId: 'user_1', phoneVerifiedAt: null },
       data: { phoneVerifiedAt: expect.any(Date) },
     })
 
@@ -578,15 +575,15 @@ describe('app/api/v1/auth/phone/verify/route', () => {
       token: 'active_token',
     })
 
-    expect(mockTxUserUpdate).toHaveBeenCalledWith({
-      where: { id: 'user_1' },
+    expect(mockTxUserUpdateMany).toHaveBeenCalledWith({
+      where: { id: 'user_1', phoneVerifiedAt: null },
       data: { phoneVerifiedAt: expect.any(Date) },
     })
 
     expect(mockTxClientProfileUpdateMany).not.toHaveBeenCalled()
 
     expect(mockTxProfessionalProfileUpdateMany).toHaveBeenCalledWith({
-      where: { userId: 'user_1' },
+      where: { userId: 'user_1', phoneVerifiedAt: null },
       data: { phoneVerifiedAt: expect.any(Date) },
     })
 

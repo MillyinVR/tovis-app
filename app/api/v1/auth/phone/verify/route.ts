@@ -8,6 +8,7 @@ import { enforceVerificationVerifyThrottle } from '@/app/api/_utils/auth/verific
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { setSessionCookie } from '@/app/api/_utils/auth/sessionCookie'
 import { createActiveToken, createVerificationToken } from '@/lib/auth'
+import { markUserPhoneVerified } from '@/lib/auth/contactVerification'
 import { checkTwilioVerifyPhoneCode } from '@/lib/twilio/verify'
 import {
   captureAuthException,
@@ -142,30 +143,11 @@ export async function POST(request: Request) {
     const verifiedAt = new Date()
 
     await prisma.$transaction(async (tx) => {
-      await tx.user.update({
-        where: { id: userId },
-        data: {
-          phoneVerifiedAt: verifiedAt,
-        },
+      await markUserPhoneVerified(tx, {
+        userId,
+        role: user.role,
+        verifiedAt,
       })
-
-      if (user.role === 'CLIENT') {
-        await tx.clientProfile.updateMany({
-          where: { userId },
-          data: {
-            phoneVerifiedAt: verifiedAt,
-          },
-        })
-      }
-
-      if (user.role === 'PRO') {
-        await tx.professionalProfile.updateMany({
-          where: { userId },
-          data: {
-            phoneVerifiedAt: verifiedAt,
-          },
-        })
-      }
     })
 
     const isEmailVerified = user.isEmailVerified

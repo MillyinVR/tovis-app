@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 
+import AuthNotice from '../AuthNotice'
 import {
   sanitizeInternalPath,
   sanitizeRedirectTarget,
@@ -206,6 +207,10 @@ export default function SocialSignIn() {
         <div className="h-px flex-1 bg-surfaceGlass/12" />
       </div>
 
+      {/* Directly above the provider buttons — a failure here must not land at
+          the page footer, below the control that was pressed. */}
+      {error ? <AuthNotice tone="danger">{error}</AuthNotice> : null}
+
       <div className="grid gap-2" aria-busy={busy}>
         {googleClientId ? (
           <div ref={googleButtonRef} className="flex justify-center" />
@@ -229,12 +234,6 @@ export default function SocialSignIn() {
           </button>
         ) : null}
       </div>
-
-      {error ? (
-        <div className="rounded-card border border-toneDanger/25 bg-toneDanger/10 px-3 py-2 text-sm font-bold text-toneDanger">
-          {error}
-        </div>
-      ) : null}
     </div>
   )
 }

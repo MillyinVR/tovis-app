@@ -5,23 +5,44 @@ const mocks = vi.hoisted(() => ({
   jsonFail: vi.fn(),
   jsonOk: vi.fn(),
   acceptClientClaimFromLink: vi.fn(),
+  verifyClaimLinkChannel: vi.fn(),
+  applyClaimLinkChannelVerification: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
   requireClient: mocks.requireClient,
   jsonFail: mocks.jsonFail,
   jsonOk: mocks.jsonOk,
+  pickString: (value: unknown) => {
+    if (typeof value !== 'string') return null
+    const trimmed = value.trim()
+    return trimmed.length > 0 ? trimmed : null
+  },
 }))
 
 vi.mock('@/lib/clients/clientClaim', () => ({
   acceptClientClaimFromLink: mocks.acceptClientClaimFromLink,
 }))
 
+vi.mock('@/lib/clients/claimLinkChannel', () => ({
+  verifyClaimLinkChannel: mocks.verifyClaimLinkChannel,
+}))
+
+vi.mock('@/lib/clients/claimChannelVerification', () => ({
+  applyClaimLinkChannelVerification: mocks.applyClaimLinkChannelVerification,
+}))
+
 import { POST } from './route'
 
-function makeRequest(): Request {
+function makeRequest(body?: unknown): Request {
   return new Request('http://localhost/api/v1/pro/invites/token_1/accept', {
     method: 'POST',
+    ...(body !== undefined
+      ? {
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        }
+      : {}),
   })
 }
 
@@ -34,8 +55,14 @@ describe('POST /api/v1/pro/invites/[token]/accept', () => {
       clientId: 'client_1',
       user: {
         id: 'user_1',
+        role: 'CLIENT',
+        email: 'tori@example.com',
+        phone: '+16195551234',
       },
     })
+
+    mocks.verifyClaimLinkChannel.mockReturnValue(null)
+    mocks.applyClaimLinkChannelVerification.mockResolvedValue(true)
 
     mocks.jsonFail.mockImplementation(
       (status: number, error: string, extra?: unknown) => ({
@@ -404,5 +431,64 @@ describe('POST /api/v1/pro/invites/[token]/accept', () => {
     } finally {
       consoleErrorSpy.mockRestore()
     }
+  })
+
+  it('credits a signature-proven channel before accepting', async () => {
+    mocks.verifyClaimLinkChannel.mockReturnValue('EMAIL')
+
+    await POST(makeRequest({ via: 'email', vsig: 'sig_1' }), {
+      params: { token: 'token_1' },
+    })
+
+    expect(mocks.verifyClaimLinkChannel).toHaveBeenCalledWith({
+      rawToken: 'token_1',
+      via: 'email',
+      sig: 'sig_1',
+    })
+    expect(mocks.applyClaimLinkChannelVerification).toHaveBeenCalledWith({
+      token: 'token_1',
+      channel: 'EMAIL',
+      user: {
+        id: 'user_1',
+        role: 'CLIENT',
+        email: 'tori@example.com',
+        phone: '+16195551234',
+      },
+    })
+    expect(mocks.acceptClientClaimFromLink).toHaveBeenCalledTimes(1)
+  })
+
+  it('gives no credit and still accepts when the channel marker does not validate', async () => {
+    mocks.verifyClaimLinkChannel.mockReturnValue(null)
+
+    const result = await POST(makeRequest({ via: 'email', vsig: 'forged' }), {
+      params: { token: 'token_1' },
+    })
+
+    expect(mocks.applyClaimLinkChannelVerification).not.toHaveBeenCalled()
+    expect(mocks.acceptClientClaimFromLink).toHaveBeenCalledTimes(1)
+    expect(result).toEqual({
+      ok: true,
+      status: 200,
+      data: { bookingId: 'booking_1' },
+    })
+  })
+
+  it('still accepts when the credit write itself fails', async () => {
+    mocks.verifyClaimLinkChannel.mockReturnValue('SMS')
+    mocks.applyClaimLinkChannelVerification.mockRejectedValueOnce(
+      new Error('db down'),
+    )
+
+    const result = await POST(makeRequest({ via: 'sms', vsig: 'sig_1' }), {
+      params: { token: 'token_1' },
+    })
+
+    expect(mocks.acceptClientClaimFromLink).toHaveBeenCalledTimes(1)
+    expect(result).toEqual({
+      ok: true,
+      status: 200,
+      data: { bookingId: 'booking_1' },
+    })
   })
 })

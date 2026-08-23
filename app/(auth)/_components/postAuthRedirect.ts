@@ -7,7 +7,7 @@
 // to phone verification. Consolidated here so the two callers can't drift.
 
 import { isRecord } from '@/lib/guards'
-import { readStringField } from '@/lib/http'
+import { readBooleanField, readStringField } from '@/lib/http'
 
 export type UserRole = 'ADMIN' | 'PRO' | 'CLIENT'
 
@@ -45,11 +45,6 @@ export function readUserRole(data: unknown): UserRole | null {
   if (!isRecord(user)) return null
   const role = user.role
   return role === 'ADMIN' || role === 'PRO' || role === 'CLIENT' ? role : null
-}
-
-function readBooleanField(data: unknown, key: string): boolean {
-  if (!isRecord(data)) return false
-  return data[key] === true
 }
 
 export function roleIntentFromPath(path: string | null): UserRole | null {

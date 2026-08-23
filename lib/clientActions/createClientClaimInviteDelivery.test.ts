@@ -33,6 +33,8 @@ vi.mock('@/lib/brand/forTenant', () => ({
   getBrandForTenantContext: mocks.getBrandForTenantContext,
 }))
 
+import { hashProClientInviteToken } from '@/lib/clients/proClientInviteTokens'
+
 import { createClientClaimInviteDelivery } from './createClientClaimInviteDelivery'
 
 const tenantContext = { tenantId: 't', slug: 's', isRoot: true } as never
@@ -128,5 +130,39 @@ describe('createClientClaimInviteDelivery copy', () => {
     expect(mocks.prisma.professionalProfile.findUnique).not.toHaveBeenCalled()
     expect(title).toBe('Claim your Tovis account')
     expect(body).toContain('We found existing history for your contact on Tovis')
+  })
+})
+
+describe('createClientClaimInviteDelivery send cycle', () => {
+  it('defaults to INITIAL_SEND and keys the send cycle to the token hash', async () => {
+    await createClientClaimInviteDelivery({
+      ...baseArgs,
+      professionalId: null,
+      bookingId: null,
+    })
+
+    expect(mocks.orchestrateClientActionDelivery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resendMode: 'INITIAL_SEND',
+        sendVersion: hashProClientInviteToken('rawtok'),
+      }),
+    )
+  })
+
+  it('passes RESEND for a rotated invite so the fresh link gets a fresh delivery', async () => {
+    await createClientClaimInviteDelivery({
+      ...baseArgs,
+      professionalId: null,
+      bookingId: null,
+      rawToken: 'rawtok_rotated',
+      resendMode: 'RESEND',
+    })
+
+    expect(mocks.orchestrateClientActionDelivery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resendMode: 'RESEND',
+        sendVersion: hashProClientInviteToken('rawtok_rotated'),
+      }),
+    )
   })
 })

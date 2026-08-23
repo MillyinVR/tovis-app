@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { useMemo, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 
+import AuthNotice from '../AuthNotice'
 import AuthShell from '../AuthShell'
 import FieldLabel from '../FieldLabel'
 import HelpText from '../HelpText'
@@ -1240,11 +1241,7 @@ export default function SignupProClient() {
           </>
         ) : null}
 
-        {error ? (
-          <div className="rounded-card border border-toneDanger/25 bg-toneDanger/10 px-3 py-2 text-sm font-bold text-toneDanger">
-            {error}
-          </div>
-        ) : null}
+        {error ? <AuthNotice tone="danger">{error}</AuthNotice> : null}
 
         <div className="grid gap-2 pt-1">
           {captchaChallengeActive ? (

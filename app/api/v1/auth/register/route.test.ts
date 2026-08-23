@@ -1,6 +1,6 @@
 // app/api/v1/auth/register/route.test.ts
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { Role } from '@prisma/client'
+import { ContactMethod, Role } from '@prisma/client'
 
 import {
   clearContactLookupHmacKeyringCacheForTests,
@@ -170,6 +170,8 @@ vi.mock('@/lib/security/emailPrivacy', () => ({
       ? {}
       : { emailEncrypted: { encrypted: input.email } },
 }))
+
+import { signClaimLinkChannel } from '@/lib/clients/claimLinkChannel'
 
 import { POST } from './route'
 
@@ -543,6 +545,7 @@ describe('app/api/v1/auth/register/route', () => {
     mockAdoptClaimInvite.mockResolvedValue({
       adopted: true,
       clientId: 'client_adopted',
+      verifiedChannelApplied: null,
     })
 
     mockFindSelfServeClaimable.mockReset()
@@ -1471,6 +1474,151 @@ describe('app/api/v1/auth/register/route', () => {
     expect(tx.clientProfile.create).not.toHaveBeenCalled()
   })
 
+  it('skips the email verification send when the claim click already verified the email', async () => {
+    const tx = {
+      user: {
+        create: vi.fn().mockResolvedValue({
+          id: 'user_claim',
+          email: 'client@example.com',
+          role: Role.CLIENT,
+          phone: '+15551234567',
+          authVersion: 1,
+        }),
+      },
+      clientProfile: { updateMany: vi.fn(), create: vi.fn() },
+    }
+
+    mockPrisma.$transaction.mockImplementation(
+      async (fn: (txArg: typeof tx) => Promise<unknown>) => fn(tx),
+    )
+
+    mockAdoptClaimInvite.mockResolvedValueOnce({
+      adopted: true,
+      clientId: 'client_existing',
+      verifiedChannelApplied: ContactMethod.EMAIL,
+    })
+
+    const signed = signClaimLinkChannel('tok_claim_1', ContactMethod.EMAIL)
+
+    const result = await POST(
+      makeRequest({
+        ...makeClientSignupBody(),
+        intent: 'CLAIM_INVITE',
+        inviteToken: 'tok_claim_1',
+        via: signed.via,
+        vsig: signed.sig,
+      }),
+    )
+    const body = await result.json()
+    await flushWaitUntilTasks()
+
+    expect(result.status).toBe(201)
+
+    // The proven channel is passed to the adoption, reported as verified, and
+    // never re-sent.
+    expect(mockAdoptClaimInvite).toHaveBeenCalledWith(
+      expect.objectContaining({ verifiedChannel: ContactMethod.EMAIL }),
+    )
+    expect(body.isEmailVerified).toBe(true)
+    expect(body.requiresEmailVerification).toBe(false)
+    expect(body.emailVerificationSent).toBe('skipped')
+    expect(mockIssueAndSendEmailVerification).not.toHaveBeenCalled()
+
+    // The other channel is untouched: phone still needs its OTP.
+    expect(body.isPhoneVerified).toBe(false)
+    expect(body.requiresPhoneVerification).toBe(true)
+    expect(body.isFullyVerified).toBe(false)
+    expect(mockStartTwilioVerifyPhoneVerification).toHaveBeenCalledTimes(1)
+  })
+
+  it('skips the phone OTP when the claim click already verified the phone', async () => {
+    const tx = {
+      user: {
+        create: vi.fn().mockResolvedValue({
+          id: 'user_claim',
+          email: 'client@example.com',
+          role: Role.CLIENT,
+          phone: '+15551234567',
+          authVersion: 1,
+        }),
+      },
+      clientProfile: { updateMany: vi.fn(), create: vi.fn() },
+    }
+
+    mockPrisma.$transaction.mockImplementation(
+      async (fn: (txArg: typeof tx) => Promise<unknown>) => fn(tx),
+    )
+
+    mockAdoptClaimInvite.mockResolvedValueOnce({
+      adopted: true,
+      clientId: 'client_existing',
+      verifiedChannelApplied: ContactMethod.SMS,
+    })
+
+    const signed = signClaimLinkChannel('tok_claim_1', ContactMethod.SMS)
+
+    const result = await POST(
+      makeRequest({
+        ...makeClientSignupBody(),
+        intent: 'CLAIM_INVITE',
+        inviteToken: 'tok_claim_1',
+        via: signed.via,
+        vsig: signed.sig,
+      }),
+    )
+    const body = await result.json()
+    await flushWaitUntilTasks()
+
+    expect(result.status).toBe(201)
+    expect(body.isPhoneVerified).toBe(true)
+    expect(body.requiresPhoneVerification).toBe(false)
+    expect(body.phoneVerificationSent).toBe('skipped')
+    expect(mockStartTwilioVerifyPhoneVerification).not.toHaveBeenCalled()
+
+    expect(body.isEmailVerified).toBe(false)
+    expect(mockIssueAndSendEmailVerification).toHaveBeenCalledTimes(1)
+  })
+
+  it('passes no verified channel when the marker signature does not validate', async () => {
+    const tx = {
+      user: {
+        create: vi.fn().mockResolvedValue({
+          id: 'user_claim',
+          email: 'client@example.com',
+          role: Role.CLIENT,
+          phone: '+15551234567',
+          authVersion: 1,
+        }),
+      },
+      clientProfile: { updateMany: vi.fn(), create: vi.fn() },
+    }
+
+    mockPrisma.$transaction.mockImplementation(
+      async (fn: (txArg: typeof tx) => Promise<unknown>) => fn(tx),
+    )
+
+    const result = await POST(
+      makeRequest({
+        ...makeClientSignupBody(),
+        intent: 'CLAIM_INVITE',
+        inviteToken: 'tok_claim_1',
+        via: 'email',
+        vsig: 'forged-signature',
+      }),
+    )
+    const body = await result.json()
+    await flushWaitUntilTasks()
+
+    expect(result.status).toBe(201)
+    expect(mockAdoptClaimInvite).toHaveBeenCalledWith(
+      expect.objectContaining({ verifiedChannel: null }),
+    )
+    expect(body.requiresEmailVerification).toBe(true)
+    expect(body.requiresPhoneVerification).toBe(true)
+    expect(mockIssueAndSendEmailVerification).toHaveBeenCalledTimes(1)
+    expect(mockStartTwilioVerifyPhoneVerification).toHaveBeenCalledTimes(1)
+  })
+
   it('falls back to a fresh profile when the claim invite is not adopted', async () => {
     const tx = {
       user: {
@@ -1532,6 +1680,7 @@ describe('app/api/v1/auth/register/route', () => {
     expect(result.status).toBe(409)
     expect(body.code).toBe('CLAIMABLE_HISTORY')
     expect(body.maskedDestination).toBe('t***@example.com')
+    expect(body.claimLinkSent).toBe(true)
 
     expect(mockFindSelfServeClaimable).toHaveBeenCalledWith({
       email: 'client@example.com',
@@ -1542,6 +1691,23 @@ describe('app/api/v1/auth/register/route', () => {
     )
     // No account is created for a cold-claimable contact.
     expect(mockPrisma.$transaction).not.toHaveBeenCalled()
+  })
+
+  it('never promises a message when the self-serve claim send did not go out', async () => {
+    mockFindSelfServeClaimable.mockResolvedValueOnce({
+      clientId: 'client_cold',
+      bookingId: 'booking_cold',
+      maskedDestination: 't***@example.com',
+    })
+    mockSendSelfServeClaimLink.mockResolvedValueOnce({ sent: false })
+
+    const result = await POST(makeRequest(makeClientSignupBody()))
+    const body = await result.json()
+
+    expect(result.status).toBe(409)
+    expect(body.code).toBe('CLAIMABLE_HISTORY')
+    expect(body.claimLinkSent).toBe(false)
+    expect(body.error).toContain('could not send a new secure link')
   })
 
   it('does not resend the self-serve claim link when its rate-limit bucket is exhausted', async () => {
@@ -1560,6 +1726,7 @@ describe('app/api/v1/auth/register/route', () => {
 
     expect(result.status).toBe(409)
     expect(body.code).toBe('CLAIMABLE_HISTORY')
+    expect(body.claimLinkSent).toBe(false)
     expect(mockSendSelfServeClaimLink).not.toHaveBeenCalled()
   })
 

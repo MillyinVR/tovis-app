@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useMemo, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 
+import AuthNotice from '../AuthNotice'
 import AuthShell from '../AuthShell'
 import FieldLabel from '../FieldLabel'
 import HelpText from '../HelpText'
@@ -13,7 +14,12 @@ import PasswordInput from '../PasswordInput'
 import PrimaryButton from '../PrimaryButton'
 import SecondaryLinkButton from '../SecondaryLinkButton'
 import SocialSignIn from '../social/SocialSignIn'
-import { safeJsonRecord, readErrorMessage, readStringField } from '@/lib/http'
+import {
+  safeJsonRecord,
+  readBooleanField,
+  readErrorMessage,
+  readStringField,
+} from '@/lib/http'
 import { hardNavigate } from '@/lib/clientNavigation'
 import { friendlyTimeZoneLabel } from '@/lib/timeZone'
 import { getTurnstileToken } from '@/lib/turnstileClient'
@@ -37,7 +43,7 @@ import {
   isLikelyValidPhoneInput,
 } from '@/lib/phoneInputFormat'
 
-type VerificationSendState = boolean | 'pending'
+type VerificationSendState = boolean | 'pending' | 'skipped'
 
 type ClientField =
   | 'firstName'
@@ -94,6 +100,10 @@ function readVerificationSendState(
 ): VerificationSendState {
   const value = data?.[key]
   if (value === 'pending') return 'pending'
+  // The channel was verified by the claim-link click itself, so no
+  // verification message was (or ever will be) sent — distinct from `false`,
+  // which means a send was attempted and failed.
+  if (value === 'skipped') return 'skipped'
   return value === true
 }
 
@@ -172,6 +182,8 @@ export default function SignupClientClient() {
     nextFromQuery,
     intent,
     inviteToken,
+    via,
+    vsig,
     emailPrefill,
     phonePrefill,
     nameParts,
@@ -186,10 +198,12 @@ export default function SignupClientClient() {
         next: nextFromQuery,
         intent,
         inviteToken,
+        via,
+        vsig,
         email: emailPrefill || null,
         phone: phonePrefill || null,
       }),
-    [ti, from, nextFromQuery, intent, inviteToken, emailPrefill, phonePrefill],
+    [ti, from, nextFromQuery, intent, inviteToken, via, vsig, emailPrefill, phonePrefill],
   )
 
   const isClaimInviteFlow = intent === 'CLAIM_INVITE'
@@ -215,6 +229,8 @@ export default function SignupClientClient() {
   >(null)
   const [claimableInfo, setClaimableInfo] = useState<{
     maskedDestination: string | null
+    /** Whether the server actually queued a claim link for delivery. */
+    sent: boolean
   } | null>(null)
   const [fieldErrors, setFieldErrors] = useState<
     Partial<Record<ClientField, string>>
@@ -373,6 +389,8 @@ export default function SignupClientClient() {
           next: nextFromQuery ?? undefined,
           intent: intent ?? undefined,
           inviteToken: inviteToken ?? undefined,
+          via: via ?? undefined,
+          vsig: vsig ?? undefined,
           signupLocation: {
             kind: 'CLIENT_ZIP',
             postalCode: confirmedZip.postalCode,
@@ -390,12 +408,14 @@ export default function SignupClientClient() {
 
       if (!res.ok) {
         // Cold self-serve claim: the contact matches existing (pro-created)
-        // history, so the server sent a claim link to the on-file contact instead
-        // of creating a duplicate account. Show a check-your-inbox state, not an
-        // error.
+        // history, so the server tried to send a claim link to the on-file
+        // contact instead of creating a duplicate account. `claimLinkSent`
+        // says whether a link actually went out — the banner must never
+        // promise a message the server didn't queue.
         if (readStringField(data, 'code') === 'CLAIMABLE_HISTORY') {
           setClaimableInfo({
             maskedDestination: readStringField(data, 'maskedDestination'),
+            sent: readBooleanField(data, 'claimLinkSent'),
           })
           return
         }
@@ -467,26 +487,6 @@ export default function SignupClientClient() {
             <span className="font-black text-textPrimary">Claim invite:</span>{' '}
             Your account will return to the secure claim link after phone
             verification.
-          </div>
-        ) : null}
-
-        {claimableInfo ? (
-          <div className="rounded-card border border-toneSuccess/30 bg-toneSuccess/10 px-4 py-3 text-sm text-textPrimary">
-            <div className="font-black">Check your email or text</div>
-            <div className="mt-1 text-textSecondary">
-              We found existing history for this contact and sent a secure link
-              {claimableInfo.maskedDestination ? (
-                <>
-                  {' '}
-                  to{' '}
-                  <span className="font-black text-textPrimary">
-                    {claimableInfo.maskedDestination}
-                  </span>
-                </>
-              ) : null}
-              . Open it to finish setting up your account and keep your booking
-              history together.
-            </div>
           </div>
         ) : null}
 
@@ -734,8 +734,42 @@ export default function SignupClientClient() {
           </span>
         </label>
 
+        {/* Outcome notices render directly above the button that produced
+            them — never at the top of a long form the user has scrolled past. */}
+        {claimableInfo ? (
+          claimableInfo.sent ? (
+            <AuthNotice tone="success" className="px-4 py-3 font-normal">
+              <div className="font-black">Check your email or text</div>
+              <div className="mt-1 text-textSecondary">
+                We found existing history for this contact and sent a secure
+                link
+                {claimableInfo.maskedDestination ? (
+                  <>
+                    {' '}
+                    to{' '}
+                    <span className="font-black text-textPrimary">
+                      {claimableInfo.maskedDestination}
+                    </span>
+                  </>
+                ) : null}
+                . Open it to finish setting up your account and keep your
+                booking history together.
+              </div>
+            </AuthNotice>
+          ) : (
+            <AuthNotice tone="warn" className="px-4 py-3 font-normal text-textPrimary">
+              <div className="font-black">You already have history here</div>
+              <div className="mt-1 text-textSecondary">
+                We found existing history for this contact, but couldn’t send a
+                new secure link just now. Check your messages for a link we
+                sent earlier, or try again in about an hour.
+              </div>
+            </AuthNotice>
+          )
+        ) : null}
+
         {error ? (
-          <div className="rounded-card border border-toneDanger/25 bg-toneDanger/10 px-3 py-2 text-sm font-bold text-toneDanger">
+          <AuthNotice tone="danger">
             {error}
             {accountExistsLoginHref ? (
               <div className="mt-1.5 text-sm font-bold text-textPrimary">
@@ -749,7 +783,7 @@ export default function SignupClientClient() {
                 .
               </div>
             ) : null}
-          </div>
+          </AuthNotice>
         ) : null}
 
         <div className="grid gap-2 pt-1">

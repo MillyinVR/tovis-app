@@ -3,6 +3,7 @@
 import { ContactMethod, Prisma } from '@prisma/client'
 
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
+import { hashProClientInviteToken } from '@/lib/clients/proClientInviteTokens'
 import { asTrimmedString } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 import {
@@ -16,9 +17,11 @@ import type { TenantContext } from '@/lib/tenant/context'
 import { buildClientActionLinkForType } from './linkBuilders'
 import { enqueueClientActionDispatch } from './enqueueClientActionDispatch'
 import { orchestrateClientActionDelivery } from './orchestrateClientActionDelivery'
+import { normalizeResendMode } from './policies'
 import type {
   ClientActionBuildLinkResult,
   ClientActionOrchestrationPlan,
+  ClientActionResendMode,
 } from './types'
 
 export type CreateClientClaimInviteDeliveryArgs = {
@@ -39,6 +42,15 @@ export type CreateClientClaimInviteDeliveryArgs = {
   issuedByUserId?: string | null
   recipientUserId?: string | null
   recipientTimeZone?: string | null
+
+  /**
+   * Pass RESEND whenever the claim token was ROTATED on an existing invite
+   * (issueClaimLink* returns `created: false`). Every issuance mints a fresh
+   * token, so the send cycle is keyed to the token hash — without it, a re-issue
+   * collapses into the original send's idempotency key and the freshly rotated
+   * link is never delivered while the previously delivered one is already dead.
+   */
+  resendMode?: ClientActionResendMode
 
   tx?: Prisma.TransactionClient
 }
@@ -201,7 +213,11 @@ function buildOrchestrationPlan(
       preferredContactMethod: args.preferredContactMethod ?? null,
       timeZone: asTrimmedString(args.recipientTimeZone),
     },
-    resendMode: 'INITIAL_SEND',
+    resendMode: normalizeResendMode(args.resendMode),
+    // The claim token is unique per issuance (mint or rotate), so its hash is
+    // the natural send-cycle discriminator — each rotated link gets a fresh
+    // delivery while retries of the SAME link still collapse.
+    sendVersion: hashProClientInviteToken(args.rawToken),
     issuedByUserId: asTrimmedString(args.issuedByUserId),
     expiresAtOverride: null,
     metadata: buildInvitePayload(args),
