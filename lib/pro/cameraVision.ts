@@ -5,7 +5,8 @@
 //  - enhanceReferenceLook — a picked reference photo → the direction on-device
 //    geometry can't measure (expression, head angle, hand styling, light
 //    direction) as (a) extra pose rules in the camera's fixed vocabulary and
-//    (b) plain direction lines the coach speaks/shows step-by-step.
+//    (b) direction lines bound to coach states, so the line spoken is chosen
+//    by what the lens sees now instead of played in sequence.
 //  - critiqueSessionSet — the captured before/after set → a photographer's
 //    review: what's strong, what to retake and why, what's portfolio-worthy.
 //
@@ -20,7 +21,9 @@ import { isRecord } from '@/lib/guards'
 import { pickString } from '@/lib/pick'
 
 import {
+  DIRECTION_TRIGGER_KINDS,
   POSE_RULE_KINDS,
+  type DirectionTriggerKind,
   type PoseRuleKind,
   type ShotPackPoseRule,
 } from './cameraShotPacks'
@@ -41,12 +44,29 @@ export type CameraVisionImage = {
   mediaType: CameraVisionMediaType
 }
 
+/** One direction line bound to the coach state that should speak it. */
+export type LookBriefDirection = {
+  trigger: DirectionTriggerKind
+  line: string
+}
+
 export type LookBrief = {
   /** One-line read of the reference's vibe, shown above the direction lines. */
   summary: string
   /** Extra pose rules in the camera's measurable vocabulary. */
   poseRules: ShotPackPoseRule[]
-  /** Spoken/shown direction lines, in coaching order. */
+  /** Direction lines keyed by the coach state that triggers them, in canonical
+   * coaching order (DIRECTION_TRIGGER_KINDS declaration order). A build that
+   * understands triggers speaks the line matching what the lens sees NOW rather
+   * than working down a script. At most one line per trigger. When no line
+   * carries the `opening` trigger the step falls back to its own
+   * `ShotPackStep.hint` — every pack step already ships one, so the server never
+   * has to synthesize an opening line out of a corrective one. A missing `ready`
+   * likewise just means no settle line: the shot still fires on its gates. */
+  directions: LookBriefDirection[]
+  /** LEGACY, for builds that predate triggers: `directions` projected to a flat
+   * ordered script. Derived server-side rather than generated separately, so the
+   * two shapes cannot drift apart. */
   directionLines: string[]
 }
 
@@ -262,12 +282,16 @@ const POSE_RULE_PARAM_KEYS = [
 ] as const
 
 const LOOK_BRIEF_MAX_POSE_RULES = 4
+// Deliberately one BELOW the trigger vocabulary size: the sanitizer's own cap is
+// structural (at most one line per trigger), and holding the model to 6 keeps the
+// legacy `directionLines` projection inside the 3-6 script contract that
+// pre-trigger builds were shipped against.
 const LOOK_BRIEF_MAX_DIRECTION_LINES = 6
 
 const LOOK_BRIEF_SCHEMA: Record<string, unknown> = {
   type: 'object',
   additionalProperties: false,
-  required: ['summary', 'poseRules', 'directionLines'],
+  required: ['summary', 'poseRules', 'directions'],
   properties: {
     summary: {
       type: 'string',
@@ -297,11 +321,23 @@ const LOOK_BRIEF_SCHEMA: Record<string, unknown> = {
         },
       },
     },
-    directionLines: {
+    directions: {
       type: 'array',
       minItems: 3,
       maxItems: LOOK_BRIEF_MAX_DIRECTION_LINES,
-      items: { type: 'string' },
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['trigger', 'line'],
+        properties: {
+          trigger: { type: 'string', enum: [...DIRECTION_TRIGGER_KINDS] },
+          line: {
+            type: 'string',
+            description:
+              'What to say in that state, spoken aloud (max 90 characters).',
+          },
+        },
+      },
     },
   },
 }
@@ -314,7 +350,10 @@ const LOOK_BRIEF_SYSTEM =
   'on-device; you add ONLY what geometry cannot measure: expression and ' +
   'mood, head angle and tilt, hand styling, where the light comes from, and ' +
   'the styling details that sell the shot. Keep every line short, concrete, ' +
-  'and speakable — the app reads them aloud to the pro while they shoot.'
+  'and speakable — the app reads them aloud to the pro while they shoot. Your ' +
+  'direction is not a script read in order: each line is bound to a state the ' +
+  'camera can detect, and the app speaks it at the moment that state is true. ' +
+  'So write each line as the thing a photographer would say RIGHT THEN.'
 
 function lookBriefInstructions(args: {
   serviceName: string | null
@@ -343,7 +382,16 @@ function lookBriefInstructions(args: {
     '  - shouldersLevel → maxDegrees: shoulder line within N degrees of level',
     '  - faceNearShoulder → maxFaceWidths: face center within N face-widths of a shoulder',
     '  Each rule’s tip = the words to say to get the subject into it (max 80 characters).',
-    '- directionLines: 3–6 short direction lines in coaching order (expression → head → hands → light).',
+    '- directions: 3–6 direction lines, each bound to the camera state that should SPEAK it. At most one line per trigger:',
+    '  - opening → the shot just began: the expression and mood you want',
+    '  - subjectTooFar → they fill less of the frame than this shot wants',
+    '  - subjectTooClose → they fill more of the frame than this shot wants',
+    '  - faceMissing → this shot needs their face and it is not in frame',
+    '  - eyesClosed → they blinked and this shot wants eyes open',
+    '  - poseUnmet → they are out of the pose this shot calls for',
+    '  - ready → everything is right; the last word before the shutter',
+    '  ALWAYS include opening and ready. Add a corrective trigger ONLY where THIS look needs it said a particular way',
+    '  — a generic correction is already handled on-device, so a line that could fit any shoot is wasted.',
     '  Refer to the client as "them/their", e.g. "Turn their face toward the window light". Max 90 characters each.',
   ].join('\n')
 }
@@ -382,24 +430,53 @@ function sanitizePoseRules(value: unknown): ShotPackPoseRule[] {
   return rules
 }
 
+/** Keep the first usable line per trigger and return them in canonical coaching
+ * order, so the ordering the app (and the legacy script) sees is ours, not
+ * whatever order the model happened to emit. Unknown trigger kinds are dropped
+ * on the same forward-compat contract as unknown pose-rule kinds. The
+ * one-line-per-trigger rule is what bounds the result — there is no separate cap
+ * to trim against, and so no branch that could silently drop the settle line. */
+function sanitizeDirections(value: unknown): LookBriefDirection[] {
+  if (!Array.isArray(value)) return []
+
+  const lineByTrigger = new Map<DirectionTriggerKind, string>()
+  for (const item of value) {
+    if (!isRecord(item)) continue
+
+    const rawTrigger = pickString(item.trigger)
+    const trigger: DirectionTriggerKind | undefined =
+      DIRECTION_TRIGGER_KINDS.find((known) => known === rawTrigger)
+    if (!trigger || lineByTrigger.has(trigger)) continue
+
+    const line = cleanLine(item.line, 140)
+    if (!line) continue
+
+    lineByTrigger.set(trigger, line)
+  }
+
+  const directions: LookBriefDirection[] = []
+  for (const trigger of DIRECTION_TRIGGER_KINDS) {
+    const line = lineByTrigger.get(trigger)
+    if (line !== undefined) directions.push({ trigger, line })
+  }
+  return directions
+}
+
 function sanitizeLookBrief(raw: unknown): LookBrief {
   if (!isRecord(raw)) {
     throw new CameraVisionError('bad_output', 'Malformed look brief.')
   }
 
-  const directionLines = cleanLines(
-    raw.directionLines,
-    LOOK_BRIEF_MAX_DIRECTION_LINES,
-    140,
-  )
-  if (directionLines.length === 0) {
+  const directions = sanitizeDirections(raw.directions)
+  if (directions.length === 0) {
     throw new CameraVisionError('bad_output', 'Look brief had no direction.')
   }
 
   return {
     summary: cleanLine(raw.summary, 140),
     poseRules: sanitizePoseRules(raw.poseRules),
-    directionLines,
+    directions,
+    directionLines: directions.map((direction) => direction.line),
   }
 }
 

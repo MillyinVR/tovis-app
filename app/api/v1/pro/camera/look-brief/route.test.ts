@@ -82,6 +82,7 @@ describe('POST /api/v1/pro/camera/look-brief', () => {
     const brief = {
       summary: 'Soft glam',
       poseRules: [],
+      directions: [{ trigger: 'opening', line: 'Chin down a touch' }],
       directionLines: ['Chin down a touch'],
     }
     mocks.enhanceReferenceLook.mockResolvedValue(brief)
