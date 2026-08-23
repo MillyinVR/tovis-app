@@ -323,7 +323,19 @@ export type IssueClaimLinkForBookingArgs = {
 }
 
 export type IssueClaimLinkForBookingResult =
-  | { kind: 'ok'; rawToken: string; invite: ClientClaimLinkRow }
+  | {
+      kind: 'ok'
+      rawToken: string
+      invite: ClientClaimLinkRow
+      /**
+       * True when this call minted the ProClientInvite row itself; false when it
+       * rotated the token on an existing row. A rotation means an earlier link
+       * (and very likely an earlier send) existed, so deliveries for it must use
+       * a fresh send cycle instead of collapsing into the original send's
+       * idempotency key.
+       */
+      created: boolean
+    }
   | { kind: 'not_found' }
   | { kind: 'already_claimed' }
   | { kind: 'revoked' }
@@ -419,7 +431,7 @@ export async function issueClaimLinkForBooking(
       select: clientClaimLinkSelect,
     })
 
-    return { kind: 'ok', rawToken, invite: created }
+    return { kind: 'ok', rawToken, invite: created, created: true }
   }
 
   const updated = await db.proClientInvite.update({
@@ -438,7 +450,7 @@ export async function issueClaimLinkForBooking(
     select: clientClaimLinkSelect,
   })
 
-  return { kind: 'ok', rawToken, invite: updated }
+  return { kind: 'ok', rawToken, invite: updated, created: false }
 }
 
 export type IssueClaimLinkForClientArgs = {
@@ -452,7 +464,13 @@ export type IssueClaimLinkForClientArgs = {
 }
 
 export type IssueClaimLinkForClientResult =
-  | { kind: 'ok'; rawToken: string; invite: ClientClaimLinkRow }
+  | {
+      kind: 'ok'
+      rawToken: string
+      invite: ClientClaimLinkRow
+      /** Same semantics as IssueClaimLinkForBookingResult.created. */
+      created: boolean
+    }
   | { kind: 'not_found' }
   | { kind: 'already_claimed' }
   | { kind: 'revoked' }
@@ -541,7 +559,7 @@ export async function issueClaimLinkForClient(
       select: clientClaimLinkSelect,
     })
 
-    return { kind: 'ok', rawToken, invite: created }
+    return { kind: 'ok', rawToken, invite: created, created: true }
   }
 
   const updated = await db.proClientInvite.update({
@@ -562,7 +580,7 @@ export async function issueClaimLinkForClient(
     select: clientClaimLinkSelect,
   })
 
-  return { kind: 'ok', rawToken, invite: updated }
+  return { kind: 'ok', rawToken, invite: updated, created: false }
 }
 
 export async function getClientClaimLinkByToken(

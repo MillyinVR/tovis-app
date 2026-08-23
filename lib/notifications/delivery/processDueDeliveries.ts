@@ -1,6 +1,7 @@
 // lib/notifications/delivery/processDueDeliveries.ts
 
 import {
+  ContactMethod,
   NotificationChannel,
   NotificationDeliveryStatus,
   NotificationProvider,
@@ -14,6 +15,7 @@ import {
   resolveBookingCalendarLinks,
   type BookingCalendarLinks,
 } from '@/lib/calendar/bookingInvite'
+import { appendClaimChannelParams } from '@/lib/clients/claimLinkChannel'
 import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 import { getOrCreateShortLink, buildShortLinkUrl } from '@/lib/shortLink/shortLinkService'
@@ -236,6 +238,8 @@ function pathFromAbsoluteAppUrl(absoluteUrl: string): string | null {
 export async function resolveSmsLinkOverrides(args: {
   delivery: ClaimedNotificationDelivery
   calendarLinks: BookingCalendarLinks | null
+  /** Channel-resolved href to shorten; defaults to the dispatch's stored href. */
+  href?: string | null
 }): Promise<{ smsHref: string | null; smsCalendarUrl: string | null }> {
   if (args.delivery.channel !== NotificationChannel.SMS) {
     return { smsHref: null, smsCalendarUrl: null }
@@ -244,7 +248,7 @@ export async function resolveSmsLinkOverrides(args: {
   let smsHref: string | null = null
   try {
     const link = await getOrCreateShortLink({
-      destinationPath: args.delivery.dispatch.href,
+      destinationPath: args.href ?? args.delivery.dispatch.href,
       createdForType: 'notification_dispatch_href',
       createdForId: args.delivery.dispatch.id,
       expiresAt: readExpiresAtFromPayload(args.delivery.dispatch.payload),
@@ -313,14 +317,35 @@ export async function resolveIsFirstSmsToDestination(
   return priorSend === null
 }
 
+/**
+ * The delivery channel a href is about to travel on, as a contact method —
+ * null for channels (in-app/push) that never leave the app.
+ */
+function contactMethodForDeliveryChannel(
+  channel: NotificationChannel,
+): ContactMethod | null {
+  if (channel === NotificationChannel.EMAIL) return ContactMethod.EMAIL
+  if (channel === NotificationChannel.SMS) return ContactMethod.SMS
+  return null
+}
+
 async function buildProviderRequest(
   delivery: ClaimedNotificationDelivery,
   tenantContext: TenantContext,
   calendarLinks: BookingCalendarLinks | null,
 ): Promise<ProviderSendRequest> {
+  // Claim links get stamped with the channel carrying them (a signed
+  // `via=email|sms`), so the click can count as verification of that contact.
+  // Applied before short-link minting so the SMS short link redirects to the
+  // stamped destination; every non-claim href passes through unchanged.
+  const channelHref = appendClaimChannelParams(
+    delivery.dispatch.href,
+    contactMethodForDeliveryChannel(delivery.channel),
+  )
+
   const [{ smsHref, smsCalendarUrl }, isFirstSmsToDestination] =
     await Promise.all([
-      resolveSmsLinkOverrides({ delivery, calendarLinks }),
+      resolveSmsLinkOverrides({ delivery, calendarLinks, href: channelHref }),
       resolveIsFirstSmsToDestination(delivery),
     ])
 
@@ -333,7 +358,7 @@ async function buildProviderRequest(
       eventKey: delivery.dispatch.eventKey,
       title: delivery.dispatch.title,
       body: delivery.dispatch.body,
-      href: delivery.dispatch.href,
+      href: channelHref,
       payload: delivery.dispatch.payload,
       calendarLinks,
       smsHref,

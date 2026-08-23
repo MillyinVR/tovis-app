@@ -2,6 +2,7 @@
 import { AuthVerificationPurpose, Prisma } from '@prisma/client'
 
 import { createActiveToken, createVerificationToken } from '@/lib/auth'
+import { markUserEmailVerified } from '@/lib/auth/contactVerification'
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
 import type { AuthEmailVerifyResponseDTO } from '@/lib/dto/auth'
 import { enforceVerificationVerifyThrottle } from '@/app/api/_utils/auth/verificationThrottle'
@@ -171,11 +172,13 @@ export async function POST(request: Request) {
           data: { usedAt: now },
         })
 
-        const updatedUser = await tx.user.update({
+        await markUserEmailVerified(tx, {
+          userId: record.userId,
+          verifiedAt: now,
+        })
+
+        const updatedUser = await tx.user.findUniqueOrThrow({
           where: { id: record.userId },
-          data: {
-            emailVerifiedAt: record.user.emailVerifiedAt ?? now,
-          },
           select: {
             id: true,
             email: true,

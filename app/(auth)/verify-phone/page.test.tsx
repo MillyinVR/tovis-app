@@ -87,6 +87,8 @@ vi.mock('@/lib/http', () => ({
     typeof data?.error === 'string' ? data.error : null,
   readStringField: (data: Record<string, unknown> | null, key: string) =>
     typeof data?.[key] === 'string' ? (data[key] as string) : null,
+  readBooleanField: (data: Record<string, unknown> | null, key: string) =>
+    data?.[key] === true,
 }))
 
 import VerifyPhonePage from './page'

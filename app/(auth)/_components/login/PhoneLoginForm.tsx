@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from 'react'
 
+import AuthNotice from '../AuthNotice'
 import FieldLabel from '../FieldLabel'
 import Input from '../Input'
 import PrimaryButton from '../PrimaryButton'
@@ -15,6 +16,15 @@ import { cn } from '@/lib/utils'
 import { safeJsonRecord, readErrorMessage } from '@/lib/http'
 
 type Step = 'phone' | 'code'
+
+/**
+ * Which control a notice belongs to, so it renders directly above the button
+ * that was pressed: the primary submit ('form') or the inline resend link
+ * ('resend').
+ */
+type NoticeAt = 'form' | 'resend'
+
+type Notice = { at: NoticeAt; message: string }
 
 type PhoneLoginFormProps = {
   /** Sanitized `next`/`from` fallbacks, so post-auth routing matches password login. */
@@ -70,8 +80,8 @@ export default function PhoneLoginForm({
   const [step, setStep] = useState<Step>('phone')
   const [phone, setPhone] = useState(initialPhone ?? '')
   const [code, setCode] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [info, setInfo] = useState<string | null>(null)
+  const [error, setError] = useState<Notice | null>(null)
+  const [info, setInfo] = useState<Notice | null>(null)
   const [sending, setSending] = useState(false)
   const [verifying, setVerifying] = useState(false)
   const [cooldownSeconds, setCooldownSeconds] = useState(0)
@@ -88,9 +98,11 @@ export default function PhoneLoginForm({
     if (sending) return
     if (kind === 'resend' && cooldownSeconds > 0) return
 
+    const at: NoticeAt = kind === 'resend' ? 'resend' : 'form'
+
     const trimmed = phone.trim()
     if (!trimmed) {
-      setError('Enter your phone number.')
+      setError({ at, message: 'Enter your phone number.' })
       return
     }
 
@@ -113,12 +125,16 @@ export default function PhoneLoginForm({
         const retryAfterSeconds = readRetryAfterSeconds(data)
         if (retryAfterSeconds != null && retryAfterSeconds > 0) {
           setCooldownSeconds(retryAfterSeconds)
-          setError(
-            `Too many requests. Wait ${formatCooldown(retryAfterSeconds)} and try again.`,
-          )
+          setError({
+            at,
+            message: `Too many requests. Wait ${formatCooldown(retryAfterSeconds)} and try again.`,
+          })
           return
         }
-        setError(readErrorMessage(data) ?? 'Could not send a code.')
+        setError({
+          at,
+          message: readErrorMessage(data) ?? 'Could not send a code.',
+        })
         return
       }
 
@@ -127,10 +143,14 @@ export default function PhoneLoginForm({
       setStep('code')
       setCode('')
       setCooldownSeconds(RESEND_COOLDOWN_SECONDS)
-      setInfo('If an account exists for that number, we sent a verification code.')
+      setInfo({
+        at,
+        message:
+          'If an account exists for that number, we sent a verification code.',
+      })
     } catch (err) {
       console.error(err)
-      setError('Network error.')
+      setError({ at, message: 'Network error.' })
     } finally {
       setSending(false)
     }
@@ -141,7 +161,7 @@ export default function PhoneLoginForm({
 
     const trimmedCode = code.replace(/[^\d]/g, '')
     if (!/^\d{6}$/.test(trimmedCode)) {
-      setError('Enter the 6-digit code.')
+      setError({ at: 'form', message: 'Enter the 6-digit code.' })
       return
     }
 
@@ -161,26 +181,31 @@ export default function PhoneLoginForm({
       const data = await safeJsonRecord(res)
 
       if (!res.ok) {
-        setError(readErrorMessage(data) ?? 'Incorrect or expired code.')
+        setError({
+          at: 'form',
+          message: readErrorMessage(data) ?? 'Incorrect or expired code.',
+        })
         return
       }
 
       const nav = resolvePostAuthNavigation(data, { nextSafe, fromSafe })
       if (nav.kind === 'missing-role') {
-        setError(
-          'Sign in succeeded, but your account role is missing. Please contact support.',
-        )
+        setError({
+          at: 'form',
+          message:
+            'Sign in succeeded, but your account role is missing. Please contact support.',
+        })
         return
       }
       if (nav.kind === 'error') {
-        setError(nav.message)
+        setError({ at: 'form', message: nav.message })
         return
       }
 
       window.location.assign(nav.url)
     } catch (err) {
       console.error(err)
-      setError('Network error.')
+      setError({ at: 'form', message: 'Network error.' })
     } finally {
       setVerifying(false)
     }
@@ -239,6 +264,14 @@ export default function PhoneLoginForm({
             disabled={verifying}
           />
 
+          {/* Resend outcomes render directly above the resend control. */}
+          {info?.at === 'resend' ? (
+            <AuthNotice tone="accent">{info.message}</AuthNotice>
+          ) : null}
+          {error?.at === 'resend' ? (
+            <AuthNotice tone="danger">{error.message}</AuthNotice>
+          ) : null}
+
           <div className="flex items-center justify-between gap-3">
             <span className="text-xs text-textSecondary/80">
               Sent to <span className="font-black text-textPrimary">{phone.trim()}</span>
@@ -257,16 +290,12 @@ export default function PhoneLoginForm({
         </div>
       )}
 
-      {info ? (
-        <div className="rounded-card border border-accentPrimary/25 bg-accentPrimary/10 px-3 py-2 text-sm font-bold text-textPrimary">
-          {info}
-        </div>
+      {info?.at === 'form' ? (
+        <AuthNotice tone="accent">{info.message}</AuthNotice>
       ) : null}
 
-      {error ? (
-        <div className="rounded-card border border-toneDanger/25 bg-toneDanger/10 px-3 py-2 text-sm font-bold text-toneDanger">
-          {error}
-        </div>
+      {error?.at === 'form' ? (
+        <AuthNotice tone="danger">{error.message}</AuthNotice>
       ) : null}
 
       <div className="grid gap-2 pt-1">

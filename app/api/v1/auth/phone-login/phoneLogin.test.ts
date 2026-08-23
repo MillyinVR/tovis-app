@@ -40,8 +40,18 @@ vi.mock('@/lib/observability/authEvents', () => ({
   captureAuthException: vi.fn(),
   logAuthEvent: vi.fn(),
 }))
+const txMocks = vi.hoisted(() => ({
+  user: { updateMany: vi.fn(async () => ({ count: 1 })) },
+  clientProfile: { updateMany: vi.fn(async () => ({ count: 1 })) },
+  professionalProfile: { updateMany: vi.fn(async () => ({ count: 0 })) },
+}))
 vi.mock('@/lib/prisma', () => ({
-  prisma: { user: { update: vi.fn(async () => ({})) } },
+  prisma: {
+    $transaction: vi.fn(
+      async (run: (transactionClient: typeof txMocks) => Promise<unknown>) =>
+        run(txMocks),
+    ),
+  },
 }))
 
 import { POST as sendPOST } from './send/route'
@@ -52,13 +62,12 @@ import {
   checkTwilioVerifyPhoneCode,
 } from '@/lib/twilio/verify'
 import { findUserByPhoneForLogin } from '@/lib/auth/findUserByPhone'
-import { prisma } from '@/lib/prisma'
 
 const mockCountry = vi.mocked(validateSmsDestinationCountry)
 const mockStart = vi.mocked(startTwilioVerifyPhoneVerification)
 const mockCheck = vi.mocked(checkTwilioVerifyPhoneCode)
 const mockFindUser = vi.mocked(findUserByPhoneForLogin)
-const mockUpdate = vi.mocked(prisma.user.update)
+const mockUpdate = txMocks.user.updateMany
 
 function req(body: unknown): Request {
   return new Request('https://app.tovis.app/api/v1/auth/phone-login', {
@@ -179,12 +188,16 @@ describe('POST /api/v1/auth/phone-login/verify', () => {
     expect(json.isFullyVerified).toBe(true)
   })
 
-  it('marks an unverified phone as verified on success', async () => {
+  it('marks an unverified phone as verified on success, fanning to the profile', async () => {
     mockFindUser.mockResolvedValue({ ...verifiedUser, phoneVerifiedAt: null })
     const res = await verifyPOST(req({ phone: '+15555550123', code: '123456' }))
     expect(res.status).toBe(200)
     expect(mockUpdate).toHaveBeenCalledWith({
-      where: { id: 'u1' },
+      where: { id: 'u1', phoneVerifiedAt: null },
+      data: { phoneVerifiedAt: expect.any(Date) },
+    })
+    expect(txMocks.clientProfile.updateMany).toHaveBeenCalledWith({
+      where: { userId: 'u1', phoneVerifiedAt: null },
       data: { phoneVerifiedAt: expect.any(Date) },
     })
   })

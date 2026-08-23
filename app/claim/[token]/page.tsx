@@ -1,8 +1,18 @@
 // app/claim/[token]/page.tsx
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
-import { ClientClaimStatus, ProClientInviteStatus } from '@prisma/client'
+import {
+  ClientClaimStatus,
+  type ContactMethod,
+  ProClientInviteStatus,
+} from '@prisma/client'
 
+import { applyClaimLinkChannelVerification } from '@/lib/clients/claimChannelVerification'
+import {
+  CLAIM_CHANNEL_SIG_PARAM,
+  CLAIM_CHANNEL_VIA_PARAM,
+  verifyClaimLinkChannel,
+} from '@/lib/clients/claimLinkChannel'
 import { acceptClientClaimFromLink } from '@/lib/clients/clientClaim'
 import {
   getClientClaimLinkPublicState,
@@ -41,24 +51,51 @@ type ClaimPageState =
 
 type ClaimInviteRecord = ClientClaimLinkRow
 
-function claimHref(token: string): string {
-  return `/claim/${encodeURIComponent(token)}`
+/**
+ * The signature-validated channel marker from the delivered link, kept as raw
+ * params so it can ride every hop of the flow (login, signup, verification and
+ * back here) without being re-derived. Null when absent or tampered.
+ */
+type ClaimChannelParams = { via: string; vsig: string } | null
+
+function claimHref(
+  token: string,
+  channel: ClaimChannelParams,
+  state?: ClaimPageState,
+): string {
+  const base = `/claim/${encodeURIComponent(token)}`
+  const params = new URLSearchParams()
+
+  if (channel) {
+    params.set(CLAIM_CHANNEL_VIA_PARAM, channel.via)
+    params.set(CLAIM_CHANNEL_SIG_PARAM, channel.vsig)
+  }
+  if (state) params.set('state', state)
+
+  const qs = params.toString()
+  return qs ? `${base}?${qs}` : base
 }
 
 function buildClaimAuthParams(args: {
   token: string
+  channel: ClaimChannelParams
   invitedName?: string | null
   invitedEmail?: string | null
   invitedPhone?: string | null
 }): string {
   const params = new URLSearchParams()
-  const claimPath = claimHref(args.token)
+  const claimPath = claimHref(args.token, args.channel)
 
   params.set('from', claimPath)
   params.set('next', claimPath)
   params.set('role', 'CLIENT')
   params.set('intent', 'CLAIM_INVITE')
   params.set('inviteToken', args.token)
+
+  if (args.channel) {
+    params.set(CLAIM_CHANNEL_VIA_PARAM, args.channel.via)
+    params.set(CLAIM_CHANNEL_SIG_PARAM, args.channel.vsig)
+  }
 
   const invitedName = pickString(args.invitedName)
   const invitedEmail = pickString(args.invitedEmail)
@@ -71,21 +108,26 @@ function buildClaimAuthParams(args: {
   return params.toString()
 }
 
-function loginHref(token: string): string {
-  return `/login?from=${encodeURIComponent(claimHref(token))}`
+function loginHref(token: string, channel: ClaimChannelParams): string {
+  return `/login?from=${encodeURIComponent(claimHref(token, channel))}`
 }
 
-function signupHref(invite: ClaimInviteRecord, token: string): string {
+function signupHref(
+  invite: ClaimInviteRecord,
+  token: string,
+  channel: ClaimChannelParams,
+): string {
   return `/signup?${buildClaimAuthParams({
     token,
+    channel,
     invitedName: invite.invitedName,
     invitedEmail: invite.invitedEmail,
     invitedPhone: invite.invitedPhone,
   })}`
 }
 
-function verifyHref(token: string): string {
-  return `/verify-phone?next=${encodeURIComponent(claimHref(token))}`
+function verifyHref(token: string, channel: ClaimChannelParams): string {
+  return `/verify-phone?next=${encodeURIComponent(claimHref(token, channel))}`
 }
 
 function bookingHref(bookingId: string): string {
@@ -180,6 +222,21 @@ export default async function ClaimInvitePage(props: PageProps) {
     pickSearchParam(resolvedSearchParams.state),
   )
 
+  // Which channel delivered this click (email or SMS), proven by the signed
+  // marker the delivery stamped onto the link. Tampered or absent → null, and
+  // the claim flow just runs without verification credit.
+  const claimedVia: ContactMethod | null = verifyClaimLinkChannel({
+    rawToken: token,
+    via: pickSearchParam(resolvedSearchParams[CLAIM_CHANNEL_VIA_PARAM]),
+    sig: pickSearchParam(resolvedSearchParams[CLAIM_CHANNEL_SIG_PARAM]),
+  })
+  const channelParams: ClaimChannelParams = claimedVia
+    ? {
+        via: pickSearchParam(resolvedSearchParams[CLAIM_CHANNEL_VIA_PARAM]) ?? '',
+        vsig: pickSearchParam(resolvedSearchParams[CLAIM_CHANNEL_SIG_PARAM]) ?? '',
+      }
+    : null
+
   const inviteState = await getClientClaimLinkPublicState({ token })
 
   if (inviteState.kind === 'not_found') {
@@ -194,7 +251,32 @@ export default async function ClaimInvitePage(props: PageProps) {
     notFound()
   }
 
-  const user = await getCurrentUser().catch(() => null)
+  let viewer = await getCurrentUser().catch(() => null)
+
+  // The click counts as verification of the channel that delivered it. Credit
+  // it for a signed-in viewer right on landing, so the verification gate below
+  // already reflects it instead of sending them off to verify a contact this
+  // very click just proved. Idempotent and signature-gated; a mail scanner's
+  // prefetch carries no session cookie, so it can never reach this write.
+  if (claimedVia && viewer) {
+    const credited = await applyClaimLinkChannelVerification({
+      token,
+      channel: claimedVia,
+      user: {
+        id: viewer.id,
+        role: viewer.role,
+        email: viewer.email,
+        phone: viewer.phone,
+      },
+    }).catch(() => false)
+
+    if (credited) {
+      viewer = (await getCurrentUser().catch(() => null)) ?? viewer
+    }
+  }
+
+  // Const alias so the narrowing below (isAuthedClient → user non-null) holds.
+  const user = viewer
 
   const isAuthedClient =
     user?.role === 'CLIENT' && Boolean(user.clientProfile?.id)
@@ -228,9 +310,9 @@ export default async function ClaimInvitePage(props: PageProps) {
     pageState = stateFromQuery
   }
 
-  const loginLink = loginHref(token)
-  const signupLink = signupHref(invite, token)
-  const verifyLink = verifyHref(token)
+  const loginLink = loginHref(token, channelParams)
+  const signupLink = signupHref(invite, token, channelParams)
+  const verifyLink = verifyHref(token, channelParams)
   // Booking-less claims land on the client home after claiming.
   const claimedDestinationHref = invite.booking
     ? bookingHref(invite.booking.id)
@@ -249,8 +331,31 @@ export default async function ClaimInvitePage(props: PageProps) {
       redirect(signupLink)
     }
 
-    if (freshUser.sessionKind !== 'ACTIVE' || !freshUser.isFullyVerified) {
-      redirect(verifyHref(token))
+    // Channel credit BEFORE the verification gate: the click proves control of
+    // the contact that received the link, and may be exactly the verification
+    // the gate below would otherwise send this person away to perform.
+    if (claimedVia) {
+      await applyClaimLinkChannelVerification({
+        token,
+        channel: claimedVia,
+        user: {
+          id: freshUser.id,
+          role: freshUser.role,
+          email: freshUser.email,
+          phone: freshUser.phone,
+        },
+      }).catch(() => false)
+    }
+
+    // Re-read after a possible stamp — the gate must see it. The session-kind
+    // half still routes through /verify-phone, whose status check upgrades a
+    // stale VERIFICATION cookie and bounces straight back here.
+    const gateUser = claimedVia
+      ? ((await getCurrentUser().catch(() => null)) ?? freshUser)
+      : freshUser
+
+    if (gateUser.sessionKind !== 'ACTIVE' || !gateUser.isFullyVerified) {
+      redirect(verifyHref(token, channelParams))
     }
 
     const result = await acceptClientClaimFromLink({
@@ -267,25 +372,25 @@ export default async function ClaimInvitePage(props: PageProps) {
         notFound()
 
       case 'revoked':
-        redirect(`${claimHref(token)}?state=revoked`)
+        redirect(claimHref(token, channelParams, 'revoked'))
 
       case 'already_claimed':
-        redirect(`${claimHref(token)}?state=already-claimed`)
+        redirect(claimHref(token, channelParams, 'already-claimed'))
 
       case 'client_not_found':
         redirect(signupLink)
 
       case 'client_mismatch':
-        redirect(`${claimHref(token)}?state=client-mismatch`)
+        redirect(claimHref(token, channelParams, 'client-mismatch'))
 
       case 'merge_refused':
-        redirect(`${claimHref(token)}?state=merge-unavailable`)
+        redirect(claimHref(token, channelParams, 'merge-unavailable'))
 
       case 'merge_paused':
-        redirect(`${claimHref(token)}?state=claim-paused`)
+        redirect(claimHref(token, channelParams, 'claim-paused'))
 
       case 'conflict':
-        redirect(`${claimHref(token)}?state=conflict`)
+        redirect(claimHref(token, channelParams, 'conflict'))
     }
   }
 
@@ -574,7 +679,7 @@ export default async function ClaimInvitePage(props: PageProps) {
 
       <section className="mt-5 text-xs text-textSecondary/75">
         <div className="font-black text-textSecondary">Claim link</div>
-        <div className="mt-1 break-all">{claimHref(token)}</div>
+        <div className="mt-1 break-all">{claimHref(token, null)}</div>
       </section>
     </main>
   )

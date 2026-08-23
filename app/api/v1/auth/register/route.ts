@@ -39,6 +39,7 @@ import {
 } from '@/lib/security/contactNormalization'
 import { startTwilioVerifyPhoneVerification } from '@/lib/twilio/verify'
 import {
+  ContactMethod,
   Prisma,
   type ProfessionType,
   VerificationDocumentType,
@@ -79,6 +80,7 @@ import { buildPhoneEncryptionWriteData } from '@/lib/security/phonePrivacy'
 import { buildEmailEncryptionWriteData } from '@/lib/security/emailPrivacy'
 import { buildAddressPrivacyWriteData } from '@/lib/security/addressEncryption'
 import { adoptClaimInviteDuringRegistration } from '@/lib/clients/claimAdoption'
+import { verifyClaimLinkChannel } from '@/lib/clients/claimLinkChannel'
 import {
   findSelfServeClaimableProfile,
   sendSelfServeClaimLink,
@@ -139,6 +141,9 @@ type RegisterBody = {
   next?: unknown
   intent?: unknown
   inviteToken?: unknown
+  // Claim-link channel marker (which channel delivered the link + signature).
+  via?: unknown
+  vsig?: unknown
   deviceId?: unknown
 
   // pro fields
@@ -653,6 +658,15 @@ export async function POST(request: Request) {
     const verificationInviteToken = sanitizeOptionalText(
       pickString(body.inviteToken),
     )
+    // The claim link's channel marker (via/vsig), threaded from the delivered
+    // link through /claim and the signup form. Resolves to the delivery
+    // channel only when the signature validates against the invite token;
+    // anything absent or tampered is simply no credit.
+    const claimVerifiedChannel = verifyClaimLinkChannel({
+      rawToken: verificationInviteToken,
+      via: sanitizeOptionalText(pickString(body.via)),
+      sig: sanitizeOptionalText(pickString(body.vsig)),
+    })
 
     if (!email || !password || !role) {
       return jsonFail(400, 'Missing required fields.', {
@@ -1079,6 +1093,12 @@ export async function POST(request: Request) {
       const claimable = await findSelfServeClaimableProfile({ email, phone })
 
       if (claimable) {
+        // Track whether a link actually entered the send queue — the response
+        // below must never promise a message that was rate-limited, refused,
+        // or failed. (The banner used to say "check your email" regardless,
+        // and the client sat waiting for a message that was never coming.)
+        let claimLinkSent = false
+
         const claimSendLimited = await enforceRateLimit({
           bucket: 'auth:self-serve-claim',
           identity: { kind: 'token', id: claimable.clientId },
@@ -1086,11 +1106,12 @@ export async function POST(request: Request) {
 
         if (!claimSendLimited) {
           try {
-            await sendSelfServeClaimLink({
+            const claimSend = await sendSelfServeClaimLink({
               clientId: claimable.clientId,
               bookingId: claimable.bookingId,
               tenantContext,
             })
+            claimLinkSent = claimSend.sent
           } catch (claimErr) {
             captureAuthException({
               event: 'auth.self_serve_claim.send_failed',
@@ -1104,10 +1125,13 @@ export async function POST(request: Request) {
 
         return jsonFail(
           409,
-          'We found existing history for this contact. Check your email or text for a secure link to finish setting up your account.',
+          claimLinkSent
+            ? 'We found existing history for this contact. Check your email or text for a secure link to finish setting up your account.'
+            : 'We found existing history for this contact, but could not send a new secure link just now. Use the link we sent you earlier, or try again in about an hour.',
           {
             code: 'CLAIMABLE_HISTORY',
             maskedDestination: claimable.maskedDestination,
+            claimLinkSent,
           },
         )
       }
@@ -1126,7 +1150,7 @@ export async function POST(request: Request) {
       phoneVerifiedAt: null,
     } satisfies Prisma.ClientProfileUncheckedCreateWithoutUserInput
 
-    const { user } = await prisma.$transaction(async (tx) => {
+    const { user, adoptionVerifiedChannel } = await prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
         data: {
           email,
@@ -1299,6 +1323,8 @@ export async function POST(request: Request) {
         },
       })
 
+      let adoptionVerifiedChannel: ContactMethod | null = null
+
       if (role === 'CLIENT' && attemptClaimAdopt) {
         const adoption = await adoptClaimInviteDuringRegistration({
           tx,
@@ -1306,6 +1332,7 @@ export async function POST(request: Request) {
           userId: user.id,
           registeredEmail: email,
           registeredPhone: phone,
+          verifiedChannel: claimVerifiedChannel,
           now: new Date(),
         })
 
@@ -1315,6 +1342,8 @@ export async function POST(request: Request) {
           await tx.clientProfile.create({
             data: { userId: user.id, ...clientProfileCreateData },
           })
+        } else {
+          adoptionVerifiedChannel = adoption.verifiedChannelApplied
         }
       }
 
@@ -1333,7 +1362,7 @@ export async function POST(request: Request) {
         })
       }
 
-      return { user }
+      return { user, adoptionVerifiedChannel }
     })
 
     if (dcaTimedOutAtSignup) {
@@ -1347,9 +1376,14 @@ export async function POST(request: Request) {
 
     const verificationEmail = normalizeEmail(user.email)
 
+    // A claim-link click already verified one channel (the one that delivered
+    // the link), so that channel needs no OTP/verification send at all.
+    const phoneVerifiedByClaim = adoptionVerifiedChannel === ContactMethod.SMS
+    const emailVerifiedByClaim = adoptionVerifiedChannel === ContactMethod.EMAIL
+
     waitUntil(
       (async () => {
-        if (user.phone) {
+        if (user.phone && !phoneVerifiedByClaim) {
           const phoneVerification =
             await startTwilioVerifyPhoneVerification({
               to: user.phone,
@@ -1387,7 +1421,7 @@ export async function POST(request: Request) {
           }
         }
 
-        if (verificationEmail) {
+        if (verificationEmail && !emailVerifiedByClaim) {
           try {
             await issueAndSendEmailVerification({
               userId: user.id,
@@ -1449,14 +1483,14 @@ export async function POST(request: Request) {
         // `Authorization: Bearer`. Web uses the httpOnly cookie set below.
         token,
         nextUrl: nextForVerification ?? null,
-        requiresPhoneVerification: true,
-        phoneVerificationSent: 'pending',
+        requiresPhoneVerification: !phoneVerifiedByClaim,
+        phoneVerificationSent: phoneVerifiedByClaim ? 'skipped' : 'pending',
         phoneVerificationErrorCode: null,
-        requiresEmailVerification: true,
-        isPhoneVerified: false,
-        isEmailVerified: false,
-        isFullyVerified: false,
-        emailVerificationSent: 'pending',
+        requiresEmailVerification: !emailVerifiedByClaim,
+        isPhoneVerified: phoneVerifiedByClaim,
+        isEmailVerified: emailVerifiedByClaim,
+        isFullyVerified: phoneVerifiedByClaim && emailVerifiedByClaim,
+        emailVerificationSent: emailVerifiedByClaim ? 'skipped' : 'pending',
 
         // ✅ safe flags for the client UX
         needsManualLicenseUpload:

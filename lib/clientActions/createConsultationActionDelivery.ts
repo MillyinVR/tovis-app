@@ -11,7 +11,7 @@ import { asTrimmedString } from '@/lib/guards'
 import { buildClientActionLinkForType } from './linkBuilders'
 import { enqueueClientActionDispatch } from './enqueueClientActionDispatch'
 import { orchestrateClientActionDelivery } from './orchestrateClientActionDelivery'
-import { requireRecipientProfessionalId } from './policies'
+import { normalizeResendMode, requireRecipientProfessionalId } from './policies'
 import type {
   ClientActionBuildLinkResult,
   ClientActionIssuedToken,
@@ -46,12 +46,6 @@ export type CreateConsultationActionDeliveryResult = {
   token: ClientActionIssuedToken
   link: ClientActionBuildLinkResult
   dispatch: Awaited<ReturnType<typeof enqueueClientActionDispatch>>
-}
-
-function normalizeResendMode(
-  value: ClientActionResendMode | null | undefined,
-): ClientActionResendMode {
-  return value ?? 'INITIAL_SEND'
 }
 
 function buildConsultationTitle(): string {

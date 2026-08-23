@@ -1,10 +1,13 @@
 // app/api/v1/pro/invites/[token]/accept/route.ts
 
-import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
+import { jsonFail, jsonOk, pickString, requireClient } from '@/app/api/_utils'
 import {
   resolveRouteParams,
   type RouteContext,
 } from '@/app/api/_utils/routeContext'
+import { isRecord } from '@/lib/guards'
+import { applyClaimLinkChannelVerification } from '@/lib/clients/claimChannelVerification'
+import { verifyClaimLinkChannel } from '@/lib/clients/claimLinkChannel'
 import { acceptClientClaimFromLink } from '@/lib/clients/clientClaim'
 import { normalizeProClientInviteToken } from '@/lib/clients/proClientInviteTokens'
 
@@ -12,7 +15,7 @@ export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
 export async function POST(
-  _request: Request,
+  request: Request,
   ctx: RouteContext<{ token: string }>,
 ) {
   try {
@@ -24,6 +27,31 @@ export async function POST(
 
     if (!token) {
       return jsonFail(404, 'Invite not found.', { code: 'NOT_FOUND' })
+    }
+
+    // Optional channel marker from the delivered link (native forwards the
+    // link's via/vsig). A valid one credits the click as verification of the
+    // channel that carried it; anything else is silently no credit — the
+    // accept itself never depends on it.
+    const rawBody: unknown = await request.json().catch(() => ({}))
+    const body = isRecord(rawBody) ? rawBody : {}
+    const claimedVia = verifyClaimLinkChannel({
+      rawToken: token,
+      via: pickString(body.via),
+      sig: pickString(body.vsig),
+    })
+
+    if (claimedVia) {
+      await applyClaimLinkChannelVerification({
+        token,
+        channel: claimedVia,
+        user: {
+          id: auth.user.id,
+          role: auth.user.role,
+          email: auth.user.email,
+          phone: auth.user.phone,
+        },
+      }).catch(() => false)
     }
 
     const result = await acceptClientClaimFromLink({

@@ -147,7 +147,8 @@ export async function findSelfServeClaimableProfile(args: {
  * then kick the notification drain. Mints a booking-bearing link when the
  * profile has a booking, else a pro-less booking-less link. Returns
  * `{ sent: false }` if the profile turned out to be claimed/revoked between
- * detection and send.
+ * detection and send, or if no new delivery was actually enqueued — the caller
+ * must not promise a message that never entered the queue.
  */
 export async function sendSelfServeClaimLink(args: {
   clientId: string
@@ -167,7 +168,7 @@ export async function sendSelfServeClaimLink(args: {
 
   const invite = issued.invite
 
-  await createClientClaimInviteDelivery({
+  const delivery = await createClientClaimInviteDelivery({
     professionalId: invite.professionalId,
     clientId: invite.clientId,
     bookingId: invite.bookingId,
@@ -179,7 +180,15 @@ export async function sendSelfServeClaimLink(args: {
     invitedPhone: invite.invitedPhone,
     preferredContactMethod: invite.preferredContactMethod,
     recipientUserId: null,
+    // A rotated invite already had a send under its previous token; a fresh
+    // send cycle is what makes THIS link actually go out (the rotation just
+    // killed the previously delivered one).
+    resendMode: issued.created ? 'INITIAL_SEND' : 'RESEND',
   })
+
+  if (!delivery.dispatch.created) {
+    return { sent: false }
+  }
 
   kickNotificationDrain()
 
