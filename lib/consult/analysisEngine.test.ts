@@ -106,6 +106,19 @@ afterEach(() => {
 })
 
 describe('hair-color consult analysis provider', () => {
+  it('fails closed before sending photos when the model override is not allowlisted', async () => {
+    process.env.AI_CONSULT_ANALYSIS_MODEL = 'claude-sonnet-5-typo'
+
+    await expect(
+      runHairColorAnalysis({
+        intake: { desired_color: 'red', prior_reaction: 'no' },
+        captures,
+      }),
+    ).rejects.toBeInstanceOf(ConsultAnalysisProviderError)
+    // The assertion that matters: no image ever reached the provider.
+    expect(mocks.create).not.toHaveBeenCalled()
+  })
+
   it('pins exact schema/prompt/model versions and sends four labeled images as structured output', async () => {
     mocks.create.mockResolvedValue(message(validOutput()))
     const result = await runHairColorAnalysis({

@@ -5,6 +5,7 @@ import { isRecord } from '@/lib/guards'
 import type { ConsultCaptureQualityReasonCodeDTO } from '@/lib/dto/consult'
 
 import type { HairColorCaptureShotKey } from './capturePack'
+import { isAllowedConsultProviderModel } from './providerModel'
 
 export const CONSULT_CAPTURE_MEDIA_TYPES = [
   'image/jpeg',
@@ -49,7 +50,13 @@ const RETAKE_TIP_MAX_CHARS = 160
 let cachedClient: Anthropic | null = null
 
 function modelName(): string {
-  return readOptionalEnv('AI_CONSULT_CAPTURE_MODEL') ?? DEFAULT_MODEL
+  const model = readOptionalEnv('AI_CONSULT_CAPTURE_MODEL') ?? DEFAULT_MODEL
+  if (!isAllowedConsultProviderModel(model)) {
+    // Fail closed: client photos never go to a model the repo has not
+    // explicitly allowlisted (lib/consult/providerModel.ts).
+    throw new ConsultCaptureVisionError('unavailable')
+  }
+  return model
 }
 
 function getClient(): Anthropic {

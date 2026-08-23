@@ -18,7 +18,7 @@
  *    Emptying this array (one line) fully re-darkens the feature.
  */
 export const AI_CONSULT_PRO_ALLOWLIST: readonly string[] = [
-  'cmq9p645v0002jp04fttoatlq', // amara619@gmail.com — founder personal testing
+  'cmq9p645v0002jp04fttoatlq', // founder personal testing account
 ]
 
 function globalAiConsultFlag(): boolean {

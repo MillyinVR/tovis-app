@@ -8,6 +8,7 @@ import {
   type HairColorCaptureShotKey,
 } from './capturePack'
 import type { ConsultCaptureImage } from './captureStorage'
+import { isAllowedConsultProviderModel } from './providerModel'
 
 export const CONSULT_ANALYSIS_SCHEMA_VERSION = 1
 export const CONSULT_ANALYSIS_PROMPT_VERSION = 'hair-color-analysis-v1'
@@ -529,7 +530,14 @@ function sanitizeAnalysis(
 let cachedClient: Anthropic | null = null
 
 function analysisModel(): string {
-  return readOptionalEnv('AI_CONSULT_ANALYSIS_MODEL') ?? CONSULT_ANALYSIS_DEFAULT_MODEL
+  const model =
+    readOptionalEnv('AI_CONSULT_ANALYSIS_MODEL') ?? CONSULT_ANALYSIS_DEFAULT_MODEL
+  if (!isAllowedConsultProviderModel(model)) {
+    // Fail closed: client photos never go to a model the repo has not
+    // explicitly allowlisted (lib/consult/providerModel.ts).
+    throw new ConsultAnalysisProviderError('unavailable')
+  }
+  return model
 }
 
 function getClient(): Anthropic {

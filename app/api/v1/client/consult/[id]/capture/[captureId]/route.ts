@@ -1,6 +1,7 @@
 import { ConsultActorType } from '@prisma/client'
 
 import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
+import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
 import {
   resolveRouteParams,
   type RouteContext,
@@ -24,6 +25,12 @@ export async function DELETE(_req: Request, ctx: RouteContext<Params>) {
   try {
     const auth = await requireClient()
     if (!auth.ok) return auth.res
+
+    const limited = await enforceRateLimit({
+      bucket: 'client:consult:write',
+      identity: await rateLimitIdentity(auth.user.id),
+    })
+    if (limited) return limited
     const { id, captureId } = await resolveRouteParams(ctx)
     if (!id || !captureId) return consultNotFoundResponse()
 

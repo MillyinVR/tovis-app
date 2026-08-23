@@ -232,6 +232,7 @@ import {
 } from '@/lib/consult/capturePack'
 import {
   attachConsultCaptureUpload,
+  CONSULT_CAPTURE_MAX_QUALITY_CHECKS_PER_SESSION,
 } from '@/lib/consult/captureContract'
 import {
   purgeConsultSessionRawObjects,
@@ -2630,4 +2631,50 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
     `)
     expect(rls).toEqual([{ relrowsecurity: true }])
   })
+
+  it(
+    'stops paid quality checks at the per-session cap while replays stay free',
+    async () => {
+      const consult = await createReadyConsult('quality-cap')
+      authenticate(consult)
+      fake.qualityByShot.set('hair_left', {
+        accepted: false,
+        reasonCode: 'BLURRY',
+        retakeTip: 'Hold the phone still and try again.',
+        model: 'fake-quality-model',
+      })
+
+      let lastCheckedId = ''
+      for (let i = 0; i < CONSULT_CAPTURE_MAX_QUALITY_CHECKS_PER_SESSION; i += 1) {
+        lastCheckedId = await issueAttach(consult, 'hair_left', `cap-${i}`)
+        const checked = await quality(consult, lastCheckedId, `cap-q-${i}`)
+        expect(checked.status).toBe(200)
+      }
+      expect(fake.modelCalls.length).toBe(
+        CONSULT_CAPTURE_MAX_QUALITY_CHECKS_PER_SESSION,
+      )
+
+      // The next fresh check is refused BEFORE the provider is called — the
+      // provider-call count is the assertion that matters, not the status.
+      const overCapId = await issueAttach(consult, 'hair_left', 'cap-final')
+      const blocked = await quality(consult, overCapId, 'cap-q-final')
+      expect(blocked.status).toBe(429)
+      expect(await body(blocked)).toMatchObject({
+        code: 'CONSULT_CAPTURE_QUALITY_LIMIT_EXCEEDED',
+      })
+      expect(fake.modelCalls.length).toBe(
+        CONSULT_CAPTURE_MAX_QUALITY_CHECKS_PER_SESSION,
+      )
+
+      // Replaying an already-checked capture is free and stays available.
+      const lastIndex = CONSULT_CAPTURE_MAX_QUALITY_CHECKS_PER_SESSION - 1
+      const replay = await quality(consult, lastCheckedId, `cap-q-${lastIndex}`)
+      expect(replay.status).toBe(200)
+      expect(await body(replay)).toMatchObject({ replayed: true })
+      expect(fake.modelCalls.length).toBe(
+        CONSULT_CAPTURE_MAX_QUALITY_CHECKS_PER_SESSION,
+      )
+    },
+    120_000,
+  )
 })

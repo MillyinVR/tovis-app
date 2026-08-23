@@ -43,6 +43,16 @@ afterEach(() => {
 })
 
 describe('checkHairColorCapture', () => {
+  it('fails closed before sending the photo when the model override is not allowlisted', async () => {
+    process.env.AI_CONSULT_CAPTURE_MODEL = 'claude-sonnet-5-typo'
+
+    await expect(
+      checkHairColorCapture({ shotKey: 'hair_back', image: IMAGE }),
+    ).rejects.toBeInstanceOf(ConsultCaptureVisionError)
+    // The assertion that matters: the image never reached the provider.
+    expect(mocks.create).not.toHaveBeenCalled()
+  })
+
   it('uses structured Sonnet output and returns one bounded sanitized tip', async () => {
     mocks.create.mockResolvedValue(
       message({

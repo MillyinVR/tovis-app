@@ -6,6 +6,7 @@ import {
   pickNonEmptyString,
   requireClient,
 } from '@/app/api/_utils'
+import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import {
   resolveRouteParams,
@@ -75,6 +76,16 @@ export async function POST(req: Request, ctx: RouteContext) {
     if (!auth.ok) return auth.res
     const { id } = await resolveRouteParams(ctx)
     if (!id) return consultNotFoundResponse()
+
+    // Paid provider call: one analysis per session is enforced structurally
+    // (partial unique index); the vision bucket bounds how fast repeated
+    // attempts across sessions can spend.
+    const limited = await enforceRateLimit({
+      bucket: 'client:consult:vision',
+      identity: await rateLimitIdentity(auth.user.id),
+    })
+    if (limited) return limited
+
     const result = await runConsultAnalysis({
       consultSessionId: id,
       clientId: auth.clientId,

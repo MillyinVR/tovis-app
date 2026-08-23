@@ -14,6 +14,8 @@ export type RateLimitBucket =
   | 'consultation:decision:token'
   | 'account-invite:mint'
   | 'account-invite:mint:token'
+  | 'client:consult:write'
+  | 'client:consult:vision'
   | 'client:rebook:token'
   | 'client:checkout:token'
   | 'client:deposit:token'
@@ -241,6 +243,38 @@ export const RATE_LIMITS: Record<RateLimitBucket, RateLimitConfig> = {
     limit: 20,
     windowSeconds: 5 * 60,
     prefix: 'rl:client:appointment:answer',
+    mode: 'redis-only',
+  },
+  // AI Consult client mutations (create, agreements, intake, capture
+  // issue/attach/delete, inspiration, teaser tap) — every non-paid consult
+  // write on ONE bucket, keyed per user. The flow is bursty by design: the
+  // inspiration step posts one answer per question (7 questions) and the
+  // capture step issues+attaches 4 slots back to back, so a fast human can
+  // legitimately land ~15 writes in a minute. 30 clears that with headroom
+  // while dropping a script from unlimited to 30 — the same envelope as the
+  // other authenticated write buckets. Paid provider calls are deliberately
+  // NOT in this bucket (see client:consult:vision).
+  'client:consult:write': {
+    limit: 30,
+    windowSeconds: 60,
+    prefix: 'rl:client:consult:write',
+    mode: 'redis-only',
+  },
+  // AI Consult paid vision calls: capture quality checks + the analysis run,
+  // both on ONE bucket (what needs bounding is total provider spend for the
+  // class, not each half — the waitlist:write rationale). Sized like the
+  // camera vision buckets: a complete consult is 4 quality checks + a retake
+  // allowance + 1 analysis (~6–8 calls), and a client can only mint one
+  // session per eligible booking, so 40/day covers several full consults
+  // including bad-lighting days while capping worst-case per-user provider
+  // spend at a known daily ceiling. This is the abuse backstop; the
+  // per-session structural cap in lib/consult/captureContract.ts
+  // (CONSULT_CAPTURE_MAX_QUALITY_CHECKS_PER_SESSION) still holds when Redis
+  // is unavailable, because redis-only buckets fail open.
+  'client:consult:vision': {
+    limit: 40,
+    windowSeconds: 24 * 60 * 60,
+    prefix: 'rl:client:consult:vision',
     mode: 'redis-only',
   },
   'pro:bookings:write': {
