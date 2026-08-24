@@ -25,7 +25,6 @@ app/admin/license-review/page.tsx|fullName
 app/admin/nfc/page.tsx|isUniqueConstraintError
 app/api/internal/jobs/last-minute/process/route.ts|incentiveLabel
 app/api/v1/admin/notifications/route.ts|asInt
-app/api/v1/auth/register/route.ts|defaultWorkingHours
 app/api/v1/availability/bootstrap/route.ts|pickNumber
 app/api/v1/availability/bootstrap/route.ts|pickString
 app/api/v1/availability/bootstrap/route.ts|pickStringArray
