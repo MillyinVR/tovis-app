@@ -9,6 +9,11 @@
 //    by what the lens sees now instead of played in sequence.
 //  - critiqueSessionSet — the captured before/after set → a photographer's
 //    review: what's strong, what to retake and why, what's portfolio-worthy.
+//    Each read runs strength → the one change → what that change buys, so it
+//    lands like someone standing at the chair rather than a report card. The
+//    strength has to name something visible in the frame, and a photo with no
+//    strength leads with the problem instead — an invented one is how a pro
+//    ends up publishing a bad photo.
 //
 // The Anthropic API key lives server-side only. Images are analyzed in-flight
 // and never persisted — no DB writes, no storage, and image bytes are never
@@ -507,6 +512,32 @@ export async function enhanceReferenceLook(input: {
 
 // ── critiqueSessionSet ──────────────────────────────────────────────────────
 
+const CRITIQUE_MAX_STRENGTHS = 4
+
+/** The critique's text budgets, in one place because the prompt and the
+ * sanitizer used to carry two different sets of numbers (the prompt asked for
+ * 140/120, the sanitizer cut at 200/160).
+ *
+ * `max` is what `sanitizeCritique` enforces: `cleanLine` hard-slices there,
+ * mid-word, with no ellipsis. It is the longest string the shipped iOS card can
+ * ever be handed, so it is contract — never widen it here.
+ *
+ * `aim` is what the prompt asks for, deliberately below `max`. A note now
+ * carries three beats and the last of them is the good news; one cut mid-praise
+ * reads worse than two that finish. Both numbers go into the prompt, so the aim
+ * is a target with a stated reason rather than a ceiling the model has no cause
+ * to respect. */
+const CRITIQUE_TEXT_LIMITS = {
+  note: { aim: 160, max: 200 },
+  retakeTip: { aim: 120, max: 160 },
+  strength: { aim: 110, max: 160 },
+  overall: { aim: 260, max: 400 },
+} as const
+
+function charBudget(limit: { aim: number; max: number }): string {
+  return `aim for ${limit.aim} characters — anything past ${limit.max} is cut off mid-word`
+}
+
 const CRITIQUE_SCHEMA: Record<string, unknown> = {
   type: 'object',
   additionalProperties: false,
@@ -514,12 +545,11 @@ const CRITIQUE_SCHEMA: Record<string, unknown> = {
   properties: {
     overall: {
       type: 'string',
-      description:
-        'The set in at most 2 sentences: what to publish, what to reshoot.',
+      description: `The set in at most 3 short sentences: what to publish and why, the one thing to reshoot, what the set gives them once that is done (${charBudget(CRITIQUE_TEXT_LIMITS.overall)}).`,
     },
     strengths: {
       type: 'array',
-      maxItems: 4,
+      maxItems: CRITIQUE_MAX_STRENGTHS,
       items: { type: 'string' },
     },
     photos: {
@@ -537,13 +567,11 @@ const CRITIQUE_SCHEMA: Record<string, unknown> = {
           verdict: { type: 'string', enum: [...SET_CRITIQUE_VERDICTS] },
           note: {
             type: 'string',
-            description:
-              'The photographer’s read on this photo (max 140 characters).',
+            description: `The photographer’s read on this photo: what it already has, the one thing to change, then what that change buys (${charBudget(CRITIQUE_TEXT_LIMITS.note)}).`,
           },
           retakeTip: {
             type: 'string',
-            description:
-              'For retakes only: the concrete fix in shooting terms (max 120 characters). Empty string otherwise.',
+            description: `For retakes only: the fix on its own, in shooting terms, with no praise in it (${charBudget(CRITIQUE_TEXT_LIMITS.retakeTip)}). Empty string otherwise.`,
           },
         },
       },
@@ -552,10 +580,14 @@ const CRITIQUE_SCHEMA: Record<string, unknown> = {
 }
 
 const CRITIQUE_SYSTEM =
-  'You are a beauty-industry photographer reviewing a professional’s ' +
-  'session photo set for social and portfolio use. Be direct and specific ' +
-  '— the pro is deciding right now, chair-side, what to publish and ' +
-  'what to reshoot while the client is still in the room.'
+  'You are a beauty-industry photographer standing beside a professional, ' +
+  'looking through the set they just shot. You talk the way a photographer ' +
+  'talks at the chair: what the photograph already has, the one thing you ' +
+  'would change, and what that change buys. You are direct and specific, and ' +
+  'you never flatter — a compliment the pro cannot check is the one thing ' +
+  'they cannot act on, and it spends the trust every other line depends on. ' +
+  'The pro is deciding right now what to publish and what to reshoot while ' +
+  'the client is still in the room.'
 
 function critiqueInstructions(args: {
   photoCount: number
@@ -566,14 +598,29 @@ function critiqueInstructions(args: {
   return [
     `The ${args.photoCount} photos above are the before/after set of ${service} appointment.`,
     '',
+    'Judge: sharpness on the subject, exposure and light direction, color, framing/crop, background, pose/expression — and whether AFTER shots actually showcase the finished work.',
+    '',
+    'Every read you write has the same three beats, in this order:',
+    '  1. STRENGTH — what the photograph already has, named so the pro can point at it in the frame: the light on the crown, the sharpness at the ends, the clean edge along the hairline, the color holding true.',
+    '  2. CHANGE — the one thing to do differently. On a retake: the problem and the fix. On a keep: the single thing holding it out of the portfolio. On a portfolio shot: the move that produced beat 1, said so they can repeat it on the next frame.',
+    '  3. CLOSE — what beat 1 becomes once beat 2 is done. A consequence, not a compliment.',
+    '',
     'For EVERY photo return:',
     '- index: its 1-based number from the labels.',
     "- verdict: 'portfolio' (hero shot — feed/portfolio worthy), 'keep' (solid documentation, not a hero), or 'retake' (weak but fixable right now).",
-    '- note: your read on that photo — name the decisive factor (max 140 characters).',
-    "- retakeTip: for retakes only, the concrete fix in shooting terms — angle, light, focus, framing (max 120 characters). Empty string otherwise.",
+    `- note: the three beats as one short paragraph (${charBudget(CRITIQUE_TEXT_LIMITS.note)}).`,
+    `- retakeTip: for retakes only, the fix on its own as a bare instruction in shooting terms — angle, light, focus, framing — with no praise in it at all, because it prints under the note as the thing to go and do (${charBudget(CRITIQUE_TEXT_LIMITS.retakeTip)}). Empty string otherwise.`,
     '',
-    'Judge: sharpness on the subject, exposure and light direction, color, framing/crop, background, pose/expression — and whether AFTER shots actually showcase the finished work.',
-    'Also return strengths (2–4 things this set does well) and overall (at most 2 sentences: what to publish, what to reshoot).',
+    'What keeps this a review and not a compliment:',
+    '- Beat 1 has to name something visible in that frame. If the pro cannot look at the photo and see the thing you named, it is not a strength. Never write “great energy”, “lovely vibe”, “stunning”, “beautiful work”, “you nailed it” — none of those can be checked, so none of them are worth anything at the chair.',
+    '- Praise the photograph, never the professional and never the client. No superlatives, no exclamation marks.',
+    '- If a photograph genuinely has no strength, lead with the problem and skip beat 1. Never invent one to fill the shape: a manufactured strength is how a pro ends up publishing a bad photo.',
+    '- A retake still has to read as a retake. Name the problem plainly, and let the close point at the reshoot rather than at settling for the frame. Never soften it with “still usable”, “fine as is”, or “could go either way”.',
+    '- The verdict is a decision, not a kindness. A frame that needs reshooting is a retake however good its strength is: the strength is the reason to go back and get it, not a reason to keep it.',
+    '- No scores, no grades, no ratings out of ten, no percentages.',
+    '',
+    `Also return strengths: 2–4 things the SET does well, each one checkable — name the photo number or the element you mean. Per strength: ${charBudget(CRITIQUE_TEXT_LIMITS.strength)}.`,
+    `And overall: the same three beats for the set — what to publish and why, the one thing to reshoot before the client leaves, what the set gives them once that is done. At most 3 short sentences (${charBudget(CRITIQUE_TEXT_LIMITS.overall)}).`,
   ].join('\n')
 }
 
@@ -612,11 +659,14 @@ function sanitizeCritique(
       )
       if (!verdict) continue
 
-      const retakeTip = cleanLine(item.retakeTip, 160)
+      const retakeTip = cleanLine(
+        item.retakeTip,
+        CRITIQUE_TEXT_LIMITS.retakeTip.max,
+      )
       notesById.set(id, {
         id,
         verdict,
-        note: cleanLine(item.note, 200),
+        note: cleanLine(item.note, CRITIQUE_TEXT_LIMITS.note.max),
         retakeTip: verdict === 'retake' && retakeTip ? retakeTip : null,
       })
     }
@@ -631,8 +681,12 @@ function sanitizeCritique(
   }
 
   return {
-    overall: cleanLine(raw.overall, 400),
-    strengths: cleanLines(raw.strengths, 4, 160),
+    overall: cleanLine(raw.overall, CRITIQUE_TEXT_LIMITS.overall.max),
+    strengths: cleanLines(
+      raw.strengths,
+      CRITIQUE_MAX_STRENGTHS,
+      CRITIQUE_TEXT_LIMITS.strength.max,
+    ),
     photos: orderedNotes,
   }
 }
