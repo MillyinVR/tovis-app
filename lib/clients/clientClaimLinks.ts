@@ -216,6 +216,63 @@ function legacyRawTokenFromInvite(invite: ClientClaimLinkRow): string | null {
   return normalizeProClientInviteToken(invite.token)
 }
 
+/**
+ * Who a claim link is addressed to, and how it should reach them.
+ */
+export type ClaimLinkContact = {
+  invitedName: string
+  invitedEmail: string | null
+  invitedPhone: string | null
+  preferredContactMethod: ContactMethod | null
+}
+
+/**
+ * Derive the invite contact from a client profile. Shared by both issue*
+ * helpers so the booking and booking-less doors cannot drift apart on what they
+ * address a link to.
+ */
+function contactFromClientProfile(client: {
+  firstName: string | null
+  lastName: string | null
+  email: string | null
+  phone: string | null
+}): ClaimLinkContact {
+  const invitedName =
+    [client.firstName, client.lastName] // pii-plaintext-read-ok: composes required ProClientInvite.invitedName for the claim link
+      .map((part) => asTrimmedString(part))
+      .filter((part): part is string => Boolean(part))
+      .join(' ') || 'Client'
+  const invitedEmail = asTrimmedString(client.email) // pii-plaintext-read-ok: seeds invitedEmail for claim-link prefill, mirrors upsertProClient invite flow
+  const invitedPhone = asTrimmedString(client.phone) // pii-plaintext-read-ok: seeds invitedPhone for claim-link prefill, mirrors upsertProClient invite flow
+
+  return {
+    invitedName,
+    invitedEmail,
+    invitedPhone,
+    preferredContactMethod: invitedEmail
+      ? ContactMethod.EMAIL
+      : invitedPhone
+        ? ContactMethod.SMS
+        : null,
+  }
+}
+
+/**
+ * Normalize a caller-supplied contact, applying the same channel rules the
+ * pro-driven upsert path enforces — a link nothing can be delivered to is a
+ * throw, not a silent mint.
+ */
+function normalizeSuppliedContact(contact: ClaimLinkContact): ClaimLinkContact {
+  const invitedName = normalizeRequiredString(contact.invitedName, 'invitedName')
+  const invitedEmail = asTrimmedString(contact.invitedEmail)
+  const invitedPhone = asTrimmedString(contact.invitedPhone)
+  const preferredContactMethod = contact.preferredContactMethod ?? null
+
+  validateClaimChannels({ invitedEmail, invitedPhone, preferredContactMethod })
+
+  return { invitedName, invitedEmail, invitedPhone, preferredContactMethod }
+}
+
 export async function upsertClientClaimLink(
   args: UpsertClientClaimLinkArgs,
 ): Promise<ClientClaimLinkWithRawToken> {
@@ -319,6 +376,14 @@ export async function upsertClientClaimLink(
 
 export type IssueClaimLinkForBookingArgs = {
   bookingId: string
+  /**
+   * Contact this invite is addressed to. Omit to derive it from the client
+   * profile (what the public consultation/aftercare doors do). Supply it when
+   * the caller took the contact from a request body — the pro-facing invite
+   * door does, and a pro may invite a client at an address the profile does not
+   * carry yet.
+   */
+  contact?: ClaimLinkContact | null
   tx?: Prisma.TransactionClient
 }
 
@@ -344,12 +409,18 @@ export type IssueClaimLinkForBookingResult =
  * Mint (or rotate) a claim link for a booking's UNCLAIMED client, returning a
  * fresh raw token usable at /claim/{token}.
  *
- * Unlike upsertClientClaimLink (driven by the pro at booking time), this is for
- * the public consultation/aftercare pages: the caller already holds a valid
- * ClientActionToken proving they are the intended recipient, so we always
- * regenerate the token hash and hand back a working link even when the original
- * emailed claim token is no longer recoverable. It does not require a contact
- * channel — the link itself is the delivery.
+ * Unlike upsertClientClaimLink, this ALWAYS regenerates the token hash, so it
+ * hands back a working link even when the original emailed claim token is no
+ * longer recoverable — and reports `created` so a caller that also delivers the
+ * link can open a fresh send cycle for a rotation.
+ *
+ * Two kinds of caller:
+ *   - the public consultation/aftercare pages, which hold a valid
+ *     ClientActionToken proving they are the intended recipient and pass no
+ *     `contact` (it is derived from the profile, and no contact channel is
+ *     required — the link itself is the delivery);
+ *   - the pro-facing invite door, which passes the `contact` from its request
+ *     body and delivers the link to it.
  *
  * Respects pro revocation: a revoked invite returns { kind: 'revoked' } rather
  * than silently re-opening claim access.
@@ -389,18 +460,10 @@ export async function issueClaimLinkForBooking(
     return { kind: 'already_claimed' }
   }
 
-  const invitedName =
-    [client.firstName, client.lastName] // pii-plaintext-read-ok: composes required ProClientInvite.invitedName for the claim link
-      .map((part) => asTrimmedString(part))
-      .filter((part): part is string => Boolean(part))
-      .join(' ') || 'Client'
-  const invitedEmail = asTrimmedString(client.email) // pii-plaintext-read-ok: seeds invitedEmail for claim-link prefill, mirrors upsertProClient invite flow
-  const invitedPhone = asTrimmedString(client.phone) // pii-plaintext-read-ok: seeds invitedPhone for claim-link prefill, mirrors upsertProClient invite flow
-  const preferredContactMethod = invitedEmail
-    ? ContactMethod.EMAIL
-    : invitedPhone
-      ? ContactMethod.SMS
-      : null
+  const { invitedName, invitedEmail, invitedPhone, preferredContactMethod } =
+    args.contact
+      ? normalizeSuppliedContact(args.contact)
+      : contactFromClientProfile(client)
 
   const existing = await db.proClientInvite.findUnique({
     where: { bookingId },
@@ -514,18 +577,8 @@ export async function issueClaimLinkForClient(
     return { kind: 'already_claimed' }
   }
 
-  const invitedName =
-    [client.firstName, client.lastName] // pii-plaintext-read-ok: composes required ProClientInvite.invitedName for the claim link
-      .map((part) => asTrimmedString(part))
-      .filter((part): part is string => Boolean(part))
-      .join(' ') || 'Client'
-  const invitedEmail = asTrimmedString(client.email) // pii-plaintext-read-ok: seeds invitedEmail for claim-link prefill, mirrors issueClaimLinkForBooking
-  const invitedPhone = asTrimmedString(client.phone) // pii-plaintext-read-ok: seeds invitedPhone for claim-link prefill, mirrors issueClaimLinkForBooking
-  const preferredContactMethod = invitedEmail
-    ? ContactMethod.EMAIL
-    : invitedPhone
-      ? ContactMethod.SMS
-      : null
+  const { invitedName, invitedEmail, invitedPhone, preferredContactMethod } =
+    contactFromClientProfile(client)
 
   // One booking-less invite per client — rotate an existing one rather than
   // minting a duplicate. (A booking-BEARING invite for the same client is a

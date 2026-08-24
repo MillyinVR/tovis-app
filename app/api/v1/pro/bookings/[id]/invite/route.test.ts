@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
   jsonFail: vi.fn(),
   jsonOk: vi.fn(),
   bookingFindFirst: vi.fn(),
-  upsertClientClaimLink: vi.fn(),
+  issueClaimLinkForBooking: vi.fn(),
   createClientClaimInviteDelivery: vi.fn(),
   enforceRateLimit: vi.fn(),
   tokenRateLimitIdentity: vi.fn(),
@@ -43,7 +43,7 @@ vi.mock('@/lib/prisma', () => ({
 }))
 
 vi.mock('@/lib/clients/clientClaimLinks', () => ({
-  upsertClientClaimLink: mocks.upsertClientClaimLink,
+  issueClaimLinkForBooking: mocks.issueClaimLinkForBooking,
 }))
 
 vi.mock('@/lib/clientActions/createClientClaimInviteDelivery', () => ({
@@ -81,7 +81,6 @@ function makeBooking(overrides?: {
 
 function makeInvite(overrides?: {
   id?: string
-  rawToken?: string | null
   status?: ProClientInviteStatus
   invitedName?: string
   invitedEmail?: string | null
@@ -92,10 +91,6 @@ function makeInvite(overrides?: {
 }) {
   return {
     id: overrides?.id ?? 'invite_1',
-    rawToken:
-      overrides && 'rawToken' in overrides
-        ? overrides.rawToken
-        : 'token_1',
     status: overrides?.status ?? ProClientInviteStatus.PENDING,
     invitedName: overrides?.invitedName ?? 'Tori Morales',
     invitedEmail:
@@ -114,6 +109,24 @@ function makeInvite(overrides?: {
       overrides && 'acceptedAt' in overrides ? overrides.acceptedAt : null,
     revokedAt:
       overrides && 'revokedAt' in overrides ? overrides.revokedAt : null,
+  }
+}
+
+/**
+ * The issuer's success shape. `created` is the load-bearing half: false means
+ * the token was ROTATED on an existing row, so the delivery must open a fresh
+ * send cycle rather than collapse into the first invite's idempotency key.
+ */
+function makeIssued(overrides?: {
+  rawToken?: string
+  created?: boolean
+  invite?: ReturnType<typeof makeInvite>
+}) {
+  return {
+    kind: 'ok' as const,
+    rawToken: overrides?.rawToken ?? 'token_1',
+    created: overrides?.created ?? true,
+    invite: overrides?.invite ?? makeInvite(),
   }
 }
 
@@ -177,7 +190,7 @@ describe('POST /api/v1/pro/bookings/[id]/invite', () => {
     }))
 
     mocks.bookingFindFirst.mockResolvedValue(makeBooking())
-    mocks.upsertClientClaimLink.mockResolvedValue(makeInvite())
+    mocks.issueClaimLinkForBooking.mockResolvedValue(makeIssued())
     mocks.createClientClaimInviteDelivery.mockResolvedValue(
       makeInviteDeliveryResult(),
     )
@@ -203,7 +216,7 @@ describe('POST /api/v1/pro/bookings/[id]/invite', () => {
 
     expect(result).toBe(authRes)
     expect(mocks.bookingFindFirst).not.toHaveBeenCalled()
-    expect(mocks.upsertClientClaimLink).not.toHaveBeenCalled()
+    expect(mocks.issueClaimLinkForBooking).not.toHaveBeenCalled()
     expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
   })
 
@@ -392,7 +405,7 @@ describe('POST /api/v1/pro/bookings/[id]/invite', () => {
       error: 'Booking not found.',
     })
 
-    expect(mocks.upsertClientClaimLink).not.toHaveBeenCalled()
+    expect(mocks.issueClaimLinkForBooking).not.toHaveBeenCalled()
     expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
   })
 
@@ -408,14 +421,14 @@ describe('POST /api/v1/pro/bookings/[id]/invite', () => {
       },
     )
 
-    expect(mocks.upsertClientClaimLink).toHaveBeenCalledWith({
-      professionalId: 'pro_123',
-      clientId: 'client_123',
+    expect(mocks.issueClaimLinkForBooking).toHaveBeenCalledWith({
       bookingId: 'booking_1',
-      invitedName: 'Tori Morales',
-      invitedEmail: 'tori@example.com',
-      invitedPhone: null,
-      preferredContactMethod: ContactMethod.EMAIL,
+      contact: {
+        invitedName: 'Tori Morales',
+        invitedEmail: 'tori@example.com',
+        invitedPhone: null,
+        preferredContactMethod: ContactMethod.EMAIL,
+      },
     })
 
     expect(mocks.createClientClaimInviteDelivery).toHaveBeenCalledWith({
@@ -431,6 +444,7 @@ describe('POST /api/v1/pro/bookings/[id]/invite', () => {
       preferredContactMethod: ContactMethod.EMAIL,
       issuedByUserId: 'user_123',
       recipientUserId: null,
+      resendMode: 'INITIAL_SEND',
     })
 
     expect(mocks.jsonOk).toHaveBeenCalledWith(
@@ -505,6 +519,7 @@ describe('POST /api/v1/pro/bookings/[id]/invite', () => {
       preferredContactMethod: ContactMethod.EMAIL,
       issuedByUserId: 'user_123',
       recipientUserId: 'user_client_123',
+      resendMode: 'INITIAL_SEND',
     })
   })
 
@@ -582,10 +597,12 @@ describe('POST /api/v1/pro/bookings/[id]/invite', () => {
   })
 
   it('does not attempt delivery for an already accepted invite', async () => {
-    mocks.upsertClientClaimLink.mockResolvedValueOnce(
-      makeInvite({
-        status: ProClientInviteStatus.ACCEPTED,
-        acceptedAt: new Date('2026-04-13T20:00:00.000Z'),
+    mocks.issueClaimLinkForBooking.mockResolvedValueOnce(
+      makeIssued({
+        invite: makeInvite({
+          status: ProClientInviteStatus.ACCEPTED,
+          acceptedAt: new Date('2026-04-13T20:00:00.000Z'),
+        }),
       }),
     )
 
@@ -623,13 +640,19 @@ describe('POST /api/v1/pro/bookings/[id]/invite', () => {
     })
   })
 
-  it('does not attempt delivery when rawToken is missing', async () => {
-    mocks.upsertClientClaimLink.mockResolvedValueOnce(
-      makeInvite({
-        rawToken: null,
-        status: ProClientInviteStatus.PENDING,
-      }),
+  // The bug this route shipped with: `upsertClientClaimLink` returned the
+  // EXISTING row untouched on a repeat invite, and its rawToken came from the
+  // deprecated plaintext `ProClientInvite.token` column — null on every modern
+  // row. So the second invite for a booking sent nothing AND handed the pro no
+  // link to pass on by hand, behind a 200 whose only tell was two false flags.
+  it('re-invites: rotates the token, sends again on a fresh cycle, and hands back a usable link', async () => {
+    mocks.issueClaimLinkForBooking.mockResolvedValueOnce(
+      makeIssued({ rawToken: 'token_2', created: false }),
     )
+    mocks.createClientClaimInviteDelivery.mockResolvedValueOnce({
+      ...makeInviteDeliveryResult(),
+      link: { target: 'CLAIM', href: '/claim/token_2', tokenIncluded: true },
+    })
 
     const result = await POST(
       makeRequest({
@@ -641,7 +664,15 @@ describe('POST /api/v1/pro/bookings/[id]/invite', () => {
       },
     )
 
-    expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
+    // RESEND, not INITIAL_SEND: the rotated token is the send-cycle
+    // discriminator, and `resolveSendCycleDiscriminator` only consults it on
+    // the RESEND branch. INITIAL_SEND here would silently deliver nothing.
+    expect(mocks.createClientClaimInviteDelivery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rawToken: 'token_2',
+        resendMode: 'RESEND',
+      }),
+    )
 
     expect(result).toEqual({
       ok: true,
@@ -649,7 +680,8 @@ describe('POST /api/v1/pro/bookings/[id]/invite', () => {
       data: {
         invite: {
           id: 'invite_1',
-          token: null,
+          // The freshly rotated token, never the null legacy column.
+          token: 'token_2',
           status: ProClientInviteStatus.PENDING,
           invitedName: 'Tori Morales',
           invitedEmail: 'tori@example.com',
@@ -657,21 +689,36 @@ describe('POST /api/v1/pro/bookings/[id]/invite', () => {
           preferredContactMethod: ContactMethod.EMAIL,
         },
         inviteDelivery: {
-          attempted: false,
-          queued: false,
-          href: null,
+          attempted: true,
+          queued: true,
+          href: '/claim/token_2',
         },
       },
     })
   })
 
-  it('does not attempt delivery for a revoked invite', async () => {
-    mocks.upsertClientClaimLink.mockResolvedValueOnce(
-      makeInvite({
-        status: ProClientInviteStatus.REVOKED,
-        revokedAt: new Date('2026-04-13T20:00:00.000Z'),
-      }),
+  // Honesty half: a dispatch that collapsed into an existing send (an exact
+  // retry of the SAME token) must not be reported as queued.
+  it('reports queued false when the dispatch collapsed into an existing send', async () => {
+    mocks.createClientClaimInviteDelivery.mockResolvedValueOnce({
+      ...makeInviteDeliveryResult(),
+      dispatch: { ...makeInviteDeliveryResult().dispatch, created: false },
+    })
+
+    const result = await POST(
+      makeRequest({ name: 'Tori Morales', email: 'tori@example.com' }),
+      { params: { id: 'booking_1' } },
     )
+
+    expect(result).toMatchObject({
+      data: {
+        inviteDelivery: { attempted: true, queued: false, href: '/claim/token_1' },
+      },
+    })
+  })
+
+  it('returns 409 for a revoked claim link rather than a 200 that sent nothing', async () => {
+    mocks.issueClaimLinkForBooking.mockResolvedValueOnce({ kind: 'revoked' })
 
     const result = await POST(
       makeRequest({
@@ -684,33 +731,70 @@ describe('POST /api/v1/pro/bookings/[id]/invite', () => {
     )
 
     expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
+    expect(mocks.jsonFail).toHaveBeenCalledWith(
+      409,
+      'This client’s claim link was revoked.',
+      { code: 'REVOKED' },
+    )
+    expect(result).toMatchObject({ ok: false, status: 409, code: 'REVOKED' })
+  })
 
-    expect(result).toEqual({
-      ok: true,
-      status: 200,
-      data: {
-        invite: {
-          id: 'invite_1',
-          token: 'token_1',
-          status: ProClientInviteStatus.REVOKED,
-          invitedName: 'Tori Morales',
-          invitedEmail: 'tori@example.com',
-          invitedPhone: null,
-          preferredContactMethod: ContactMethod.EMAIL,
-        },
-        inviteDelivery: {
-          attempted: false,
-          queued: false,
-          href: null,
-        },
+  it('returns 409 when the client has already claimed their profile', async () => {
+    mocks.issueClaimLinkForBooking.mockResolvedValueOnce({
+      kind: 'already_claimed',
+    })
+
+    const result = await POST(
+      makeRequest({
+        name: 'Tori Morales',
+        email: 'tori@example.com',
+      }),
+      {
+        params: { id: 'booking_1' },
       },
+    )
+
+    expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
+    expect(mocks.jsonFail).toHaveBeenCalledWith(
+      409,
+      'This client has already been claimed.',
+      { code: 'ALREADY_CLAIMED' },
+    )
+    expect(result).toMatchObject({
+      ok: false,
+      status: 409,
+      code: 'ALREADY_CLAIMED',
+    })
+  })
+
+  it('returns 404 when the issuer cannot find the booking', async () => {
+    mocks.issueClaimLinkForBooking.mockResolvedValueOnce({ kind: 'not_found' })
+
+    const result = await POST(
+      makeRequest({
+        name: 'Tori Morales',
+        email: 'tori@example.com',
+      }),
+      {
+        params: { id: 'booking_1' },
+      },
+    )
+
+    expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
+    expect(mocks.jsonFail).toHaveBeenCalledWith(404, 'Booking not found.', {
+      code: 'NOT_FOUND',
+    })
+    expect(result).toMatchObject({
+      ok: false,
+      status: 404,
+      code: 'NOT_FOUND',
     })
   })
 
   it('returns INTERNAL_ERROR when invite creation throws', async () => {
     const error = new Error('invite helper exploded')
 
-    mocks.upsertClientClaimLink.mockRejectedValueOnce(error)
+    mocks.issueClaimLinkForBooking.mockRejectedValueOnce(error)
 
     const consoleErrorSpy = vi
       .spyOn(console, 'error')
@@ -791,7 +875,7 @@ describe('POST /api/v1/pro/bookings/[id]/invite', () => {
 
     expect(result).toBe(limited)
     // The whole point: no token is minted and nothing is queued for delivery.
-    expect(mocks.upsertClientClaimLink).not.toHaveBeenCalled()
+    expect(mocks.issueClaimLinkForBooking).not.toHaveBeenCalled()
     expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
   })
 })
