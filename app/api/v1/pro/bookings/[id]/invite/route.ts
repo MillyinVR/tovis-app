@@ -1,5 +1,5 @@
 // app/api/v1/pro/bookings/[id]/invite/route.ts
-import { ContactMethod, ProClientInviteStatus } from '@prisma/client'
+import { ContactMethod } from '@prisma/client'
 
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { requireProBooking } from '@/app/api/_utils/auth/requireProBooking'
@@ -13,7 +13,7 @@ import {
 } from '@/app/api/_utils/routeContext'
 import { createClientClaimInviteDelivery } from '@/lib/clientActions/createClientClaimInviteDelivery'
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
-import { upsertClientClaimLink } from '@/lib/clients/clientClaimLinks'
+import { issueClaimLinkForBooking } from '@/lib/clients/clientClaimLinks'
 import { asTrimmedString, isRecord } from '@/lib/guards'
 import { safeError, safeLogMeta } from '@/lib/security/logging'
 import type { TenantContext } from '@/lib/tenant/context'
@@ -52,14 +52,14 @@ type BookingInviteContext = {
 
 type ClaimInviteForDelivery = {
   id: string
-  rawToken: string | null
-  status: ProClientInviteStatus
+  rawToken: string
   acceptedAt: Date | null
-  revokedAt: Date | null
   invitedName: string
   invitedEmail: string | null
   invitedPhone: string | null
   preferredContactMethod: ContactMethod | null
+  /** False when the claim token was ROTATED on an existing invite row. */
+  created: boolean
 }
 
 function parsePreferredContactMethod(
@@ -127,21 +127,6 @@ function validateInviteInput(input: NormalizedInviteInput): Response | null {
   return null
 }
 
-function shouldAttemptInviteDelivery(invite: {
-  status: ProClientInviteStatus
-  acceptedAt: Date | null
-  revokedAt: Date | null
-  rawToken: string | null
-}): invite is typeof invite & { rawToken: string } {
-  return (
-    invite.status === ProClientInviteStatus.PENDING &&
-    invite.acceptedAt == null &&
-    invite.revokedAt == null &&
-    typeof invite.rawToken === 'string' &&
-    invite.rawToken.trim().length > 0
-  )
-}
-
 async function maybeQueueInviteDelivery(args: {
   professionalId: string
   actorUserId: string | null
@@ -149,15 +134,20 @@ async function maybeQueueInviteDelivery(args: {
   booking: BookingInviteContext
   invite: ClaimInviteForDelivery
 }): Promise<InviteDeliverySummary> {
-  if (!shouldAttemptInviteDelivery(args.invite)) {
+  // issueClaimLinkForBooking has already refused a revoked link and an
+  // already-claimed client, and the row it hands back was just written PENDING
+  // with a fresh token — so acceptedAt is the only invite state left to check.
+  // It should be unreachable (accepting an invite claims the client profile in
+  // the same transaction), but if it ever is reached, say so honestly rather
+  // than texting a claim link for an invite that has already been used. The
+  // rotated token still rides the response, so the pro is not left empty-handed.
+  if (args.invite.acceptedAt != null) {
     return {
       attempted: false,
       queued: false,
       href: null,
     }
   }
-
-  const rawToken = args.invite.rawToken
 
   try {
     const delivery = await createClientClaimInviteDelivery({
@@ -166,18 +156,21 @@ async function maybeQueueInviteDelivery(args: {
       clientId: args.booking.clientId,
       bookingId: args.booking.id,
       inviteId: args.invite.id,
-      rawToken,
+      rawToken: args.invite.rawToken,
       invitedName: args.invite.invitedName,
       invitedEmail: args.invite.invitedEmail,
       invitedPhone: args.invite.invitedPhone,
       preferredContactMethod: args.invite.preferredContactMethod,
       issuedByUserId: args.actorUserId,
       recipientUserId: args.booking.client?.userId ?? null,
+      // A rotated invite needs a fresh send cycle; INITIAL_SEND would collapse
+      // into the first invite's idempotency key and deliver nothing.
+      resendMode: args.invite.created ? 'INITIAL_SEND' : 'RESEND',
     })
 
     return {
       attempted: true,
-      queued: true,
+      queued: delivery.dispatch.created,
       href: delivery.link.href,
     }
   } catch (error: unknown) {
@@ -263,15 +256,48 @@ export async function POST(request: Request, ctx: RouteContext) {
     })
     if (limited) return limited
 
-    const invite = await upsertClientClaimLink({
-      professionalId: auth.professionalId,
-      clientId: booking.clientId,
+    // ROTATE, never upsert. `upsertClientClaimLink` returns an unchanged
+    // existing row on a repeat invite, and its rawToken then comes from the
+    // deprecated plaintext `ProClientInvite.token` column — null on every modern
+    // row. That made a second invite for the same booking a DOUBLE silent
+    // failure: nothing was sent (no token to deliver) and the pro was handed no
+    // link to pass on by hand either, behind a 200. Rotating gives this door the
+    // same contract as its booking-less sibling — a fresh working token every
+    // time, plus `created: false` so the delivery below opens a new send cycle
+    // instead of collapsing into the first invite's idempotency key.
+    //
+    // Rotation invalidates the previously delivered link, which is why it may
+    // only happen below the per-(pro, client) ceiling enforced above: every call
+    // that kills a live link must also queue its replacement.
+    const issued = await issueClaimLinkForBooking({
       bookingId: booking.id,
-      invitedName: input.name,
-      invitedEmail: input.email,
-      invitedPhone: input.phone,
-      preferredContactMethod: input.preferredContactMethod,
+      // Contact comes from the request body, not the client profile: a pro can
+      // invite at an address the profile does not carry yet.
+      contact: {
+        invitedName: input.name,
+        invitedEmail: input.email,
+        invitedPhone: input.phone,
+        preferredContactMethod: input.preferredContactMethod,
+      },
     })
+
+    if (issued.kind === 'not_found') {
+      return jsonFail(404, 'Booking not found.', { code: 'NOT_FOUND' })
+    }
+
+    if (issued.kind === 'already_claimed') {
+      return jsonFail(409, 'This client has already been claimed.', {
+        code: 'ALREADY_CLAIMED',
+      })
+    }
+
+    if (issued.kind === 'revoked') {
+      return jsonFail(409, 'This client’s claim link was revoked.', {
+        code: 'REVOKED',
+      })
+    }
+
+    const invite = issued.invite
 
     const inviteDelivery = await maybeQueueInviteDelivery({
       professionalId: auth.professionalId,
@@ -280,18 +306,19 @@ export async function POST(request: Request, ctx: RouteContext) {
       booking,
       invite: {
         id: invite.id,
-        rawToken: invite.rawToken,
-        status: invite.status,
+        rawToken: issued.rawToken,
         acceptedAt: invite.acceptedAt,
-        revokedAt: invite.revokedAt,
         invitedName: invite.invitedName,
         invitedEmail: invite.invitedEmail,
         invitedPhone: invite.invitedPhone,
         preferredContactMethod: invite.preferredContactMethod,
+        created: issued.created,
       },
     })
 
-    // Claim invite enqueued — deliver the email/SMS link now.
+    // Claim invite enqueued — deliver the email/SMS link now. Unconditional on
+    // purpose: `queued: false` can also mean a dispatch row already existed and
+    // has not drained yet, and the kick is what gets THAT one moving.
     kickNotificationDrain()
 
     return jsonOk(
@@ -300,9 +327,9 @@ export async function POST(request: Request, ctx: RouteContext) {
           id: invite.id,
 
           // Token is returned so the caller can display/share the claim link
-          // immediately. For new invites, this is the non-persisted raw token;
+          // immediately. Always the non-persisted raw token from this issuance;
           // ProClientInvite stores tokenHash instead.
-          token: invite.rawToken,
+          token: issued.rawToken,
 
           status: invite.status,
           invitedName: invite.invitedName,

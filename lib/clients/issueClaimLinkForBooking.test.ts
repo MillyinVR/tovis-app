@@ -122,7 +122,7 @@ describe('issueClaimLinkForBooking', () => {
     const result = await issueClaimLinkForBooking({ bookingId: 'booking_1' })
 
     expect(result.kind).toBe('ok')
-    expect(result).toMatchObject({ rawToken: 'raw-token-123' })
+    expect(result).toMatchObject({ rawToken: 'raw-token-123', created: true })
     expect(mocks.prisma.proClientInvite.create).toHaveBeenCalledTimes(1)
     expect(mocks.prisma.proClientInvite.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -156,7 +156,9 @@ describe('issueClaimLinkForBooking', () => {
     const result = await issueClaimLinkForBooking({ bookingId: 'booking_1' })
 
     expect(result.kind).toBe('ok')
-    expect(result).toMatchObject({ rawToken: 'raw-token-123' })
+    // created: false is the flag a delivering caller reads to send on a FRESH
+    // cycle — a rotation has already invalidated the link that went out before.
+    expect(result).toMatchObject({ rawToken: 'raw-token-123', created: false })
     expect(mocks.prisma.proClientInvite.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: 'invite_existing' },
@@ -193,6 +195,78 @@ describe('issueClaimLinkForBooking', () => {
           invitedEmail: null,
           invitedPhone: '+15555550100',
           preferredContactMethod: ContactMethod.SMS,
+        }),
+      }),
+    )
+  })
+
+  // The pro-facing door types the contact into its request body; a pro can
+  // invite at an address the client profile does not carry yet, so a supplied
+  // contact must WIN over the derived one rather than be quietly ignored.
+  it('uses a caller-supplied contact instead of the client profile', async () => {
+    mocks.prisma.booking.findUnique.mockResolvedValue(makeBooking())
+    mocks.prisma.proClientInvite.findUnique.mockResolvedValue(null)
+    mocks.prisma.proClientInvite.create.mockResolvedValue({ id: 'invite_new' })
+
+    const result = await issueClaimLinkForBooking({
+      bookingId: 'booking_1',
+      contact: {
+        invitedName: '  Tori M.  ',
+        invitedEmail: null,
+        invitedPhone: '  +15555550199  ',
+        preferredContactMethod: ContactMethod.SMS,
+      },
+    })
+
+    expect(result.kind).toBe('ok')
+    expect(mocks.prisma.proClientInvite.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          invitedName: 'Tori M.',
+          // Not tori@example.com from the profile.
+          invitedEmail: null,
+          invitedPhone: '+15555550199',
+          preferredContactMethod: ContactMethod.SMS,
+        }),
+      }),
+    )
+  })
+
+  it('refuses a supplied contact with no channel rather than minting an undeliverable link', async () => {
+    mocks.prisma.booking.findUnique.mockResolvedValue(makeBooking())
+    mocks.prisma.proClientInvite.findUnique.mockResolvedValue(null)
+
+    await expect(
+      issueClaimLinkForBooking({
+        bookingId: 'booking_1',
+        contact: {
+          invitedName: 'Tori M.',
+          invitedEmail: null,
+          invitedPhone: null,
+          preferredContactMethod: null,
+        },
+      }),
+    ).rejects.toThrow(
+      'clientClaimLinks: invitedEmail or invitedPhone is required.',
+    )
+
+    expect(mocks.prisma.proClientInvite.create).not.toHaveBeenCalled()
+    expect(mocks.prisma.proClientInvite.update).not.toHaveBeenCalled()
+  })
+
+  it('still derives the contact from the profile when none is supplied', async () => {
+    mocks.prisma.booking.findUnique.mockResolvedValue(makeBooking())
+    mocks.prisma.proClientInvite.findUnique.mockResolvedValue(null)
+    mocks.prisma.proClientInvite.create.mockResolvedValue({ id: 'invite_new' })
+
+    await issueClaimLinkForBooking({ bookingId: 'booking_1', contact: null })
+
+    expect(mocks.prisma.proClientInvite.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          invitedName: 'Tori Morales',
+          invitedEmail: 'tori@example.com',
+          preferredContactMethod: ContactMethod.EMAIL,
         }),
       }),
     )

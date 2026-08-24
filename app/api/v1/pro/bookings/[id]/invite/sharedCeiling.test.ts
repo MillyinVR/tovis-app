@@ -31,7 +31,7 @@ const mocks = vi.hoisted(() => ({
   bookingFindFirst: vi.fn(),
   bookingCount: vi.fn(),
   clientProfileFindUnique: vi.fn(),
-  upsertClientClaimLink: vi.fn(),
+  issueClaimLinkForBooking: vi.fn(),
   issueClaimLinkForClient: vi.fn(),
   createClientClaimInviteDelivery: vi.fn(),
 }))
@@ -55,7 +55,7 @@ vi.mock('@/lib/prisma', () => ({
 }))
 
 vi.mock('@/lib/clients/clientClaimLinks', () => ({
-  upsertClientClaimLink: mocks.upsertClientClaimLink,
+  issueClaimLinkForBooking: mocks.issueClaimLinkForBooking,
   issueClaimLinkForClient: mocks.issueClaimLinkForClient,
 }))
 
@@ -228,12 +228,18 @@ describe('claim-invite ceiling, through the real limiter', () => {
       preferredContactMethod: ContactMethod.SMS,
     }
 
-    mocks.upsertClientClaimLink.mockResolvedValue(invite)
-    mocks.issueClaimLinkForClient.mockResolvedValue({
-      kind: 'issued',
+    // Both doors now go through an issue* helper, which returns the same
+    // discriminated shape: 'ok' plus the raw token and whether the row was
+    // minted or rotated.
+    const issued = {
+      kind: 'ok',
       rawToken: 'token_1',
+      created: true,
       invite,
-    })
+    }
+
+    mocks.issueClaimLinkForBooking.mockResolvedValue(issued)
+    mocks.issueClaimLinkForClient.mockResolvedValue(issued)
     mocks.createClientClaimInviteDelivery.mockResolvedValue({
       plan: { idempotency: { baseKey: 'b', sendKey: 's' } },
       link: { target: 'CLAIM', href: '/claim/token_1', tokenIncluded: true },
