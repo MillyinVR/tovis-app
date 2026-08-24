@@ -54,6 +54,12 @@ const AUTH_CRITICAL_BUCKETS = [
   // which is precisely when a brute-force against a token id is cheapest.
   'auth:session-handoff:issue',
   'auth:session-handoff:exchange',
+  // "Become a pro". Same rule as the hand-off above: it MINTS a session
+  // credential (an ACTIVE token replacing the caller's client session) and in
+  // the same transaction grants the capability to take bookings and money. A
+  // `redis-only` bucket fails OPEN, so during an outage the one endpoint that
+  // hands out pro access would be the one with no ceiling at all.
+  'pro:upgrade',
 ] as const satisfies readonly RateLimitBucket[]
 
 function getBuckets(): RateLimitBucket[] {
