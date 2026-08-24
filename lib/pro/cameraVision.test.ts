@@ -326,6 +326,182 @@ describe('critiqueSessionSet', () => {
     expect(critique.photos[0]?.retakeTip).toBeNull()
   })
 
+  it('keeps the JSON contract the shipped iOS build decodes', async () => {
+    mocks.create.mockResolvedValue(
+      textMessage({
+        overall: 'x',
+        strengths: [],
+        photos: [{ index: 1, verdict: 'keep', note: 'x', retakeTip: '' }],
+      }),
+    )
+
+    await critiqueSessionSet({ photos: critiquePhotos(1) })
+
+    const [params] = mocks.create.mock.calls[0] ?? []
+    const schema = params.output_config.format.schema
+    // Shape only — the prompt inside `description` is free to change, the field
+    // names, verdicts and caps are not: ProSetCritique on iOS decodes these.
+    expect(schema.additionalProperties).toBe(false)
+    expect(schema.required).toEqual(['overall', 'strengths', 'photos'])
+    expect(Object.keys(schema.properties)).toEqual([
+      'overall',
+      'strengths',
+      'photos',
+    ])
+    expect(schema.properties.strengths.maxItems).toBe(4)
+
+    const photo = schema.properties.photos.items
+    expect(photo.additionalProperties).toBe(false)
+    expect(photo.required).toEqual(['index', 'verdict', 'note', 'retakeTip'])
+    expect(Object.keys(photo.properties)).toEqual([
+      'index',
+      'verdict',
+      'note',
+      'retakeTip',
+    ])
+    expect(photo.properties.verdict.enum).toEqual([
+      'portfolio',
+      'keep',
+      'retake',
+    ])
+    expect(photo.properties.index.minimum).toBe(1)
+  })
+
+  it('asks for the three beats, strength first', async () => {
+    mocks.create.mockResolvedValue(
+      textMessage({
+        overall: 'x',
+        strengths: [],
+        photos: [{ index: 1, verdict: 'keep', note: 'x', retakeTip: '' }],
+      }),
+    )
+
+    await critiqueSessionSet({ photos: critiquePhotos(1) })
+
+    const [params] = mocks.create.mock.calls[0] ?? []
+    const instructions = params.messages[0].content.at(-1).text
+
+    expect(instructions).toContain('1. STRENGTH')
+    expect(instructions).toContain('2. CHANGE')
+    expect(instructions).toContain('3. CLOSE')
+    // The close is what the fix buys, not a second compliment — the beat that
+    // turns a compliment sandwich back into a review.
+    expect(instructions).toContain('A consequence, not a compliment.')
+    // Beat 2 is spelled out per verdict, so a hero shot is not given a nitpick
+    // just to fill the shape.
+    expect(instructions).toContain('On a retake:')
+    expect(instructions).toContain('On a keep:')
+    expect(instructions).toContain('On a portfolio shot:')
+  })
+
+  it('refuses a strength the pro cannot check, and lets there be none', async () => {
+    mocks.create.mockResolvedValue(
+      textMessage({
+        overall: 'x',
+        strengths: [],
+        photos: [{ index: 1, verdict: 'keep', note: 'x', retakeTip: '' }],
+      }),
+    )
+
+    await critiqueSessionSet({ photos: critiquePhotos(1) })
+
+    const [params] = mocks.create.mock.calls[0] ?? []
+    const system = params.system
+    const instructions = params.messages[0].content.at(-1).text
+
+    expect(system).toContain('never flatter')
+    expect(instructions).toContain('name something visible in that frame')
+    for (const banned of [
+      'great energy',
+      'lovely vibe',
+      'stunning',
+      'beautiful work',
+      'you nailed it',
+    ]) {
+      expect(instructions).toContain(banned)
+    }
+    // The escape hatch is what stops "strength first" manufacturing one.
+    expect(instructions).toContain('lead with the problem and skip beat 1')
+    expect(instructions).toContain('Never invent one to fill the shape')
+    // Praise the photograph, never the people in front of or behind it.
+    expect(instructions).toContain(
+      'Praise the photograph, never the professional and never the client',
+    )
+    // North-star hard line: no scores anywhere the pro shoots.
+    expect(instructions).toContain('No scores, no grades')
+  })
+
+  it('keeps a retake reading as a retake', async () => {
+    mocks.create.mockResolvedValue(
+      textMessage({
+        overall: 'x',
+        strengths: [],
+        photos: [{ index: 1, verdict: 'retake', note: 'x', retakeTip: 'y' }],
+      }),
+    )
+
+    await critiqueSessionSet({ photos: critiquePhotos(1) })
+
+    const [params] = mocks.create.mock.calls[0] ?? []
+    const instructions = params.messages[0].content.at(-1).text
+
+    expect(instructions).toContain('A retake still has to read as a retake')
+    expect(instructions).toContain('point at the reshoot')
+    for (const softener of ['still usable', 'fine as is', 'could go either way']) {
+      expect(instructions).toContain(softener)
+    }
+    // retakeTip is the accent-coloured line under the note on the iOS card —
+    // it stays a bare instruction so the fix is never wrapped in praise.
+    expect(instructions).toContain('with no praise in it at all')
+    // The softening that actually loses a photo is the verdict moving, not the
+    // prose: a warmer review must not promote a retake to a keep.
+    expect(instructions).toContain('The verdict is a decision, not a kindness')
+    expect(instructions).toContain(
+      'the strength is the reason to go back and get it, not a reason to keep it',
+    )
+  })
+
+  it('asks for less text than it will silently cut off', async () => {
+    const long = 'word '.repeat(200)
+    mocks.create.mockResolvedValue(
+      textMessage({
+        overall: long,
+        strengths: [long],
+        photos: [
+          { index: 1, verdict: 'retake', note: long, retakeTip: long },
+        ],
+      }),
+    )
+
+    const critique = await critiqueSessionSet({ photos: critiquePhotos(1) })
+
+    // The caps the iOS card was built against, unchanged.
+    expect(critique.overall).toHaveLength(400)
+    expect(critique.strengths[0]).toHaveLength(160)
+    expect(critique.photos[0]?.note).toHaveLength(200)
+    expect(critique.photos[0]?.retakeTip).toHaveLength(160)
+
+    // …and the prompt names the same cut length, under a lower target, so a
+    // three-beat note is never truncated in the middle of its last beat.
+    const [params] = mocks.create.mock.calls[0] ?? []
+    const instructions = params.messages[0].content.at(-1).text
+    expect(instructions).toContain(
+      'aim for 160 characters — anything past 200 is cut off mid-word',
+    )
+    expect(instructions).toContain(
+      'aim for 120 characters — anything past 160 is cut off mid-word',
+    )
+    // Asserted as the whole sentence, not the fragment: an earlier wording put
+    // the word "each" after the closing bracket and read as gibberish, which a
+    // substring match on the budget alone went straight past.
+    expect(instructions).toContain(
+      'Per strength: aim for 110 characters — anything past 160 is cut off mid-word.',
+    )
+    expect(instructions).toContain(
+      'aim for 260 characters — anything past 400 is cut off mid-word',
+    )
+  })
+
   it('rejects a critique with no usable photo notes', async () => {
     mocks.create.mockResolvedValue(
       textMessage({ overall: 'x', strengths: [], photos: [] }),
