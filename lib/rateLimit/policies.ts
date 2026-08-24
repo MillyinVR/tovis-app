@@ -32,6 +32,7 @@ export type RateLimitBucket =
   | 'pro:camera:look-brief'
   | 'pro:camera:set-critique'
   | 'pro:client-claim-invite'
+  | 'pro:upgrade'
   | 'google:proxy'
   | 'pro-license:verify'
   | 'messages:send'
@@ -299,6 +300,18 @@ export const RATE_LIMITS: Record<RateLimitBucket, RateLimitConfig> = {
   },
   // Keyed per (pro, client) so a pro can batch-invite many DIFFERENT clients
   // (a migrated list) while no single client can be spammed with claim links.
+  // "Become a pro" — a CLIENT account adding a pro workspace. Keyed per USER,
+  // not per IP: the expensive part is the CA BreEZe licence lookup, and the
+  // thing worth bounding is one account retrying it, not a shared NAT. Low
+  // ceiling because a successful upgrade is once-per-lifetime and every retry
+  // past the first few means the pro is stuck on a refusal, not racing us.
+  // auth-critical so a Redis outage degrades to in-memory rather than open.
+  'pro:upgrade': {
+    limit: 8,
+    windowSeconds: 60 * 60,
+    prefix: 'rl:pro:upgrade',
+    mode: 'auth-critical',
+  },
   'pro:client-claim-invite': {
     limit: 5,
     windowSeconds: 60 * 60,

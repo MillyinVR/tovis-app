@@ -60,6 +60,15 @@ import {
 } from '@/lib/licensing/caDcaLicense'
 import { validateSmsDestinationCountry } from '@/lib/smsCountryPolicy'
 import {
+  buildProfessionalProfileCreateData,
+  createManualLicenseDocData,
+  isAnyProfessionType,
+  parseMaybeDate,
+  resolveProProfileSetup,
+  type ResolvedProProfileSetup,
+} from '@/lib/pro/proProfileSetup'
+import { defaultWorkingHours } from '@/lib/scheduling/workingHoursValidation'
+import {
   logAuthEvent,
   captureAuthException,
 } from '@/lib/observability/authEvents'
@@ -231,29 +240,8 @@ function isLocationPayload(v: unknown): v is SignupLocation {
   return false
 }
 
-function defaultWorkingHours() {
-  return {
-    mon: { enabled: true, start: '09:00', end: '17:00' },
-    tue: { enabled: true, start: '09:00', end: '17:00' },
-    wed: { enabled: true, start: '09:00', end: '17:00' },
-    thu: { enabled: true, start: '09:00', end: '17:00' },
-    fri: { enabled: true, start: '09:00', end: '17:00' },
-    sat: { enabled: false, start: '09:00', end: '17:00' },
-    sun: { enabled: false, start: '09:00', end: '17:00' },
-  }
-}
 
 
-function parseMaybeDate(v: string | null): Date | null {
-  if (!v) return null
-  const d = new Date(v)
-  return Number.isFinite(d.getTime()) ? d : null
-}
-
-function normalizeLicenseNumber(v: unknown) {
-  const raw = typeof v === 'string' ? v : ''
-  return raw.trim().toUpperCase().replace(/\s+/g, '')
-}
 
 
 /** Accept number or string, return finite number or null */
@@ -265,55 +253,9 @@ function parseNumber(v: unknown): number | null {
   return Number.isFinite(n) ? n : null
 }
 
-function parseSupabaseRef(
-  input: string,
-): { bucket: string; path: string } | null {
-  const s = input.trim()
-  if (!s.startsWith('supabase://')) return null
-  const rest = s.slice('supabase://'.length)
-  const idx = rest.indexOf('/')
-  if (idx <= 0) return null
-  const bucket = rest.slice(0, idx).trim()
-  const path = rest.slice(idx + 1).trim()
-  if (!bucket || !path) return null
-  return { bucket, path }
-}
 
-function looksLikeLicenseDocRef(s: string) {
-  if (!s) return false
-  if (s.startsWith('http://') || s.startsWith('https://')) return true
-  if (s.startsWith('supabase://')) return Boolean(parseSupabaseRef(s))
-  if (s.startsWith('/')) return true
-  return false
-}
 
-function validateLicenseDocUrl(
-  input: string,
-): { ok: true; value: string } | { ok: false; error: string } {
-  const s = input.trim()
-  if (!looksLikeLicenseDocRef(s)) {
-    return { ok: false, error: 'Invalid license document reference.' }
-  }
 
-  const ref = parseSupabaseRef(s)
-  if (ref && ref.bucket !== BUCKETS.mediaPrivate) {
-    return {
-      ok: false,
-      error: 'Invalid license document (must be private upload).',
-    }
-  }
-
-  return { ok: true, value: s }
-}
-
-function createManualLicenseDocData(urlOrRef: string) {
-  return {
-    type: VerificationDocumentType.LICENSE,
-    label: 'License (manual review)',
-    url: urlOrRef,
-    status: VerificationStatus.PENDING,
-  }
-}
 
 
 function readPrismaUniqueTargets(err: unknown): string[] {
@@ -354,266 +296,13 @@ function targetsContainHandle(targets: string[]): boolean {
    Profession rules
 ========================================================= */
 
-const ALL_PROFESSIONS: ProfessionType[] = [
-  'COSMETOLOGIST',
-  'BARBER',
-  'ESTHETICIAN',
-  'MANICURIST',
-  'HAIRSTYLIST',
-  'ELECTROLOGIST',
-  'MASSAGE_THERAPIST',
-  'MAKEUP_ARTIST',
-]
 
-const ALL_PROFESSIONS_SET = new Set<string>(ALL_PROFESSIONS)
 
-function isAnyProfessionType(v: string): v is ProfessionType {
-  return ALL_PROFESSIONS_SET.has(v)
-}
 
 // Licensure requirement is now per (profession, state) — see
 // lib/licensing/licenseRequirement.ts. requiresLicense()/supportsOnlineVerification()
 // replace the old global CA-only set.
 
-/* =========================================================
-   CA DCA (BreEZe) verification
-========================================================= */
-
-type CaVerifyResult =
-  | {
-      ok: true
-      verified: true
-      statusCode: string | null
-      expDate: string | null
-      raw: Prisma.InputJsonValue
-      source: 'CA_DCA_BREEZE'
-    }
-  | {
-      ok: true
-      verified: false
-      statusCode: string | null
-      expDate: string | null
-      raw: Prisma.InputJsonValue
-      source: 'CA_DCA_BREEZE'
-    }
-  | {
-      ok: false
-      error: string
-      reason:
-        | 'TIMEOUT'
-        | 'UNAVAILABLE'
-        | 'CONFIG'
-        | 'UNKNOWN'
-        // A 200 we could not read as a license record (empty body, a 200-shaped
-        // gateway error page, schema drift). Not evidence — degrade, never reject.
-        | 'UNREADABLE'
-        // A record came back CURRENT under a different number. Ambiguous, so a
-        // human compares the two rather than the signup being refused.
-        | 'NUMBER_MISMATCH'
-      /** Extra context persisted for whoever picks up the manual review. */
-      details?: Prisma.JsonObject
-    }
-
-let cachedTypeMap: Record<string, string> | null = null
-let cachedTypeExp = 0
-
-async function getCaDcaTypeMap(): Promise<Record<string, string>> {
-  const now = Date.now()
-  if (cachedTypeMap && now < cachedTypeExp) return cachedTypeMap
-
-  const APP_ID = envOrNull('DCA_SEARCH_APP_ID')
-  const APP_KEY = envOrNull('DCA_SEARCH_APP_KEY')
-  if (!APP_ID || !APP_KEY) {
-    throw new Error(
-      'DCA API is not configured (missing DCA_SEARCH_APP_ID / DCA_SEARCH_APP_KEY).',
-    )
-  }
-
-  const url =
-    'https://iservices.dca.ca.gov/api/v1/search/v1/breezeDetailService/getAllLicenseTypes'
-  const res = await fetch(url, {
-    headers: { APP_ID, APP_KEY },
-    cache: 'no-store',
-    signal: AbortSignal.timeout(10000),
-  })
-  const data: unknown = await res.json().catch(() => ({}))
-
-  if (!res.ok) {
-    const msg =
-      isRecord(data) &&
-      (typeof data.message === 'string' || typeof data.error === 'string')
-        ? String(data.message ?? data.error)
-        : 'DCA license types lookup failed.'
-    throw new Error(msg)
-  }
-
-  const rows = isRecord(data) ? asArray(data.getAllLicenseTypes) : []
-  const allTypes: unknown[] = rows.flatMap((r) => {
-    if (!isRecord(r)) return []
-    return asArray(r.licenseTypes)
-  })
-
-  const pick = (needle: string) => {
-    const need = needle.toUpperCase()
-    const hit = allTypes.find((t) => {
-      if (!isRecord(t)) return false
-      const long = String(t.licenseLongName ?? '').toUpperCase()
-      const pub = String(t.publicNameDesc ?? '').toUpperCase()
-      return long.includes(need) || pub.includes(need)
-    })
-    if (!hit || !isRecord(hit)) return null
-    const code = hit.clientCode
-    return typeof code === 'string' && code.trim() ? code.trim() : null
-  }
-
-  const map: Record<string, string> = {
-    COSMETOLOGIST: pick('COSMETOLOG') ?? '',
-    BARBER: pick('BARBER') ?? '',
-    ESTHETICIAN: pick('ESTHETIC') ?? '',
-    MANICURIST: pick('MANICUR') ?? '',
-    HAIRSTYLIST: pick('HAIRSTYL') ?? '',
-    ELECTROLOGIST: pick('ELECTRO') ?? '',
-  }
-
-  const missing = Object.entries(map)
-    .filter(([, v]) => !v)
-    .map(([k]) => k)
-
-  if (missing.length) {
-    throw new Error(
-      `Could not resolve DCA licType codes for: ${missing.join(', ')}.`,
-    )
-  }
-
-  cachedTypeMap = map
-  cachedTypeExp = now + 6 * 60 * 60 * 1000 // 6 hours
-  return map
-}
-
-async function verifyCaBbcLicense(args: {
-  professionType: ProfessionType
-  licenseNumber: string
-}): Promise<CaVerifyResult> {
-  try {
-    const APP_ID = envOrNull('DCA_SEARCH_APP_ID')
-    const APP_KEY = envOrNull('DCA_SEARCH_APP_KEY')
-    if (!APP_ID || !APP_KEY) {
-      return {
-        ok: false,
-        error: 'License verification is not configured.',
-        reason: 'CONFIG',
-      }
-    }
-    const typeMap = await getCaDcaTypeMap()
-    const licType = typeMap[args.professionType]
-    if (!licType) {
-      return {
-        ok: false,
-        error: 'Unsupported CA license type.',
-        reason: 'UNKNOWN',
-      }
-    }
-
-    const url = new URL(
-      'https://iservices.dca.ca.gov/api/v1/search/v1/licenseSearchService/getLicenseNumberSearch',
-    )
-    url.searchParams.set('licType', licType)
-    // BreEZe keys on the numeric portion; the letter prefix printed on the
-    // physical license is not part of what it searches on.
-    url.searchParams.set('licNumber', dcaLicenseQueryNumber(args.licenseNumber))
-
-    const res = await fetch(url.toString(), {
-      headers: { APP_ID, APP_KEY },
-      cache: 'no-store',
-      signal: AbortSignal.timeout(10000),
-    })
-    const data: unknown = await res.json().catch(() => ({}))
-
-    if (!res.ok) {
-      const msg =
-        isRecord(data) &&
-        (typeof data.message === 'string' || typeof data.error === 'string')
-          ? String(data.message ?? data.error)
-          : 'License lookup failed.'
-      return {
-        ok: false,
-        error: msg,
-        reason: 'UNAVAILABLE',
-      }
-    }
-
-    const record = parseDcaLicenseRecord(data)
-
-    // A 200 we cannot read is NOT a finding about this license. An empty body,
-    // a gateway error page served with status 200, or BreEZe changing its
-    // schema all land here — and none of them says a pro is unlicensed. Send it
-    // down the same manual-review path as a network failure rather than
-    // refusing a legitimate signup on the strength of an unparseable response.
-    if (!record) {
-      return {
-        ok: false,
-        error: 'DCA returned no readable license record.',
-        reason: 'UNREADABLE',
-        details: { dcaRecordParsed: false },
-      }
-    }
-
-    // Match first: a record filed under a different number tells us nothing
-    // about THIS pro's license, so its status must not condemn them either.
-    //
-    // Note we deliberately do NOT persist the raw payload here — it is the
-    // government record of a DIFFERENT licensee. The admin gets both numbers
-    // and the status, which is what the comparison actually needs.
-    if (!licenseNumbersMatch(record.licNumber ?? '', args.licenseNumber)) {
-      return {
-        ok: false,
-        error: 'The license number did not match the record DCA returned.',
-        reason: 'NUMBER_MISMATCH',
-        details: {
-          dcaRecordParsed: true,
-          dcaReturnedLicenseNumber: record.licNumber,
-          submittedLicenseNumber: args.licenseNumber,
-          statusCode: record.statusCode,
-        },
-      }
-    }
-
-    // Prisma wants InputJsonValue for create/update inputs.
-    // fetch().json() is JSON-safe; stringify/parse guarantees no Date/functions/undefined.
-    const rawJson: Prisma.InputJsonValue = JSON.parse(
-      JSON.stringify(data ?? {}),
-    )
-
-    // This pro's own record, read cleanly. Only here is `verified: false`
-    // definitive — it is the one case that still hard-rejects at signup.
-    return {
-      ok: true,
-      verified: isCurrentStatusCode(record.statusCode),
-      statusCode: record.statusCode,
-      expDate: record.expDate,
-      raw: rawJson,
-      source: 'CA_DCA_BREEZE',
-    }
-  } catch (e: unknown) {
-    if (e instanceof Error && e.name === 'AbortError') {
-      return {
-        ok: false,
-        error: 'DCA verification timed out.',
-        reason: 'TIMEOUT',
-      }
-    }
-
-    const msg = e instanceof Error ? e.message : 'Verification error.'
-    return {
-      ok: false,
-      error: msg,
-      reason:
-        msg.includes('not configured') || msg.includes('missing')
-          ? 'CONFIG'
-          : 'UNAVAILABLE',
-    }
-  }
-}
 
 /* =========================================================
    Route
@@ -871,208 +560,44 @@ export async function POST(request: Request) {
 
     if (smsPhoneDayRes) return smsPhoneDayRes
 
-    // pro profession
-    const professionRaw = pickUpper(body.professionType)
-    let profession: ProfessionType | null = null
+    // ── Pro fields ────────────────────────────────────────────────────────
+    // Validation, licence verification and manual-review staging all live in
+    // lib/pro/proProfileSetup so the "become a pro" upgrade door (which adds a
+    // pro workspace to an EXISTING account) runs the identical checks. Only the
+    // refusal SHAPE differs, and that is translated back to jsonFail below.
+    let proSetup: ResolvedProProfileSetup | null = null
+
     if (role === 'PRO') {
-      if (!professionRaw) {
-        return jsonFail(400, 'Profession is required for pros.', {
-          code: 'PROFESSION_REQUIRED',
+      // Unreachable: the location-enforcement block above already refuses a
+      // PRO whose location is not PRO_SALON/PRO_MOBILE. Kept only to narrow the
+      // union for the resolver, and it echoes that block's code so the two can
+      // never disagree if the order above ever changes.
+      if (signupLocation.kind === 'CLIENT_ZIP') {
+        return jsonFail(400, 'Please confirm your work location.', {
+          code: 'PRO_LOCATION_REQUIRED',
         })
       }
-      if (!isAnyProfessionType(professionRaw)) {
-        return jsonFail(400, 'Invalid profession type.', {
-          code: 'PROFESSION_INVALID',
-        })
+
+      const resolved = await resolveProProfileSetup({
+        professionRaw: pickString(body.professionType),
+        businessNameRaw: pickString(body.businessName),
+        handleRaw: pickString(body.handle),
+        licenseStateRaw: pickString(body.licenseState),
+        licenseNumberRaw: pickString(body.licenseNumber),
+        licenseExpiryRaw: pickString(body.licenseExpiry) ?? null,
+        licenseDocumentUrlRaw: pickString(body.licenseDocumentUrl),
+        mobileRadiusRaw: body.mobileRadiusMiles,
+        location: signupLocation,
+      })
+
+      if (!resolved.ok) {
+        const { status, message, code, extra } = resolved.failure
+        return jsonFail(status, message, { code, ...(extra ?? {}) })
       }
-      profession = professionRaw
+
+      proSetup = resolved.value
     }
 
-    // business name
-    const businessNameRaw = pickString(body.businessName)
-    const businessName =
-      role === 'PRO'
-        ? businessNameRaw?.trim()
-          ? businessNameRaw.trim()
-          : null
-        : null
-
-    // handle
-    const handleRaw = pickString(body.handle)
-    let handleToStore: string | null = null
-    let normalizedHandle: string | null = null
-    if (role === 'PRO' && handleRaw?.trim()) {
-      handleToStore = handleRaw.trim()
-      normalizedHandle = normalizeHandle(handleToStore)
-      if (!normalizedHandle || !isValidHandle(normalizedHandle)) {
-        return jsonFail(400, 'Handle is invalid.', { code: 'HANDLE_INVALID' })
-      }
-      if (isHandleReserved(normalizedHandle)) {
-        return jsonFail(400, 'That handle is reserved.', {
-          code: 'HANDLE_RESERVED',
-        })
-      }
-    }
-
-    // mobile radius
-    let mobileRadiusMiles: number | null = null
-    if (role === 'PRO' && signupLocation.kind === 'PRO_MOBILE') {
-      const miles = parseNumber(body.mobileRadiusMiles)
-      if (miles == null) {
-        return jsonFail(
-          400,
-          'Mobile radius (miles) is required for mobile pros.',
-          { code: 'MOBILE_RADIUS_REQUIRED' },
-        )
-      }
-      if (miles < 1 || miles > 200) {
-        return jsonFail(
-          400,
-          'Please enter a mobile radius between 1 and 200 miles.',
-          { code: 'MOBILE_RADIUS_RANGE' },
-        )
-      }
-      mobileRadiusMiles = Math.round(miles)
-    }
-
-    // license verification + manual follow-up (NEW FLOW)
-    let verificationStatus: VerificationStatus = VerificationStatus.PENDING
-    let licenseVerified = false
-    let licenseStateToStore: string | null = null
-    let licenseNumberToStore: string | null = null
-    let licenseExpiryToStore: Date | null = null
-    let licenseVerifiedAtToStore: Date | null = null
-    let licenseVerifiedSourceToStore: string | null = null
-    let licenseStatusCodeToStore: string | null = null
-
-    // ✅ KEY FIX: never null, only set when we actually have a JSON payload
-    let licenseRawJsonToStore: Prisma.InputJsonValue | undefined = undefined
-
-    let manualLicenseDocUrl: string | null = null
-    let needsManualLicenseUpload = false
-    let manualLicensePendingReview = false
-    let dcaTimedOutAtSignup = false
-
-    // State is mandatory for every pro — it drives the per-state service gate
-    // (loadAllowedServices keys off licenseState), not only license checks.
-    if (role === 'PRO') {
-      const licenseState = pickUpper(body.licenseState)
-      if (!licenseState) {
-        return jsonFail(400, 'Please select the state you’re licensed/operating in.', {
-          code: 'STATE_REQUIRED',
-        })
-      }
-      if (!isUsStateCode(licenseState)) {
-        return jsonFail(400, 'Please select a valid US state.', {
-          code: 'STATE_INVALID',
-        })
-      }
-      licenseStateToStore = licenseState
-
-      // Helper: stage the attestation + manual-review path (optional doc now,
-      // otherwise upload later on the Verification page). Account stays usable.
-      const stageManualReview = (note: string, extra: Prisma.JsonObject) => {
-        const docUrlRaw = pickString(body.licenseDocumentUrl)
-        if (docUrlRaw?.trim()) {
-          const checked = validateLicenseDocUrl(docUrlRaw)
-          if (!checked.ok) return checked.error
-          manualLicenseDocUrl = checked.value
-          manualLicensePendingReview = true
-        } else {
-          needsManualLicenseUpload = true
-        }
-        verificationStatus = VerificationStatus.PENDING
-        licenseVerified = false
-        licenseRawJsonToStore = {
-          note,
-          needsManualUpload: needsManualLicenseUpload,
-          docProvidedAtSignup: Boolean(manualLicenseDocUrl),
-          ...extra,
-        } satisfies Prisma.InputJsonValue
-        return null
-      }
-
-      if (profession && requiresLicense(profession, licenseState)) {
-        const licenseNumber = normalizeLicenseNumber(body.licenseNumber)
-        if (!licenseNumber) {
-          return jsonFail(
-            400,
-            'A license or registration number is required for this profession in your state.',
-            { code: 'LICENSE_REQUIRED' },
-          )
-        }
-        licenseNumberToStore = licenseNumber
-        // Pro-entered expiry (optional at signup; required before approval).
-        // CA online verify overrides this with the official BreEZe date below.
-        licenseExpiryToStore = parseMaybeDate(pickString(body.licenseExpiry) ?? null)
-
-        if (supportsOnlineVerification(profession, licenseState)) {
-          // CA BreEZe online verification (the only auto-verifier today).
-          const v = await verifyCaBbcLicense({
-            professionType: profession,
-            licenseNumber,
-          })
-
-          if (v.ok && v.verified) {
-            verificationStatus = VerificationStatus.APPROVED
-            licenseVerified = true
-            licenseExpiryToStore = parseMaybeDate(v.expDate ?? null)
-            licenseVerifiedAtToStore = new Date()
-            licenseVerifiedSourceToStore = v.source
-            licenseStatusCodeToStore = v.statusCode ?? null
-            licenseRawJsonToStore = v.raw
-          } else if (v.ok && !v.verified) {
-            return jsonFail(400, 'License could not be verified as CURRENT.', {
-              code: 'LICENSE_NOT_VERIFIED',
-              statusCode: v.statusCode ?? null,
-            })
-          } else if (v.reason === 'TIMEOUT') {
-            dcaTimedOutAtSignup = true
-            verificationStatus = VerificationStatus.PENDING
-            licenseVerified = false
-            licenseRawJsonToStore = {
-              note: 'DCA timeout at signup',
-              error: 'AbortError',
-            } satisfies Prisma.InputJsonValue
-          } else {
-            // Everything that is not a clean read of this pro's own record ends
-            // up in front of an admin instead of bouncing the signup.
-            const note =
-              v.reason === 'NUMBER_MISMATCH'
-                ? 'DCA record did not match the submitted license number; manual review required'
-                : v.reason === 'UNREADABLE'
-                  ? 'DCA response was not a readable license record; manual review required'
-                  : 'DCA unavailable at signup; manual follow-up required'
-
-            const err = stageManualReview(note, {
-              error: v.error ?? null,
-              ...(v.details ?? {}),
-            })
-            if (err) return jsonFail(400, err, { code: 'LICENSE_DOC_INVALID' })
-          }
-        } else {
-          // Out-of-state / specialty credential: no online verifier yet →
-          // attestation + async admin review.
-          const err = stageManualReview('Out-of-state/specialty credential; manual review required', {
-            state: licenseState,
-          })
-          if (err) return jsonFail(400, err, { code: 'LICENSE_DOC_INVALID' })
-        }
-      }
-    }
-
-    // handle uniqueness — against the GLOBAL namespace, not just other pros. A
-    // client can hold a handle too, and the looks feed renders both as the same
-    // `@handle`. This is the friendly pre-check; the registry's primary key is
-    // what actually decides, inside the transaction below.
-    if (role === 'PRO' && normalizedHandle) {
-      const available = await isHandleAvailable(normalizedHandle)
-      if (!available) {
-        return jsonFail(400, 'That handle is already taken.', {
-          code: 'HANDLE_IN_USE',
-        })
-      }
-    }
 
     // Claim-link signup: the real person should ADOPT the pro's existing UNCLAIMED
     // ClientProfile (keeping its bookings, aftercare, addresses, and contact)
@@ -1177,140 +702,15 @@ export async function POST(request: Request) {
               : undefined,
 
           professionalProfile:
-            role === 'PRO'
+            role === 'PRO' && proSetup && signupLocation.kind !== 'CLIENT_ZIP'
               ? {
-                  create: {
-                    homeTenantId: tenantContext.tenantId,
-                    firstName,
-                    lastName,
-                    phone,
-                    phoneVerifiedAt: null,
+                  create: buildProfessionalProfileCreateData({
+                    resolved: proSetup,
+                    identity: { firstName, lastName, phone },
+                    tenantId: tenantContext.tenantId,
                     timeZone: finalTimeZone,
-
-                    bio: '',
-                    location: '',
-
-                    businessName,
-                    handle: handleToStore,
-                    handleNormalized: normalizedHandle,
-
-                    professionType: profession,
-
-                    licenseNumber: licenseNumberToStore,
-                    licenseState: licenseStateToStore,
-                    licenseExpiry: licenseExpiryToStore,
-                    licenseVerified,
-                    verificationStatus,
-
-                    licenseVerifiedAt: licenseVerifiedAtToStore,
-                    licenseVerifiedSource: licenseVerifiedSourceToStore,
-                    licenseStatusCode: licenseStatusCodeToStore,
-
-                    // ✅ IMPORTANT: omit when undefined (prevents exactOptionalPropertyTypes pain)
-                    ...(licenseRawJsonToStore !== undefined
-                      ? { licenseRawJson: licenseRawJsonToStore }
-                      : {}),
-
-                    mobileBasePostalCode:
-                      signupLocation.kind === 'PRO_MOBILE'
-                        ? signupLocation.postalCode
-                        : null,
-                    mobileRadiusMiles:
-                      signupLocation.kind === 'PRO_MOBILE'
-                        ? mobileRadiusMiles
-                        : null,
-
-                    locations: {
-                      create:
-                        signupLocation.kind === 'PRO_SALON'
-                          ? {
-                              type: 'SALON',
-                              name: signupLocation.name ?? null,
-                              isPrimary: true,
-                              isBookable: false,
-
-                              formattedAddress:
-                                signupLocation.formattedAddress,
-                              city: signupLocation.city,
-                              state: signupLocation.state,
-                              postalCode: signupLocation.postalCode,
-                              countryCode: signupLocation.countryCode,
-                              placeId: signupLocation.placeId,
-
-                              lat: signupLocation.lat,
-                              lng: signupLocation.lng,
-
-                              ...buildAddressPrivacyWriteData({
-                                formattedAddress: signupLocation.formattedAddress,
-                                addressLine1: null,
-                                addressLine2: null,
-                                city: signupLocation.city,
-                                state: signupLocation.state,
-                                postalCode: signupLocation.postalCode,
-                                countryCode: signupLocation.countryCode,
-                                placeId: signupLocation.placeId,
-                                lat: signupLocation.lat,
-                                lng: signupLocation.lng,
-                              }),
-
-                              timeZone: finalTimeZone,
-                              workingHours: defaultWorkingHours(),
-                            }
-                          : {
-                              type: 'MOBILE_BASE',
-                              name: 'Mobile base',
-                              isPrimary: true,
-                              isBookable: false,
-
-                              city: signupLocation.city,
-                              state: signupLocation.state,
-                              postalCode: signupLocation.postalCode,
-                              countryCode: signupLocation.countryCode,
-
-                              lat: signupLocation.lat,
-                              lng: signupLocation.lng,
-
-                              ...buildAddressPrivacyWriteData({
-                                formattedAddress: null,
-                                addressLine1: null,
-                                addressLine2: null,
-                                city: signupLocation.city,
-                                state: signupLocation.state,
-                                postalCode: signupLocation.postalCode,
-                                countryCode: signupLocation.countryCode,
-                                placeId: null,
-                                lat: signupLocation.lat,
-                                lng: signupLocation.lng,
-                              }),
-
-                              timeZone: finalTimeZone,
-                              workingHours: defaultWorkingHours(),
-                            },
-                    },
-
-                    verificationDocs: manualLicenseDocUrl
-                      ? {
-                          create: createManualLicenseDocData(
-                            manualLicenseDocUrl,
-                          ),
-                        }
-                      : undefined,
-
-                    // 🔴 A pro with NO payment-settings row accepts no payment
-                    // method at all: buildAcceptedPaymentMethods(null) and
-                    // listPublicAcceptedMethods(null) both return empty, so the
-                    // session wrap-up offers no "Mark as paid" control and the
-                    // very first booking can never be closed out. The pro's own
-                    // Payment settings screen meanwhile showed "Currently
-                    // enabled: 1 · Cash", because the editor falls back to these
-                    // same schema defaults — so the app told them to turn on a
-                    // method that already looked on. Create the row here (empty
-                    // = every Prisma default, which is exactly what that screen
-                    // has always displayed) so the two agree from the pro's
-                    // first minute. Existing pros are covered by
-                    // `pnpm backfill:pro-payment-settings`.
-                    paymentSettings: { create: {} },
-                  },
+                    location: signupLocation,
+                  }),
                 }
               : undefined,
         },
@@ -1351,12 +751,12 @@ export async function POST(request: Request) {
       // holding it. The pre-check above is advisory; this is what actually
       // refuses a handle a client (or another pro) took in the meantime, and it
       // rolls the whole signup back rather than half-creating an account.
-      if (role === 'PRO' && normalizedHandle) {
+      if (role === 'PRO' && proSetup?.normalizedHandle) {
         const created = await tx.professionalProfile.findUniqueOrThrow({
           where: { userId: user.id },
           select: { id: true },
         })
-        await claimHandle(tx, normalizedHandle, {
+        await claimHandle(tx, proSetup.normalizedHandle, {
           kind: 'PRO',
           professionalId: created.id,
         })
@@ -1365,7 +765,7 @@ export async function POST(request: Request) {
       return { user, adoptionVerifiedChannel }
     })
 
-    if (dcaTimedOutAtSignup) {
+    if (proSetup?.dcaTimedOutAtSignup) {
       logAuthEvent({
         level: 'warn',
         event: 'auth.dca.timeout',
@@ -1494,9 +894,9 @@ export async function POST(request: Request) {
 
         // ✅ safe flags for the client UX
         needsManualLicenseUpload:
-          role === 'PRO' ? needsManualLicenseUpload : false,
+          role === 'PRO' ? (proSetup?.needsManualLicenseUpload ?? false) : false,
         manualLicensePendingReview:
-          role === 'PRO' ? manualLicensePendingReview : false,
+          role === 'PRO' ? (proSetup?.manualLicensePendingReview ?? false) : false,
       } satisfies AuthRegisterResponseDTO,
       201,
     )

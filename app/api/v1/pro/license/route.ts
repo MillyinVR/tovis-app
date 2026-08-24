@@ -14,12 +14,9 @@ import { emitAdminVerificationReviewNeeded } from '@/lib/notifications/adminNoti
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 import { prisma } from '@/lib/prisma'
 import { isUsStateCode } from '@/lib/usStates'
+import { normalizeLicenseNumber } from '@/lib/pro/proProfileSetup'
 
 export const dynamic = 'force-dynamic'
-
-function normalizeLicenseNumber(v: unknown): string {
-  return typeof v === 'string' ? v.trim().toUpperCase().replace(/\s+/g, '') : ''
-}
 
 function parseExpiry(v: unknown): { ok: true; value: Date | null } | { ok: false } {
   if (v == null || v === '') return { ok: true, value: null }
