@@ -4,6 +4,7 @@ import {
   Prisma,
   ProClientInviteStatus,
 } from '@prisma/client'
+import type { ClientProfile, ProClientInvite } from '@prisma/client'
 
 import {
   createProClientInviteToken,
@@ -218,25 +219,24 @@ function legacyRawTokenFromInvite(invite: ClientClaimLinkRow): string | null {
 
 /**
  * Who a claim link is addressed to, and how it should reach them.
+ *
+ * Derived from the model rather than restated: these four ARE ProClientInvite
+ * columns, so a schema change (a nullability flip, a new ContactMethod) has to
+ * reach every caller instead of quietly disagreeing with the database.
  */
-export type ClaimLinkContact = {
-  invitedName: string
-  invitedEmail: string | null
-  invitedPhone: string | null
-  preferredContactMethod: ContactMethod | null
-}
+export type ClaimLinkContact = Pick<
+  ProClientInvite,
+  'invitedName' | 'invitedEmail' | 'invitedPhone' | 'preferredContactMethod'
+>
 
 /**
  * Derive the invite contact from a client profile. Shared by both issue*
  * helpers so the booking and booking-less doors cannot drift apart on what they
  * address a link to.
  */
-function contactFromClientProfile(client: {
-  firstName: string | null
-  lastName: string | null
-  email: string | null
-  phone: string | null
-}): ClaimLinkContact {
+function contactFromClientProfile(
+  client: Pick<ClientProfile, 'firstName' | 'lastName' | 'email' | 'phone'>,
+): ClaimLinkContact {
   const invitedName =
     [client.firstName, client.lastName] // pii-plaintext-read-ok: composes required ProClientInvite.invitedName for the claim link
       .map((part) => asTrimmedString(part))

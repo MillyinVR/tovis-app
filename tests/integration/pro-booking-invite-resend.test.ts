@@ -65,7 +65,17 @@ vi.mock('@/app/api/_utils', async (importOriginal) => {
   }
 })
 
+// The booking-less sibling is behind ENABLE_BOOKINGLESS_CLAIM, which production
+// leaves unset. Forced ON so the LIVE door can be driven too — it is the one
+// with real callers, and the one a shared-helper refactor can actually break.
+vi.mock('@/lib/clients/bookinglessClaimFlag', () => ({
+  bookinglessClaimEnabled: () => true,
+}))
+
 const { POST } = await import('@/app/api/v1/pro/bookings/[id]/invite/route')
+const { POST: clientInvitePost } = await import(
+  '@/app/api/v1/pro/clients/[id]/invite/route'
+)
 
 const databaseUrl = process.env.DATABASE_URL
 if (!databaseUrl) {
@@ -82,6 +92,36 @@ const INVITED_EMAIL = `${TAG}_invitee@example.com`
 
 let bookingId = ''
 let clientId = ''
+/** A second, booking-LESS client, so the two doors' dispatch rows never mix. */
+let bookinglessClientId = ''
+
+function clientInviteRequest(): Request {
+  return new Request(
+    `http://localhost/api/v1/pro/clients/${bookinglessClientId}/invite`,
+    { method: 'POST' },
+  )
+}
+
+async function callClientInvite(): Promise<{
+  status: number
+  body: InvitePayload
+}> {
+  const res = await clientInvitePost(clientInviteRequest(), {
+    params: Promise.resolve({ id: bookinglessClientId }),
+  })
+
+  if (!(res instanceof Response)) {
+    throw new Error('route did not return a Response')
+  }
+
+  const json = (await res.json()) as InvitePayload
+
+  if (!json?.invite) {
+    throw new Error(`route returned no invite: ${JSON.stringify(json)}`)
+  }
+
+  return { status: res.status, body: json }
+}
 
 async function cleanup(): Promise<void> {
   await db.notificationDelivery.deleteMany({
@@ -251,9 +291,24 @@ beforeAll(async () => {
     select: { id: true },
   })
 
+  // Booking-less, contactable, pro-created — what the sibling door is for.
+  const bookinglessClient = await db.clientProfile.create({
+    data: {
+      homeTenantId: tenant.id,
+      firstName: TAG,
+      lastName: 'Bookingless',
+      userId: null,
+      claimStatus: ClientClaimStatus.UNCLAIMED,
+      createdByProfessionalId: professional.id,
+      email: `${TAG}_bookingless@example.com`,
+    },
+    select: { id: true },
+  })
+
   auth.professionalId = professional.id
   auth.userId = proUser.id
   clientId = client.id
+  bookinglessClientId = bookinglessClient.id
   bookingId = booking.id
 }, 120_000)
 
@@ -347,6 +402,69 @@ describe('POST /pro/bookings/[id]/invite — repeat invite', () => {
     // Each dispatch carries its OWN link, and each actually produced delivery
     // rows — a dispatch with zero deliveries is the silent no-op wearing a
     // 200.
+    expect(firstDispatch.href).toContain(firstToken)
+    expect(secondDispatch.href).toContain(secondToken as string)
+    expect(firstDispatch._count.deliveries).toBeGreaterThan(0)
+    expect(secondDispatch._count.deliveries).toBeGreaterThan(0)
+  }, 60_000)
+})
+
+// The booking door has no caller; THIS one does (the iOS pro app calls it), so
+// it is the one a shared-helper refactor can actually break. Same assertions,
+// same reason: only the rows can tell you a second send really happened.
+describe('POST /pro/clients/[id]/invite — repeat invite (the LIVE door)', () => {
+  it('rotates the token and queues a SECOND real dispatch through the shared helper', async () => {
+    const first = await callClientInvite()
+
+    expect(first.status).toBe(200)
+    expect(first.body.invite.token).toBeTruthy()
+    expect(first.body.inviteDelivery).toMatchObject({
+      attempted: true,
+      queued: true,
+    })
+
+    const firstToken = first.body.invite.token as string
+
+    const second = await callClientInvite()
+
+    expect(second.status).toBe(200)
+    const secondToken = second.body.invite.token
+    expect(secondToken).toBeTruthy()
+    expect(secondToken).not.toBe(firstToken)
+    expect(second.body.inviteDelivery).toMatchObject({
+      attempted: true,
+      queued: true,
+    })
+
+    // Rotation is real, and the previously delivered link is dead.
+    expect(
+      await db.proClientInvite.findUnique({
+        where: { tokenHash: hashProClientInviteToken(firstToken) },
+        select: { id: true },
+      }),
+    ).toBeNull()
+
+    const dispatches = await db.notificationDispatch.findMany({
+      where: {
+        clientId: bookinglessClientId,
+        eventKey: NotificationEventKey.CLIENT_CLAIM_INVITE,
+      },
+      select: {
+        sourceKey: true,
+        href: true,
+        _count: { select: { deliveries: true } },
+      },
+      orderBy: { createdAt: 'asc' },
+    })
+
+    expect(dispatches).toHaveLength(2)
+    expect(new Set(dispatches.map((d) => d.sourceKey)).size).toBe(2)
+
+    const [firstDispatch, secondDispatch] = dispatches
+    if (!firstDispatch || !secondDispatch) {
+      throw new Error('expected two claim-invite dispatches')
+    }
+
     expect(firstDispatch.href).toContain(firstToken)
     expect(secondDispatch.href).toContain(secondToken as string)
     expect(firstDispatch._count.deliveries).toBeGreaterThan(0)
