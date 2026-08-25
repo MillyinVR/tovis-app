@@ -11,7 +11,12 @@ import {
   resolveRouteParams,
   type RouteContext,
 } from '@/app/api/_utils/routeContext'
-import { createClientClaimInviteDelivery } from '@/lib/clientActions/createClientClaimInviteDelivery'
+import { claimLinkRefusalResponse } from '@/app/api/_utils/claimInviteRefusals'
+import {
+  NO_CLAIM_INVITE_DELIVERY,
+  queueClaimInviteDelivery,
+  type ClaimInviteDeliverySummary,
+} from '@/lib/clientActions/queueClaimInviteDelivery'
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 import { issueClaimLinkForBooking } from '@/lib/clients/clientClaimLinks'
 import { asTrimmedString, isRecord } from '@/lib/guards'
@@ -34,12 +39,6 @@ type NormalizedInviteInput = {
   email: string | null
   phone: string | null
   preferredContactMethod: ContactMethod | null | 'invalid'
-}
-
-type InviteDeliverySummary = {
-  attempted: boolean
-  queued: boolean
-  href: string | null
 }
 
 type BookingInviteContext = {
@@ -133,7 +132,7 @@ async function maybeQueueInviteDelivery(args: {
   tenantContext: TenantContext
   booking: BookingInviteContext
   invite: ClaimInviteForDelivery
-}): Promise<InviteDeliverySummary> {
+}): Promise<ClaimInviteDeliverySummary> {
   // issueClaimLinkForBooking has already refused a revoked link and an
   // already-claimed client, and the row it hands back was just written PENDING
   // with a fresh token — so acceptedAt is the only invite state left to check.
@@ -142,55 +141,25 @@ async function maybeQueueInviteDelivery(args: {
   // than texting a claim link for an invite that has already been used. The
   // rotated token still rides the response, so the pro is not left empty-handed.
   if (args.invite.acceptedAt != null) {
-    return {
-      attempted: false,
-      queued: false,
-      href: null,
-    }
+    return NO_CLAIM_INVITE_DELIVERY
   }
 
-  try {
-    const delivery = await createClientClaimInviteDelivery({
-      tenantContext: args.tenantContext,
-      professionalId: args.professionalId,
-      clientId: args.booking.clientId,
-      bookingId: args.booking.id,
-      inviteId: args.invite.id,
-      rawToken: args.invite.rawToken,
-      invitedName: args.invite.invitedName,
-      invitedEmail: args.invite.invitedEmail,
-      invitedPhone: args.invite.invitedPhone,
-      preferredContactMethod: args.invite.preferredContactMethod,
-      issuedByUserId: args.actorUserId,
-      recipientUserId: args.booking.client?.userId ?? null,
-      // A rotated invite needs a fresh send cycle; INITIAL_SEND would collapse
-      // into the first invite's idempotency key and deliver nothing.
-      resendMode: args.invite.created ? 'INITIAL_SEND' : 'RESEND',
-    })
-
-    return {
-      attempted: true,
-      queued: delivery.dispatch.created,
-      href: delivery.link.href,
-    }
-  } catch (error: unknown) {
-    console.error('POST /api/v1/pro/bookings/[id]/invite delivery enqueue failed', {
-      error: safeError(error),
-      meta: safeLogMeta({
-        route: 'POST /api/v1/pro/bookings/[id]/invite',
-        professionalId: args.professionalId,
-        bookingId: args.booking.id,
-        clientId: args.booking.clientId,
-        inviteId: args.invite.id,
-      }),
-    })
-
-    return {
-      attempted: true,
-      queued: false,
-      href: null,
-    }
-  }
+  return queueClaimInviteDelivery({
+    route: 'POST /api/v1/pro/bookings/[id]/invite',
+    tenantContext: args.tenantContext,
+    professionalId: args.professionalId,
+    clientId: args.booking.clientId,
+    bookingId: args.booking.id,
+    inviteId: args.invite.id,
+    rawToken: args.invite.rawToken,
+    invitedName: args.invite.invitedName,
+    invitedEmail: args.invite.invitedEmail,
+    invitedPhone: args.invite.invitedPhone,
+    preferredContactMethod: args.invite.preferredContactMethod,
+    issuedByUserId: args.actorUserId,
+    recipientUserId: args.booking.client?.userId ?? null,
+    created: args.invite.created,
+  })
 }
 
 export async function POST(request: Request, ctx: RouteContext) {
@@ -285,16 +254,8 @@ export async function POST(request: Request, ctx: RouteContext) {
       return jsonFail(404, 'Booking not found.', { code: 'NOT_FOUND' })
     }
 
-    if (issued.kind === 'already_claimed') {
-      return jsonFail(409, 'This client has already been claimed.', {
-        code: 'ALREADY_CLAIMED',
-      })
-    }
-
-    if (issued.kind === 'revoked') {
-      return jsonFail(409, 'This client’s claim link was revoked.', {
-        code: 'REVOKED',
-      })
+    if (issued.kind === 'already_claimed' || issued.kind === 'revoked') {
+      return claimLinkRefusalResponse(issued.kind)
     }
 
     const invite = issued.invite

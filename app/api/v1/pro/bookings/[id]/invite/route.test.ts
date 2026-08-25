@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   jsonOk: vi.fn(),
   bookingFindFirst: vi.fn(),
   issueClaimLinkForBooking: vi.fn(),
+  claimLinkRefusalResponse: vi.fn(),
   createClientClaimInviteDelivery: vi.fn(),
   enforceRateLimit: vi.fn(),
   tokenRateLimitIdentity: vi.fn(),
@@ -44,6 +45,10 @@ vi.mock('@/lib/prisma', () => ({
 
 vi.mock('@/lib/clients/clientClaimLinks', () => ({
   issueClaimLinkForBooking: mocks.issueClaimLinkForBooking,
+}))
+
+vi.mock('@/app/api/_utils/claimInviteRefusals', () => ({
+  claimLinkRefusalResponse: mocks.claimLinkRefusalResponse,
 }))
 
 vi.mock('@/lib/clientActions/createClientClaimInviteDelivery', () => ({
@@ -184,6 +189,11 @@ describe('POST /api/v1/pro/bookings/[id]/invite', () => {
     // Default: under the ceiling. `enforceRateLimit` returns a Response when it
     // refuses and null when it allows, so null is "allowed".
     mocks.enforceRateLimit.mockResolvedValue(null)
+    mocks.claimLinkRefusalResponse.mockImplementation((kind: string) => ({
+      ok: false,
+      status: 409,
+      refusal: kind,
+    }))
     mocks.tokenRateLimitIdentity.mockImplementation((id: string) => ({
       kind: 'token' as const,
       id,
@@ -731,12 +741,8 @@ describe('POST /api/v1/pro/bookings/[id]/invite', () => {
     )
 
     expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
-    expect(mocks.jsonFail).toHaveBeenCalledWith(
-      409,
-      'This client’s claim link was revoked.',
-      { code: 'REVOKED' },
-    )
-    expect(result).toMatchObject({ ok: false, status: 409, code: 'REVOKED' })
+    expect(mocks.claimLinkRefusalResponse).toHaveBeenCalledWith('revoked')
+    expect(result).toMatchObject({ ok: false, status: 409, refusal: 'revoked' })
   })
 
   it('returns 409 when the client has already claimed their profile', async () => {
@@ -755,15 +761,13 @@ describe('POST /api/v1/pro/bookings/[id]/invite', () => {
     )
 
     expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
-    expect(mocks.jsonFail).toHaveBeenCalledWith(
-      409,
-      'This client has already been claimed.',
-      { code: 'ALREADY_CLAIMED' },
+    expect(mocks.claimLinkRefusalResponse).toHaveBeenCalledWith(
+      'already_claimed',
     )
     expect(result).toMatchObject({
       ok: false,
       status: 409,
-      code: 'ALREADY_CLAIMED',
+      refusal: 'already_claimed',
     })
   })
 

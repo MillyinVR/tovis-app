@@ -18,9 +18,10 @@ import {
   resolveRouteParams,
   type RouteContext,
 } from '@/app/api/_utils/routeContext'
+import { claimLinkRefusalResponse } from '@/app/api/_utils/claimInviteRefusals'
 import { bookinglessClaimEnabled } from '@/lib/clients/bookinglessClaimFlag'
 import { issueClaimLinkForClient } from '@/lib/clients/clientClaimLinks'
-import { createClientClaimInviteDelivery } from '@/lib/clientActions/createClientClaimInviteDelivery'
+import { queueClaimInviteDelivery } from '@/lib/clientActions/queueClaimInviteDelivery'
 import { asTrimmedString } from '@/lib/guards'
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 import { prisma } from '@/lib/prisma'
@@ -83,9 +84,7 @@ export async function POST(request: Request, ctx: RouteContext) {
     }
 
     if (client.userId != null || client.claimStatus !== ClientClaimStatus.UNCLAIMED) {
-      return jsonFail(409, 'This client has already been claimed.', {
-        code: 'ALREADY_CLAIMED',
-      })
+      return claimLinkRefusalResponse('already_claimed')
     }
 
     const issued = await issueClaimLinkForClient({
@@ -96,66 +95,34 @@ export async function POST(request: Request, ctx: RouteContext) {
     if (issued.kind === 'not_found') {
       return jsonFail(404, 'Client not found.', { code: 'NOT_FOUND' })
     }
-    if (issued.kind === 'already_claimed') {
-      return jsonFail(409, 'This client has already been claimed.', {
-        code: 'ALREADY_CLAIMED',
-      })
-    }
-    if (issued.kind === 'revoked') {
-      return jsonFail(409, 'This client’s claim link was revoked.', {
-        code: 'REVOKED',
-      })
+    if (issued.kind === 'already_claimed' || issued.kind === 'revoked') {
+      return claimLinkRefusalResponse(issued.kind)
     }
 
     const invite = issued.invite
 
-    let inviteDelivery: {
-      attempted: boolean
-      queued: boolean
-      href: string | null
-    } = { attempted: false, queued: false, href: null }
+    const inviteDelivery = await queueClaimInviteDelivery({
+      route: 'POST /api/v1/pro/clients/[id]/invite',
+      tenantContext: await resolveTenantContextForRequest(request),
+      professionalId: proId,
+      clientId: invite.clientId,
+      bookingId: null,
+      inviteId: invite.id,
+      rawToken: issued.rawToken,
+      invitedName: invite.invitedName,
+      invitedEmail: invite.invitedEmail,
+      invitedPhone: invite.invitedPhone,
+      preferredContactMethod: invite.preferredContactMethod,
+      issuedByUserId: asTrimmedString(auth.user?.id),
+      recipientUserId: null,
+      created: issued.created,
+    })
 
-    // Deliver only when there's a contact channel on file; a contactless client
-    // still gets a link the pro can share manually (returned below).
-    if (invite.invitedEmail || invite.invitedPhone) {
-      try {
-        const delivery = await createClientClaimInviteDelivery({
-          tenantContext: await resolveTenantContextForRequest(request),
-          professionalId: proId,
-          clientId: invite.clientId,
-          bookingId: null,
-          inviteId: invite.id,
-          rawToken: issued.rawToken,
-          invitedName: invite.invitedName,
-          invitedEmail: invite.invitedEmail,
-          invitedPhone: invite.invitedPhone,
-          preferredContactMethod: invite.preferredContactMethod,
-          issuedByUserId: asTrimmedString(auth.user?.id),
-          recipientUserId: null,
-          // A rotated invite (re-invite of the same client) needs a fresh send
-          // cycle; INITIAL_SEND would collapse into the first invite's
-          // idempotency key and deliver nothing.
-          resendMode: issued.created ? 'INITIAL_SEND' : 'RESEND',
-        })
-        inviteDelivery = {
-          attempted: true,
-          queued: delivery.dispatch.created,
-          href: delivery.link.href,
-        }
-        kickNotificationDrain()
-      } catch (error: unknown) {
-        console.error('POST /api/v1/pro/clients/[id]/invite delivery enqueue failed', {
-          error: safeError(error),
-          meta: safeLogMeta({
-            route: 'POST /api/v1/pro/clients/[id]/invite',
-            professionalId: proId,
-            clientId: invite.clientId,
-            inviteId: invite.id,
-          }),
-        })
-        inviteDelivery = { attempted: true, queued: false, href: null }
-      }
-    }
+    // Claim invite enqueued — deliver the email/SMS link now. Unconditional, and
+    // matching the booking door: `queued: false` can also mean a dispatch row
+    // already existed and has not drained yet, and the kick is what gets THAT
+    // one moving. A kick with nothing due is a no-op.
+    kickNotificationDrain()
 
     return jsonOk(
       {

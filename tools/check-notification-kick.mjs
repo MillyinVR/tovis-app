@@ -35,6 +35,11 @@ const EMIT_SIGNALS = [
   'upsertClientNotification',
   'createClientNotification',
   'createClientClaimInviteDelivery',
+  // The pro-facing wrapper around the line above. Both claim-invite doors call
+  // this instead of the raw helper now, and THIS GUARD IS NOT TRANSITIVE — it
+  // scans each route file's own text. Without this entry the two doors would
+  // simply stop being checked, staying green by accident rather than by rule.
+  'queueClaimInviteDelivery',
   'createLookFollowerNewProNotification',
   'createClientFollowNotification',
   'notifyChartAccessRequested',
