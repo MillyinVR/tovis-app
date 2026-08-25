@@ -119,12 +119,14 @@ const DST_FALL_BACK_DAY = '2027-11-07'
 const NEAR_MIDNIGHT_DAY = '2027-01-15'
 
 // Read the local wall clock through `getZonedParts` rather than a raw
-// `Intl.DateTimeFormat`. `hour12: false` is NOT portable at midnight: it
-// resolves to the h24 cycle in some ICU builds, so 00:00 formats as "24:00"
-// (seen on Node 20 / ICU 78.3, while Node 22 / ICU 78.2 says "00:00") and the
-// fall-back case below — whose surviving slots include local midnight —
-// failed on one runtime and passed on the other. `getZonedParts` already
-// normalizes that hour-24 spelling, so this reads the same everywhere.
+// `Intl.DateTimeFormat`. `hour12: false` is NOT portable at midnight: which
+// hour cycle it resolves to changed in V8, so local midnight formats as
+// "24:00" under Node 20 (V8 11.3 -> h24) and "00:00" under Node 22
+// (V8 12.4 -> h23). It is the V8/Node version that decides this, NOT the ICU
+// data — both spellings were observed on the same ICU 78.3. The fall-back
+// case below, whose surviving slots include local midnight, therefore failed
+// on one runtime and passed on the other. `getZonedParts` already normalizes
+// that hour-24 spelling, so this reads the same everywhere.
 // The slots asserted here are literal constants, not values the route
 // computes, so borrowing the helper does not make the oracle self-referential.
 function localHmInTz(isoUtc: string, timeZone: string): string {

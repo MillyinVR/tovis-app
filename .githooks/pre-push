@@ -19,10 +19,11 @@ set -e
 # ── Runtime guard ───────────────────────────────────────────────────────────
 # `engines.node` in package.json is the supported runtime, and every CI
 # workflow pins that same major. A hook that runs under an OLDER node does not
-# fail cleanly — it fails somewhere far from the cause. Observed: Homebrew
-# node@20 ships ICU 78.3, whose `hour12: false` formats local midnight as
-# "24:00" instead of "00:00", which reddened a DST availability test that CI
-# (Node 22) passed. The apparent lesson was "that test is flaky, push with
+# fail cleanly — it fails somewhere far from the cause. Observed: under Node
+# 20 (V8 11.3) `hour12: false` resolves to the h24 hour cycle, so local
+# midnight formats as "24:00" instead of "00:00" — Node 22 (V8 12.4) resolves
+# the same option to h23, on identical ICU. That reddened a DST availability
+# test that CI (Node 22) passed. The apparent lesson was "that test is flaky, push with
 # --no-verify" — which silently disarms typecheck, the whole unit suite and
 # every static guard on every push. So check the runtime FIRST and name it.
 if ! command -v node >/dev/null 2>&1; then
@@ -46,7 +47,7 @@ case "${required_major}-${current_major}" in
       echo "    resolved from: $(command -v node)" >&2
       echo "" >&2
       echo "  An unsupported runtime produces failures that have nothing to do with your" >&2
-      echo "  change — a stale ICU spelling local midnight \"24:00\" is a real example." >&2
+      echo "  change — an older V8 spelling local midnight \"24:00\" is a real example." >&2
       echo "  Fix PATH so a supported node comes first; do NOT reach for --no-verify." >&2
       echo "" >&2
       exit 1
