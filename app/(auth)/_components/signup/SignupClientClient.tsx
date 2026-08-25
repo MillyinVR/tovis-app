@@ -21,9 +21,13 @@ import {
   readStringField,
 } from '@/lib/http'
 import { hardNavigate } from '@/lib/clientNavigation'
-import { friendlyTimeZoneLabel } from '@/lib/timeZone'
 import { getTurnstileToken } from '@/lib/turnstileClient'
-import { buildVerifyPhoneUrl } from './buildVerifyPhoneUrl'
+import {
+  buildVerifyPhoneUrl,
+  readVerificationSendState,
+} from './buildVerifyPhoneUrl'
+import ClientZipField from './location/ClientZipField'
+import { clientZipToSignupLocation, useClientZip } from './location/useClientZip'
 import {
   buildLoginHref,
   readSignupForwardedParams,
@@ -42,8 +46,6 @@ import {
   formatPhoneInputValue,
   isLikelyValidPhoneInput,
 } from '@/lib/phoneInputFormat'
-
-type VerificationSendState = boolean | 'pending' | 'skipped'
 
 type ClientField =
   | 'firstName'
@@ -76,100 +78,6 @@ const FIELD_ORDER: ClientField[] = [
   'password',
   'tos',
 ]
-
-type GeocodeResponse = {
-  geo?: {
-    lat?: number
-    lng?: number
-    postalCode?: string
-    city?: string
-    state?: string
-    countryCode?: string
-  }
-  error?: string
-}
-
-type TimeZoneResponse = {
-  timeZoneId?: string
-  error?: string
-}
-
-function readVerificationSendState(
-  data: Record<string, unknown> | null,
-  key: string,
-): VerificationSendState {
-  const value = data?.[key]
-  if (value === 'pending') return 'pending'
-  // The channel was verified by the claim-link click itself, so no
-  // verification message was (or ever will be) sent — distinct from `false`,
-  // which means a send was attempted and failed.
-  if (value === 'skipped') return 'skipped'
-  return value === true
-}
-
-function isUsZip(raw: string) {
-  const s = raw.trim()
-  return /^\d{5}(-\d{4})?$/.test(s)
-}
-
-type ConfirmedZip = {
-  timeZoneId: string
-  lat: number
-  lng: number
-  city: string | null
-  state: string | null
-  countryCode: string | null
-  postalCode: string
-}
-
-async function fetchGeocodeByPostal(args: { postalCode: string }) {
-  const url = new URL('/api/v1/google/geocode', 'http://localhost')
-  url.searchParams.set('postalCode', args.postalCode)
-  url.searchParams.set('components', 'country:us')
-
-  const res = await fetch(`${url.pathname}${url.search}`, { cache: 'no-store' })
-  const raw = (await res.json().catch(() => null)) as GeocodeResponse | null
-  const geo = raw?.geo
-
-  if (!res.ok) {
-    throw new Error(raw?.error || 'ZIP lookup failed.')
-  }
-
-  const lat = typeof geo?.lat === 'number' ? geo.lat : null
-  const lng = typeof geo?.lng === 'number' ? geo.lng : null
-  const postalCode =
-    typeof geo?.postalCode === 'string' ? geo.postalCode : null
-  const city = typeof geo?.city === 'string' ? geo.city : null
-  const state = typeof geo?.state === 'string' ? geo.state : null
-  const countryCode =
-    typeof geo?.countryCode === 'string' ? geo.countryCode : null
-
-  if (lat == null || lng == null) {
-    throw new Error('ZIP lookup returned no coordinates.')
-  }
-  if (!postalCode) {
-    throw new Error('ZIP lookup did not resolve a valid postal code.')
-  }
-
-  return { lat, lng, postalCode, city, state, countryCode }
-}
-
-async function fetchTimeZoneId(args: { lat: number; lng: number }) {
-  const url = new URL('/api/v1/google/timezone', 'http://localhost')
-  url.searchParams.set('lat', String(args.lat))
-  url.searchParams.set('lng', String(args.lng))
-
-  const res = await fetch(`${url.pathname}${url.search}`, { cache: 'no-store' })
-  const raw = (await res.json().catch(() => null)) as TimeZoneResponse | null
-
-  if (!res.ok) {
-    throw new Error(raw?.error || 'Timezone lookup failed.')
-  }
-
-  const tz = typeof raw?.timeZoneId === 'string' ? raw.timeZoneId : ''
-  if (!tz) throw new Error('No timezone returned.')
-  return tz
-}
 
 export default function SignupClientClient() {
   const router = useRouter()
@@ -211,9 +119,7 @@ export default function SignupClientClient() {
   const [firstName, setFirstName] = useState(nameParts.firstName)
   const [lastName, setLastName] = useState(nameParts.lastName)
 
-  const [zip, setZip] = useState('')
-  const [zipLoading, setZipLoading] = useState(false)
-  const [confirmed, setConfirmed] = useState<ConfirmedZip | null>(null)
+  const zipField = useClientZip()
 
   const [phone, setPhone] = useState(() => formatPhoneInputValue(phonePrefill))
   const [email, setEmail] = useState(emailPrefill)
@@ -248,73 +154,6 @@ export default function SignupClientClient() {
     })
   }
 
-  function resetZip(next = '') {
-    setZip(next)
-    setConfirmed(null)
-  }
-
-  type ZipConfirmResult = {
-    confirmed: ConfirmedZip | null
-    errorMessage: string | null
-  }
-
-  async function confirmZipIfValid(
-    rawInput?: string,
-  ): Promise<ZipConfirmResult> {
-    const raw = (rawInput ?? zip).trim()
-
-    if (!raw) return { confirmed: null, errorMessage: null }
-
-    if (confirmed?.postalCode && confirmed.postalCode === raw) {
-      return { confirmed, errorMessage: null }
-    }
-
-    if (!isUsZip(raw)) {
-      setConfirmed(null)
-      return {
-        confirmed: null,
-        errorMessage: 'Please enter a valid 5-digit ZIP code.',
-      }
-    }
-
-    if (zipLoading) return { confirmed, errorMessage: null }
-
-    setZipLoading(true)
-
-    try {
-      const geo = await fetchGeocodeByPostal({ postalCode: raw })
-      const tz = await fetchTimeZoneId({ lat: geo.lat, lng: geo.lng })
-
-      const nextConfirmed: ConfirmedZip = {
-        timeZoneId: tz,
-        lat: geo.lat,
-        lng: geo.lng,
-        city: geo.city,
-        state: geo.state,
-        countryCode: geo.countryCode,
-        postalCode: geo.postalCode,
-      }
-
-      setConfirmed(nextConfirmed)
-      setZip(geo.postalCode ?? raw)
-      return { confirmed: nextConfirmed, errorMessage: null }
-    } catch (e) {
-      setConfirmed(null)
-      return {
-        confirmed: null,
-        errorMessage:
-          e instanceof Error ? e.message : 'Could not confirm ZIP code.',
-      }
-    } finally {
-      setZipLoading(false)
-    }
-  }
-
-  async function handleZipBlur() {
-    const result = await confirmZipIfValid(zip)
-    setFieldError('zip', result.errorMessage)
-  }
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (loading) return
@@ -327,7 +166,7 @@ export default function SignupClientClient() {
     if (!firstName.trim()) errors.firstName = 'First name is required.'
     if (!lastName.trim()) errors.lastName = 'Last name is required.'
 
-    const zipResult = await confirmZipIfValid(zip)
+    const zipResult = await zipField.confirmIfValid()
     const confirmedZip = zipResult.confirmed
     if (!confirmedZip) {
       errors.zip = zipResult.errorMessage ?? 'Please confirm your ZIP code.'
@@ -391,16 +230,7 @@ export default function SignupClientClient() {
           inviteToken: inviteToken ?? undefined,
           via: via ?? undefined,
           vsig: vsig ?? undefined,
-          signupLocation: {
-            kind: 'CLIENT_ZIP',
-            postalCode: confirmedZip.postalCode,
-            city: confirmedZip.city,
-            state: confirmedZip.state,
-            countryCode: confirmedZip.countryCode,
-            lat: confirmedZip.lat,
-            lng: confirmedZip.lng,
-            timeZoneId: confirmedZip.timeZoneId,
-          },
+          signupLocation: clientZipToSignupLocation(confirmedZip),
         }),
       })
 
@@ -535,67 +365,13 @@ export default function SignupClientClient() {
             />
           </label>
 
-          <label className="grid gap-1.5 sm:col-span-2">
-            <div className="flex items-center justify-between gap-3">
-              <FieldLabel>ZIP code</FieldLabel>
-              {confirmed?.timeZoneId ? (
-                <span className="text-[11px] font-black text-textSecondary/80">
-                  {friendlyTimeZoneLabel(confirmed.timeZoneId) ?? confirmed.timeZoneId}
-                </span>
-              ) : null}
-            </div>
-
-            <Input
-              id={FIELD_IDS.zip}
-              value={zip}
-              onChange={(e) => {
-                const v = e.target.value
-                setZip(v)
-                setConfirmed(null)
-                setFieldError('zip', null)
-              }}
-              onBlur={() => {
-                void handleZipBlur()
-              }}
-              placeholder="e.g. 92024"
-              inputMode="numeric"
-              autoComplete="postal-code"
-              {...fieldErrorDescribedBy(FIELD_IDS.zip, fieldErrors.zip)}
-            />
-            <FieldErrorText
-              id={`${FIELD_IDS.zip}-error`}
-              message={fieldErrors.zip}
-            />
-
-            <div className="flex items-center justify-between gap-3">
-              {zipLoading ? (
-                <HelpText>Confirming…</HelpText>
-              ) : (
-                <HelpText>We’ll confirm this when you leave the field.</HelpText>
-              )}
-              {confirmed ? (
-                <span className="text-xs font-black text-accentPrimary">
-                  Confirmed
-                </span>
-              ) : null}
-            </div>
-
-            {confirmed && (confirmed.city || confirmed.state) ? (
-              <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary/20 px-3 py-2 text-xs text-textSecondary">
-                <span className="font-black text-textPrimary">Near:</span>{' '}
-                <span>
-                  {[confirmed.city, confirmed.state].filter(Boolean).join(', ')}
-                </span>
-                <button
-                  type="button"
-                  className="ml-3 text-xs font-black text-textPrimary/80 hover:text-textPrimary"
-                  onClick={() => resetZip(zip)}
-                >
-                  Change
-                </button>
-              </div>
-            ) : null}
-          </label>
+          <ClientZipField
+            id={FIELD_IDS.zip}
+            controller={zipField}
+            error={fieldErrors.zip}
+            onErrorChange={(message) => setFieldError('zip', message)}
+            className="grid gap-1.5 sm:col-span-2"
+          />
         </div>
 
         <div className="h-px w-full bg-surfaceGlass/10" />

@@ -83,6 +83,33 @@ export function buildLoginHref(args: {
   return qs ? `/login?${qs}` : '/login'
 }
 
+/** Where a social sign-in that turned out to be a SIGNUP has to finish. */
+const SOCIAL_COMPLETE_PATH = '/signup/social'
+
+/**
+ * The completion form's href, carrying the params a signup must not lose —
+ * above all `intent` / `inviteToken` / `via` / `vsig`, without which a claim
+ * link's whole point (adopting the history a pro already recorded) is dropped
+ * silently. The TICKET is not in here: it is a credential and travels through
+ * sessionStorage, never a URL. See socialSignupHandoff.ts.
+ */
+export function buildSocialCompleteHref(
+  sp: Pick<URLSearchParams, 'get'>,
+): string {
+  const params = new URLSearchParams()
+
+  appendIfPresent(params, 'ti', normalizeTrimmed(sp.get('ti')))
+  appendIfPresent(params, 'from', sanitizeNextUrl(sp.get('from')))
+  appendIfPresent(params, 'next', sanitizeNextUrl(sp.get('next')))
+  appendIfPresent(params, 'intent', normalizeTrimmed(sp.get('intent')))
+  appendIfPresent(params, 'inviteToken', normalizeTrimmed(sp.get('inviteToken')))
+  appendIfPresent(params, 'via', normalizeTrimmed(sp.get('via')))
+  appendIfPresent(params, 'vsig', normalizeTrimmed(sp.get('vsig')))
+
+  const qs = params.toString()
+  return qs ? `${SOCIAL_COMPLETE_PATH}?${qs}` : SOCIAL_COMPLETE_PATH
+}
+
 export type SignupForwardedParams = {
   ti: string | null
   from: string | null
