@@ -15,7 +15,9 @@
 //            provisioning; acting-as alone never conjures it. This lets a pro
 //            (home role PRO) who is also a super admin switch into the console
 //            without giving up Pro as their home workspace.
-//   PRO    — only with an APPROVED ProfessionalProfile (i.e. licensed).
+//   PRO    — with an APPROVED ProfessionalProfile (i.e. licensed), OR when PRO
+//            is the user's own home role and they have a profile at all. The
+//            second half is not a loophole: see the note on the PRO branch.
 //   CLIENT — anyone; a missing ClientProfile is provisioned on first switch.
 
 import type { Role, VerificationStatus } from '@prisma/client'
@@ -92,6 +94,28 @@ export function canActAs(user: WorkspaceCapabilityUser, role: Role): boolean {
     case 'ADMIN':
       return user.homeRole === 'ADMIN' || user.hasAdminGrant
     case 'PRO':
+      // The home workspace is always available — the same rule the ADMIN
+      // branch above already applies to its own home role.
+      //
+      // This is a correction, not a widening. `resolveActingRole` (see
+      // lib/currentUser.ts) grants `User.role` on BOTH of its branches without
+      // ever consulting this function, so a home-PRO user is acting as PRO on
+      // every request whether or not this said so, and app/pro/layout.tsx
+      // admits them on exactly this rule (acting PRO + a profile exists — it
+      // does NOT check APPROVED). Denying PRO here therefore withheld nothing;
+      // it only hid the SWITCHER, which is the one thing that gets them back.
+      //
+      // Who that stranded: a client who upgraded. POST /api/v1/pro/upgrade
+      // flips User.role to PRO while the licence is still PENDING, so the
+      // upgraded person acted as PRO with `buildWorkspaceOptions` returning []
+      // in BOTH shells — and app/client/(gated)/layout.tsx redirects any
+      // acting role that is not CLIENT. Their own bookings, boards and chart
+      // were unreachable until an admin approved the licence. Measured against
+      // these functions, not argued.
+      //
+      // APPROVED still governs the case the rule was written for: acting as
+      // PRO from a DIFFERENT home role.
+      if (user.homeRole === 'PRO') return user.professionalProfile !== null
       return user.professionalProfile?.verificationStatus === 'APPROVED'
     case 'CLIENT':
       return true

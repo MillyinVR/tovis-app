@@ -135,10 +135,42 @@ describe('serializeClientMePageData — availableWorkspaces', () => {
     expect(dto.user.availableWorkspaces).not.toContain('PRO')
   })
 
-  it('withholds PRO while the professional profile is not APPROVED', () => {
-    // The entitlement boundary: a pending/rejected pro would get a 403 from
-    // POST /workspace/switch, so the row must not be offered. Anything other
-    // than APPROVED is not entitled.
+  it('withholds PRO from another home role while the profile is not APPROVED', () => {
+    // The entitlement boundary, and the case the APPROVED rule was written
+    // for: entering the pro shell from a home role that is NOT pro. Anything
+    // other than APPROVED is not entitled, and POST /workspace/switch answers
+    // 403 to match.
+    for (const homeRole of ['CLIENT', 'ADMIN'] as const) {
+      for (const status of [
+        VerificationStatus.PENDING,
+        VerificationStatus.REJECTED,
+      ]) {
+        const dto = serializeClientMePageData(
+          makePageData({
+            homeRole,
+            professionalProfile: { verificationStatus: status },
+          }),
+        )
+
+        expect(dto.user.availableWorkspaces).not.toContain('PRO')
+      }
+    }
+  })
+
+  it('offers PRO to a home-PRO account whose licence is not APPROVED yet', () => {
+    // This expectation used to be the opposite, on the reasoning that
+    // /workspace/switch would answer 403 — which was circular: that 403 came
+    // from the same canActAs being asserted here.
+    //
+    // The population it stranded is the one POST /api/v1/pro/upgrade creates.
+    // The upgrade flips User.role to PRO while the licence is still PENDING,
+    // and `resolveActingRole` grants the home role without consulting
+    // canActAs — so the person IS acting as PRO, and app/pro/layout.tsx admits
+    // them (it checks acting role + a profile exists, never APPROVED). All
+    // withholding PRO here did was delete the row that gets them home, on the
+    // one screen (native's client shell) where that row is the only signal
+    // there is. Not being APPROVED still governs what a pro may DO — take
+    // bookings, appear publicly — which is checked where those things happen.
     for (const status of [
       VerificationStatus.PENDING,
       VerificationStatus.REJECTED,
@@ -150,8 +182,18 @@ describe('serializeClientMePageData — availableWorkspaces', () => {
         }),
       )
 
-      expect(dto.user.availableWorkspaces).toEqual(['CLIENT'])
+      expect(dto.user.availableWorkspaces).toEqual(['PRO', 'CLIENT'])
     }
+  })
+
+  it('still withholds PRO from a home-PRO account with no profile at all', () => {
+    // app/pro/layout.tsx bounces this user, so the row would be a door that
+    // shuts in their face.
+    const dto = serializeClientMePageData(
+      makePageData({ homeRole: 'PRO', professionalProfile: null }),
+    )
+
+    expect(dto.user.availableWorkspaces).toEqual(['CLIENT'])
   })
 
   it('offers ADMIN on a super-admin grant, in switcher display order', () => {

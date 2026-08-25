@@ -23,6 +23,7 @@ import {
   CreditCard,
   Eye,
   MapPin,
+  Scissors,
   Search,
   Sparkles,
   Trash2,
@@ -31,6 +32,7 @@ import {
 } from 'lucide-react'
 
 import ThemeToggle from '@/lib/brand/ThemeToggle'
+import { getCurrentUser } from '@/lib/currentUser'
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
@@ -43,6 +45,18 @@ export const dynamic = 'force-dynamic'
 export default async function ClientSettingsPage() {
   const brand = getBrandForTenantContext(await resolveTenantContextForLayout())
   const showPaymentMethods = noShowProtectionEnabled()
+
+  // The become-a-pro row is offered only to someone who could actually take it.
+  // POST /api/v1/pro/upgrade answers 409 ALREADY_PRO once a professional
+  // profile exists, so showing the row to a dual-role account would advertise a
+  // door that is already open — and the switcher is how they walk through it.
+  //
+  // A second getCurrentUser() on top of the layout's: it is not request-cached,
+  // so this is one extra indexed read on a settings render. The same pattern
+  // the neighbouring /client/me page and RoleFooter already use, and the only
+  // thing that answers this question.
+  const user = await getCurrentUser().catch(() => null)
+  const canBecomeAPro = user !== null && !user.professionalProfile
 
   return (
     <ClientPage
@@ -131,6 +145,26 @@ export default async function ClientSettingsPage() {
             subtitle="Close your account & remove your details"
           />
         </section>
+
+        {canBecomeAPro ? (
+          <section className="flex flex-col gap-2.5">
+            <h2 className="font-mono text-[11px] font-bold uppercase tracking-[0.18em] text-textMuted">
+              Your work
+            </h2>
+
+            {/*
+              Item 60's missing entry point. POST /api/v1/pro/upgrade shipped in
+              #987 with no caller anywhere in the tree; this row and the page it
+              opens are that caller.
+            */}
+            <SettingsRow
+              href="/client/settings/become-a-pro"
+              icon={Scissors}
+              title="Offer services"
+              subtitle="Add a pro workspace & start taking bookings"
+            />
+          </section>
+        ) : null}
 
         <section className="flex flex-col gap-2.5">
           <h2 className="font-mono text-[11px] font-bold uppercase tracking-[0.18em] text-textMuted">
