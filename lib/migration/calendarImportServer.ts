@@ -80,8 +80,17 @@ const MAX_IMPORTED_BLOCK_DAYS = 60
 const MAX_BLOCK_NOTE_LENGTH = 500
 
 // The per-event idempotency key used on imported bookings (creationIdempotencyKey).
-function importKey(uid: string): string {
-  return `${IMPORT_IDEMPOTENCY_PREFIX}${uid}`
+//
+// Scoped to the professional ON PURPOSE. Client identity matching is global by
+// design (one client account across all pros), so two pros importing feeds that
+// share an event UID AND a client — common when both exports came from the same
+// source app — resolve to the SAME (clientId, key) replay pair. An unscoped key
+// made the second pro's import hydrate the first pro's booking, report
+// `mutated:false`, and count the event skipped: silent data loss reported as
+// success. Embedding the professionalId makes the bookmark per-pro while the
+// client consolidation stays exactly as global as the product wants it.
+function importKey(professionalId: string, uid: string): string {
+  return `${IMPORT_IDEMPOTENCY_PREFIX}${professionalId}:${uid}`
 }
 
 export type CalendarEventClassification = 'BOOKING' | 'BLOCK' | 'HISTORY' | 'SKIP'
@@ -615,7 +624,7 @@ export async function commitCalendarImport(args: {
             // in performLockedCreateProBooking runs before any schedule check,
             // so re-importing an already-imported UID never re-evaluates it.
             importMode: true,
-            idempotencyKey: importKey(event.uid),
+            idempotencyKey: importKey(args.professionalId, event.uid),
           })
           // "Succeeded" is not "created". A re-import of an already-imported UID
           // short-circuits on the idempotency key and writes nothing, and the
@@ -707,7 +716,7 @@ export async function reconcileRemovedImportedEvents(args: {
     // owned there); it only cancels a still-pristine imported booking.
     cancelledBookings += await cancelImportedBookingIfPristine({
       professionalId: args.professionalId,
-      idempotencyKey: importKey(uid),
+      idempotencyKey: importKey(args.professionalId, uid),
     })
 
     // Matched on the dedicated column, not on the note: a pro who renamed the

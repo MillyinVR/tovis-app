@@ -68,6 +68,13 @@ const ALLOWED_FILES = new Set([
 ])
 
 const TEMP_ALLOWED_FILES = new Set([
+  // One-time cutover for the pro-scoped calendar-import idempotency key
+  // (OPEN-WORK item 1). Its only Booking write is
+  // `creationIdempotencyKey: 'import:<uid>' -> 'import:<professionalId>:<uid>'`
+  // on rows previewed by an exact-match SELECT first — never a lifecycle
+  // field, never a create/move. Dry-run by default, refuses non-dev DATABASE_URL
+  // hosts, and becomes a no-op once every import:* bookmark carries its pro.
+  normalize('scripts/migration-drive/renameImportIdempotencyKeys.mjs'),
 ])
 
 const IGNORE_DIRS = new Set([
