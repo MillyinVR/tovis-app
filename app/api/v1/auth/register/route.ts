@@ -1,5 +1,4 @@
 // app/api/v1/auth/register/route.ts
-import { prisma } from '@/lib/prisma'
 import { readOptionalEnv as envOrNull } from '@/lib/env'
 import { hashPassword, createVerificationToken } from '@/lib/auth'
 import { validatePassword } from '@/lib/passwordPolicy'
@@ -9,11 +8,7 @@ import {
   isNativeRegisterRequest,
   verifyNativeRegistrationGateOrFailOpen,
 } from '@/lib/auth/appAttest'
-import { consumeTapIntent } from '@/lib/tapIntentConsume'
-import {
-  getAppUrlFromRequest,
-  issueAndSendEmailVerification,
-} from '@/lib/auth/emailVerification'
+import { getAppUrlFromRequest } from '@/lib/auth/emailVerification'
 import { resolveTenantContextForRequest } from '@/lib/tenant/requestContext'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
 import { BUCKETS } from '@/lib/storageBuckets'
@@ -37,10 +32,8 @@ import {
   normalizeEmail,
   normalizePhone,
 } from '@/lib/security/contactNormalization'
-import { startTwilioVerifyPhoneVerification } from '@/lib/twilio/verify'
 import {
   ContactMethod,
-  Prisma,
   type ProfessionType,
   VerificationDocumentType,
   VerificationStatus,
@@ -60,13 +53,15 @@ import {
 } from '@/lib/licensing/caDcaLicense'
 import { validateSmsDestinationCountry } from '@/lib/smsCountryPolicy'
 import {
-  buildProfessionalProfileCreateData,
   createManualLicenseDocData,
   isAnyProfessionType,
   parseMaybeDate,
   resolveProProfileSetup,
   type ResolvedProProfileSetup,
 } from '@/lib/pro/proProfileSetup'
+import { isSignupLocationPayload } from '@/lib/auth/registration/signupLocation'
+import { createRegisteredAccount } from '@/lib/auth/registration/createRegisteredAccount'
+import { sendRegistrationVerifications } from '@/lib/auth/registration/sendRegistrationVerifications'
 import { defaultWorkingHours } from '@/lib/scheduling/workingHoursValidation'
 import {
   logAuthEvent,
@@ -77,18 +72,10 @@ import {
   isValidHandle,
   normalizeHandle,
 } from '@/lib/handles'
-import { claimHandle, isHandleAvailable } from '@/lib/handles/registry'
 import { waitUntil } from '@vercel/functions'
 import { TRANSACTIONAL_SMS_POLICY_VERSION } from '@/lib/transactionalSmsPolicy'
 
-import {
-  buildClientProfileContactLookupData,
-  buildUserContactLookupData,
-} from '@/lib/security/contactLookup'
-import { buildPhoneEncryptionWriteData } from '@/lib/security/phonePrivacy'
-import { buildEmailEncryptionWriteData } from '@/lib/security/emailPrivacy'
 import { buildAddressPrivacyWriteData } from '@/lib/security/addressEncryption'
-import { adoptClaimInviteDuringRegistration } from '@/lib/clients/claimAdoption'
 import { verifyClaimLinkChannel } from '@/lib/clients/claimLinkChannel'
 import {
   findSelfServeClaimableProfile,
@@ -101,42 +88,6 @@ export const runtime = 'nodejs'
 /* =========================================================
    Types
 ========================================================= */
-
-type SignupLocation =
-  | {
-      kind: 'PRO_SALON'
-      placeId: string
-      formattedAddress: string
-      city: string | null
-      state: string | null
-      postalCode: string | null
-      countryCode: string | null
-      lat: number
-      lng: number
-      timeZoneId: string
-      name?: string | null
-    }
-  | {
-      kind: 'PRO_MOBILE'
-      postalCode: string
-      city: string | null
-      state: string | null
-      countryCode: string | null
-      lat: number
-      lng: number
-      timeZoneId: string
-    }
-  | {
-      kind: 'CLIENT_ZIP'
-      postalCode: string
-      city: string | null
-      state: string | null
-      countryCode: string | null
-      lat: number
-      lng: number
-      timeZoneId: string
-    }
-
 
 type RegisterBody = {
   email?: unknown
@@ -214,34 +165,6 @@ function normalizeRole(v: unknown): 'CLIENT' | 'PRO' | null {
   if (s === 'PRO') return 'PRO'
   return null
 }
-
-function isLocationPayload(v: unknown): v is SignupLocation {
-  if (!isRecord(v)) return false
-
-  if (v.kind === 'PRO_SALON') {
-    return (
-      typeof v.placeId === 'string' &&
-      typeof v.formattedAddress === 'string' &&
-      typeof v.lat === 'number' &&
-      typeof v.lng === 'number' &&
-      typeof v.timeZoneId === 'string'
-    )
-  }
-
-  if (v.kind === 'PRO_MOBILE' || v.kind === 'CLIENT_ZIP') {
-    return (
-      typeof v.postalCode === 'string' &&
-      typeof v.lat === 'number' &&
-      typeof v.lng === 'number' &&
-      typeof v.timeZoneId === 'string'
-    )
-  }
-
-  return false
-}
-
-
-
 
 
 /** Accept number or string, return finite number or null */
@@ -339,7 +262,7 @@ export async function POST(request: Request) {
     // Native clients send a stable per-install id so the session can be revoked
     // per-device; it rides the verification token through to the active one.
     const deviceId = pickString(body.deviceId)
-    const signupLocation = isLocationPayload(body.signupLocation)
+    const signupLocation = isSignupLocationPayload(body.signupLocation)
       ? body.signupLocation
       : null
     const nextForVerification = sanitizeInternalPath(pickString(body.next))
@@ -664,105 +587,27 @@ export async function POST(request: Request) {
 
     const passwordHash = await hashPassword(password)
 
-    const clientProfileCreateData = {
-      homeTenantId: tenantContext.tenantId,
+    const { user, adoptionVerifiedChannel } = await createRegisteredAccount({
+      email,
+      phone,
+      passwordHash,
+      role,
       firstName,
       lastName,
-      phone,
-      ...buildClientProfileContactLookupData({ email, phone }),
-      ...buildEmailEncryptionWriteData({ email }),
-      ...buildPhoneEncryptionWriteData({ phone }),
-      phoneVerifiedAt: null,
-    } satisfies Prisma.ClientProfileUncheckedCreateWithoutUserInput
-
-    const { user, adoptionVerifiedChannel } = await prisma.$transaction(async (tx) => {
-      const user = await tx.user.create({
-        data: {
-          email,
-          phone,
-          ...buildUserContactLookupData({ email, phone }),
-          ...buildEmailEncryptionWriteData({ email }),
-          ...buildPhoneEncryptionWriteData({ phone }),
-          phoneVerifiedAt: null,
-          emailVerifiedAt: null,
-          password: passwordHash,
-          role,
-          tosAcceptedAt: new Date(),
-          tosVersion,
-          transactionalSmsConsentAt: new Date(),
-          transactionalSmsConsentVersion,
-          transactionalSmsConsentSource:
-            role === 'PRO' ? 'WEB_SIGNUP_PRO' : 'WEB_SIGNUP_CLIENT',
-          transactionalSmsConsentIp,
-          transactionalSmsConsentUserAgent,
-          
-          clientProfile:
-            role === 'CLIENT' && !attemptClaimAdopt
-              ? { create: clientProfileCreateData }
-              : undefined,
-
-          professionalProfile:
-            role === 'PRO' && proSetup && signupLocation.kind !== 'CLIENT_ZIP'
-              ? {
-                  create: buildProfessionalProfileCreateData({
-                    resolved: proSetup,
-                    identity: { firstName, lastName, phone },
-                    tenantId: tenantContext.tenantId,
-                    timeZone: finalTimeZone,
-                    location: signupLocation,
-                  }),
-                }
-              : undefined,
-        },
-        select: {
-          id: true,
-          email: true,
-          role: true,
-          phone: true,
-          authVersion: true,
-        },
-      })
-
-      let adoptionVerifiedChannel: ContactMethod | null = null
-
-      if (role === 'CLIENT' && attemptClaimAdopt) {
-        const adoption = await adoptClaimInviteDuringRegistration({
-          tx,
-          token: verificationInviteToken,
-          userId: user.id,
-          registeredEmail: email,
-          registeredPhone: phone,
-          verifiedChannel: claimVerifiedChannel,
-          now: new Date(),
-        })
-
-        // Contact mismatch / invalid / already-claimed invite: fall back to a
-        // fresh profile so signup still succeeds (degrades to today's behavior).
-        if (!adoption.adopted) {
-          await tx.clientProfile.create({
-            data: { userId: user.id, ...clientProfileCreateData },
-          })
-        } else {
-          adoptionVerifiedChannel = adoption.verifiedChannelApplied
-        }
-      }
-
-      // Lock the handle in the same transaction that creates the profile
-      // holding it. The pre-check above is advisory; this is what actually
-      // refuses a handle a client (or another pro) took in the meantime, and it
-      // rolls the whole signup back rather than half-creating an account.
-      if (role === 'PRO' && proSetup?.normalizedHandle) {
-        const created = await tx.professionalProfile.findUniqueOrThrow({
-          where: { userId: user.id },
-          select: { id: true },
-        })
-        await claimHandle(tx, proSetup.normalizedHandle, {
-          kind: 'PRO',
-          professionalId: created.id,
-        })
-      }
-
-      return { user, adoptionVerifiedChannel }
+      tenantId: tenantContext.tenantId,
+      tosVersion,
+      timeZone: finalTimeZone,
+      location: signupLocation,
+      proSetup,
+      transactionalSmsConsent: {
+        version: transactionalSmsConsentVersion,
+        source: role === 'PRO' ? 'WEB_SIGNUP_PRO' : 'WEB_SIGNUP_CLIENT',
+        ip: transactionalSmsConsentIp,
+        userAgent: transactionalSmsConsentUserAgent,
+      },
+      attemptClaimAdopt,
+      claimInviteToken: verificationInviteToken,
+      claimVerifiedChannel,
     })
 
     if (proSetup?.dcaTimedOutAtSignup) {
@@ -782,90 +627,19 @@ export async function POST(request: Request) {
     const emailVerifiedByClaim = adoptionVerifiedChannel === ContactMethod.EMAIL
 
     waitUntil(
-      (async () => {
-        if (user.phone && !phoneVerifiedByClaim) {
-          const phoneVerification =
-            await startTwilioVerifyPhoneVerification({
-              to: user.phone,
-            })
-
-          if (phoneVerification.ok) {
-            logAuthEvent({
-              level: 'info',
-              event: 'auth.phone.verify.start.success',
-              route: 'auth.register',
-              provider: 'twilio_verify',
-              userId: user.id,
-              phone: user.phone,
-              meta: {
-                sid: phoneVerification.sid,
-                status: phoneVerification.status,
-              },
-            })
-          } else {
-            logAuthEvent({
-              level:
-                phoneVerification.code === 'TWILIO_VERIFY_NOT_CONFIGURED'
-                  ? 'error'
-                  : 'warn',
-              event: 'auth.phone.verify.start.failed',
-              route: 'auth.register',
-              provider: 'twilio_verify',
-              code: phoneVerification.code,
-              userId: user.id,
-              phone: user.phone,
-              meta: {
-                message: phoneVerification.message,
-              },
-            })
-          }
-        }
-
-        if (verificationEmail && !emailVerifiedByClaim) {
-          try {
-            await issueAndSendEmailVerification({
-              userId: user.id,
-              email: verificationEmail,
-              appUrl,
-              tenantContext,
-              next: nextForVerification,
-              intent: verificationIntent,
-              inviteToken: verificationInviteToken,
-            })
-
-            logAuthEvent({
-              level: 'info',
-              event: 'auth.email.send.success',
-              route: 'auth.register',
-              provider: 'postmark',
-              userId: user.id,
-              email: verificationEmail,
-            })
-          } catch (emailErr) {
-            captureAuthException({
-              event: 'auth.email.send.failed',
-              route: 'auth.register',
-              provider: 'postmark',
-              userId: user.id,
-              email: verificationEmail,
-              error: emailErr,
-            })
-          }
-        }
-
-        await consumeTapIntent({
-          tapIntentId,
-          userId: user.id,
-        }).catch(() => null)
-      })().catch((backgroundErr) => {
-        captureAuthException({
-          event: 'auth.register.background_tail.failed',
-          route: 'auth.register',
-          userId: user.id,
-          email: verificationEmail,
-          phone: user.phone,
-          error: backgroundErr,
-        })
+      sendRegistrationVerifications({
+        route: 'auth.register',
+        userId: user.id,
+        email: verificationEmail,
+        phone: user.phone,
+        appUrl,
+        tenantContext,
+        next: nextForVerification,
+        intent: verificationIntent,
+        inviteToken: verificationInviteToken,
+        skipPhoneVerification: phoneVerifiedByClaim,
+        skipEmailVerification: emailVerifiedByClaim,
+        tapIntentId,
       }),
     )
 
