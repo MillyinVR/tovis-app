@@ -5,6 +5,7 @@
 // itself, or the wire could disagree with the routes it describes.
 
 import type { ProCapabilitiesDTO } from '@/lib/dto/proCapabilities'
+import { recurringAppointmentsEnabled } from '@/lib/booking/series/flag'
 import { isProMigrationEnabled } from '@/lib/migration/featureFlag'
 import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
 
@@ -19,5 +20,6 @@ export function resolveProCapabilities(): ProCapabilitiesDTO {
   return {
     noShowFees: noShowProtectionEnabled(),
     importFromAnotherApp: isProMigrationEnabled(),
+    recurringAppointments: recurringAppointmentsEnabled(),
   }
 }

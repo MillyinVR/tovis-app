@@ -14888,11 +14888,16 @@
         "noShowFees": {
           "description": "`ENABLE_NO_SHOW_PROTECTION` — the pro's no-show / late-cancel fee policy settings, the client card-on-file rail, and real fee charging.",
           "type": "boolean"
+        },
+        "recurringAppointments": {
+          "description": "`ENABLE_RECURRING_APPOINTMENTS` — standing appointments (BookingSeries): the series create/edit surface and the write boundary that stamps seriesId onto bookings. K18 ships with no UI; until the flag is on, no pro can create a standing appointment and nothing acquires a seriesId.",
+          "type": "boolean"
         }
       },
       "required": [
         "noShowFees",
-        "importFromAnotherApp"
+        "importFromAnotherApp",
+        "recurringAppointments"
       ],
       "type": "object"
     },
