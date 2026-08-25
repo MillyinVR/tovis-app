@@ -103,6 +103,14 @@ const child = spawnSync(command, args, {
     // Defaults FIRST so a real environment value (CI's generated keyring)
     // always wins; everything else about the child env is unchanged.
     ...testPiiKeyring,
+    // Every var in `.env.test.local`, not just the two DATABASE URLs. The file
+    // already carries secrets some suites need at import time (JWT_SECRET for
+    // lib/auth.ts) — reading it and dropping the rest meant local runs died
+    // with "JWT_SECRET is not set" while CI stayed green, because CI generates
+    // its own secrets in the workflow instead.
+    ...parsed,
+    // The shell / CI environment beats the file, matching dotenv convention;
+    // the pinned test database URLs beat both, since that is this wrapper's job.
     ...process.env,
     DATABASE_URL: databaseUrl,
     DIRECT_URL: directUrl,

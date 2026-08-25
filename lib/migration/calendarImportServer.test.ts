@@ -263,7 +263,7 @@ describe('commitCalendarImport', () => {
         locationId: 'loc-salon',
         locationType: 'SALON',
         importMode: true,
-        idempotencyKey: 'import:b1',
+        idempotencyKey: 'import:pro-1:b1',
         allowOutsideWorkingHours: true,
         scheduledFor: FUTURE,
       }),
@@ -809,7 +809,7 @@ describe('reconcileRemovedImportedEvents', () => {
 
     expect(mocks.cancelImportedBookingIfPristine).toHaveBeenCalledWith({
       professionalId: 'pro-1',
-      idempotencyKey: 'import:gone-1',
+      idempotencyKey: 'import:pro-1:gone-1',
     })
     // Keyed on the column, not on a `contains` match against the pro-editable
     // note — renaming a block used to make it un-removable.

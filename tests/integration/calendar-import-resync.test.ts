@@ -83,6 +83,8 @@ import {
   startOfLocalDayUtc,
   utcFromDayAndMinutesInTimeZone,
 } from '@/lib/time'
+import { commitCalendarImport } from '@/lib/migration/calendarImportServer'
+import { upsertProClient } from '@/lib/clients/upsertProClient'
 
 const databaseUrl = process.env.DATABASE_URL
 
@@ -104,6 +106,11 @@ let tenantId = ''
 let clientId = ''
 let professionalId = ''
 let proUserId = ''
+// Pro 2 exists ONLY for the cross-pro idempotency regression at the bottom of
+// this file — same client, shared event UID, and the booking keys must not
+// collide. Everything about it mirrors pro 1's fixture.
+let pro2Id = ''
+let pro2UserId = ''
 let locationId = ''
 let serviceId = ''
 let categoryId = ''
@@ -434,6 +441,56 @@ beforeAll(async () => {
     select: { id: true },
   })
   subscriptionId = subscription.id
+
+  // ── pro 2 (cross-pro idempotency regression only) ──────────────────────────
+  const pro2Email = `${tag}_pro2@example.com`
+  const pro2User = await db.user.create({
+    data: { email: pro2Email, password: 'test-password', role: Role.PRO },
+    select: { id: true },
+  })
+  seededUserEmails.push(pro2Email)
+  pro2UserId = pro2User.id
+
+  const pro2 = await db.professionalProfile.create({
+    data: {
+      userId: pro2User.id,
+      homeTenantId: tenantId,
+      firstName: 'Second',
+      lastName: 'Pro',
+      businessName: `${tag} second studio`,
+      timeZone: TZ,
+    },
+    select: { id: true },
+  })
+  pro2Id = pro2.id
+
+  // A bookable salon so pro 2's import can materialize a BOOKING. Deliberately
+  // a different location from pro 1's — nothing about this fixture should
+  // collide with pro 1's except the thing under test.
+  await db.professionalLocation.create({
+    data: {
+      professionalId: pro2Id,
+      type: ProfessionalLocationType.SALON,
+      name: `${tag} second salon`,
+      isPrimary: true,
+      isBookable: true,
+      formattedAddress: '12 Second Pro Rd, Los Angeles, CA 90002',
+      addressLine1: '12 Second Pro Rd',
+      city: 'Los Angeles',
+      state: 'CA',
+      postalCode: '90002',
+      countryCode: 'US',
+      lat: new Prisma.Decimal('34.0523000'),
+      lng: new Prisma.Decimal('-118.2438000'),
+      timeZone: TZ,
+      workingHours: OPEN_ALL_WEEK,
+      bufferMinutes: 0,
+      stepMinutes: 15,
+      advanceNoticeMinutes: 0,
+      maxDaysAhead: 365,
+    },
+    select: { id: true },
+  })
 }, 180_000)
 
 afterAll(async () => {
@@ -449,6 +506,22 @@ afterAll(async () => {
     where: { booking: { professionalId } },
   })
   await db.booking.deleteMany({ where: { professionalId } })
+  // Pro 2's cross-pro regression rows.
+  await db.bookingServiceItem.deleteMany({ where: { booking: { professionalId: pro2Id } } })
+  await db.booking.deleteMany({ where: { professionalId: pro2Id } })
+  const pro2ImportedClients = await db.clientProfile.findMany({
+    where: { createdByProfessionalId: pro2Id },
+    select: { id: true, userId: true },
+  })
+  await db.clientProfile.deleteMany({
+    where: { id: { in: pro2ImportedClients.map((c) => c.id) } },
+  })
+  await db.user.deleteMany({
+    where: { id: { in: pro2ImportedClients.map((c) => c.userId).filter((id): id is string => Boolean(id)) } },
+  })
+  await db.professionalLocation.deleteMany({ where: { professionalId: pro2Id } })
+  await db.professionalServiceOffering.deleteMany({ where: { professionalId: pro2Id } })
+  await db.professionalProfile.deleteMany({ where: { id: pro2Id } })
   await db.professionalServiceOffering.deleteMany({ where: { professionalId } })
   await db.professionalLocation.deleteMany({ where: { professionalId } })
   await db.professionalProfile.deleteMany({ where: { id: professionalId } })
@@ -511,7 +584,11 @@ describe('B9 — a real .ics feed through the resync, against real Postgres', ()
     expect(bookings).toHaveLength(1)
     expect(bookings[0]?.status).toBe(BookingStatus.ACCEPTED)
     expect(bookings[0]?.scheduledFor).toEqual(localHour(DAY_BOOKABLE, 11))
-    expect(bookings[0]?.creationIdempotencyKey).toBe(`import:${UID_BOOKABLE}`)
+    // The key is scoped per pro (`import:<professionalId>:<uid>`): two pros can
+    // share a UID and a client without one's bookmark swallowing the other's.
+    expect(bookings[0]?.creationIdempotencyKey).toBe(
+      `import:${professionalId}:${UID_BOOKABLE}`,
+    )
 
     // The event that lands on the pro's NATIVE booking is still held — Tori's
     // call, and what overlapPolicy.ts already promises ("held as blocked time
@@ -708,5 +785,157 @@ describe('B9 — a real .ics feed through the resync, against real Postgres', ()
     expect(native.status).toBe(BookingStatus.ACCEPTED)
     expect(native.scheduledFor).toEqual(localHour(DAY_NATIVE, 10))
     expect(native.source).not.toBe(BookingSource.IMPORTED)
+  }, 120_000)
+})
+
+// ── the cross-pro idempotency regression ─────────────────────────────────────
+//
+// OPEN-WORK item 1 (drive run 2): `importKey` used to be `import:<uid>` with no
+// professional in it. Client identity matching is GLOBAL by design (one client
+// account across all pros), so two pros whose feeds share an event UID AND a
+// client — routine when both exports came from the same source app — collapsed
+// onto one (clientId, key) replay pair: pro B's import hydrated pro A's booking,
+// got mutated:false, and reported the event skipped. Silent data loss reported
+// as success.
+//
+// This drives commitCalendarImport DIRECTLY (no feed subscription), so it shares
+// nothing with the resync describe above except the tenant and teardown. The
+// shared client is created through upsertProClient itself — the same global
+// match path production runs — so the test fails for the RIGHT reason if the
+// scoping ever regresses.
+
+describe('cross-pro import: same UID + same client ⇒ each pro gets its own booking', () => {
+  const SHARED_UID = `${tag}-shared@google.com`
+  // A distinct future day so neither pro's write contends on any unique index
+  // the other pro's fixture touches — the ONLY thing under test is the key.
+  const DAY_SHARED = localDate(60)
+
+  let sharedClientId = ''
+
+  beforeAll(async () => {
+    // The client exists ONCE app-wide; both pros resolve to this same profile
+    // through the blind-index email match inside upsertProClient.
+    const upserted = await upsertProClient({
+      professionalId,
+      firstName: 'Shared',
+      lastName: 'Client',
+      email: `${tag}_shared@example.com`,
+    })
+    if (!upserted.ok) throw new Error(`fixture: upsertProClient failed`)
+    sharedClientId = upserted.clientId
+
+    await db.professionalServiceOffering.create({
+      data: {
+        professionalId: pro2Id,
+        serviceId,
+        offersInSalon: true,
+        salonDurationMinutes: 60,
+        salonPriceStartingAt: new Prisma.Decimal('80.00'),
+        isActive: true,
+      },
+      select: { id: true },
+    })
+  }, 60_000)
+
+  it('imports the identical event for both pros as two separate bookings', async () => {
+    const sharedEvent = [
+      {
+        uid: SHARED_UID,
+        time: {
+          anchor: 'INSTANT' as const,
+          startUtc: localHour(DAY_SHARED, 11),
+          endUtc: localHour(DAY_SHARED, 12),
+        },
+        summary: SERVICE_NAME,
+        attendeeName: 'Shared Client',
+        attendeeEmail: `${tag}_shared@example.com`,
+        isRecurring: false,
+      },
+    ]
+
+    const pro1Result = await commitCalendarImport({
+      professionalId,
+      actorUserId: proUserId,
+      events: sharedEvent,
+      now: new Date(),
+    })
+    const pro2Result = await commitCalendarImport({
+      professionalId: pro2Id,
+      actorUserId: pro2UserId,
+      events: sharedEvent,
+      now: new Date(),
+    })
+
+    expect(pro1Result.created.bookings).toBe(1)
+    // THE assertion. Before the fix this was 0 with skipped:1 — pro 2 replayed
+    // pro 1's booking off the unscoped key and counted it a skip.
+    expect(pro2Result.created.bookings).toBe(1)
+
+    // Scoped to THIS event's keys — both pros also carry other IMPORTED
+    // bookings from the resync fixtures above.
+    const keys = (
+      await db.booking.findMany({
+        where: {
+          professionalId: { in: [professionalId, pro2Id] },
+          source: BookingSource.IMPORTED,
+          creationIdempotencyKey: { contains: SHARED_UID },
+        },
+        select: { professionalId: true, creationIdempotencyKey: true },
+      })
+    ).map((b) => ({ pro: b.professionalId, key: b.creationIdempotencyKey }))
+
+    expect(keys).toHaveLength(2)
+    expect(keys).toContainEqual({
+      pro: professionalId,
+      key: `import:${professionalId}:${SHARED_UID}`,
+    })
+    expect(keys).toContainEqual({
+      pro: pro2Id,
+      key: `import:${pro2Id}:${SHARED_UID}`,
+    })
+
+    // And the global-client rule held: ONE client account, TWO bookings.
+    const bookingsForClient = await db.booking.count({
+      where: {
+        clientId: sharedClientId,
+        source: BookingSource.IMPORTED,
+        status: BookingStatus.ACCEPTED,
+      },
+    })
+    expect(bookingsForClient).toBe(2)
+  }, 120_000)
+
+  it('is still idempotent per pro when the same feed replays', async () => {
+    const sharedEvent = [
+      {
+        uid: SHARED_UID,
+        time: {
+          anchor: 'INSTANT' as const,
+          startUtc: localHour(DAY_SHARED, 11),
+          endUtc: localHour(DAY_SHARED, 12),
+        },
+        summary: SERVICE_NAME,
+        attendeeName: 'Shared Client',
+        attendeeEmail: `${tag}_shared@example.com`,
+        isRecurring: false,
+      },
+    ]
+    for (const pro of [professionalId, pro2Id]) {
+      const result = await commitCalendarImport({
+        professionalId: pro,
+        actorUserId: pro === professionalId ? proUserId : pro2UserId,
+        events: sharedEvent,
+        now: new Date(),
+      })
+      expect(result.created.bookings).toBe(0)
+    }
+    expect(
+      await db.booking.count({
+        where: {
+          clientId: sharedClientId,
+          source: BookingSource.IMPORTED,
+        },
+      }),
+    ).toBe(2)
   }, 120_000)
 })
