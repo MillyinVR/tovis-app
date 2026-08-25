@@ -6,6 +6,7 @@ import {
   describe,
   expect,
   it,
+  vi,
 } from 'vitest'
 import {
   BookingSource,
@@ -48,6 +49,19 @@ import { utcDateToLocalParts } from '@/lib/time'
 import { createProBooking } from '@/lib/booking/writeBoundary'
 import { deleteExpiredHoldsForProfessional } from '@/lib/booking/holdCleanup'
 import { lockProfessionalSchedule } from '@/lib/booking/scheduleLock'
+
+// Headroom for the cleanup hooks, which empty the whole schema before AND after
+// each of this file's 42 tests. Vitest's default is 10s, which is not a number
+// anyone chose for this file — and on a loaded CI runner one of those hooks
+// overran it and failed the suite with `Hook timed out in 10000ms` while
+// nothing was actually wrong (PR #991's first run; it passed unchanged on
+// re-run, and the only diff in that PR was auth code).
+//
+// cleanupAll() below is now much cheaper, so this is a BACKSTOP, not the fix:
+// it buys margin for CI contention that cannot be reproduced locally, where the
+// slowest hook measured is ~0.4s. It only ever ALLOWS more time — a hook that
+// genuinely hangs still fails, just later.
+vi.setConfig({ hookTimeout: 30_000 })
 
 const databaseUrl = process.env.DATABASE_URL
 
@@ -126,26 +140,71 @@ function workingHoursJson(): Prisma.InputJsonValue {
  * than what it replaces — the old chain already wiped `User`/`Service`/
  * `ClientProfile` unfiltered, so this suite has always assumed it owns the
  * database. Only ever point DATABASE_URL at a throwaway test DB.
+ *
+ * ── Why it truncates only the NON-EMPTY tables (2026-08-25) ────────────────
+ *
+ * This runs 85 times per run of this file — `beforeEach` and `afterEach` across
+ * 42 tests, plus `afterAll` — so its cost IS the file's cost. It used to
+ * TRUNCATE all 157 tables unconditionally, and truncating an already-empty
+ * table is a no-op that still pays for its lock and catalogue work. Roughly 150
+ * of the 157 are empty on any given call.
+ *
+ * Measured in-suite against the docker test database, timing every call:
+ *
+ *   before   85 calls, median 327ms, total 28.4s   (of a ~33s file)
+ *   after    85 calls, median  20ms, total 14.1s
+ *   file     32.3s / 33.3s  →  18.2s / 18.6s  (paired runs, twice each)
+ *
+ * The worst single call is ~0.42s either way — that one is truncating the
+ * tables a test actually filled, which both versions must do. What went away is
+ * the fixed cost of the ~150 empty ones.
+ *
+ * The post-condition is unchanged: every table is empty afterwards. A table
+ * that is skipped was empty when it was checked, and nothing else writes to
+ * this database while a test runs (`fileParallelism: false`, one connection).
+ * CASCADE may additionally truncate tables that reference a non-empty one,
+ * which is fine — they end up empty either way.
+ *
+ * It is also one round trip instead of two, and no identifier crosses the wire
+ * at all now, which is strictly safer than interpolating names fetched by a
+ * previous query.
+ *
+ * RESTART IDENTITY is deliberately KEPT. Nothing in this schema uses a serial
+ * or identity column today, so it is a no-op, but dropping it would silently
+ * change behaviour the moment one is added, and it costs nothing once only a
+ * handful of tables are being truncated.
  */
 async function cleanupAll(): Promise<void> {
-  // Table names come from pg_tables, never from test input, so interpolating
-  // them into the TRUNCATE is safe — identifiers cannot be parameterized.
-  const tables = await db.$queryRaw<{ tablename: string }[]>`
-    SELECT tablename
-    FROM pg_tables
-    WHERE schemaname = 'public'
-      AND tablename <> '_prisma_migrations'
-  `
+  await db.$executeRawUnsafe(`
+    DO $cleanup$
+    DECLARE
+      r record;
+      nonempty text[] := '{}';
+      has_rows boolean;
+    BEGIN
+      FOR r IN
+        SELECT tablename
+        FROM pg_tables
+        WHERE schemaname = 'public'
+          AND tablename <> '_prisma_migrations'
+      LOOP
+        EXECUTE format(
+          'SELECT EXISTS (SELECT 1 FROM %I.%I LIMIT 1)', 'public', r.tablename
+        ) INTO has_rows;
 
-  if (tables.length === 0) return
+        IF has_rows THEN
+          nonempty := nonempty || format('%I.%I', 'public', r.tablename);
+        END IF;
+      END LOOP;
 
-  const quoted = tables
-    .map((row) => `"public"."${row.tablename}"`)
-    .join(', ')
-
-  await db.$executeRawUnsafe(
-    `TRUNCATE TABLE ${quoted} RESTART IDENTITY CASCADE`,
-  )
+      IF array_length(nonempty, 1) > 0 THEN
+        EXECUTE 'TRUNCATE TABLE '
+          || array_to_string(nonempty, ', ')
+          || ' RESTART IDENTITY CASCADE';
+      END IF;
+    END
+    $cleanup$;
+  `)
 }
 
 async function seedClient(
