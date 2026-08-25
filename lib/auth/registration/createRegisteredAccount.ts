@@ -5,15 +5,26 @@
 // handle lock — committed together or not at all.
 //
 // Extracted verbatim from app/api/v1/auth/register/route.ts so a second entry
-// point (social signup completion) can create an account that is byte-for-byte
-// the same as a password signup, instead of the parallel, thinner creation that
-// lib/auth/findOrCreate{Google,Apple}User.ts does today.
+// point could create an account that is byte-for-byte the same as a password
+// signup. That entry point now exists: POST /api/v1/auth/social/complete calls
+// this, which is what retired the parallel, thinner creation that
+// lib/auth/findOrCreate{Google,Apple}User.ts used to do — a CLIENT with no
+// phone, no SMS consent, no location, and no way to adopt a claim invite.
+//
+// The two callers differ ONLY in the credential (see SignupCredential) and in
+// what they gate on upstream. If a third ever appears, that is the seam to
+// widen; do not fork this.
 //
 // This module owns the WRITE only. Everything upstream of it — body parsing,
 // password policy, bot gate, rate limits, licence resolution, the self-serve
 // claim refusal — stays with the caller, because each caller gates differently.
 
-import { ContactMethod, Prisma, type Role } from '@prisma/client'
+import {
+  ContactMethod,
+  Prisma,
+  type Role,
+  type SocialAuthProvider,
+} from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
 import {
@@ -28,6 +39,7 @@ import {
   claimHandle,
   type ResolvedProProfileSetup,
 } from '@/lib/pro/proProfileSetup'
+import { socialProviderIdCreateData } from '@/lib/auth/socialProviderColumns'
 import type { SignupLocation } from './signupLocation'
 
 const CREATED_USER_SELECT = {
@@ -42,13 +54,47 @@ export type CreatedAccountUser = Prisma.UserGetPayload<{
   select: typeof CREATED_USER_SELECT
 }>
 
+/**
+ * How a signup proved its identity — and therefore what the new row carries.
+ *
+ * This is a union rather than a `passwordHash: string` because the two are not
+ * variations of one thing. A password signup chooses a secret and must then
+ * PROVE its email; a social signup never chooses a secret and arrives with the
+ * email already proven by the provider. Collapsing them loses both facts.
+ *
+ * It replaced a real bug rather than a stylistic one. The social path used to
+ * mint `hashPassword(crypto.randomUUID())` purely to satisfy a NOT NULL column,
+ * which left a provider-only account indistinguishable from a password account
+ * at the row level — nothing could tell that the person had never set a
+ * password, and `User.password` said they had. The column is now nullable and
+ * SOCIAL writes null.
+ */
+export type SignupCredential =
+  | {
+      kind: 'PASSWORD'
+      /** Already hashed — this module never sees a plaintext password. */
+      passwordHash: string
+    }
+  | {
+      kind: 'SOCIAL'
+      provider: SocialAuthProvider
+      /** The provider's stable subject id, taken from a consumed signup ticket. */
+      subject: string
+      /**
+       * When the provider asserted the email. A social signup is email-verified
+       * on arrival, so this stamps `emailVerifiedAt` and the caller skips the
+       * verification email entirely.
+       */
+      emailVerifiedAt: Date
+    }
+
 export type CreateRegisteredAccountArgs = {
   /** Already normalized via normalizeEmail. */
   email: string
   /** Already normalized via normalizePhone; null only where a caller allows it. */
   phone: string | null
-  /** Already hashed — this module never sees a plaintext password. */
-  passwordHash: string
+  /** How the person proved who they are. See SignupCredential. */
+  credential: SignupCredential
   role: Role
   firstName: string
   lastName: string
@@ -98,7 +144,7 @@ export async function createRegisteredAccount(
   const {
     email,
     phone,
-    passwordHash,
+    credential,
     role,
     firstName,
     lastName,
@@ -133,8 +179,25 @@ export async function createRegisteredAccount(
         ...buildEmailEncryptionWriteData({ email }),
         ...buildPhoneEncryptionWriteData({ phone }),
         phoneVerifiedAt: null,
-        emailVerifiedAt: null,
-        password: passwordHash,
+
+        // A password signup must still prove its email; a social one arrived
+        // with it proven, so it is stamped here and no verification email is
+        // sent. `password` is null for SOCIAL — the account genuinely has none.
+        ...(credential.kind === 'PASSWORD'
+          ? {
+              emailVerifiedAt: null,
+              password: credential.passwordHash,
+              googleUserId: null,
+              appleUserId: null,
+            }
+          : {
+              emailVerifiedAt: credential.emailVerifiedAt,
+              password: null,
+              ...socialProviderIdCreateData(
+                credential.provider,
+                credential.subject,
+              ),
+            }),
         role,
         tosAcceptedAt: new Date(),
         tosVersion,

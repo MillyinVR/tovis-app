@@ -7,14 +7,16 @@ vi.mock('@/app/api/_utils/rateLimit', () => ({
 vi.mock('@/lib/auth/appleIdentity', () => ({
   verifyAppleIdentityToken: vi.fn(),
 }))
-vi.mock('@/lib/auth/findOrCreateAppleUser', () => ({
-  findOrCreateAppleUser: vi.fn(),
+vi.mock('@/lib/auth/resolveSocialAccount', () => ({
+  resolveSocialAccount: vi.fn(),
+}))
+vi.mock('@/lib/auth/socialSignupTicket', () => ({
+  createSocialSignupTicket: vi.fn(),
 }))
 vi.mock('@/lib/tenant/requestContext', () => ({
-  resolveTenantContextForRequest: vi.fn(async () => ({ tenantId: 'tovis-root' })),
-}))
-vi.mock('@/lib/legal', () => ({
-  getCurrentTosVersion: vi.fn(() => 'v1'),
+  resolveTenantContextForRequest: vi.fn(async () => ({
+    tenantId: 'tovis-root',
+  })),
 }))
 vi.mock('@/app/api/_utils/auth/sessionCookie', () => ({
   setSessionCookie: vi.fn(),
@@ -25,10 +27,12 @@ vi.mock('@/lib/observability/authEvents', () => ({
 
 import { POST } from './route'
 import { verifyAppleIdentityToken } from '@/lib/auth/appleIdentity'
-import { findOrCreateAppleUser } from '@/lib/auth/findOrCreateAppleUser'
+import { resolveSocialAccount } from '@/lib/auth/resolveSocialAccount'
+import { createSocialSignupTicket } from '@/lib/auth/socialSignupTicket'
 
 const mockVerify = vi.mocked(verifyAppleIdentityToken)
-const mockFindOrCreate = vi.mocked(findOrCreateAppleUser)
+const mockResolve = vi.mocked(resolveSocialAccount)
+const mockCreateTicket = vi.mocked(createSocialSignupTicket)
 
 function req(body: unknown): Request {
   return new Request('https://app.tovis.app/api/v1/auth/apple', {
@@ -36,6 +40,15 @@ function req(body: unknown): Request {
     headers: { 'content-type': 'application/json', host: 'app.tovis.app' },
     body: JSON.stringify(body),
   })
+}
+
+// Apple's identity token carries no name — only sub/email.
+const VERIFIED = { sub: 's', email: 'a@b.com', emailVerified: true }
+
+const TICKET = {
+  id: 't1',
+  token: 't1.secret',
+  expiresAt: new Date('2026-01-01T00:15:00.000Z'),
 }
 
 beforeEach(() => {
@@ -54,23 +67,24 @@ describe('POST /api/v1/auth/apple', () => {
     const res = await POST(req({ identityToken: 'bad' }))
     expect(res.status).toBe(401)
     expect((await res.json()).code).toBe('INVALID_APPLE_TOKEN')
+    expect(mockResolve).not.toHaveBeenCalled()
+    expect(mockCreateTicket).not.toHaveBeenCalled()
   })
 
   it('returns 409 when an unverified same-email account exists', async () => {
-    mockVerify.mockResolvedValue({ sub: 's', email: 'a@b.com', emailVerified: true })
-    mockFindOrCreate.mockResolvedValue({
-      ok: false,
-      code: 'ACCOUNT_EXISTS_UNVERIFIED',
-    })
+    mockVerify.mockResolvedValue(VERIFIED)
+    mockResolve.mockResolvedValue({ outcome: 'ACCOUNT_EXISTS_UNVERIFIED' })
+
     const res = await POST(req({ identityToken: 'tok' }))
     expect(res.status).toBe(409)
     expect((await res.json()).code).toBe('ACCOUNT_EXISTS_UNVERIFIED')
+    expect(mockCreateTicket).not.toHaveBeenCalled()
   })
 
-  it('returns 200 with the session payload on success', async () => {
-    mockVerify.mockResolvedValue({ sub: 's', email: 'a@b.com', emailVerified: true })
-    mockFindOrCreate.mockResolvedValue({
-      ok: true,
+  it('returns 200 with the session payload when the identity already has an account', async () => {
+    mockVerify.mockResolvedValue(VERIFIED)
+    mockResolve.mockResolvedValue({
+      outcome: 'SIGNED_IN',
       user: {
         id: 'u1',
         email: 'a@b.com',
@@ -81,25 +95,67 @@ describe('POST /api/v1/auth/apple', () => {
       },
     })
 
-    const res = await POST(req({ identityToken: 'tok', deviceId: 'dev-1' }))
+    const res = await POST(req({ identityToken: 'tok' }))
     expect(res.status).toBe(200)
 
     const json = await res.json()
-    expect(json.ok).toBe(true)
+    expect(json.status).toBe('SIGNED_IN')
     expect(json.user).toEqual({ id: 'u1', email: 'a@b.com', role: 'CLIENT' })
     expect(typeof json.token).toBe('string')
-    expect(json.isEmailVerified).toBe(true)
-    expect(json.isPhoneVerified).toBe(false)
-    // Phone not verified yet → a VERIFICATION session, not fully verified.
     expect(json.isFullyVerified).toBe(false)
 
-    expect(mockFindOrCreate).toHaveBeenCalledWith(
+    expect(mockResolve).toHaveBeenCalledWith({
+      provider: 'APPLE',
+      subject: 's',
+      email: 'a@b.com',
+    })
+    expect(mockCreateTicket).not.toHaveBeenCalled()
+  })
+
+  it('returns a signup ticket — and creates NO account — for an identity with no account', async () => {
+    mockVerify.mockResolvedValue(VERIFIED)
+    mockResolve.mockResolvedValue({ outcome: 'NEEDS_SIGNUP' })
+    mockCreateTicket.mockResolvedValue(TICKET)
+
+    const res = await POST(
+      req({ identityToken: 'tok', firstName: 'Ada', lastName: 'Lovelace' }),
+    )
+
+    expect(res.status).toBe(200)
+
+    const json = await res.json()
+    expect(json.status).toBe('SIGNUP_REQUIRED')
+    expect(json.signupTicket).toBe('t1.secret')
+    expect(json.token).toBeUndefined()
+    expect(json.user).toBeUndefined()
+
+    // 🔴 Apple's name comes from the BODY, not the token — Apple releases it
+    // exactly once, in the first authorization response, so the client has to
+    // forward it. Capturing it on the ticket at issuance is the only chance to
+    // keep it: a later sign-in for the same subject gets nothing.
+    expect(mockCreateTicket).toHaveBeenCalledWith(
       expect.objectContaining({
-        appleUserId: 's',
+        provider: 'APPLE',
+        subject: 's',
         email: 'a@b.com',
+        firstName: 'Ada',
+        lastName: 'Lovelace',
         tenantId: 'tovis-root',
-        tosVersion: 'v1',
       }),
+    )
+  })
+
+  it('carries null names when Apple withholds them and the client sends none', async () => {
+    mockVerify.mockResolvedValue(VERIFIED)
+    mockResolve.mockResolvedValue({ outcome: 'NEEDS_SIGNUP' })
+    mockCreateTicket.mockResolvedValue(TICKET)
+
+    await POST(req({ identityToken: 'tok' }))
+
+    // The repeat-sign-in case, which is the common one. The completion form
+    // asks for a name rather than inventing one.
+    expect(mockCreateTicket).toHaveBeenCalledWith(
+      expect.objectContaining({ firstName: null, lastName: null }),
     )
   })
 })

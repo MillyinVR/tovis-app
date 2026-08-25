@@ -11,6 +11,7 @@ import { readOptionalEnv as envOrNull } from '@/lib/env'
 import { realDeliverySuppressed } from '@/lib/loadTestDelivery'
 import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
+import { getAuditClientIp } from '@/lib/security/auditClientIp'
 import { logAuthEvent } from '@/lib/observability/authEvents'
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import type { TenantContext } from '@/lib/tenant/context'
@@ -41,12 +42,9 @@ export function buildPasswordResetUrl(args: {
   return url.toString()
 }
 
+/** @see getAuditClientIp — audit only, never an authorization input. */
 export function getPasswordResetRequestIp(request: Request): string | null {
-  const xff = request.headers.get('x-forwarded-for')
-  if (!xff) return null
-
-  const first = xff.split(',')[0]?.trim()
-  return first || null
+  return getAuditClientIp(request)
 }
 
 export async function createPasswordResetToken(args: {
