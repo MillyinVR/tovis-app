@@ -373,7 +373,13 @@ describe('POST /api/v1/auth/social/complete (integration)', () => {
     expect(row.transactionalSmsConsentIp).toBe('203.0.113.7')
     expect(row.transactionalSmsConsentUserAgent).toBe('integration-suite/1.0')
 
-    expect(row.tosVersion).toBe('2026-04')
+    // Compare against the env var, not the literal fallback three lines of
+    // setup above it: `process.env.TOVIS_TOS_VERSION ||= '2026-04'` only
+    // applies when the var is UNSET (as in CI). A developer whose local env
+    // pins a different version then fails a test about consent capture, for a
+    // reason that has nothing to do with consent capture. The sibling suite
+    // (`register-signup.test.ts`) already asserts it this way.
+    expect(row.tosVersion).toBe(process.env.TOVIS_TOS_VERSION)
 
     // The form's name wins over the provider's.
     expect(row.clientProfile?.firstName).toBe('Grace')
