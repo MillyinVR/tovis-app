@@ -129,17 +129,13 @@ app/api/v1/auth/phone/correct/route.ts:direct property read:phoneForLog = user.p
 app/api/v1/auth/phone/send/route.ts:direct property read:const normalizedPhone = smsCountry.phone
 app/api/v1/auth/phone/send/route.ts:direct property read:const phone = user.phone?.trim() ?? ''
 app/api/v1/auth/phone/verify/route.ts:direct property read:const phone = user.phone?.trim() ?? ''
-app/api/v1/auth/register/route.ts:Prisma select/include plaintext field:email: true,
-app/api/v1/auth/register/route.ts:Prisma select/include plaintext field:phone: true,
 app/api/v1/auth/register/route.ts:direct property read:? signupLocation.postalCode
 app/api/v1/auth/register/route.ts:direct property read:const email = normalizeEmail(body.email)
 app/api/v1/auth/register/route.ts:direct property read:const firstName = pickString(body.firstName)
 app/api/v1/auth/register/route.ts:direct property read:const lastName = pickString(body.lastName)
 app/api/v1/auth/register/route.ts:direct property read:const rawPhone = pickString(body.phone)
 app/api/v1/auth/register/route.ts:direct property read:const verificationEmail = normalizeEmail(user.email)
-app/api/v1/auth/register/route.ts:direct property read:if (user.phone && !phoneVerifiedByClaim) {
 app/api/v1/auth/register/route.ts:direct property read:res.cookies.set('tovis_client_zip', signupLocation.postalCode, {
-app/api/v1/auth/register/route.ts:direct property read:typeof v.postalCode === 'string' &&
 app/api/v1/availability/other-pros/route.ts:Prisma select/include plaintext field:lat: true,
 app/api/v1/availability/other-pros/route.ts:Prisma select/include plaintext field:lng: true,
 app/api/v1/client/addresses/[id]/route.ts:direct property read:body.addressLine1 !== undefined ||
@@ -419,6 +415,7 @@ lib/aftercare/aftercareAccessTokens.ts:Prisma select/include plaintext field:fir
 lib/aftercare/aftercareAccessTokens.ts:Prisma select/include plaintext field:lastName: true,
 lib/aftercare/loadProAftercareList.ts:Prisma select/include plaintext field:firstName: true,
 lib/aftercare/loadProAftercareList.ts:Prisma select/include plaintext field:lastName: true,
+lib/auth/registration/signupLocation.ts:direct property read:typeof v.postalCode === 'string' &&
 lib/availability/core/placement.ts:Prisma select/include plaintext field:lat: true,
 lib/availability/core/placement.ts:Prisma select/include plaintext field:lng: true,
 lib/availability/data/offeringContext.ts:Prisma select/include plaintext field:firstName: true,
