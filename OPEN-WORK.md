@@ -1,6 +1,26 @@
 # OPEN-WORK — carried out of the drive-migration-wizard session (2026-08-25)
 
-## 🔴 1. TOP PRIORITY — Pro-scope the calendar-import idempotency key
+## 🔴 1. Pro-scope the calendar-import idempotency key — CODE DONE, cutover owed
+
+**Status (2026-08-25, PR #1002, merged as caa3c9a4):** the fix is live on main.
+`importKey()` now returns `import:<professionalId>:<uid>`; regression tests
+(two pros × one shared client + one UID against real Postgres) prove each pro
+gets its own booking and per-pro replay still dedupes.
+
+**⏳ Still owed at deploy time:** run the one-time rename once, in the next
+deploy window:
+
+```
+node scripts/migration-drive/renameImportIdempotencyKeys.mjs          # dry run
+node scripts/migration-drive/renameImportIdempotencyKeys.mjs --yes    # apply
+```
+
+Verified 2026-08-25: dev DB has **0** `import:*` bookings, so this is a
+near-no-op right now — but it must actually run after the first prod deploy
+that carries #1002, BEFORE any pro imports a feed on new code. The script is
+idempotent and safe to re-run. Once it has run cleanly in prod, delete this
+section (and consider removing the script's entry from
+`TEMP_ALLOWED_FILES` in `tools/check-booking-write-boundary.mjs`).
 
 **Why top:** two pros importing calendars that share an event UID *and* a client
 (same email/phone — common when both exported from the same source app) will
