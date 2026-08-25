@@ -1,0 +1,43 @@
+-- A CANCELLED booking must release its time. Drop the plain UNIQUE on
+-- (professionalId, scheduledFor).
+--
+-- THE BUG. `Booking_professionalId_scheduledFor_key` is a plain unique index
+-- with no WHERE clause, so it binds EVERY row whatever its status. Cancel a
+-- booking and its exact start time is taken forever: the row still occupies
+-- the index, the pro calendar does not render CANCELLED bookings, so the slot
+-- reads as free and every attempt to rebook it dies on a raw 23505 that the
+-- UI reports as "That time is no longer available". Observed in production on
+-- 2026-08-25: a Sep 21 booking was cancelled at 22:41Z, and both the pro
+-- booking route and the aftercare rebook path then failed with
+--   Unique constraint failed on the fields: (`professionalId`,`scheduledFor`)
+-- against an otherwise empty slot.
+--
+-- WHY DROPPING IT IS SAFE. The invariant it looks like it protects is already
+-- held — better — by `Booking_no_active_professional_overlap`, the EXCLUDE
+-- constraint added in 20260522000000 and widened in 20260806000000:
+--
+--   EXCLUDE USING gist ("professionalId" WITH =, <range> WITH &&)
+--   WHERE status IN (PENDING, ACCEPTED, IN_PROGRESS, COMPLETED)
+--     AND NOT "allowsOverlap"
+--
+-- Two bookings at the same start time necessarily overlap, so that constraint
+-- already refuses the case this index was refusing — while correctly making
+-- the two exceptions this index cannot express:
+--   * CANCELLED / NO_SHOW release their time (that time is genuinely free);
+--   * an `allowsOverlap` row is exempt, which is how a PRO-authorized
+--     double-book is permitted at all (lib/booking/overlapPolicy.ts).
+--
+-- The plain unique silently overrode BOTH exceptions. It even made an
+-- authorized overlap impossible at an identical start time while permitting it
+-- one minute either side, which is not a rule anyone chose.
+--
+-- Query paths are unaffected: `Booking_professionalId_scheduledFor_idx`
+-- (@@index([professionalId, scheduledFor])) stays and serves the same lookups.
+-- Nothing in the codebase used the compound key as a Prisma `where` — swept
+-- for `professionalId_scheduledFor` across app/, lib/ and prisma/: zero hits.
+--
+-- NOT CHANGED, deliberately: `BookingHold_professionalId_scheduledFor_key`
+-- carries the same shape. Holds are transient and swept, and their own EXCLUDE
+-- constraint is expiry-agnostic, so the defect is not reachable the same way.
+-- Left as a separate, conscious decision rather than widened blast radius.
+DROP INDEX IF EXISTS "Booking_professionalId_scheduledFor_key";

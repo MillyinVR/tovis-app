@@ -1422,6 +1422,87 @@ describe('booking overlap concurrency integration', () => {
     ).resolves.toBe(1)
   })
 
+  // Regression, 2026-08-26. `Booking_professionalId_scheduledFor_key` was a
+  // PLAIN unique index, so it bound every row whatever its status: cancelling a
+  // booking held its exact start time forever. The calendar does not render
+  // CANCELLED bookings, so the slot read as free while every rebook died on a
+  // raw 23505 the UI reported as "That time is no longer available". Seen in
+  // production before the index was dropped in 20260826000000. These two cases
+  // pin BOTH halves — the time is released, and the real invariant is not.
+  it('database releases a CANCELLED booking\'s exact start time for rebooking', async () => {
+    if (!fixtures) throw new Error('Missing fixtures')
+
+    const fx = fixtures
+    const start = futureUtc(23, 18, 0)
+
+    const cancelledId = await createDirectBooking({
+      clientId: fx.clients[0].clientId,
+      start,
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      status: BookingStatus.CANCELLED,
+      durationMinutes: 60,
+      bufferMinutes: 15,
+    })
+
+    // The SAME professional, the SAME instant — the case the unique index made
+    // impossible. It must succeed: cancelled time is genuinely free.
+    const rebookedId = await createDirectBooking({
+      clientId: fx.clients[1].clientId,
+      start,
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      status: BookingStatus.ACCEPTED,
+      durationMinutes: 60,
+      bufferMinutes: 15,
+    })
+
+    expect(rebookedId).not.toBe(cancelledId)
+
+    await expect(
+      db.booking.count({
+        where: { professionalId: fx.professionalId, scheduledFor: start },
+      }),
+    ).resolves.toBe(2)
+  })
+
+  it('database still refuses a second ACTIVE booking at the identical start time', async () => {
+    if (!fixtures) throw new Error('Missing fixtures')
+
+    const fx = fixtures
+    const start = futureUtc(24, 18, 0)
+
+    await createDirectBooking({
+      clientId: fx.clients[0].clientId,
+      start,
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      status: BookingStatus.ACCEPTED,
+      durationMinutes: 60,
+      bufferMinutes: 15,
+    })
+
+    // Dropping the unique index must not have opened the real double-book. The
+    // EXCLUDE constraint refuses this, and it is the one that carries the rule.
+    await expectDbBookingOverlapRejection(() =>
+      createDirectBooking({
+        clientId: fx.clients[1].clientId,
+        start,
+        locationId: fx.salonLocationId,
+        locationType: ServiceLocationType.SALON,
+        status: BookingStatus.PENDING,
+        durationMinutes: 60,
+        bufferMinutes: 15,
+      }),
+    )
+
+    await expect(
+      db.booking.count({
+        where: { professionalId: fx.professionalId, scheduledFor: start },
+      }),
+    ).resolves.toBe(1)
+  })
+
   it('database ALLOWS an overlapping booking flagged allowsOverlap (authorized PRO/ADMIN double-book)', async () => {
     if (!fixtures) throw new Error('Missing fixtures')
 

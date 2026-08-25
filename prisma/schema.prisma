@@ -3921,7 +3921,16 @@ model Booking {
   /// Inspiration boards the client handed to the pro for this booking.
   boardShares BookingBoardShare[]
 
-  @@unique([professionalId, scheduledFor])
+  // NO `@@unique([professionalId, scheduledFor])`. It existed until
+  // 20260826000000 and was a bug: a plain unique binds every row whatever its
+  // status, so a CANCELLED booking held its start time forever — invisible on
+  // the calendar, un-rebookable, failing with a raw 23505 the UI reported as
+  // "That time is no longer available". `Booking_no_active_professional_overlap`
+  // (raw SQL, 20260522000000) is the real invariant and expresses the two
+  // exceptions a unique index cannot: CANCELLED/NO_SHOW release their time,
+  // and an `allowsOverlap` row is exempt so a PRO-authorized double-book can
+  // exist at all. `@@index([professionalId, scheduledFor])` below still serves
+  // the lookups.
   @@unique([clientId, creationIdempotencyKey])
   /// One booking per occurrence index. This is the idempotency key of the
   /// materializer: re-running it can never double-book an index it already
