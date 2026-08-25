@@ -6794,6 +6794,11 @@ model SocialSignupTicket {
   /// burn of a subject's earlier unused tickets.
   @@index([provider, subject, usedAt])
   @@index([expiresAt])
+  /// Postgres does NOT index a foreign key column for you, and this FK is
+  /// ON DELETE CASCADE — so without this, every Tenant delete sequentially
+  /// scans this table to find the rows it has to remove. Matches NfcCard and
+  /// the other tenant-scoped tables.
+  @@index([tenantId])
 }
 
 model SupportTicket {

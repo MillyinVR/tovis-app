@@ -51,6 +51,12 @@ CREATE INDEX "SocialSignupTicket_provider_subject_usedAt_idx" ON "SocialSignupTi
 -- CreateIndex
 CREATE INDEX "SocialSignupTicket_expiresAt_idx" ON "SocialSignupTicket"("expiresAt");
 
+-- CreateIndex
+-- Postgres does not index a foreign key column for you. This FK is ON DELETE
+-- CASCADE, so without this index every Tenant delete sequentially scans this
+-- table to find the rows it must remove.
+CREATE INDEX "SocialSignupTicket_tenantId_idx" ON "SocialSignupTicket"("tenantId");
+
 -- AddForeignKey
 -- Cascade, not the Restrict every other tenant-scoped table uses: a ticket is a
 -- minutes-long scrap of in-flight signup state, not history worth refusing a
