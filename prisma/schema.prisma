@@ -142,6 +142,12 @@ enum AuthVerificationPurpose {
   EMAIL_VERIFY
 }
 
+/// Identity providers this app accepts a verified sign-in from.
+enum SocialAuthProvider {
+  GOOGLE
+  APPLE
+}
+
 enum MediaType {
   IMAGE
   VIDEO
@@ -1483,14 +1489,15 @@ model Tenant {
   customDomain String? @unique
   isActive     Boolean @default(true)
 
-  homePros       ProfessionalProfile[] @relation("TenantHomePros")
-  homeClients    ClientProfile[]       @relation("TenantHomeClients")
-  proBookings    Booking[]             @relation("TenantProBookings")
-  clientBookings Booking[]             @relation("TenantClientHomeBookings")
-  nfcCards       NfcCard[]             @relation("TenantNfcCards")
-  mediaAssets    MediaAsset[]          @relation("TenantMediaAssets")
-  practiceShots  PracticeShot[]        @relation("TenantPracticeShots")
-  notifications  Notification[]        @relation("TenantNotifications")
+  homePros            ProfessionalProfile[] @relation("TenantHomePros")
+  homeClients         ClientProfile[]       @relation("TenantHomeClients")
+  proBookings         Booking[]             @relation("TenantProBookings")
+  clientBookings      Booking[]             @relation("TenantClientHomeBookings")
+  nfcCards            NfcCard[]             @relation("TenantNfcCards")
+  socialSignupTickets SocialSignupTicket[]  @relation("TenantSocialSignupTickets")
+  mediaAssets         MediaAsset[]          @relation("TenantMediaAssets")
+  practiceShots       PracticeShot[]        @relation("TenantPracticeShots")
+  notifications       Notification[]        @relation("TenantNotifications")
 
   @@index([isActive])
 }
@@ -1549,7 +1556,16 @@ model User {
   authVersion        Int                        @default(1)
   loginAttempts      Int                        @default(0)
   lockedUntil        DateTime?
-  password           String
+  /// Bcrypt hash of the account's password, or NULL when the account has no
+  /// password at all — a social signup completes with a provider credential
+  /// and never chooses one. It was NOT NULL until social signup became
+  /// two-phase, which forced every social account to store a random unguessable
+  /// hash purely to satisfy the column; that made a provider-only account
+  /// indistinguishable from a password account at the row level. NULL says the
+  /// true thing. The login route already reads this as
+  /// `user?.password ?? DUMMY_PASSWORD_HASH`, so a null compares (in constant
+  /// time) against a hash nothing matches and falls out as invalid credentials.
+  password           String?
   // Apple "Sign in with Apple" stable user id (the identity-token `sub`). Null
   // for password/other users; set when an account is linked to an Apple id.
   appleUserId        String?                    @unique @db.VarChar(255)
@@ -6707,6 +6723,76 @@ model SessionHandoffToken {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
+  @@index([expiresAt])
+}
+
+/// A verified social identity that has NO account yet, parked for the few
+/// minutes it takes the person to finish signing up.
+///
+/// Why it exists: /api/v1/auth/{google,apple} used to CREATE the account inline
+/// the moment the provider verified a token. That skipped everything a signup
+/// owes — SMS consent, a phone number, the role choice, the ZIP/work location,
+/// and claim-invite adoption — and it collided (unhandled P2002) with the
+/// UNCLAIMED ClientProfile a pro had already created for that email. The
+/// identity is proven at sign-in; the ACCOUNT is created one step later, by
+/// /api/v1/auth/social/complete, through the same createRegisteredAccount() a
+/// password signup uses.
+///
+/// Security shape is SessionHandoffToken's, for the same reasons documented in
+/// lib/auth/sessionHandoff.ts: opaque 32-byte secret, SHA-256 at rest,
+/// single-use via one guarded updateMany, short TTL. It differs in one way that
+/// matters — it is NOT user-bound, because at issuance there is no user yet, so
+/// there is no authVersion to pin. What binds it instead is `provider` +
+/// `subject`: the completion route links the identity stored in THIS row and
+/// never one named by the request body.
+model SocialSignupTicket {
+  id        String @id @default(cuid())
+  tokenHash String @unique @db.VarChar(128)
+
+  provider SocialAuthProvider
+
+  /// The provider's stable subject id (the identity token's `sub`) — what
+  /// lands in User.googleUserId / User.appleUserId when the account is created.
+  subject String @db.VarChar(255)
+
+  /// Normalized email the provider asserted, and therefore already verified.
+  /// Plaintext for this row's few minutes of life, exactly as
+  /// EmailVerificationToken.email is; the row is deleted-by-expiry, never read
+  /// for anything but the one completion it authorizes.
+  email String @db.VarChar(320)
+
+  /// Names as the provider supplied them. Apple sends these only on the FIRST
+  /// authorization, so capturing them at issuance is the only chance to keep
+  /// them — a retry of the same sign-in gets nothing.
+  firstName String? @db.VarChar(255)
+  lastName  String? @db.VarChar(255)
+
+  /// The tenant whose domain served the sign-in; becomes the profile's
+  /// permanent home tenant. Pinned here so it cannot be swapped at completion.
+  tenantId String
+
+  expiresAt DateTime
+  usedAt    DateTime?
+
+  /// Audit only, never used for authorization — the same call
+  /// SessionHandoffToken makes. Binding completion to the issuing IP/UA would
+  /// break a legitimate flow (sign in on a phone, finish after a network hop).
+  issuedIp        String?
+  issuedUserAgent String? @db.VarChar(512)
+
+  createdAt DateTime @default(now())
+
+  /// Cascade, not Restrict: a ticket is a minutes-long scrap of in-flight
+  /// state. Every other tenant-scoped row here is Restrict because it holds
+  /// real history worth refusing a delete over; an unfinished signup is not,
+  /// and a Restrict FK on it would let one abandoned ticket block a tenant
+  /// teardown for as long as the row sat there.
+  tenant Tenant @relation("TenantSocialSignupTickets", fields: [tenantId], references: [id], onDelete: Cascade)
+
+  /// The completion route looks a ticket up by its id (from the composite
+  /// token), so no index is needed for that. This one serves the issuance-side
+  /// burn of a subject's earlier unused tickets.
+  @@index([provider, subject, usedAt])
   @@index([expiresAt])
 }
 

@@ -40,6 +40,7 @@ import {
 } from '@prisma/client'
 import { isRuntimeFlagEnabled } from '@/lib/runtimeFlags'
 import { isRecord } from '@/lib/guards'
+import { getAuditClientIp } from '@/lib/security/auditClientIp'
 import { isUsStateCode } from '@/lib/usStates'
 import {
   requiresLicense,
@@ -147,13 +148,6 @@ function sanitizeOptionalText(raw: string | null | undefined): string | null {
   return value || null
 }
 
-function getClientIp(request: Request): string | null {
-  const forwarded = request.headers.get('x-forwarded-for')?.trim()
-  if (!forwarded) return null
-  const first = forwarded.split(',')[0]?.trim()
-  return first || null
-}
-
 function getUserAgent(request: Request): string | null {
   const value = request.headers.get('user-agent')?.trim()
   return value || null
@@ -254,7 +248,7 @@ export async function POST(request: Request) {
 
     const tosAccepted = body.tosAccepted === true
     const transactionalSmsConsent = body.transactionalSmsConsent === true
-    const transactionalSmsConsentIp = getClientIp(request)
+    const transactionalSmsConsentIp = getAuditClientIp(request)
     const transactionalSmsConsentUserAgent = getUserAgent(request)
     const turnstileToken = pickString(body.turnstileToken)
 
@@ -590,7 +584,7 @@ export async function POST(request: Request) {
     const { user, adoptionVerifiedChannel } = await createRegisteredAccount({
       email,
       phone,
-      passwordHash,
+      credential: { kind: 'PASSWORD', passwordHash },
       role,
       firstName,
       lastName,

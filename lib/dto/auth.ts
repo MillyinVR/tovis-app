@@ -28,6 +28,43 @@ export type AuthLoginResponseDTO = {
   isFullyVerified: boolean
 }
 
+// POST /api/v1/auth/google and /api/v1/auth/apple.
+//
+// Social sign-in has two outcomes, and the client must be able to tell them
+// apart without guessing from which fields are present — hence the `status`
+// discriminant. `SIGNED_IN` carries exactly AuthLoginResponseDTO, so the
+// existing post-auth navigation reads it unchanged; the discriminant is
+// additive, which is what keeps an already-shipped client that ignores it
+// working on the signed-in path.
+//
+// `SIGNUP_REQUIRED` means the provider proved an identity that has NO account
+// yet. NOTHING has been created. The ticket is the proof, and it is spent by
+// POST /api/v1/auth/social/complete, which collects the parts a signup needs
+// that a provider cannot supply — role, phone, SMS consent, location.
+export type AuthSocialSignInResponseDTO =
+  | ({ status: 'SIGNED_IN' } & AuthLoginResponseDTO)
+  | {
+      status: 'SIGNUP_REQUIRED'
+      /** Opaque single-use `<id>.<secret>`. Echo it back to /social/complete. */
+      signupTicket: string
+      /** ISO instant; the ticket is dead after this. */
+      ticketExpiresAt: string
+      /**
+       * Prefill only — the completion route reads the real values from the
+       * ticket row, never from its request body, so editing these client-side
+       * changes what is displayed and nothing that is stored.
+       */
+      prefill: {
+        email: string
+        firstName: string | null
+        lastName: string | null
+      }
+    }
+
+// POST /api/v1/auth/social/complete — the account now exists, so this is
+// exactly the register response.
+export type AuthSocialCompleteResponseDTO = AuthRegisterResponseDTO
+
 // POST /api/v1/auth/register
 export type AuthRegisterResponseDTO = {
   user: AuthUserDTO
