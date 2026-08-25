@@ -1,6 +1,7 @@
 // app/api/v1/availability/day/route.test.ts
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ServiceLocationType } from '@prisma/client'
+import { getZonedParts } from '@/lib/time'
 
 const mocks = vi.hoisted(() => ({
   getScheduleVersion: vi.fn(),
@@ -117,18 +118,20 @@ const DST_SPRING_FORWARD_DAY = '2027-03-14'
 const DST_FALL_BACK_DAY = '2027-11-07'
 const NEAR_MIDNIGHT_DAY = '2027-01-15'
 
+// Read the local wall clock through `getZonedParts` rather than a raw
+// `Intl.DateTimeFormat`. `hour12: false` is NOT portable at midnight: it
+// resolves to the h24 cycle in some ICU builds, so 00:00 formats as "24:00"
+// (seen on Node 20 / ICU 78.3, while Node 22 / ICU 78.2 says "00:00") and the
+// fall-back case below — whose surviving slots include local midnight —
+// failed on one runtime and passed on the other. `getZonedParts` already
+// normalizes that hour-24 spelling, so this reads the same everywhere.
+// The slots asserted here are literal constants, not values the route
+// computes, so borrowing the helper does not make the oracle self-referential.
 function localHmInTz(isoUtc: string, timeZone: string): string {
-  const d = new Date(isoUtc)
+  const { hour, minute } = getZonedParts(new Date(isoUtc), timeZone)
 
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).formatToParts(d)
-
-  const hh = parts.find((p) => p.type === 'hour')?.value ?? '00'
-  const mm = parts.find((p) => p.type === 'minute')?.value ?? '00'
+  const hh = String(hour).padStart(2, '0')
+  const mm = String(minute).padStart(2, '0')
   return `${hh}:${mm}`
 }
 
