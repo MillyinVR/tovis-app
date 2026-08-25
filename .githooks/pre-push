@@ -16,6 +16,44 @@
 # .githooks). If it isn't running, run:  git config core.hooksPath .githooks
 set -e
 
+# ── Runtime guard ───────────────────────────────────────────────────────────
+# `engines.node` in package.json is the supported runtime, and every CI
+# workflow pins that same major. A hook that runs under an OLDER node does not
+# fail cleanly — it fails somewhere far from the cause. Observed: Homebrew
+# node@20 ships ICU 78.3, whose `hour12: false` formats local midnight as
+# "24:00" instead of "00:00", which reddened a DST availability test that CI
+# (Node 22) passed. The apparent lesson was "that test is flaky, push with
+# --no-verify" — which silently disarms typecheck, the whole unit suite and
+# every static guard on every push. So check the runtime FIRST and name it.
+if ! command -v node >/dev/null 2>&1; then
+  echo "✖ pre-push: no \`node\` on PATH — cannot run the checks." >&2
+  exit 1
+fi
+
+required_major="$(node -p "(String((require('./package.json').engines || {}).node || '').match(/[0-9]+/) || [''])[0]" 2>/dev/null || true)"
+current_major="$(node -p "process.versions.node.split('.')[0]" 2>/dev/null || true)"
+
+# Only compare when BOTH parsed to plain digits; an unreadable version must not
+# block a push, because this guard is a signpost and not a security control.
+case "${required_major}-${current_major}" in
+  *[!0-9-]* | -* | *- ) ;;
+  * )
+    if [ "$current_major" -lt "$required_major" ]; then
+      echo "" >&2
+      echo "✖ pre-push: Node $(node -v) is older than this project supports." >&2
+      echo "    engines.node : >=${required_major}   (CI runs Node ${required_major})" >&2
+      echo "    running      : $(node -v)" >&2
+      echo "    resolved from: $(command -v node)" >&2
+      echo "" >&2
+      echo "  An unsupported runtime produces failures that have nothing to do with your" >&2
+      echo "  change — a stale ICU spelling local midnight \"24:00\" is a real example." >&2
+      echo "  Fix PATH so a supported node comes first; do NOT reach for --no-verify." >&2
+      echo "" >&2
+      exit 1
+    fi
+    ;;
+esac
+
 echo "▶ pre-push: typecheck + unit tests + static guards (bypass with --no-verify)…"
 npm run typecheck
 npx vitest run
