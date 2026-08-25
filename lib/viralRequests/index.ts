@@ -10,7 +10,7 @@ import {
 } from '@prisma/client'
 
 import { notifyMatchedProsAboutApprovedViralRequest } from '@/lib/notifications/social'
-import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
+import { PUBLICLY_LISTABLE_PRO_STATUSES } from '@/lib/proTrustState'
 import { BUCKETS } from '@/lib/storageBuckets'
 import { platformCrossTenantProVisibilityFilter } from '@/lib/tenant'
 import { readViralSubmitterMedia } from '@/lib/viralRequests/contracts'
@@ -666,7 +666,7 @@ export async function findMatchingProsByRequestedCategory(
       // if viral requests ever become tenant-facing.
       ...platformCrossTenantProVisibilityFilter(),
       verificationStatus: {
-        in: [...PUBLICLY_APPROVED_PRO_STATUSES],
+        in: [...PUBLICLY_LISTABLE_PRO_STATUSES],
       },
       offerings: {
         some: {

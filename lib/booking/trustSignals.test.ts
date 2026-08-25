@@ -87,16 +87,33 @@ describe('loadBookingTrustSignals', () => {
     expect(result.rating).toBeNull()
   })
 
-  it.each(['REJECTED', 'NEEDS_INFO'])(
-    'does not call a %s pro verified',
-    async (status) => {
-      given({ verificationStatus: status })
+  // PENDING and PENDING_MANUAL_REVIEW are the cases this list was MISSING, and
+  // their absence is why the chip claimed a licence check that had never
+  // happened: the implementation asked "is this pro not barred?", which is true
+  // of somebody nobody has looked at. Only APPROVED earns the chip.
+  it.each([
+    'PENDING',
+    'PENDING_MANUAL_REVIEW',
+    'REJECTED',
+    'NEEDS_INFO',
+  ])('does not call a %s pro verified', async (status) => {
+    given({ verificationStatus: status })
 
-      const result = await loadBookingTrustSignals('pro_1')
+    const result = await loadBookingTrustSignals('pro_1')
 
-      expect(result.verified).toBe(false)
-    },
-  )
+    expect(result.verified).toBe(false)
+  })
+
+  it('is the ONLY thing separating an unreviewed pro from a reviewed one', async () => {
+    // An unreviewed pro is otherwise a full marketplace citizen — listed,
+    // searchable, bookable (lib/proTrustState.ts). This chip is the whole
+    // visible difference, so it has to be exact.
+    given({ verificationStatus: 'PENDING' })
+    expect((await loadBookingTrustSignals('pro_1')).verified).toBe(false)
+
+    given({ verificationStatus: 'APPROVED' })
+    expect((await loadBookingTrustSignals('pro_1')).verified).toBe(true)
+  })
 
   it('treats a missing pro as unverified rather than throwing', async () => {
     given({ verificationStatus: null })

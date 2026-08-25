@@ -6,7 +6,7 @@ import {
   ProfessionalLocationType,
 } from '@prisma/client'
 
-import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
+import { PUBLICLY_LISTABLE_PRO_STATUSES } from '@/lib/proTrustState'
 import { rootTenantContext, whiteLabelTenantContext } from '@/lib/tenant/context'
 
 const mocks = vi.hoisted(() => {
@@ -228,7 +228,7 @@ describe('lib/discovery/nearbyPros.ts', () => {
           isBookable: true,
           professionalId: { not: 'pro_self' },
           professional: {
-            verificationStatus: { in: [...PUBLICLY_APPROVED_PRO_STATUSES] },
+            verificationStatus: { in: [...PUBLICLY_LISTABLE_PRO_STATUSES] },
           },
         }),
         take: 800,
@@ -258,7 +258,7 @@ describe('lib/discovery/nearbyPros.ts', () => {
         where: expect.objectContaining({
           professional: expect.objectContaining({
             homeTenantId: 'tenant_salon_a',
-            verificationStatus: { in: [...PUBLICLY_APPROVED_PRO_STATUSES] },
+            verificationStatus: { in: [...PUBLICLY_LISTABLE_PRO_STATUSES] },
           }),
         }),
       }),

@@ -61,7 +61,7 @@ const PUBLISH_BLOCKER_LABELS: Record<string, string> = {
   OFFERING_MISSING_SALON_PRICE_OR_DURATION: 'salon services missing price or duration',
   OFFERING_MISSING_MOBILE_PRICE_OR_DURATION: 'mobile services missing price or duration',
   STRIPE_NOT_READY: 'Stripe payouts not finished',
-  VERIFICATION_NOT_APPROVED: 'verification not approved',
+  VERIFICATION_BARRED: 'verification not approved',
 }
 
 function publishBlockerLabel(code: string): string {

@@ -395,13 +395,20 @@ function isModerationStatus(value: unknown): value is ModerationStatus {
   )
 }
 
+/**
+ * ⚠️ This hand-written list was missing `PENDING_MANUAL_REVIEW`, and the caller
+ * DROPS the whole row when the guard says no — so a look belonging to a
+ * manual-review pro silently vanished. Harmless only while such a pro was
+ * unlisted anyway; now that an unreviewed pro is publicly listed
+ * (lib/proTrustState.ts) it would have deleted real rows from the feed.
+ *
+ * Derived from the Prisma enum rather than retyped, so the next status added
+ * cannot go missing the same way.
+ */
+const VERIFICATION_STATUSES = Object.values(VerificationStatus)
+
 function isVerificationStatus(value: unknown): value is VerificationStatus {
-  return (
-    value === VerificationStatus.PENDING ||
-    value === VerificationStatus.APPROVED ||
-    value === VerificationStatus.REJECTED ||
-    value === VerificationStatus.NEEDS_INFO
-  )
+  return VERIFICATION_STATUSES.some((status) => status === value)
 }
 
 function isMediaVisibility(value: unknown): value is MediaVisibility {

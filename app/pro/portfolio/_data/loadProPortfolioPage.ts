@@ -14,7 +14,7 @@ import { isUnpromotedPrivateMedia } from '@/lib/media/publicShareGuard'
 import { reachableClientWhere } from '@/lib/notifications/contactMethod'
 import { pickString } from '@/lib/pick'
 import { prisma } from '@/lib/prisma'
-import { isPubliclyApprovedProStatus } from '@/lib/proTrustState'
+import { canListProPublicly } from '@/lib/proTrustState'
 
 import {
   PRO_PORTFOLIO_GROUP_PAGE_SIZE,
@@ -311,7 +311,7 @@ export async function buildProPortfolioModel({
 
     isBlank,
 
-    publicProfileHref: isPubliclyApprovedProStatus(pro.verificationStatus)
+    publicProfileHref: canListProPublicly(pro.verificationStatus)
       ? `/professionals/${encodeURIComponent(pro.id)}`
       : null,
   }

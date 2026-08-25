@@ -54,12 +54,11 @@ export const PRO_BLOCKER_COPY: Record<ProReadinessBlocker, ProBlockerCopy> = {
     label: 'Finish Stripe payout setup in your payment settings.',
     href: PRO_PUBLIC_PROFILE_PATH,
   },
-  VERIFICATION_NOT_APPROVED: {
-    label: 'Finish professional verification.',
-    href: '/pro/verification',
-  },
-  VERIFICATION_NOT_BROADLY_DISCOVERABLE: {
-    label: 'Finish verification so clients can discover you.',
+  // Only fires on an admin's active refusal now (REJECTED / NEEDS_INFO), so
+  // the copy says what is actually wrong rather than "finish verification" —
+  // an unreviewed pro is no longer blocked and never sees this.
+  VERIFICATION_BARRED: {
+    label: 'Your verification needs attention before you can take bookings.',
     href: '/pro/verification',
   },
   LICENSE_EXPIRED: {

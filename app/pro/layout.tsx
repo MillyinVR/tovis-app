@@ -5,7 +5,7 @@ import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 
 import { getCurrentUser } from '@/lib/currentUser'
-import { isPubliclyApprovedProStatus } from '@/lib/proTrustState'
+import { canListProPublicly } from '@/lib/proTrustState'
 import '@/lib/brand/proOverview.css'
 import { checkProReadiness } from '@/lib/pro/readiness/proReadiness'
 import { getProOnboardingRedirectHref } from '@/lib/pro/readiness/onboardingGate'
@@ -86,7 +86,7 @@ export default async function ProRootLayout({
 
   const pro = user.professionalProfile
   const proDisplayName = pickProfessionalPublicDisplayName(pro)
-  const publicUrl = isPubliclyApprovedProStatus(pro.verificationStatus)
+  const publicUrl = canListProPublicly(pro.verificationStatus)
     ? `/professionals/${encodeURIComponent(pro.id)}`
     : null
 

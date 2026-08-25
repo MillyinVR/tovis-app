@@ -17,10 +17,10 @@ import {
   LastMinuteVisibilityMode,
   OpeningStatus,
   Prisma,
-  VerificationStatus,
 } from '@prisma/client'
 
 import { jsonFail, jsonOk } from '@/app/api/_utils'
+import { PUBLICLY_LISTABLE_PRO_STATUSES } from '@/lib/proTrustState'
 import { decimalToNumber } from '@/lib/booking/snapshots'
 import {
   boundsForRadiusMiles,
@@ -306,7 +306,9 @@ export async function GET(req: Request) {
           },
         },
         professional: {
-          verificationStatus: VerificationStatus.APPROVED,
+          // Follows public listing, like search / nearby / the feed. A saved
+          // service whose pro is merely unreviewed is still a real option.
+          verificationStatus: { in: PUBLICLY_LISTABLE_PRO_STATUSES },
         },
         location: {
           isBookable: true,

@@ -15,12 +15,14 @@
 //            provisioning; acting-as alone never conjures it. This lets a pro
 //            (home role PRO) who is also a super admin switch into the console
 //            without giving up Pro as their home workspace.
-//   PRO    — with an APPROVED ProfessionalProfile (i.e. licensed), OR when PRO
-//            is the user's own home role and they have a profile at all. The
-//            second half is not a loophole: see the note on the PRO branch.
+//   PRO    — with a ProfessionalProfile an admin has not REFUSED. A verified
+//            licence is a badge, not a gate (lib/proTrustState.ts). Home-PRO is
+//            unconditional on top of that: see the note on the PRO branch.
 //   CLIENT — anyone; a missing ClientProfile is provisioned on first switch.
 
 import type { Role, VerificationStatus } from '@prisma/client'
+
+import { isBarredProStatus } from '@/lib/proTrustState'
 
 /** Structural input — avoids importing CurrentUser (would create a cycle). */
 export type WorkspaceCapabilityUser = {
@@ -113,10 +115,16 @@ export function canActAs(user: WorkspaceCapabilityUser, role: Role): boolean {
       // were unreachable until an admin approved the licence. Measured against
       // these functions, not argued.
       //
-      // APPROVED still governs the case the rule was written for: acting as
-      // PRO from a DIFFERENT home role.
-      if (user.homeRole === 'PRO') return user.professionalProfile !== null
-      return user.professionalProfile?.verificationStatus === 'APPROVED'
+      // Entering the pro workspace from a DIFFERENT home role used to demand
+      // APPROVED. It now asks the same question every other surface asks —
+      // whether an admin has actively refused this pro — because a verified
+      // licence became a BADGE rather than a gate (lib/proTrustState.ts). A
+      // profile is still required: app/pro/layout.tsx bounces a pro who has
+      // none, so offering the workspace would be a door that shuts.
+      if (!user.professionalProfile) return false
+      if (user.homeRole === 'PRO') return true
+
+      return !isBarredProStatus(user.professionalProfile.verificationStatus)
     case 'CLIENT':
       return true
     default:

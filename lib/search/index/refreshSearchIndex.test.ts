@@ -247,7 +247,7 @@ describe('refreshLocation', () => {
 
     mocks.checkProReadinessWithDb.mockResolvedValueOnce({
       ok: false,
-      blockers: ['VERIFICATION_NOT_APPROVED'],
+      blockers: ['VERIFICATION_BARRED'],
     })
 
     await refreshLocation('loc_a', 'location.create')

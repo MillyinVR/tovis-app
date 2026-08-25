@@ -162,7 +162,10 @@ describe('lib/jobs/looksSocial/indexLookPostDocument.ts', () => {
       expect(isLookPostSearchEligible(row)).toBe(false)
     })
 
-    it('returns false when the professional is not publicly approved', () => {
+    it('indexes an unreviewed professional\u2019s look', () => {
+      // Search follows public listing, and the licence is a badge rather than
+      // a gate (lib/proTrustState.ts). A look nobody can find is the same as a
+      // look that does not exist.
       const row = makeLookPostRow({
         professional: {
           id: 'pro_1',
@@ -172,7 +175,25 @@ describe('lib/jobs/looksSocial/indexLookPostDocument.ts', () => {
         },
       })
 
-      expect(isLookPostSearchEligible(row)).toBe(false)
+      expect(isLookPostSearchEligible(row)).toBe(true)
+    })
+
+    it('returns false when the professional was refused', () => {
+      for (const status of [
+        VerificationStatus.REJECTED,
+        VerificationStatus.NEEDS_INFO,
+      ]) {
+        const row = makeLookPostRow({
+          professional: {
+            id: 'pro_1',
+            businessName: 'TOVIS Studio',
+            handle: 'tovisstudio',
+            verificationStatus: status,
+          },
+        })
+
+        expect(isLookPostSearchEligible(row)).toBe(false)
+      }
     })
   })
 

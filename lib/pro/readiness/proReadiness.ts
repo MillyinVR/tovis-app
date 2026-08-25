@@ -9,13 +9,13 @@ import {
   Prisma,
   ProfessionalLocationType,
   StripeAccountStatus,
-  VerificationStatus,
 } from '@prisma/client'
 
 import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
 import { requiresLicense } from '@/lib/licensing/licenseRequirement'
+import { isBarredProStatus } from '@/lib/proTrustState'
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -43,8 +43,7 @@ export type ProReadinessBlocker =
   | 'OFFERING_MISSING_SALON_PRICE_OR_DURATION'
   | 'OFFERING_MISSING_MOBILE_PRICE_OR_DURATION'
   | 'STRIPE_NOT_READY'
-  | 'VERIFICATION_NOT_APPROVED'
-  | 'VERIFICATION_NOT_BROADLY_DISCOVERABLE'
+  | 'VERIFICATION_BARRED'
   | 'LICENSE_EXPIRED'
 
 export type ProReadiness =
@@ -170,25 +169,6 @@ function isSalonLikeLocation(type: ProfessionalLocationType): boolean {
   )
 }
 
-function isBlockedVerificationStatus(status: VerificationStatus): boolean {
-  return (
-    status === VerificationStatus.REJECTED ||
-    status === VerificationStatus.NEEDS_INFO
-  )
-}
-
-function isBroadlyDiscoverableVerificationStatus(
-  status: VerificationStatus,
-): boolean {
-  return status === VerificationStatus.APPROVED
-}
-
-function requiresBroadDiscoveryApproval(
-  entryPoint: ProBookingEntryPoint,
-): boolean {
-  return entryPoint === 'BROAD_DISCOVERY'
-}
-
 function addBlocker(
   blockers: Set<ProReadinessBlocker>,
   blocker: ProReadinessBlocker,
@@ -245,24 +225,33 @@ function hasReadyStripeConnect(
 
 function evaluateProReadinessForEntryPoint(args: {
   pro: ProReadinessRecord
+  /**
+   * Where the booking came from. No readiness rule varies by it any more —
+   * dropping the broad-discovery bar was the last one — but the seam is kept
+   * rather than ripped out: every caller in the booking write path already
+   * threads a real value through, and v2's products/classes are the obvious
+   * next rule that would want it. If v2 does not, remove it there and here
+   * together rather than leaving it half-plumbed.
+   */
   entryPoint: ProBookingEntryPoint
 }): ProReadiness {
-  const { pro, entryPoint } = args
+  const { pro } = args
   const blockers = new Set<ProReadinessBlocker>()
 
   // ── Verification ──────────────────────────────────────────────────────────
-  // REJECTED and NEEDS_INFO block every booking entry point.
-  // PENDING/manual-review style states are allowed for intentional booking
-  // paths, but not for broad discovery.
-  if (isBlockedVerificationStatus(pro.verificationStatus)) {
-    addBlocker(blockers, 'VERIFICATION_NOT_APPROVED')
-  }
-
-  if (
-    requiresBroadDiscoveryApproval(entryPoint) &&
-    !isBroadlyDiscoverableVerificationStatus(pro.verificationStatus)
-  ) {
-    addBlocker(blockers, 'VERIFICATION_NOT_BROADLY_DISCOVERABLE')
+  // A verified licence is a BADGE, not a gate (Tori, 2026-08-25). The only
+  // verification state that blocks a booking is an admin's active refusal —
+  // REJECTED, or NEEDS_INFO meaning we asked for something and are waiting.
+  // The rule itself lives in lib/proTrustState.ts, which is also what decides
+  // public listing; a second copy here is how the two drift apart.
+  //
+  // This used to bar an unreviewed pro from BROAD_DISCOVERY as well, so a pro
+  // who signed up this morning could take a booking from their own link but
+  // not be found by anyone browsing. That blocker is gone, not merely unused:
+  // "not approved" and "barred" are now the same question, so a second
+  // entry-point-dependent check could only ever repeat this one.
+  if (isBarredProStatus(pro.verificationStatus)) {
+    addBlocker(blockers, 'VERIFICATION_BARRED')
   }
 
   // An actually-expired license blocks every entry point. A license merely
@@ -518,8 +507,5 @@ export async function checkProReadinessForEntryPoint(args: {
 export {
   evaluateProReadiness,
   evaluateProReadinessForEntryPoint,
-  // Exported so the booking sheet's "Verified pro" chip asks the SAME question
-  // readiness asks, rather than restating the status list and drifting from it.
-  isBlockedVerificationStatus,
   proReadinessSelect,
 }

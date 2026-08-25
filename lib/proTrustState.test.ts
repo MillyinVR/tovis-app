@@ -8,55 +8,124 @@ import {
 } from '@prisma/client'
 
 import {
-  PUBLICLY_APPROVED_PRO_STATUSES,
+  PUBLICLY_LISTABLE_PRO_STATUSES,
   canEditPublicPublishingFields,
   canViewerSeeProPublicSurface,
   canViewerSeePublicMediaSurface,
   getPostVerificationNextUrl,
-  isPubliclyApprovedProStatus,
+  canListProPublicly,
+  hasVerifiedLicenceBadge,
+  isBarredProStatus,
 } from './proTrustState'
 
 describe('lib/proTrustState', () => {
-  describe('PUBLICLY_APPROVED_PRO_STATUSES', () => {
-    it('only treats APPROVED as publicly live', () => {
-      expect(PUBLICLY_APPROVED_PRO_STATUSES).toEqual([
+  describe('PUBLICLY_LISTABLE_PRO_STATUSES', () => {
+    it('lists everyone an admin has not refused', () => {
+      // Order follows the declaration in proTrustState, and these feed Prisma
+      // `in:` filters across search, discovery, the feed and the sitemap — so
+      // this is the one assertion that says who the marketplace can see.
+      expect(PUBLICLY_LISTABLE_PRO_STATUSES).toEqual([
+        VerificationStatus.PENDING,
+        VerificationStatus.PENDING_MANUAL_REVIEW,
         VerificationStatus.APPROVED,
       ])
     })
+
+    it('never lists a refused pro', () => {
+      expect(PUBLICLY_LISTABLE_PRO_STATUSES).not.toContain(
+        VerificationStatus.REJECTED,
+      )
+      expect(PUBLICLY_LISTABLE_PRO_STATUSES).not.toContain(
+        VerificationStatus.NEEDS_INFO,
+      )
+    })
   })
 
-  describe('isPubliclyApprovedProStatus', () => {
-    it('returns true for APPROVED', () => {
-      expect(isPubliclyApprovedProStatus(VerificationStatus.APPROVED)).toBe(true)
+  describe('isBarredProStatus', () => {
+    it('is true only where an admin actively said no, or is waiting', () => {
+      expect(isBarredProStatus(VerificationStatus.REJECTED)).toBe(true)
+      expect(isBarredProStatus(VerificationStatus.NEEDS_INFO)).toBe(true)
     })
 
-    it('returns false for non-approved statuses and empty values', () => {
-      expect(isPubliclyApprovedProStatus(VerificationStatus.PENDING)).toBe(false)
-      expect(isPubliclyApprovedProStatus(VerificationStatus.REJECTED)).toBe(false)
-      expect(isPubliclyApprovedProStatus(VerificationStatus.NEEDS_INFO)).toBe(false)
-      expect(isPubliclyApprovedProStatus(null)).toBe(false)
-      expect(isPubliclyApprovedProStatus(undefined)).toBe(false)
+    it('does not treat "not reviewed yet" as a refusal', () => {
+      expect(isBarredProStatus(VerificationStatus.PENDING)).toBe(false)
+      expect(isBarredProStatus(VerificationStatus.PENDING_MANUAL_REVIEW)).toBe(
+        false,
+      )
+      expect(isBarredProStatus(VerificationStatus.APPROVED)).toBe(false)
+      // No status at all is an absence of review, not a rejection.
+      expect(isBarredProStatus(null)).toBe(false)
+      expect(isBarredProStatus(undefined)).toBe(false)
+    })
+  })
+
+  describe('canListProPublicly', () => {
+    it('lists an unreviewed pro — the licence is a badge, not a gate', () => {
+      expect(canListProPublicly(VerificationStatus.PENDING)).toBe(true)
+      expect(canListProPublicly(VerificationStatus.PENDING_MANUAL_REVIEW)).toBe(
+        true,
+      )
+      expect(canListProPublicly(VerificationStatus.APPROVED)).toBe(true)
+    })
+
+    it('still refuses a pro an admin refused', () => {
+      expect(canListProPublicly(VerificationStatus.REJECTED)).toBe(false)
+      expect(canListProPublicly(VerificationStatus.NEEDS_INFO)).toBe(false)
+    })
+
+    it('has nothing to list without a status', () => {
+      // Unlike isBarredProStatus, a missing status here means "no professional
+      // profile", and there is no such pro to put on a page.
+      expect(canListProPublicly(null)).toBe(false)
+      expect(canListProPublicly(undefined)).toBe(false)
+    })
+  })
+
+  describe('hasVerifiedLicenceBadge', () => {
+    it('is APPROVED and nothing else', () => {
+      // The whole visible difference between a reviewed and an unreviewed pro,
+      // and the hook v2's products/classes are meant to gate on. If this ever
+      // starts returning true for PENDING, the badge stops meaning anything.
+      expect(hasVerifiedLicenceBadge(VerificationStatus.APPROVED)).toBe(true)
+
+      for (const status of [
+        VerificationStatus.PENDING,
+        VerificationStatus.PENDING_MANUAL_REVIEW,
+        VerificationStatus.REJECTED,
+        VerificationStatus.NEEDS_INFO,
+      ]) {
+        expect(hasVerifiedLicenceBadge(status)).toBe(false)
+      }
+
+      expect(hasVerifiedLicenceBadge(null)).toBe(false)
+      expect(hasVerifiedLicenceBadge(undefined)).toBe(false)
+    })
+
+    it('is a strictly narrower question than being listed', () => {
+      // The pair that must never collapse into one: an unreviewed pro is
+      // listed WITHOUT the badge. That gap is the entire design.
+      expect(canListProPublicly(VerificationStatus.PENDING)).toBe(true)
+      expect(hasVerifiedLicenceBadge(VerificationStatus.PENDING)).toBe(false)
     })
   })
 
   describe('canEditPublicPublishingFields', () => {
-    it('allows publishing-field edits only for approved pros', () => {
-      expect(
-        canEditPublicPublishingFields(VerificationStatus.APPROVED),
-      ).toBe(true)
+    it('lets any pro who can be listed edit what is published', () => {
+      expect(canEditPublicPublishingFields(VerificationStatus.APPROVED)).toBe(
+        true,
+      )
+      expect(canEditPublicPublishingFields(VerificationStatus.PENDING)).toBe(
+        true,
+      )
+    })
 
-      expect(
-        canEditPublicPublishingFields(VerificationStatus.PENDING),
-      ).toBe(false)
-
-      expect(
-        canEditPublicPublishingFields(VerificationStatus.REJECTED),
-      ).toBe(false)
-
-      expect(
-        canEditPublicPublishingFields(VerificationStatus.NEEDS_INFO),
-      ).toBe(false)
-
+    it('does not let a refused pro publish', () => {
+      expect(canEditPublicPublishingFields(VerificationStatus.REJECTED)).toBe(
+        false,
+      )
+      expect(canEditPublicPublishingFields(VerificationStatus.NEEDS_INFO)).toBe(
+        false,
+      )
       expect(canEditPublicPublishingFields(null)).toBe(false)
       expect(canEditPublicPublishingFields(undefined)).toBe(false)
     })
@@ -76,7 +145,7 @@ describe('lib/proTrustState', () => {
       ).toBe(true)
     })
 
-    it('blocks non-owners from seeing an unapproved public surface', () => {
+    it('shows an unreviewed pro to everyone, not just its owner', () => {
       expect(
         canViewerSeeProPublicSurface({
           viewerRole: Role.CLIENT,
@@ -84,14 +153,25 @@ describe('lib/proTrustState', () => {
           professionalId,
           verificationStatus: VerificationStatus.PENDING,
         }),
-      ).toBe(false)
+      ).toBe(true)
+    })
 
+    it('still hides a refused pro from everyone but its owner', () => {
       expect(
         canViewerSeeProPublicSurface({
           viewerRole: Role.PRO,
           viewerProfessionalId: 'other_pro',
           professionalId,
           verificationStatus: VerificationStatus.REJECTED,
+        }),
+      ).toBe(false)
+
+      expect(
+        canViewerSeeProPublicSurface({
+          viewerRole: Role.CLIENT,
+          viewerProfessionalId: null,
+          professionalId,
+          verificationStatus: VerificationStatus.NEEDS_INFO,
         }),
       ).toBe(false)
     })
@@ -108,12 +188,15 @@ describe('lib/proTrustState', () => {
     })
 
     it('does not treat a matching id as owner unless the viewer role is PRO', () => {
+      // REJECTED rather than PENDING: an unreviewed pro is visible to everyone
+      // now, so PENDING could no longer tell the owner branch from the public
+      // one — the assertion would have passed without exercising anything.
       expect(
         canViewerSeeProPublicSurface({
           viewerRole: Role.CLIENT,
           viewerProfessionalId: professionalId,
           professionalId,
-          verificationStatus: VerificationStatus.PENDING,
+          verificationStatus: VerificationStatus.REJECTED,
         }),
       ).toBe(false)
     })
@@ -134,13 +217,25 @@ describe('lib/proTrustState', () => {
       ).toBe(true)
     })
 
-    it('blocks non-owners from public media when the pro is not approved', () => {
+    it('shows an unreviewed pro\u2019s public media to non-owners', () => {
       expect(
         canViewerSeePublicMediaSurface({
           viewerRole: Role.CLIENT,
           viewerProfessionalId: null,
           professionalId,
           verificationStatus: VerificationStatus.PENDING,
+          visibility: MediaVisibility.PUBLIC,
+        }),
+      ).toBe(true)
+    })
+
+    it('blocks non-owners from a refused pro\u2019s public media', () => {
+      expect(
+        canViewerSeePublicMediaSurface({
+          viewerRole: Role.CLIENT,
+          viewerProfessionalId: null,
+          professionalId,
+          verificationStatus: VerificationStatus.REJECTED,
           visibility: MediaVisibility.PUBLIC,
         }),
       ).toBe(false)

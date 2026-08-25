@@ -32,6 +32,7 @@ import { getCurrentUser } from '@/lib/currentUser'
 import { prisma } from '@/lib/prisma'
 import { messageStartHref } from '@/lib/messages'
 import { loadProProfileSeoById } from '@/lib/profiles/proProfileSeo'
+import { isBarredProStatus } from '@/lib/proTrustState'
 import { absoluteUrl } from '@/lib/seo/absoluteUrl'
 import { buildProProfileJsonLd } from '@/lib/seo/proProfileJsonLd'
 import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
@@ -85,7 +86,7 @@ export default async function PublicProfileView({
 
   if (baseResult.kind === 'not-found') notFound()
   if (baseResult.kind === 'not-viewable') {
-    return <PendingVerificationSurface />
+    return <UnavailableProfileSurface />
   }
 
   const {
@@ -128,11 +129,20 @@ export default async function PublicProfileView({
       })
     : buildLoginHref(fromPath)
 
-  // The pro's own view of a still-pending profile: the page renders in full (it
-  // is worth reading) but the bar goes inert rather than offering a booking the
+  // Whether the booking bar goes inert rather than offering a booking the
   // server would refuse.
-  const isPendingVerification =
-    baseResult.base.verificationStatus !== VerificationStatus.APPROVED
+  //
+  // This used to be "not APPROVED", which was already stricter than the server
+  // — readiness has only ever refused a REFUSED pro — so it disabled booking
+  // for pros the backend was happy to accept. Now that an unreviewed pro is
+  // publicly listed (lib/proTrustState.ts), leaving it that way would have made
+  // the whole change cosmetic: visible everywhere, bookable nowhere.
+  //
+  // The only person who can still see this is the OWNER previewing their own
+  // refused profile — everybody else got UnavailableProfileSurface above.
+  const isPendingVerification = isBarredProStatus(
+    baseResult.base.verificationStatus,
+  )
 
   const cheapestOffering = offerings.reduce<(typeof offerings)[number] | null>(
     (best, offering) => {
@@ -272,7 +282,17 @@ export default async function PublicProfileView({
   )
 }
 
-function PendingVerificationSurface() {
+/**
+ * Shown in place of a profile the viewer may not see.
+ *
+ * This used to greet anyone visiting an unreviewed pro, and said so: "pending
+ * verification … check back soon." Since a verified licence became a badge
+ * rather than a gate (lib/proTrustState.ts) an unreviewed pro's real profile
+ * renders, so the only people who land here are pros an admin has REFUSED —
+ * for whom the old copy was both wrong (nothing is coming back) and a
+ * disclosure, since it told a stranger the state of someone else's review.
+ */
+function UnavailableProfileSurface() {
   return (
     <main className="brand-pp-page min-h-screen px-4 py-10">
       <div className="mx-auto max-w-180">
@@ -285,11 +305,10 @@ function PendingVerificationSurface() {
 
         <div className="brand-pp-card mt-4 p-4">
           <div className="text-[16px] font-black text-textPrimary">
-            This profile is pending verification
+            This profile isn’t available
           </div>
           <div className="mt-2 text-[13px] text-textSecondary">
-            We’re verifying the professional’s license and details. Check back
-            soon.
+            It may have been removed, or it isn’t open to bookings right now.
           </div>
         </div>
       </div>

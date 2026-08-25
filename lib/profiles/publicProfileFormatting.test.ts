@@ -139,7 +139,10 @@ describe('buildPublicProfileBookBar', () => {
     expect(bar.footnote).toBeNull()
   })
 
-  it('goes inert and explains itself for a pending pro', () => {
+  it('goes inert and explains itself for a barred pro', () => {
+    // The caller now passes this only for a REFUSED profile, and only its OWNER
+    // can see one — an unreviewed pro is bookable like anyone else. So the copy
+    // no longer promises a review that has already happened.
     const bar = buildPublicProfileBookBar({
       isPendingVerification: true,
       isSignedIn: true,
@@ -152,9 +155,13 @@ describe('buildPublicProfileBookBar', () => {
     expect(bar.inert).toBe(true)
     expect(bar.ctaLabel).toBe('Unavailable')
     expect(bar.headline).toBe('Not bookable yet')
-    // A pending pro never advertises availability, even when the stat exists.
-    expect(bar.subline).toBe('Profile is live, booking opens after review')
-    expect(bar.footnote).toBe('Verification usually takes 2 business days')
+    // Never advertises availability, even when the stat exists.
+    expect(bar.subline).toBe(
+      'Your verification needs attention before clients can book',
+    )
+    expect(bar.footnote).toBe('Open Verification to see what we need')
+    // The old copy told the pro to wait for a review that is already finished.
+    expect(bar.subline).not.toMatch(/after review/i)
   })
 
   it('keeps the time-slot promise for a signed-out viewer', () => {

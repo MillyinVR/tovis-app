@@ -17,7 +17,7 @@
 import { BookingStatus, Prisma } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
-import { isBlockedVerificationStatus } from '@/lib/pro/readiness/proReadiness'
+import { hasVerifiedLicenceBadge } from '@/lib/proTrustState'
 import { visibleReviewsWhere } from '@/lib/reviews/visibility'
 import { getProNoShowSettings } from '@/lib/noShowProtection/settings'
 
@@ -92,7 +92,13 @@ export async function loadBookingTrustSignals(
   ])
 
   return {
-    verified: pro ? !isBlockedVerificationStatus(pro.verificationStatus) : false,
+    // APPROVED, and only APPROVED. This asked "is this pro not BARRED?" — which
+    // is true of a pro nobody has reviewed yet, so the chip already claimed a
+    // licence check that had never happened. That was survivable only while an
+    // unreviewed pro was undiscoverable; now that the licence is a badge rather
+    // than a gate (lib/proTrustState.ts), this chip is the whole difference a
+    // client can see, so it has to be the badge and nothing looser.
+    verified: hasVerifiedLicenceBadge(pro?.verificationStatus),
     completedBookings: completed >= MIN_BOOKED_COUNT_TO_SHOW ? completed : null,
     rating,
     // A fee the pro never charges is not a cancellation window. Both switches

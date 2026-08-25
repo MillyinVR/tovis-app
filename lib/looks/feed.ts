@@ -7,7 +7,7 @@ import {
 } from '@prisma/client'
 import { isRecord } from '@/lib/guards'
 import { pickNonEmptyString } from '@/lib/pick'
-import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
+import { PUBLICLY_LISTABLE_PRO_STATUSES } from '@/lib/proTrustState'
 import { buildLookPostBlockFilter } from '@/lib/blocks/userBlocks'
 import { buildLookPostSpotlightEligibilityWhere } from '@/lib/looks/spotlight'
 import { proDiscoveryVisibilityFilter } from '@/lib/tenant'
@@ -278,7 +278,7 @@ export function buildLooksFeedWhere(
     professional: {
       is: {
         verificationStatus: {
-          in: [...PUBLICLY_APPROVED_PRO_STATUSES],
+          in: [...PUBLICLY_LISTABLE_PRO_STATUSES],
         },
         // Asymmetric tenant visibility: spreads `{}` for root (no-op) or
         // `{ homeTenantId }` for a white-label context.

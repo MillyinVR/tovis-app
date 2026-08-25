@@ -425,22 +425,24 @@ describe('app/professionals/[id] PublicProfileView', () => {
     })
   })
 
-  it('shows the pending verification surface to non-owners when the pro is not approved', async () => {
+  it('shows the unavailable surface to non-owners when the pro was refused', async () => {
     mocks.prisma.professionalProfile.findUnique.mockResolvedValue(
-      makePro({ verificationStatus: VerificationStatus.PENDING }),
+      makePro({ verificationStatus: VerificationStatus.REJECTED }),
     )
 
     await renderView()
 
-    expect(
-      screen.getByText('This profile is pending verification'),
-    ).toBeInTheDocument()
+    expect(screen.getByText('This profile isn’t available')).toBeInTheDocument()
 
     expect(
       screen.getByText(
-        'We’re verifying the professional’s license and details. Check back soon.',
+        'It may have been removed, or it isn’t open to bookings right now.',
       ),
     ).toBeInTheDocument()
+
+    // Never says WHY. A stranger is not told the state of someone else's review.
+    expect(screen.queryByText(/pending verification/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/license/i)).not.toBeInTheDocument()
 
     expect(screen.getByRole('link', { name: /back to looks/i })).toHaveAttribute(
       'href',
@@ -457,6 +459,22 @@ describe('app/professionals/[id] PublicProfileView', () => {
     expect(mocks.prisma.review.findMany).not.toHaveBeenCalled()
   })
 
+  it('shows an unreviewed pro\u2019s real profile to a stranger', async () => {
+    // The point of the change: an unreviewed pro is a listed pro. What they do
+    // not get is the verified badge, which the booking sheet's trust signals
+    // own (lib/booking/trustSignals.ts).
+    mocks.prisma.professionalProfile.findUnique.mockResolvedValue(
+      makePro({ verificationStatus: VerificationStatus.PENDING }),
+    )
+
+    await renderView()
+
+    expect(screen.getByTestId('identity-rail')).toHaveTextContent('TOVIS Studio')
+    expect(
+      screen.queryByText('This profile isn’t available'),
+    ).not.toBeInTheDocument()
+  })
+
   it('allows the owner to preview their own pending profile', async () => {
     mockGetCurrentUser.mockResolvedValue(
       makeOwnerViewer({ professionalProfileId: 'pro_1' }),
@@ -469,7 +487,7 @@ describe('app/professionals/[id] PublicProfileView', () => {
     await renderView()
 
     expect(
-      screen.queryByText('This profile is pending verification'),
+      screen.queryByText('This profile isn’t available'),
     ).not.toBeInTheDocument()
 
     expect(screen.getByTestId('identity-rail')).toHaveTextContent('TOVIS Studio')

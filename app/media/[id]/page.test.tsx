@@ -338,11 +338,13 @@ describe('app/media/[id]/page', () => {
     })
   })
 
-  it('blocks non-owners from viewing pending public media', async () => {
+  it('blocks non-owners from viewing a REFUSED pro\u2019s public media', async () => {
+    // PENDING no longer hides media — the licence is a badge, not a gate
+    // (lib/proTrustState.ts). An admin's refusal still does.
     mocks.prisma.mediaAsset.findUnique.mockResolvedValue(
       makeMedia({
         visibility: MediaVisibility.PUBLIC,
-        professionalVerificationStatus: VerificationStatus.PENDING,
+        professionalVerificationStatus: VerificationStatus.REJECTED,
       }),
     )
 

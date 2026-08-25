@@ -43,19 +43,16 @@ describe('canActAs', () => {
     )
   })
 
-  it('allows PRO only with an APPROVED professional profile', () => {
-    expect(
-      canActAs(
-        user({ professionalProfile: { verificationStatus: 'APPROVED' } }),
-        'PRO',
-      ),
-    ).toBe(true)
-    expect(
-      canActAs(
-        user({ professionalProfile: { verificationStatus: 'PENDING' } }),
-        'PRO',
-      ),
-    ).toBe(false)
+  it('allows PRO with any profile an admin has not refused', () => {
+    // Was "only with an APPROVED profile". A verified licence is a badge, not
+    // a gate (lib/proTrustState.ts), and the pro shell has never checked
+    // APPROVED to let somebody in.
+    for (const status of ['APPROVED', 'PENDING', 'PENDING_MANUAL_REVIEW'] as const) {
+      expect(
+        canActAs(user({ professionalProfile: { verificationStatus: status } }), 'PRO'),
+      ).toBe(true)
+    }
+
     expect(canActAs(user({ professionalProfile: null }), 'PRO')).toBe(false)
   })
 
@@ -84,9 +81,22 @@ describe('canActAs', () => {
     ).toBe(false)
   })
 
-  it('does not let a home-CLIENT act as PRO on an unapproved profile', () => {
-    // The rule the APPROVED check was written for is untouched: entering PRO
-    // from a different home role still requires a licensed profile.
+  it('does not let ANY home role act as PRO on a refused profile', () => {
+    // The boundary moved from "unapproved" to "refused", but it is still a
+    // boundary, and it does not depend on where the user calls home.
+    for (const homeRole of ['CLIENT', 'ADMIN'] as const) {
+      for (const status of ['REJECTED', 'NEEDS_INFO'] as const) {
+        expect(
+          canActAs(
+            user({ homeRole, professionalProfile: { verificationStatus: status } }),
+            'PRO',
+          ),
+        ).toBe(false)
+      }
+    }
+  })
+
+  it('lets a home-CLIENT act as PRO on an unreviewed profile', () => {
     expect(
       canActAs(
         user({
@@ -95,16 +105,23 @@ describe('canActAs', () => {
         }),
         'PRO',
       ),
-    ).toBe(false)
+    ).toBe(true)
+  })
+
+  it('still gives a home-PRO their own workspace even when refused', () => {
+    // The #996 lockout rule, which outranks the refusal boundary: canActAs must
+    // never withhold the HOME role, because resolveActingRole grants it without
+    // consulting this function. Withholding it only hides the switcher, which
+    // is the one control that gets the person back to their client account.
     expect(
       canActAs(
         user({
-          homeRole: 'ADMIN',
+          homeRole: 'PRO',
           professionalProfile: { verificationStatus: 'REJECTED' },
         }),
         'PRO',
       ),
-    ).toBe(false)
+    ).toBe(true)
   })
 
   it('gives an upgraded client a way back to their client account', () => {
