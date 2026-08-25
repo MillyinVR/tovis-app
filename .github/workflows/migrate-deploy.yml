@@ -3,11 +3,30 @@ name: migrate-deploy
 # Applies pending Prisma migrations to the production database on every merge to
 # main, so the schema can never drift behind the deployed code.
 #
-# Why this exists: the Vercel build runs only `next build` (+ `prisma generate`)
-# and never runs `prisma migrate deploy`. Without this workflow, a migration
-# merged alongside the code that needs it silently misses production until the
-# deployed code hits the missing column/enum and 500s (this caused the
-# 2026-06-13 `proTenantId` MediaAsset outage).
+# ⚠️ The paragraph that used to be here said the Vercel build "never runs
+# `prisma migrate deploy`". That is FALSE and has been for as long as
+# `vercel.json` has carried:
+#
+#     "buildCommand": "if [ \"$VERCEL_ENV\" = \"production\" ]; then prisma migrate deploy; fi && next build"
+#
+# A production `vercel --prod` DOES apply pending migrations, before the build,
+# and fails the whole deploy if they fail (the `if` block's status feeds the
+# `&&`). That is what actually applied 20260919010000 on 2026-08-25.
+#
+# Why this workflow still exists: deploys are MANUAL here
+# (`git.deploymentEnabled: false`), so code can sit merged and undeployed for
+# days. Applying expand-phase migrations at MERGE time keeps the schema from
+# lagging the moment someone does deploy, and is the belt to Vercel's braces —
+# `migrate deploy` is idempotent and advisory-locked, so both running is safe.
+# Without either, a migration merged alongside the code that needs it silently
+# misses production until the deployed code hits the missing column/enum and
+# 500s (the 2026-06-13 `proTenantId` MediaAsset outage).
+#
+# 🔴 Read the JOB LOG, not the check's colour. When the secrets below are unset
+# this job SKIPS the migrate step and still reports SUCCESS — deliberately, see
+# the preflight step — so a green "Deploy DB migrations (production)" is NOT
+# evidence that anything was applied. As of 2026-08-25 the secrets are NOT set
+# and every run has been skipping.
 #
 # Scope: runs ONLY on push to main (and manual dispatch) — never on
 # pull_request — so it cannot touch preview/branch databases. It applies
