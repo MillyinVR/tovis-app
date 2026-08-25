@@ -10,7 +10,12 @@
 // completion form, which is what finally made them worth sharing.
 
 import { isRecord } from '@/lib/guards'
+import { isUsZip } from '@/lib/usPostalCode'
 import { safeJsonRecord, readErrorMessage } from '@/lib/http'
+
+// Re-exported so the two location hooks keep importing their Google helpers and
+// their ZIP check from one module; the check itself is lib/usPostalCode's.
+export { isUsZip }
 
 export type GooglePrediction = {
   placeId: string
@@ -40,10 +45,6 @@ export type GeocodedPostal = {
   countryCode: string | null
 }
 
-/** US ZIP, 5 digits with an optional +4 — the only postal shape we accept. */
-export function isUsZip(raw: string): boolean {
-  return /^\d{5}(-\d{4})?$/.test(raw.trim())
-}
 
 function readString(v: unknown): string | null {
   return typeof v === 'string' ? v : null

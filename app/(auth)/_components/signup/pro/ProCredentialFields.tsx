@@ -11,6 +11,11 @@
 //
 // Shared because the social completion form asks the identical questions; it
 // was a hand-copied ~150 lines away from being the second copy.
+//
+// The profession OPTIONS are not written here either — they come from
+// lib/professions, which is also what names a profession on a public profile.
+// The two had already drifted: this dropdown said "Hairstylist" while every
+// customer-facing surface said "Hair stylist".
 
 'use client'
 
@@ -19,6 +24,7 @@ import HelpText from '../../HelpText'
 import Input from '../../Input'
 import Select from '../../Select'
 import { FieldErrorText, fieldErrorDescribedBy } from '../fieldErrors'
+import { PROFESSION_OPTIONS } from '@/lib/professions'
 import { US_STATES, stateName } from '@/lib/usStates'
 import {
   getLicenseRequirement,
@@ -27,19 +33,6 @@ import {
 } from '@/lib/licensing/licenseRequirement'
 import type { ProfessionType } from '@prisma/client'
 
-const PROFESSIONS: ReadonlyArray<{ value: ProfessionType; label: string }> = [
-  { value: 'COSMETOLOGIST', label: 'Cosmetologist' },
-  { value: 'BARBER', label: 'Barber' },
-  { value: 'ESTHETICIAN', label: 'Esthetician' },
-  { value: 'MANICURIST', label: 'Manicurist' },
-  { value: 'HAIRSTYLIST', label: 'Hairstylist' },
-  { value: 'ELECTROLOGIST', label: 'Electrologist' },
-  { value: 'MASSAGE_THERAPIST', label: 'Massage therapist' },
-  { value: 'MAKEUP_ARTIST', label: 'Makeup artist' },
-  { value: 'LASH_TECHNICIAN', label: 'Lash technician' },
-  { value: 'HAIR_BRAIDER', label: 'Hair braider' },
-  { value: 'PERMANENT_MAKEUP_ARTIST', label: 'Permanent makeup artist' },
-]
 
 /** True only once BOTH halves are known and that pair requires a credential. */
 export function proNeedsLicense(
@@ -88,13 +81,13 @@ export function ProProfessionFields({
         <Select
           value={professionType}
           onChange={(e) => {
-            const next = PROFESSIONS.find(
+            const next = PROFESSION_OPTIONS.find(
               (p) => p.value === e.target.value,
             )?.value
             if (next) onProfessionChange(next)
           }}
         >
-          {PROFESSIONS.map((p) => (
+          {PROFESSION_OPTIONS.map((p) => (
             <option key={p.value} value={p.value}>
               {p.label}
             </option>

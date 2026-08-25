@@ -20,7 +20,7 @@
 
 import { isRecord } from '@/lib/guards'
 import { readStringField } from '@/lib/http'
-import type { SocialProvider, SocialSignupTicket } from './submitSocialToken'
+import type { SocialProvider, SocialSignupHandoff } from './submitSocialToken'
 
 const STORAGE_KEY = 'tovis:social-signup-ticket'
 
@@ -38,7 +38,7 @@ function readProvider(value: string | null): SocialProvider | null {
 }
 
 /** Stash a ticket for the completion form. False when storage is unavailable. */
-export function stashSocialSignup(ticket: SocialSignupTicket): boolean {
+export function stashSocialSignup(ticket: SocialSignupHandoff): boolean {
   const store = storage()
   if (!store) return false
 
@@ -55,7 +55,7 @@ export function stashSocialSignup(ticket: SocialSignupTicket): boolean {
  * expiry has already passed. An expired one is dropped on the way out — the
  * completion form must never post a ticket the server is certain to refuse.
  */
-export function readSocialSignup(now: Date = new Date()): SocialSignupTicket | null {
+export function readSocialSignup(now: Date = new Date()): SocialSignupHandoff | null {
   const store = storage()
   if (!store) return null
 

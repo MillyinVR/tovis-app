@@ -14,6 +14,7 @@ import {
   setViewerLocation,
   VIEWER_RADIUS_DEFAULT_MILES,
 } from '@/lib/viewerLocation'
+import { isUsZip } from '@/lib/usPostalCode'
 
 function pickRadiusMiles(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null
@@ -215,9 +216,6 @@ function parseAddresses(raw: unknown): AddressRecord[] {
     .filter((row): row is AddressRecord => Boolean(row))
 }
 
-function isUsZip(input: string) {
-  return /^\d{5}(?:-\d{4})?$/.test(input.trim())
-}
 
 function addressTitle(address: AddressRecord) {
   return (

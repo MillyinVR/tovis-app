@@ -80,11 +80,11 @@ vi.mock('@/lib/clientNavigation', () => ({
 
 import SocialCompleteClient from './SocialCompleteClient'
 import { stashSocialSignup } from '../social/socialSignupHandoff'
-import type { SocialSignupTicket } from '../social/submitSocialToken'
+import type { SocialSignupHandoff } from '../social/submitSocialToken'
 
 const TICKET_SECRET = 'tid.secret-do-not-put-me-in-a-url'
 
-function ticket(overrides: Partial<SocialSignupTicket> = {}): SocialSignupTicket {
+function ticket(overrides: Partial<SocialSignupHandoff> = {}): SocialSignupHandoff {
   return {
     provider: 'google',
     signupTicket: TICKET_SECRET,
