@@ -11,6 +11,7 @@ import {
 } from '@/app/api/_utils'
 import { isRecord } from '@/lib/guards'
 import { isAbortError } from '@/lib/http'
+import { isUsZip } from '@/lib/usPostalCode'
 
 export const dynamic = 'force-dynamic'
 
@@ -49,9 +50,6 @@ function normalizeKind(v: string | null): Kind {
   return 'ANY'
 }
 
-function isUsZip(input: string) {
-  return /^\d{5}(?:-\d{4})?$/.test(input.trim())
-}
 
 function normalizeCountryCode(raw: string | null): string {
   const cleaned = (raw || '').trim().toUpperCase().replace(/[^A-Z]/g, '')

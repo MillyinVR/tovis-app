@@ -69,7 +69,7 @@ import {
 } from '../social/socialSignupHandoff'
 import type {
   SocialProvider,
-  SocialSignupTicket,
+  SocialSignupHandoff,
 } from '../social/submitSocialToken'
 import { buildTransactionalSmsCheckboxLabel } from '@/lib/transactionalSmsPolicy'
 import { useBrand } from '@/lib/brand/BrandProvider'
@@ -149,7 +149,7 @@ export default function SocialCompleteClient() {
   // render, and `hydrated` keeps the "start again" screen from flashing before
   // a perfectly good ticket has been looked for.
   const [hydrated, setHydrated] = useState(false)
-  const [ticket, setTicket] = useState<SocialSignupTicket | null>(null)
+  const [ticket, setTicket] = useState<SocialSignupHandoff | null>(null)
 
   const [role, setRole] = useState<SignupRole | null>(null)
   const [step, setStep] = useState(0)

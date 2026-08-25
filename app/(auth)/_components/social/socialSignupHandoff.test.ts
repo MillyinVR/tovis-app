@@ -6,11 +6,11 @@ import {
   readSocialSignup,
   stashSocialSignup,
 } from './socialSignupHandoff'
-import type { SocialSignupTicket } from './submitSocialToken'
+import type { SocialSignupHandoff } from './submitSocialToken'
 
 const STORAGE_KEY = 'tovis:social-signup-ticket'
 
-function ticket(overrides: Partial<SocialSignupTicket> = {}): SocialSignupTicket {
+function ticket(overrides: Partial<SocialSignupHandoff> = {}): SocialSignupHandoff {
   return {
     provider: 'google',
     signupTicket: 'tid.secret',

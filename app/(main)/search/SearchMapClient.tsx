@@ -26,6 +26,7 @@ import { preferredProLocation, type ApiLocationPreview, type ApiPro } from './_l
 import { isSortMode, sortPros, type SortMode } from './_lib/discoverSort'
 import type { DiscoverMode, DiscoverViewMode } from './_lib/discoverViewTypes'
 import type { DiscoverCategoryOption } from '@/lib/discovery/categoryTypes'
+import { isUsZip } from '@/lib/usPostalCode'
 
 type Coords = { lat: number; lng: number }
 
@@ -164,9 +165,6 @@ function haversineMiles(a: Coords, b: Coords) {
   return radiusMiles * c
 }
 
-function isUsZip(input: string) {
-  return /^\d{5}(?:-\d{4})?$/.test(input.trim())
-}
 
 function zoomForRadiusMiles(radiusMiles: number) {
   if (radiusMiles <= 5) return 12

@@ -14,6 +14,7 @@ import { kmToMiles } from '@/lib/units'
 import { friendlyTimeZoneLabel } from '@/lib/timeZone'
 import { cn } from '@/lib/utils'
 import { Badge, Button, FieldLabel, buttonClassName } from '@/app/_components/ui'
+import { isUsZip } from '@/lib/usPostalCode'
 
 type ToastState = { tone: 'success' | 'error'; title: string; body?: string | null }
 const ADVANCE_NOTICE_OPTIONS = [
@@ -36,9 +37,6 @@ function formatAdvanceNotice(minutes: number | null | undefined): string {
   return `${normalized} minutes`
 }
 
-function isValidUsZip(v: string) {
-  return /^\d{5}(-\d{4})?$/.test(v.trim())
-}
 
 function formatLocationTitle(l: ProLocation) {
   return l.name || (l.type === 'SALON' ? 'Salon location' : l.type === 'SUITE' ? 'Suite location' : 'Mobile base')
@@ -504,7 +502,7 @@ async function updateAdvanceNotice(
 
     try {
       const zip = mobilePostalCode.trim()
-      if (!isValidUsZip(zip)) throw new Error('Enter a valid US ZIP code (e.g. 92024).')
+      if (!isUsZip(zip)) throw new Error('Enter a valid US ZIP code (e.g. 92024).')
 
       const radius = clampInt(Number(mobileRadiusKm), 1, 200)
       const prevPrimary = locations.find((l) => l.isPrimary)?.id ?? null
@@ -571,7 +569,7 @@ async function updateAdvanceNotice(
 
     try {
       const zip = editBaseZip.trim()
-      if (!isValidUsZip(zip)) throw new Error('Enter a valid US ZIP code (e.g. 92024).')
+      if (!isUsZip(zip)) throw new Error('Enter a valid US ZIP code (e.g. 92024).')
 
       const res = await fetch(`/api/v1/pro/locations/${encodeURIComponent(id)}/mobile-base`, {
         method: 'PATCH',

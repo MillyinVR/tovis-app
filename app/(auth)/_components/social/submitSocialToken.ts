@@ -12,6 +12,7 @@
 // person with no account fell through the `missing-role` branch and was told
 // their "account role is missing" — advice about an account that did not exist.
 
+import type { AuthSocialSignInResponseDTO } from '@/lib/dto/auth'
 import { isRecord } from '@/lib/guards'
 import { safeJsonRecord, readErrorMessage, readStringField } from '@/lib/http'
 import { resolvePostAuthNavigation } from '../postAuthRedirect'
@@ -24,30 +25,41 @@ const ENDPOINTS: Record<SocialProvider, string> = {
 }
 
 /**
- * The half-finished signup a provider hands back. `prefill` is display-only —
- * the completion route reads the real email and names from the ticket row, so
- * editing these client-side changes what is shown and nothing that is stored.
+ * The `SIGNUP_REQUIRED` arm of the wire contract, DERIVED rather than retyped —
+ * `lib/dto/auth.ts` is its single source, the routes pin their responses to it
+ * with `satisfies`, and a hand-written copy here would let the two drift with
+ * typecheck green on both sides.
+ *
+ * `provider` is the one field the client adds: the response does not carry it
+ * (it is whichever button was pressed), and the completion form needs it to say
+ * "Verified by Google".
+ *
+ * Named ...Handoff, not ...Ticket: `SocialSignupTicket` is a Prisma MODEL, and
+ * two different shapes answering to one name is the more expensive bug. This is
+ * the wire payload; that is the row.
+ *
+ * `prefill` is display-only — the completion route reads the real email and
+ * names from the ticket row, so editing these client-side changes what is shown
+ * and nothing that is stored.
  */
-export type SocialSignupTicket = {
+type SignupRequiredResponse = Extract<
+  AuthSocialSignInResponseDTO,
+  { status: 'SIGNUP_REQUIRED' }
+>
+
+export type SocialSignupHandoff = Omit<SignupRequiredResponse, 'status'> & {
   provider: SocialProvider
-  signupTicket: string
-  ticketExpiresAt: string
-  prefill: {
-    email: string
-    firstName: string | null
-    lastName: string | null
-  }
 }
 
 export type SubmitSocialResult =
   | { ok: true; kind: 'signed-in'; url: string }
-  | { ok: true; kind: 'signup-required'; ticket: SocialSignupTicket }
+  | { ok: true; kind: 'signup-required'; ticket: SocialSignupHandoff }
   | { ok: false; error: string }
 
 function readSignupTicket(
   provider: SocialProvider,
   data: unknown,
-): SocialSignupTicket | null {
+): SocialSignupHandoff | null {
   const signupTicket = readStringField(data, 'signupTicket')
   const ticketExpiresAt = readStringField(data, 'ticketExpiresAt')
   if (!signupTicket || !ticketExpiresAt) return null

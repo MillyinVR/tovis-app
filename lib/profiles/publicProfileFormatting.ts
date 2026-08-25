@@ -8,7 +8,13 @@ import type { ProfessionType, ProNameDisplay } from '@prisma/client'
 import { COPY } from '@/lib/copy'
 import { formatCompactCount } from '@/lib/format/compactCount'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
+import { formatProfessionLabel } from '@/lib/professions'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
+
+// Re-exported, not re-implemented: the label map now lives in lib/professions
+// (one home, shared with the signup dropdown that had forked it), and this
+// module's existing importers keep their import path.
+export { formatProfessionLabel }
 
 export type PublicProfileTab = 'portfolio' | 'services' | 'reviews'
 
@@ -29,19 +35,6 @@ export const PUBLIC_PROFILE_TABS: PublicProfileTabItem[] = [
 
 const PUBLIC_PROFILE_DEFAULT_TAB: PublicProfileTab = 'portfolio'
 
-const PROFESSION_LABEL_BY_TYPE = {
-  COSMETOLOGIST: 'Cosmetologist',
-  BARBER: 'Barber',
-  ESTHETICIAN: 'Esthetician',
-  MANICURIST: 'Manicurist',
-  HAIRSTYLIST: 'Hair stylist',
-  ELECTROLOGIST: 'Electrologist',
-  MASSAGE_THERAPIST: 'Massage therapist',
-  MAKEUP_ARTIST: 'Makeup artist',
-  LASH_TECHNICIAN: 'Lash technician',
-  HAIR_BRAIDER: 'Hair braider',
-  PERMANENT_MAKEUP_ARTIST: 'Permanent makeup artist',
-} satisfies Record<ProfessionType, string>
 
 function trimToNull(value: string | null | undefined): string | null {
   const trimmed = value?.trim() ?? ''
@@ -160,12 +153,6 @@ export function formatPublicProfileDisplayName(args: {
   fallback?: string
 }): string {
   return formatProfessionalPublicDisplayName(args, args.fallback)
-}
-
-export function formatProfessionLabel(
-  professionType: ProfessionType | null | undefined,
-): string {
-  return professionType ? PROFESSION_LABEL_BY_TYPE[professionType] : 'Beauty professional'
 }
 
 export function formatProfileLocation(
