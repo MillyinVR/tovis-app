@@ -9,7 +9,9 @@ import {
   sanitizeRedirectTarget,
 } from '../postAuthRedirect'
 import { submitSocialToken } from './submitSocialToken'
+import { stashSocialSignup } from './socialSignupHandoff'
 import { appleWebClientId, googleWebClientId } from './socialProviders'
+import { buildSocialCompleteHref } from '../signup/signupSearchParams'
 
 const GOOGLE_GSI_SRC = 'https://accounts.google.com/gsi/client'
 const APPLE_JS_SRC =
@@ -85,6 +87,14 @@ export default function SocialSignIn() {
     return { nextSafe: next, fromSafe: from }
   }, [searchParams])
 
+  // Built from the CURRENT query, so a claim link's intent/inviteToken/via/vsig
+  // reach the completion form. `nextSafe`/`fromSafe` above are stripped of auth
+  // paths for redirecting; this one forwards the raw signup params instead.
+  const completeHref = useMemo(
+    () => buildSocialCompleteHref(searchParams),
+    [searchParams],
+  )
+
   const googleClientId = useMemo(() => googleWebClientId(), [])
   const appleClientId = useMemo(() => appleWebClientId(), [])
 
@@ -113,6 +123,21 @@ export default function SocialSignIn() {
           setError(result.error)
           return
         }
+
+        // No account yet: the provider proved an identity and nothing was
+        // created. Carry the ticket to the form that collects the parts a
+        // provider cannot supply — role, phone, SMS consent, location.
+        if (result.kind === 'signup-required') {
+          if (!stashSocialSignup(result.ticket)) {
+            setError(
+              'We couldn’t continue because this browser is blocking site data for this page. Allow it and try again, or create your account with an email and password.',
+            )
+            return
+          }
+          window.location.assign(completeHref)
+          return
+        }
+
         window.location.assign(result.url)
       } catch {
         setError('Network error. Please try again.')
@@ -120,7 +145,7 @@ export default function SocialSignIn() {
         setBusy(false)
       }
     },
-    [nextSafe, fromSafe],
+    [nextSafe, fromSafe, completeHref],
   )
 
   // Render the Google Identity Services button (GIS draws its own branded
