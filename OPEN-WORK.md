@@ -79,6 +79,13 @@ capabilities probe returning `"recurringAppointments": false`.
    `true`.
 5. Watch error rates for one cycle of the K20 cron before declaring done.
 
+iOS follow-up (needed only when K19 approaches): TovisKit's `ProCapabilities`
+(`TovisKit/Sources/TovisKit/ProSettings/ProCapabilities.swift`) decodes only
+`noShowFees` + `importFromAnotherApp` today and safely ignores the new third
+wire field, so this PR needs no iOS change. Before any native UI reads the
+flag, a tiny tovis-ios PR must decode `recurringAppointments` into that struct
+(defaulting `ProCapabilities.none` to `false`, per its own rule).
+
 ## 3. Owed hygiene
 
 - ✅ **DONE 2026-08-25** — the two stray `mig_*` User rows on the REMOTE dev
