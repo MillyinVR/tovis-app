@@ -9,11 +9,20 @@ const mocks = vi.hoisted(() => ({
   jsonFail: vi.fn(),
   jsonOk: vi.fn(),
   getClientClaimLinkPublicState: vi.fn(),
+  enforceRateLimit: vi.fn(),
+  rateLimitIdentity: vi.fn(),
+  tokenRateLimitIdentity: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
   jsonFail: mocks.jsonFail,
   jsonOk: mocks.jsonOk,
+}))
+
+vi.mock('@/app/api/_utils/rateLimit', () => ({
+  enforceRateLimit: mocks.enforceRateLimit,
+  rateLimitIdentity: mocks.rateLimitIdentity,
+  tokenRateLimitIdentity: mocks.tokenRateLimitIdentity,
 }))
 
 vi.mock('@/lib/clients/clientClaimLinks', () => ({
@@ -125,6 +134,14 @@ describe('GET /api/v1/pro/invites/[token]', () => {
     mocks.getClientClaimLinkPublicState.mockResolvedValue({
       kind: 'not_found',
     })
+
+    // Default: neither bucket is over its ceiling.
+    mocks.enforceRateLimit.mockResolvedValue(null)
+    mocks.rateLimitIdentity.mockResolvedValue({ kind: 'ip', id: '203.0.113.7' })
+    mocks.tokenRateLimitIdentity.mockImplementation((prefix: string) => ({
+      kind: 'token',
+      id: prefix,
+    }))
   })
 
   it('returns NOT_FOUND when token is missing', async () => {
@@ -336,5 +353,60 @@ describe('GET /api/v1/pro/invites/[token]', () => {
     } finally {
       consoleErrorSpy.mockRestore()
     }
+  })
+
+  it('caps by IP and by token-hash prefix on the shared claim buckets', async () => {
+    mocks.getClientClaimLinkPublicState.mockResolvedValue({ kind: 'not_found' })
+
+    await GET(new Request('http://localhost/api/v1/pro/invites/tok_1'), {
+      params: { token: 'tok_1' },
+    })
+
+    // Same buckets as /api/v1/public/claim/[token] — a caller must not be able
+    // to double its budget by alternating between the two routes.
+    expect(mocks.enforceRateLimit).toHaveBeenCalledTimes(2)
+    expect(mocks.enforceRateLimit).toHaveBeenNthCalledWith(1, {
+      bucket: 'account-invite:mint',
+      identity: { kind: 'ip', id: '203.0.113.7' },
+    })
+    expect(mocks.enforceRateLimit).toHaveBeenNthCalledWith(2, {
+      bucket: 'account-invite:mint:token',
+      identity: { kind: 'token', id: expect.any(String) },
+    })
+
+    // The token bucket must be keyed on the HASH, never the raw token.
+    const [prefix] = mocks.tokenRateLimitIdentity.mock.calls[0] ?? []
+    expect(prefix).toHaveLength(16)
+    expect(prefix).not.toContain('tok_1')
+  })
+
+  it('refuses on the IP bucket BEFORE any claim-link lookup', async () => {
+    const blocked = { ok: false, status: 429, error: 'Too many requests.' }
+    mocks.enforceRateLimit.mockResolvedValueOnce(blocked)
+
+    const result = await GET(
+      new Request('http://localhost/api/v1/pro/invites/tok_1'),
+      { params: { token: 'tok_1' } },
+    )
+
+    expect(result).toBe(blocked)
+    expect(mocks.getClientClaimLinkPublicState).not.toHaveBeenCalled()
+    // Short-circuits: the token bucket is never consulted.
+    expect(mocks.enforceRateLimit).toHaveBeenCalledTimes(1)
+  })
+
+  it('refuses on the token bucket BEFORE any claim-link lookup', async () => {
+    const blocked = { ok: false, status: 429, error: 'Too many requests.' }
+    mocks.enforceRateLimit
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(blocked)
+
+    const result = await GET(
+      new Request('http://localhost/api/v1/pro/invites/tok_1'),
+      { params: { token: 'tok_1' } },
+    )
+
+    expect(result).toBe(blocked)
+    expect(mocks.getClientClaimLinkPublicState).not.toHaveBeenCalled()
   })
 })
