@@ -24,8 +24,17 @@ vi.mock('@/app/api/_utils', () => ({
 
 import { GET } from './route'
 
-const ORIGINAL_NO_SHOW = process.env.ENABLE_NO_SHOW_PROTECTION
-const ORIGINAL_MIGRATION = process.env.ENABLE_PRO_MIGRATION
+const FLAG_ENV_KEYS = [
+  'ENABLE_NO_SHOW_PROTECTION',
+  'ENABLE_PRO_MIGRATION',
+  'ENABLE_RECURRING_APPOINTMENTS',
+] as const
+
+const ORIGINALS: Record<(typeof FLAG_ENV_KEYS)[number], string | undefined> = {
+  ENABLE_NO_SHOW_PROTECTION: process.env.ENABLE_NO_SHOW_PROTECTION,
+  ENABLE_PRO_MIGRATION: process.env.ENABLE_PRO_MIGRATION,
+  ENABLE_RECURRING_APPOINTMENTS: process.env.ENABLE_RECURRING_APPOINTMENTS,
+}
 
 function restore(key: string, value: string | undefined) {
   if (value === undefined) delete process.env[key]
@@ -47,13 +56,11 @@ async function readJson(res: Response) {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  delete process.env.ENABLE_NO_SHOW_PROTECTION
-  delete process.env.ENABLE_PRO_MIGRATION
+  FLAG_ENV_KEYS.forEach((key) => delete process.env[key])
 })
 
 afterEach(() => {
-  restore('ENABLE_NO_SHOW_PROTECTION', ORIGINAL_NO_SHOW)
-  restore('ENABLE_PRO_MIGRATION', ORIGINAL_MIGRATION)
+  FLAG_ENV_KEYS.forEach((key) => restore(key, ORIGINALS[key]))
 })
 
 describe('GET /api/v1/pro/capabilities', () => {
@@ -62,7 +69,7 @@ describe('GET /api/v1/pro/capabilities', () => {
   // learn the flag by walking the pro into the dead end this endpoint exists to
   // remove. Copy the `if (!flagEnabled()) return jsonFail(404, …)` guard from a
   // sibling route into route.ts and this goes red.
-  it('answers 200 with both capabilities false while the flags are off', async () => {
+  it('answers 200 with every capability false while the flags are off', async () => {
     asPro()
 
     const res = await GET()
@@ -72,6 +79,7 @@ describe('GET /api/v1/pro/capabilities', () => {
     expect(body.capabilities).toEqual({
       noShowFees: false,
       importFromAnotherApp: false,
+      recurringAppointments: false,
     })
   })
 
@@ -83,13 +91,23 @@ describe('GET /api/v1/pro/capabilities', () => {
     expect(body.capabilities).toEqual({
       noShowFees: true,
       importFromAnotherApp: false,
+      recurringAppointments: false,
     })
 
     process.env.ENABLE_PRO_MIGRATION = 'true'
-    const both = await readJson(await GET())
-    expect(both.capabilities).toEqual({
+    const two = await readJson(await GET())
+    expect(two.capabilities).toEqual({
       noShowFees: true,
       importFromAnotherApp: true,
+      recurringAppointments: false,
+    })
+
+    process.env.ENABLE_RECURRING_APPOINTMENTS = '1'
+    const all = await readJson(await GET())
+    expect(all.capabilities).toEqual({
+      noShowFees: true,
+      importFromAnotherApp: true,
+      recurringAppointments: true,
     })
   })
 
@@ -105,8 +123,9 @@ describe('GET /api/v1/pro/capabilities', () => {
   // The flag booleans must never leak to an unauthenticated caller — this route
   // is a readout of the deployment's configuration.
   it('does not read the flags before authenticating', async () => {
-    process.env.ENABLE_NO_SHOW_PROTECTION = '1'
-    process.env.ENABLE_PRO_MIGRATION = '1'
+    FLAG_ENV_KEYS.forEach((key) => {
+      process.env[key] = '1'
+    })
     const refusal = Response.json({ ok: false, error: 'Unauthorized.' }, { status: 401 })
     mocks.requirePro.mockResolvedValue({ ok: false as const, res: refusal })
 

@@ -33,6 +33,13 @@ export type ProCapabilitiesDTO = {
    * calendar) for a pro coming from another booking app.
    */
   importFromAnotherApp: boolean
+  /**
+   * `ENABLE_RECURRING_APPOINTMENTS` — standing appointments (BookingSeries):
+   * the series create/edit surface and the write boundary that stamps
+   * seriesId onto bookings. K18 ships with no UI; until the flag is on, no pro
+   * can create a standing appointment and nothing acquires a seriesId.
+   */
+  recurringAppointments: boolean
 }
 
 /** Response for GET /api/v1/pro/capabilities. */

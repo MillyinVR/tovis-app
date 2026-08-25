@@ -1,0 +1,11 @@
+First Name,Last Name,Email,Cell Phone,Date of Birth,Notes
+Maria,Santos,maria.santos@example.com,(619) 555-0142,1988-03-12,Balayage regular - books 8 weeks out
+jessica,wu,Jessica.Wu@Example.com,619.555.0183,,prefers text over call
+,,toni@example.com,+1 619 555 0117,,no name on row - came from old export
+Dana,White,dana_white@example.com,,
+Dana,White,dana.white@example.com,(619) 555-0199,,duplicate name different emails
+Ava,Thompson,ava.t@example.com,6195550164,,allergic to ammonia
+Sofia,Ramirez,,,,,,,,half empty row
+Kim,Park,kim.park@example.com,760-555-0104,,sister of Lily Park
+Lily,Park,lily.park@example.com,760-555-0104,,shares phone with Kim (household)
+Bree,Short,,,,name only
