@@ -83,14 +83,14 @@ const mocks = vi.hoisted(() => {
     },
   )
 
-  const PUBLICLY_APPROVED_PRO_STATUSES = ['APPROVED'] as const
+  const PUBLICLY_LISTABLE_PRO_STATUSES = ['APPROVED'] as const
 
   return {
     queryRaw,
     inferProfessionTypesFromQuery,
     isOpenNowAtLocation,
     buildDiscoveryLocationLabel,
-    PUBLICLY_APPROVED_PRO_STATUSES,
+    PUBLICLY_LISTABLE_PRO_STATUSES,
   }
 })
 
@@ -101,7 +101,7 @@ vi.mock('@/lib/prisma', () => ({
 }))
 
 vi.mock('@/lib/proTrustState', () => ({
-  PUBLICLY_APPROVED_PRO_STATUSES: mocks.PUBLICLY_APPROVED_PRO_STATUSES,
+  PUBLICLY_LISTABLE_PRO_STATUSES: mocks.PUBLICLY_LISTABLE_PRO_STATUSES,
 }))
 
 vi.mock('@/lib/discovery/nearby', () => ({

@@ -174,7 +174,10 @@ describe('lib/looks/guards.ts', () => {
       ).toBe(false)
     })
 
-    it('blocks non-owner view when the pro is not publicly approved', () => {
+    it('shows an unreviewed pro\u2019s published look to non-owners', () => {
+      // The licence is a badge, not a gate (lib/proTrustState.ts). Moderation
+      // still governs the POST — the assertion above this one pins that — and
+      // this only changes who the pro has to be.
       expect(
         canViewLookPost({
           isOwner: false,
@@ -185,7 +188,26 @@ describe('lib/looks/guards.ts', () => {
           proVerificationStatus: VerificationStatus.PENDING,
           viewerFollowsProfessional: false,
         }),
-      ).toBe(false)
+      ).toBe(true)
+    })
+
+    it('blocks non-owner view when the pro was refused', () => {
+      for (const status of [
+        VerificationStatus.REJECTED,
+        VerificationStatus.NEEDS_INFO,
+      ]) {
+        expect(
+          canViewLookPost({
+            isOwner: false,
+            viewerRole: Role.CLIENT,
+            status: LookPostStatus.PUBLISHED,
+            visibility: LookPostVisibility.PUBLIC,
+            moderationStatus: ModerationStatus.APPROVED,
+            proVerificationStatus: status,
+            viewerFollowsProfessional: false,
+          }),
+        ).toBe(false)
+      }
     })
 
     it('blocks non-owner view when verification status is missing', () => {

@@ -29,7 +29,7 @@ import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { pairedBeforeAssetSelect } from '@/lib/profiles/publicProfileSelects'
 import { pickString } from '@/lib/pick'
 import { prisma } from '@/lib/prisma'
-import { isPubliclyApprovedProStatus } from '@/lib/proTrustState'
+import { canListProPublicly } from '@/lib/proTrustState'
 import { visibleReviewsWhere } from '@/lib/reviews/visibility'
 
 import {
@@ -369,7 +369,7 @@ async function mapReviewMediaForUi(
 }
 
 async function buildProfileModel(pro: ProProfileManagementRow) {
-  const isApproved = isPubliclyApprovedProStatus(pro.verificationStatus)
+  const isApproved = canListProPublicly(pro.verificationStatus)
   const publicUrl = `/professionals/${encodeURIComponent(pro.id)}`
 
   const handle = pickString(pro.handle)

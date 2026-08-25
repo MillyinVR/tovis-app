@@ -28,7 +28,7 @@ const unreadyWithLocationBlocker: ProReadiness = {
 
 const unreadyWithVerificationBlocker: ProReadiness = {
   ok: false,
-  blockers: ['VERIFICATION_NOT_APPROVED'],
+  blockers: ['VERIFICATION_BARRED'],
 }
 
 const unreadyWithStripeBlocker: ProReadiness = {
@@ -155,12 +155,9 @@ describe('onboardingGate', () => {
     })
 
     it('routes verification blockers to verification', () => {
-      expect(getNextOnboardingHref(['VERIFICATION_NOT_APPROVED'])).toBe(
+      expect(getNextOnboardingHref(['VERIFICATION_BARRED'])).toBe(
         '/pro/verification',
       )
-      expect(
-        getNextOnboardingHref(['VERIFICATION_NOT_BROADLY_DISCOVERABLE']),
-      ).toBe('/pro/verification')
     })
 
     it('uses the first actionable blocker and falls back to onboarding home', () => {

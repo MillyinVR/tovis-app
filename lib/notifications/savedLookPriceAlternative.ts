@@ -69,7 +69,7 @@ import {
   formatProfessionalPublicDisplayName,
   professionalPublicDisplayNameSelect,
 } from '@/lib/privacy/professionalDisplayName'
-import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
+import { PUBLICLY_LISTABLE_PRO_STATUSES } from '@/lib/proTrustState'
 import {
   proDiscoveryVisibilityFilter,
   tenantContextFor,
@@ -585,7 +585,7 @@ async function loadInBandAlternatives(
         OR: [{ clientAuthorId: null }, { publicToFeed: true }],
         professional: {
           is: {
-            verificationStatus: { in: [...PUBLICLY_APPROVED_PRO_STATUSES] },
+            verificationStatus: { in: [...PUBLICLY_LISTABLE_PRO_STATUSES] },
             // {} for root (sees all) or { homeTenantId } for a white-label tenant.
             ...proDiscoveryVisibilityFilter(ctx),
           },

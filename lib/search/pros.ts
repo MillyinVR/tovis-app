@@ -48,7 +48,7 @@ import { entitledStatuses, planKeysGranting } from '@/lib/pro/entitlements'
 import { prismaRead } from '@/lib/prisma'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import { formatProfessionLabel } from '@/lib/profiles/publicProfileFormatting'
-import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
+import { PUBLICLY_LISTABLE_PRO_STATUSES } from '@/lib/proTrustState'
 import { searchIndexVisibilitySql } from '@/lib/tenant'
 import type { TenantContext } from '@/lib/tenant'
 import {
@@ -297,7 +297,7 @@ export async function fetchProSearchCandidates(
   const filters: Prisma.Sql[] = []
 
   filters.push(
-    Prisma.sql`psi."verificationStatus" = ANY(${[...PUBLICLY_APPROVED_PRO_STATUSES] as VerificationStatus[]}::"VerificationStatus"[])`,
+    Prisma.sql`psi."verificationStatus" = ANY(${[...PUBLICLY_LISTABLE_PRO_STATUSES] as VerificationStatus[]}::"VerificationStatus"[])`,
   )
   filters.push(Prisma.sql`psi."isBookable" = TRUE`)
   // Asymmetric tenant visibility — white-label contexts only see their own

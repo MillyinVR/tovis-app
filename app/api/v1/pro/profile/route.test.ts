@@ -154,10 +154,27 @@ describe('app/api/v1/pro/profile/route.ts', () => {
     expect(mocks.prisma.professionalProfile.update).not.toHaveBeenCalled()
   })
 
-  it('returns 403 when a pending pro tries to change their handle', async () => {
+  it('lets an unreviewed pro change their handle', async () => {
+    // They are publicly listed now, so the link is theirs to set. Approval
+    // buys the verified badge, not the right to own your own URL.
     mocks.prisma.professionalProfile.findUnique.mockResolvedValue(
       makeCurrentProfile({
         verificationStatus: VerificationStatus.PENDING,
+        handle: 'tovisstudio',
+        handleNormalized: 'tovisstudio',
+      }),
+    )
+
+    const result = await PATCH(makeRequest({ handle: 'new-handle' }))
+
+    expect(result.status).toBe(200)
+    expect(mocks.prisma.professionalProfile.update).toHaveBeenCalled()
+  })
+
+  it('returns 403 when a REFUSED pro tries to change their handle', async () => {
+    mocks.prisma.professionalProfile.findUnique.mockResolvedValue(
+      makeCurrentProfile({
+        verificationStatus: VerificationStatus.REJECTED,
         handle: 'tovisstudio',
         handleNormalized: 'tovisstudio',
       }),
@@ -174,7 +191,8 @@ describe('app/api/v1/pro/profile/route.ts', () => {
     expect(result.status).toBe(403)
     expect(body).toEqual({
       ok: false,
-      error: 'Your public profile link becomes available after approval.',
+      error:
+        'Your public profile link is unavailable while your verification needs attention.',
     })
 
     expect(mocks.prisma.professionalProfile.update).not.toHaveBeenCalled()

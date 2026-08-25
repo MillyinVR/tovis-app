@@ -6,7 +6,7 @@ import {
   ModerationStatus,
 } from '@prisma/client'
 
-import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
+import { PUBLICLY_LISTABLE_PRO_STATUSES } from '@/lib/proTrustState'
 import {
   rootTenantContext,
   whiteLabelTenantContext,
@@ -93,7 +93,7 @@ describe('lib/looks/feed.ts', () => {
         professional: {
           is: {
             verificationStatus: {
-              in: [...PUBLICLY_APPROVED_PRO_STATUSES],
+              in: [...PUBLICLY_LISTABLE_PRO_STATUSES],
             },
           },
         },
@@ -140,7 +140,7 @@ describe('lib/looks/feed.ts', () => {
         professional: {
           is: {
             verificationStatus: {
-              in: [...PUBLICLY_APPROVED_PRO_STATUSES],
+              in: [...PUBLICLY_LISTABLE_PRO_STATUSES],
             },
           },
         },
@@ -431,7 +431,7 @@ describe('lib/looks/feed.ts', () => {
       expect(where.professional).toEqual({
         is: {
           verificationStatus: {
-            in: [...PUBLICLY_APPROVED_PRO_STATUSES],
+            in: [...PUBLICLY_LISTABLE_PRO_STATUSES],
           },
         },
       })
@@ -447,7 +447,7 @@ describe('lib/looks/feed.ts', () => {
       expect(where.professional).toEqual({
         is: {
           verificationStatus: {
-            in: [...PUBLICLY_APPROVED_PRO_STATUSES],
+            in: [...PUBLICLY_LISTABLE_PRO_STATUSES],
           },
           homeTenantId: 'tenant_salon_a',
         },

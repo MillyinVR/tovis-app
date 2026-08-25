@@ -366,14 +366,18 @@ export const COPY = {
      */
     bookBarHeadlineFallback: 'Book with this pro',
     bookBarHeadlinePending: 'Not bookable yet',
-    bookBarSublinePending: 'Profile is live, booking opens after review',
+    bookBarSublinePending: 'Your verification needs attention before clients can book',
     bookBarSublineNoPrice: 'See services and availability',
     bookBarCta: 'Book',
     bookBarCtaPending: 'Unavailable',
     /** Composed as `${bookBarCta} · From $85`. */
     bookBarCtaPriceJoin: ' · From ',
-    bookBarFootnotePending:
-      'Verification usually takes 2 business days',
+    /**
+     * Only the OWNER of a REFUSED profile sees the pending book bar now — an
+     * unreviewed pro is bookable like anyone else (lib/proTrustState.ts) — so
+     * this no longer promises a review that is already finished.
+     */
+    bookBarFootnotePending: 'Open Verification to see what we need',
     bookBarFootnoteSignedOut: 'You can pick a time before signing in',
     /** Composed as `Balayage from $250 · 5 services`. */
     bookBarSublineFrom: 'from',

@@ -135,14 +135,13 @@ describe('serializeClientMePageData — availableWorkspaces', () => {
     expect(dto.user.availableWorkspaces).not.toContain('PRO')
   })
 
-  it('withholds PRO from another home role while the profile is not APPROVED', () => {
-    // The entitlement boundary, and the case the APPROVED rule was written
-    // for: entering the pro shell from a home role that is NOT pro. Anything
-    // other than APPROVED is not entitled, and POST /workspace/switch answers
-    // 403 to match.
+  it('withholds PRO from another home role only when the profile was refused', () => {
+    // The boundary moved from "not APPROVED" to "refused" when the licence
+    // became a badge rather than a gate (lib/proTrustState.ts). An unreviewed
+    // profile now DOES offer the switch — covered by the case below.
     for (const homeRole of ['CLIENT', 'ADMIN'] as const) {
       for (const status of [
-        VerificationStatus.PENDING,
+        VerificationStatus.NEEDS_INFO,
         VerificationStatus.REJECTED,
       ]) {
         const dto = serializeClientMePageData(
@@ -154,6 +153,21 @@ describe('serializeClientMePageData — availableWorkspaces', () => {
 
         expect(dto.user.availableWorkspaces).not.toContain('PRO')
       }
+    }
+  })
+
+  it('offers PRO to another home role on an unreviewed profile', () => {
+    for (const homeRole of ['CLIENT', 'ADMIN'] as const) {
+      const dto = serializeClientMePageData(
+        makePageData({
+          homeRole,
+          professionalProfile: {
+            verificationStatus: VerificationStatus.PENDING,
+          },
+        }),
+      )
+
+      expect(dto.user.availableWorkspaces).toContain('PRO')
     }
   })
 

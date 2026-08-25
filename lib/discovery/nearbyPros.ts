@@ -12,7 +12,7 @@ import {
 } from '@/lib/discovery/nearby'
 import { toPublicAddressView } from '@/lib/discovery/publicAddress'
 import { prisma } from '@/lib/prisma'
-import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
+import { PUBLICLY_LISTABLE_PRO_STATUSES } from '@/lib/proTrustState'
 import { isRuntimeFlagEnabled } from '@/lib/runtimeFlags'
 import { visibleReviewsWhere } from '@/lib/reviews/visibility'
 import { fetchProSearchCandidates } from '@/lib/search/pros'
@@ -207,7 +207,7 @@ async function loadNearbyProsLegacy(
         : {}),
       professional: {
         ...proDiscoveryVisibilityFilter(tenantContext),
-        verificationStatus: { in: [...PUBLICLY_APPROVED_PRO_STATUSES] },
+        verificationStatus: { in: [...PUBLICLY_LISTABLE_PRO_STATUSES] },
       },
       lat: {
         not: null,

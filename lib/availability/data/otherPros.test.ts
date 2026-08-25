@@ -25,7 +25,7 @@ vi.mock('@/lib/prisma', () => ({
 }))
 
 vi.mock('@/lib/proTrustState', () => ({
-  PUBLICLY_APPROVED_PRO_STATUSES: ['APPROVED'],
+  PUBLICLY_LISTABLE_PRO_STATUSES: ['APPROVED'],
 }))
 
 import {

@@ -221,9 +221,12 @@ export async function PATCH(req: Request) {
       handleActuallyChanges &&
       !canEditPublicPublishingFields(current.verificationStatus)
     ) {
+      // Only a REFUSED pro reaches this now — an unreviewed one is publicly
+      // listed and owns their link like anyone else — so the message no longer
+      // promises that approval is what unlocks it.
       return jsonFail(
         403,
-        'Your public profile link becomes available after approval.',
+        'Your public profile link is unavailable while your verification needs attention.',
       )
     }
 

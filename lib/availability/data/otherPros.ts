@@ -22,7 +22,7 @@ import {
 import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
-import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
+import { PUBLICLY_LISTABLE_PRO_STATUSES } from '@/lib/proTrustState'
 import {
   proDiscoveryVisibilityFilter,
   tenantCacheScope,
@@ -154,7 +154,7 @@ export async function loadOtherProsNearby(
       workingHours: { not: Prisma.JsonNull },
       professional: {
         ...proDiscoveryVisibilityFilter(args.tenantContext),
-        verificationStatus: { in: [...PUBLICLY_APPROVED_PRO_STATUSES] },
+        verificationStatus: { in: [...PUBLICLY_LISTABLE_PRO_STATUSES] },
       },
       lat: {
         not: null,

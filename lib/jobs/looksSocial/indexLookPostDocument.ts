@@ -7,7 +7,7 @@ import {
   PrismaClient,
 } from '@prisma/client'
 
-import { isPubliclyApprovedProStatus } from '@/lib/proTrustState'
+import { canListProPublicly } from '@/lib/proTrustState'
 import { normalizeRequiredId } from '@/lib/guards'
 
 export type IndexLookPostDocumentDb =
@@ -178,7 +178,7 @@ export function isLookPostSearchEligible(
     row.moderationStatus === ModerationStatus.APPROVED &&
     row.publishedAt !== null &&
     row.removedAt === null &&
-    isPubliclyApprovedProStatus(
+    canListProPublicly(
         row.professional.verificationStatus,
     )
   )

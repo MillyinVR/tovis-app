@@ -7,7 +7,7 @@ import {
   Role,
   VerificationStatus,
 } from '@prisma/client'
-import { isPubliclyApprovedProStatus } from '@/lib/proTrustState'
+import { canListProPublicly } from '@/lib/proTrustState'
 
 export type LookViewPolicyInput = {
   isOwner: boolean
@@ -51,7 +51,7 @@ function isPubliclyViewablePublishedLook(args: {
 }): boolean {
   if (args.status !== LookPostStatus.PUBLISHED) return false
   if (args.moderationStatus !== ModerationStatus.APPROVED) return false
-  if (!isPubliclyApprovedProStatus(args.proVerificationStatus ?? null)) {
+  if (!canListProPublicly(args.proVerificationStatus ?? null)) {
     return false
   }
 

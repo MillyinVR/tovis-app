@@ -141,18 +141,43 @@ describe('license expiry gating', () => {
 })
 
 describe('evaluateProReadiness', () => {
-  it('blocks pending/manual-review pros from broad discovery even when otherwise ready', () => {
-    const result = evaluateProReadinessForEntryPoint({
-      pro: makePro({
-        verificationStatus: VerificationStatus.PENDING_MANUAL_REVIEW,
-      }),
-      entryPoint: 'BROAD_DISCOVERY',
-    })
+  it('lets an unreviewed pro be found by broad discovery when otherwise ready', () => {
+    // The rule this file used to enforce, inverted on purpose (Tori,
+    // 2026-08-25): a verified licence is a BADGE, not a gate. An unreviewed pro
+    // could already take a booking from their own link — barring them from
+    // broad discovery only meant nobody could FIND the pro we were happy to let
+    // them book.
+    for (const status of [
+      VerificationStatus.PENDING,
+      VerificationStatus.PENDING_MANUAL_REVIEW,
+    ]) {
+      const result = evaluateProReadinessForEntryPoint({
+        pro: makePro({ verificationStatus: status }),
+        entryPoint: 'BROAD_DISCOVERY',
+      })
 
-    expect(result).toEqual({
-      ok: false,
-      blockers: ['VERIFICATION_NOT_BROADLY_DISCOVERABLE'],
-    })
+      expect(result).toEqual({
+        ok: true,
+        liveModes: ['SALON'],
+        readyLocationIds: ['loc_1'],
+      })
+    }
+  })
+
+  it('bars a refused pro from broad discovery like every other entry point', () => {
+    // The half that did NOT change: an admin's active "no" still blocks, and
+    // now it blocks uniformly rather than adding a second discovery-only code.
+    for (const status of [
+      VerificationStatus.REJECTED,
+      VerificationStatus.NEEDS_INFO,
+    ]) {
+      expect(
+        evaluateProReadinessForEntryPoint({
+          pro: makePro({ verificationStatus: status }),
+          entryPoint: 'BROAD_DISCOVERY',
+        }),
+      ).toEqual({ ok: false, blockers: ['VERIFICATION_BARRED'] })
+    }
   })
 
   it('allows pending/manual-review pros through specific search when otherwise ready', () => {
@@ -251,17 +276,11 @@ describe('evaluateProReadiness', () => {
         entryPoint,
       })
 
-      const expectedBlockers =
-        entryPoint === 'BROAD_DISCOVERY'
-          ? [
-              'VERIFICATION_NOT_APPROVED',
-              'VERIFICATION_NOT_BROADLY_DISCOVERABLE',
-            ]
-          : ['VERIFICATION_NOT_APPROVED']
-
+      // Uniform across every entry point — there is no longer a
+      // discovery-only verification code to add on top.
       expect(result).toEqual({
         ok: false,
-        blockers: expectedBlockers,
+        blockers: ['VERIFICATION_BARRED'],
       })
     }
   })
@@ -275,17 +294,11 @@ describe('evaluateProReadiness', () => {
         entryPoint,
       })
 
-      const expectedBlockers =
-        entryPoint === 'BROAD_DISCOVERY'
-          ? [
-              'VERIFICATION_NOT_APPROVED',
-              'VERIFICATION_NOT_BROADLY_DISCOVERABLE',
-            ]
-          : ['VERIFICATION_NOT_APPROVED']
-
+      // Uniform across every entry point — there is no longer a
+      // discovery-only verification code to add on top.
       expect(result).toEqual({
         ok: false,
-        blockers: expectedBlockers,
+        blockers: ['VERIFICATION_BARRED'],
       })
     }
   })
@@ -312,10 +325,13 @@ describe('evaluateProReadiness', () => {
     }
   })
 
-  it('combines broad-discovery verification and payment blockers when both apply', () => {
+  it('combines verification and payment blockers when both apply', () => {
+    // REJECTED rather than PENDING_MANUAL_REVIEW: an unreviewed pro no longer
+    // contributes a verification blocker at all, so the old status would have
+    // made this a one-blocker test wearing a two-blocker name.
     const result = evaluateProReadinessForEntryPoint({
       pro: makePro({
-        verificationStatus: VerificationStatus.PENDING_MANUAL_REVIEW,
+        verificationStatus: VerificationStatus.REJECTED,
         paymentSettings: {
           acceptStripeCard: true,
           stripeAccountStatus: StripeAccountStatus.ONBOARDING_STARTED,
@@ -329,10 +345,7 @@ describe('evaluateProReadiness', () => {
 
     expect(result).toEqual({
       ok: false,
-      blockers: [
-        'VERIFICATION_NOT_BROADLY_DISCOVERABLE',
-        'STRIPE_NOT_READY',
-      ],
+      blockers: ['VERIFICATION_BARRED', 'STRIPE_NOT_READY'],
     })
   })
 
@@ -355,7 +368,7 @@ describe('evaluateProReadiness', () => {
       ),
     ).toEqual({
       ok: false,
-      blockers: ['VERIFICATION_NOT_APPROVED'],
+      blockers: ['VERIFICATION_BARRED'],
     })
 
     expect(
@@ -366,7 +379,7 @@ describe('evaluateProReadiness', () => {
       ),
     ).toEqual({
       ok: false,
-      blockers: ['VERIFICATION_NOT_APPROVED'],
+      blockers: ['VERIFICATION_BARRED'],
     })
   })
 

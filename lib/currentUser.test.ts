@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { Role } from '@prisma/client'
+import { Role, type VerificationStatus } from '@prisma/client'
 
 const mockCookies = vi.hoisted(() => vi.fn())
 const mockHeaders = vi.hoisted(() => vi.fn())
@@ -404,7 +404,7 @@ describe('lib/currentUser — acting role (workspace switching)', () => {
   function dbUser(args: {
     homeRole: Role
     hasClientProfile?: boolean
-    proStatus?: 'APPROVED' | 'PENDING' | null
+    proStatus?: VerificationStatus | null
     hasAdminGrant?: boolean
   }) {
     return {
@@ -521,7 +521,7 @@ describe('lib/currentUser — acting role (workspace switching)', () => {
     expect(result?.canAccessAdmin).toBe(false)
   })
 
-  it('honors PRO acting role only when the professional profile is APPROVED', async () => {
+  it('honors a PRO acting role unless the profile was REFUSED', async () => {
     mockCookies.mockResolvedValue(cookieWith('pro_token'))
     mockVerifyToken.mockReturnValue({
       userId: 'user_1',
@@ -529,17 +529,25 @@ describe('lib/currentUser — acting role (workspace switching)', () => {
       sessionKind: 'ACTIVE',
       authVersion: 1,
     })
-    mockPrisma.user.findUnique.mockResolvedValue(
-      dbUser({ homeRole: Role.ADMIN, proStatus: 'APPROVED' }),
-    )
 
-    expect((await getCurrentUser())?.role).toBe(Role.PRO)
+    // An unreviewed licence is honored now — a verified licence is a badge, not
+    // a gate (lib/proTrustState.ts). This assertion used to demand APPROVED.
+    for (const proStatus of ['APPROVED', 'PENDING', 'PENDING_MANUAL_REVIEW'] as const) {
+      mockPrisma.user.findUnique.mockResolvedValue(
+        dbUser({ homeRole: Role.ADMIN, proStatus }),
+      )
 
-    mockPrisma.user.findUnique.mockResolvedValue(
-      dbUser({ homeRole: Role.ADMIN, proStatus: 'PENDING' }),
-    )
+      expect((await getCurrentUser())?.role).toBe(Role.PRO)
+    }
 
-    // Pending license is not entitled to the PRO workspace → back to home (ADMIN).
-    expect((await getCurrentUser())?.role).toBe(Role.ADMIN)
+    // A refused licence still drops the acting role back to home (ADMIN) — the
+    // entitlement re-check on every request is what makes that safe.
+    for (const proStatus of ['REJECTED', 'NEEDS_INFO'] as const) {
+      mockPrisma.user.findUnique.mockResolvedValue(
+        dbUser({ homeRole: Role.ADMIN, proStatus }),
+      )
+
+      expect((await getCurrentUser())?.role).toBe(Role.ADMIN)
+    }
   })
 })

@@ -8,7 +8,7 @@ import type { MetadataRoute } from 'next'
 import { buildLooksFeedWhere } from '@/lib/looks/feed'
 import { loadIndexableLookTagSlugs } from '@/lib/looks/tagPage'
 import { prisma } from '@/lib/prisma'
-import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
+import { PUBLICLY_LISTABLE_PRO_STATUSES } from '@/lib/proTrustState'
 import {
   getRootTenantId,
   proDiscoveryVisibilityFilter,
@@ -36,7 +36,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       where: {
         AND: [
           {
-            verificationStatus: { in: [...PUBLICLY_APPROVED_PRO_STATUSES] },
+            verificationStatus: { in: [...PUBLICLY_LISTABLE_PRO_STATUSES] },
           },
           proDiscoveryVisibilityFilter(tenant),
         ],

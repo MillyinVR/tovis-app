@@ -161,9 +161,16 @@ export default function ProfileIdentityRail({
             </span>
           ) : null}
 
+          {/*
+            Only ever rendered to the OWNER of a refused profile — a listed pro
+            reaching this rail is bookable, and the decision (Tori, 2026-08-25)
+            is that the "✓ License verified" chip above is the ONE difference a
+            client sees. A second "pending" chip on an unreviewed pro would be a
+            scarlet letter the rule deliberately removed.
+          */}
           {isPendingVerification ? (
             <span className="brand-pp-chip" data-tone="pending">
-              Pending verification
+              Verification needs attention
             </span>
           ) : null}
 

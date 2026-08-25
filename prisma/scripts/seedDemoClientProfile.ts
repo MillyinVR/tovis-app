@@ -3125,7 +3125,7 @@ async function main(): Promise<void> {
         licenseState: 'NY',
         licenseVerified: true,
         // APPROVED so the side rail's "View public profile" link renders — that
-        // href is gated on `isPubliclyApprovedProStatus`, and an unapproved
+        // href is gated on `canListProPublicly`, and an unapproved
         // fixture would leave the rail's own CTA permanently unlooked-at.
         verificationStatus: VerificationStatus.APPROVED,
       },
