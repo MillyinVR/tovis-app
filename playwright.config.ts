@@ -14,6 +14,8 @@ const clientAuthFile = path.join(
 
 export default defineConfig({
   testDir: './tests/e2e',
+  // Refuses to run against the main Supabase project — see the file's header.
+  globalSetup: './tests/e2e/globalSetup.ts',
   testMatch: /.*\.(spec|setup)\.ts/,
   // The availability perf sampler hammers the single shared `next start`
   // server for ~3min and wedges its connection pool, timing out the
@@ -89,9 +91,25 @@ export default defineConfig({
     // died with the opaque "Timed out waiting 120000ms from config.webServer"
     // having run zero tests (it took down `main` twice on 2026-07-16, once on a
     // docs-only commit). Any CI caller of `playwright test` MUST build first.
-    command: isCI ? 'npm run start' : 'npm run dev',
+    //
+    // Locally the server is started THROUGH the e2e env files. `next dev`
+    // reads `.env.local`, which on a maintainer's machine points at the main
+    // Supabase project, so a bare `npx playwright test` used to serve
+    // production data to the suite. Layering `.env.e2e.local` first (exactly
+    // what `pnpm test:e2e:local` does) makes every entry point safe, not just
+    // that one. Running under `test:e2e:local` simply loads them twice, which
+    // is a no-op — dotenv never overrides an already-set variable.
+    command: isCI
+      ? 'npm run start'
+      : 'npx dotenv -e .env.e2e.local -e .env.local -- npm run dev',
     url: baseURL,
     timeout: 120_000,
-    reuseExistingServer: !isCI,
+    // Reuse is opt-in locally now. `reuseExistingServer: true` silently adopts
+    // whatever is already on the port — typically a `pnpm dev` started with
+    // `.env.local`, i.e. the production database — which defeats the env
+    // layering above and is precisely what signup.spec.ts warns against ("do
+    // NOT reuse a dev server that was started with .env.local"). Opt back in
+    // with E2E_REUSE_DEV_SERVER=true when you know what your server is on.
+    reuseExistingServer: !isCI && process.env.E2E_REUSE_DEV_SERVER === 'true',
   },
 })
