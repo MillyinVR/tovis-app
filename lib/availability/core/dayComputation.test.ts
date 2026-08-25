@@ -45,12 +45,18 @@ afterAll(() => {
   vi.useRealTimers()
 })
 
+// This suite tests the timezone engine itself, so the oracle stays a raw
+// `Intl` call rather than borrowing `lib/timeZone` back. But it pins
+// `hourCycle: 'h23'` instead of `hour12: false`: the latter resolves to the
+// h24 cycle in some ICU builds, which spells local midnight "24:00" and makes
+// a DST assertion pass or fail on the runtime's ICU version rather than on the
+// arithmetic under test.
 function localHm(iso: string, timeZone: string): string {
   return new Intl.DateTimeFormat('en-GB', {
     timeZone,
     hour: '2-digit',
     minute: '2-digit',
-    hour12: false,
+    hourCycle: 'h23',
   }).format(new Date(iso))
 }
 
