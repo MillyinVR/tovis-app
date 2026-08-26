@@ -2,9 +2,17 @@
 
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
 import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
+import {
+  enforceRateLimit,
+  rateLimitIdentity,
+  tokenRateLimitIdentity,
+} from '@/app/api/_utils/rateLimit'
 import { asTrimmedString } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
-import { hashClientActionToken } from '@/lib/consultation/clientActionTokens'
+import {
+  clientActionTokenRateLimitPrefix,
+  hashClientActionToken,
+} from '@/lib/consultation/clientActionTokens'
 import { ClientActionTokenKind, ConsultationApprovalStatus } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
@@ -41,6 +49,29 @@ export async function GET(_request: Request, ctx: RouteContext<{ token: string }
         code: 'NOT_FOUND',
       })
     }
+
+    // Brute-force guard: cap by IP and by token-prefix BEFORE any DB lookup,
+    // exactly as the decision route next door does for this same token space.
+    // Deliberately SEPARATE buckets from consultation:decision, not shared
+    // ones: this GET fires on every page view, and metering it out of the
+    // decision budget (8 per 5 min) would let a handful of refreshes lock a
+    // client out of actually approving. It still cannot stay unmetered — this
+    // is the widest public view of the consultation record (proof rows carry
+    // ipAddress, userAgent, and contact snapshots) behind an unauthenticated,
+    // DB-hitting read.
+    const ipLimited = await enforceRateLimit({
+      bucket: 'consultation:read',
+      identity: await rateLimitIdentity(),
+    })
+    if (ipLimited) return ipLimited
+
+    const tokenLimited = await enforceRateLimit({
+      bucket: 'consultation:read:token',
+      identity: tokenRateLimitIdentity(
+        clientActionTokenRateLimitPrefix(rawToken),
+      ),
+    })
+    if (tokenLimited) return tokenLimited
 
     const tokenHash = hashClientActionToken(rawToken)
 
