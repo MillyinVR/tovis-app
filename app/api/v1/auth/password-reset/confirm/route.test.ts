@@ -18,6 +18,10 @@ const mockPrisma = vi.hoisted(() => ({
   user: {
     update: vi.fn(),
   },
+  // A reset also burns outstanding passwordless SIGN-IN tokens (item 58).
+  emailVerificationToken: {
+    updateMany: vi.fn(),
+  },
   $transaction: vi.fn(),
 }))
 
@@ -106,6 +110,7 @@ describe('app/api/v1/auth/password-reset/confirm/route', () => {
     mockPrisma.passwordResetToken.update.mockReset()
     mockPrisma.passwordResetToken.updateMany.mockReset()
     mockPrisma.user.update.mockReset()
+    mockPrisma.emailVerificationToken.updateMany.mockReset()
     mockPrisma.$transaction.mockReset()
 
     mockRateLimitIdentity.mockResolvedValue({
@@ -126,9 +131,11 @@ describe('app/api/v1/auth/password-reset/confirm/route', () => {
     mockPrisma.user.update.mockResolvedValue({ id: 'user_1' })
     mockPrisma.passwordResetToken.update.mockResolvedValue({ id: 'prt_1' })
     mockPrisma.passwordResetToken.updateMany.mockResolvedValue({ count: 1 })
+    mockPrisma.emailVerificationToken.updateMany.mockResolvedValue({ count: 1 })
     mockPrisma.$transaction.mockResolvedValue([
       { id: 'user_1' },
       { id: 'prt_1' },
+      { count: 1 },
       { count: 1 },
     ])
   })
@@ -505,10 +512,26 @@ describe('app/api/v1/auth/password-reset/confirm/route', () => {
       data: { usedAt: expect.any(Date) },
     })
 
+    // A reset must kill any passwordless sign-in link already sitting in the
+    // mailbox (Tori's decision, 2026-08-25 — item 58). Bumping authVersion
+    // above does NOT cover this: that invalidates issued SESSIONS, while these
+    // rows are credentials nobody has redeemed yet.
+    expect(mockPrisma.emailVerificationToken.updateMany).toHaveBeenCalledWith({
+      where: {
+        userId: 'user_1',
+        purpose: 'EMAIL_SIGN_IN',
+        usedAt: null,
+      },
+      data: { usedAt: expect.any(Date) },
+    })
+
     expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1)
     const txArg = mockPrisma.$transaction.mock.calls[0]?.[0]
     expect(Array.isArray(txArg)).toBe(true)
-    expect(txArg).toHaveLength(3)
+    // Four statements now: password, this token, sibling reset tokens, and the
+    // sign-in token burn. All in ONE transaction — a reset that committed while
+    // the burn failed would leave live links for a locked-down account.
+    expect(txArg).toHaveLength(4)
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 

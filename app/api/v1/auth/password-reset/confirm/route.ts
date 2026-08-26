@@ -1,5 +1,7 @@
 // app/api/v1/auth/password-reset/confirm/route.ts
 
+import { AuthVerificationPurpose } from '@prisma/client'
+
 import { prisma } from '@/lib/prisma'
 import { hashPassword } from '@/lib/auth'
 import {
@@ -156,6 +158,29 @@ export async function POST(req: Request) {
       prisma.passwordResetToken.updateMany({
         where: {
           userId: record.userId,
+          usedAt: null,
+        },
+        data: { usedAt: now },
+      }),
+      // A password reset burns every outstanding passwordless SIGN-IN token
+      // (Tori's decision, 2026-08-25). This is the whole of what replaces
+      // `authVersionAtIssue` for item 58: a sign-in link has no issuing session
+      // to pin a generation to, and a reset is the closest equivalent act of
+      // "lock my account down" — so any link still sitting in the mailbox must
+      // die with the old password. Bumping `authVersion` above does NOT do this
+      // on its own: that invalidates issued SESSIONS, while these rows are
+      // credentials that have not been redeemed yet.
+      //
+      // In the same $transaction as the password write on purpose: a reset that
+      // committed while this failed would leave live sign-in links for an
+      // account whose owner had just locked it down.
+      //
+      // Deliberately NOT done on an ordinary successful sign-in — see
+      // lib/auth/emailSignIn.ts property 6.
+      prisma.emailVerificationToken.updateMany({
+        where: {
+          userId: record.userId,
+          purpose: AuthVerificationPurpose.EMAIL_SIGN_IN,
           usedAt: null,
         },
         data: { usedAt: now },

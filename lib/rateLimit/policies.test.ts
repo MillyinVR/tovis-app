@@ -54,6 +54,16 @@ const AUTH_CRITICAL_BUCKETS = [
   // which is precisely when a brute-force against a token id is cheapest.
   'auth:session-handoff:issue',
   'auth:session-handoff:exchange',
+  // Passwordless email sign-in (item 58), all three. Same rule as the hand-off
+  // above: the request half MINTS a credential and mails it, the verify half
+  // REDEEMS it for a session. `redis-only` FAILS OPEN, which would leave the
+  // redeem endpoint unthrottled during a Redis outage — exactly when brute
+  // forcing a 6-digit code is cheapest. The request half is listed too because
+  // an unthrottled mailer is both an abuse vector and a way to burn a victim's
+  // deliverability.
+  'auth:email-sign-in:request',
+  'auth:email-sign-in:request:identity',
+  'auth:email-sign-in:verify',
   // "Become a pro". Same rule as the hand-off above: it MINTS a session
   // credential (an ACTIVE token replacing the caller's client session) and in
   // the same transaction grants the capability to take bookings and money. A

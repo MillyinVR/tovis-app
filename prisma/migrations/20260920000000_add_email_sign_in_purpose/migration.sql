@@ -1,0 +1,33 @@
+-- Passwordless email sign-in (OPEN-WORK item 58).
+--
+-- Two additive changes, both expand-phase safe: the currently running build
+-- neither writes the new enum value nor reads the new column, so the old and
+-- new builds can share this schema during the deploy swap.
+--
+-- 1. `EMAIL_SIGN_IN` on AuthVerificationPurpose.
+--    Deliberately a NEW purpose rather than reusing EMAIL_VERIFY. The email
+--    verify route burns *all* of a user's outstanding EMAIL_VERIFY tokens on
+--    success (app/api/v1/auth/email/verify/route.ts), so overloading it would
+--    mean "I verified my address" silently kills a sign-in link already sitting
+--    in the inbox — and a sign-in would kill a pending address verification.
+--    Every existing reader already filters on `purpose = 'EMAIL_VERIFY'`
+--    explicitly (the verify route's guard and the retry-verification-emails
+--    cron), so the new value cannot leak into those paths.
+--
+--    Postgres allows ALTER TYPE … ADD VALUE inside a transaction block (PG 12+)
+--    as long as the new value is not USED in the same transaction — nothing
+--    here uses it. Precedent: 20260903000000_waitlist_offer_expiry_events.
+--
+-- 2. `codeHash` on EmailVerificationToken.
+--    ONE email carries BOTH a magic link and a 6-digit code (Tori's decision,
+--    2026-08-25). The code is the fallback for a link opened in an in-app
+--    browser (Instagram/TikTok), which lands in a different cookie jar than the
+--    person's real browser. Both credentials therefore redeem the SAME row:
+--    `tokenHash` is the link's, `codeHash` is the code's.
+--
+--    NULLABLE because EMAIL_VERIFY rows have no code and every row that already
+--    exists is one. Adding a nullable column with no default is a catalog-only
+--    change — no table rewrite, no backfill, no lock worth naming.
+ALTER TYPE "AuthVerificationPurpose" ADD VALUE IF NOT EXISTS 'EMAIL_SIGN_IN';
+
+ALTER TABLE "EmailVerificationToken" ADD COLUMN IF NOT EXISTS "codeHash" TEXT;

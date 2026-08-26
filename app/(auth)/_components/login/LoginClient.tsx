@@ -12,6 +12,7 @@ import PasswordInput from '../PasswordInput'
 import PrimaryButton from '../PrimaryButton'
 import SecondaryLinkButton from '../SecondaryLinkButton'
 import SocialSignIn from '../social/SocialSignIn'
+import EmailSignInForm from './EmailSignInForm'
 import PhoneLoginForm from './PhoneLoginForm'
 import { safeJsonRecord, readErrorMessage } from '@/lib/http'
 import {
@@ -125,7 +126,9 @@ export default function LoginClient() {
   )
   const phone = useMemo(() => sanitizeOptionalText(phoneRaw), [phoneRaw])
 
-  const [mode, setMode] = useState<'password' | 'phone'>('password')
+  const [mode, setMode] = useState<'password' | 'phone' | 'email-link'>(
+    'password',
+  )
   const [email, setEmail] = useState(emailPrefill)
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -311,13 +314,23 @@ export default function LoginClient() {
                 Create an account
               </SecondaryLinkButton>
 
-              <div className="flex justify-center pt-1">
+              <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 pt-1">
                 <button
                   type="button"
                   onClick={() => setMode('phone')}
                   className="text-[11px] font-black text-textSecondary/80 transition hover:text-textPrimary focus:outline-none focus-visible:underline"
                 >
                   Text me a code instead
+                </button>
+                <span aria-hidden="true" className="text-[11px] text-textSecondary/40">
+                  ·
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setMode('email-link')}
+                  className="text-[11px] font-black text-textSecondary/80 transition hover:text-textPrimary focus:outline-none focus-visible:underline"
+                >
+                  Email me a link instead
                 </button>
               </div>
 
@@ -334,11 +347,20 @@ export default function LoginClient() {
               </div>
             </div>
           </form>
-        ) : (
+        ) : mode === 'phone' ? (
           <PhoneLoginForm
             nextSafe={nextSafe}
             fromSafe={fromSafe}
             initialPhone={phone ?? undefined}
+            onUsePassword={() => setMode('password')}
+          />
+        ) : (
+          <EmailSignInForm
+            nextSafe={nextSafe}
+            fromSafe={fromSafe}
+            // Carry whatever they already typed on the password form, so
+            // switching modes does not make them retype their address.
+            initialEmail={email.trim() || emailPrefill || undefined}
             onUsePassword={() => setMode('password')}
           />
         )}
