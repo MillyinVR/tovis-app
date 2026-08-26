@@ -16,8 +16,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
-    # Private-repo runners are 2-core/7GB (public repos get 4-core/16GB), so
-    # Node's default heap cap lands near 2GB — below what tsc needs here.
+    # Node's default heap cap lands near 2GB on a hosted runner — below what
+    # tsc needs here. This job-level value covers Lint and the test run; the
+    # Typecheck step raises it further on its own (see that step).
+    #
+    # Deliberately NOT raised job-wide: `pnpm test` runs vitest with a worker
+    # per core, and a ceiling is per PROCESS. Four workers each entitled to 6GB
+    # can exhaust a 16GB runner, which kills the runner outright instead of
+    # failing with a readable heap error. Only the step that actually needs the
+    # headroom gets it.
     env:
       NODE_OPTIONS: --max-old-space-size=4096
 
@@ -40,8 +47,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # tsc runs COLD here — `incremental: true` in tsconfig.json only helps
+      # when tsconfig.tsbuildinfo survives, and a fresh checkout has none. A
+      # cold full check measured 4.71GB peak RSS at this ceiling and 5.38GB at
+      # 8192, so the previous 4096 was BELOW the requirement, not merely tight:
+      # it OOM'd with `Ineffective mark-compacts near heap limit` / exit 134
+      # after ~2min on 97c489fb, which reads as "unit tests failed" even though
+      # no test had run yet. 6144 matches e2e.yml and perf-availability.yml.
       - name: Typecheck
         run: pnpm typecheck
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
 
       # CLAUDE.md has always mandated lint before pushing, but no workflow ran
       # it — so an introduced ESLint *error* shipped green. Warnings stay
