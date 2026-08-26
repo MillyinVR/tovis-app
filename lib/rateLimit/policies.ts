@@ -52,6 +52,9 @@ export type RateLimitBucket =
   | 'auth:password-reset-request'
   | 'auth:password-reset-request:identity'
   | 'auth:password-reset-confirm'
+  | 'auth:email-sign-in:request'
+  | 'auth:email-sign-in:request:identity'
+  | 'auth:email-sign-in:verify'
   | 'auth:phone:verify'
   | 'auth:email:send'
   | 'auth:email:verify'
@@ -534,6 +537,48 @@ export const RATE_LIMITS: Record<RateLimitBucket, RateLimitConfig> = {
     limit: 10,
     windowSeconds: 15 * 60,
     prefix: 'rl:auth:pw-reset-confirm',
+    mode: 'auth-critical',
+  },
+  // Passwordless email sign-in (item 58). Its OWN buckets, deliberately not
+  // `auth:email:send` — that one meters address-verification mail, and sharing
+  // it would let a burst of sign-in requests exhaust a brand-new signup's
+  // ability to receive its verification email (and vice versa). Two different
+  // things being throttled by one counter is how an unrelated feature takes
+  // another one down.
+  //
+  // The TWO-DIMENSIONAL shape is copied from password-reset above and is the
+  // point, not decoration: the loose per-IP cap is sized for NAT tolerance (a
+  // salon on shared wifi), and the tight IP+email composite is what stops a
+  // remote attacker exhausting ONE victim's allowance to lock them out of
+  // passwordless sign-in. A single per-IP cap alone would make targeted denial
+  // of service trivial and cheap.
+  //
+  // Both trigger on attempt count alone, so a 429 is identical for an existing
+  // and a non-existent account — the enumeration-safe contract of the request
+  // route survives the limiter.
+  //
+  // ⚠️ `mode: 'auth-critical'`, never 'redis-only': redis-only FAILS OPEN when
+  // Upstash is unreachable, which on a credential-issuing endpoint means the
+  // limiter silently stops existing exactly when someone is hammering it.
+  'auth:email-sign-in:request': {
+    limit: 20,
+    windowSeconds: 15 * 60,
+    prefix: 'rl:auth:email-signin-req',
+    mode: 'auth-critical',
+  },
+  'auth:email-sign-in:request:identity': {
+    limit: 5,
+    windowSeconds: 15 * 60,
+    prefix: 'rl:auth:email-signin-req:id',
+    mode: 'auth-critical',
+  },
+  // Redemption. Bounds online guessing of the 6-digit code across rows; the
+  // per-row `attempts` counter (EMAIL_SIGN_IN_MAX_CODE_ATTEMPTS) bounds it
+  // within one row, which this cannot do because an attacker can rotate IPs.
+  'auth:email-sign-in:verify': {
+    limit: 10,
+    windowSeconds: 15 * 60,
+    prefix: 'rl:auth:email-signin-verify',
     mode: 'auth-critical',
   },
   'auth:phone:verify': {

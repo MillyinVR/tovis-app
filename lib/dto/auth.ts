@@ -112,6 +112,17 @@ export type AuthPhoneLoginSendResponseDTO = {
 
 // POST /api/v1/auth/phone-login/verify reuses AuthLoginResponseDTO.
 
+// POST /api/v1/auth/email-sign-in/request — ALWAYS `{ ok: true }`, on every
+// path including failure. The shape has no room to say whether the address has
+// an account, because saying so would make this endpoint an account oracle.
+export type AuthEmailSignInRequestResponseDTO = {
+  ok: true
+}
+
+// POST /api/v1/auth/email-sign-in/verify reuses AuthLoginResponseDTO — the
+// point of the feature is that it lands you in exactly the state a password
+// login would.
+
 // POST /api/v1/auth/phone/verify — token is null until the session is fully
 // verified (and on the already-verified early return, which mints no new token).
 export type AuthPhoneVerifyResponseDTO = {

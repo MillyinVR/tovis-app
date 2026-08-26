@@ -140,6 +140,11 @@ enum VerificationDocumentType {
 
 enum AuthVerificationPurpose {
   EMAIL_VERIFY
+  /// Passwordless sign-in (item 58). Deliberately NOT EMAIL_VERIFY: that
+  /// purpose's verify route burns ALL of a user's outstanding tokens on
+  /// success, so overloading it would let "verify my address" silently kill a
+  /// sign-in link already sitting in the inbox (and vice versa).
+  EMAIL_SIGN_IN
 }
 
 /// Identity providers this app accepts a verified sign-in from.
@@ -1689,6 +1694,13 @@ model EmailVerificationToken {
   purpose   AuthVerificationPurpose @default(EMAIL_VERIFY)
   email     String                  @db.VarChar(320)
   tokenHash String                  @unique
+  /// EMAIL_SIGN_IN only: hash of the 6-digit fallback code that rides in the
+  /// SAME email as the link, for when the link opens in an in-app browser
+  /// (Instagram/TikTok) whose cookie jar is not the person's real browser.
+  /// Salted with the row id so one leaked hash cannot be matched against
+  /// another row that happened to draw the same six digits. Null for
+  /// EMAIL_VERIFY, which has no code.
+  codeHash  String?
   expiresAt DateTime
   usedAt    DateTime?
   attempts  Int                     @default(0)
