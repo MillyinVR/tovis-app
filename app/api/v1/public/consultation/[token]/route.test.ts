@@ -12,6 +12,11 @@ const mocks = vi.hoisted(() => ({
   prismaClientActionTokenFindUnique: vi.fn(),
 
   hashClientActionToken: vi.fn(),
+  clientActionTokenRateLimitPrefix: vi.fn(),
+
+  enforceRateLimit: vi.fn(),
+  rateLimitIdentity: vi.fn(),
+  tokenRateLimitIdentity: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -30,6 +35,13 @@ vi.mock('@/lib/prisma', () => ({
 
 vi.mock('@/lib/consultation/clientActionTokens', () => ({
   hashClientActionToken: mocks.hashClientActionToken,
+  clientActionTokenRateLimitPrefix: mocks.clientActionTokenRateLimitPrefix,
+}))
+
+vi.mock('@/app/api/_utils/rateLimit', () => ({
+  enforceRateLimit: mocks.enforceRateLimit,
+  rateLimitIdentity: mocks.rateLimitIdentity,
+  tokenRateLimitIdentity: mocks.tokenRateLimitIdentity,
 }))
 
 import { GET } from './route'
@@ -170,6 +182,18 @@ describe('GET /api/v1/public/consultation/[token]', () => {
     mocks.hashClientActionToken.mockImplementation(
       (rawToken: string) => `hashed:${rawToken}`,
     )
+
+    mocks.clientActionTokenRateLimitPrefix.mockImplementation(
+      (rawToken: string) => `prefix:${rawToken}`,
+    )
+
+    // Default: neither bucket is over its ceiling.
+    mocks.enforceRateLimit.mockResolvedValue(null)
+    mocks.rateLimitIdentity.mockResolvedValue({ kind: 'ip', id: '203.0.113.7' })
+    mocks.tokenRateLimitIdentity.mockImplementation((prefix: string) => ({
+      kind: 'token',
+      id: prefix,
+    }))
   })
 
   afterEach(() => {
@@ -186,6 +210,57 @@ describe('GET /api/v1/public/consultation/[token]', () => {
       code: 'NOT_FOUND',
     })
 
+    expect(mocks.hashClientActionToken).not.toHaveBeenCalled()
+    expect(mocks.prismaClientActionTokenFindUnique).not.toHaveBeenCalled()
+  })
+
+  it('consults both rate-limit buckets before touching the database', async () => {
+    mocks.prismaClientActionTokenFindUnique.mockResolvedValueOnce(null)
+
+    await GET(new Request('http://localhost/test'), makeCtx('token_rl'))
+
+    expect(mocks.enforceRateLimit).toHaveBeenCalledTimes(2)
+    expect(mocks.enforceRateLimit).toHaveBeenNthCalledWith(1, {
+      bucket: 'consultation:read',
+      identity: { kind: 'ip', id: '203.0.113.7' },
+    })
+    expect(mocks.enforceRateLimit).toHaveBeenNthCalledWith(2, {
+      bucket: 'consultation:read:token',
+      identity: { kind: 'token', id: 'prefix:token_rl' },
+    })
+    expect(mocks.clientActionTokenRateLimitPrefix).toHaveBeenCalledWith(
+      'token_rl',
+    )
+  })
+
+  it('returns the limiter response and skips the DB when the IP bucket blocks', async () => {
+    const blocked = makeJsonResponse(429, { ok: false, error: 'Rate limited.' })
+    mocks.enforceRateLimit.mockResolvedValueOnce(blocked)
+
+    const response = await GET(
+      new Request('http://localhost/test'),
+      makeCtx('token_rl_ip'),
+    )
+
+    expect(response).toBe(blocked)
+    expect(mocks.enforceRateLimit).toHaveBeenCalledTimes(1)
+    expect(mocks.hashClientActionToken).not.toHaveBeenCalled()
+    expect(mocks.prismaClientActionTokenFindUnique).not.toHaveBeenCalled()
+  })
+
+  it('returns the limiter response and skips the DB when the token bucket blocks', async () => {
+    const blocked = makeJsonResponse(429, { ok: false, error: 'Rate limited.' })
+    mocks.enforceRateLimit
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(blocked)
+
+    const response = await GET(
+      new Request('http://localhost/test'),
+      makeCtx('token_rl_tok'),
+    )
+
+    expect(response).toBe(blocked)
+    expect(mocks.enforceRateLimit).toHaveBeenCalledTimes(2)
     expect(mocks.hashClientActionToken).not.toHaveBeenCalled()
     expect(mocks.prismaClientActionTokenFindUnique).not.toHaveBeenCalled()
   })

@@ -12,6 +12,8 @@ export type RateLimitBucket =
   | 'waitlist:write'
   | 'consultation:decision'
   | 'consultation:decision:token'
+  | 'consultation:read'
+  | 'consultation:read:token'
   | 'account-invite:mint'
   | 'account-invite:mint:token'
   | 'client:consult:write'
@@ -183,6 +185,27 @@ export const RATE_LIMITS: Record<RateLimitBucket, RateLimitConfig> = {
     limit: 12,
     windowSeconds: 5 * 60,
     prefix: 'rl:consultation:decision:token',
+    mode: 'redis-only',
+  },
+  // The public consultation page-load read (GET …/consultation/[token]).
+  // Same token space as consultation:decision but deliberately SEPARATE
+  // buckets: the read fires once per page view, so sharing the decision
+  // counters would let a few refreshes exhaust a client's budget to actually
+  // approve. Sized wider than the decision pair for the same reason — views
+  // are more frequent than decisions — while still capping a scraper of the
+  // widest public view of a consultation record (proof rows carry ipAddress,
+  // userAgent, and contact snapshots). 20/5min ≈ the client:appointment:token
+  // ceiling for the equivalent public appointment link.
+  'consultation:read': {
+    limit: 20,
+    windowSeconds: 5 * 60,
+    prefix: 'rl:consultation:read',
+    mode: 'redis-only',
+  },
+  'consultation:read:token': {
+    limit: 30,
+    windowSeconds: 5 * 60,
+    prefix: 'rl:consultation:read:token',
     mode: 'redis-only',
   },
   // Public account-invite (magic-link) claim-link mint. Keyed by IP and by
