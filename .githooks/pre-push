@@ -56,7 +56,13 @@ case "${required_major}-${current_major}" in
 esac
 
 echo "▶ pre-push: typecheck + unit tests + static guards (bypass with --no-verify)…"
-npm run typecheck
+# tsc needs a raised heap when it runs COLD. The ~10s figure above assumes a
+# warm tsconfig.tsbuildinfo; a FRESH WORKTREE has none, and the cold check peaks
+# at ~4.7GB — well past Node's default cap on a hosted runner or a loaded Mac.
+# Without this the hook dies with `Abort trap: 6` / `Ineffective mark-compacts`
+# and the push is refused for what looks like a type error but is not one.
+# Same ceiling the Typecheck step in .github/workflows/unit-tests.yml uses.
+NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=6144}" npm run typecheck
 npx vitest run
 npm run check:static-guards
 echo "✓ pre-push checks passed"
