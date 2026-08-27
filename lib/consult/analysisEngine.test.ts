@@ -35,10 +35,84 @@ const captures = [
   'hair_left',
   'hair_right',
   'hair_crown',
+  'face_front',
+  'face_side',
+  'eyes_closeup',
 ].map((shotKey) => ({
-  shotKey: shotKey as 'hair_back' | 'hair_left' | 'hair_right' | 'hair_crown',
+  shotKey: shotKey as
+    | 'hair_back'
+    | 'hair_left'
+    | 'hair_right'
+    | 'hair_crown'
+    | 'face_front'
+    | 'face_side'
+    | 'eyes_closeup',
   image: { base64: 'aGVsbG8=', mediaType: 'image/jpeg' as const },
 }))
+
+function validProfile(): HairColorAnalysisProviderOutput['profile'] {
+  const face = <T extends string>(value: T) => ({
+    value,
+    confidence: { min: 0.45, max: 0.7 },
+    evidence: ['face_front' as const],
+  })
+  const unknown = <T extends string>(value: T) => ({
+    value,
+    confidence: { min: 0, max: 0.25 },
+    evidence: [],
+  })
+  return {
+    skinUndertone: face('NEUTRAL' as const),
+    contrastLevel: face('MEDIUM' as const),
+    colorSeason: unknown('UNKNOWN' as const),
+    faceProportion: face('BALANCED' as const),
+    jawline: face('SOFTLY_ROUNDED' as const),
+    foreheadProportion: face('BALANCED' as const),
+    featureBalance: face('SOFT' as const),
+    eyeShape: {
+      value: 'HOODED' as const,
+      confidence: { min: 0.5, max: 0.8 },
+      evidence: ['eyes_closeup' as const],
+    },
+    eyeSpacing: {
+      value: 'BALANCED' as const,
+      confidence: { min: 0.5, max: 0.8 },
+      evidence: ['eyes_closeup' as const],
+    },
+    browDensity: {
+      value: 'FULL' as const,
+      confidence: { min: 0.5, max: 0.8 },
+      evidence: ['eyes_closeup' as const],
+    },
+    browShape: {
+      value: 'SOFT_ARCH' as const,
+      confidence: { min: 0.5, max: 0.8 },
+      evidence: ['eyes_closeup' as const],
+    },
+  }
+}
+
+function validStyleDirections(): HairColorAnalysisProviderOutput['styleDirections'] {
+  const domains = [
+    'HAIR_COLOR_HARMONY',
+    'CUT_AND_SHAPE',
+    'BANGS',
+    'BROWS',
+    'LASHES',
+    'MAKEUP',
+    'COLOR_PALETTE',
+  ] as const
+  return domains.map((domain) => ({
+    domain,
+    title: 'A soft, harmonizing direction',
+    direction: 'Discuss a soft, blended direction for this domain together.',
+    whyItFlatters:
+      'Low observed contrast and soft feature balance favor blended, diffused choices.',
+    confidence: { min: 0.4, max: 0.7 },
+    evidence: ['face_front' as const],
+    discussWithProfessional: true as const,
+  }))
+}
 
 function validOutput(): HairColorAnalysisProviderOutput {
   const observed = <T extends 'MIXED' | 'NO_VISIBLE_CONCERN' | 'UNKNOWN' | 'WAVY' | 'HIGH'>(
@@ -51,6 +125,8 @@ function validOutput(): HairColorAnalysisProviderOutput {
     evidence,
   })
   return {
+    profile: validProfile(),
+    styleDirections: validStyleDirections(),
     core: {
       currentLevel: {
         min: 4,
@@ -119,14 +195,14 @@ describe('hair-color consult analysis provider', () => {
     expect(mocks.create).not.toHaveBeenCalled()
   })
 
-  it('pins exact schema/prompt/model versions and sends four labeled images as structured output', async () => {
+  it('pins exact schema/prompt/model versions and sends seven labeled images as structured output', async () => {
     mocks.create.mockResolvedValue(message(validOutput()))
     const result = await runHairColorAnalysis({
       intake: { desired_color: 'red', prior_reaction: 'no' },
       captures,
     })
-    expect(CONSULT_ANALYSIS_SCHEMA_VERSION).toBe(1)
-    expect(CONSULT_ANALYSIS_PROMPT_VERSION).toBe('hair-color-analysis-v1')
+    expect(CONSULT_ANALYSIS_SCHEMA_VERSION).toBe(2)
+    expect(CONSULT_ANALYSIS_PROMPT_VERSION).toBe('full-analysis-v1')
     expect(result.model).toBe(CONSULT_ANALYSIS_DEFAULT_MODEL)
 
     const [params, options] = mocks.create.mock.calls[0] ?? []
@@ -136,9 +212,11 @@ describe('hair-color consult analysis provider', () => {
       format: { type: 'json_schema', schema: CONSULT_ANALYSIS_OUTPUT_SCHEMA },
     })
     expect(options.timeout).toBe(CONSULT_ANALYSIS_REQUEST_TIMEOUT_MS)
-    expect(options.timeout).toBeLessThan(60_000)
-    expect(params.messages[0].content.filter((item: { type: string }) => item.type === 'image')).toHaveLength(4)
+    // The provider timeout must finish inside the route's maxDuration (150s).
+    expect(options.timeout).toBeLessThan(150_000)
+    expect(params.messages[0].content.filter((item: { type: string }) => item.type === 'image')).toHaveLength(7)
     expect(JSON.stringify(params.messages[0].content)).toContain('hair_crown')
+    expect(JSON.stringify(params.messages[0].content)).toContain('eyes_closeup')
   })
 
   it('keeps unsupported traits unknown and rejects unsupported or medical language', () => {

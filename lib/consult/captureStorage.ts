@@ -59,6 +59,8 @@ export interface ConsultCaptureStorage {
   }): Promise<ConsultCaptureImage>
   createSignedRead(path: string, expiresInSeconds: number): Promise<string>
   purgeObject(path: string): Promise<void>
+  /** In-bucket copy to a durable path (chart copy). Fails closed. */
+  copyObject(args: { fromPath: string; toPath: string }): Promise<void>
 }
 
 function parseUrl(raw: string | undefined): URL {
@@ -240,6 +242,19 @@ export const consultCaptureStorage: ConsultCaptureStorage = {
 
     const absent = await bucket.exists(path)
     if (absent.data !== false) {
+      throw new ConsultCaptureStorageError('unavailable')
+    }
+  },
+
+  async copyObject(args) {
+    const bucket = (await admin()).storage.from(CONSULT_CAPTURE_BUCKET)
+    const copied = await bucket.copy(args.fromPath, args.toPath)
+    if (copied.error) {
+      // An existing destination means an earlier attempt already copied this
+      // object; the destination paths are deterministic per capture, so treat
+      // "already exists" as success rather than failing the chart copy.
+      const exists = await bucket.exists(args.toPath)
+      if (exists.data === true) return
       throw new ConsultCaptureStorageError('unavailable')
     }
   },

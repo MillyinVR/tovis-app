@@ -56,6 +56,48 @@ const brief: ConsultProBriefDTO = {
     maintenanceSummary: 'Discuss maintenance.',
     appointmentContextSummary: 'No fixed event date.',
   },
+  profile: {
+    skinUndertone: { value: 'NEUTRAL', confidence, evidence: ['face_front'] },
+    contrastLevel: { value: 'MEDIUM', confidence, evidence: ['face_front'] },
+    colorSeason: {
+      value: 'UNKNOWN',
+      confidence: { min: 0, max: 0.2 },
+      evidence: [],
+    },
+    faceProportion: { value: 'BALANCED', confidence, evidence: ['face_front'] },
+    jawline: { value: 'SOFTLY_ROUNDED', confidence, evidence: ['face_side'] },
+    foreheadProportion: {
+      value: 'BALANCED',
+      confidence,
+      evidence: ['face_side'],
+    },
+    featureBalance: { value: 'SOFT', confidence, evidence: ['face_front'] },
+    eyeShape: { value: 'HOODED', confidence, evidence: ['eyes_closeup'] },
+    eyeSpacing: { value: 'BALANCED', confidence, evidence: ['eyes_closeup'] },
+    browDensity: { value: 'FULL', confidence, evidence: ['eyes_closeup'] },
+    browShape: { value: 'SOFT_ARCH', confidence, evidence: ['eyes_closeup'] },
+  },
+  styleDirections: [
+    {
+      domain: 'BANGS',
+      title: 'Soft curtain bangs',
+      direction: 'Discuss soft curtain bangs that open at the cheekbone.',
+      whyItFlatters:
+        'A taller forehead reading is balanced by soft curtain bangs.',
+      confidence,
+      evidence: ['face_front'],
+      discussWithProfessional: true,
+    },
+    {
+      domain: 'LASHES',
+      title: 'Lifted-curl lash mapping',
+      direction: 'Discuss a lifted curl that opens the lid.',
+      whyItFlatters: 'Hooded eyes are opened by a lifted curl.',
+      confidence,
+      evidence: ['eyes_closeup'],
+      discussWithProfessional: true,
+    },
+  ],
   safetyFlags: [
     {
       code: 'RECENT_BOX_DYE',
@@ -100,5 +142,21 @@ describe('ProConsultBrief', () => {
     expect(aiIndex).toBeLessThan(safetyIndex)
     expect(html).toContain('Recent box dye was reported.')
     expect(html).toContain('Discuss with the professional before service.')
+  })
+
+  it('renders the feature profile and style directions between observations and safety', () => {
+    const html = renderToStaticMarkup(
+      <ProConsultBrief brief={brief} timeZone="UTC" />,
+    )
+    const aiIndex = html.indexOf('AI observations')
+    const profileIndex = html.indexOf('Feature profile')
+    const directionsIndex = html.indexOf('Style directions by area')
+    const safetyIndex = html.indexOf('Safety flags')
+    expect(aiIndex).toBeLessThan(profileIndex)
+    expect(profileIndex).toBeLessThan(directionsIndex)
+    expect(directionsIndex).toBeLessThan(safetyIndex)
+    expect(html).toContain('Skin undertone')
+    expect(html).toContain('Soft curtain bangs')
+    expect(html).toContain('Hooded eyes are opened by a lifted curl.')
   })
 })

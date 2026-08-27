@@ -24,7 +24,13 @@ import ClickableMedia from '@/app/_components/media/ClickableMedia'
 import AftercareBeforeAfter from '@/app/_components/aftercare/AftercareBeforeAfter'
 import { orderMediaByFeatured } from '@/lib/media/bookingBeforeAfter'
 
+import {
+  AI_CONSULT_ELIGIBILITY_BOOKING_SELECT,
+  evaluateAiConsultBookingEligibility,
+} from '@/lib/consult/eligibility'
+
 import AftercareProductRecommendationsCard from './AftercareProductRecommendationsCard'
+import AiConsultCard from './AiConsultCard'
 import AftercareNextAppointmentCard from './AftercareNextAppointmentCard'
 import MediaConsentCard from './MediaConsentCard'
 import AftercareRebookButton from './AftercareRebookButton'
@@ -767,6 +773,26 @@ export default async function ClientBookingPage(props: {
     )
   }
 
+  // AI beauty consult (2026-08-26 full-analysis launch): founder-gated,
+  // booking-attached. Hidden reasons render nothing (no-leak).
+  const aiConsultBooking = await prisma.booking.findUnique({
+    where: { id: bookingId },
+    select: AI_CONSULT_ELIGIBILITY_BOOKING_SELECT,
+  })
+  const aiConsultEligibility = aiConsultBooking
+    ? evaluateAiConsultBookingEligibility(aiConsultBooking)
+    : null
+  const aiConsultSession = await prisma.consultSession.findUnique({
+    where: { bookingId },
+    select: { id: true, status: true, clientId: true },
+  })
+  // Results are served through the same eligibility window (C7 loader), so the
+  // card renders only while the booking itself is consult-eligible.
+  const showAiConsultCard = Boolean(
+    aiConsultEligibility?.eligible &&
+      (!aiConsultSession || aiConsultSession.clientId === clientId),
+  )
+
   const validMedia = media.filter(hasUsableMediaUrl)
   // Order the pro-chosen featured pair first so it renders as the primary
   // before/after comparison; the rest trail as flat thumbnails. Falls back to
@@ -1327,6 +1353,14 @@ export default async function ClientBookingPage(props: {
                   }))}
                   sharedBoardIds={boards.sharedBoardIds}
                   writable={prepWritable}
+                />
+              ) : null}
+
+              {showAiConsultCard ? (
+                <AiConsultCard
+                  bookingId={booking.id}
+                  consultId={aiConsultSession?.id ?? null}
+                  consultStatus={aiConsultSession?.status ?? null}
                 />
               ) : null}
 

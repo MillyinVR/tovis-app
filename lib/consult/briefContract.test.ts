@@ -11,7 +11,43 @@ import {
 
 function analysis(): ConsultAnalysisPayloadDTO {
   const confidence = { min: 0.4, max: 0.7 }
+  const faceObservation = <T extends string>(value: T) => ({
+    value,
+    confidence,
+    evidence: ['face_front' as const],
+  })
   return {
+    profile: {
+      skinUndertone: faceObservation('NEUTRAL'),
+      contrastLevel: faceObservation('MEDIUM'),
+      colorSeason: { value: 'UNKNOWN', confidence: { min: 0, max: 0.2 }, evidence: [] },
+      faceProportion: faceObservation('BALANCED'),
+      jawline: faceObservation('SOFTLY_ROUNDED'),
+      foreheadProportion: faceObservation('BALANCED'),
+      featureBalance: faceObservation('SOFT'),
+      eyeShape: faceObservation('HOODED'),
+      eyeSpacing: faceObservation('BALANCED'),
+      browDensity: faceObservation('FULL'),
+      browShape: faceObservation('SOFT_ARCH'),
+    },
+    styleDirections: [
+      'HAIR_COLOR_HARMONY',
+      'CUT_AND_SHAPE',
+      'BANGS',
+      'BROWS',
+      'LASHES',
+      'MAKEUP',
+      'COLOR_PALETTE',
+    ].map((domain) => ({
+      domain: domain as ConsultAnalysisPayloadDTO['styleDirections'][number]['domain'],
+      title: 'A soft, harmonizing direction',
+      direction: 'Discuss a soft, blended direction for this domain together.',
+      whyItFlatters:
+        'Low observed contrast and soft feature balance favor blended choices.',
+      confidence,
+      evidence: ['face_front' as const],
+      discussWithProfessional: true as const,
+    })),
     core: {
       currentLevel: {
         min: 4,
@@ -126,7 +162,10 @@ describe('hair-color pro brief contract', () => {
     expect(framing).not.toMatch(/guarantee|promise|will achieve/)
   })
 
-  it('cannot carry raw image material or unsupported traits into durable JSON', () => {
+  it('cannot carry raw image material or forbidden traits into durable JSON', () => {
+    // Decision 2026-08-26: cosmetic feature observations (undertone, face and
+    // eye descriptors) are now first-class brief content. Raw image material
+    // and identity/medical traits remain forbidden.
     const json = JSON.stringify(
       toBriefJsonPayload(
         buildHairColorProBriefPayload({
@@ -145,15 +184,13 @@ describe('hair-color pro brief contract', () => {
       'storagePath',
       'storageBucket',
       'signedUrl',
-      'skinTone',
-      'undertone',
-      'faceShape',
-      'eyeShape',
       'ethnicity',
       'health',
     ]) {
       expect(json).not.toContain(forbidden)
     }
+    expect(json).toContain('styleDirections')
+    expect(json).toContain('skinUndertone')
   })
 
   it('retains the exact v1 projection for immutable historical briefs', () => {

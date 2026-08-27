@@ -17,7 +17,7 @@ export type ConsultCaptureMediaType =
   (typeof CONSULT_CAPTURE_MEDIA_TYPES)[number]
 
 export const CONSULT_CAPTURE_QUALITY_SCHEMA_VERSION = 1
-export const CONSULT_CAPTURE_QUALITY_PROMPT_VERSION = 'hair-color-capture-v1'
+export const CONSULT_CAPTURE_QUALITY_PROMPT_VERSION = 'full-analysis-capture-v2'
 export const CONSULT_CAPTURE_QUALITY_REASON_CODES = [
   'PASS',
   'WARM_INDOOR_LIGHT',
@@ -92,17 +92,34 @@ const QUALITY_SCHEMA: Record<string, unknown> = {
 }
 
 const SYSTEM =
-  'You are a strict capture-quality gate for a hair-color consultation. ' +
+  'You are a strict capture-quality gate for a beauty consultation. ' +
   'Judge only whether this single photo is a usable input for later analysis. ' +
   'Do not analyze the client, infer traits, diagnose, recommend services, or ' +
   'describe sensitive content. Reject any warm indoor lighting or color cast, ' +
-  'even if the requested hair view is otherwise visible. Return exactly one ' +
+  'even if the requested view is otherwise visible. Return exactly one ' +
   'stable reason code and at most one short retake tip.'
+
+const SHOT_ACCEPTANCE: Readonly<Record<HairColorCaptureShotKey, string>> = {
+  hair_back:
+    'Accept only when the full back of the hair is clearly represented, the relevant hair and roots are sufficiently visible, focus and exposure are usable, and indirect daylight preserves color.',
+  hair_left:
+    'Accept only when the left side of the hair is clearly represented, the relevant hair and roots are sufficiently visible, focus and exposure are usable, and indirect daylight preserves color.',
+  hair_right:
+    'Accept only when the right side of the hair is clearly represented, the relevant hair and roots are sufficiently visible, focus and exposure are usable, and indirect daylight preserves color.',
+  hair_crown:
+    'Accept only when the crown, part, and surrounding roots are clearly represented, focus and exposure are usable, and indirect daylight preserves color.',
+  face_front:
+    'Accept only when one full front-facing face is clearly represented with hairline, brows, both eyes, and jawline visible and unobstructed, focus and exposure are usable, no beauty filter is apparent, and indirect daylight preserves color. Use VIEW_MISMATCH when the face is missing, obstructed, or not front-facing.',
+  face_side:
+    'Accept only when a full side profile is clearly represented with forehead, nose, lips, chin, and jawline visible in silhouette, focus and exposure are usable, no beauty filter is apparent, and indirect daylight preserves color. Use VIEW_MISMATCH when the profile is missing or partial.',
+  eyes_closeup:
+    'Accept only when both open eyes and both full brows fill most of the frame in sharp focus, exposure is usable, no beauty filter is apparent, and indirect daylight preserves color. Use VIEW_MISMATCH when eyes or brows are cropped, closed, or obstructed.',
+}
 
 function instructions(shotKey: HairColorCaptureShotKey): string {
   return [
     `Requested view: ${shotKey}.`,
-    'Accept only when that exact view is clearly represented, the relevant hair and roots are sufficiently visible, focus and exposure are usable, and indirect daylight preserves color.',
+    SHOT_ACCEPTANCE[shotKey],
     'WARM_INDOOR_LIGHT and COLOR_CAST are always rejected.',
     'Use PASS only with accepted=true. Every other reason requires accepted=false.',
     'retakeTip must be null on acceptance; on rejection provide zero or one concrete sentence, max 160 characters.',

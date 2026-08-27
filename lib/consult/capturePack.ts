@@ -3,15 +3,28 @@ import type {
   ConsultCaptureShotPackDTO,
 } from '@/lib/dto/consult'
 
+// The pack id is a legacy-stable wire identifier pinned by the iOS contract
+// fixtures (renaming it opens a cross-repo red window); `version: 2` is what
+// marks this as the full-analysis pack.
 export const HAIR_COLOR_CAPTURE_PACK_ID = 'hair-color-daylight' as const
-export const HAIR_COLOR_CAPTURE_PACK_VERSION = 1
+export const HAIR_COLOR_CAPTURE_PACK_VERSION = 2
 export const HAIR_COLOR_CAPTURE_SCHEMA_VERSION = 1
 
+/**
+ * Pack v2 (full-analysis): the four hair views from pack v1 plus three face
+ * views. Order is the fixed evidence order the analysis engine sends to the
+ * provider. The exported identifiers keep their HAIR_COLOR_ prefix so pack v2
+ * did not have to rename every call site in the same change; the pack itself
+ * is the full-analysis pack.
+ */
 export const HAIR_COLOR_CAPTURE_SHOT_KEYS = [
   'hair_back',
   'hair_left',
   'hair_right',
   'hair_crown',
+  'face_front',
+  'face_side',
+  'eyes_closeup',
 ] as const
 
 export type HairColorCaptureShotKey =
@@ -30,9 +43,10 @@ function shot(
   }
 }
 /**
- * Founder-pilot shot pack. The back instruction reuses the approved camera
- * pack's "Back canvas" framing; every view adds the daylight/color-fidelity
- * requirement that is specific to hair-color analysis.
+ * Full-analysis shot pack. The hair instructions reuse the approved camera
+ * pack's framing; every view carries the daylight/color-fidelity requirement
+ * because color observations (hair level and tone, undertone, contrast,
+ * seasonal palette) are only trustworthy in unfiltered indirect daylight.
  */
 export const HAIR_COLOR_CAPTURE_PACK: ConsultCaptureShotPackDTO = Object.freeze({
   id: HAIR_COLOR_CAPTURE_PACK_ID,
@@ -59,6 +73,21 @@ export const HAIR_COLOR_CAPTURE_PACK: ConsultCaptureShotPackDTO = Object.freeze(
       'hair_crown',
       'Crown',
       'Angle the crown toward the camera in indirect daylight. Keep the roots, part, and surrounding hair sharp and fully visible.',
+    ),
+    shot(
+      'face_front',
+      'Face front',
+      'Face the camera straight on in indirect daylight with a relaxed, neutral expression. Pull hair off your face so your hairline, brows, eyes, and jawline are fully visible. No filters.',
+    ),
+    shot(
+      'face_side',
+      'Profile',
+      'Turn fully to one side in indirect daylight. Keep your profile—forehead, nose, lips, chin, and jawline—sharp and unobstructed, with hair tucked behind your ear.',
+    ),
+    shot(
+      'eyes_closeup',
+      'Eyes & brows',
+      'Fill the frame with both eyes and brows, looking straight at the camera with eyes open, in indirect daylight. Keep lashes, lids, and full brows sharp.',
     ),
   ]),
 })

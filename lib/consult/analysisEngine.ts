@@ -10,10 +10,10 @@ import {
 import type { ConsultCaptureImage } from './captureStorage'
 import { isAllowedConsultProviderModel } from './providerModel'
 
-export const CONSULT_ANALYSIS_SCHEMA_VERSION = 1
-export const CONSULT_ANALYSIS_PROMPT_VERSION = 'hair-color-analysis-v1'
+export const CONSULT_ANALYSIS_SCHEMA_VERSION = 2
+export const CONSULT_ANALYSIS_PROMPT_VERSION = 'full-analysis-v1'
 export const CONSULT_ANALYSIS_DEFAULT_MODEL = 'claude-sonnet-5'
-export const CONSULT_ANALYSIS_REQUEST_TIMEOUT_MS = 40_000
+export const CONSULT_ANALYSIS_REQUEST_TIMEOUT_MS = 90_000
 
 export const CONSULT_ANALYSIS_PROVIDER_SERVICE_INTENTS = [
   'COLOR_CONSULTATION',
@@ -49,11 +49,16 @@ export const CONSULT_ANALYSIS_SAFETY_CODES = [
 export type ConsultAnalysisSafetyCode =
   (typeof CONSULT_ANALYSIS_SAFETY_CODES)[number]
 
-export const CONSULT_ANALYSIS_EVIDENCE_KEYS = [
+/** Hair-view evidence keys, in fixed provider order. */
+export const CONSULT_ANALYSIS_HAIR_EVIDENCE_KEYS = [
   'hair_back',
   'hair_left',
   'hair_right',
   'hair_crown',
+] as const
+
+export const CONSULT_ANALYSIS_EVIDENCE_KEYS = [
+  ...HAIR_COLOR_CAPTURE_SHOT_KEYS,
   'intake',
 ] as const
 type EvidenceKey = (typeof CONSULT_ANALYSIS_EVIDENCE_KEYS)[number]
@@ -88,10 +93,172 @@ export const CONSULT_ANALYSIS_ACHIEVABILITY = [
   'UNKNOWN',
 ] as const
 
+// ── Schema v2: feature-profile observation enums ────────────────────────────
+// These are cosmetic styling descriptors only. None may carry identity,
+// ethnicity, age, or medical meaning, and every one has an honest UNKNOWN.
+
+export const CONSULT_PROFILE_UNDERTONES = [
+  'WARM',
+  'COOL',
+  'NEUTRAL',
+  'OLIVE',
+  'UNKNOWN',
+] as const
+export const CONSULT_PROFILE_CONTRASTS = ['LOW', 'MEDIUM', 'HIGH', 'UNKNOWN'] as const
+export const CONSULT_PROFILE_COLOR_SEASONS = [
+  'BRIGHT_SPRING',
+  'TRUE_SPRING',
+  'LIGHT_SPRING',
+  'LIGHT_SUMMER',
+  'TRUE_SUMMER',
+  'SOFT_SUMMER',
+  'SOFT_AUTUMN',
+  'TRUE_AUTUMN',
+  'DEEP_AUTUMN',
+  'DEEP_WINTER',
+  'TRUE_WINTER',
+  'BRIGHT_WINTER',
+  'UNKNOWN',
+] as const
+export const CONSULT_PROFILE_FACE_PROPORTIONS = [
+  'WIDER',
+  'BALANCED',
+  'LONGER',
+  'UNKNOWN',
+] as const
+export const CONSULT_PROFILE_JAWLINES = [
+  'SOFTLY_ROUNDED',
+  'BALANCED',
+  'ANGULAR',
+  'UNKNOWN',
+] as const
+export const CONSULT_PROFILE_FOREHEADS = [
+  'SHORTER',
+  'BALANCED',
+  'TALLER',
+  'UNKNOWN',
+] as const
+export const CONSULT_PROFILE_FEATURE_BALANCES = [
+  'SOFT',
+  'BLENDED',
+  'STRUCTURED',
+  'UNKNOWN',
+] as const
+export const CONSULT_PROFILE_EYE_SHAPES = [
+  'ALMOND',
+  'ROUND',
+  'HOODED',
+  'MONOLID',
+  'DOWNTURNED',
+  'UPTURNED',
+  'DEEP_SET',
+  'PROMINENT',
+  'UNKNOWN',
+] as const
+export const CONSULT_PROFILE_EYE_SPACINGS = [
+  'CLOSE_SET',
+  'BALANCED',
+  'WIDE_SET',
+  'UNKNOWN',
+] as const
+export const CONSULT_PROFILE_BROW_DENSITIES = [
+  'SPARSE',
+  'MEDIUM',
+  'FULL',
+  'UNKNOWN',
+] as const
+export const CONSULT_PROFILE_BROW_SHAPES = [
+  'STRAIGHT',
+  'SOFT_ARCH',
+  'HIGH_ARCH',
+  'ROUNDED',
+  'UNKNOWN',
+] as const
+
+export const CONSULT_PROFILE_FIELDS = [
+  'skinUndertone',
+  'contrastLevel',
+  'colorSeason',
+  'faceProportion',
+  'jawline',
+  'foreheadProportion',
+  'featureBalance',
+  'eyeShape',
+  'eyeSpacing',
+  'browDensity',
+  'browShape',
+] as const
+export type ConsultProfileField = (typeof CONSULT_PROFILE_FIELDS)[number]
+
+const PROFILE_FIELD_VALUES: Readonly<
+  Record<ConsultProfileField, readonly string[]>
+> = {
+  skinUndertone: CONSULT_PROFILE_UNDERTONES,
+  contrastLevel: CONSULT_PROFILE_CONTRASTS,
+  colorSeason: CONSULT_PROFILE_COLOR_SEASONS,
+  faceProportion: CONSULT_PROFILE_FACE_PROPORTIONS,
+  jawline: CONSULT_PROFILE_JAWLINES,
+  foreheadProportion: CONSULT_PROFILE_FOREHEADS,
+  featureBalance: CONSULT_PROFILE_FEATURE_BALANCES,
+  eyeShape: CONSULT_PROFILE_EYE_SHAPES,
+  eyeSpacing: CONSULT_PROFILE_EYE_SPACINGS,
+  browDensity: CONSULT_PROFILE_BROW_DENSITIES,
+  browShape: CONSULT_PROFILE_BROW_SHAPES,
+}
+
+export const CONSULT_STYLE_DOMAINS = [
+  'HAIR_COLOR_HARMONY',
+  'CUT_AND_SHAPE',
+  'BANGS',
+  'BROWS',
+  'LASHES',
+  'MAKEUP',
+  'COLOR_PALETTE',
+] as const
+export type ConsultStyleDomain = (typeof CONSULT_STYLE_DOMAINS)[number]
+
 type ConfidenceRange = { min: number; max: number }
 type Evidence = EvidenceKey[]
 
+type ProfileObservation<T extends string> = {
+  value: T
+  confidence: ConfidenceRange
+  evidence: Evidence
+}
+
+export type ConsultAnalysisFeatureProfile = {
+  skinUndertone: ProfileObservation<(typeof CONSULT_PROFILE_UNDERTONES)[number]>
+  contrastLevel: ProfileObservation<(typeof CONSULT_PROFILE_CONTRASTS)[number]>
+  colorSeason: ProfileObservation<(typeof CONSULT_PROFILE_COLOR_SEASONS)[number]>
+  faceProportion: ProfileObservation<
+    (typeof CONSULT_PROFILE_FACE_PROPORTIONS)[number]
+  >
+  jawline: ProfileObservation<(typeof CONSULT_PROFILE_JAWLINES)[number]>
+  foreheadProportion: ProfileObservation<
+    (typeof CONSULT_PROFILE_FOREHEADS)[number]
+  >
+  featureBalance: ProfileObservation<
+    (typeof CONSULT_PROFILE_FEATURE_BALANCES)[number]
+  >
+  eyeShape: ProfileObservation<(typeof CONSULT_PROFILE_EYE_SHAPES)[number]>
+  eyeSpacing: ProfileObservation<(typeof CONSULT_PROFILE_EYE_SPACINGS)[number]>
+  browDensity: ProfileObservation<(typeof CONSULT_PROFILE_BROW_DENSITIES)[number]>
+  browShape: ProfileObservation<(typeof CONSULT_PROFILE_BROW_SHAPES)[number]>
+}
+
+export type ConsultStyleDirection = {
+  domain: ConsultStyleDomain
+  title: string
+  direction: string
+  whyItFlatters: string
+  confidence: ConfidenceRange
+  evidence: Evidence
+  discussWithProfessional: true
+}
+
 export type HairColorAnalysisProviderOutput = {
+  profile: ConsultAnalysisFeatureProfile
+  styleDirections: ConsultStyleDirection[]
   core: {
     currentLevel: {
       min: number | null
@@ -188,7 +355,7 @@ function observationSchema(values: readonly string[]) {
       confidence: CONFIDENCE_SCHEMA,
       evidence: {
         type: 'array',
-        maxItems: 5,
+        maxItems: 8,
         uniqueItems: true,
         items: { type: 'string', enum: [...CONSULT_ANALYSIS_EVIDENCE_KEYS] },
       },
@@ -199,8 +366,59 @@ function observationSchema(values: readonly string[]) {
 export const CONSULT_ANALYSIS_OUTPUT_SCHEMA: Record<string, unknown> = {
   type: 'object',
   additionalProperties: false,
-  required: ['core', 'hairColorLens', 'safetyFlags', 'recommendations'],
+  required: [
+    'profile',
+    'styleDirections',
+    'core',
+    'hairColorLens',
+    'safetyFlags',
+    'recommendations',
+  ],
   properties: {
+    profile: {
+      type: 'object',
+      additionalProperties: false,
+      required: [...CONSULT_PROFILE_FIELDS],
+      properties: Object.fromEntries(
+        CONSULT_PROFILE_FIELDS.map((field) => [
+          field,
+          observationSchema(PROFILE_FIELD_VALUES[field]),
+        ]),
+      ),
+    },
+    styleDirections: {
+      type: 'array',
+      minItems: CONSULT_STYLE_DOMAINS.length,
+      maxItems: CONSULT_STYLE_DOMAINS.length,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: [
+          'domain',
+          'title',
+          'direction',
+          'whyItFlatters',
+          'confidence',
+          'evidence',
+          'discussWithProfessional',
+        ],
+        properties: {
+          domain: { type: 'string', enum: [...CONSULT_STYLE_DOMAINS] },
+          title: { type: 'string', maxLength: 120 },
+          direction: { type: 'string', maxLength: 400 },
+          whyItFlatters: { type: 'string', maxLength: 400 },
+          confidence: CONFIDENCE_SCHEMA,
+          evidence: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 8,
+            uniqueItems: true,
+            items: { type: 'string', enum: [...CONSULT_ANALYSIS_EVIDENCE_KEYS] },
+          },
+          discussWithProfessional: { const: true },
+        },
+      },
+    },
     core: {
       type: 'object',
       additionalProperties: false,
@@ -220,7 +438,7 @@ export const CONSULT_ANALYSIS_OUTPUT_SCHEMA: Record<string, unknown> = {
               uniqueItems: true,
               items: {
                 type: 'string',
-                enum: CONSULT_ANALYSIS_EVIDENCE_KEYS.slice(0, 4),
+                enum: [...CONSULT_ANALYSIS_HAIR_EVIDENCE_KEYS],
               },
             },
           },
@@ -302,18 +520,32 @@ export const CONSULT_ANALYSIS_OUTPUT_SCHEMA: Record<string, unknown> = {
 }
 
 export const CONSULT_ANALYSIS_SYSTEM_PROMPT = [
-  'You are a cosmetic-only hair-color consultation analysis engine.',
-  'Use only the immutable intake option codes and the four labeled daylight hair views.',
-  'Do not infer face shape, eye shape, skin tone, undertone, identity, ethnicity, age, health conditions, diagnoses, or any trait not reliably supported by these inputs.',
-  'Unknown or unsupported observations must use UNKNOWN or null with empty evidence and a low confidence range.',
-  'Every non-unknown observation must cite one or more supplied evidence labels and use a confidence range rather than certainty.',
+  'You are a cosmetic-only full styling consultation analysis engine for a professional beauty platform.',
+  'Inputs: immutable intake option codes and seven labeled daylight photos — four hair views (hair_back, hair_left, hair_right, hair_crown) and three face views (face_front, face_side, eyes_closeup).',
+  'You produce: hair core observations, a feature profile, a hair-color lens, safety flags, hair-color service recommendations, and exactly one style direction per domain (HAIR_COLOR_HARMONY, CUT_AND_SHAPE, BANGS, BROWS, LASHES, MAKEUP, COLOR_PALETTE).',
+  'Never infer or mention identity, ethnicity, race, nationality, religion, gender, age, health conditions, or diagnoses. Profile observations are cosmetic styling descriptors only.',
+  'Unknown or unsupported observations must use UNKNOWN or null with empty evidence and a low confidence range. Every non-unknown observation must cite one or more supplied evidence labels and use a confidence range rather than certainty. If a face view is occluded, filtered, or poorly lit, prefer UNKNOWN over a guess.',
+  'Skin undertone and color season read from phone photos are approximate even in daylight: widen those confidence ranges and frame every palette direction as a starting point the professional confirms in person with physical draping.',
+  'Rubric — recommend what harmonizes with the observed features, never what is merely trending:',
+  'Contrast is the backbone: low contrast between skin, hair, and eyes favors soft, blended color and diffused makeup; high contrast carries bold, saturated color and defined lines.',
+  'Undertone and season guide hair-color tone, makeup color families, and the COLOR_PALETTE direction; name palette families in plain words.',
+  'Face proportions guide CUT_AND_SHAPE and BANGS: a longer face or taller forehead is balanced by bangs and width around the face; a wider face is elongated by length, crown height, and longer layers; an angular jawline is softened by soft perimeters and movement; softly rounded features gain definition from structure. When bangs would not serve the observed proportions, say so plainly — BETTER WITHOUT is a valid direction.',
+  'Feature balance guides MAKEUP: soft features suit diffused, blended application; structured features carry defined lines; blended features can move either way.',
+  'Eye shape and spacing guide LASHES: hooded or monolid eyes favor lifted curls that open the lid; downturned eyes favor lifted outer corners; round eyes favor lengthening through the center; deep-set eyes favor longer centers and lighter inner corners; close-set eyes favor outer emphasis; wide-set eyes favor inner-to-center emphasis.',
+  'BROWS work with the natural density and existing shape, anchored to the face’s own proportions; never direct chemical brow or lash treatments.',
+  'Hair texture, density, and current level bound which cuts and colors will actually behave well; honor them in CUT_AND_SHAPE and HAIR_COLOR_HARMONY.',
+  'Every style direction’s whyItFlatters must name the specific observed feature or features it builds on. Style directions are directions to discuss with the professional, never promises and never treatment prescriptions.',
+  'For the hair-color lens: combine visible evidence with goal, box dye, prior lightening, last color service, prior reaction, budget, and event context. If maintenance tolerance, allergies, or other constraints were not asked in the intake, say they are unknown; never invent them.',
   'Visible condition is a cosmetic visual observation only. Never diagnose hair, scalp, skin, or medical conditions.',
-  'Combine visible evidence with goal, box dye, prior lightening, last color service, prior reaction, budget, and event context. If maintenance tolerance, allergies, or other constraints were not asked in the intake, say they are unknown; never invent them.',
   'All chemical, reaction, allergy, unknown-history, or visibly compromised-hair concerns must be structurally represented in safetyFlags and framed for discussion with the professional.',
   'Recommendations are bounded directions to discuss with the professional, never promises. Choose only a serviceIntent enum; never output database identifiers, paths, credentials, hidden reasoning, or provider metadata.',
 ].join(' ')
 
-const FORBIDDEN_LANGUAGE = /\b(diagnos(?:e|is|ed|tic)|dermatolog(?:y|ist|ical)|disease|disorder|infection|psoriasis|eczema|alopecia|medical|doctor|physician|health condition|identity|ethnic(?:ity)?|race|nationality|religion|gender|age|skin[ -]?tone|under[ -]?tone|face shape|eye shape)\b/i
+// Schema v2 deliberately removed skin-tone/undertone/face-shape/eye-shape from
+// this list (they are now first-class cosmetic observations, per the 2026-08-26
+// decision record). Identity, ethnicity, age, and medical language remain
+// forbidden in every free-text field.
+const FORBIDDEN_LANGUAGE = /\b(diagnos(?:e|is|ed|tic)|dermatolog(?:y|ist|ical)|disease|disorder|infection|psoriasis|eczema|alopecia|medical|doctor|physician|health condition|identity|ethnic(?:ity)?|race|nationality|religion|gender|age|aging|youthful|anti[ -]?age)\b/i
 
 function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
   const actual = Object.keys(value).sort()
@@ -348,13 +580,18 @@ function confidence(value: unknown): ConfidenceRange {
   return { min: value.min, max: value.max }
 }
 
-function evidence(value: unknown, allowIntake: boolean): EvidenceKey[] {
-  if (!Array.isArray(value) || value.length > 5) {
+function evidence(
+  value: unknown,
+  options: { allowIntake: boolean; hairOnly?: boolean },
+): EvidenceKey[] {
+  if (!Array.isArray(value) || value.length > CONSULT_ANALYSIS_EVIDENCE_KEYS.length) {
     throw new ConsultAnalysisProviderError('bad_output')
   }
-  const allowed = allowIntake
-    ? CONSULT_ANALYSIS_EVIDENCE_KEYS
-    : CONSULT_ANALYSIS_EVIDENCE_KEYS.slice(0, 4)
+  const allowed: readonly EvidenceKey[] = options.hairOnly
+    ? CONSULT_ANALYSIS_HAIR_EVIDENCE_KEYS
+    : options.allowIntake
+      ? CONSULT_ANALYSIS_EVIDENCE_KEYS
+      : HAIR_COLOR_CAPTURE_SHOT_KEYS
   const result: EvidenceKey[] = []
   for (const item of value) {
     const key = allowed.find((candidate) => candidate === item)
@@ -380,7 +617,7 @@ function observed<const T extends readonly string[]>(
   }
   const value = enumValue(raw.value, values)
   const range = confidence(raw.confidence)
-  const cited = evidence(raw.evidence, false)
+  const cited = evidence(raw.evidence, { allowIntake: false })
   if (
     (value === unknown && (cited.length > 0 || range.max > 0.35)) ||
     (value !== unknown && cited.length === 0)
@@ -390,13 +627,80 @@ function observed<const T extends readonly string[]>(
   return { value, confidence: range, evidence: cited }
 }
 
+function sanitizeProfile(raw: unknown): ConsultAnalysisFeatureProfile {
+  if (!isRecord(raw) || !exactKeys(raw, CONSULT_PROFILE_FIELDS)) {
+    throw new ConsultAnalysisProviderError('bad_output')
+  }
+  const profile = Object.fromEntries(
+    CONSULT_PROFILE_FIELDS.map((field) => [
+      field,
+      observed(raw[field], PROFILE_FIELD_VALUES[field], 'UNKNOWN'),
+    ]),
+  )
+  return profile as ConsultAnalysisFeatureProfile
+}
+
+function sanitizeStyleDirections(raw: unknown): ConsultStyleDirection[] {
+  if (
+    !Array.isArray(raw) ||
+    raw.length !== CONSULT_STYLE_DOMAINS.length
+  ) {
+    throw new ConsultAnalysisProviderError('bad_output')
+  }
+  const directions = raw.map((item): ConsultStyleDirection => {
+    if (
+      !isRecord(item) ||
+      !exactKeys(item, [
+        'domain',
+        'title',
+        'direction',
+        'whyItFlatters',
+        'confidence',
+        'evidence',
+        'discussWithProfessional',
+      ]) ||
+      item.discussWithProfessional !== true
+    ) {
+      throw new ConsultAnalysisProviderError('bad_output')
+    }
+    const cited = evidence(item.evidence, { allowIntake: true })
+    if (cited.length === 0) throw new ConsultAnalysisProviderError('bad_output')
+    return {
+      domain: enumValue(item.domain, CONSULT_STYLE_DOMAINS),
+      title: cleanText(item.title, 120),
+      direction: cleanText(item.direction, 400),
+      whyItFlatters: cleanText(item.whyItFlatters, 400),
+      confidence: confidence(item.confidence),
+      evidence: cited,
+      discussWithProfessional: true,
+    }
+  })
+  const domains = new Set(directions.map((direction) => direction.domain))
+  if (domains.size !== CONSULT_STYLE_DOMAINS.length) {
+    throw new ConsultAnalysisProviderError('bad_output')
+  }
+  // Deterministic storage/render order regardless of provider ordering.
+  return CONSULT_STYLE_DOMAINS.map((domain) => {
+    const direction = directions.find((candidate) => candidate.domain === domain)
+    if (!direction) throw new ConsultAnalysisProviderError('bad_output')
+    return direction
+  })
+}
+
 function sanitizeAnalysis(
   raw: unknown,
   serviceIntents: readonly ConsultAnalysisServiceIntent[],
 ): HairColorAnalysisProviderOutput {
   if (
     !isRecord(raw) ||
-    !exactKeys(raw, ['core', 'hairColorLens', 'safetyFlags', 'recommendations']) ||
+    !exactKeys(raw, [
+      'profile',
+      'styleDirections',
+      'core',
+      'hairColorLens',
+      'safetyFlags',
+      'recommendations',
+    ]) ||
     !isRecord(raw.core) ||
     !exactKeys(raw.core, ['currentLevel', 'currentTone', 'visibleCondition', 'density', 'texture']) ||
     !isRecord(raw.core.currentLevel)
@@ -409,7 +713,7 @@ function sanitizeAnalysis(
   }
   const levelMin = level.min
   const levelMax = level.max
-  const levelEvidence = evidence(level.evidence, false)
+  const levelEvidence = evidence(level.evidence, { allowIntake: false, hairOnly: true })
   const validLevel =
     (levelMin === null && levelMax === null && levelEvidence.length === 0) ||
     (Number.isInteger(levelMin) &&
@@ -493,6 +797,8 @@ function sanitizeAnalysis(
   }
 
   return {
+    profile: sanitizeProfile(raw.profile),
+    styleDirections: sanitizeStyleDirections(raw.styleDirections),
     core: {
       currentLevel: {
         min: typeof levelMin === 'number' ? levelMin : null,
@@ -592,7 +898,7 @@ export const runHairColorAnalysis: HairColorAnalysisProvider = async (input) => 
     message = await getClient().messages.create(
       {
         model,
-        max_tokens: 2_500,
+        max_tokens: 6_000,
         system: CONSULT_ANALYSIS_SYSTEM_PROMPT,
         messages: [{ role: 'user', content }],
         output_config: {

@@ -3,8 +3,8 @@
   "createdAt": "2026-08-07T00:00:00.000Z",
   "providerMode": "deterministic_fake",
   "versions": {
-    "analysisSchemaVersion": 1,
-    "promptVersion": "hair-color-analysis-v1",
+    "analysisSchemaVersion": 2,
+    "promptVersion": "full-analysis-v1",
     "requestedModel": "claude-sonnet-5",
     "configuredModel": "deterministic-consult-eval-v1",
     "fixtureManifestVersion": "hair-color-eval-manifest-v1",

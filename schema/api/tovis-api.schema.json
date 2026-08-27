@@ -7249,9 +7249,63 @@
         "hair_left",
         "hair_right",
         "hair_crown",
+        "face_front",
+        "face_side",
+        "eyes_closeup",
         "intake"
       ],
       "type": "string"
+    },
+    "ConsultAnalysisFeatureProfileDTO": {
+      "properties": {
+        "browDensity": {
+          "$ref": "#/definitions/ConsultAnalysisObservationDTO%3CConsultProfileBrowDensityDTO%3E"
+        },
+        "browShape": {
+          "$ref": "#/definitions/ConsultAnalysisObservationDTO%3CConsultProfileBrowShapeDTO%3E"
+        },
+        "colorSeason": {
+          "$ref": "#/definitions/ConsultAnalysisObservationDTO%3CConsultProfileColorSeasonDTO%3E"
+        },
+        "contrastLevel": {
+          "$ref": "#/definitions/ConsultAnalysisObservationDTO%3CConsultProfileContrastDTO%3E"
+        },
+        "eyeShape": {
+          "$ref": "#/definitions/ConsultAnalysisObservationDTO%3CConsultProfileEyeShapeDTO%3E"
+        },
+        "eyeSpacing": {
+          "$ref": "#/definitions/ConsultAnalysisObservationDTO%3CConsultProfileEyeSpacingDTO%3E"
+        },
+        "faceProportion": {
+          "$ref": "#/definitions/ConsultAnalysisObservationDTO%3CConsultProfileFaceProportionDTO%3E"
+        },
+        "featureBalance": {
+          "$ref": "#/definitions/ConsultAnalysisObservationDTO%3CConsultProfileFeatureBalanceDTO%3E"
+        },
+        "foreheadProportion": {
+          "$ref": "#/definitions/ConsultAnalysisObservationDTO%3CConsultProfileForeheadDTO%3E"
+        },
+        "jawline": {
+          "$ref": "#/definitions/ConsultAnalysisObservationDTO%3CConsultProfileJawlineDTO%3E"
+        },
+        "skinUndertone": {
+          "$ref": "#/definitions/ConsultAnalysisObservationDTO%3CConsultProfileUndertoneDTO%3E"
+        }
+      },
+      "required": [
+        "skinUndertone",
+        "contrastLevel",
+        "colorSeason",
+        "faceProportion",
+        "jawline",
+        "foreheadProportion",
+        "featureBalance",
+        "eyeShape",
+        "eyeSpacing",
+        "browDensity",
+        "browShape"
+      ],
+      "type": "object"
     },
     "ConsultAnalysisObservationDTO<(\"ASHY\"|\"NEUTRAL\"|\"GOLDEN\"|\"COPPER\"|\"RED\"|\"MIXED\"|\"UNKNOWN\")>": {
       "properties": {
@@ -7369,6 +7423,248 @@
       ],
       "type": "object"
     },
+    "ConsultAnalysisObservationDTO<ConsultProfileBrowDensityDTO>": {
+      "properties": {
+        "confidence": {
+          "$ref": "#/definitions/ConsultAnalysisConfidenceDTO"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/definitions/ConsultAnalysisEvidenceDTO"
+          },
+          "type": "array"
+        },
+        "value": {
+          "$ref": "#/definitions/ConsultProfileBrowDensityDTO"
+        }
+      },
+      "required": [
+        "value",
+        "confidence",
+        "evidence"
+      ],
+      "type": "object"
+    },
+    "ConsultAnalysisObservationDTO<ConsultProfileBrowShapeDTO>": {
+      "properties": {
+        "confidence": {
+          "$ref": "#/definitions/ConsultAnalysisConfidenceDTO"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/definitions/ConsultAnalysisEvidenceDTO"
+          },
+          "type": "array"
+        },
+        "value": {
+          "$ref": "#/definitions/ConsultProfileBrowShapeDTO"
+        }
+      },
+      "required": [
+        "value",
+        "confidence",
+        "evidence"
+      ],
+      "type": "object"
+    },
+    "ConsultAnalysisObservationDTO<ConsultProfileColorSeasonDTO>": {
+      "properties": {
+        "confidence": {
+          "$ref": "#/definitions/ConsultAnalysisConfidenceDTO"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/definitions/ConsultAnalysisEvidenceDTO"
+          },
+          "type": "array"
+        },
+        "value": {
+          "$ref": "#/definitions/ConsultProfileColorSeasonDTO"
+        }
+      },
+      "required": [
+        "value",
+        "confidence",
+        "evidence"
+      ],
+      "type": "object"
+    },
+    "ConsultAnalysisObservationDTO<ConsultProfileContrastDTO>": {
+      "properties": {
+        "confidence": {
+          "$ref": "#/definitions/ConsultAnalysisConfidenceDTO"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/definitions/ConsultAnalysisEvidenceDTO"
+          },
+          "type": "array"
+        },
+        "value": {
+          "$ref": "#/definitions/ConsultProfileContrastDTO"
+        }
+      },
+      "required": [
+        "value",
+        "confidence",
+        "evidence"
+      ],
+      "type": "object"
+    },
+    "ConsultAnalysisObservationDTO<ConsultProfileEyeShapeDTO>": {
+      "properties": {
+        "confidence": {
+          "$ref": "#/definitions/ConsultAnalysisConfidenceDTO"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/definitions/ConsultAnalysisEvidenceDTO"
+          },
+          "type": "array"
+        },
+        "value": {
+          "$ref": "#/definitions/ConsultProfileEyeShapeDTO"
+        }
+      },
+      "required": [
+        "value",
+        "confidence",
+        "evidence"
+      ],
+      "type": "object"
+    },
+    "ConsultAnalysisObservationDTO<ConsultProfileEyeSpacingDTO>": {
+      "properties": {
+        "confidence": {
+          "$ref": "#/definitions/ConsultAnalysisConfidenceDTO"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/definitions/ConsultAnalysisEvidenceDTO"
+          },
+          "type": "array"
+        },
+        "value": {
+          "$ref": "#/definitions/ConsultProfileEyeSpacingDTO"
+        }
+      },
+      "required": [
+        "value",
+        "confidence",
+        "evidence"
+      ],
+      "type": "object"
+    },
+    "ConsultAnalysisObservationDTO<ConsultProfileFaceProportionDTO>": {
+      "properties": {
+        "confidence": {
+          "$ref": "#/definitions/ConsultAnalysisConfidenceDTO"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/definitions/ConsultAnalysisEvidenceDTO"
+          },
+          "type": "array"
+        },
+        "value": {
+          "$ref": "#/definitions/ConsultProfileFaceProportionDTO"
+        }
+      },
+      "required": [
+        "value",
+        "confidence",
+        "evidence"
+      ],
+      "type": "object"
+    },
+    "ConsultAnalysisObservationDTO<ConsultProfileFeatureBalanceDTO>": {
+      "properties": {
+        "confidence": {
+          "$ref": "#/definitions/ConsultAnalysisConfidenceDTO"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/definitions/ConsultAnalysisEvidenceDTO"
+          },
+          "type": "array"
+        },
+        "value": {
+          "$ref": "#/definitions/ConsultProfileFeatureBalanceDTO"
+        }
+      },
+      "required": [
+        "value",
+        "confidence",
+        "evidence"
+      ],
+      "type": "object"
+    },
+    "ConsultAnalysisObservationDTO<ConsultProfileForeheadDTO>": {
+      "properties": {
+        "confidence": {
+          "$ref": "#/definitions/ConsultAnalysisConfidenceDTO"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/definitions/ConsultAnalysisEvidenceDTO"
+          },
+          "type": "array"
+        },
+        "value": {
+          "$ref": "#/definitions/ConsultProfileForeheadDTO"
+        }
+      },
+      "required": [
+        "value",
+        "confidence",
+        "evidence"
+      ],
+      "type": "object"
+    },
+    "ConsultAnalysisObservationDTO<ConsultProfileJawlineDTO>": {
+      "properties": {
+        "confidence": {
+          "$ref": "#/definitions/ConsultAnalysisConfidenceDTO"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/definitions/ConsultAnalysisEvidenceDTO"
+          },
+          "type": "array"
+        },
+        "value": {
+          "$ref": "#/definitions/ConsultProfileJawlineDTO"
+        }
+      },
+      "required": [
+        "value",
+        "confidence",
+        "evidence"
+      ],
+      "type": "object"
+    },
+    "ConsultAnalysisObservationDTO<ConsultProfileUndertoneDTO>": {
+      "properties": {
+        "confidence": {
+          "$ref": "#/definitions/ConsultAnalysisConfidenceDTO"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/definitions/ConsultAnalysisEvidenceDTO"
+          },
+          "type": "array"
+        },
+        "value": {
+          "$ref": "#/definitions/ConsultProfileUndertoneDTO"
+        }
+      },
+      "required": [
+        "value",
+        "confidence",
+        "evidence"
+      ],
+      "type": "object"
+    },
     "ConsultAnalysisPayloadDTO": {
       "properties": {
         "core": {
@@ -7473,6 +7769,9 @@
           ],
           "type": "object"
         },
+        "profile": {
+          "$ref": "#/definitions/ConsultAnalysisFeatureProfileDTO"
+        },
         "recommendations": {
           "items": {
             "properties": {
@@ -7530,9 +7829,17 @@
             "type": "object"
           },
           "type": "array"
+        },
+        "styleDirections": {
+          "items": {
+            "$ref": "#/definitions/ConsultStyleDirectionDTO"
+          },
+          "type": "array"
         }
       },
       "required": [
+        "profile",
+        "styleDirections",
         "core",
         "hairColorLens",
         "safetyFlags",
@@ -8235,7 +8542,10 @@
         "hair_back",
         "hair_left",
         "hair_right",
-        "hair_crown"
+        "hair_crown",
+        "face_front",
+        "face_side",
+        "eyes_closeup"
       ],
       "type": "string"
     },
@@ -8335,6 +8645,9 @@
     },
     "ConsultCaptureStateDTO": {
       "properties": {
+        "chartCopy": {
+          "$ref": "#/definitions/ConsultChartCopyStateDTO"
+        },
         "consultId": {
           "type": "string"
         },
@@ -8355,7 +8668,8 @@
         "consultId",
         "status",
         "shotPack",
-        "slots"
+        "slots",
+        "chartCopy"
       ],
       "type": "object"
     },
@@ -8425,6 +8739,24 @@
       ],
       "type": "object"
     },
+    "ConsultChartCopyStateDTO": {
+      "properties": {
+        "decidedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "optIn": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "optIn",
+        "decidedAt"
+      ],
+      "type": "object"
+    },
     "ConsultClientResultsDTO": {
       "properties": {
         "achievabilityDirection": {
@@ -8479,6 +8811,9 @@
           ],
           "type": "object"
         },
+        "profile": {
+          "$ref": "#/definitions/ConsultAnalysisFeatureProfileDTO"
+        },
         "recommendationDirections": {
           "items": {
             "$ref": "#/definitions/ConsultBriefRecommendationDirectionDTO"
@@ -8510,6 +8845,12 @@
         },
         "serviceCategoryId": {
           "type": "string"
+        },
+        "styleDirections": {
+          "items": {
+            "$ref": "#/definitions/ConsultStyleDirectionDTO"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -8523,6 +8864,8 @@
         "intakeRevisionId",
         "clientIntake",
         "aiObservations",
+        "profile",
+        "styleDirections",
         "safetyFlags",
         "achievabilityDirection",
         "recommendationDirections",
@@ -9513,6 +9856,9 @@
         "professionalId": {
           "type": "string"
         },
+        "profile": {
+          "$ref": "#/definitions/ConsultAnalysisFeatureProfileDTO"
+        },
         "recommendationDirections": {
           "items": {
             "$ref": "#/definitions/ConsultBriefRecommendationDirectionDTO"
@@ -9550,6 +9896,12 @@
         },
         "sourceAnalysisRevisionId": {
           "type": "string"
+        },
+        "styleDirections": {
+          "items": {
+            "$ref": "#/definitions/ConsultStyleDirectionDTO"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -9565,6 +9917,8 @@
         "inspiration",
         "clientIntake",
         "aiObservations",
+        "profile",
+        "styleDirections",
         "safetyFlags",
         "achievabilityDirection",
         "recommendationDirections",
@@ -9597,6 +9951,121 @@
         "brief"
       ],
       "type": "object"
+    },
+    "ConsultProfileBrowDensityDTO": {
+      "enum": [
+        "SPARSE",
+        "MEDIUM",
+        "FULL",
+        "UNKNOWN"
+      ],
+      "type": "string"
+    },
+    "ConsultProfileBrowShapeDTO": {
+      "enum": [
+        "STRAIGHT",
+        "SOFT_ARCH",
+        "HIGH_ARCH",
+        "ROUNDED",
+        "UNKNOWN"
+      ],
+      "type": "string"
+    },
+    "ConsultProfileColorSeasonDTO": {
+      "enum": [
+        "BRIGHT_SPRING",
+        "TRUE_SPRING",
+        "LIGHT_SPRING",
+        "LIGHT_SUMMER",
+        "TRUE_SUMMER",
+        "SOFT_SUMMER",
+        "SOFT_AUTUMN",
+        "TRUE_AUTUMN",
+        "DEEP_AUTUMN",
+        "DEEP_WINTER",
+        "TRUE_WINTER",
+        "BRIGHT_WINTER",
+        "UNKNOWN"
+      ],
+      "type": "string"
+    },
+    "ConsultProfileContrastDTO": {
+      "enum": [
+        "LOW",
+        "MEDIUM",
+        "HIGH",
+        "UNKNOWN"
+      ],
+      "type": "string"
+    },
+    "ConsultProfileEyeShapeDTO": {
+      "enum": [
+        "ALMOND",
+        "ROUND",
+        "HOODED",
+        "MONOLID",
+        "DOWNTURNED",
+        "UPTURNED",
+        "DEEP_SET",
+        "PROMINENT",
+        "UNKNOWN"
+      ],
+      "type": "string"
+    },
+    "ConsultProfileEyeSpacingDTO": {
+      "enum": [
+        "CLOSE_SET",
+        "BALANCED",
+        "WIDE_SET",
+        "UNKNOWN"
+      ],
+      "type": "string"
+    },
+    "ConsultProfileFaceProportionDTO": {
+      "enum": [
+        "WIDER",
+        "BALANCED",
+        "LONGER",
+        "UNKNOWN"
+      ],
+      "type": "string"
+    },
+    "ConsultProfileFeatureBalanceDTO": {
+      "enum": [
+        "SOFT",
+        "BLENDED",
+        "STRUCTURED",
+        "UNKNOWN"
+      ],
+      "type": "string"
+    },
+    "ConsultProfileForeheadDTO": {
+      "enum": [
+        "SHORTER",
+        "BALANCED",
+        "TALLER",
+        "UNKNOWN"
+      ],
+      "type": "string"
+    },
+    "ConsultProfileJawlineDTO": {
+      "enum": [
+        "SOFTLY_ROUNDED",
+        "BALANCED",
+        "ANGULAR",
+        "UNKNOWN"
+      ],
+      "type": "string"
+    },
+    "ConsultProfileUndertoneDTO": {
+      "enum": [
+        "WARM",
+        "COOL",
+        "NEUTRAL",
+        "OLIVE",
+        "UNKNOWN"
+      ],
+      "type": "string"
     },
     "ConsultSessionDTO": {
       "properties": {
@@ -9631,6 +10100,57 @@
     },
     "ConsultSessionStatus": {
       "$ref": "#/definitions/%24Enums.ConsultSessionStatus"
+    },
+    "ConsultStyleDirectionDTO": {
+      "properties": {
+        "confidence": {
+          "$ref": "#/definitions/ConsultAnalysisConfidenceDTO"
+        },
+        "direction": {
+          "type": "string"
+        },
+        "discussWithProfessional": {
+          "const": true,
+          "type": "boolean"
+        },
+        "domain": {
+          "$ref": "#/definitions/ConsultStyleDomainDTO"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/definitions/ConsultAnalysisEvidenceDTO"
+          },
+          "type": "array"
+        },
+        "title": {
+          "type": "string"
+        },
+        "whyItFlatters": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "domain",
+        "title",
+        "direction",
+        "whyItFlatters",
+        "confidence",
+        "evidence",
+        "discussWithProfessional"
+      ],
+      "type": "object"
+    },
+    "ConsultStyleDomainDTO": {
+      "enum": [
+        "HAIR_COLOR_HARMONY",
+        "CUT_AND_SHAPE",
+        "BANGS",
+        "BROWS",
+        "LASHES",
+        "MAKEUP",
+        "COLOR_PALETTE"
+      ],
+      "type": "string"
     },
     "ConsultationApprovalProofMethod": {
       "$ref": "#/definitions/%24Enums.ConsultationApprovalProofMethod"

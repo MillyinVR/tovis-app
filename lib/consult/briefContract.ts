@@ -1,12 +1,14 @@
 import type { Prisma } from '@prisma/client'
 
 import type {
+  ConsultAnalysisFeatureProfileDTO,
   ConsultAnalysisPayloadDTO,
   ConsultBriefAchievabilityDirectionDTO,
   ConsultBriefAiObservationsDTO,
   ConsultBriefClientIntakeItemDTO,
   ConsultBriefRecommendationDirectionDTO,
   ConsultBriefInspirationDTO,
+  ConsultStyleDirectionDTO,
 } from '@/lib/dto/consult'
 
 import {
@@ -14,8 +16,8 @@ import {
   type HairColorIntakeQuestionKey,
 } from './intakePack'
 
-export const CONSULT_PRO_BRIEF_SCHEMA_VERSION = 2
-export const CONSULT_PRO_BRIEF_PROMPT_VERSION = 'hair-color-pro-brief-v2'
+export const CONSULT_PRO_BRIEF_SCHEMA_VERSION = 3
+export const CONSULT_PRO_BRIEF_PROMPT_VERSION = 'full-analysis-pro-brief-v3'
 export const LEGACY_CONSULT_PRO_BRIEF_SCHEMA_VERSION = 1
 export const LEGACY_CONSULT_PRO_BRIEF_PROMPT_VERSION = 'hair-color-pro-brief-v1'
 
@@ -26,6 +28,10 @@ type HairColorProBriefCore = {
   intakeRevisionId: string
   clientIntake: ConsultBriefClientIntakeItemDTO[]
   aiObservations: ConsultBriefAiObservationsDTO
+  // Brief schema v3 (full analysis): the feature profile and per-domain style
+  // directions ride beside the hair observations as distinct AI structures.
+  profile: ConsultAnalysisFeatureProfileDTO
+  styleDirections: ConsultStyleDirectionDTO[]
   safetyFlags: ConsultAnalysisPayloadDTO['safetyFlags']
   achievabilityDirection: ConsultBriefAchievabilityDirectionDTO
   recommendationDirections: ConsultBriefRecommendationDirectionDTO[]
@@ -34,6 +40,20 @@ type HairColorProBriefCore = {
 export type LegacyHairColorProBriefPayload = HairColorProBriefCore
 export type HairColorProBriefPayload = HairColorProBriefCore & {
   inspiration: ConsultBriefInspirationDTO
+}
+
+function structuredCloneProfile(
+  profile: ConsultAnalysisFeatureProfileDTO,
+): ConsultAnalysisFeatureProfileDTO {
+  const entries = Object.entries(profile).map(([field, observation]) => [
+    field,
+    {
+      value: observation.value,
+      confidence: { ...observation.confidence },
+      evidence: [...observation.evidence],
+    },
+  ])
+  return Object.fromEntries(entries) as ConsultAnalysisFeatureProfileDTO
 }
 
 function intakeItems(
@@ -87,6 +107,12 @@ function buildHairColorProBriefCore(
     clientIntake,
     // AI-derived content is a distinct second structure, never blended into
     // the client's own statements.
+    profile: structuredCloneProfile(args.analysis.profile),
+    styleDirections: args.analysis.styleDirections.map((direction) => ({
+      ...direction,
+      evidence: [...direction.evidence],
+      confidence: { ...direction.confidence },
+    })),
     aiObservations: {
       currentLevel: args.analysis.core.currentLevel,
       currentTone: args.analysis.core.currentTone,
@@ -145,6 +171,12 @@ export function toBriefJsonPayload(
   return {
     ...payload,
     clientIntake: payload.clientIntake.map((item) => ({ ...item })),
+    profile: structuredCloneProfile(payload.profile),
+    styleDirections: payload.styleDirections.map((direction) => ({
+      ...direction,
+      evidence: [...direction.evidence],
+      confidence: { ...direction.confidence },
+    })),
     inspiration: {
       ...payload.inspiration,
       exactClientDetails: payload.inspiration.exactClientDetails.map((item) => ({ ...item })),
@@ -167,6 +199,12 @@ export function toLegacyBriefJsonPayload(
   return {
     ...payload,
     clientIntake: payload.clientIntake.map((item) => ({ ...item })),
+    profile: structuredCloneProfile(payload.profile),
+    styleDirections: payload.styleDirections.map((direction) => ({
+      ...direction,
+      evidence: [...direction.evidence],
+      confidence: { ...direction.confidence },
+    })),
     aiObservations: { ...payload.aiObservations },
     safetyFlags: payload.safetyFlags.map((flag) => ({ ...flag })),
     achievabilityDirection: { ...payload.achievabilityDirection },

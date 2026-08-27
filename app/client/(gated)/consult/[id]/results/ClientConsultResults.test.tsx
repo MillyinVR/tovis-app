@@ -57,6 +57,52 @@ function results(withSafety = true): ConsultClientResultsDTO {
       maintenanceSummary: 'Discuss maintenance.',
       appointmentContextSummary: 'No fixed event date.',
     },
+    profile: {
+      skinUndertone: { value: 'NEUTRAL', confidence, evidence: ['face_front'] },
+      contrastLevel: { value: 'MEDIUM', confidence, evidence: ['face_front'] },
+      colorSeason: {
+        value: 'UNKNOWN',
+        confidence: { min: 0, max: 0.2 },
+        evidence: [],
+      },
+      faceProportion: {
+        value: 'BALANCED',
+        confidence,
+        evidence: ['face_front'],
+      },
+      jawline: { value: 'SOFTLY_ROUNDED', confidence, evidence: ['face_side'] },
+      foreheadProportion: {
+        value: 'BALANCED',
+        confidence,
+        evidence: ['face_side'],
+      },
+      featureBalance: { value: 'SOFT', confidence, evidence: ['face_front'] },
+      eyeShape: { value: 'HOODED', confidence, evidence: ['eyes_closeup'] },
+      eyeSpacing: { value: 'BALANCED', confidence, evidence: ['eyes_closeup'] },
+      browDensity: { value: 'FULL', confidence, evidence: ['eyes_closeup'] },
+      browShape: { value: 'SOFT_ARCH', confidence, evidence: ['eyes_closeup'] },
+    },
+    styleDirections: [
+      {
+        domain: 'BANGS',
+        title: 'Soft curtain bangs',
+        direction: 'Discuss soft curtain bangs that open at the cheekbone.',
+        whyItFlatters:
+          'A taller forehead reading is balanced by soft curtain bangs.',
+        confidence,
+        evidence: ['face_front'],
+        discussWithProfessional: true,
+      },
+      {
+        domain: 'LASHES',
+        title: 'Lifted-curl lash mapping',
+        direction: 'Discuss a lifted curl that opens the lid.',
+        whyItFlatters: 'Hooded eyes are opened by a lifted curl.',
+        confidence,
+        evidence: ['eyes_closeup'],
+        discussWithProfessional: true,
+      },
+    ],
     safetyFlags: withSafety
       ? [
           {
@@ -107,7 +153,19 @@ describe('ClientConsultResults', () => {
       html.indexOf(copy.safetyTitle),
     )
     expect(container.querySelector('[data-safety-visible="true"]')).not.toBeNull()
-    expect(screen.getAllByRole('heading', { level: 3 })).toHaveLength(2)
+    // Feature profile and style directions render between observations and safety.
+    expect(html.indexOf(copy.aiObservationsTitle)).toBeLessThan(
+      html.indexOf(copy.profileTitle),
+    )
+    expect(html.indexOf(copy.profileTitle)).toBeLessThan(
+      html.indexOf(copy.styleDirectionsTitle),
+    )
+    expect(html.indexOf(copy.styleDirectionsTitle)).toBeLessThan(
+      html.indexOf(copy.safetyTitle),
+    )
+    expect(screen.getByText('Soft curtain bangs')).toBeInTheDocument()
+    // 2 style directions + 2 recommendation directions.
+    expect(screen.getAllByRole('heading', { level: 3 })).toHaveLength(4)
     expect(screen.getByText('Direction 1')).toBeInTheDocument()
     expect(screen.getByText('Direction 2')).toBeInTheDocument()
     const recommendationFraming = container.querySelectorAll('ol li > p:last-child')
