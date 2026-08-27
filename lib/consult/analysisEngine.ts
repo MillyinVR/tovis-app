@@ -11,7 +11,9 @@ import type { ConsultCaptureImage } from './captureStorage'
 import { isAllowedConsultProviderModel } from './providerModel'
 
 export const CONSULT_ANALYSIS_SCHEMA_VERSION = 2
-export const CONSULT_ANALYSIS_PROMPT_VERSION = 'full-analysis-v1'
+// v2 (2026-08-27): the capture pack may be partial — the prompt lists missing
+// views and pins their observations to UNKNOWN. Output schema is unchanged.
+export const CONSULT_ANALYSIS_PROMPT_VERSION = 'full-analysis-v2'
 export const CONSULT_ANALYSIS_DEFAULT_MODEL = 'claude-sonnet-5'
 export const CONSULT_ANALYSIS_REQUEST_TIMEOUT_MS = 90_000
 
@@ -521,10 +523,11 @@ export const CONSULT_ANALYSIS_OUTPUT_SCHEMA: Record<string, unknown> = {
 
 export const CONSULT_ANALYSIS_SYSTEM_PROMPT = [
   'You are a cosmetic-only full styling consultation analysis engine for a professional beauty platform.',
-  'Inputs: immutable intake option codes and seven labeled daylight photos — four hair views (hair_back, hair_left, hair_right, hair_crown) and three face views (face_front, face_side, eyes_closeup).',
+  'Inputs: immutable intake option codes and one to seven labeled daylight photos from the full pack — hair views (hair_back, hair_left, hair_right, hair_crown) and face views (face_front, face_side, eyes_closeup). The client may submit a partial pack; when views are missing, a text line names them.',
   'You produce: hair core observations, a feature profile, a hair-color lens, safety flags, hair-color service recommendations, and exactly one style direction per domain (HAIR_COLOR_HARMONY, CUT_AND_SHAPE, BANGS, BROWS, LASHES, MAKEUP, COLOR_PALETTE).',
   'Never infer or mention identity, ethnicity, race, nationality, religion, gender, age, health conditions, or diagnoses. Profile observations are cosmetic styling descriptors only.',
   'Unknown or unsupported observations must use UNKNOWN or null with empty evidence and a low confidence range. Every non-unknown observation must cite one or more supplied evidence labels and use a confidence range rather than certainty. If a face view is occluded, filtered, or poorly lit, prefer UNKNOWN over a guess.',
+  'Cite only evidence labels that were actually supplied in this request; never cite a missing view. Any observation that depends mainly on a missing view must be UNKNOWN or null with a low confidence range, and every style direction must lean only on what the supplied views and the intake actually show — with fewer views, widen confidence ranges and say less, never more.',
   'Skin undertone and color season read from phone photos are approximate even in daylight: widen those confidence ranges and frame every palette direction as a starting point the professional confirms in person with physical draping.',
   'Rubric — recommend what harmonizes with the observed features, never what is merely trending:',
   'Contrast is the backbone: low contrast between skin, hair, and eyes favors soft, blended color and diffused makeup; high contrast carries bold, saturated color and defined lines.',
@@ -862,16 +865,25 @@ export const runHairColorAnalysis: HairColorAnalysisProvider = async (input) => 
     input.captures.map((capture) => [capture.shotKey, capture] as const),
   )
   if (
-    input.captures.length !== HAIR_COLOR_CAPTURE_SHOT_KEYS.length ||
-    capturesByShot.size !== HAIR_COLOR_CAPTURE_SHOT_KEYS.length
+    input.captures.length < 1 ||
+    input.captures.length > HAIR_COLOR_CAPTURE_SHOT_KEYS.length ||
+    capturesByShot.size !== input.captures.length ||
+    input.captures.some(
+      (capture) =>
+        !HAIR_COLOR_CAPTURE_SHOT_KEYS.some((key) => key === capture.shotKey),
+    )
   ) {
     throw new ConsultAnalysisProviderError('bad_output')
   }
   const model = analysisModel()
   const content: Anthropic.ContentBlockParam[] = []
+  const missingShotKeys: HairColorCaptureShotKey[] = []
   for (const shotKey of HAIR_COLOR_CAPTURE_SHOT_KEYS) {
     const capture = capturesByShot.get(shotKey)
-    if (!capture) throw new ConsultAnalysisProviderError('bad_output')
+    if (!capture) {
+      missingShotKeys.push(shotKey)
+      continue
+    }
     content.push({ type: 'text', text: `Evidence label: ${shotKey}` })
     content.push({
       type: 'image',
@@ -880,6 +892,12 @@ export const runHairColorAnalysis: HairColorAnalysisProvider = async (input) => 
         media_type: capture.image.mediaType,
         data: capture.image.base64,
       },
+    })
+  }
+  if (missingShotKeys.length > 0) {
+    content.push({
+      type: 'text',
+      text: `Missing views (not supplied): ${missingShotKeys.join(', ')}. Treat everything they would have shown as unobserved.`,
     })
   }
   content.push({
@@ -930,20 +948,51 @@ export const runHairColorAnalysis: HairColorAnalysisProvider = async (input) => 
   }
 }
 
+/**
+ * A partial pack (Tori, 2026-08-27) makes citation honesty load-bearing: an
+ * evidence label for a view that was never supplied is a fabricated
+ * observation, so it fails the whole result rather than shipping.
+ */
+function assertEvidenceSupplied(
+  analysis: HairColorAnalysisProviderOutput,
+  suppliedShotKeys: ReadonlySet<string>,
+): void {
+  const assertSupplied = (cited: Evidence): void => {
+    for (const key of cited) {
+      if (key !== 'intake' && !suppliedShotKeys.has(key)) {
+        throw new ConsultAnalysisProviderError('bad_output')
+      }
+    }
+  }
+  for (const field of CONSULT_PROFILE_FIELDS) {
+    assertSupplied(analysis.profile[field].evidence)
+  }
+  for (const direction of analysis.styleDirections) {
+    assertSupplied(direction.evidence)
+  }
+  assertSupplied(analysis.core.currentLevel.evidence)
+  assertSupplied(analysis.core.currentTone.evidence)
+  assertSupplied(analysis.core.visibleCondition.evidence)
+  assertSupplied(analysis.core.density.evidence)
+  assertSupplied(analysis.core.texture.evidence)
+}
+
 export function validateHairColorAnalysisProviderResult(
   result: { analysis: unknown; model: string },
+  suppliedShotKeys?: readonly HairColorCaptureShotKey[],
 ): HairColorAnalysisProviderResult {
   const model = result.model.trim()
   if (!model || model !== result.model || model.length > 128) {
     throw new ConsultAnalysisProviderError('bad_output')
   }
-  return {
-    analysis: sanitizeAnalysis(
-      result.analysis,
-      CONSULT_ANALYSIS_PROVIDER_SERVICE_INTENTS,
-    ),
-    model,
+  const analysis = sanitizeAnalysis(
+    result.analysis,
+    CONSULT_ANALYSIS_PROVIDER_SERVICE_INTENTS,
+  )
+  if (suppliedShotKeys) {
+    assertEvidenceSupplied(analysis, new Set<string>(suppliedShotKeys))
   }
+  return { analysis, model }
 }
 
 /** Validates the post-routing stored shape, including deterministic test intents. */

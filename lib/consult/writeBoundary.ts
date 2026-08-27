@@ -577,9 +577,13 @@ export async function finalizeLockedHairColorAnalysis(
     actor: ConsultActor
   },
 ) {
+  // Partial packs (Tori, 2026-08-27): between one and the full pack of
+  // captures, all distinct. Every capture the analysis consumed must be
+  // purge-marked below — the count equality keeps that exact.
   if (
-    args.captureIds.length !== HAIR_COLOR_CAPTURE_SHOT_KEYS.length ||
-    new Set(args.captureIds).size !== HAIR_COLOR_CAPTURE_SHOT_KEYS.length
+    args.captureIds.length < 1 ||
+    args.captureIds.length > HAIR_COLOR_CAPTURE_SHOT_KEYS.length ||
+    new Set(args.captureIds).size !== args.captureIds.length
   ) {
     throw new ConsultWriteError(
       'ANALYSIS_PREREQUISITES_REQUIRED',
@@ -627,7 +631,7 @@ export async function finalizeLockedHairColorAnalysis(
       purgeRequestedAt: args.finalizedAt,
     },
   })
-  if (marked.count !== HAIR_COLOR_CAPTURE_SHOT_KEYS.length) {
+  if (marked.count !== args.captureIds.length) {
     throw new ConsultWriteError(
       'ANALYSIS_PREREQUISITES_REQUIRED',
       'Analysis captures changed.',

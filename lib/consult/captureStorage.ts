@@ -8,7 +8,9 @@ import { BUCKETS } from '@/lib/storageBuckets'
 import type { ConsultCaptureMediaType } from './captureVision'
 
 export const CONSULT_CAPTURE_BUCKET = BUCKETS.mediaPrivate
-export const CONSULT_CAPTURE_MAX_BYTES = 5_000_000
+// Definition moved to capturePack (client-safe) so the browser wizard can
+// downscale against the same cap; re-exported to keep server call sites.
+export { CONSULT_CAPTURE_MAX_BYTES } from './capturePack'
 
 const LOCAL_HOSTS = new Set([
   'localhost',

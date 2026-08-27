@@ -185,8 +185,20 @@ export function consultWriteErrorResponse(error: unknown): Response | null {
     case 'ANALYSIS_PREREQUISITES_REQUIRED':
       return consultAgreementFail(
         409,
-        'Current completed intake and captures are required.',
+        'Current completed intake, inspiration, and captures are required.',
         'CONSULT_ANALYSIS_PREREQUISITES_REQUIRED',
+      )
+    case 'ANALYSIS_CAPTURES_REQUIRED':
+      return consultAgreementFail(
+        409,
+        'At least one accepted photo is required before analysis.',
+        'CONSULT_ANALYSIS_CAPTURES_REQUIRED',
+      )
+    case 'ANALYSIS_INSPIRATION_REQUIRED':
+      return consultAgreementFail(
+        409,
+        'Finish the inspiration step before continuing to analysis.',
+        'CONSULT_ANALYSIS_INSPIRATION_REQUIRED',
       )
     case 'ANALYSIS_UNAVAILABLE':
       return consultAgreementFail(

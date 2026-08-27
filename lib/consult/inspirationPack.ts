@@ -13,6 +13,11 @@ import type {
 } from '@/lib/dto/consult'
 import { isRecord } from '@/lib/guards'
 
+import {
+  CONSULT_INSPIRATION_TEXT_MAX_CHARS,
+  CONSULT_INSPIRATION_UNSUPPORTED_TRAIT_LANGUAGE,
+} from './inspirationTextRules'
+
 export const CONSULT_INSPIRATION_SCHEMA_VERSION = 1
 export const CONSULT_INSPIRATION_REQUIRED_DETAIL_COUNT = 3 as const
 
@@ -143,8 +148,7 @@ const QUESTIONS_BY_KEY = new Map(
   CONSULT_INSPIRATION_QUESTIONS.map((question) => [question.key, question]),
 )
 
-const UNSUPPORTED_TRAIT_LANGUAGE =
-  /\b(face|facial|eye|eyes|skin|undertone|complexion|identity|ethnic|ethnicity|race|health|medical|diagnosis|body|attractive|attractiveness)\b/i
+const UNSUPPORTED_TRAIT_LANGUAGE = CONSULT_INSPIRATION_UNSUPPORTED_TRAIT_LANGUAGE
 
 const NEUTRAL_VALUES = new Set([
   'none',
@@ -185,7 +189,11 @@ function validateText(value: unknown): string | null {
   if (value == null || value === '') return null
   if (typeof value !== 'string') throw new Error('Invalid inspiration answer.')
   const text = compactText(value)
-  if (!text || text.length > 240 || UNSUPPORTED_TRAIT_LANGUAGE.test(text)) {
+  if (
+    !text ||
+    text.length > CONSULT_INSPIRATION_TEXT_MAX_CHARS ||
+    UNSUPPORTED_TRAIT_LANGUAGE.test(text)
+  ) {
     throw new Error('Invalid inspiration answer.')
   }
   return text

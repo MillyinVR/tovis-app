@@ -275,7 +275,10 @@ export async function requireCompletedConsultInspiration(
 }
 
 /** The single cross-step readiness boundary. Either capture or inspiration may
- * finish last; both call here while holding the ConsultSession row lock. */
+ * finish last; both call here while holding the ConsultSession row lock.
+ * Auto-advance (the default) still requires the full accepted pack; the
+ * client-initiated partial submission (Tori, 2026-08-27) passes
+ * minimumAcceptedShots: 1 through proceedConsultCaptureToAnalysis. */
 export async function advanceLockedConsultToAnalysisIfReady(
   tx: Prisma.TransactionClient,
   args: {
@@ -285,6 +288,7 @@ export async function advanceLockedConsultToAnalysisIfReady(
     actor: ClientActor
     now: Date
   },
+  options?: { minimumAcceptedShots?: number },
 ): Promise<boolean> {
   try {
     await requireCompletedConsultInspiration(tx, args)
@@ -307,7 +311,9 @@ export async function advanceLockedConsultToAnalysisIfReady(
     select: { shotKey: true },
   })
   const accepted = new Set(captures.map(({ shotKey }) => shotKey))
-  if (!HAIR_COLOR_CAPTURE_SHOT_KEYS.every((shotKey) => accepted.has(shotKey))) {
+  const minimumAcceptedShots =
+    options?.minimumAcceptedShots ?? HAIR_COLOR_CAPTURE_SHOT_KEYS.length
+  if (accepted.size < minimumAcceptedShots) {
     return false
   }
   await transitionLockedConsultSession(tx, {

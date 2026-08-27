@@ -4,7 +4,7 @@
   "providerMode": "deterministic_fake",
   "versions": {
     "analysisSchemaVersion": 2,
-    "promptVersion": "full-analysis-v1",
+    "promptVersion": "full-analysis-v2",
     "requestedModel": "claude-sonnet-5",
     "configuredModel": "deterministic-consult-eval-v1",
     "fixtureManifestVersion": "hair-color-eval-manifest-v1",

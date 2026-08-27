@@ -247,6 +247,7 @@ vi.mock('@/lib/consult/analysisEngine', async (importOriginal) => {
 })
 
 import { POST as attachCapture } from '@/app/api/v1/client/consult/[id]/capture/attach/route'
+import { POST as proceedCapture } from '@/app/api/v1/client/consult/[id]/capture/proceed/route'
 import { GET as getCapture } from '@/app/api/v1/client/consult/[id]/capture/route'
 import { POST as issueUpload } from '@/app/api/v1/client/consult/[id]/capture/uploads/route'
 import { POST as checkQuality } from '@/app/api/v1/client/consult/[id]/capture/[captureId]/quality/route'
@@ -1461,7 +1462,7 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
     expect(revisions).toHaveLength(1)
     expect(revisions[0]).toMatchObject({
       schemaVersion: 2,
-      promptVersion: 'full-analysis-v1',
+      promptVersion: 'full-analysis-v2',
       model: 'fake-analysis-model',
       idempotencyKey: 'canonical-analysis',
     })
@@ -1612,7 +1613,7 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
       analysis: {
         status: ConsultSessionStatus.COMPLETED,
         schemaVersion: 2,
-        promptVersion: 'full-analysis-v1',
+        promptVersion: 'full-analysis-v2',
         result: { revisionId: revisions[0]?.id },
       },
     })
@@ -1833,7 +1834,7 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
     const darkRequest = jsonRequest(`/api/v1/client/consult/${owner.sessionId}/analysis`, {
       idempotencyKey: 'dark-analysis',
       schemaVersion: 2,
-      promptVersion: 'full-analysis-v1',
+      promptVersion: 'full-analysis-v2',
     })
     const darkJson = vi.spyOn(darkRequest, 'json')
     const dark = await startAnalysis(darkRequest, context(owner.sessionId))
@@ -2727,4 +2728,155 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
     },
     120_000,
   )
+})
+
+describe('consult partial capture submission against PostgreSQL (Tori, 2026-08-27)', () => {
+  // hair_left / hair_right deliberately omitted: the fake analysis provider
+  // cites only the other five views, so the supplied-evidence check holds.
+  const PARTIAL_SHOTS = [
+    'hair_back',
+    'hair_crown',
+    'face_front',
+    'face_side',
+    'eyes_closeup',
+  ] as const satisfies readonly HairColorCaptureShotKey[]
+
+  async function acceptShots(
+    consult: ReadyConsult,
+    suffix: string,
+    shots: readonly HairColorCaptureShotKey[],
+  ) {
+    for (const shotKey of shots) {
+      const captureId = await issueAttach(consult, shotKey, `${suffix}-${shotKey}`)
+      expect((await quality(consult, captureId, `${suffix}-q-${shotKey}`)).status).toBe(
+        200,
+      )
+    }
+  }
+
+  function proceedRequest(consult: ReadyConsult) {
+    return proceedCapture(
+      jsonRequest(
+        `/api/v1/client/consult/${consult.sessionId}/capture/proceed`,
+        {},
+      ),
+      context(consult.sessionId),
+    )
+  }
+
+  it(
+    'advances an incomplete accepted pack on explicit proceed and completes the analysis end to end',
+    async () => {
+      const consult = await createReadyConsult('partial-proceed')
+      authenticate(consult)
+      await acceptShots(consult, 'partial-proceed', PARTIAL_SHOTS)
+
+      // Below seven accepted shots there is no auto-advance.
+      const before = await db.consultSession.findUniqueOrThrow({
+        where: { id: consult.sessionId },
+        select: { status: true },
+      })
+      expect(before.status).toBe(ConsultSessionStatus.MEDIA_READY)
+
+      const proceed = await proceedRequest(consult)
+      expect(proceed.status).toBe(200)
+      expect(await body(proceed)).toMatchObject({
+        advanced: true,
+        capture: expect.objectContaining({ status: 'ANALYSIS_PENDING' }),
+      })
+
+      // Replays are safe once the session moved forward.
+      const replay = await proceedRequest(consult)
+      expect(replay.status).toBe(200)
+      expect(await body(replay)).toMatchObject({ advanced: false })
+
+      const analysis = await analysisRequest(consult, 'partial-analysis')
+      expect(analysis.status).toBe(200)
+      const session = await db.consultSession.findUniqueOrThrow({
+        where: { id: consult.sessionId },
+        select: { status: true },
+      })
+      expect(session.status).toBe(ConsultSessionStatus.COMPLETED)
+
+      const accepted = await db.consultCapture.findMany({
+        where: {
+          consultSessionId: consult.sessionId,
+          status: ConsultCaptureStatus.ACCEPTED,
+        },
+        select: { shotKey: true, purgeRequestedAt: true, purgedAt: true },
+      })
+      expect(accepted.map(({ shotKey }) => shotKey).sort()).toEqual(
+        [...PARTIAL_SHOTS].sort(),
+      )
+      for (const capture of accepted) {
+        expect(capture.purgeRequestedAt).not.toBeNull()
+        expect(capture.purgedAt).not.toBeNull()
+      }
+    },
+    120_000,
+  )
+
+  it('refuses to proceed with zero accepted captures', async () => {
+    const consult = await createReadyConsult('partial-zero')
+    authenticate(consult)
+    const response = await proceedRequest(consult)
+    expect(response.status).toBe(409)
+    expect(await body(response)).toMatchObject({
+      code: 'CONSULT_ANALYSIS_CAPTURES_REQUIRED',
+      error: 'At least one accepted photo is required before analysis.',
+    })
+  })
+
+  it('refuses to proceed before the inspiration step is finished', async () => {
+    const consult = await createReadyConsult(
+      'partial-inspiration',
+      {},
+      { skipInspiration: false },
+    )
+    authenticate(consult)
+    await acceptShots(consult, 'partial-inspiration', ['hair_back'])
+    const response = await proceedRequest(consult)
+    expect(response.status).toBe(409)
+    expect(await body(response)).toMatchObject({
+      code: 'CONSULT_ANALYSIS_INSPIRATION_REQUIRED',
+      error: 'Finish the inspiration step before continuing to analysis.',
+    })
+  })
+
+  it('keeps the rejection reason and retake tip on the slot after the immediate purge', async () => {
+    const consult = await createReadyConsult('rejected-slot-state')
+    authenticate(consult)
+    fake.qualityByShot.set('hair_left', {
+      accepted: false,
+      reasonCode: 'WARM_INDOOR_LIGHT',
+      retakeTip: 'Face a window in indirect daylight.',
+      model: 'fake-quality-model',
+    })
+    const rejectedId = await issueAttach(consult, 'hair_left', 'rejected-slot')
+    expect((await quality(consult, rejectedId, 'rejected-slot-q')).status).toBe(200)
+    const row = await db.consultCapture.findUniqueOrThrow({
+      where: { id: rejectedId },
+      select: { purgedAt: true },
+    })
+    expect(row.purgedAt).not.toBeNull()
+
+    const state = await getCapture(
+      new Request(
+        `http://test/api/v1/client/consult/${consult.sessionId}/capture`,
+      ),
+      context(consult.sessionId),
+    )
+    expect(state.status).toBe(200)
+    const payload = (await body(state)) as {
+      capture: { slots: Array<Record<string, unknown>> }
+    }
+    const slot = payload.capture.slots.find(
+      (entry) => entry.shotKey === 'hair_left',
+    )
+    expect(slot).toMatchObject({
+      state: 'REJECTED',
+      qualityReasonCode: 'WARM_INDOOR_LIGHT',
+      retakeTip: 'Face a window in indirect daylight.',
+    })
+  })
 })
