@@ -586,6 +586,36 @@ export type BrandClientConsultResultsCopy = {
     | 'UNKNOWN',
     string
   >
+  // Full-analysis feature profile + per-domain style directions (schema v2).
+  profileTitle: string
+  profileBody: string
+  profileLabels: Record<
+    | 'skinUndertone'
+    | 'contrastLevel'
+    | 'colorSeason'
+    | 'faceProportion'
+    | 'jawline'
+    | 'foreheadProportion'
+    | 'featureBalance'
+    | 'eyeShape'
+    | 'eyeSpacing'
+    | 'browDensity'
+    | 'browShape',
+    string
+  >
+  styleDirectionsTitle: string
+  styleDirectionsBody: string
+  styleDomainLabels: Record<
+    | 'HAIR_COLOR_HARMONY'
+    | 'CUT_AND_SHAPE'
+    | 'BANGS'
+    | 'BROWS'
+    | 'LASHES'
+    | 'MAKEUP'
+    | 'COLOR_PALETTE',
+    string
+  >
+  whyItFlattersLabel: string
   recommendationsTitle: string
   recommendationDiscussionPrefix: string
   meCardEyebrow: string

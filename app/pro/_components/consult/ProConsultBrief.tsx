@@ -36,6 +36,36 @@ function Observation({
   )
 }
 
+const PROFILE_LABELS: Record<
+  keyof ConsultProBriefDTO['profile'],
+  string
+> = {
+  skinUndertone: 'Skin undertone',
+  contrastLevel: 'Natural contrast',
+  colorSeason: 'Color season',
+  faceProportion: 'Face proportion',
+  jawline: 'Jawline',
+  foreheadProportion: 'Forehead',
+  featureBalance: 'Feature balance',
+  eyeShape: 'Eye shape',
+  eyeSpacing: 'Eye spacing',
+  browDensity: 'Brow density',
+  browShape: 'Brow shape',
+}
+
+const STYLE_DOMAIN_LABELS: Record<
+  ConsultProBriefDTO['styleDirections'][number]['domain'],
+  string
+> = {
+  HAIR_COLOR_HARMONY: 'Hair color',
+  CUT_AND_SHAPE: 'Cut & shape',
+  BANGS: 'Bangs',
+  BROWS: 'Brows',
+  LASHES: 'Lashes',
+  MAKEUP: 'Makeup',
+  COLOR_PALETTE: 'Color palette',
+}
+
 export default function ProConsultBrief({
   brief,
   timeZone,
@@ -134,6 +164,70 @@ export default function ProConsultBrief({
             </div>
           ))}
         </dl>
+      </section>
+
+      <section aria-labelledby={`${brief.consultId}-profile`}>
+        <h3
+          id={`${brief.consultId}-profile`}
+          className="text-[14px] font-black text-textPrimary"
+        >
+          Feature profile
+        </h3>
+        <p className="mt-1 text-[12px] text-textSecondary">
+          Photo-based feature observations to confirm in person — color readings
+          from phone photos are approximate; drape to verify.
+        </p>
+        <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+          {(
+            Object.entries(brief.profile) as Array<
+              [
+                keyof ConsultProBriefDTO['profile'],
+                ConsultProBriefDTO['profile'][keyof ConsultProBriefDTO['profile']],
+              ]
+            >
+          ).map(([field, observation]) => (
+            <Observation
+              key={field}
+              label={PROFILE_LABELS[field]}
+              value={observation.value}
+              confidence={observation.confidence}
+            />
+          ))}
+        </ul>
+      </section>
+
+      <section aria-labelledby={`${brief.consultId}-style-directions`}>
+        <h3
+          id={`${brief.consultId}-style-directions`}
+          className="text-[14px] font-black text-textPrimary"
+        >
+          Style directions by area
+        </h3>
+        <p className="mt-1 text-[12px] text-textSecondary">
+          One feature-grounded direction per area — discussion starting points,
+          not promises.
+        </p>
+        <ul className="mt-2 grid gap-2">
+          {brief.styleDirections.map((direction) => (
+            <li
+              key={direction.domain}
+              className="rounded-xl border border-surfaceGlass/10 bg-bgPrimary p-3"
+            >
+              <div className="font-mono text-[10px] font-bold uppercase tracking-[0.12em] text-microAccent">
+                {STYLE_DOMAIN_LABELS[direction.domain]}
+              </div>
+              <div className="mt-1 text-[12.5px] font-black text-textPrimary">
+                {direction.title}
+              </div>
+              <p className="mt-1 text-[12px] text-textSecondary">
+                {direction.direction}
+              </p>
+              <p className="mt-2 text-[12px] font-semibold text-textPrimary">
+                Why it flatters: {direction.whyItFlatters}
+              </p>
+            </li>
+          ))}
+        </ul>
       </section>
 
       <section

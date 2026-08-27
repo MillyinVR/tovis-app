@@ -37,6 +37,29 @@ function globalAiConsultFlag(): boolean {
 export const AI_CONSULT_C5_LIVE_BASELINE_APPROVED = false
 export const AI_CONSULT_C5_LIVE_CANDIDATE_PASSED = false
 
+/**
+ * 🔴 Founder eval deferral — Tori, 2026-08-26 (full-analysis launch decisions).
+ *
+ * Tori explicitly authorized exposing consult briefs/results to the FOUNDER
+ * ALLOWLIST ONLY while the formal C5-style evaluation for the full analysis is
+ * still outstanding ("you ARE the evaluation"). This deferral:
+ *
+ *   - applies exclusively to pros on AI_CONSULT_PRO_ALLOWLIST — the global
+ *     ENABLE_AI_CONSULT flag deliberately CANNOT ride it; and
+ *   - must be revoked (set accepted back to false) before any allowlist growth
+ *     or flag-based widening, which again requires a passed, domain-reviewed
+ *     evaluation including per-stratum fairness bars for the new traits.
+ *
+ * The C5 flags above stay false on purpose: no evaluation passed, and this
+ * constant records a deferral, not evidence.
+ */
+export const AI_CONSULT_FOUNDER_EVAL_DEFERRAL = Object.freeze({
+  accepted: true,
+  authorizedBy: 'Tori',
+  decisionDate: '2026-08-26',
+  scope: 'AI_CONSULT_PRO_ALLOWLIST members only',
+})
+
 export function evaluateAiConsultC6Exposure(args: {
   founderEnabled: boolean
   liveBaselineApproved: boolean
@@ -51,8 +74,9 @@ export function evaluateAiConsultC6Exposure(args: {
 
 export function isAiConsultC6ExposurePossible(): boolean {
   return (
-    AI_CONSULT_C5_LIVE_BASELINE_APPROVED &&
-    AI_CONSULT_C5_LIVE_CANDIDATE_PASSED
+    (AI_CONSULT_C5_LIVE_BASELINE_APPROVED &&
+      AI_CONSULT_C5_LIVE_CANDIDATE_PASSED) ||
+    AI_CONSULT_FOUNDER_EVAL_DEFERRAL.accepted
   )
 }
 
@@ -71,14 +95,21 @@ export function isAiConsultEnabledForPro(
 }
 
 /**
- * C6/C7 serve gate. This is deliberately stricter than the C1–C5 founder
- * development gate: founder eligibility alone cannot expose a brief, rating,
- * result, or invitation while C5's live evidence is absent.
+ * C6/C7 serve gate. Stricter than the C1–C5 founder development gate: a brief,
+ * rating, result, or invitation is exposed only when (a) C5's live evidence
+ * exists, or (b) the pro is on the founder allowlist and Tori's recorded
+ * eval deferral (above) is active. Path (b) never widens via ENABLE_AI_CONSULT.
  */
 export function isAiConsultC6ExposureEnabledForPro(
   professionalId: string | null | undefined,
 ): boolean {
-  if (!isAiConsultC6ExposurePossible()) return false
+  if (!professionalId) return false
+  if (
+    AI_CONSULT_FOUNDER_EVAL_DEFERRAL.accepted &&
+    AI_CONSULT_PRO_ALLOWLIST.includes(professionalId)
+  ) {
+    return true
+  }
   return evaluateAiConsultC6Exposure({
     founderEnabled: isAiConsultEnabledForPro(professionalId),
     liveBaselineApproved: AI_CONSULT_C5_LIVE_BASELINE_APPROVED,
@@ -88,7 +119,7 @@ export function isAiConsultC6ExposureEnabledForPro(
 
 /** Explicit C7 name so client-result routes cannot accidentally use C1–C5's
  * looser founder-development gate. C6 and C7 intentionally share the same
- * checked-in live-evidence block. */
+ * exposure rule (live evidence, or the founder-allowlist eval deferral). */
 export function isAiConsultC7ExposureEnabledForPro(
   professionalId: string | null | undefined,
 ): boolean {

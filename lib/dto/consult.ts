@@ -361,6 +361,9 @@ export type ConsultCaptureShotKeyDTO =
   | 'hair_left'
   | 'hair_right'
   | 'hair_crown'
+  | 'face_front'
+  | 'face_side'
+  | 'eyes_closeup'
 
 export type ConsultCaptureShotDTO = {
   key: ConsultCaptureShotKeyDTO
@@ -370,6 +373,8 @@ export type ConsultCaptureShotDTO = {
 }
 
 export type ConsultCaptureShotPackDTO = {
+  // Legacy-stable wire id (pinned by iOS contract fixtures); version 2 of this
+  // pack is the seven-shot full-analysis pack.
   id: 'hair-color-daylight'
   categorySlug: 'hair-color'
   version: number
@@ -398,11 +403,24 @@ export type ConsultCaptureSlotStateDTO = {
   purgedAt: string | null
 }
 
+// Decision 2026-08-26: consult photos may be kept on the client's chart with
+// consent. Default-on but visibly optional; the choice is recorded before
+// analysis runs and the copy happens only after the analysis commits.
+export type ConsultChartCopyStateDTO = {
+  optIn: boolean
+  decidedAt: string | null
+}
+
+export type ConsultChartCopyUpdateRequestDTO = {
+  optIn: boolean
+}
+
 export type ConsultCaptureStateDTO = {
   consultId: string
   status: ConsultSessionStatus
   shotPack: ConsultCaptureShotPackDTO
   slots: ConsultCaptureSlotStateDTO[]
+  chartCopy: ConsultChartCopyStateDTO
 }
 
 export type ConsultCaptureStateResponseDTO = {
@@ -485,6 +503,9 @@ export type ConsultAnalysisEvidenceDTO =
   | 'hair_left'
   | 'hair_right'
   | 'hair_crown'
+  | 'face_front'
+  | 'face_side'
+  | 'eyes_closeup'
   | 'intake'
 
 export type ConsultAnalysisObservationDTO<T extends string> = {
@@ -527,7 +548,126 @@ export type ConsultAnalysisReferenceDTO =
       serviceCategoryId: string
     }
 
+export type ConsultProfileUndertoneDTO =
+  | 'WARM'
+  | 'COOL'
+  | 'NEUTRAL'
+  | 'OLIVE'
+  | 'UNKNOWN'
+
+export type ConsultProfileContrastDTO = 'LOW' | 'MEDIUM' | 'HIGH' | 'UNKNOWN'
+
+export type ConsultProfileColorSeasonDTO =
+  | 'BRIGHT_SPRING'
+  | 'TRUE_SPRING'
+  | 'LIGHT_SPRING'
+  | 'LIGHT_SUMMER'
+  | 'TRUE_SUMMER'
+  | 'SOFT_SUMMER'
+  | 'SOFT_AUTUMN'
+  | 'TRUE_AUTUMN'
+  | 'DEEP_AUTUMN'
+  | 'DEEP_WINTER'
+  | 'TRUE_WINTER'
+  | 'BRIGHT_WINTER'
+  | 'UNKNOWN'
+
+export type ConsultProfileFaceProportionDTO =
+  | 'WIDER'
+  | 'BALANCED'
+  | 'LONGER'
+  | 'UNKNOWN'
+
+export type ConsultProfileJawlineDTO =
+  | 'SOFTLY_ROUNDED'
+  | 'BALANCED'
+  | 'ANGULAR'
+  | 'UNKNOWN'
+
+export type ConsultProfileForeheadDTO =
+  | 'SHORTER'
+  | 'BALANCED'
+  | 'TALLER'
+  | 'UNKNOWN'
+
+export type ConsultProfileFeatureBalanceDTO =
+  | 'SOFT'
+  | 'BLENDED'
+  | 'STRUCTURED'
+  | 'UNKNOWN'
+
+export type ConsultProfileEyeShapeDTO =
+  | 'ALMOND'
+  | 'ROUND'
+  | 'HOODED'
+  | 'MONOLID'
+  | 'DOWNTURNED'
+  | 'UPTURNED'
+  | 'DEEP_SET'
+  | 'PROMINENT'
+  | 'UNKNOWN'
+
+export type ConsultProfileEyeSpacingDTO =
+  | 'CLOSE_SET'
+  | 'BALANCED'
+  | 'WIDE_SET'
+  | 'UNKNOWN'
+
+export type ConsultProfileBrowDensityDTO =
+  | 'SPARSE'
+  | 'MEDIUM'
+  | 'FULL'
+  | 'UNKNOWN'
+
+export type ConsultProfileBrowShapeDTO =
+  | 'STRAIGHT'
+  | 'SOFT_ARCH'
+  | 'HIGH_ARCH'
+  | 'ROUNDED'
+  | 'UNKNOWN'
+
+// Schema v2: the observed feature profile behind the style directions. Every
+// entry is an evidence-cited observation with an honest UNKNOWN state; none of
+// these fields may carry identity, ethnicity, age, or medical meaning.
+export type ConsultAnalysisFeatureProfileDTO = {
+  skinUndertone: ConsultAnalysisObservationDTO<ConsultProfileUndertoneDTO>
+  contrastLevel: ConsultAnalysisObservationDTO<ConsultProfileContrastDTO>
+  colorSeason: ConsultAnalysisObservationDTO<ConsultProfileColorSeasonDTO>
+  faceProportion: ConsultAnalysisObservationDTO<ConsultProfileFaceProportionDTO>
+  jawline: ConsultAnalysisObservationDTO<ConsultProfileJawlineDTO>
+  foreheadProportion: ConsultAnalysisObservationDTO<ConsultProfileForeheadDTO>
+  featureBalance: ConsultAnalysisObservationDTO<ConsultProfileFeatureBalanceDTO>
+  eyeShape: ConsultAnalysisObservationDTO<ConsultProfileEyeShapeDTO>
+  eyeSpacing: ConsultAnalysisObservationDTO<ConsultProfileEyeSpacingDTO>
+  browDensity: ConsultAnalysisObservationDTO<ConsultProfileBrowDensityDTO>
+  browShape: ConsultAnalysisObservationDTO<ConsultProfileBrowShapeDTO>
+}
+
+export type ConsultStyleDomainDTO =
+  | 'HAIR_COLOR_HARMONY'
+  | 'CUT_AND_SHAPE'
+  | 'BANGS'
+  | 'BROWS'
+  | 'LASHES'
+  | 'MAKEUP'
+  | 'COLOR_PALETTE'
+
+// Schema v2: one professionally framed direction per style domain. These are
+// discussion directions grounded in the feature profile — never bookable
+// service references and never promises.
+export type ConsultStyleDirectionDTO = {
+  domain: ConsultStyleDomainDTO
+  title: string
+  direction: string
+  whyItFlatters: string
+  confidence: ConsultAnalysisConfidenceDTO
+  evidence: ConsultAnalysisEvidenceDTO[]
+  discussWithProfessional: true
+}
+
 export type ConsultAnalysisPayloadDTO = {
+  profile: ConsultAnalysisFeatureProfileDTO
+  styleDirections: ConsultStyleDirectionDTO[]
   core: {
     currentLevel: {
       min: number | null
@@ -671,6 +811,10 @@ export type ConsultProBriefDTO = {
   inspiration: ConsultBriefInspirationDTO
   clientIntake: ConsultBriefClientIntakeItemDTO[]
   aiObservations: ConsultBriefAiObservationsDTO
+  // Brief schema v3: the full feature profile and per-domain style directions
+  // sit beside the hair observations, never blended into the client's words.
+  profile: ConsultAnalysisFeatureProfileDTO
+  styleDirections: ConsultStyleDirectionDTO[]
   safetyFlags: ConsultAnalysisPayloadDTO['safetyFlags']
   achievabilityDirection: ConsultBriefAchievabilityDirectionDTO
   recommendationDirections: ConsultBriefRecommendationDirectionDTO[]
@@ -708,6 +852,10 @@ export type ConsultClientResultsDTO = {
   // both this wire shape and the C7 render order.
   clientIntake: ConsultBriefClientIntakeItemDTO[]
   aiObservations: ConsultBriefAiObservationsDTO
+  // Brief schema v3: feature profile + per-domain style directions, rendered
+  // after the client's words and the hair observations.
+  profile: ConsultAnalysisFeatureProfileDTO
+  styleDirections: ConsultStyleDirectionDTO[]
   // Always present and structurally separate, including when empty.
   safetyFlags: ConsultAnalysisPayloadDTO['safetyFlags']
   achievabilityDirection: ConsultBriefAchievabilityDirectionDTO

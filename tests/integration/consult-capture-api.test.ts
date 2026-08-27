@@ -177,6 +177,37 @@ vi.mock('@/lib/consult/analysisEngine', async (importOriginal) => {
       return {
         model: 'fake-analysis-model',
         analysis: {
+          profile: {
+            skinUndertone: observed('NEUTRAL', ['face_front']),
+            contrastLevel: observed('MEDIUM', ['face_front']),
+            colorSeason: observed('UNKNOWN', []),
+            faceProportion: observed('BALANCED', ['face_front']),
+            jawline: observed('SOFTLY_ROUNDED', ['face_side']),
+            foreheadProportion: observed('BALANCED', ['face_side']),
+            featureBalance: observed('SOFT', ['face_front']),
+            eyeShape: observed('HOODED', ['eyes_closeup']),
+            eyeSpacing: observed('BALANCED', ['eyes_closeup']),
+            browDensity: observed('FULL', ['eyes_closeup']),
+            browShape: observed('SOFT_ARCH', ['eyes_closeup']),
+          },
+          styleDirections: [
+            'HAIR_COLOR_HARMONY',
+            'CUT_AND_SHAPE',
+            'BANGS',
+            'BROWS',
+            'LASHES',
+            'MAKEUP',
+            'COLOR_PALETTE',
+          ].map((domain) => ({
+            domain,
+            title: 'A soft, harmonizing direction',
+            direction: 'Discuss a soft, blended direction for this domain together.',
+            whyItFlatters:
+              'Low observed contrast and soft feature balance favor blended choices.',
+            confidence: { min: 0.4, max: 0.7 },
+            evidence: ['face_front'],
+            discussWithProfessional: true,
+          })),
           core: {
             currentLevel: {
               min: 4,
@@ -557,7 +588,15 @@ async function issueAttach(
 }
 
 async function completeCapturePack(consult: ReadyConsult, suffix: string) {
-  for (const shotKey of ['hair_back', 'hair_left', 'hair_right', 'hair_crown'] as const) {
+  for (const shotKey of [
+    'hair_back',
+    'hair_left',
+    'hair_right',
+    'hair_crown',
+    'face_front',
+    'face_side',
+    'eyes_closeup',
+  ] as const) {
     const captureId = await issueAttach(consult, shotKey, `${suffix}-${shotKey}`)
     const response = await quality(
       consult,
@@ -755,13 +794,16 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
         status: ConsultSessionStatus.MEDIA_READY,
         shotPack: {
           id: 'hair-color-daylight',
-          version: 1,
+          version: 2,
           schemaVersion: 1,
           shots: [
             { key: 'hair_back', requirement: 'REQUIRED' },
             { key: 'hair_left', requirement: 'REQUIRED' },
             { key: 'hair_right', requirement: 'REQUIRED' },
             { key: 'hair_crown', requirement: 'REQUIRED' },
+            { key: 'face_front', requirement: 'REQUIRED' },
+            { key: 'face_side', requirement: 'REQUIRED' },
+            { key: 'eyes_closeup', requirement: 'REQUIRED' },
           ],
         },
       },
@@ -905,7 +947,7 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
           idempotencyKey: 'expired-attach',
           uploadSessionId,
           shotKey: 'hair_back',
-          shotPackVersion: 1,
+          shotPackVersion: 2,
           schemaVersion: 1,
         }),
       }),
@@ -1027,10 +1069,19 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
     ).toMatchObject({ purgedAt: expect.any(Date), storagePath: null })
   })
 
-  it('moves to ANALYSIS_PENDING exactly once after four accepted unexpired slots', async () => {
+  it('moves to ANALYSIS_PENDING exactly once after seven accepted unexpired slots', async () => {
     const consult = await createReadyConsult('ready')
     authenticate(consult)
-    for (const shotKey of ['hair_back', 'hair_left', 'hair_right', 'hair_crown'] as const) {
+    const shotKeys = [
+      'hair_back',
+      'hair_left',
+      'hair_right',
+      'hair_crown',
+      'face_front',
+      'face_side',
+      'eyes_closeup',
+    ] as const
+    for (const shotKey of shotKeys) {
       const captureId = await issueAttach(consult, shotKey, `ready-${shotKey}`)
       const [first, retry] = await Promise.all([
         quality(consult, captureId, `quality-${shotKey}`),
@@ -1039,9 +1090,7 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
       expect(first.status).toBe(200)
       expect(retry.status).toBe(200)
     }
-    expect(fake.modelCalls.sort()).toEqual(
-      ['hair_back', 'hair_crown', 'hair_left', 'hair_right'].sort(),
-    )
+    expect(fake.modelCalls.sort()).toEqual([...shotKeys].sort())
     expect(
       await db.consultSession.findUniqueOrThrow({ where: { id: consult.sessionId }, select: { status: true } }),
     ).toEqual({ status: ConsultSessionStatus.ANALYSIS_PENDING })
@@ -1411,8 +1460,8 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
     })
     expect(revisions).toHaveLength(1)
     expect(revisions[0]).toMatchObject({
-      schemaVersion: 1,
-      promptVersion: 'hair-color-analysis-v1',
+      schemaVersion: 2,
+      promptVersion: 'full-analysis-v1',
       model: 'fake-analysis-model',
       idempotencyKey: 'canonical-analysis',
     })
@@ -1438,8 +1487,8 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
     })
     expect(brief).toMatchObject({
       revision: revisions[0]!.revision + 1,
-      schemaVersion: 2,
-      promptVersion: 'hair-color-pro-brief-v2',
+      schemaVersion: 3,
+      promptVersion: 'full-analysis-pro-brief-v3',
       model: null,
       idempotencyKey: null,
       requestHash: null,
@@ -1477,7 +1526,7 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
       where: { consultSessionId: consult.sessionId, status: ConsultCaptureStatus.ACCEPTED },
       select: { purgedAt: true, storagePath: true, storageBucket: true },
     })
-    expect(captures).toHaveLength(4)
+    expect(captures).toHaveLength(7)
     expect(captures).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1487,7 +1536,7 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
         }),
       ]),
     )
-    expect(fake.purgedPaths).toHaveLength(4)
+    expect(fake.purgedPaths).toHaveLength(7)
 
     const audits = await db.consultAuditEvent.findMany({
       where: { consultSessionId: consult.sessionId },
@@ -1507,6 +1556,9 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
       ),
     ).toHaveLength(1)
     expect(audits.filter((event) => event.revisionId === revisions[0]?.id)).toHaveLength(1)
+    // Decision 2026-08-26: cosmetic feature observations (skinUndertone,
+    // eyeShape, …) are now first-class durable content, so they left this
+    // list. Raw material and identity/medical terms remain forbidden.
     const durable = JSON.stringify({ revisions, brief, audits })
     for (const forbidden of [
       'consult-raw',
@@ -1517,14 +1569,12 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
       'hiddenReasoning',
       'storagePath',
       'storageBucket',
-      'skinTone',
-      'undertone',
-      'faceShape',
-      'eyeShape',
       'ethnicity',
     ]) {
       expect(durable).not.toContain(forbidden)
     }
+    expect(durable).toContain('styleDirections')
+    expect(durable).toContain('skinUndertone')
 
     const feedback = await db.$transaction(async (tx) => {
       const created = await tx.consultBriefFeedback.create({
@@ -1561,8 +1611,8 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
     expect(await body(read)).toMatchObject({
       analysis: {
         status: ConsultSessionStatus.COMPLETED,
-        schemaVersion: 1,
-        promptVersion: 'hair-color-analysis-v1',
+        schemaVersion: 2,
+        promptVersion: 'full-analysis-v1',
         result: { revisionId: revisions[0]?.id },
       },
     })
@@ -1782,8 +1832,8 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
     delete process.env.ENABLE_AI_CONSULT
     const darkRequest = jsonRequest(`/api/v1/client/consult/${owner.sessionId}/analysis`, {
       idempotencyKey: 'dark-analysis',
-      schemaVersion: 1,
-      promptVersion: 'hair-color-analysis-v1',
+      schemaVersion: 2,
+      promptVersion: 'full-analysis-v1',
     })
     const darkJson = vi.spyOn(darkRequest, 'json')
     const dark = await startAnalysis(darkRequest, context(owner.sessionId))
@@ -1844,7 +1894,7 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
           purgeRequestedAt: { not: null },
         },
       }),
-    ).toBe(4)
+    ).toBe(7)
   })
 
   it('rejects a structurally incomplete analysis payload at the direct database guard', async () => {
@@ -1944,7 +1994,7 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
           requestHash: 'd'.repeat(64),
         },
       }),
-    ).rejects.toThrow('invalid versioned hair-color analysis payload')
+    ).rejects.toThrow('invalid versioned full-analysis payload')
   })
 
   it('keeps inspiration optional but requires an explicit fresh decision before analysis', async () => {
@@ -2413,8 +2463,8 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
       select: { schemaVersion: true, promptVersion: true, payload: true },
     })
     expect(brief).toMatchObject({
-      schemaVersion: 2,
-      promptVersion: 'hair-color-pro-brief-v2',
+      schemaVersion: 3,
+      promptVersion: 'full-analysis-pro-brief-v3',
       payload: expect.objectContaining({
         inspiration: expect.objectContaining({
           source: 'EXTERNAL_UPLOAD',

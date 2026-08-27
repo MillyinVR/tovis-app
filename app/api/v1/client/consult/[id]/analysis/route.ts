@@ -29,7 +29,7 @@ import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
-export const maxDuration = 60
+export const maxDuration = 150
 
 async function readStartInput(req: Request) {
   const body = await readJsonRecord(req)

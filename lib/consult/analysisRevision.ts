@@ -65,6 +65,8 @@ export function normalizeStoredHairColorAnalysisPayload(
     sanitized = validateHairColorAnalysisResult({
       model: 'stored-analysis',
       analysis: {
+        profile: payload.profile,
+        styleDirections: payload.styleDirections,
         core: payload.core,
         hairColorLens: payload.hairColorLens,
         safetyFlags: payload.safetyFlags,

@@ -145,6 +145,71 @@ export default function ClientConsultResults({
       </section>
 
       <section
+        aria-labelledby={`${results.consultId}-profile`}
+        className="rounded-2xl border border-surfaceGlass/10 bg-bgSurface p-5"
+      >
+        <h2
+          id={`${results.consultId}-profile`}
+          className="text-base font-black text-textPrimary"
+        >
+          {copy.profileTitle}
+        </h2>
+        <p className="mt-1 text-sm text-textSecondary">{copy.profileBody}</p>
+        <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+          {(
+            Object.entries(results.profile) as Array<
+              [
+                keyof typeof results.profile,
+                (typeof results.profile)[keyof typeof results.profile],
+              ]
+            >
+          ).map(([field, observation]) => (
+            <Observation
+              key={field}
+              label={copy.profileLabels[field]}
+              value={observation.value}
+              confidence={observation.confidence}
+              copy={copy}
+            />
+          ))}
+        </ul>
+      </section>
+
+      <section aria-labelledby={`${results.consultId}-style-directions`}>
+        <h2
+          id={`${results.consultId}-style-directions`}
+          className="text-lg font-black text-textPrimary"
+        >
+          {copy.styleDirectionsTitle}
+        </h2>
+        <p className="mt-1 text-sm text-textSecondary">
+          {copy.styleDirectionsBody}
+        </p>
+        <ul className="mt-3 grid gap-3">
+          {results.styleDirections.map((direction) => (
+            <li
+              key={direction.domain}
+              className="rounded-2xl border border-surfaceGlass/10 bg-bgSurface p-5"
+            >
+              <div className="font-mono text-[10px] font-bold uppercase tracking-[0.12em] text-microAccent">
+                {copy.styleDomainLabels[direction.domain]}
+              </div>
+              <h3 className="mt-2 text-base font-black text-textPrimary">
+                {direction.title}
+              </h3>
+              <p className="mt-2 text-sm leading-6 text-textSecondary">
+                {direction.direction}
+              </p>
+              <p className="mt-3 text-sm leading-6 text-textPrimary">
+                <span className="font-black">{copy.whyItFlattersLabel}:</span>{' '}
+                {direction.whyItFlatters}
+              </p>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section
         aria-labelledby={`${results.consultId}-safety`}
         className="rounded-2xl border border-toneWarn/30 bg-toneWarn/10 p-5"
         data-safety-visible="true"

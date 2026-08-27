@@ -62,6 +62,7 @@ import {
 } from './intakePack'
 import { requireCompletedConsultInspiration } from './inspirationContract'
 import { purgeConsultCaptureRawObject } from './capturePurge'
+import { copyConsultCapturesToChart } from './chartCopy'
 import {
   CONSULT_SAFETY_SERVICE_BOOKING_RULES,
   determineHairColorSafetyRouting,
@@ -341,7 +342,7 @@ async function currentCaptures(
   if (byShot.size !== HAIR_COLOR_CAPTURE_SHOT_KEYS.length) {
     throw new ConsultWriteError(
       'ANALYSIS_PREREQUISITES_REQUIRED',
-      'Four accepted, unexpired captures are required.',
+      'Seven accepted, unexpired captures are required.',
     )
   }
   return HAIR_COLOR_CAPTURE_SHOT_KEYS.map((shotKey) => {
@@ -904,8 +905,25 @@ export async function runConsultAnalysis(args: {
           replayed: false,
         }
       },
-      { maxWait: 55_000, timeout: 55_000 },
+      // v2 sends seven images and a larger structured output; the provider
+      // timeout is 90s, so the claim transaction must outlive it.
+      { maxWait: 55_000, timeout: 115_000 },
     )
+
+  if (consumedCaptureIds.length > 0) {
+    try {
+      // Chart copy (decision 2026-08-26) runs strictly BEFORE the raw purge and
+      // is best-effort: a failed copy never blocks the purge or the analysis.
+      await copyConsultCapturesToChart({
+        consultSessionId: args.consultSessionId,
+        captureIds: consumedCaptureIds,
+        storage,
+      })
+    } catch {
+      // Raw purge below still runs; losing the optional chart copy is the
+      // accepted failure mode, retaining unpurged raw photos is not.
+    }
+  }
 
   await Promise.all(
     consumedCaptureIds.map(async (captureId) => {

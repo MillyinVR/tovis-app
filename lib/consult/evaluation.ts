@@ -12,6 +12,7 @@ import {
   CONSULT_ANALYSIS_SCHEMA_VERSION,
   CONSULT_ANALYSIS_TEXTURES,
   CONSULT_ANALYSIS_TONES,
+  CONSULT_STYLE_DOMAINS,
   ConsultAnalysisProviderError,
   type ConsultAnalysisSafetyCode,
   type ConsultAnalysisServiceIntent,
@@ -763,9 +764,42 @@ export function createDeterministicConsultEvaluationResult(
       evidence: [...expected.allowedEvidence],
     }
   }
+  const unknownProfileObservation = <T extends string>(unknown: T) => ({
+    value: unknown,
+    confidence: fakeConfidence(true),
+    evidence: [],
+  })
   return {
     model: 'deterministic-consult-eval-v1',
     analysis: {
+      // The deterministic baseline proves harness mechanics only. Schema v2's
+      // feature profile is emitted as honest UNKNOWNs (the synthetic four-view
+      // fixtures cannot support face observations), and each style direction
+      // is a bounded, intake-grounded placeholder.
+      profile: {
+        skinUndertone: unknownProfileObservation('UNKNOWN' as const),
+        contrastLevel: unknownProfileObservation('UNKNOWN' as const),
+        colorSeason: unknownProfileObservation('UNKNOWN' as const),
+        faceProportion: unknownProfileObservation('UNKNOWN' as const),
+        jawline: unknownProfileObservation('UNKNOWN' as const),
+        foreheadProportion: unknownProfileObservation('UNKNOWN' as const),
+        featureBalance: unknownProfileObservation('UNKNOWN' as const),
+        eyeShape: unknownProfileObservation('UNKNOWN' as const),
+        eyeSpacing: unknownProfileObservation('UNKNOWN' as const),
+        browDensity: unknownProfileObservation('UNKNOWN' as const),
+        browShape: unknownProfileObservation('UNKNOWN' as const),
+      },
+      styleDirections: CONSULT_STYLE_DOMAINS.map((domain) => ({
+        domain,
+        title: 'Direction to review together',
+        direction:
+          'Review this styling domain with the professional at the appointment.',
+        whyItFlatters:
+          'The supplied views and intake support a professional review of this domain.',
+        confidence: fakeConfidence(true),
+        evidence: ['intake' as const],
+        discussWithProfessional: true as const,
+      })),
       core: {
         currentLevel: {
           min: levelRange?.[0] ?? null,

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   AI_CONSULT_C5_LIVE_BASELINE_APPROVED,
   AI_CONSULT_C5_LIVE_CANDIDATE_PASSED,
+  AI_CONSULT_FOUNDER_EVAL_DEFERRAL,
   AI_CONSULT_PRO_ALLOWLIST,
   evaluateAiConsultC6Exposure,
   isAiConsultC6ExposureEnabledForPro,
@@ -44,13 +45,24 @@ describe('isAiConsultEnabledForPro', () => {
     }
   })
 
-  it('fails closed for C6 and C7 while either required live C5 artifact is absent', () => {
+  it('exposes results only via live C5 evidence or the founder-allowlist eval deferral', () => {
+    // The C5 evidence flags stay false: no evaluation has passed. Tonight's
+    // exposure rides Tori's recorded founder deferral (2026-08-26) instead,
+    // which applies to allowlist members ONLY — the global env flag can never
+    // widen it.
     expect(AI_CONSULT_C5_LIVE_BASELINE_APPROVED).toBe(false)
     expect(AI_CONSULT_C5_LIVE_CANDIDATE_PASSED).toBe(false)
+    expect(AI_CONSULT_FOUNDER_EVAL_DEFERRAL.accepted).toBe(true)
     process.env.ENABLE_AI_CONSULT = 'true'
     expect(isAiConsultC6ExposureEnabledForPro('anyone')).toBe(false)
     expect(isAiConsultC7ExposureEnabledForPro('anyone')).toBe(false)
-    expect(isAiConsultC6ExposurePossible()).toBe(false)
+    expect(isAiConsultC6ExposureEnabledForPro(undefined)).toBe(false)
+    expect(isAiConsultC6ExposurePossible()).toBe(true)
+    if (AI_CONSULT_PRO_ALLOWLIST.length > 0) {
+      const id = AI_CONSULT_PRO_ALLOWLIST[0]!
+      expect(isAiConsultC6ExposureEnabledForPro(id)).toBe(true)
+      expect(isAiConsultC7ExposureEnabledForPro(id)).toBe(true)
+    }
 
     expect(
       evaluateAiConsultC6Exposure({

@@ -103,6 +103,9 @@ const tx = {
   booking: {
     findUnique: mocks.txBookingFindUnique,
     findMany: mocks.txBookingFindMany,
+    // The AI-consult invitation lookup (maybeCreateAiConsultInvitation) sees
+    // no booking here, so the invitation path no-ops as BOOKING_INELIGIBLE.
+    findFirst: async () => null,
     update: mocks.txBookingUpdate,
   },
   mediaAsset: {

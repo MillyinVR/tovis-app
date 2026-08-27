@@ -61,13 +61,13 @@ export const CONSULT_CAPTURE_UPLOAD_TTL_MS = 60 * 60 * 1000
 // Structural ceiling on paid quality checks per consult session. Each check is
 // a provider vision call, and retakes mint a fresh capture row each time, so
 // without a per-session bound a stuck client (or automation) could spend
-// without limit inside one consult. 24 = the 4 pack slots × 6 attempts each —
+// without limit inside one consult. 42 = the 7 pack slots × 6 attempts each —
 // far beyond real use (a client failing six checks on one slot has a lighting
 // problem the retake tips address, not a reason for a seventh paid call), and
 // it holds when the redis-only route bucket fails open, because it is counted
 // in the same transaction that runs the check. Replays of an already-checked
 // capture return before this bound and stay free.
-export const CONSULT_CAPTURE_MAX_QUALITY_CHECKS_PER_SESSION = 24
+export const CONSULT_CAPTURE_MAX_QUALITY_CHECKS_PER_SESSION = 42
 
 const CAPTURE_STATES = new Set<ConsultSessionStatus>([
   ConsultSessionStatus.MEDIA_READY,
@@ -98,6 +98,8 @@ const CAPTURE_SCOPE_SELECT = {
   serviceCategoryId: true,
   bookingId: true,
   status: true,
+  chartCopyOptIn: true,
+  chartCopyDecidedAt: true,
   client: { select: { userId: true } },
   booking: {
     select: {
@@ -254,7 +256,7 @@ async function buildState(
   now: Date,
 ): Promise<ConsultCaptureStateDTO> {
   // The durable audit trail may contain arbitrarily many rejected replacements,
-  // but this read is intentionally fixed at one row per one of the four slots.
+  // but this read is intentionally fixed at one row per pack slot.
   const captures = await Promise.all(
     HAIR_COLOR_CAPTURE_SHOT_KEYS.map((shotKey) =>
       tx.consultCapture.findFirst({
@@ -284,6 +286,10 @@ async function buildState(
     consultId: session.id,
     status: session.status,
     shotPack: HAIR_COLOR_CAPTURE_PACK,
+    chartCopy: {
+      optIn: session.chartCopyOptIn,
+      decidedAt: session.chartCopyDecidedAt?.toISOString() ?? null,
+    },
     slots: HAIR_COLOR_CAPTURE_SHOT_KEYS.map((shotKey) => {
       const capture = latest.get(shotKey)
       if (!capture) {
@@ -932,5 +938,47 @@ export async function deleteConsultCapture(args: {
     args.captureId,
     now,
     args.storage ?? consultCaptureStorage,
+  )
+}
+
+/**
+ * Records the client's chart-copy choice (decision 2026-08-26: default-on but
+ * visibly optional). The choice can be changed freely until analysis runs; the
+ * post-analysis copy in lib/consult/chartCopy.ts reads the committed value.
+ */
+export async function updateConsultChartCopyChoice(args: {
+  consultSessionId: string
+  clientId: string
+  actor: ClientActor
+  optIn: boolean
+  now?: Date
+}): Promise<ConsultCaptureStateDTO> {
+  const now = args.now ?? new Date()
+  return prisma.$transaction(
+    async (tx) => {
+      await lockSession(tx, args.consultSessionId, 'UPDATE')
+      const session = await requireScope(tx, {
+        consultSessionId: args.consultSessionId,
+        clientId: args.clientId,
+        actorUserId: args.actor.id,
+        now,
+      })
+      await requireCurrentConsultAgreementAcceptances(tx, session.id)
+      assertCaptureState(session)
+      await tx.consultSession.update({
+        where: { id: session.id },
+        data: { chartCopyOptIn: args.optIn, chartCopyDecidedAt: now },
+      })
+      return buildState(
+        tx,
+        {
+          ...session,
+          chartCopyOptIn: args.optIn,
+          chartCopyDecidedAt: now,
+        },
+        now,
+      )
+    },
+    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
   )
 }

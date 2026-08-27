@@ -7218,6 +7218,14 @@ model ConsultSession {
   // ConsultRevision is inserted. It is coordination metadata, not content.
   revisionSequence Int @default(0)
 
+  // Decision 2026-08-26: consult photos may be kept on the client's chart as
+  // PRO_CLIENT MediaAssets. Default-on but visibly optional; decidedAt records
+  // the client's explicit choice, completedAt records the post-analysis copy
+  // (idempotency marker — the copy runs at most once per consult).
+  chartCopyOptIn       Boolean   @default(true)
+  chartCopyDecidedAt   DateTime?
+  chartCopyCompletedAt DateTime?
+
   revisions            ConsultRevision[]
   agreementAcceptances ConsultAgreementAcceptance[]
   auditEvents          ConsultAuditEvent[]

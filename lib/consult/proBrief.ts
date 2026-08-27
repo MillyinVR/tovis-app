@@ -89,6 +89,8 @@ async function loadSessionBrief(
     inspiration: payload.inspiration,
     clientIntake: payload.clientIntake,
     aiObservations: payload.aiObservations,
+    profile: payload.profile,
+    styleDirections: payload.styleDirections,
     safetyFlags: payload.safetyFlags,
     achievabilityDirection: payload.achievabilityDirection,
     recommendationDirections: payload.recommendationDirections,

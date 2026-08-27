@@ -134,6 +134,8 @@ function clientResultsDto(args: {
     intakeRevisionId: args.result.intakeRevisionId,
     clientIntake: args.result.payload.clientIntake,
     aiObservations: args.result.payload.aiObservations,
+    profile: args.result.payload.profile,
+    styleDirections: args.result.payload.styleDirections,
     safetyFlags: args.result.payload.safetyFlags,
     achievabilityDirection: args.result.payload.achievabilityDirection,
     recommendationDirections: directions,
