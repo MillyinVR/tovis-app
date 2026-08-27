@@ -30,7 +30,16 @@ import {
   badgeToneForBookingStatus,
   labelForBookingStatus,
 } from '@/lib/booking/statusLabel'
-import { CHART_BOOKING_SELECT } from '@/lib/clients/chartBookingSelect'
+import {
+  CHART_BOOKING_FILTER_NONE,
+  CHART_BOOKING_HISTORY_TAKE,
+  CHART_BOOKING_SELECT,
+  chartBookingWhere,
+  isChartBookingFilterActive,
+  parseChartBookingFilter,
+} from '@/lib/clients/chartBookingSelect'
+import { CHART_PHOTO_TAKE, chartPhotoWhere } from '@/lib/clients/chartPhotoQuery'
+import { comparePhotoPhase } from '@/lib/proBookingMedia'
 import RelationshipBadgePill from '@/app/_components/RelationshipBadgePill'
 import { partitionNotesByKind } from '@/lib/clients/clientNoteKinds'
 import {
@@ -265,8 +274,6 @@ type ClientLeftReviewRow = Prisma.ReviewGetPayload<{
 type ProFeedbackRow = Prisma.ClientProfessionalNoteGetPayload<{
   select: typeof PRO_FEEDBACK_SELECT
 }>
-
-const PHASE_ORDER: Record<string, number> = { BEFORE: 0, AFTER: 1, OTHER: 2 }
 
 type TimelinePhoto = {
   id: string
@@ -519,16 +526,9 @@ async function loadPhotoTimeline(
   proId: string,
 ): Promise<TimelineVisit[]> {
   const rows = await prisma.mediaAsset.findMany({
-    where: {
-      mediaType: 'IMAGE',
-      booking: { clientId },
-      OR: [
-        { professionalId: proId },
-        { visibility: 'PUBLIC', reviewId: { not: null } },
-      ],
-    },
+    where: chartPhotoWhere({ clientId, proId }),
     orderBy: { createdAt: 'desc' },
-    take: 500,
+    take: CHART_PHOTO_TAKE,
     select: TIMELINE_MEDIA_SELECT,
   })
 
@@ -570,9 +570,7 @@ async function loadPhotoTimeline(
 
   const visits = [...byBooking.values()]
   for (const visit of visits) {
-    visit.photos.sort(
-      (a, b) => (PHASE_ORDER[a.phase] ?? 9) - (PHASE_ORDER[b.phase] ?? 9),
-    )
+    visit.photos.sort((a, b) => comparePhotoPhase(a.phase, b.phase))
   }
   visits.sort(
     (a, b) => (b.when?.getTime() ?? 0) - (a.when?.getTime() ?? 0),
@@ -1976,10 +1974,12 @@ export default async function ClientDetailPage(props: {
           },
         },
       }),
+      // The WHOLE history — it powers the header counts and relationship
+      // intelligence as well as the history tab, so it must never be narrowed.
       prisma.booking.findMany({
         where: { clientId },
         orderBy: { scheduledFor: 'desc' },
-        take: 2000,
+        take: CHART_BOOKING_HISTORY_TAKE,
         select: BOOKING_ROW_SELECT,
       }),
       prisma.review.count({ where: { clientId, ...visibleReviewsWhere } }),
@@ -2041,11 +2041,21 @@ export default async function ClientDetailPage(props: {
   const email = client.user?.email || ''
   const phone = client.phone || ''
 
-  // History-tab inputs (filter the already-loaded set; no extra query).
+  // History-tab inputs. `q` / `bookingFilter` still filter the already-loaded
+  // set in memory (no extra query); `status` / `withMe` are the SERVER-side pair
+  // the native chart shares, and when either is present the history tab reads a
+  // narrowed query instead. An unrecognized status has no way to be answered
+  // with a 400 here, so the page falls back to showing everything.
   const bookingQ = firstParam(searchParams.q).trim()
   const bookingFilter = normalizeBookingFilter(
     firstParam(searchParams.bookingFilter),
   )
+  const parsedChartFilter = parseChartBookingFilter((key) =>
+    firstParam(searchParams[key]),
+  )
+  const chartFilter = parsedChartFilter.ok
+    ? parsedChartFilter.filter
+    : CHART_BOOKING_FILTER_NONE
 
   let myServiceIds: string[] = []
   let bookingRowsFiltered: BookingRow[] = []
@@ -2058,7 +2068,16 @@ export default async function ClientDetailPage(props: {
       })
       myServiceIds = myOfferings.map((o) => o.serviceId).filter(Boolean)
     }
-    const matched = bookingRowsAll.filter((booking) =>
+    // Narrowed in Prisma when asked for; otherwise the set already in hand.
+    const historyRows = isChartBookingFilterActive(chartFilter)
+      ? await prisma.booking.findMany({
+          where: chartBookingWhere({ clientId, proId, filter: chartFilter }),
+          orderBy: { scheduledFor: 'desc' },
+          take: CHART_BOOKING_HISTORY_TAKE,
+          select: BOOKING_ROW_SELECT,
+        })
+      : bookingRowsAll
+    const matched = historyRows.filter((booking) =>
       bookingMatchesFilter(booking, { bookingFilter, proId, myServiceIds, now }),
     )
     bookingRowsFiltered = filterBookingsBySearch({

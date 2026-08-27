@@ -7,7 +7,7 @@
 // technical-record gate), respecting `assertProCanViewClient` and the founder
 // technical-record flag. Decryption is applied for occupation only; encrypted
 // technical notes are intentionally NOT returned (kept web-only). PRO-only.
-import { Prisma } from '@prisma/client'
+import { BookingStatus, Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
@@ -22,7 +22,15 @@ import {
   formatRelationshipIntelligence,
 } from '@/lib/clients/relationshipIntelligence'
 import { deriveRelationshipBadge } from '@/lib/booking/relationshipLabel'
-import { CHART_BOOKING_SELECT } from '@/lib/clients/chartBookingSelect'
+import {
+  CHART_BOOKING_HISTORY_TAKE,
+  CHART_BOOKING_SELECT,
+  chartBookingWhere,
+  isChartBookingFilterActive,
+  parseChartBookingFilter,
+} from '@/lib/clients/chartBookingSelect'
+import { CHART_PHOTO_TAKE, chartPhotoWhere } from '@/lib/clients/chartPhotoQuery'
+import { comparePhotoPhase } from '@/lib/proBookingMedia'
 import { resolveAppointmentDisplayTimeZone } from '@/lib/booking/appointmentDisplayTimeZone'
 import { resolveProScheduleTimeZone } from '@/lib/proLocations/resolveProScheduleTimeZone'
 import { decimalToNullableNumber } from '@/lib/booking/snapshots'
@@ -114,7 +122,7 @@ function proName(p: { businessName: string | null; firstName: string | null; las
   return name || 'Professional'
 }
 
-export async function GET(_req: Request, ctx: RouteContext) {
+export async function GET(req: Request, ctx: RouteContext) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
@@ -130,11 +138,23 @@ export async function GET(_req: Request, ctx: RouteContext) {
       return jsonFail(refusal.status, refusal.message, { code: refusal.code })
     }
 
+    // Optional history narrowing (`?status=COMPLETED&withMe=true`). Parsed
+    // AFTER the access gate so a malformed param can never be an oracle about a
+    // client this pro cannot see. Absent params ⇒ the whole history, exactly as
+    // before this route learned to filter.
+    const url = new URL(req.url)
+    const parsedFilter = parseChartBookingFilter((key) => url.searchParams.get(key))
+    if (!parsedFilter.ok) return jsonFail(400, parsedFilter.error)
+    const filter = parsedFilter.filter
+    const filterActive = isChartBookingFilterActive(filter)
+
     const technicalEnabled = isClientTechnicalRecordEnabled(proId)
 
     const [
       client,
       bookings,
+      filteredBookings,
+      noShowCount,
       reviewCount,
       products,
       clientLeftReviews,
@@ -152,7 +172,32 @@ export async function GET(_req: Request, ctx: RouteContext) {
             notes: { where: { professionalId: proId }, orderBy: { createdAt: 'desc' }, select: CLIENT_SELECT.notes.select },
           },
         }),
-        prisma.booking.findMany({ where: { clientId }, orderBy: { scheduledFor: 'desc' }, take: 500, select: BOOKING_SELECT }),
+        // The WHOLE history, unnarrowed, always. `header.bookingCount` and every
+        // relationship-intelligence tile are statements about the client's
+        // complete record — computing them off a filtered set would report a
+        // lifetime value of one visit because the caller asked for one status.
+        prisma.booking.findMany({
+          where: { clientId },
+          orderBy: { scheduledFor: 'desc' },
+          take: CHART_BOOKING_HISTORY_TAKE,
+          select: BOOKING_SELECT,
+        }),
+        // The narrowed list that `history[]` renders — a real Prisma `where`, not
+        // an in-memory pass. Only runs when something was actually asked for, so
+        // an unfiltered request still costs exactly one booking query.
+        filterActive
+          ? prisma.booking.findMany({
+              where: chartBookingWhere({ clientId, proId, filter }),
+              orderBy: { scheduledFor: 'desc' },
+              take: CHART_BOOKING_HISTORY_TAKE,
+              select: BOOKING_SELECT,
+            })
+          : Promise.resolve(null),
+        // App-wide, on purpose: NO `professionalId`. "Has this client no-showed
+        // before?" is a question about the client, and an answer scoped to the
+        // viewing pro would read as "never" for a client who has stood up five
+        // other pros. Backed by @@index([clientId, status]) on Booking.
+        prisma.booking.count({ where: { clientId, status: BookingStatus.NO_SHOW } }),
         prisma.review.count({ where: { clientId, ...visibleReviewsWhere } }),
         prisma.productRecommendation.findMany({
           where: { aftercareSummary: { booking: { clientId, professionalId: proId } } },
@@ -163,12 +208,9 @@ export async function GET(_req: Request, ctx: RouteContext) {
         prisma.review.findMany({ where: { clientId, ...visibleReviewsWhere }, orderBy: { createdAt: 'desc' }, take: 200, select: REVIEW_SELECT }),
         prisma.clientProfessionalNote.findMany({ where: { clientId }, orderBy: { createdAt: 'desc' }, take: 200, select: FEEDBACK_SELECT }),
         prisma.mediaAsset.findMany({
-          where: {
-            booking: { clientId },
-            OR: [{ professionalId: proId }, { reviewId: { not: null } }],
-          },
+          where: chartPhotoWhere({ clientId, proId }),
           orderBy: { createdAt: 'desc' },
-          take: 200,
+          take: CHART_PHOTO_TAKE,
           select: PHOTO_SELECT,
         }),
         // Relationship-intelligence inputs (mirror the web chart loader).
@@ -246,6 +288,25 @@ export async function GET(_req: Request, ctx: RouteContext) {
       )
     ).filter((p): p is NonNullable<typeof p> => p !== null)
 
+    // `history[]` renders the narrowed list when one was asked for; everything
+    // else on this response stays whole-record.
+    const historyRows = filteredBookings ?? bookings
+
+    // Per-visit photos, grouped from the SAME MediaAsset rows already fetched and
+    // rendered above — one query for the whole chart, never one per booking. A
+    // photo with no `bookingId` (a Look, a portfolio upload) belongs to no visit
+    // and is correctly absent here; it still appears in the flat `photos` array.
+    const photosByBooking = new Map<string, typeof photos>()
+    for (const photo of photos) {
+      if (!photo.bookingId) continue
+      const bucket = photosByBooking.get(photo.bookingId)
+      if (bucket) bucket.push(photo)
+      else photosByBooking.set(photo.bookingId, [photo])
+    }
+    for (const bucket of photosByBooking.values()) {
+      bucket.sort((a, b) => comparePhotoPhase(a.phase, b.phase))
+    }
+
     return jsonOk({
       header: {
         id: client.id,
@@ -261,6 +322,8 @@ export async function GET(_req: Request, ctx: RouteContext) {
         reviewCount,
       },
       relationshipIntelligence,
+      // Cross-professional, by design — see the count query above.
+      noShowCount,
       alertBanner: pickString(client.alertBanner),
       doNotRebook: doNotRebookNote ? { reason: pickString(doNotRebookNote.body), createdAt: doNotRebookNote.createdAt.toISOString() } : null,
       allergies: client.allergies.map((a) => ({
@@ -281,7 +344,7 @@ export async function GET(_req: Request, ctx: RouteContext) {
           createdAt: n.createdAt.toISOString(),
         })),
       })),
-      history: bookings.map((b) => ({
+      history: historyRows.map((b) => ({
         id: b.id,
         status: b.status,
         scheduledFor: b.scheduledFor.toISOString(),
@@ -299,6 +362,10 @@ export async function GET(_req: Request, ctx: RouteContext) {
           b.professionalId === proId ? deriveRelationshipBadge(b) : null,
         total: moneyToString(b.totalAmount ?? b.subtotalSnapshot) ?? null,
         aftercareNotes: pickString(b.aftercareSummary?.notes),
+        // The visit's own before/after frames, BEFORE-first — the same rows and
+        // the same order as the web timeline's card for this booking. Empty when
+        // the visit has no photos this pro is allowed to see.
+        photos: photosByBooking.get(b.id) ?? [],
       })),
       products: products.map((p) => ({
         id: p.id,

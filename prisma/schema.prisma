@@ -3950,6 +3950,12 @@ model Booking {
   @@unique([seriesId, seriesOccurrenceIndex])
   @@index([professionalId, scheduledFor])
   @@index([clientId, scheduledFor])
+  // The chart's cross-professional no-show count
+  // (prisma.booking.count({ clientId, status: NO_SHOW })). No existing index
+  // covers `status`, and @@index([clientId, scheduledFor]) can only narrow to
+  // the client before filtering every one of their bookings by status in the
+  // heap — fine at 5 visits, a scan at 500.
+  @@index([clientId, status])
   @@index([locationId, scheduledFor])
   @@index([professionalId, source])
   @@index([clientAddressId])

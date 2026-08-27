@@ -69,6 +69,25 @@ export function parseMediaPhase(value: unknown): MediaPhase | null {
   return null
 }
 
+/**
+ * Display order for one visit's photos: BEFORE, then AFTER, then anything else.
+ *
+ * The web chart's photo timeline and the native chart's per-visit photos read
+ * the SAME rows and must tell the same story in the same order — a device that
+ * led with the AFTER shot would be showing a different visit than the web.
+ * Keyed off Prisma's enum so a new phase can't be ordered by a stale copy.
+ */
+const MEDIA_PHASE_ORDER: Record<string, number> = {
+  [MediaPhase.BEFORE]: 0,
+  [MediaPhase.AFTER]: 1,
+  [MediaPhase.OTHER]: 2,
+}
+
+/** Sort comparator over `MEDIA_PHASE_ORDER`; unknown phases sort last. */
+export function comparePhotoPhase(a: string, b: string): number {
+  return (MEDIA_PHASE_ORDER[a] ?? 9) - (MEDIA_PHASE_ORDER[b] ?? 9)
+}
+
 export async function listProBookingMedia(
   input: ListProBookingMediaInput,
 ): Promise<ListProBookingMediaOutcome> {
