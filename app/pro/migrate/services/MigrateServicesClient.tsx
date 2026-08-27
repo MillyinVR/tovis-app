@@ -2,9 +2,9 @@
 
 // app/pro/migrate/services/MigrateServicesClient.tsx
 //
-// Real service-menu import: upload CSV → client-side parse → match against the
-// license-gated catalog (POST /preview) → review/map + tune raises → commit
-// (POST /commit). Server types are type-only imports (erased at build).
+// Real service-menu import: upload CSV/Excel → shared server parse → match
+// against the license-gated catalog (POST /preview) → review/map + tune raises
+// → commit (POST /commit). Server types are type-only imports (erased at build).
 
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
@@ -28,6 +28,7 @@ import {
   type RaiseConfigChange,
 } from './_components/RaisePlanSection'
 import { ServiceMapRow } from './_components/ServiceMapRow'
+import { parseDurationMinutes } from '../_utils/parseDurationMinutes'
 import {
   parseSpreadsheetFiles,
   type ParsedFileTable,
@@ -147,7 +148,7 @@ export function MigrateServicesClient({ copy }: { copy: MigrationCopy['services'
       .map((r) => ({
         name: (nameCol ? r[nameCol] : '')?.trim() ?? '',
         price: priceCol ? parseNum(r[priceCol]) : null,
-        durationMinutes: durationCol ? parseNum(r[durationCol]) : null,
+        durationMinutes: durationCol ? parseDurationMinutes(r[durationCol]) : null,
       }))
       .filter((r) => r.name.length > 0)
   }
@@ -198,6 +199,19 @@ export function MigrateServicesClient({ copy }: { copy: MigrationCopy['services'
     } finally {
       setBusy(false)
     }
+  }
+
+  // "Skip — don't add": commit already ignores non-MAP rows; this just moves
+  // the row out of NEEDS_ATTENTION so one unmatchable service can't dead-end
+  // the whole step. Re-opening the dropdown and picking a service un-skips.
+  function handleSkipRow(rowId: string): void {
+    setRows((cur) =>
+      cur.map((r) =>
+        r.rowId === rowId
+          ? { ...r, selection: { kind: 'SKIP' }, status: 'SKIPPED', priceGrace: undefined }
+          : r,
+      ),
+    )
   }
 
   function handleSelectService(rowId: string, serviceId: string): void {
@@ -346,6 +360,7 @@ export function MigrateServicesClient({ copy }: { copy: MigrationCopy['services'
                   catalog={canonical}
                   copy={copy}
                   onSelectService={handleSelectService}
+                  onSkip={handleSkipRow}
                 />
               ))}
             </div>

@@ -8,8 +8,10 @@
 //
 // Every guide below was fact-checked against the source app's official help
 // docs (or, where those are silent, the migration guides of vendors who run
-// concierge imports from that app) on 2026-07-15 — sources in the PR that
-// landed this revision; re-verify before editing a path here. Several
+// concierge imports from that app) on 2026-07-15; Vagaro, Square, and Acuity
+// re-checked 2026-08-26 (Vagaro had retired its iCal calendar export and gone
+// Google-only — sources in the PR that landed each revision). Re-verify
+// against the vendor's current docs before editing a path here. Several
 // apps have NO self-serve export for a given stage; the guide then says so and
 // leads with the build-a-CSV fallback instead of pointing at a screen that
 // doesn't exist. The universal fallback (see MigrationCopy.entry.exportGuide)
@@ -40,11 +42,11 @@ const GENERIC: MigrationExportGuide = {
 
 export const EXPORT_GUIDES: Record<SourceApp, MigrationExportGuide> = {
   Vagaro: {
-    menu: 'Vagaro’s service list downloads per stylist: Settings → Employees → Employee Profiles → pick the stylist → Services → the download icon (choose Excel — it uploads as-is, and you can pick several files at once). Or just build a quick name-and-price CSV for the whole menu.',
+    menu: 'Vagaro’s service list downloads per stylist: Settings → Employee Profiles → pick the stylist → Services → the download icon (choose Excel — it uploads as-is, and you can pick several files at once). Or just build a quick name-and-price CSV for the whole menu.',
     clients:
-      'In Vagaro (owner login), go to Reports → Customers → Customers, run the report, then Export → Excel. The Excel file uploads as-is.',
+      'In Vagaro (owner login), go to Reports → Customers, run the report, then Export → Excel. The Excel file uploads as-is.',
     calendar:
-      'In Vagaro on the web, open Calendar and choose Export to iCal to download an .ics of the view on screen. Already had Apple/Outlook calendar sync connected? That subscribe link still works — paste it below.',
+      'Vagaro now syncs calendars only with Google: in Vagaro, connect Google Calendar (Vagaro → Google direction), then paste Google Calendar’s private iCal address below. Already had an Apple/Outlook calendar link connected from before? That subscribe link still works — paste it instead.',
     calendarFeed: false,
   },
   GlossGenius: {

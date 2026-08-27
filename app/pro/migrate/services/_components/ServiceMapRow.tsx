@@ -15,6 +15,7 @@ type Props = {
   catalog: CanonicalService[]
   copy: MigrationCopy['services']
   onSelectService: (rowId: string, serviceId: string) => void
+  onSkip: (rowId: string) => void
 }
 
 const BORDER_BY_STATUS: Record<Row['status'], string> = {
@@ -26,7 +27,7 @@ const BORDER_BY_STATUS: Record<Row['status'], string> = {
   SKIPPED: 'border-surfaceGlass/10 opacity-60',
 }
 
-export function ServiceMapRow({ row, catalog, copy, onSelectService }: Props) {
+export function ServiceMapRow({ row, catalog, copy, onSelectService, onSkip }: Props) {
   const sel = row.selection
   const mapped =
     sel.kind === 'MAP'
@@ -65,6 +66,7 @@ export function ServiceMapRow({ row, catalog, copy, onSelectService }: Props) {
           catalog={catalog}
           copy={copy}
           onSelectService={onSelectService}
+          onSkip={onSkip}
         />
       </div>
 
@@ -83,12 +85,14 @@ function MappingControl({
   catalog,
   copy,
   onSelectService,
+  onSkip,
 }: {
   row: Row
   mapped: CanonicalService | null
   catalog: CanonicalService[]
   copy: MigrationCopy['services']
   onSelectService: (rowId: string, serviceId: string) => void
+  onSkip: (rowId: string) => void
 }) {
   if (row.status === 'UNLICENSED') {
     return (
@@ -112,6 +116,7 @@ function MappingControl({
         catalog={catalog}
         copy={copy}
         onSelectService={onSelectService}
+        onSkip={onSkip}
         placeholder={row.status === 'SKIPPED' ? copy.skip : 'Choose a service'}
       />
     )
@@ -123,6 +128,7 @@ function MappingControl({
       catalog={catalog}
       copy={copy}
       onSelectService={onSelectService}
+      onSkip={onSkip}
       placeholder="Choose a service"
     />
   )
@@ -134,6 +140,7 @@ function ServiceDropdown({
   catalog,
   copy,
   onSelectService,
+  onSkip,
   placeholder,
 }: {
   row: Row
@@ -141,6 +148,7 @@ function ServiceDropdown({
   catalog: CanonicalService[]
   copy: MigrationCopy['services']
   onSelectService: (rowId: string, serviceId: string) => void
+  onSkip: (rowId: string) => void
   placeholder: string
 }) {
   const [open, setOpen] = useState(false)
@@ -256,15 +264,16 @@ function ServiceDropdown({
               })}
             </div>
           ))}
+          {/* "Request new service" used to render here too, but no backend
+              exists to receive the request yet — a button that claims to send
+              one is worse than none. Restore it with real machinery. */}
           <div className="mt-1 border-t border-surfaceGlass/10 pt-1">
             <button
               type="button"
-              className="flex w-full rounded-[8px] px-2 py-1.5 text-left text-[13px] text-amber hover:bg-surfaceGlass/5"
-            >
-              {copy.requestNew}
-            </button>
-            <button
-              type="button"
+              onClick={() => {
+                onSkip(row.rowId)
+                setOpen(false)
+              }}
               className="flex w-full rounded-[8px] px-2 py-1.5 text-left text-[13px] text-textMuted hover:bg-surfaceGlass/5"
             >
               {copy.skip}
