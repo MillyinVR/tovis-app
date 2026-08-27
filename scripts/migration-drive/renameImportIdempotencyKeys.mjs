@@ -18,7 +18,7 @@
 //   - Only rows whose key matches the EXACT old shape are renamed. A row whose
 //     key already contains its own professionalId is left alone (idempotent),
 //   - refuses to run unless `--yes` is passed after the dry-run preview,
-//   - refuses to run against a DATABASE_URL that looks like production
+//   - refuses to run against anything but a clearly-LOCAL DATABASE_URL
 //     (prod imports must go through Tori explicitly).
 //
 // Usage:
@@ -40,10 +40,23 @@ for (const line of readFileSync(new URL('../../.env.local', import.meta.url), 'u
 
 const prisma = new PrismaClient()
 
+// Fail CLOSED: run only against a clearly-local database. The old guard here
+// blocklisted a "hosted endpoint" shape — `:<port>` followed by a literal dot —
+// that no real URL has (prod pooler, direct, and localhost all put `/` after
+// the port), so it aborted on nothing while .env.local's DATABASE_URL points
+// at production. An unparseable URL also aborts.
 const url = process.env.DATABASE_URL ?? ''
-if (/postgres(ql)?:\/\/[^/]*:(\d+)\./.test(url)) {
+const dbHost = (() => {
+  try {
+    return new URL(url).hostname
+  } catch {
+    return ''
+  }
+})()
+const LOCAL_DB_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]'])
+if (!LOCAL_DB_HOSTS.has(dbHost)) {
   console.error(
-    'ABORT: DATABASE_URL looks like a hosted production endpoint. ' +
+    `ABORT: DATABASE_URL host ${JSON.stringify(dbHost || '(unparseable)')} is not a local database. ` +
       'Prod renames go through Tori explicitly.',
   )
   await prisma.$disconnect()
