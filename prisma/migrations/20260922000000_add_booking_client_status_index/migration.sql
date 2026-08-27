@@ -1,0 +1,11 @@
+-- Composite index backing the client chart's cross-professional no-show count:
+--   prisma.booking.count({ where: { clientId, status: 'NO_SHOW' } })
+--
+-- Additive and index-only: no column, no constraint, no row rewritten, and no
+-- existing query's plan can get worse for having one more index to choose from.
+--
+-- Why a NEW index rather than leaning on @@index([clientId, scheduledFor]):
+-- that one can narrow to the client, but `status` is not in it, so every one of
+-- that client's bookings still has to be visited to test the status. Harmless
+-- for a client with five visits; a heap scan for a salon regular with hundreds.
+CREATE INDEX "Booking_clientId_status_idx" ON "Booking" ("clientId", "status");
