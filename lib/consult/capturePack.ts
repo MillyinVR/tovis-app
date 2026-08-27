@@ -10,6 +10,12 @@ export const HAIR_COLOR_CAPTURE_PACK_ID = 'hair-color-daylight' as const
 export const HAIR_COLOR_CAPTURE_PACK_VERSION = 2
 export const HAIR_COLOR_CAPTURE_SCHEMA_VERSION = 1
 
+// Lives here (not captureStorage, which is server-only) because the browser
+// wizard downscales photos against the same cap the storage boundary enforces.
+// Mirrored by the DB CHECK constraints ("maxBytes"/"sizeBytes" BETWEEN 1 AND
+// 5000000) and iOS ConsultService.maximumPhotoBytes.
+export const CONSULT_CAPTURE_MAX_BYTES = 5_000_000
+
 /**
  * Pack v2 (full-analysis): the four hair views from pack v1 plus three face
  * views. Order is the fixed evidence order the analysis engine sends to the

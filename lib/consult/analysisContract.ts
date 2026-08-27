@@ -339,18 +339,19 @@ async function currentCaptures(
     captureMediaType(capture.contentType)
     byShot.set(capture.shotKey, capture)
   }
-  if (byShot.size !== HAIR_COLOR_CAPTURE_SHOT_KEYS.length) {
+  // Partial packs are allowed (Tori, 2026-08-27): the client can proceed with
+  // any non-empty accepted subset, and the v2 prompt is told which views are
+  // missing. The lifecycle transition into ANALYSIS_PENDING enforced the same
+  // at-least-one bound.
+  if (byShot.size < 1) {
     throw new ConsultWriteError(
       'ANALYSIS_PREREQUISITES_REQUIRED',
-      'Seven accepted, unexpired captures are required.',
+      'At least one accepted, unexpired capture is required.',
     )
   }
-  return HAIR_COLOR_CAPTURE_SHOT_KEYS.map((shotKey) => {
+  return HAIR_COLOR_CAPTURE_SHOT_KEYS.flatMap((shotKey) => {
     const capture = byShot.get(shotKey)
-    if (!capture) {
-      throw new ConsultWriteError('ANALYSIS_PREREQUISITES_REQUIRED', 'Capture missing.')
-    }
-    return capture
+    return capture ? [capture] : []
   })
 }
 
@@ -813,6 +814,7 @@ export async function runConsultAnalysis(args: {
         try {
           providerResult = validateHairColorAnalysisProviderResult(
             await provider({ intake: intake.payload.answers, captures: images }),
+            images.map((image) => image.shotKey),
           )
           providerResult = {
             ...providerResult,

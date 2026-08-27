@@ -202,7 +202,7 @@ describe('hair-color consult analysis provider', () => {
       captures,
     })
     expect(CONSULT_ANALYSIS_SCHEMA_VERSION).toBe(2)
-    expect(CONSULT_ANALYSIS_PROMPT_VERSION).toBe('full-analysis-v1')
+    expect(CONSULT_ANALYSIS_PROMPT_VERSION).toBe('full-analysis-v2')
     expect(result.model).toBe(CONSULT_ANALYSIS_DEFAULT_MODEL)
 
     const [params, options] = mocks.create.mock.calls[0] ?? []
@@ -272,12 +272,65 @@ describe('hair-color consult analysis provider', () => {
     ).toThrowError(ConsultAnalysisProviderError)
   })
 
-  it('rejects duplicate or incomplete capture packs before provider work', async () => {
+  it('rejects duplicate and empty capture packs before provider work', async () => {
     const duplicatePack = captures.map(() => captures[0]!)
     await expect(
       runHairColorAnalysis({ intake: {}, captures: duplicatePack }),
     ).rejects.toThrowError(ConsultAnalysisProviderError)
+    await expect(
+      runHairColorAnalysis({ intake: {}, captures: [] }),
+    ).rejects.toThrowError(ConsultAnalysisProviderError)
     expect(mocks.create).not.toHaveBeenCalled()
+  })
+
+  it('accepts a partial pack and names the missing views to the provider', async () => {
+    mocks.create.mockResolvedValue(message(validOutput()))
+    const partial = captures.filter(
+      (capture) =>
+        capture.shotKey !== 'hair_back' && capture.shotKey !== 'face_side',
+    )
+    await runHairColorAnalysis({
+      intake: { desired_color: 'red' },
+      captures: partial,
+    })
+    const [params] = mocks.create.mock.calls[0] ?? []
+    const images = params.messages[0].content.filter(
+      (item: { type: string }) => item.type === 'image',
+    )
+    expect(images).toHaveLength(5)
+    const serialized = JSON.stringify(params.messages[0].content)
+    expect(serialized).toContain(
+      'Missing views (not supplied): hair_back, face_side.',
+    )
+    expect(serialized).not.toContain('Evidence label: hair_back')
+  })
+
+  it('sends no missing-views line for a full pack', async () => {
+    mocks.create.mockResolvedValue(message(validOutput()))
+    await runHairColorAnalysis({ intake: {}, captures })
+    const [params] = mocks.create.mock.calls[0] ?? []
+    expect(JSON.stringify(params.messages[0].content)).not.toContain(
+      'Missing views',
+    )
+  })
+
+  it('refuses provider output citing a view that was not supplied', () => {
+    // validOutput cites hair_back / face_front / eyes_closeup.
+    const supplied = ['face_front', 'eyes_closeup'] as const
+    expect(() =>
+      validateHairColorAnalysisProviderResult(
+        { analysis: validOutput(), model: 'fake-model' },
+        [...supplied],
+      ),
+    ).toThrowError(ConsultAnalysisProviderError)
+
+    const fullSupplied = captures.map((capture) => capture.shotKey)
+    expect(() =>
+      validateHairColorAnalysisProviderResult(
+        { analysis: validOutput(), model: 'fake-model' },
+        fullSupplied,
+      ),
+    ).not.toThrow()
   })
 
   it('returns typed content-free failures for provider errors and refusals', async () => {

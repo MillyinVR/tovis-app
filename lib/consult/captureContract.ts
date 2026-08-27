@@ -52,7 +52,10 @@ import {
   evaluateAiConsultBookingEligibility,
 } from './eligibility'
 import { ConsultWriteError } from './errors'
-import { advanceLockedConsultToAnalysisIfReady } from './inspirationContract'
+import {
+  advanceLockedConsultToAnalysisIfReady,
+  requireCompletedConsultInspiration,
+} from './inspirationContract'
 import { transitionLockedConsultSession } from './writeBoundary'
 
 export const CONSULT_CAPTURE_RAW_TTL_MS = 24 * 60 * 60 * 1000
@@ -232,12 +235,17 @@ function stateForCapture(capture: {
   const reasonCode = capture.qualityReasonCode
     ? [...QUALITY_REASON_CODES].find((candidate) => candidate === capture.qualityReasonCode) ?? null
     : null
-  const state = capture.purgedAt
-    ? 'PURGED'
-    : capture.status === ConsultCaptureStatus.ACCEPTED
-      ? 'ACCEPTED'
-      : capture.status === ConsultCaptureStatus.REJECTED
-        ? 'REJECTED'
+  // A rejected capture is purge-marked in the same commit and its raw object
+  // is purged immediately after, so purgedAt must NOT eclipse the rejection:
+  // the client still needs the REJECTED state, reason code, and retake tip to
+  // explain the slot. PURGED is reserved for non-rejected rows (post-analysis
+  // or client-deleted captures).
+  const state = capture.status === ConsultCaptureStatus.REJECTED
+    ? 'REJECTED'
+    : capture.purgedAt
+      ? 'PURGED'
+      : capture.status === ConsultCaptureStatus.ACCEPTED
+        ? 'ACCEPTED'
         : 'UPLOADED'
   return {
     shotKey,
@@ -938,6 +946,87 @@ export async function deleteConsultCapture(args: {
     args.captureId,
     now,
     args.storage ?? consultCaptureStorage,
+  )
+}
+
+/**
+ * Client-initiated advance to analysis with an incomplete accepted pack
+ * (Tori, 2026-08-27). Auto-advance still requires all seven accepted shots;
+ * this explicit action needs the finished inspiration step plus at least ONE
+ * accepted, unexpired capture — the analysis prompt (full-analysis-v2) is told
+ * which views are missing and must keep their observations UNKNOWN.
+ */
+export async function proceedConsultCaptureToAnalysis(args: {
+  consultSessionId: string
+  clientId: string
+  actor: ClientActor
+  now?: Date
+}): Promise<{ capture: ConsultCaptureStateDTO; advanced: boolean }> {
+  const now = args.now ?? new Date()
+  return prisma.$transaction(
+    async (tx) => {
+      await lockSession(tx, args.consultSessionId, 'UPDATE')
+      const session = await requireScope(tx, {
+        consultSessionId: args.consultSessionId,
+        clientId: args.clientId,
+        actorUserId: args.actor.id,
+        now,
+      })
+      await requireCurrentConsultAgreementAcceptances(tx, session.id)
+      if (session.status === ConsultSessionStatus.ANALYSIS_PENDING) {
+        // Replay: an earlier proceed (or the full-pack auto-advance) already
+        // moved the session forward.
+        return { capture: await buildState(tx, session, now), advanced: false }
+      }
+      if (session.status !== ConsultSessionStatus.MEDIA_READY) {
+        throw new ConsultWriteError('INVALID_STATE', 'Capture proceed is unavailable.')
+      }
+      try {
+        await requireCompletedConsultInspiration(tx, {
+          consultSessionId: session.id,
+          clientId: session.clientId,
+          professionalId: session.professionalId,
+          now,
+        })
+      } catch (error) {
+        if (
+          error instanceof ConsultWriteError &&
+          error.code === 'ANALYSIS_PREREQUISITES_REQUIRED'
+        ) {
+          throw new ConsultWriteError(
+            'ANALYSIS_INSPIRATION_REQUIRED',
+            'Finish the inspiration step before continuing to analysis.',
+          )
+        }
+        throw error
+      }
+      const advanced = await advanceLockedConsultToAnalysisIfReady(
+        tx,
+        {
+          consultSessionId: session.id,
+          clientId: session.clientId,
+          professionalId: session.professionalId,
+          actor: args.actor,
+          now,
+        },
+        { minimumAcceptedShots: 1 },
+      )
+      if (!advanced) {
+        throw new ConsultWriteError(
+          'ANALYSIS_CAPTURES_REQUIRED',
+          'At least one accepted photo is required before analysis.',
+        )
+      }
+      return {
+        capture: await buildState(
+          tx,
+          { ...session, status: ConsultSessionStatus.ANALYSIS_PENDING },
+          now,
+        ),
+        advanced: true,
+      }
+    },
+    { maxWait: 10_000, timeout: 60_000 },
   )
 }
 
