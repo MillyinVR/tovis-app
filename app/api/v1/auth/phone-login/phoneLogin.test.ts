@@ -14,9 +14,19 @@ vi.mock('@/lib/smsCountryPolicy', () => ({
     countryCode: 'US',
   })),
 }))
-vi.mock('@/lib/auth/verification', () => ({
-  getVerificationPhoneLookupValue: vi.fn(() => '+15555550123'),
-}))
+// Delegate to the REAL normalizer (verification.ts itself imports
+// 'server-only', so it can't be imported here directly): the routes now rely
+// on it to turn a bare 10-digit US number into E.164, and a constant mock
+// would pass with that behaviour broken.
+vi.mock('@/lib/auth/verification', async () => {
+  const { normalizePhone } = await vi.importActual<
+    typeof import('@/lib/security/contactNormalization')
+  >('@/lib/security/contactNormalization')
+  return {
+    getVerificationPhoneLookupValue: (value: unknown) =>
+      normalizePhone(value) ?? '',
+  }
+})
 vi.mock('@/lib/twilio/verify', () => ({
   startTwilioVerifyPhoneVerification: vi.fn(async () => ({
     ok: true,
@@ -107,11 +117,35 @@ describe('POST /api/v1/auth/phone-login/send', () => {
       ok: false,
       code: 'SMS_COUNTRY_UNSUPPORTED',
       message: 'Not supported.',
-      countryCode: 'XX',
+      countryCode: 'GB',
     })
-    const res = await sendPOST(req({ phone: '+440000' }))
+    const res = await sendPOST(req({ phone: '+442071234567' }))
     expect(res.status).toBe(400)
     expect((await res.json()).code).toBe('SMS_COUNTRY_UNSUPPORTED')
+  })
+
+  it('400 for an unparseable number, before the country gate', async () => {
+    const res = await sendPOST(req({ phone: '555' }))
+    expect(res.status).toBe(400)
+    expect((await res.json()).code).toBe('INVALID_PHONE_FORMAT')
+    expect(mockCountry).not.toHaveBeenCalled()
+  })
+
+  it('accepts a bare 10-digit US number — no +1 required', async () => {
+    mockFindUser.mockResolvedValue(verifiedUser)
+    const res = await sendPOST(req({ phone: '5555550123' }))
+    expect(res.status).toBe(200)
+    // Everything downstream sees the canonical E.164 form.
+    expect(mockCountry).toHaveBeenCalledWith('+15555550123')
+    expect(mockFindUser).toHaveBeenCalledWith('+15555550123')
+    expect(mockStart).toHaveBeenCalledWith({ to: '+15555550123' })
+  })
+
+  it('accepts a display-formatted number "(555) 555-0123"', async () => {
+    mockFindUser.mockResolvedValue(verifiedUser)
+    const res = await sendPOST(req({ phone: '(555) 555-0123' }))
+    expect(res.status).toBe(200)
+    expect(mockStart).toHaveBeenCalledWith({ to: '+15555550123' })
   })
 
   it('returns a generic message and does NOT send when no account exists', async () => {
@@ -174,6 +208,13 @@ describe('POST /api/v1/auth/phone-login/verify', () => {
     const res = await verifyPOST(req({ phone: '+15555550123', code: '000000' }))
     expect(res.status).toBe(400)
     expect((await res.json()).code).toBe('CODE_REJECTED')
+  })
+
+  it('verifies a bare 10-digit US number against the same Twilio identity the send used', async () => {
+    mockFindUser.mockResolvedValue(verifiedUser)
+    const res = await verifyPOST(req({ phone: '5555550123', code: '123456' }))
+    expect(res.status).toBe(200)
+    expect(mockCheck).toHaveBeenCalledWith({ to: '+15555550123', code: '123456' })
   })
 
   it('returns the session payload on a correct code', async () => {

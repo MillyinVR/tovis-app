@@ -14,6 +14,11 @@ import {
 import { resolvePostAuthNavigation } from '../postAuthRedirect'
 import { cn } from '@/lib/utils'
 import { safeJsonRecord, readErrorMessage } from '@/lib/http'
+import {
+  compactPhoneInputForSubmit,
+  formatPhoneInputValue,
+  isLikelyValidPhoneInput,
+} from '@/lib/phoneInputFormat'
 
 type Step = 'phone' | 'code'
 
@@ -78,7 +83,9 @@ export default function PhoneLoginForm({
   onUsePassword,
 }: PhoneLoginFormProps) {
   const [step, setStep] = useState<Step>('phone')
-  const [phone, setPhone] = useState(initialPhone ?? '')
+  const [phone, setPhone] = useState(() =>
+    formatPhoneInputValue(initialPhone ?? ''),
+  )
   const [code, setCode] = useState('')
   const [error, setError] = useState<Notice | null>(null)
   const [info, setInfo] = useState<Notice | null>(null)
@@ -100,9 +107,13 @@ export default function PhoneLoginForm({
 
     const at: NoticeAt = kind === 'resend' ? 'resend' : 'form'
 
-    const trimmed = phone.trim()
-    if (!trimmed) {
+    const compact = compactPhoneInputForSubmit(phone)
+    if (!compact) {
       setError({ at, message: 'Enter your phone number.' })
+      return
+    }
+    if (!isLikelyValidPhoneInput(phone)) {
+      setError({ at, message: 'Enter a valid phone number.' })
       return
     }
 
@@ -116,7 +127,7 @@ export default function PhoneLoginForm({
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         cache: 'no-store',
-        body: JSON.stringify({ phone: trimmed }),
+        body: JSON.stringify({ phone: compact }),
       })
 
       const data = await safeJsonRecord(res)
@@ -175,7 +186,10 @@ export default function PhoneLoginForm({
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         cache: 'no-store',
-        body: JSON.stringify({ phone: phone.trim(), code: trimmedCode }),
+        body: JSON.stringify({
+          phone: compactPhoneInputForSubmit(phone),
+          code: trimmedCode,
+        }),
       })
 
       const data = await safeJsonRecord(res)
@@ -235,12 +249,12 @@ export default function PhoneLoginForm({
           <FieldLabel>Phone number</FieldLabel>
           <Input
             value={phone}
-            onChange={(e) => setPhone(e.target.value)}
+            onChange={(e) => setPhone(formatPhoneInputValue(e.target.value))}
             type="tel"
             required
             autoComplete="tel"
             inputMode="tel"
-            placeholder="+1 555 123 4567"
+            placeholder="(555) 123-4567"
             disabled={sending}
           />
         </label>

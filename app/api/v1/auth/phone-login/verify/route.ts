@@ -48,21 +48,30 @@ export async function POST(request: Request) {
       return jsonFail(400, 'Invalid code format.', { code: 'CODE_INVALID' })
     }
 
-    const country = validateSmsDestinationCountry(phoneInput)
+    // Canonicalize BEFORE the country gate — libphonenumber cannot parse a
+    // number with no country prefix, so a bare 10-digit US number would be
+    // refused as "invalid" unless the user typed +1. Same order as register.
+    const phone = getVerificationPhoneLookupValue(phoneInput)
+    if (!phone) {
+      return jsonFail(400, 'Enter a valid phone number.', {
+        code: 'INVALID_PHONE_FORMAT',
+      })
+    }
+
+    const country = validateSmsDestinationCountry(phone)
     if (!country.ok) {
       return jsonFail(400, country.message, { code: country.code })
     }
 
-    const to = getVerificationPhoneLookupValue(phoneInput)
-    const user = to ? await findUserByPhoneForLogin(phoneInput) : null
+    const user = await findUserByPhoneForLogin(phone)
 
     // Uniform rejection for "no account" and "wrong code" so existence never leaks.
     const rejected = () =>
       jsonFail(400, 'Incorrect or expired code.', { code: 'CODE_REJECTED' })
 
-    if (!user || !to) return rejected()
+    if (!user) return rejected()
 
-    const check = await checkTwilioVerifyPhoneCode({ to, code })
+    const check = await checkTwilioVerifyPhoneCode({ to: phone, code })
     if (!check.ok) {
       const status = check.code === 'TWILIO_VERIFY_NOT_CONFIGURED' ? 503 : 502
       return jsonFail(status, 'Phone sign-in is unavailable.', {
