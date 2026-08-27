@@ -580,6 +580,8 @@ export type {
 // ── AI Consult (client flow + dark C6 pro brief twins) ──────────────────────
 export type {
   ConsultSessionDTO,
+  ConsultAvailabilityDTO,
+  ConsultAvailabilityResponseDTO,
   ConsultAgreementVersionDTO,
   ConsultAgreementAcceptanceDTO,
   ConsultAgreementRevocationDTO,

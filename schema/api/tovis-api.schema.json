@@ -8023,6 +8023,39 @@
       ],
       "type": "object"
     },
+    "ConsultAvailabilityDTO": {
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "consult": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultSessionDTO"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "available",
+        "consult"
+      ],
+      "type": "object"
+    },
+    "ConsultAvailabilityResponseDTO": {
+      "properties": {
+        "availability": {
+          "$ref": "#/definitions/ConsultAvailabilityDTO"
+        }
+      },
+      "required": [
+        "availability"
+      ],
+      "type": "object"
+    },
     "ConsultBriefAchievabilityDirectionDTO": {
       "properties": {
         "assessment": {
