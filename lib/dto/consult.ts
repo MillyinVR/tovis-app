@@ -20,6 +20,22 @@ export type ConsultSessionDTO = {
   createdAt: string
 }
 
+// GET /api/v1/client/consult/availability?bookingId= — whether the AI consult
+// entry surface is open for a booking the caller owns. Answers the same rule
+// the web booking page uses to render its consult card (booking eligibility +
+// existing-session ownership), so a native client can gate its entry point on
+// the server's decision instead of shipping a copy of the gate. Hidden
+// ineligibility reasons answer `available: false` with no reason — the same
+// no-leak behavior as the card simply not rendering.
+export type ConsultAvailabilityDTO = {
+  available: boolean
+  consult: ConsultSessionDTO | null
+}
+
+export type ConsultAvailabilityResponseDTO = {
+  availability: ConsultAvailabilityDTO
+}
+
 // Exact immutable wording currently required for one legal prerequisite.
 // Production owns publication; the client contract never supplies wording.
 export type ConsultAgreementVersionDTO = {
