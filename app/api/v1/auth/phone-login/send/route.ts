@@ -31,22 +31,31 @@ export async function POST(request: Request) {
       return jsonFail(400, 'Phone number is required.', { code: 'PHONE_REQUIRED' })
     }
 
-    // Format / allowed-country gate. This is about the number itself, not
-    // account existence, so a 400 here leaks nothing.
-    const country = validateSmsDestinationCountry(phoneInput)
+    // Canonicalize BEFORE the country gate — libphonenumber cannot parse a
+    // number with no country prefix, so a bare 10-digit US number would be
+    // refused as "invalid" unless the user typed +1. Same order as register.
+    const phone = getVerificationPhoneLookupValue(phoneInput)
+    if (!phone) {
+      return jsonFail(400, 'Enter a valid phone number.', {
+        code: 'INVALID_PHONE_FORMAT',
+      })
+    }
+
+    // Allowed-country gate. This is about the number itself, not account
+    // existence, so a 400 here leaks nothing.
+    const country = validateSmsDestinationCountry(phone)
     if (!country.ok) {
       return jsonFail(400, country.message, { code: country.code })
     }
 
     // IP + per-phone SMS throttle (keyed identically regardless of existence).
-    const throttle = await enforceVerificationSendThrottle({ phone: phoneInput })
+    const throttle = await enforceVerificationSendThrottle({ phone })
     if (!throttle.ok) return throttle.response
 
-    const to = getVerificationPhoneLookupValue(phoneInput)
-    const user = to ? await findUserByPhoneForLogin(phoneInput) : null
+    const user = await findUserByPhoneForLogin(phone)
 
-    if (user && to) {
-      const result = await startTwilioVerifyPhoneVerification({ to })
+    if (user) {
+      const result = await startTwilioVerifyPhoneVerification({ to: phone })
       if (!result.ok) {
         logAuthEvent({
           level:
@@ -56,7 +65,7 @@ export async function POST(request: Request) {
           provider: 'twilio_verify',
           code: result.code,
           userId: user.id,
-          phone: phoneInput,
+          phone,
         })
         if (result.code === 'TWILIO_VERIFY_NOT_CONFIGURED') {
           return jsonFail(503, 'Phone sign-in is unavailable.', {

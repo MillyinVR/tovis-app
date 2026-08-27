@@ -54,7 +54,7 @@ function renderForm(props: Partial<React.ComponentProps<typeof PhoneLoginForm>> 
 }
 
 function typePhone(value: string) {
-  fireEvent.change(screen.getByPlaceholderText('+1 555 123 4567'), {
+  fireEvent.change(screen.getByPlaceholderText('(555) 123-4567'), {
     target: { value },
   })
 }
@@ -232,12 +232,46 @@ describe('PhoneLoginForm', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
+  it('accepts a bare 10-digit number: formats the display, posts the compact form', async () => {
+    const fetchMock = setFetchSequence([jsonResponse({ message: 'sent' })])
+
+    renderForm()
+
+    typePhone('6195550123')
+    const input = screen.getByPlaceholderText(
+      '(555) 123-4567',
+    ) as HTMLInputElement
+    expect(input.value).toBe('(619) 555-0123')
+
+    clickSendCode()
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('123456')).toBeInTheDocument()
+    })
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      phone: '6195550123',
+    })
+  })
+
+  it('blocks an obviously short number client-side and never calls send', async () => {
+    const fetchMock = setFetchSequence([])
+
+    renderForm()
+
+    typePhone('619555')
+    clickSendCode()
+
+    expect(
+      await screen.findByText('Enter a valid phone number.'),
+    ).toBeInTheDocument()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('prefills the phone from initialPhone and calls onUsePassword from the toggle', () => {
     const { onUsePassword } = renderForm({ initialPhone: '+16195559999' })
 
     expect(
-      (screen.getByPlaceholderText('+1 555 123 4567') as HTMLInputElement).value,
-    ).toBe('+16195559999')
+      (screen.getByPlaceholderText('(555) 123-4567') as HTMLInputElement).value,
+    ).toBe('+1 (619) 555-9999')
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Use your password instead' }),
