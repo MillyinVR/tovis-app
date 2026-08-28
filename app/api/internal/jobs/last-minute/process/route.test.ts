@@ -34,6 +34,8 @@ const mocks = vi.hoisted(() => ({
   buildTier2ReactivationAudience: vi.fn(),
   buildTier3DiscoveryAudience: vi.fn(),
 
+  captureScheduledJobException: vi.fn(),
+
   expireOverduePriorityOffers: vi.fn(),
   offerNextPriorityClient: vi.fn(),
   hasActivePriorityOffer: vi.fn(),
@@ -96,6 +98,10 @@ vi.mock('@/lib/lastMinute/priorityOffer/priorityOffer', () => ({
 
 vi.mock('@/lib/security/logging', () => ({
   safeError: mocks.safeError,
+}))
+
+vi.mock('@/lib/observability/scheduledJobEvents', () => ({
+  captureScheduledJobException: mocks.captureScheduledJobException,
 }))
 
 import { GET, POST } from './route'
@@ -915,6 +921,30 @@ describe('app/api/internal/jobs/last-minute/process/route.ts', () => {
     await expect(result.json()).resolves.toEqual({
       ok: false,
       error: 'Internal server error',
+    })
+
+    consoleErrorSpy.mockRestore()
+  })
+
+  // Sole actor on two clocks: it expires overdue priority offers and it fills
+  // openings. While it is down an offered client stays blocked on a countdown
+  // that never lands and the pro just sees an opening nobody took — no other
+  // surface looks wrong. The console line reaches Sentry only when
+  // SENTRY_ENABLE_LOGS is on, and it is off by default.
+  it('captures the failure to Sentry, not just the console', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+
+    const thrown = new Error('db down')
+    mocks.lastMinuteTierPlanFindMany.mockRejectedValueOnce(thrown)
+
+    await GET(makeRequest({ authorization: 'Bearer job_secret_1' }))
+
+    expect(mocks.captureScheduledJobException).toHaveBeenCalledWith({
+      error: thrown,
+      job: '/api/internal/jobs/last-minute/process',
+      event: 'LAST_MINUTE_PROCESS_SWEEP_ERROR',
     })
 
     consoleErrorSpy.mockRestore()

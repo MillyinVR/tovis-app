@@ -34,6 +34,8 @@ const mocks = vi.hoisted(() => ({
 
   applyLateCaptureCancelRefund: vi.fn(),
 
+  captureBookingException: vi.fn(),
+
   safeError: vi.fn((error: unknown) => ({
     name: error instanceof Error ? error.name : 'NonErrorThrown',
     message: error instanceof Error ? error.message : String(error),
@@ -99,6 +101,15 @@ vi.mock('@/lib/booking/cancelRefund', () => ({
 vi.mock('@/lib/security/logging', () => ({
   safeError: mocks.safeError,
 }))
+
+// Spread the real module: the route also imports
+// captureManualCloseoutStripeOverCollection from here, and a bare factory would
+// leave it undefined at its call site.
+vi.mock('@/lib/observability/bookingEvents', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/lib/observability/bookingEvents')>()
+  return { ...actual, captureBookingException: mocks.captureBookingException }
+})
 
 import { POST } from './route'
 
@@ -865,6 +876,35 @@ describe('POST /api/webhooks/stripe', () => {
     await expect(response.json()).resolves.toEqual({
       error: 'Failed to process Stripe webhook.',
       code: 'STRIPE_WEBHOOK_PROCESSING_FAILED',
+    })
+
+    consoleErrorSpy.mockRestore()
+  })
+
+  // The processing error on its own HAS a backstop: markEventFailed records the
+  // event and the stripe-webhook-requeue cron retries it, capturing as it goes.
+  // THIS failure removes that backstop — the event is now neither processed nor
+  // recorded as failed, so the requeue sweep will never see it and a payment,
+  // refund or payout event can be lost outright. The console line above reaches
+  // Sentry only when SENTRY_ENABLE_LOGS is on, and it is off by default, so the
+  // capture is the only alarm that leaves the raw log.
+  it('captures a failed mark-failed to Sentry, not just the console', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+
+    const markError = new Error('mark failed')
+    mocks.applyStripePaymentSucceededInTransaction.mockRejectedValueOnce(
+      new Error('payment sync failed'),
+    )
+    mocks.stripeWebhookEventUpdate.mockRejectedValueOnce(markError)
+
+    await POST(makeWebhookRequest())
+
+    expect(mocks.captureBookingException).toHaveBeenCalledWith({
+      error: markError,
+      route: 'POST /api/webhooks/stripe',
+      event: 'STRIPE_WEBHOOK_MARK_FAILED_ERROR',
     })
 
     consoleErrorSpy.mockRestore()

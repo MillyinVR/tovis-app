@@ -6,7 +6,10 @@ import { prisma } from '@/lib/prisma'
 import { getStripe, getStripeWebhookSecret } from '@/lib/stripe/server'
 import { handleStripeEvent } from '@/lib/stripe/handleWebhookEvent'
 import { applyLateCaptureCancelRefund } from '@/lib/booking/cancelRefund'
-import { captureManualCloseoutStripeOverCollection } from '@/lib/observability/bookingEvents'
+import {
+  captureBookingException,
+  captureManualCloseoutStripeOverCollection,
+} from '@/lib/observability/bookingEvents'
 
 export const dynamic = 'force-dynamic'
 
@@ -161,6 +164,17 @@ const result = await prisma.$transaction(
       console.error('POST /api/webhooks/stripe failed to mark event failed', {
         stripeEventId: event.id,
         error: safeError(markError),
+      })
+      // The processing error above HAS a backstop: markEventFailed records the
+      // event and the stripe-webhook-requeue cron retries it, capturing on its
+      // own. This failure is the one that removes that backstop — the event is
+      // now neither processed nor recorded as failed, so the requeue sweep will
+      // never see it and Stripe's retries are the only thing left. A payment,
+      // refund or payout event can be lost outright.
+      captureBookingException({
+        error: markError,
+        route: 'POST /api/webhooks/stripe',
+        event: 'STRIPE_WEBHOOK_MARK_FAILED_ERROR',
       })
     })
 

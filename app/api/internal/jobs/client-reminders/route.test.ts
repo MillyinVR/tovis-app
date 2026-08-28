@@ -21,6 +21,8 @@ const mocks = vi.hoisted(() => ({
   clientConfirmationLoopEnabled: vi.fn(),
   armAppointmentConfirmationAsk: vi.fn(),
 
+  captureScheduledJobException: vi.fn(),
+
   safeError: vi.fn((error: unknown) => ({
     name: error instanceof Error ? error.name : 'NonErrorThrown',
     message: error instanceof Error ? error.message : String(error),
@@ -30,6 +32,10 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/app/api/_utils', () => ({
   jsonFail: mocks.jsonFail,
   jsonOk: mocks.jsonOk,
+}))
+
+vi.mock('@/lib/observability/scheduledJobEvents', () => ({
+  captureScheduledJobException: mocks.captureScheduledJobException,
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -771,6 +777,31 @@ describe('app/api/internal/jobs/client-reminders/route.ts', () => {
     await expect(result.json()).resolves.toEqual({
       ok: false,
       error: 'Internal server error',
+    })
+
+    consoleErrorSpy.mockRestore()
+  })
+
+  // This sweep CREATES the reminders, review requests and deposit reminders
+  // that the notification delivery-health probe later measures. A probe over a
+  // queue that was never filled reports healthy, so nothing downstream notices
+  // this job going dark — and the console line above reaches Sentry only when
+  // SENTRY_ENABLE_LOGS is on, which it is not by default. The capture is the
+  // only signal that leaves the raw log.
+  it('captures the failure to Sentry, not just the console', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+
+    const thrown = new Error('db down')
+    mocks.scheduledClientNotificationFindMany.mockRejectedValueOnce(thrown)
+
+    await GET(makeRequest({ authorization: 'Bearer job_secret_1' }))
+
+    expect(mocks.captureScheduledJobException).toHaveBeenCalledWith({
+      error: thrown,
+      job: '/api/internal/jobs/client-reminders',
+      event: 'CLIENT_REMINDERS_SWEEP_ERROR',
     })
 
     consoleErrorSpy.mockRestore()
