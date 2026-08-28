@@ -14,7 +14,6 @@ import {
   boundsForRadiusMiles,
   buildDiscoveryLocationLabel,
   buildDiscoveryOfferSummaryMap,
-  haversineMiles,
   inferProfessionTypesFromQuery,
   isOpenNowAtLocation,
   mapProfessionalLocation,
@@ -92,28 +91,6 @@ describe('lib/discovery/nearby.ts', () => {
 
   afterEach(() => {
     vi.useRealTimers()
-  })
-
-  describe('haversineMiles', () => {
-    it('returns zero distance for identical coordinates', () => {
-      expect(
-        haversineMiles(
-          { lat: 32.7157, lng: -117.1611 },
-          { lat: 32.7157, lng: -117.1611 },
-        ),
-      ).toBeCloseTo(0, 8)
-    })
-
-    it('returns a positive symmetric distance for different coordinates', () => {
-      const a = { lat: 32.7157, lng: -117.1611 }
-      const b = { lat: 34.0522, lng: -118.2437 }
-
-      const ab = haversineMiles(a, b)
-      const ba = haversineMiles(b, a)
-
-      expect(ab).toBeGreaterThan(0)
-      expect(ab).toBeCloseTo(ba, 8)
-    })
   })
 
   describe('milesToLatDelta / milesToLngDelta', () => {

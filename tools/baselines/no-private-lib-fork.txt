@@ -19,7 +19,6 @@ app/(main)/booking/AvailabilityDrawer/utils/hold.ts|pickString
 app/(main)/booking/add-ons/page.tsx|normalizeLocationType
 app/(main)/booking/add-ons/page.tsx|parseCommaIds
 app/(main)/booking/add-ons/ui/AddOnsClient.tsx|parseCommaIds
-app/(main)/search/SearchMapClient.tsx|haversineMiles
 app/_components/_hooks/useUnreadBadge.ts|safeJson
 app/admin/license-review/page.tsx|fullName
 app/admin/nfc/page.tsx|isUniqueConstraintError
