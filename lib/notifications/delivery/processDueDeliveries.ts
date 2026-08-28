@@ -18,7 +18,12 @@ import {
 import { appendClaimChannelParams } from '@/lib/clients/claimLinkChannel'
 import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
-import { getOrCreateShortLink, buildShortLinkUrl } from '@/lib/shortLink/shortLinkService'
+import {
+  getOrCreateShortLink,
+  buildShortLinkUrl,
+  ShortLinkDestinationNotAllowedError,
+} from '@/lib/shortLink/shortLinkService'
+import { captureNotificationException } from '@/lib/observability/notificationEvents'
 import {
   claimDeliveries,
   type ClaimDeliveriesArgs,
@@ -228,6 +233,62 @@ function pathFromAbsoluteAppUrl(absoluteUrl: string): string | null {
 }
 
 /**
+ * How many EXTRA attempts a mint gets after the first one fails. One, and only
+ * for a failure that could plausibly differ next time (a DB hiccup mid-drain):
+ * getOrCreateShortLink is idempotent on (createdForType, createdForId), so a
+ * second call either reuses the row the first call actually wrote or mints it
+ * cleanly. A rejected destination is NOT retried — see below.
+ */
+const SHORT_LINK_MINT_RETRIES = 1
+
+/**
+ * One mint, retried once on a transient failure, with the final failure both
+ * logged and captured. Returns the tappable short URL, or null when it could
+ * not be minted (the caller then falls back to the un-shortened app URL).
+ *
+ * A ShortLinkDestinationNotAllowedError is deterministic — the allowlist is a
+ * static prefix list, so a second call returns the identical refusal — and is
+ * therefore failed immediately rather than retried. It is still the failure
+ * most worth an alert: it means a legitimate notification destination is
+ * missing from lib/shortLink/allowlist.ts, so EVERY send of that event
+ * degrades, quietly, for as long as the gap stands. That is exactly how
+ * /pro/bookings/ went unnoticed until a daily brief surfaced it.
+ */
+async function mintDeliveryShortLink(args: {
+  dispatchId: string
+  deliveryId: string
+  /** Names the link in the log line, preserving the existing log strings. */
+  scope: 'href' | 'calendar link'
+  mint: () => Promise<{ code: string }>
+}): Promise<string | null> {
+  let lastError: unknown = null
+
+  for (let attempt = 0; attempt <= SHORT_LINK_MINT_RETRIES; attempt++) {
+    try {
+      const link = await args.mint()
+      return buildShortLinkUrl(link.code)
+    } catch (error) {
+      lastError = error
+      if (error instanceof ShortLinkDestinationNotAllowedError) break
+    }
+  }
+
+  console.error(
+    `processDueDeliveries: short link mint failed for ${args.scope}`,
+    { dispatchId: args.dispatchId, error: lastError },
+  )
+  captureNotificationException({
+    error: lastError,
+    route: 'processDueDeliveries',
+    event: 'SHORT_LINK_MINT_FAILED',
+    dispatchId: args.dispatchId,
+    deliveryId: args.deliveryId,
+  })
+
+  return null
+}
+
+/**
  * Best-effort: mint (or reuse) short links for the SMS-bound href and, when
  * present, the calendar link — logging and falling back to the un-shortened
  * URL on any failure rather than blocking the send. Only SMS gets these; every
@@ -245,40 +306,35 @@ export async function resolveSmsLinkOverrides(args: {
     return { smsHref: null, smsCalendarUrl: null }
   }
 
-  let smsHref: string | null = null
-  try {
-    const link = await getOrCreateShortLink({
-      destinationPath: args.href ?? args.delivery.dispatch.href,
-      createdForType: 'notification_dispatch_href',
-      createdForId: args.delivery.dispatch.id,
-      expiresAt: readExpiresAtFromPayload(args.delivery.dispatch.payload),
-    })
-    smsHref = buildShortLinkUrl(link.code)
-  } catch (error) {
-    console.error('processDueDeliveries: short link mint failed for href', {
-      dispatchId: args.delivery.dispatch.id,
-      error,
-    })
-  }
+  const smsHref = await mintDeliveryShortLink({
+    dispatchId: args.delivery.dispatch.id,
+    deliveryId: args.delivery.id,
+    scope: 'href',
+    mint: () =>
+      getOrCreateShortLink({
+        destinationPath: args.href ?? args.delivery.dispatch.href,
+        createdForType: 'notification_dispatch_href',
+        createdForId: args.delivery.dispatch.id,
+        expiresAt: readExpiresAtFromPayload(args.delivery.dispatch.payload),
+      }),
+  })
 
   let smsCalendarUrl: string | null = null
   const icsUrl = args.calendarLinks?.icsUrl ?? null
   if (icsUrl) {
     const calendarPath = pathFromAbsoluteAppUrl(icsUrl)
     if (calendarPath) {
-      try {
-        const link = await getOrCreateShortLink({
-          destinationPath: calendarPath,
-          createdForType: 'notification_dispatch_calendar',
-          createdForId: args.delivery.dispatch.id,
-        })
-        smsCalendarUrl = buildShortLinkUrl(link.code)
-      } catch (error) {
-        console.error(
-          'processDueDeliveries: short link mint failed for calendar link',
-          { dispatchId: args.delivery.dispatch.id, error },
-        )
-      }
+      smsCalendarUrl = await mintDeliveryShortLink({
+        dispatchId: args.delivery.dispatch.id,
+        deliveryId: args.delivery.id,
+        scope: 'calendar link',
+        mint: () =>
+          getOrCreateShortLink({
+            destinationPath: calendarPath,
+            createdForType: 'notification_dispatch_calendar',
+            createdForId: args.delivery.dispatch.id,
+          }),
+      })
     }
   }
 
