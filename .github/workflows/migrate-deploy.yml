@@ -25,8 +25,15 @@ name: migrate-deploy
 # 🔴 Read the JOB LOG, not the check's colour. When the secrets below are unset
 # this job SKIPS the migrate step and still reports SUCCESS — deliberately, see
 # the preflight step — so a green "Deploy DB migrations (production)" is NOT
-# evidence that anything was applied. As of 2026-08-25 the secrets are NOT set
-# and every run has been skipping.
+# evidence that anything was applied. Verify with the STEP list, which names the
+# skip that the check's colour hides:
+#
+#   gh api repos/MillyinVR/tovis-app/actions/runs/<id>/jobs \
+#     --jq '.jobs[].steps[] | "\(.conclusion)\t\(.name)"'
+#
+# 2026-08-28: both secrets are now SET, so the step runs for real. Every run
+# before that date skipped — do not read an old green run as evidence that its
+# migration reached prod.
 #
 # Scope: runs ONLY on push to main (and manual dispatch) — never on
 # pull_request — so it cannot touch preview/branch databases. It applies
@@ -43,6 +50,7 @@ name: migrate-deploy
 # `::warning::` annotation plus a job-summary note on every main push — the
 # signal that migrations are NOT being auto-applied yet, without a permanently
 # red check that erodes trust in CI. Add both secrets to enable auto-migration.
+# (Set 2026-08-28 from the prod Supabase project's pooled + session URLs.)
 
 on:
   push:
@@ -108,9 +116,27 @@ jobs:
             echo "configured=true" >> "$GITHUB_OUTPUT"
           fi
 
+      # ALLOW_PROD_DB is REQUIRED here, not optional. `prisma.config.ts` refuses
+      # any db-touching Prisma CLI command whose URL carries the prod project ref
+      # — the guard added after the 2026-06-17 stray `prisma db push` against
+      # prod — and it exempts only `process.env.VERCEL`. A GitHub runner is not
+      # Vercel, so without this the step dies on the guard before it connects.
+      #
+      # That is exactly what happened the first time this step ever executed
+      # (run 33131000416, 2026-08-28): the secrets had just been added, the
+      # preflight passed, and the migrate step failed on the guard. Until then
+      # the step had always SKIPPED for want of secrets, so the missing opt-in
+      # had never been reachable — the workflow had never once worked.
+      #
+      # Setting it is deliberate: targeting production IS this job's whole
+      # purpose, it runs only on push to main / manual dispatch (never on a PR,
+      # so a fork can never reach it), and `migrate deploy` applies committed
+      # migrations only — it can never generate or infer one the way `db push`
+      # can. The guard still protects every OTHER caller, which is the point.
       - name: Apply pending migrations
         if: steps.preflight.outputs.configured == 'true'
         env:
           DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
           DIRECT_URL: ${{ secrets.PRODUCTION_DIRECT_URL }}
+          ALLOW_PROD_DB: '1'
         run: pnpm exec prisma migrate deploy
