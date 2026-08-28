@@ -25,7 +25,6 @@ const mocks = vi.hoisted(() => {
     tokenRateLimitIdentity: vi.fn((id: string) => ({ kind: 'token', id })),
     prisma: {
       clientProfile: { findUnique: vi.fn() },
-      booking: { count: vi.fn() },
     },
     issueClaimLinkForClient: vi.fn(),
     createClientClaimInviteDelivery: vi.fn(),
@@ -74,7 +73,6 @@ beforeEach(() => {
     user: { id: 'user_pro_1' },
   })
   mocks.enforceRateLimit.mockResolvedValue(null)
-  mocks.prisma.booking.count.mockResolvedValue(0)
 })
 
 afterEach(() => {
@@ -98,6 +96,9 @@ describe('POST /api/v1/pro/clients/[id]/invite', () => {
       userId: null,
       claimStatus: ClientClaimStatus.UNCLAIMED,
       createdByProfessionalId: 'pro_1',
+      bookings: [],
+      chartShares: [],
+      waitlistEntries: [],
     })
     mocks.issueClaimLinkForClient.mockResolvedValue({
       kind: 'ok',
@@ -151,6 +152,9 @@ describe('POST /api/v1/pro/clients/[id]/invite', () => {
       userId: 'user_9',
       claimStatus: ClientClaimStatus.CLAIMED,
       createdByProfessionalId: 'pro_1',
+      bookings: [],
+      chartShares: [],
+      waitlistEntries: [],
     })
 
     const res = await POST(new Request('http://localhost', { method: 'POST' }), ctx())
@@ -165,8 +169,10 @@ describe('POST /api/v1/pro/clients/[id]/invite', () => {
       userId: null,
       claimStatus: ClientClaimStatus.UNCLAIMED,
       createdByProfessionalId: 'pro_other',
+      bookings: [],
+      chartShares: [],
+      waitlistEntries: [],
     })
-    mocks.prisma.booking.count.mockResolvedValue(0)
 
     const res = await POST(new Request('http://localhost', { method: 'POST' }), ctx())
 
@@ -180,6 +186,9 @@ describe('POST /api/v1/pro/clients/[id]/invite', () => {
       userId: null,
       claimStatus: ClientClaimStatus.UNCLAIMED,
       createdByProfessionalId: 'pro_1',
+      bookings: [],
+      chartShares: [],
+      waitlistEntries: [],
     })
     // created:false = an invite already existed and its token was rotated, so
     // the previously delivered link is now dead; this send must not collapse
@@ -225,6 +234,9 @@ describe('POST /api/v1/pro/clients/[id]/invite', () => {
       userId: null,
       claimStatus: ClientClaimStatus.UNCLAIMED,
       createdByProfessionalId: 'pro_1',
+      bookings: [],
+      chartShares: [],
+      waitlistEntries: [],
     })
     mocks.issueClaimLinkForClient.mockResolvedValue({
       kind: 'ok',
@@ -260,8 +272,12 @@ describe('POST /api/v1/pro/clients/[id]/invite', () => {
       userId: null,
       claimStatus: ClientClaimStatus.UNCLAIMED,
       createdByProfessionalId: null,
+      // Ownership by history: the shared predicate reads the filtered relation,
+      // not a separate count query.
+      bookings: [{ id: 'booking_1' }],
+      chartShares: [],
+      waitlistEntries: [],
     })
-    mocks.prisma.booking.count.mockResolvedValue(1)
     mocks.issueClaimLinkForClient.mockResolvedValue({
       kind: 'ok',
       rawToken: 'rawtok_2',

@@ -81,6 +81,15 @@ describe('proClientVisibilityWhere', () => {
       },
     ])
   })
+
+  it('excludes a pro-created booking written for an unestablished pair', () => {
+    // Sits ALONGSIDE the OR, not inside it, so it applies to every clause: a
+    // pro cannot open the chart by starting or completing the appointment they
+    // wrote for a stranger. See lib/clients/proClientRelationship.ts.
+    expect(proClientVisibilityWhere(NOW).proCreatedWithoutRelationship).toBe(
+      false,
+    )
+  })
 })
 
 describe('getProClientVisibility', () => {

@@ -18,6 +18,7 @@ import {
   buildProBookingNewOfferingDTO,
 } from '@/lib/dto/proBookingNew'
 import { getProClientVisibility } from '@/lib/clientVisibility'
+import { hasEstablishedProClientRelationship } from '@/lib/clients/proClientRelationship'
 import { moneyToNumber } from '@/lib/money'
 import { prisma } from '@/lib/prisma'
 
@@ -318,22 +319,33 @@ export default async function BookingCreateContent(props: {
     })
 
     if (requestedClient) {
-      const visibility = await getProClientVisibility(
-        professionalId,
-        requestedClient.id,
-      )
+      const [visibility, relationship] = await Promise.all([
+        getProClientVisibility(professionalId, requestedClient.id),
+        hasEstablishedProClientRelationship({
+          professionalId,
+          clientId: requestedClient.id,
+        }),
+      ])
 
-      // W5: two different tiers in one block.
+      // W5: two different tiers in one block, plus the gate the SUBMIT will
+      // apply.
       //
       // Pre-filling WHO the appointment is for is contact-tier — it needs the
       // client's name, which a pro they are already messaging can see. Gating it
       // on the chart tier would delete the "message a waitlister, then offer
       // them a time" flow that `clientVisibility.test.ts` calls out as
-      // load-bearing: the deep link would land on an empty form.
+      // load-bearing: the deep link would land on an empty form. That flow
+      // still works — a waitlist entry is one of the relationship clauses.
+      //
+      // 🔴 But contact tier ALONE is not enough to pre-fill, because a bare
+      // message thread is contact tier and POST /api/v1/pro/bookings now
+      // refuses it (lib/clients/proClientRelationship.ts). Offering a client
+      // the submit will reject is a control that cannot be operated — the same
+      // predicate has to reach the CONTROL, not only the writer.
       //
       // Their SERVICE ADDRESSES are their home. That stays chart-tier, behind
       // a booking or the client's explicit consent.
-      if (visibility.canContactClient) {
+      if (visibility.canContactClient && relationship) {
         clients = [buildProBookingNewClientDTO(requestedClient)]
         validClientId = requestedClient.id
       }

@@ -17,6 +17,10 @@ import {
   normalizeClientAddressOptionalString,
 } from '@/lib/clientAddresses/addressInput'
 import { resolveServiceAddressValues } from '@/lib/clientAddresses/resolveServiceAddress'
+import {
+  loadProClientRelationship,
+  PRO_CLIENT_RELATIONSHIP_REFUSAL,
+} from '@/lib/clients/proClientRelationship'
 import { upsertProClient } from '@/lib/clients/upsertProClient'
 import { prisma } from '@/lib/prisma'
 import { buildAddressPrivacyWriteData } from '@/lib/security/addressEncryption'
@@ -391,12 +395,33 @@ async function resolveClientIdentity(args: {
     })
 
     if (!existingClient) {
-      return {
-        ok: false,
-        status: 404,
-        error: 'Client not found.',
-        code: 'CLIENT_NOT_FOUND',
-      }
+      return { ok: false, ...PRO_CLIENT_RELATIONSHIP_REFUSAL }
+    }
+
+    // 🔴 A caller-supplied `clientId` must be one of THIS pro's clients.
+    //
+    // This route took the id straight from the request body and never asked
+    // whose client it was. A pro-created booking is auto-ACCEPTED, and an
+    // upcoming ACCEPTED booking is a chart-access clause, so one POST with a
+    // future date and any client id handed over that client's whole chart.
+    //
+    // Refused rather than merely marked (which is what the contact-keyed path
+    // below gets), because a raw profile id has NO legitimate stranger case:
+    // every surface that supplies one — the web form, the iOS picker, the
+    // calendar deep links, the chart page's "book" link — reads it from the
+    // pro's own roster. Refusing also stops the endpoint writing appointments,
+    // and their notifications, onto arbitrary strangers.
+    //
+    // The same indistinguishable 404 a missing client gets: splitting them
+    // would make this endpoint an oracle for "does this client id exist".
+    const relationship = await loadProClientRelationship({
+      professionalId: args.professionalId,
+      clientId: existingClient.id,
+      tx: args.tx,
+    })
+
+    if (!relationship.established) {
+      return { ok: false, ...PRO_CLIENT_RELATIONSHIP_REFUSAL }
     }
 
     return {

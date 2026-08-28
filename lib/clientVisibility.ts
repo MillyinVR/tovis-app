@@ -5,6 +5,7 @@ import {
   EMPTY_CLIENT_LINK_VIEWER,
   type ClientLinkViewer,
 } from '@/lib/profiles/profileHrefs'
+import { hasGrantedProClientChartShare } from '@/lib/clients/proClientRelationship'
 
 export type ClientVisibilityReason =
   | 'ACTIVE_BOOKING'
@@ -76,6 +77,21 @@ function recentCompletedCutoff(now: Date): Date {
  *    (COALESCE(finishedAt, scheduledFor) >= cutoff). CANCELLED / no-show never
  *    count.
  *
+ * 🔴 …and that is NOT stamped `proCreatedWithoutRelationship`. Every clause
+ * below rests on a booking existing for the pair, and nothing already stored
+ * could say who put it there — a client booking themselves and a pro typing one
+ * in produce the same row (`source` defaults to DISCOVERY on both;
+ * `clientRelationshipLabel` is a display snapshot, UNKNOWN on legacy history).
+ * A pro-created booking is auto-ACCEPTED, so "ACCEPTED and still upcoming" was
+ * a chart-access grant any pro could write for any client id. The write path
+ * now records the answer at the moment it knows it
+ * (lib/clients/proClientRelationship.ts → `Booking.proCreatedWithoutRelationship`)
+ * and this filter honours it, above every other clause, so no later status
+ * change — starting the appointment, completing it — can route around it.
+ *
+ * The stamp is false on every row written before it existed, so this revokes
+ * nothing. Do not re-derive relationship clauses here; import them.
+ *
  * The clients list, the clickable name, and the page gate ALL consume this so
  * they can never disagree. If you need this logic again, import it — never
  * re-inline the clauses (grep guard in clientVisibility.test.ts).
@@ -84,6 +100,9 @@ export function proClientVisibilityWhere(now: Date): Prisma.BookingWhereInput {
   const cutoff = recentCompletedCutoff(now)
 
   return {
+    // Not negotiable by status: a booking the pro wrote for someone they had no
+    // relationship with never grants the chart, whatever they later do to it.
+    proCreatedWithoutRelationship: false,
     OR: [
       // In progress.
       { startedAt: { not: null }, finishedAt: null },
@@ -210,7 +229,9 @@ export async function getProClientVisibility(
 
   // 1. The client explicitly granted this pro chart access. Consent is as good a
   //    reason as a booking, and open-ended until they revoke it.
-  if (await hasGrantedChartShare(proId, clientId)) {
+  if (
+    await hasGrantedProClientChartShare({ professionalId: proId, clientId })
+  ) {
     return {
       canViewClient: true,
       canContactClient: true,
@@ -256,26 +277,6 @@ async function hasProClientThread(
     select: { id: true },
   })
   return thread !== null
-}
-
-/**
- * W5: whether the client has an active GRANTED chart share with this pro.
- *
- * Only GRANTED counts. REQUESTED is a pro asking and grants nothing; DECLINED
- * and REVOKED are the client's answer and must not be readable as "no row yet".
- */
-async function hasGrantedChartShare(
-  proId: string,
-  clientId: string,
-): Promise<boolean> {
-  const share = await prisma.clientChartShare.findUnique({
-    where: {
-      clientId_professionalId: { clientId, professionalId: proId },
-    },
-    select: { status: true },
-  })
-
-  return share?.status === ClientChartShareStatus.GRANTED
 }
 
 /**

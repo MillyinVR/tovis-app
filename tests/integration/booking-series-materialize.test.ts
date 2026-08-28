@@ -234,6 +234,11 @@ beforeAll(async () => {
       // The deposit path refuses without a deliverable contact for the pay link.
       email: `${tag}_client_contact@example.com`,
       homeTenantId: tenant.id,
+      // The pro created this client's record, which is what carries them
+      // through the pro↔client relationship gate `createBookingSeries` applies
+      // (lib/clients/proClientRelationship.ts). A standing appointment is only
+      // ever booked for a client the pro already has.
+      createdByProfessionalId: pro.id,
     },
     select: { id: true },
   })
