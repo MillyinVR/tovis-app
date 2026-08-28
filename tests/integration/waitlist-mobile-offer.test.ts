@@ -637,6 +637,70 @@ describe('what the PRO can see while the offer is PENDING', () => {
   })
 })
 
+describe('what the CLIENT is TOLD when the offer lands', () => {
+  it('says the pro comes to THEM, and carries no address onto the lock screen', async () => {
+    // The notification is the first thing the client sees, and it is rendered
+    // verbatim onto a push. With the in-salon wording it invited them to confirm
+    // a home visit while reading a sentence about a slot being "open".
+    const entryId = await createEntry(fx.nearClientId)
+    await offerMobile({
+      waitlistEntryId: entryId,
+      startsAt: futureLocal(13, 10),
+    })
+
+    const offer = await db.waitlistOffer.findFirstOrThrow({
+      where: { waitlistEntryId: entryId },
+      select: { id: true },
+    })
+    const notification = await db.clientNotification.findFirstOrThrow({
+      where: { dedupeKey: `WAITLIST_TIME_OFFERED:${offer.id}` },
+      select: { body: true, title: true },
+    })
+
+    // Names the client's OWN label for the address, because the offer resolved
+    // to their DEFAULT and they may have several saved — without it they cannot
+    // tell Home from Office until after they confirm.
+    expect(notification.body).toContain('can come to you at Home on ')
+    // The fixture's own service + pro, so this proves the real values are
+    // interpolated rather than a placeholder sentence being stored.
+    expect(notification.body).toContain(`${TAG} Cut`)
+    expect(notification.body).toContain('Travelling Studio')
+    expect(notification.body).toContain("Tap to confirm before it's gone.")
+    // The in-salon phrasing must be gone, not merely joined by the new one.
+    expect(notification.body).not.toContain('open for your')
+
+    // 🔴 A push body is read off a lock screen by whoever holds the phone.
+    // "Comes to you" is the fact they need; WHICH address is the offer card's
+    // job, behind the session.
+    expect(notification.body).not.toContain(NEAR_STREET)
+    expect(notification.body).not.toContain('Orange Ave')
+    expect(notification.body).not.toContain('Coronado')
+    expect(notification.body).not.toContain('92118')
+  })
+
+  it('leaves the SALON notification wording untouched', async () => {
+    // Proven against a real SALON offer rather than asserted about one: this
+    // fix must not have reworded the mode it did not change. The fixture pro is
+    // mobile-only, so the sentence is exercised through the shared helper the
+    // write path calls — see lib/waitlist/offerNotificationCopy.test.ts for the
+    // byte-for-byte assertion.
+    const { buildWaitlistOfferNotificationBody } = await import(
+      '@/lib/waitlist/offerNotificationCopy'
+    )
+
+    expect(
+      buildWaitlistOfferNotificationBody({
+        locationType: ServiceLocationType.SALON,
+        proName: 'Mo Bile',
+        when: 'Fri, Sep 4 at 10:00 AM',
+        serviceName: 'Balayage',
+      }),
+    ).toBe(
+      "Mo Bile has Fri, Sep 4 at 10:00 AM open for your Balayage. Tap to confirm before it's gone.",
+    )
+  })
+})
+
 describe('what the CLIENT can see about the same PENDING offer', () => {
   it('names their OWN address in full — the mirror of the pro’s coarse view', async () => {
     // Deliberately the opposite verdict to the pro-facing test above, against the
