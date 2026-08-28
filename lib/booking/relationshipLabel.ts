@@ -120,6 +120,24 @@ function badgeOf(kind: ClientRelationshipLabel): RelationshipBadge {
 }
 
 /**
+ * THE new-vs-returning axis, on its own.
+ *
+ * Extracted because a second pro-facing surface now needs the same answer
+ * without the request-vs-discovery half: the live-hold decision (B5 follow-up)
+ * tells the pro whether the client mid-checkout is new to THEM, and must say
+ * nothing about how that client found them — the four-mark label would leak
+ * exactly that. One predicate, so the popup and the chip cannot drift on where
+ * the line between new and returning falls.
+ *
+ * The COUNT must be the canonical pair-history one
+ * (`lib/booking/establishedBookingCount.ts`); this only decides what to do with
+ * it.
+ */
+export function isReturningClient(establishedBookingCount: number): boolean {
+  return establishedBookingCount > 0
+}
+
+/**
  * WRITE-time derivation — call this ONLY from the booking write boundary (and
  * the finalize resolver that feeds it), never from a read surface.
  *
@@ -149,7 +167,7 @@ export function deriveClientRelationshipLabel(args: {
   // (request) — no history count needed.
   if (args.source === BookingSource.AFTERCARE) return ClientRelationshipLabel.RR
 
-  const returning = args.establishedBookingCount > 0
+  const returning = isReturningClient(args.establishedBookingCount)
 
   if (args.source === BookingSource.REQUESTED) {
     return returning ? ClientRelationshipLabel.RR : ClientRelationshipLabel.NR

@@ -64,7 +64,10 @@ import { tenantContextFor } from '@/lib/tenant'
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import { haversineMiles } from '@/lib/geo/distance'
 import { upper } from '@/lib/booking/guards'
-import { deriveClientRelationshipLabel } from '@/lib/booking/relationshipLabel'
+import {
+  deriveClientRelationshipLabel,
+  isReturningClient,
+} from '@/lib/booking/relationshipLabel'
 import { isFinalizeConsultAttributionOwned } from '@/lib/booking/consultAttribution'
 import {
   DEPOSIT_CREDIT_SELECT,
@@ -314,11 +317,21 @@ import {
 } from '@/lib/pro/readiness/proReadiness'
 import {
   decideBookingOverlapPermission,
+  liveHoldConflicts,
   type BookingOverlapActor,
+  type BookingOverlapAllowedMode,
   type BookingOverlapBlockedCode,
   type BookingOverlapSource,
   type BookingWindow,
+  type ProLiveHoldOverlapStance,
+  type SchedulingConflict,
 } from '@/lib/booking/overlapPolicy'
+import type {
+  HeldSlotDecision,
+  HeldSlotRelationship,
+} from '@/lib/booking/holdOverlapPrompt'
+import { countEstablishedBookings } from '@/lib/booking/establishedBookingCount'
+import { offeringDisplayName } from '@/lib/pro/offeringDisplayName'
 import {
   findBookingAndHoldConflicts,
   hasCalendarBlockConflict,
@@ -739,6 +752,20 @@ type CreateProBookingArgs = {
   // importMode (imported history must not text clients payment links);
   // defaults to false, which keeps waitlist-offer confirms deposit-free.
   depositRequested?: boolean
+  /**
+   * The pro was shown the live-hold decision for this exact slot and chose to
+   * proceed (B5 follow-up, Tori 2026-08-28). Authorizes the overlap AND records
+   * it as an informed choice in the `booking_conflict` trail.
+   *
+   * ⚠️ Only ever set from a request that has already been REFUSED once with
+   * `HOLD_OVERLAP_NEEDS_CONFIRMATION`. It is not a way to skip the question — a
+   * caller that sets it blind simply gets today's silent behaviour back, which
+   * is why the routes read it from the body and nothing sets it by default.
+   *
+   * Ignored when there is no live hold in the way: an ordinary booking-over-
+   * booking overlap is unaffected either way.
+   */
+  confirmHoldOverlap?: boolean
 }
 
 type CreateProBookingResult = {
@@ -1488,6 +1515,20 @@ type UpdateProBookingArgs = {
   hasServiceItems: boolean
   requestId?: string | null
   idempotencyKey?: string | null
+  /**
+   * The pro was shown the live-hold decision for this exact slot and chose to
+   * proceed (B5 follow-up, Tori 2026-08-28). Authorizes the overlap AND records
+   * it as an informed choice in the `booking_conflict` trail.
+   *
+   * ⚠️ Only ever set from a request that has already been REFUSED once with
+   * `HOLD_OVERLAP_NEEDS_CONFIRMATION`. It is not a way to skip the question — a
+   * caller that sets it blind simply gets today's silent behaviour back, which
+   * is why the routes read it from the body and nothing sets it by default.
+   *
+   * Ignored when there is no live hold in the way: an ordinary booking-over-
+   * booking overlap is unaffected either way.
+   */
+  confirmHoldOverlap?: boolean
 }
 
 type UpdateProBookingResult = {
@@ -5430,6 +5471,8 @@ function mapBookingOverlapBlockedCodeToBookingError(
   code: BookingOverlapBlockedCode,
 ): BookingErrorCode {
   switch (code) {
+    case 'PRO_HOLD_DECISION_REQUIRED':
+      return 'HOLD_OVERLAP_NEEDS_CONFIRMATION'
     case 'CLIENT_OVERLAP_NOT_ALLOWED':
       return 'TIME_BOOKED'
     case 'IMPORT_OVERLAP_NOT_ALLOWED':
@@ -5459,6 +5502,12 @@ function logOverlapDecisionBlocked(args: {
   conflictKinds: string[]
   sourceKind: string
   actorKind: string
+  /**
+   * The label the pro was SHOWN, on the live-hold decision only. Null
+   * everywhere else — a refusal that never asked anybody anything has no label
+   * to record.
+   */
+  heldSlotRelationship?: HeldSlotRelationship | null
 }): void {
   logBookingConflict({
     action: args.action,
@@ -5467,7 +5516,11 @@ function logOverlapDecisionBlocked(args: {
     locationType: args.locationType,
     requestedStart: args.requestedStart,
     requestedEnd: args.requestedEnd,
-    conflictType: 'BOOKING',
+    // The live-hold decision is refused BY a hold; every other blocked code
+    // here is refused by an appointment. Saying 'BOOKING' for both would make
+    // the new line unfindable in the trail it is supposed to leave.
+    conflictType:
+      args.code === 'PRO_HOLD_DECISION_REQUIRED' ? 'HOLD' : 'BOOKING',
     holdId: args.holdId ?? undefined,
     meta: {
       route: 'lib/booking/writeBoundary.ts',
@@ -5477,6 +5530,83 @@ function logOverlapDecisionBlocked(args: {
       conflictKinds: args.conflictKinds,
       sourceKind: args.sourceKind,
       actorKind: args.actorKind,
+      ...(args.heldSlotRelationship
+        ? { heldSlotRelationship: args.heldSlotRelationship }
+        : {}),
+    },
+  })
+}
+
+/**
+ * An overlap the gate ALLOWED — the half of the trail that was never written.
+ *
+ * `enforceBookingOverlapPolicy` returned early on every `decision.ok` and logged
+ * nothing, so the `booking_conflict` trail recorded refusals only. Every
+ * deliberate double-book a pro has ever made is therefore absent from it: from
+ * the outside, "the pro booked over an appointment" and "no conflict existed"
+ * look identical. That is the gap this closes.
+ *
+ * 🔴 The HELD CLIENT IS NOT NAMED HERE. `holdId` identifies the reservation and
+ * is enough to trace one (the row knows its own client); writing the held
+ * client's id into a log line would put the pairing the popup deliberately
+ * withholds into a place a human reads. B5's anonymity is a property of the
+ * decision, not only of the pixel.
+ *
+ * Silent when there is nothing to say: a booking with no conflicts is the
+ * ordinary case and does not belong in a conflict trail.
+ */
+function logOverlapDecisionAuthorized(args: {
+  action: 'BOOKING_CREATE' | 'BOOKING_FINALIZE' | 'BOOKING_UPDATE'
+  professionalId: string
+  locationId: string
+  locationType: ServiceLocationType
+  requestedStart: Date
+  requestedEnd: Date
+  offeringId: string | null
+  clientId: string
+  mode: BookingOverlapAllowedMode
+  conflicts: readonly SchedulingConflict[]
+  sourceKind: string
+  actorKind: string
+  /** Set only when the pro was shown the live-hold decision and said yes. */
+  heldSlotRelationship?: HeldSlotRelationship | null
+}): void {
+  if (args.conflicts.length === 0) return
+
+  const holdIds = args.conflicts
+    .filter((conflict) => conflict.kind === 'HOLD')
+    .map((conflict) => conflict.id)
+
+  const informedChoice = args.mode === 'PRO_CONFIRMED_HOLD_OVERLAP'
+
+  logBookingConflict({
+    action: args.action,
+    professionalId: args.professionalId,
+    locationId: args.locationId,
+    locationType: args.locationType,
+    requestedStart: args.requestedStart,
+    requestedEnd: args.requestedEnd,
+    conflictType: holdIds.length > 0 ? 'HOLD' : 'BOOKING',
+    holdId: holdIds[0] ?? undefined,
+    // The discriminator: this line is an overlap that WENT THROUGH. Every other
+    // `booking_conflict` line is something that did not.
+    note: 'overlap_authorized',
+    meta: {
+      route: 'lib/booking/writeBoundary.ts',
+      offeringId: args.offeringId,
+      clientId: args.clientId,
+      overlapDecisionMode: args.mode,
+      conflictKinds: args.conflicts.map((conflict) => conflict.kind),
+      overlappedHoldIds: holdIds,
+      sourceKind: args.sourceKind,
+      actorKind: args.actorKind,
+      // Whether a human was SHOWN what they were overriding before they did it.
+      // False on an ordinary pro double-book (nobody is mid-checkout, so there
+      // was nothing to ask) and on the paths with no surface to ask from.
+      informedChoice,
+      ...(args.heldSlotRelationship
+        ? { heldSlotRelationship: args.heldSlotRelationship }
+        : {}),
     },
   })
 }
@@ -5556,6 +5686,77 @@ function logOverlapBackstopFired(args: {
   })
 }
 
+/**
+ * What the pro may be told about the checkout sitting on the minutes they asked
+ * for — and, by construction, nothing else.
+ *
+ * 🔴 THE RESPONSE BOUNDARY. The hold row read here knows the client's id, and
+ * that id is used (to count their history with this pro) and then dropped. What
+ * leaves this function is `HeldSlotDecision`, a closed type of strings, an enum
+ * and a count — no name, no email, no phone, no avatar, no client id. B5 made a
+ * client's live checkout anonymous to the pro; the ONE exception Tori approved
+ * (2026-08-28) is the new-or-returning label, and it is computed from the SAME
+ * pair-history count the pro's NR/RR chips and the discovery fee already use
+ * (`countEstablishedBookings` + `isReturningClient`), never a second definition.
+ *
+ * Returns null when the conflict list holds nothing describable — the caller
+ * still refuses, it just cannot dress the refusal up as a question.
+ */
+async function describeHeldSlotForPro(args: {
+  tx: Prisma.TransactionClient
+  professionalId: string
+  conflicts: readonly SchedulingConflict[]
+  now: Date
+}): Promise<HeldSlotDecision | null> {
+  const holds = liveHoldConflicts(args.conflicts, args.now)
+  // Earliest-starting first, which is the order `findBookingAndHoldConflicts`
+  // already sorts in — so the one described is the one the pro's slot runs into
+  // first, and any others are counted rather than silently ignored.
+  const [primary] = holds
+
+  if (!primary || primary.kind !== 'HOLD') return null
+
+  const row = await args.tx.bookingHold.findFirst({
+    where: { id: primary.id, professionalId: args.professionalId },
+    select: {
+      id: true,
+      clientId: true,
+      offering: {
+        select: {
+          title: true,
+          service: { select: { name: true } },
+        },
+      },
+    },
+  })
+
+  if (!row) return null
+
+  // A hold can have no client at all (`BookingHold.clientId` is nullable), and
+  // "new" would be an invention rather than an answer. UNKNOWN says so.
+  const relationship: HeldSlotRelationship = row.clientId
+    ? isReturningClient(
+        await countEstablishedBookings({
+          db: args.tx,
+          clientId: row.clientId,
+          professionalId: args.professionalId,
+        }),
+      )
+      ? 'RETURNING'
+      : 'NEW'
+    : 'UNKNOWN'
+
+  return {
+    holdId: row.id,
+    relationship,
+    serviceName: offeringDisplayName(row.offering),
+    startsAt: primary.startsAt.toISOString(),
+    endsAt: primary.endsAt.toISOString(),
+    expiresAt: primary.expiresAt.toISOString(),
+    additionalHeldSlots: Math.max(0, holds.length - 1),
+  }
+}
+
 async function enforceBookingOverlapPolicy(args: {
   tx: Prisma.TransactionClient
   actor: BookingOverlapActor
@@ -5585,9 +5786,39 @@ async function enforceBookingOverlapPolicy(args: {
     source: args.source,
     requestedWindow: args.requestedWindow,
     conflicts: conflicts.all,
+    now: args.now,
   })
 
   if (decision.ok) {
+    // The pro said yes to a live checkout. Re-derive the label rather than
+    // trusting the confirming request to echo back what it was shown — the log
+    // has to record what was TRUE at the write, not what the caller claimed.
+    const confirmedHeldSlot =
+      decision.mode === 'PRO_CONFIRMED_HOLD_OVERLAP'
+        ? await describeHeldSlotForPro({
+            tx: args.tx,
+            professionalId: args.requestedWindow.professionalId,
+            conflicts: decision.conflicts,
+            now: args.now,
+          })
+        : null
+
+    logOverlapDecisionAuthorized({
+      action: args.action,
+      professionalId: args.requestedWindow.professionalId,
+      locationId: args.locationId,
+      locationType: args.locationType,
+      requestedStart: args.requestedWindow.startsAt,
+      requestedEnd: args.requestedWindow.endsAt,
+      offeringId: args.offeringId,
+      clientId: args.clientId,
+      mode: decision.mode,
+      conflicts: decision.conflicts,
+      sourceKind: args.source.kind,
+      actorKind: args.actor.kind,
+      heldSlotRelationship: confirmedHeldSlot?.relationship ?? null,
+    })
+
     // An authorized overlap (a PRO/ADMIN double-book) must be exempted from
     // the DB overlap EXCLUDE constraint, or the booking write hits a raw
     // 23P01. A no-conflict booking stays bound by the constraint
@@ -5595,6 +5826,20 @@ async function enforceBookingOverlapPolicy(args: {
     // guarantee against races and direct writes.
     return { allowsOverlap: decision.conflicts.length > 0 }
   }
+
+  // Not a dead end — the pro has simply not been asked yet. Describe the hold
+  // (and nothing more of the client behind it) so the caller can put the choice
+  // in front of them; a second attempt carrying the confirmation takes the
+  // `decision.ok` branch above and is logged as an informed choice.
+  const heldSlot =
+    decision.code === 'PRO_HOLD_DECISION_REQUIRED'
+      ? await describeHeldSlotForPro({
+          tx: args.tx,
+          professionalId: args.requestedWindow.professionalId,
+          conflicts: decision.conflicts,
+          now: args.now,
+        })
+      : null
 
   logOverlapDecisionBlocked({
     action: args.action,
@@ -5605,11 +5850,12 @@ async function enforceBookingOverlapPolicy(args: {
     requestedEnd: args.requestedWindow.endsAt,
     offeringId: args.offeringId,
     clientId: args.clientId,
-    holdId: args.excludeHoldId ?? null,
+    holdId: heldSlot?.holdId ?? args.excludeHoldId ?? null,
     code: decision.code,
     conflictKinds: decision.conflicts.map((conflict) => conflict.kind),
     sourceKind: args.source.kind,
     actorKind: args.actor.kind,
+    heldSlotRelationship: heldSlot?.relationship ?? null,
   })
 
   throw bookingError(
@@ -5617,6 +5863,7 @@ async function enforceBookingOverlapPolicy(args: {
     {
       message: decision.userMessage,
       userMessage: decision.userMessage,
+      ...(heldSlot ? { heldSlot } : {}),
     },
   )
 }
@@ -10497,6 +10744,12 @@ async function performLockedCreateProBooking(args: {
   // A client confirming a pro-authored time (waitlist offer) is still a CLIENT
   // for overlap purposes: a conflict must refuse, never silently double-book.
   overlapActor?: BookingOverlapActor
+  /**
+   * Whether THIS create can stop and ask the pro about a live client hold.
+   * Required, no default — see `ProLiveHoldOverlapStance`. Ignored when
+   * `overlapActor` names a CLIENT.
+   */
+  proLiveHoldOverlap: ProLiveHoldOverlapStance
 }): Promise<CreateProBookingResult> {
   const importMode = args.importMode ?? false
 
@@ -10908,6 +11161,12 @@ async function performLockedCreateProBooking(args: {
       kind: 'PRO',
       userId: args.actorUserId,
       professionalId: args.professionalId,
+      // An import / a series occurrence never reaches the PRO branch at all
+      // (their SOURCE refuses on any conflict, above), so this only ever speaks
+      // for the interactive dashboard create — which is exactly where the pro
+      // can be shown the decision. Threaded from the caller rather than
+      // defaulted here: the type has no default, so a new caller is asked.
+      liveHoldOverlap: args.proLiveHoldOverlap,
     },
     // An import is machine-driven with no human at the slot, so it must not
     // inherit the pro's authority to double-book (see
@@ -11707,6 +11966,12 @@ assertCanCreateRebookFromSourceBooking({
             kind: 'PRO',
             userId: args.professionalId,
             professionalId: source.professionalId,
+            // The pro authoring aftercare, saving a next appointment. There is
+            // no dialog on that screen that could carry the live-hold decision,
+            // and failing the save with a question nobody can answer would
+            // strand the aftercare plan. Today's behaviour, unchanged and
+            // stated: a hold does not stop this write.
+            liveHoldOverlap: 'NO_DECISION_SURFACE',
           },
     source:
       args.clientId && args.aftercareId
@@ -12134,6 +12399,12 @@ async function performLockedUpdateProBooking(args: {
   overrideReason: string | null
   requestId?: string | null
   idempotencyKey?: string | null
+  /**
+   * Whether THIS update can stop and ask the pro about a live client hold.
+   * Only consulted when the occupied range actually moves. Required, no
+   * default — see `ProLiveHoldOverlapStance`.
+   */
+  proLiveHoldOverlap: ProLiveHoldOverlapStance
 }): Promise<UpdateProBookingResult> {
     assertNonEmptyUserId(args.actorUserId)
 
@@ -12597,6 +12868,7 @@ if (args.notifyClient) {
         kind: 'PRO',
         userId: args.actorUserId,
         professionalId: existing.professionalId,
+        liveHoldOverlap: args.proLiveHoldOverlap,
       },
       source: {
         kind: 'PRO_CREATED',
@@ -13406,6 +13678,11 @@ if (validRebookSlot) {
   } else if (priorRebookedBooking && placementUnchanged) {
     // Time-only change: a normal reschedule (client gets BOOKING_RESCHEDULED).
     await performLockedUpdateProBooking({
+      // The pro is saving an aftercare plan, not standing at a slot: there is
+      // no dialog here that could carry the live-hold decision, and failing the
+      // save with a question nobody can answer would strand the plan. Today's
+      // behaviour, unchanged and stated.
+      proLiveHoldOverlap: 'NO_DECISION_SURFACE',
       tx: args.tx,
       now,
       professionalId: args.professionalId,
@@ -16318,6 +16595,20 @@ export async function createProBooking(
     args.professionalId,
     async ({ tx, now }) =>
       performLockedCreateProBooking({
+        // THE interactive pro create — the dashboard form and the iOS sheet. A
+        // live client hold stops it and asks, unless this attempt is the pro's
+        // answer to that question (see CreateProBookingArgs.confirmHoldOverlap).
+        //
+        // The calendar IMPORT rides this same function. Its conflicts are
+        // already refused one layer up by the CALENDAR_IMPORT source, before the
+        // PRO branch is reached — but it is spelled out here too, because
+        // "unattended, nobody to ask" is the truth about an import whether or
+        // not another rule happens to be catching it first.
+        proLiveHoldOverlap: args.importMode
+          ? 'NO_DECISION_SURFACE'
+          : args.confirmHoldOverlap
+            ? 'PRO_CONFIRMED'
+            : 'ASK_THE_PRO',
         tx,
         now,
         professionalId: args.professionalId,
@@ -16616,6 +16907,11 @@ export async function createBookingSeries(
       })
 
       const first = await performLockedCreateProBooking({
+        // Unreachable by construction: `seriesId` below makes the source
+        // SERIES_MATERIALIZATION, which refuses on ANY conflict before the PRO
+        // branch. Stated rather than left to a default, because a default is
+        // how the wrong answer gets inherited silently.
+        proLiveHoldOverlap: 'NO_DECISION_SURFACE',
         tx,
         now,
         professionalId: args.professionalId,
@@ -16872,6 +17168,9 @@ async function materializeSeriesOccurrenceRange(args: {
         plan.professionalId,
         async ({ tx, now }) => {
           const booking = await performLockedCreateProBooking({
+            // Same as the first occurrence: SERIES_MATERIALIZATION refuses on
+            // any conflict, and this loop runs on a cron with nobody watching.
+            proLiveHoldOverlap: 'NO_DECISION_SURFACE',
             tx,
             now,
             professionalId: plan.professionalId,
@@ -17438,6 +17737,12 @@ export async function updateProBooking(
     args.professionalId,
     async ({ tx, now }) =>
       performLockedUpdateProBooking({
+        // THE interactive pro reschedule — the calendar drag/resize/edit and
+        // the iOS reschedule sheet. Same question, same answer channel as the
+        // create above.
+        proLiveHoldOverlap: args.confirmHoldOverlap
+          ? 'PRO_CONFIRMED'
+          : 'ASK_THE_PRO',
         tx,
         now,
         professionalId: args.professionalId,
@@ -18541,6 +18846,10 @@ export async function confirmClientWaitlistOffer(
       })
 
       const result = await performLockedCreateProBooking({
+        // The CLIENT is confirming an offer, and `overlapActor` below says so —
+        // this never reaches the PRO branch. Stated because the field is
+        // required, not because it can be reached.
+        proLiveHoldOverlap: 'NO_DECISION_SURFACE',
         tx,
         now,
         professionalId: locked.professionalId,

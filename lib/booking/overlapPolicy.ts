@@ -2,6 +2,43 @@
 
 import type { ServiceLocationType } from '@prisma/client'
 
+/**
+ * Whether THIS attempt can be stopped and asked about a live client hold.
+ *
+ * B5 let a pro overlap any conflict with no friction at all, which is right for
+ * another appointment — a pro double-booking their own book is their call — and
+ * wrong for a client who is mid-checkout on those exact minutes. Tori's call
+ * (2026-08-28): show the pro who is holding it (new or returning, and nothing
+ * else) and let them decide, rather than taking the slot out from under a
+ * payment in progress.
+ *
+ * REQUIRED, with no default, on purpose. A default would make every future pro
+ * write path silently inherit one of these answers, and the wrong one is
+ * invisible: `NO_DECISION_SURFACE` books straight over a live checkout in
+ * silence, exactly the behaviour this exists to end
+ * ([[a-decision-leaves-its-old-defaults-behind]]). Making it a required field
+ * means the compiler asks every new call site the question.
+ */
+export type ProLiveHoldOverlapStance =
+  /**
+   * An interactive surface that CAN show the decision and has not yet. A live
+   * hold in the way refuses with `PRO_HOLD_DECISION_REQUIRED`.
+   */
+  | 'ASK_THE_PRO'
+  /**
+   * The pro was shown the decision for this slot and chose to proceed. Books
+   * exactly as `PRO_AUTHORIZED_OVERLAP` does, and is LOGGED as an informed
+   * choice.
+   */
+  | 'PRO_CONFIRMED'
+  /**
+   * There is no surface here that could ask — the aftercare-save reschedule,
+   * the calendar import, a series occurrence. Today's behaviour, unchanged: the
+   * pro's authority stands and a hold does not stop the write. Never reach for
+   * this on a path a pro is watching.
+   */
+  | 'NO_DECISION_SURFACE'
+
 export type BookingOverlapActor =
   | {
       kind: 'CLIENT'
@@ -12,6 +49,7 @@ export type BookingOverlapActor =
       kind: 'PRO'
       userId: string
       professionalId: string
+      liveHoldOverlap: ProLiveHoldOverlapStance
     }
   | {
       kind: 'ADMIN'
@@ -26,12 +64,39 @@ export type BookingWindow = {
 
 export type SchedulingConflictKind = 'BOOKING' | 'HOLD'
 
-export type SchedulingConflict = {
-  kind: SchedulingConflictKind
+type SchedulingConflictBase = {
   id: string
   professionalId: string
   startsAt: Date
   endsAt: Date
+}
+
+/**
+ * One thing already sitting on the requested minutes.
+ *
+ * A discriminated union rather than a `kind` field on one shape, because a HOLD
+ * carries something a BOOKING has no equivalent of: the instant it lapses. The
+ * live-hold decision below has to know whether the reservation in the way is
+ * still running, and reading that off the conflict makes it a fact the type
+ * carries rather than a promise the caller's query made in a comment.
+ */
+export type SchedulingConflict =
+  | ({ kind: 'BOOKING' } & SchedulingConflictBase)
+  | ({
+      kind: 'HOLD'
+      /** When the client's checkout reservation lapses (`BookingHold.expiresAt`). */
+      expiresAt: Date
+    } & SchedulingConflictBase)
+
+/** The live (unexpired) holds among a conflict list, at `now`. */
+export function liveHoldConflicts(
+  conflicts: readonly SchedulingConflict[],
+  now: Date,
+): SchedulingConflict[] {
+  return conflicts.filter(
+    (conflict) =>
+      conflict.kind === 'HOLD' && conflict.expiresAt.getTime() > now.getTime(),
+  )
 }
 
 export type ProPreselectedAftercareSlot = {
@@ -80,10 +145,23 @@ export type BookingOverlapSource =
 export type BookingOverlapAllowedMode =
   | 'NO_OVERLAP'
   | 'PRO_AUTHORIZED_OVERLAP'
+  /**
+   * A pro who was SHOWN a live client hold on these minutes and chose to take
+   * them anyway. Functionally identical to `PRO_AUTHORIZED_OVERLAP` — same
+   * write, same `allowsOverlap` exemption — and kept as its own mode because
+   * the audit trail has to be able to say the choice was informed.
+   */
+  | 'PRO_CONFIRMED_HOLD_OVERLAP'
   | 'ADMIN_AUTHORIZED_OVERLAP'
 
 export type BookingOverlapBlockedCode =
   | 'CLIENT_OVERLAP_NOT_ALLOWED'
+  /**
+   * Not a refusal — a question. A live client hold is on these minutes and the
+   * pro has not been asked yet. The caller answers by putting the decision in
+   * front of them and re-submitting with `liveHoldOverlap: 'PRO_CONFIRMED'`.
+   */
+  | 'PRO_HOLD_DECISION_REQUIRED'
   | 'IMPORT_OVERLAP_NOT_ALLOWED'
   | 'SERIES_OVERLAP_NOT_ALLOWED'
   | 'AFTERCARE_PRESELECTED_SLOT_REQUIRED'
@@ -126,6 +204,13 @@ export function decideBookingOverlapPermission(args: {
   source: BookingOverlapSource
   requestedWindow: BookingWindow
   conflicts: readonly SchedulingConflict[]
+  /**
+   * The instant this decision is being made at. Used for ONE thing: telling a
+   * live client hold from a lapsed one. Required rather than defaulted to
+   * `new Date()` so the whole function stays clock-free and the write boundary's
+   * transaction clock is the one that decides.
+   */
+  now: Date
 }): BookingOverlapDecision {
   const conflicts = [...args.conflicts]
 
@@ -189,6 +274,38 @@ export function decideBookingOverlapPermission(args: {
   }
 
   if (args.actor.kind === 'PRO') {
+    // B5's rule, unchanged: a pro may sit an appointment on top of another
+    // appointment. That is their book, and nobody else is mid-transaction on it.
+    //
+    // The one exception (Tori, 2026-08-28) is a LIVE client hold — somebody is
+    // on the checkout screen paying for these exact minutes right now. Taking
+    // them silently is what this branch used to do; now the pro is shown who is
+    // holding it (new or returning to them, and nothing else) and decides.
+    //
+    // Scoped strictly to holds that are still RUNNING. A lapsed hold reserves
+    // nothing — every conflict query already filters `expiresAt > now`, so one
+    // normally cannot even reach here — and a booking-vs-booking conflict is
+    // untouched, so no friction is added anywhere it was not asked for.
+    const liveHolds = liveHoldConflicts(conflicts, args.now)
+
+    if (liveHolds.length > 0 && args.actor.liveHoldOverlap !== 'NO_DECISION_SURFACE') {
+      if (args.actor.liveHoldOverlap === 'ASK_THE_PRO') {
+        return {
+          ok: false,
+          code: 'PRO_HOLD_DECISION_REQUIRED',
+          userMessage:
+            'A client is checking out for this time right now. Choose whether to book over them.',
+          conflicts,
+        }
+      }
+
+      return {
+        ok: true,
+        mode: 'PRO_CONFIRMED_HOLD_OVERLAP',
+        conflicts,
+      }
+    }
+
     return {
       ok: true,
       mode: 'PRO_AUTHORIZED_OVERLAP',

@@ -12,6 +12,7 @@ import { CalendarCreateSheet } from './_components/CalendarCreateSheet'
 import { CalendarDesktopShell } from './_components/CalendarDesktopShell'
 import { CalendarMobileShell } from './_components/CalendarMobileShell'
 import { CalendarTabletShell } from './_components/CalendarTabletShell'
+import { HoldOverlapDecisionDialog } from '@/app/pro/_components/HoldOverlapDecisionDialog'
 import { ConfirmChangeModal } from './_components/ConfirmChangeModal'
 import { ManagementModal } from './_components/ManagementModal'
 import WaitlistOfferModal from './_components/WaitlistOfferModal'
@@ -499,6 +500,20 @@ export function ProCalendarClientPage(props: ProCalendarClientPageProps) {
         onConfirm={() => {
           void cal.confirmBookingOverride()
         }}
+      />
+
+      {/*
+        The pro dragged/resized an appointment onto minutes a client is checking
+        out for. Same dialog the booking form shows, so the decision reads
+        identically wherever a pro meets it.
+      */}
+      <HoldOverlapDecisionDialog
+        decision={cal.holdOverlapDecision}
+        intent="edit"
+        timeZone={calendarTimeZone}
+        busy={cal.applyingChange}
+        onProceed={cal.proceedOverHold}
+        onWait={cal.waitForHold}
       />
 
       <BookingOverrideConfirmModal

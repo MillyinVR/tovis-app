@@ -962,8 +962,17 @@ describe('re-sizing a live hold under concurrency (real DB)', () => {
   })
 
   /** The pro putting a walk-in in the book at `start`, by hand. */
-  function proWalkIn(start: Date) {
+  /**
+   * The rival pro booking this suite races against a widen.
+   *
+   * `confirmHoldOverlap` is the pro's answer to the live-hold decision (B5
+   * follow-up, Tori 2026-08-28). Left false, the walk-in is REFUSED with the
+   * decision when it meets a live hold; set true, it books exactly as the
+   * silent path used to.
+   */
+  function proWalkIn(start: Date, confirmHoldOverlap = false) {
     return createProBooking({
+      confirmHoldOverlap,
       professionalId: fx.professionalId,
       actorUserId: fx.proUserId,
       overrideReason: null,
@@ -1051,24 +1060,45 @@ describe('re-sizing a live hold under concurrency (real DB)', () => {
     expect(rows[0]?.allowsOverlap).toBe(false)
   })
 
-  it('a pro booking a tail the widen already took is an AUTHORIZED overlap, never a silent one', async () => {
+  // ⚠️ This used to assert the pro's walk-in simply SUCCEEDED here. It no longer
+  // does on the first attempt: a live client hold now stops the pro and asks
+  // (B5 follow-up, Tori 2026-08-28). What the test is really about is unchanged
+  // — that the overlap gate runs INSIDE the lock and sees the widen's committed
+  // new tail — and the refusal proves that more directly than the old
+  // `allowsOverlap` did, because the payload names the very hold it saw.
+  it('a pro booking a tail the widen already took is ASKED about, then authorized', async () => {
     const start = futureLocal(26, 12)
     const tail = new Date(start.getTime() + BASE_DURATION_MINUTES * 60_000)
 
     const created = await hold({ start, addOnIds: [] })
 
     // The mirror image, and the ordering nothing in this suite used to reach.
-    // The widen commits first and the hold now covers the tail — but the rival
-    // here is the PRO, and `decideBookingOverlapPermission` lets a pro sit on a
-    // client's live checkout on purpose (both pro surfaces warn first, B5).
-    // So BOTH succeed, and "exactly one wins" is simply not the invariant on
-    // this pairing.
-    const [resize, booking] = await raceInLockOrder(
+    // The widen commits first and the hold now covers the tail.
+    const [resize, refused] = await raceInLockOrder(
       () => widen(created.hold.id),
       () => proWalkIn(tail),
     )
 
     expect(resize.status).toBe('fulfilled')
+
+    // 🔴 The gate saw the widen's new tail — it names the hold back.
+    expect(rejectionCode(refused)).toBe('HOLD_OVERLAP_NEEDS_CONFIRMATION')
+    const decision = refused.status === 'rejected' ? refused.reason : null
+    expect(isBookingError(decision) ? decision.heldSlot?.holdId : null).toBe(
+      created.hold.id,
+    )
+
+    // Nothing was written while the pro was being asked.
+    await expect(
+      db.booking.count({ where: { professionalId: fx.professionalId } }),
+    ).resolves.toBe(0)
+
+    // The pro answers. From here the behaviour is what it always was.
+    const booking = await proWalkIn(tail, true).then(
+      (value) => ({ status: 'fulfilled' as const, value }),
+      (reason: unknown) => ({ status: 'rejected' as const, reason }),
+    )
+
     expect(booking.status).toBe('fulfilled')
 
     const after = await readHold(created.hold.id)

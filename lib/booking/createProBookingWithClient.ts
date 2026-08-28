@@ -77,6 +77,11 @@ export type CreateProBookingWithClientArgs = {
   allowFarFuture: boolean
   /** K10-B: the pro asked for the deposit step — see CreateProBookingArgs. */
   depositRequested?: boolean
+  /**
+   * The pro answered the live-hold decision with "book it anyway" — see
+   * CreateProBookingArgs.confirmHoldOverlap. Passed straight through.
+   */
+  confirmHoldOverlap?: boolean
 }
 
 type CreateProBookingResult = Awaited<ReturnType<typeof createProBooking>>
@@ -446,6 +451,7 @@ export async function createProBookingWithClient(
     requestedTotalDurationMinutes: args.requestedTotalDurationMinutes,
     allowOutsideWorkingHours: args.allowOutsideWorkingHours,
     allowShortNotice: args.allowShortNotice,
+    confirmHoldOverlap: args.confirmHoldOverlap ?? false,
     allowFarFuture: args.allowFarFuture,
     depositRequested: args.depositRequested ?? false,
     requestId: args.requestId ?? null,

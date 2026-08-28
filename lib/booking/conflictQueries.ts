@@ -560,6 +560,11 @@ export async function findBookingAndHoldConflicts(args: {
         id: true,
         professionalId: true,
         scheduledFor: true,
+        // Selected, not just filtered on: `SchedulingConflict` carries it so
+        // the overlap policy can tell a running checkout from a lapsed one
+        // itself, and so the pro's live-hold decision can show the same
+        // countdown the client is watching.
+        expiresAt: true,
         endsAtSnapshot: true,
         durationMinutesSnapshot: true,
         bufferMinutesSnapshot: true,
@@ -609,6 +614,7 @@ export async function findBookingAndHoldConflicts(args: {
         professionalId: row.professionalId,
         startsAt: interval.start,
         endsAt: interval.end,
+        expiresAt: row.expiresAt,
       }
     })
     .filter(overlapsRequested)

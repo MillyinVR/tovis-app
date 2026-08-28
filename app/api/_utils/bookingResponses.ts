@@ -38,5 +38,10 @@ export function bookingErrorJsonFail(error: BookingError) {
     message: error.message,
     userMessage: error.userMessage,
     uiAction: error.uiAction,
+    // The live-hold decision the pro has to answer. Forwarded here for exactly
+    // the reason the comment above records: a field set at the throw site that
+    // this helper does not know about is a field the wire silently drops, and
+    // dropping this one turns the popup back into a dead-end error.
+    ...(error.heldSlot ? { heldSlot: error.heldSlot } : {}),
   })
 }
