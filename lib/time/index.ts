@@ -15,13 +15,20 @@
 //   5. WHICH locale?           DISPLAY_LOCALE — the display formatters default to it
 
 // 1. Which timezone wins (precedence: booking snapshot -> hold -> location -> pro -> fallback)
+//
+// Only the PURE resolvers are re-exported here, and only from the client-safe
+// `timeZoneTruthValues` module. This barrel is what every UI file imports, so
+// anything it touches ships to the browser: re-exporting the DB-backed
+// resolvers (`resolveApptTimeZone`, `resolveSchedulingTimeZone`,
+// `resolveAppointmentSchedulingContext`) put `new PrismaClient()` and the whole
+// generated client into 124 client components' bundles (136 routes), even
+// though nothing ever imported them from here. Server code imports those three
+// from `@/lib/booking/timeZoneTruth` directly — which is now `server-only`, so
+// re-adding them here is a build error rather than ~146 KB of silent bloat.
 export {
-  resolveApptTimeZone,
   resolveApptTimeZoneFromValues,
-  resolveSchedulingTimeZone,
   resolveSchedulingTimeZoneFromValues,
-  resolveAppointmentSchedulingContext,
-} from '@/lib/booking/timeZoneTruth'
+} from '@/lib/booking/timeZoneTruthValues'
 export type {
   IanaTimeZone,
   YMD,
@@ -32,7 +39,7 @@ export type {
   TimeZoneTruthArgs,
   AppointmentSchedulingContext,
   AppointmentSchedulingContextResult,
-} from '@/lib/booking/timeZoneTruth'
+} from '@/lib/booking/timeZoneTruthValues'
 
 // Timezone validation / labels / defaults
 export {

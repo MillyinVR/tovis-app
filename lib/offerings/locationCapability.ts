@@ -18,19 +18,26 @@
 // requiring `formattedAddress`) would depend on the address-encryption expand
 // phase still keeping raw columns populated, which is not a safe thing to bet a
 // pro's bookability on.
+//
+// This module is server-only: it runs the query, and the location-type
+// constants below are Prisma enum values. The shape and the two pure rules
+// (`narrowOfferingModes`, `defaultOfferingModes`) live in the client-safe
+// sibling `@/lib/offerings/locationCapabilityRules` and are re-exported here.
+
+import 'server-only'
 
 import { Prisma, ProfessionalLocationType } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
+import type { ProLocationCapability } from '@/lib/offerings/locationCapabilityRules'
+
+export {
+  narrowOfferingModes,
+  defaultOfferingModes,
+} from '@/lib/offerings/locationCapabilityRules'
+export type { ProLocationCapability } from '@/lib/offerings/locationCapabilityRules'
 
 type DbClient = Prisma.TransactionClient | typeof prisma
-
-export type ProLocationCapability = {
-  /** The pro has at least one bookable SALON/SUITE location. */
-  salon: boolean
-  /** The pro has at least one bookable MOBILE_BASE location. */
-  mobile: boolean
-}
 
 export const SALON_CAPABLE_LOCATION_TYPES: readonly ProfessionalLocationType[] = [
   ProfessionalLocationType.SALON,
@@ -70,51 +77,5 @@ export async function loadProLocationCapability(
   return {
     salon: SALON_CAPABLE_LOCATION_TYPES.some((type) => types.has(type)),
     mobile: MOBILE_CAPABLE_LOCATION_TYPES.some((type) => types.has(type)),
-  }
-}
-
-/**
- * Narrow an offering's advertised modes to what the pro can actually host.
- *
- * ⚠️ Read boundary — belt and braces. Prod already contains offerings whose
- * `offersInSalon` was never a choice, so the flag alone cannot be trusted even
- * after the default changes and the backfill runs. Apply this everywhere an
- * offering's modes are published to a CLIENT; the pro's own management surfaces
- * keep showing the raw flags so they can see and fix what they have.
- */
-export function narrowOfferingModes<T extends { offersInSalon: boolean; offersMobile: boolean }>(
-  offering: T,
-  capability: ProLocationCapability,
-): T {
-  return {
-    ...offering,
-    offersInSalon: offering.offersInSalon && capability.salon,
-    offersMobile: offering.offersMobile && capability.mobile,
-  }
-}
-
-/**
- * The modes to pre-select for an offering whose creator has not stated them.
- *
- * ONE rule, three consumers: `POST /api/v1/pro/offerings` applies it server-side
- * when a flag is omitted, the web Add-service form seeds its toggles with it,
- * and `GET /api/v1/pro/services/catalog` ships it to the iOS form so that form
- * does not have to re-derive it in Swift. Before it was extracted, the web form
- * and the POST route each spelled the same expression out, and iOS did neither —
- * it hardcoded salon-on/mobile-off, which is how a mobile-only pro creating a
- * service on the phone still wrote `offersInSalon: true`.
- *
- * A pro with NEITHER capability yet (no bookable location at all) gets salon,
- * because a form refuses to submit with both modes off and the read boundary
- * (`narrowOfferingModes`) takes an unhostable mode back off before any client
- * sees it.
- */
-export function defaultOfferingModes(capability: ProLocationCapability): {
-  offersInSalon: boolean
-  offersMobile: boolean
-} {
-  return {
-    offersInSalon: capability.salon || !capability.mobile,
-    offersMobile: !capability.salon && capability.mobile,
   }
 }

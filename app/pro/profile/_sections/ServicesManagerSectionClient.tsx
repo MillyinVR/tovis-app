@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import AddServiceOverlay from './AddServiceOverlay'
-import type { ProLocationCapability } from '@/lib/offerings/locationCapability'
+import type { ProLocationCapability } from '@/lib/offerings/locationCapabilityRules'
 
 type ServiceDTO = {
   id: string

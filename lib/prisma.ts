@@ -1,3 +1,8 @@
+// The database client is server-exclusive. `server-only` turns an import
+// from a client component into a build error instead of a silent ~146 KB of
+// Prisma runtime (and the full schema's column names) shipped to browsers —
+// which is exactly how it leaked through the `@/lib/time` barrel before.
+import 'server-only'
 import { PrismaClient } from '@prisma/client'
 import { globalRegistry } from './typed'
 

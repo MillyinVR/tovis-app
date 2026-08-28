@@ -12,7 +12,7 @@ import { isRecord } from '@/lib/guards'
 import {
   defaultOfferingModes,
   type ProLocationCapability,
-} from '@/lib/offerings/locationCapability'
+} from '@/lib/offerings/locationCapabilityRules'
 import { controlClassName } from '@/app/_components/ui'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 

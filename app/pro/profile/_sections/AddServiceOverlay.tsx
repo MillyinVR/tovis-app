@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import ServicePicker from '@/app/pro/services/ServicePicker'
-import type { ProLocationCapability } from '@/lib/offerings/locationCapability'
+import type { ProLocationCapability } from '@/lib/offerings/locationCapabilityRules'
 import { zClass } from '@/lib/zIndex'
 
 type ServiceDTO = {
