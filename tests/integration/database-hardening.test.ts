@@ -32,8 +32,77 @@ const db = new PrismaClient({ datasources: { db: { url: databaseUrl } } })
  * It is owned by `supabase_admin` and owned by the extension, so `ALTER TABLE`
  * would fail with "must be owner of table" and take the deploy down with it. It
  * holds no user data.
+ *
+ * Re-verified against production 2026-08-28 — see ACCEPTED SUPABASE ADVISOR
+ * FINDINGS below, which records why this and two sibling advisories cannot be
+ * "fixed" and what goes wrong if someone tries.
  */
 const RLS_EXEMPT_TABLES = new Set(['spatial_ref_sys'])
+
+/**
+ * ── ACCEPTED SUPABASE ADVISOR FINDINGS (audited 2026-08-28, production) ─────
+ *
+ * The Supabase security advisor reports 10 non-INFO findings (1 ERROR + 9
+ * WARN, alongside 157 INFO `rls_enabled_no_policy` rows that ARE the deny-all
+ * posture working) which will never clear. All three underlying causes below
+ * were probed directly against production as `postgres` — the role Prisma
+ * migrates as; every "fix" is either rejected by Postgres outright or is a net
+ * security REGRESSION. Do not re-litigate them without
+ * re-running the probes — two of the three look trivially fixable and are not.
+ *
+ * 1. ERROR `rls_disabled_in_public` — `public.spatial_ref_sys`.
+ *    UNFIXABLE. `ALTER TABLE public.spatial_ref_sys ENABLE ROW LEVEL SECURITY`
+ *    fails with `must be owner of table spatial_ref_sys` (owner is
+ *    `supabase_admin`; `pg_has_role(current_user, relowner, 'MEMBER')` = false).
+ *    A migration containing it would abort the deploy.
+ *    ⚠️ Enabling RLS here would ALSO need a permissive policy, which would
+ *    break the "RLS on, no policies" deny-all invariant asserted below — the
+ *    lock works precisely because `pg_policies` in `public` is empty.
+ *    Residual exposure: the EPSG coordinate-reference registry (8500 rows of
+ *    public reference data, no user data). Confirmed readable by `anon` on
+ *    staging; on production `anon` lacks USAGE on schema `public`, so
+ *    `GET /rest/v1/spatial_ref_sys` returns 401 "permission denied for schema
+ *    public". App tables stay protected either way — on staging `anon` reads
+ *    `Booking` as 0 rows, which is the deny-all lock doing its job.
+ *
+ * 2. WARN `extension_in_public` ×3 — `postgis`, `vector`, `btree_gist`.
+ *    DELIBERATELY NOT FIXED; the advisor's advice is wrong for this database.
+ *    • `postgis` cannot move at all: `ALTER EXTENSION postgis SET SCHEMA
+ *      extensions` fails with `extension "postgis" does not support SET
+ *      SCHEMA` (`extrelocatable` = false), so the WARN is permanent regardless.
+ *    • `vector` and `btree_gist` DO relocate successfully — and doing so makes
+ *      things WORSE. Supabase grants `anon`/`authenticated` USAGE on schema
+ *      `extensions` (`nspacl` = `{...,anon=U/postgres,authenticated=U/postgres,...}`)
+ *      but NOT on `public`. Probed on production: as `anon`,
+ *      `vector_dims('[1,2,3]'::vector)` is "permission denied for schema
+ *      public" before the move and returns `3` after it. Relocating hands the
+ *      anonymous role a function surface it currently cannot reach.
+ *    • Independently, it would break CI and local dev: the integration
+ *      containers are vanilla `imresamu/postgis:16-3.4-bundle0`, whose
+ *      `search_path` has no `extensions` entry (that is a Supabase-specific
+ *      `ALTER ROLE postgres` setting), so `::vector` casts and the `<=>`
+ *      operator in the embedding suites would stop resolving.
+ *    This test asserts the three stay in `public` so a future migration that
+ *    relocates them goes red here instead of shipping.
+ *
+ * 3. WARN `anon`/`authenticated`_`security_definer_function_executable` ×6 —
+ *    `public.st_estimatedextent(text,text[,text[,boolean]])`, PostGIS's
+ *    internal index-statistics helper, three overloads × two roles.
+ *    UNFIXABLE AND UNNECESSARY.
+ *    ⚠️ `REVOKE EXECUTE ... FROM PUBLIC/anon` is a SILENT NO-OP here: it runs
+ *    without error (so a migration carrying it goes green) while
+ *    `has_function_privilege('anon', ..., 'EXECUTE')` stays true, because
+ *    `postgres` is not the grantor — the EXECUTE-to-PUBLIC grant is the
+ *    function default from owner `supabase_admin`. Verified on production.
+ *    It is also not reachable: `anon` gets "permission denied for schema
+ *    public", and PostgREST cannot invoke it anyway — all three overloads have
+ *    `proargnames` = NULL, so `POST /rest/v1/rpc/st_estimatedextent` returns
+ *    PGRST202 ("no matches were found in the schema cache").
+ *
+ * Clearing 1 and 3 requires `supabase_admin`, which no migration in this repo
+ * can assume. They are Tori's call to raise with Supabase support, not ours.
+ */
+const EXTENSIONS_PINNED_TO_PUBLIC = ['btree_gist', 'postgis', 'vector']
 
 /** Our own functions — the ones whose `search_path` must stay pinned. */
 const PINNED_FUNCTIONS = [
@@ -110,6 +179,37 @@ describe('database hardening', () => {
       'A policy exists on a public table. RLS here is a deny-all lock; ' +
         'adding policies changes the security model and needs a deliberate decision.',
     ).toBe(0)
+  })
+
+  it('keeps postgis, vector and btree_gist in public', async () => {
+    // Finding 2 in ACCEPTED SUPABASE ADVISOR FINDINGS above. The advisor asks
+    // for these to move to a dedicated schema; on this project that is either
+    // impossible (`postgis` is not relocatable) or a REGRESSION — `anon` holds
+    // USAGE on `extensions` but not on `public`, so relocating `vector` /
+    // `btree_gist` newly exposes their functions to the anonymous role, and
+    // breaks `::vector` in CI where `extensions` is not on the search_path.
+    //
+    // This is the tripwire: a migration that relocates one of them fails here.
+    const rows = await db.$queryRaw<{ extname: string; nspname: string }[]>`
+      SELECT e.extname, n.nspname
+      FROM pg_extension e
+      JOIN pg_namespace n ON n.oid = e.extnamespace
+      WHERE e.extname = ANY(${EXTENSIONS_PINNED_TO_PUBLIC})
+      ORDER BY e.extname
+    `
+
+    // Each must actually be installed — otherwise "all in public" is vacuously
+    // true against a database where they simply do not exist.
+    expect(rows.map((row) => row.extname)).toEqual(EXTENSIONS_PINNED_TO_PUBLIC)
+
+    const moved = rows.filter((row) => row.nspname !== 'public')
+
+    expect(
+      moved.map((row) => `${row.extname} -> ${row.nspname}`),
+      'These extensions were moved out of `public`. That does not satisfy the\n' +
+        'Supabase advisor safely — read ACCEPTED SUPABASE ADVISOR FINDINGS at the\n' +
+        'top of this file before changing it.',
+    ).toEqual([])
   })
 
   it('pins search_path on every function we define', async () => {
