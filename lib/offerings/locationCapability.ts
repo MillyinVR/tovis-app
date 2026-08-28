@@ -19,12 +19,15 @@
 // phase still keeping raw columns populated, which is not a safe thing to bet a
 // pro's bookability on.
 //
-// This module is server-only: it runs the query, and the location-type
+// This module is server-side: it runs the query, and the location-type
 // constants below are Prisma enum values. The shape and the two pure rules
 // (`narrowOfferingModes`, `defaultOfferingModes`) live in the client-safe
 // sibling `@/lib/offerings/locationCapabilityRules` and are re-exported here.
-
-import 'server-only'
+//
+// No `import 'server-only'`: unlike its sibling splits, this module IS reached
+// by two CLI entry points — scripts/backfill-search-index.ts (which CI runs) and
+// prisma/scripts/seedDemoClientProfile.ts — and `server-only` does not resolve
+// under `tsx`. See the note in lib/prisma.ts.
 
 import { Prisma, ProfessionalLocationType } from '@prisma/client'
 
