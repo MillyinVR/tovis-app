@@ -19,6 +19,7 @@ import {
 
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import { getAppUrl } from '@/lib/membership/urls'
+import { captureNotificationException } from '@/lib/observability/notificationEvents'
 import { resolveUserPublicNames } from '@/lib/notifications/social/resolveActorPublicName'
 import { platformCrossTenantProVisibilityFilter } from '@/lib/tenant'
 import { readPostmarkEmailConfig } from '@/lib/notifications/config'
@@ -597,6 +598,24 @@ export async function runSocialDigest(
         error: safeError(error),
       })
     }
+  }
+
+  // ONE capture per run, not one per recipient: a provider outage fails every
+  // recipient in the batch, and paging once per failure would bury the signal
+  // in its own alert storm. The per-recipient console lines above still carry
+  // the individual errors for anyone reading the run's logs.
+  //
+  // Worth paging at all because the cron route returns `failed` inside a 200
+  // response body (app/api/internal/jobs/notifications/digest/route.ts), so a
+  // run that sent nothing still looks green from the outside.
+  if (result.failed > 0) {
+    captureNotificationException({
+      error: new Error(
+        `runSocialDigest: ${result.failed} of ${result.failed + result.sent} digest sends failed`,
+      ),
+      route: 'runSocialDigest',
+      event: 'DIGEST_SENDS_FAILED',
+    })
   }
 
   return result

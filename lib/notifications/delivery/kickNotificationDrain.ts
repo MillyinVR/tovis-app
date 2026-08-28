@@ -1,6 +1,7 @@
 // lib/notifications/delivery/kickNotificationDrain.ts
 import { waitUntil } from '@vercel/functions'
 
+import { captureNotificationException } from '@/lib/observability/notificationEvents'
 import { safeError } from '@/lib/security/logging'
 
 import { drainDueNotifications } from './runNotificationDrain'
@@ -35,6 +36,15 @@ export function kickNotificationDrain(args?: { batchSize?: number }): void {
         console.error('kickNotificationDrain: drain failed', {
           error: safeError(error),
         })
+        // The every-minute cron still backstops delivery, so this is latency,
+        // not loss — but a PERSISTENT drain failure means every email/SMS in the
+        // app is late, and the console line alone is invisible to Sentry
+        // (SENTRY_ENABLE_LOGS is off by default).
+        captureNotificationException({
+          error,
+          route: 'kickNotificationDrain',
+          event: 'DRAIN_KICK_FAILED',
+        })
       },
     )
 
@@ -46,6 +56,16 @@ export function kickNotificationDrain(args?: { batchSize?: number }): void {
     // the caller's request path.
     console.warn('kickNotificationDrain: waitUntil unavailable; relying on cron', {
       error: safeError(error),
+    })
+    // Expected outside a serverless request scope (local dev, tests). In
+    // PRODUCTION it never should be — and if it is, every notification in the
+    // app silently degrades to cron-cadence. Warning level: the cron backstop
+    // means nothing is lost, only delayed.
+    captureNotificationException({
+      error,
+      route: 'kickNotificationDrain',
+      event: 'WAIT_UNTIL_UNAVAILABLE',
+      level: 'warning',
     })
   }
 }
