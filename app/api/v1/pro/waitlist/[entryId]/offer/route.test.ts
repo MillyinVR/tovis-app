@@ -161,7 +161,7 @@ describe('app/api/v1/pro/waitlist/[entryId]/offer/route.ts', () => {
     expect(mocks.createWaitlistOffer).not.toHaveBeenCalled()
   })
 
-  it('rejects a MOBILE offer for a salon-capable pro, naming the product limit', async () => {
+  it('rejects a MOBILE offer from a pro who can only host in-salon, naming what IS allowed', async () => {
     void (await POST(
       makeRequest({ body: { ...VALID_BODY, locationType: 'MOBILE' } }),
       makeCtx(),
@@ -172,6 +172,48 @@ describe('app/api/v1/pro/waitlist/[entryId]/offer/route.ts', () => {
       'Waitlist times for this service can only be offered in-salon right now.',
     )
     expect(mocks.createWaitlistOffer).not.toHaveBeenCalled()
+  })
+
+  it('accepts a MOBILE offer once the pro can host one', async () => {
+    // The counterpart to the refusal above, and the thing that proves the mode
+    // list is what gates this rather than a `locationType === SALON` compare
+    // hiding somewhere in the route.
+    mocks.loadWaitlistHostability.mockResolvedValue({
+      ok: true,
+      offeringId: 'off_1',
+      modes: ['SALON', 'MOBILE'],
+    })
+    mocks.createWaitlistOffer.mockResolvedValueOnce({
+      offer: {
+        id: 'offer_m',
+        status: 'PENDING',
+        startsAt: new Date('2026-07-10T17:00:00.000Z'),
+        endsAt: new Date('2026-07-10T18:00:00.000Z'),
+        locationType: 'MOBILE',
+      },
+    })
+
+    void (await POST(
+      makeRequest({
+        body: { ...VALID_BODY, locationType: 'MOBILE', locationId: 'base_1' },
+      }),
+      makeCtx(),
+    ))
+
+    expect(mocks.jsonFail).not.toHaveBeenCalled()
+    expect(mocks.createWaitlistOffer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        locationType: 'MOBILE',
+        locationId: 'base_1',
+        waitlistEntryId: 'entry_1',
+      }),
+    )
+    // 🔴 The route must not pass a client address: it has none, and the write
+    // boundary resolves the destination itself. A `clientAddressId` appearing
+    // in this call would mean the pro's device had one to send.
+    expect(mocks.createWaitlistOffer).not.toHaveBeenCalledWith(
+      expect.objectContaining({ clientAddressId: expect.anything() }),
+    )
   })
 
   it('rejects an unparseable location type (400) rather than defaulting to SALON', async () => {
@@ -198,25 +240,10 @@ describe('app/api/v1/pro/waitlist/[entryId]/offer/route.ts', () => {
   })
 
   describe('refuses with a reason the PRO can act on', () => {
-    it('mobile-only: says so, instead of a bare "in-salon only"', async () => {
-      mocks.loadWaitlistHostability.mockResolvedValueOnce({
-        ok: false,
-        refusal: { kind: 'NO_HOSTABLE_MODE', advertisesMobileOnly: true },
-      })
-
-      void (await POST(makeRequest({ body: VALID_BODY }), makeCtx()))
-
-      expect(mocks.jsonFail).toHaveBeenCalledWith(
-        409,
-        expect.stringContaining('only offer this service mobile'),
-      )
-      expect(mocks.createWaitlistOffer).not.toHaveBeenCalled()
-    })
-
     it('no bookable location: points at the locations screen', async () => {
       mocks.loadWaitlistHostability.mockResolvedValueOnce({
         ok: false,
-        refusal: { kind: 'NO_HOSTABLE_MODE', advertisesMobileOnly: false },
+        refusal: { kind: 'NO_HOSTABLE_MODE' },
       })
 
       void (await POST(makeRequest({ body: VALID_BODY }), makeCtx()))
@@ -225,6 +252,7 @@ describe('app/api/v1/pro/waitlist/[entryId]/offer/route.ts', () => {
         409,
         expect.stringContaining('bookable location'),
       )
+      expect(mocks.createWaitlistOffer).not.toHaveBeenCalled()
     })
 
     it('no active offering: points at the service', async () => {

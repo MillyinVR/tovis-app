@@ -163,6 +163,8 @@ describe('GET /api/v1/pro/waitlist', () => {
         waitlistEntryId: 'w2',
         startsAt: new Date('2026-08-01T17:00:00Z'),
         locationType: 'SALON',
+        clientDistanceMiles: null,
+        clientAreaLabel: null,
       },
     ])
 
@@ -175,6 +177,9 @@ describe('GET /api/v1/pro/waitlist', () => {
       id: 'off_1',
       startsAt: '2026-08-01T17:00:00.000Z',
       locationType: 'SALON',
+      // An in-salon offer involves no trip, so there is nothing to say about
+      // one — `travel` is null rather than a row of empty fields.
+      travel: null,
     })
 
     // Only the listed entries are queried, and only offers the client can still

@@ -2,7 +2,7 @@
 
 import { Role, ServiceLocationType } from '@prisma/client'
 
-import { jsonFail, pickString, requirePro } from '@/app/api/_utils'
+import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import { withRouteIdempotency } from '@/app/api/_utils/idempotency'
 import { bookingErrorJsonFail } from '@/app/api/_utils/bookingResponses'
 import {
@@ -11,9 +11,17 @@ import {
 } from '@/app/api/_utils/routeContext'
 import { createWaitlistOffer } from '@/lib/booking/writeBoundary'
 import { prisma } from '@/lib/prisma'
-import { loadWaitlistHostability } from '@/lib/waitlist/hostability'
+import {
+  loadWaitlistHostability,
+  type WaitlistHostabilityRefusal,
+} from '@/lib/waitlist/hostability'
 import { isBookingError } from '@/lib/booking/errors'
-import { normalizeLocationType } from '@/lib/booking/locationContext'
+import {
+  getModeDurationMinutesOrNull,
+  normalizeLocationType,
+} from '@/lib/booking/locationContext'
+import { pickBookableLocation } from '@/lib/booking/pickLocation'
+import { isValidIanaTimeZone } from '@/lib/time'
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
@@ -34,6 +42,51 @@ type OfferResponseBody = {
   }
 }
 
+/** One mode this pro may offer this entry a time in, and where it is anchored. */
+type OfferOption = {
+  locationType: ServiceLocationType
+  locationId: string
+  locationName: string | null
+  timeZone: string
+  durationMinutes: number
+}
+
+type OfferOptionsBody = {
+  /** The pro's active offering for the entry's service, or null when blocked. */
+  offeringId: string | null
+  options: OfferOption[]
+  /** A sentence for the picker's empty state; null when `options` is non-empty. */
+  blockedReason: string | null
+}
+
+/**
+ * The pro-facing sentence for "nothing to offer here". A sibling of
+ * `waitlistRefusalMessage`, which words the same refusals for the CLIENT — the
+ * two audiences need different sentences (one can fix it, one cannot), so they
+ * are deliberately not shared.
+ */
+function describeOfferBlock(refusal: WaitlistHostabilityRefusal): string {
+  if (refusal.kind === 'NO_ACTIVE_OFFERING') {
+    return 'You don’t have an active offering for this service, so there’s no time to offer. Add or activate the service first.'
+  }
+  return 'You don’t have a bookable location for this service yet, so there’s no time to offer. Add one in your locations first.'
+}
+
+/**
+ * The zone an offered slot is read in: the location's own, else the pro's, else
+ * UTC. Same precedence `resolveValidatedBookingContext` applies, so the picker
+ * displays the times the offer will actually be stamped in.
+ */
+function resolveOptionTimeZone(
+  locationTimeZone: string | null,
+  professionalTimeZone: string | null,
+): string {
+  for (const candidate of [locationTimeZone, professionalTimeZone]) {
+    if (candidate && isValidIanaTimeZone(candidate)) return candidate
+  }
+  return 'UTC'
+}
+
 function parseIsoDate(value: unknown): Date | null {
   if (typeof value !== 'string') return null
   const trimmed = value.trim()
@@ -48,6 +101,130 @@ function describeModes(modes: readonly ServiceLocationType[]): string {
     mode === ServiceLocationType.SALON ? 'in-salon' : 'mobile',
   )
   return labels.length ? labels.join(' or ') : 'nowhere'
+}
+
+/**
+ * What this pro may actually offer this waitlisted client, answered by the
+ * SERVER: which modes, anchored to which location, at what length.
+ *
+ * It exists because both offer surfaces were deriving that answer themselves and
+ * getting it wrong the same way — web's calendar page picked a bookable
+ * SALON/SUITE and passed `locationType: 'SALON'` as a literal, and iOS's sheet
+ * re-implemented the same search in Swift. A mobile-only pro therefore never saw
+ * an "Offer a time" action at all, on either platform, and neither client could
+ * have learned otherwise because neither was asking.
+ *
+ * `loadWaitlistHostability` is the one rule for the mode list (what the pro can
+ * host ∩ what an offer can be fulfilled in) and `pickBookableLocation` is the
+ * one rule for which location serves a mode. Both are the same resolvers the
+ * POST below re-runs under the professional's lock, so an option offered here is
+ * one the POST accepts — a picker that could offer an unacceptable choice is the
+ * same broken promise, moved one screen earlier.
+ *
+ * 🔴 Nothing about the CLIENT is in this response. A mobile option carries the
+ * pro's own base, never the destination: the destination is resolved server-side
+ * inside `createWaitlistOffer` precisely so it never has to travel to the pro's
+ * device.
+ */
+export async function GET(
+  _req: Request,
+  ctx: RouteContext<{ entryId: string }>,
+) {
+  try {
+    const auth = await requirePro()
+    if (!auth.ok) return auth.res
+    const { professionalId } = auth
+
+    const { entryId: rawEntryId } = await resolveRouteParams(ctx)
+    const entryId = pickString(rawEntryId)
+    if (!entryId) return jsonFail(400, 'Missing waitlist entry id.')
+
+    const entry = await prisma.waitlistEntry.findFirst({
+      where: { id: entryId, professionalId },
+      select: { id: true, serviceId: true },
+    })
+    if (!entry) return jsonFail(404, 'Waitlist entry not found.')
+
+    const hostability = await loadWaitlistHostability({
+      professionalId,
+      serviceId: entry.serviceId,
+    })
+
+    if (!hostability.ok) {
+      // Not an error: "there is nothing you can offer, and here is why" is the
+      // answer the picker needs in order to render its own empty state rather
+      // than an empty list with no explanation.
+      return jsonOk(
+        {
+          offeringId: null,
+          options: [],
+          blockedReason: describeOfferBlock(hostability.refusal),
+        } satisfies OfferOptionsBody,
+        200,
+      )
+    }
+
+    const offering = await prisma.professionalServiceOffering.findUnique({
+      where: { id: hostability.offeringId },
+      select: {
+        id: true,
+        salonDurationMinutes: true,
+        mobileDurationMinutes: true,
+        professional: { select: { timeZone: true } },
+      },
+    })
+    if (!offering) return jsonFail(404, 'Offering not found.')
+
+    const options: OfferOption[] = []
+
+    for (const locationType of hostability.modes) {
+      // The same picker `resolveValidatedBookingContext` runs, so the location
+      // named here is the one the POST would resolve to.
+      const location = await pickBookableLocation({
+        professionalId,
+        locationType,
+        allowFallback: true,
+      })
+      if (!location) continue
+
+      const durationMinutes = getModeDurationMinutesOrNull({
+        locationType,
+        salonDurationMinutes: offering.salonDurationMinutes,
+        mobileDurationMinutes: offering.mobileDurationMinutes,
+      })
+      // A mode with no configured length cannot be offered — the POST refuses it
+      // as DURATION_REQUIRED, so it must not appear as a choice.
+      if (durationMinutes == null) continue
+
+      options.push({
+        locationType,
+        locationId: location.id,
+        locationName: location.name ?? null,
+        timeZone: resolveOptionTimeZone(
+          location.timeZone,
+          offering.professional?.timeZone ?? null,
+        ),
+        durationMinutes,
+      })
+    }
+
+    return jsonOk(
+      {
+        offeringId: offering.id,
+        options,
+        blockedReason:
+          options.length > 0
+            ? null
+            : 'You don’t have a bookable location set up for this service yet, so there’s no time to offer. Add one in your locations first.',
+      } satisfies OfferOptionsBody,
+      200,
+    )
+  } catch (error: unknown) {
+    console.error('GET /api/v1/pro/waitlist/[entryId]/offer error', {
+      error: safeError(error),
+    })
+    return jsonFail(500, 'Internal server error')
+  }
 }
 
 /**
@@ -110,14 +287,9 @@ export async function POST(
     })
 
     if (!hostability.ok) {
-      return jsonFail(
-        409,
-        hostability.refusal.kind === 'NO_ACTIVE_OFFERING'
-          ? 'You don’t have an active offering for this service, so there’s no time to offer. Add or activate the service first.'
-          : hostability.refusal.advertisesMobileOnly
-            ? 'You only offer this service mobile, and waitlist times can only be offered in-salon right now.'
-            : 'You don’t have a bookable location for this service yet, so there’s no time to offer. Add one in your locations first.',
-      )
+      // The same two sentences the GET above hands the picker for its empty
+      // state, from the same helper — one refusal, worded once.
+      return jsonFail(409, describeOfferBlock(hostability.refusal))
     }
 
     if (!hostability.modes.includes(locationType)) {

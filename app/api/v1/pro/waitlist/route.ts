@@ -5,12 +5,17 @@
 // list top-down to fill a spot from the waitlist — so the rank here is honest
 // (it reflects who has been waiting longest), unlike a client-facing "in line"
 // number, which the first-come last-minute engine doesn't honor.
-import { ServiceLocationType, WaitlistStatus } from '@prisma/client'
+import { WaitlistStatus } from '@prisma/client'
 
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { prismaRead } from '@/lib/prisma'
 import { formatWaitlistPreferenceLabel } from '@/lib/waitlist/preferenceLabel'
 import { liveWaitlistOfferWhere } from '@/lib/waitlist/offerLiveness'
+import {
+  buildProWaitlistPendingOfferSummary,
+  PRO_WAITLIST_PENDING_OFFER_SELECT,
+  type ProWaitlistPendingOfferSummary,
+} from '@/lib/waitlist/proOfferSummary'
 import { getVisibleClientIdSetForPro } from '@/lib/clientVisibility'
 import {
   CLIENT_LINK_SELECT,
@@ -20,11 +25,17 @@ import {
 
 export const dynamic = 'force-dynamic'
 
-type WaitlistOutreachPendingOffer = {
-  id: string
-  startsAt: string
-  locationType: ServiceLocationType
-}
+/**
+ * THE pro-facing shape of a live offer — owned by lib/waitlist/proOfferSummary,
+ * not re-declared here.
+ *
+ * 🔴 For a MOBILE offer this carries a distance and a general area and NOTHING
+ * else about where the client lives. That is enforced by the select it is read
+ * through, so this RESPONSE does not contain the address — it is not a matter of
+ * the client app choosing not to render one. The exact address opens to the pro
+ * only after the client accepts, through the booking they then share.
+ */
+type WaitlistOutreachPendingOffer = ProWaitlistPendingOfferSummary
 
 type WaitlistOutreachEntry = {
   rank: number
@@ -119,23 +130,14 @@ export async function GET() {
               waitlistEntryId: { in: entryIds },
               ...liveWaitlistOfferWhere(new Date()),
             },
-            select: {
-              id: true,
-              waitlistEntryId: true,
-              startsAt: true,
-              locationType: true,
-            },
+            select: PRO_WAITLIST_PENDING_OFFER_SELECT,
           })
         : []
 
     const pendingOfferByEntryId = new Map<string, WaitlistOutreachPendingOffer>(
       pendingOfferRows.map((offer) => [
         offer.waitlistEntryId,
-        {
-          id: offer.id,
-          startsAt: offer.startsAt.toISOString(),
-          locationType: offer.locationType,
-        },
+        buildProWaitlistPendingOfferSummary(offer),
       ]),
     )
 

@@ -70,6 +70,15 @@ type Props = {
    * Omitted on non-aftercare surfaces (waitlist offer).
    */
   rebookOfBookingId?: string | null
+  /**
+   * Set when the pro is picking a time to OFFER a waitlisted client. MOBILE
+   * placement needs the client's service address, and at offer time the pro is
+   * not entitled to it — so this entry id goes to the server instead and the
+   * address is resolved there. When present it REPLACES `clientAddressId` on
+   * the availability query; nothing about the client's address reaches this
+   * component.
+   */
+  waitlistEntryId?: string | null
 }
 
 function parseSlots(data: unknown): { slots: string[]; durationMinutes: number } {
@@ -143,6 +152,7 @@ export default function RebookSlotPicker({
   offWeekdays,
   suggestedYmd,
   rebookOfBookingId,
+  waitlistEntryId,
 }: Props) {
   const initialDay = value?.startsAt
     ? isoToYmdInTimeZone(value.startsAt, timeZone)
@@ -181,8 +191,14 @@ export default function RebookSlotPicker({
           locationId,
           date: ymd,
         })
-        if (locationType === 'MOBILE' && clientAddressId) {
-          params.set('clientAddressId', clientAddressId)
+        if (locationType === 'MOBILE') {
+          // The waitlist path never has (or wants) a client address on the
+          // device: the server resolves the destination from the entry.
+          if (waitlistEntryId) {
+            params.set('waitlistEntryId', waitlistEntryId)
+          } else if (clientAddressId) {
+            params.set('clientAddressId', clientAddressId)
+          }
         }
         if (rebookOfBookingId) {
           params.set('rebookOfBookingId', rebookOfBookingId)
@@ -222,6 +238,7 @@ export default function RebookSlotPicker({
       locationId,
       clientAddressId,
       rebookOfBookingId,
+      waitlistEntryId,
     ],
   )
 

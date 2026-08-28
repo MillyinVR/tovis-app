@@ -86,20 +86,6 @@ export function ProCalendarClientPage(props: ProCalendarClientPageProps) {
     [cal.timeZone],
   )
 
-  // v1 offers are in-salon only, so anchor them to the pro's salon/suite location
-  // (prefer the primary). null when the pro has no bookable salon location.
-  const offerSalonLocation = useMemo(
-    () =>
-      (cal.locations ?? [])
-        .filter(
-          (location) =>
-            location.isBookable &&
-            (location.type === 'SALON' || location.type === 'SUITE'),
-        )
-        .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary))[0] ?? null,
-    [cal.locations],
-  )
-
   const activeLocationTimeZone = useMemo(
     () =>
       validTimeZoneOrFallback(
@@ -415,8 +401,12 @@ export function ProCalendarClientPage(props: ProCalendarClientPageProps) {
         onDenyBookingId={(bookingId) => {
           void cal.denyBookingById(bookingId)
         }}
+        // No local mode/location test any more. Which modes this pro may offer
+        // in — and from which location — is the server's answer, fetched by the
+        // modal itself; deciding it here is what hid the action entirely from a
+        // mobile-only pro and told them nothing about why.
         onOfferTime={
-          offerSalonLocation && cal.professionalId
+          cal.professionalId
             ? (event) => {
                 cal.closeManagement()
                 setOfferEvent(event)
@@ -431,7 +421,6 @@ export function ProCalendarClientPage(props: ProCalendarClientPageProps) {
       offerEvent.kind === 'BOOKING' &&
       offerEvent.waitlistEntryId &&
       offerEvent.serviceId &&
-      offerSalonLocation &&
       cal.professionalId ? (
         <WaitlistOfferModal
           open
@@ -439,12 +428,7 @@ export function ProCalendarClientPage(props: ProCalendarClientPageProps) {
           professionalId={cal.professionalId}
           waitlistEntryId={offerEvent.waitlistEntryId}
           serviceId={offerEvent.serviceId}
-          offeringId={offerEvent.offeringId ?? null}
-          locationId={offerSalonLocation.id}
-          timeZone={validTimeZoneOrFallback(
-            offerSalonLocation.timeZone,
-            calendarTimeZone,
-          )}
+          fallbackTimeZone={calendarTimeZone}
           clientName={offerEvent.clientName}
           serviceName={offerEvent.details.serviceName}
           onOffered={() => {

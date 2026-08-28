@@ -1942,6 +1942,7 @@ model ClientAddress {
   bookingHolds         BookingHold[]
   aftercareRebookSlots AftercareRebookSlot[]
   bookingSeries        BookingSeries[]
+  waitlistOffers       WaitlistOffer[]
 
   @@index([clientId, kind])
   @@index([clientId, isDefault])
@@ -6291,6 +6292,39 @@ model WaitlistOffer {
   location     ProfessionalLocation @relation(fields: [locationId], references: [id], onDelete: Restrict)
   locationType ServiceLocationType
 
+  // MOBILE offers: the client service address this offer would travel to,
+  // resolved SERVER-SIDE at offer time (the pro never picks it, and never sees
+  // it while the offer is PENDING). `confirmClientWaitlistOffer` passes this to
+  // `performLockedCreateProBooking`, which re-loads it under the lock and
+  // re-runs the radius check — so a client who moved between offer and confirm
+  // is re-validated rather than trusted from this snapshot.
+  //
+  // Null on every SALON offer, and on legacy rows. SetNull mirrors
+  // Booking.clientAddressId / AftercareRebookSlot.clientAddressId: deleting a
+  // saved address must not delete the offer, it must strand it — and the
+  // confirm then refuses with CLIENT_SERVICE_ADDRESS_REQUIRED rather than
+  // booking a trip to nowhere.
+  clientAddressId String?
+  clientAddress   ClientAddress? @relation(fields: [clientAddressId], references: [id], onDelete: SetNull)
+
+  // The PRO-FACING, pre-acceptance summary of where a MOBILE offer travels —
+  // "how far" and "roughly where", and nothing more precise. Snapshotted at
+  // offer time on purpose: the pro-facing read then selects these two scalars
+  // and never joins ClientAddress at all, so the raw address is structurally
+  // unreachable from that path rather than merely un-rendered.
+  //
+  // `clientDistanceMiles` is the SAME number `assertMobileBookingWithinRadius`
+  // measured to admit the offer — it is that function's return value, stored —
+  // so the miles the pro reads can never disagree with the miles the radius gate
+  // ruled on.
+  //
+  // 🔴 `clientAreaLabel` is city/state or a postal prefix ONLY (see
+  // lib/waitlist/offerArea.ts). Never a street line, and no coordinates are
+  // stored here in any form: latApprox/lngApprox are a ~11m grid, which
+  // reverse-geocodes to the front door.
+  clientDistanceMiles Decimal? @db.Decimal(6, 2)
+  clientAreaLabel     String?
+
   startsAt        DateTime
   endsAt          DateTime
   durationMinutes Int
@@ -6316,6 +6350,9 @@ model WaitlistOffer {
   @@index([professionalId, status, createdAt])
   @@index([offeringId])
   @@index([locationId])
+  // Prisma does not index a foreign key on its own, and `onDelete: SetNull`
+  // makes the DB scan referencing offers on every ClientAddress delete.
+  @@index([clientAddressId])
 }
 
 model MessageThread {

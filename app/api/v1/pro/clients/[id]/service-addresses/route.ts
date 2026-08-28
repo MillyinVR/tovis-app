@@ -5,6 +5,7 @@ import {
   resolveRouteParams,
   type RouteContext,
 } from '@/app/api/_utils/routeContext'
+import { CLIENT_ADDRESS_PREFERENCE_ORDER } from '@/lib/clientAddresses/addressInput'
 import { getProClientVisibility } from '@/lib/clientVisibility'
 import { asTrimmedString } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
@@ -48,11 +49,10 @@ export async function GET(_request: Request, ctx: RouteContext) {
         formattedAddress: true,
         isDefault: true,
       },
-      orderBy: [
-        { isDefault: 'desc' },
-        { updatedAt: 'desc' },
-        { createdAt: 'asc' },
-      ],
+      // THE shared "which address is this client's current one" order. The
+      // waitlist offer's server-side address resolution runs the same one, so
+      // the destination it picks is the row that leads this list.
+      orderBy: CLIENT_ADDRESS_PREFERENCE_ORDER,
     })
 
     return jsonOk(

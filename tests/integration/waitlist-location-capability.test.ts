@@ -365,11 +365,15 @@ describe('loadWaitlistHostability (real locations, real offering)', () => {
 
     expect(result).toMatchObject({ ok: true, offeringId: bothPro.offeringId })
     if (!result.ok) throw new Error('expected hostable')
-    expect(result.modes).toEqual([ServiceLocationType.SALON])
+    expect(result.modes).toEqual([
+      ServiceLocationType.SALON,
+      ServiceLocationType.MOBILE,
+    ])
   })
 
-  it('refuses a mobile-only pro even though the offering CLAIMS in-salon', async () => {
-    // Proof the flag is not what is being read.
+  it('gives a mobile-only pro MOBILE, and still refuses the in-salon they CLAIM', async () => {
+    // Proof the flag is not what is being read: the offering says it can be
+    // done in-salon, and the pro has no salon.
     const offering = await db.professionalServiceOffering.findUniqueOrThrow({
       where: { id: mobileOnlyPro.offeringId },
       select: { offersInSalon: true },
@@ -381,10 +385,11 @@ describe('loadWaitlistHostability (real locations, real offering)', () => {
       serviceId,
     })
 
-    expect(result).toEqual({
-      ok: false,
-      refusal: { kind: 'NO_HOSTABLE_MODE', advertisesMobileOnly: true },
-    })
+    // Was a NO_HOSTABLE_MODE refusal until MOBILE became fulfillable. The
+    // narrowing half of the rule is unchanged — SALON is still absent.
+    expect(result).toMatchObject({ ok: true })
+    if (!result.ok) throw new Error('expected hostable')
+    expect(result.modes).toEqual([ServiceLocationType.MOBILE])
   })
 
   it('refuses a pro whose only salon row is isBookable:false', async () => {
@@ -395,7 +400,7 @@ describe('loadWaitlistHostability (real locations, real offering)', () => {
 
     expect(result).toEqual({
       ok: false,
-      refusal: { kind: 'NO_HOSTABLE_MODE', advertisesMobileOnly: false },
+      refusal: { kind: 'NO_HOSTABLE_MODE' },
     })
   })
 
@@ -449,13 +454,14 @@ describe('availability bootstrap — waitlistSupported', () => {
     expect(isWaitlistSupportedForModes(modes)).toBe(true)
   })
 
-  it('is FALSE for the mobile-only pro whose offering claims in-salon', async () => {
+  it('is TRUE for the mobile-only pro, on the mobile half alone', async () => {
     const modes = await narrowedModes(mobileOnlyPro.professionalId)
-    // The read boundary already took the unhostable claim off…
+    // The read boundary still takes the unhostable in-salon claim off…
     expect(modes.offersInSalon).toBe(false)
     expect(modes.offersMobile).toBe(true)
-    // …and the waitlist is therefore not offered at all.
-    expect(isWaitlistSupportedForModes(modes)).toBe(false)
+    // …and the waitlist is now worth offering on what remains: a mobile offer
+    // is one this client can actually confirm.
+    expect(isWaitlistSupportedForModes(modes)).toBe(true)
   })
 
   it('never even reaches a payload for a pro with no bookable location', async () => {
@@ -487,18 +493,18 @@ describe('POST /api/v1/waitlist — join', () => {
     expect(rows[0]?.status).toBe(WaitlistStatus.ACTIVE)
   })
 
-  it('REFUSES a mobile-only pro and writes NO row', async () => {
+  it('ADMITS a mobile-only pro now that a mobile offer can be confirmed', async () => {
+    // This was a 409 until MOBILE joined WAITLIST_FULFILLABLE_MODES. The join
+    // was refused because the offer the client would eventually receive was one
+    // nobody could accept — not because a travelling pro has no queue.
     const res = await joinWaitlist(joinRequest(mobileOnlyPro.professionalId))
 
-    expect(res.status).toBe(409)
-    const body = await res.json()
-    expect(body.error).toContain('only travels to clients')
-
+    expect(res.status).toBe(201)
     expect(
       await db.waitlistEntry.count({
         where: { clientId, professionalId: mobileOnlyPro.professionalId },
       }),
-    ).toBe(0)
+    ).toBe(1)
   })
 
   it('REFUSES a pro with no bookable location and writes NO row', async () => {
@@ -506,7 +512,9 @@ describe('POST /api/v1/waitlist — join', () => {
 
     expect(res.status).toBe(409)
     const body = await res.json()
-    expect(body.error).toContain('cannot take in-salon appointments')
+    expect(body.error).toContain('cannot take appointments')
+    // …and does NOT blame in-salon-only, a limit that no longer exists.
+    expect(body.error).not.toContain('in-salon')
 
     expect(
       await db.waitlistEntry.count({
@@ -593,7 +601,9 @@ describe('POST /api/v1/pro/waitlist/[entryId]/offer', () => {
     expect(stored.locationType).toBe(ServiceLocationType.SALON)
   })
 
-  it('refuses a mobile-only pro by NAMING the reason, not a bare 400', async () => {
+  it('creates a MOBILE offer for a mobile-only pro, from their base', async () => {
+    // The case this whole flow exists for, and the one that was a 409 until the
+    // offer could carry a client address.
     mockRequirePro.mockResolvedValue({
       ok: true,
       professionalId: mobileOnlyPro.professionalId,
@@ -612,14 +622,51 @@ describe('POST /api/v1/pro/waitlist/[entryId]/offer', () => {
       offerRequest({
         locationId: mobileBase.id,
         locationType: ServiceLocationType.MOBILE,
+        idempotencyKey: `${TAG}-offer-mobile-ok`,
       }),
       ctx(entryId),
     )
 
-    expect(res.status).toBe(409)
     const body = await res.json()
-    expect(body.error).toContain('only offer this service mobile')
-    expect(await db.waitlistOffer.count({ where: { waitlistEntryId: entryId } })).toBe(0)
+    expect(res.status, JSON.stringify(body)).toBe(201)
+    expect(body.offer.locationType).toBe(ServiceLocationType.MOBILE)
+
+    const stored = await db.waitlistOffer.findFirstOrThrow({
+      where: { waitlistEntryId: entryId },
+      select: {
+        locationType: true,
+        clientAddressId: true,
+        clientAreaLabel: true,
+      },
+    })
+    expect(stored.locationType).toBe(ServiceLocationType.MOBILE)
+    // Resolved server-side: the pro never sent one, and could not have.
+    expect(stored.clientAddressId).toBe(clientAddressId)
+    expect(stored.clientAreaLabel).toBe('San Diego, CA')
+  })
+
+  it('refuses a SALON offer from a pro with no salon, naming what IS allowed', async () => {
+    mockRequirePro.mockResolvedValue({
+      ok: true,
+      professionalId: mobileOnlyPro.professionalId,
+      userId: mobileOnlyPro.userId,
+    })
+    const entryId = await seedEntry(mobileOnlyPro.professionalId)
+
+    const res = await offerTime(
+      offerRequest({
+        locationId: bothPro.salonLocationId ?? '',
+        locationType: ServiceLocationType.SALON,
+      }),
+      ctx(entryId),
+    )
+
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.error).toContain('can only be offered mobile')
+    expect(
+      await db.waitlistOffer.count({ where: { waitlistEntryId: entryId } }),
+    ).toBe(0)
   })
 
   it('rejects an unparseable locationType before touching the boundary', async () => {

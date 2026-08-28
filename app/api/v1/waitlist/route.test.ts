@@ -453,10 +453,10 @@ describe('POST /api/v1/waitlist', () => {
   // mobile-only pro silently collected salon waitlisters their own offer
   // endpoint then refused one by one.
   describe('refuses a combination the pro cannot host', () => {
-    it('names the mobile-only case specifically, and writes nothing', async () => {
+    it('refuses when the pro can host this service in NO mode, and writes nothing', async () => {
       mocks.loadWaitlistHostability.mockResolvedValue({
         ok: false,
-        refusal: { kind: 'NO_HOSTABLE_MODE', advertisesMobileOnly: true },
+        refusal: { kind: 'NO_HOSTABLE_MODE' },
       })
 
       const res = await POST(
@@ -469,32 +469,16 @@ describe('POST /api/v1/waitlist', () => {
 
       expect(res.status).toBe(409)
       const body = await res.json()
-      expect(body.message).toContain('only travels to clients')
+      expect(body.message).toContain('cannot take appointments')
+      // The refusal must not blame a mode limit that no longer exists: a
+      // mobile-only pro is now hostable, so "only in-salon" would send this
+      // client to fix the wrong thing.
+      expect(body.message).not.toContain('in-salon')
       // No row, no thread, and no "someone joined your waitlist" to a pro who
       // could never act on it.
       expect(mocks.waitlistCreate).not.toHaveBeenCalled()
       expect(mocks.resolveMessageThread).not.toHaveBeenCalled()
       expect(mocks.createProNotification).not.toHaveBeenCalled()
-    })
-
-    it('distinguishes "no bookable location" from the mobile-only case', async () => {
-      mocks.loadWaitlistHostability.mockResolvedValue({
-        ok: false,
-        refusal: { kind: 'NO_HOSTABLE_MODE', advertisesMobileOnly: false },
-      })
-
-      const res = await POST(
-        postRequest({
-          professionalId: 'pro-1',
-          serviceId: 'svc-1',
-          preferenceType: 'ANY_TIME',
-        }),
-      )
-
-      expect(res.status).toBe(409)
-      const body = await res.json()
-      expect(body.message).toContain('cannot take in-salon appointments')
-      expect(mocks.waitlistCreate).not.toHaveBeenCalled()
     })
 
     it('refuses when the pro has no active offering for the service', async () => {

@@ -32,13 +32,20 @@ type Payload = {
   offers: { offerId: string; expiresAt: string | null }[]
 }
 
-function offerRow(over?: { id?: string; expiresAt?: Date | null }) {
+function offerRow(over?: {
+  id?: string
+  expiresAt?: Date | null
+  locationType?: string
+  clientAddress?: { formattedAddress: string | null; label: string | null } | null
+}) {
   return {
     id: over?.id ?? 'off_1',
     status: 'PENDING',
     startsAt: new Date('2026-08-01T17:00:00Z'),
     endsAt: new Date('2026-08-01T18:00:00Z'),
-    locationType: 'SALON',
+    locationType: over?.locationType ?? 'SALON',
+    clientAddress:
+      over && 'clientAddress' in over ? over.clientAddress : null,
     locationId: 'loc_1',
     durationMinutes: 60,
     professionalId: 'pro_1',
@@ -61,6 +68,10 @@ function offerRow(over?: { id?: string; expiresAt?: Date | null }) {
     location: { timeZone: 'America/Los_Angeles' },
     hold: { id: 'hold_1' },
   }
+}
+
+type OfferPayload = {
+  offers: Array<{ locationType: string; clientAddressLabel: string | null }>
 }
 
 beforeEach(() => {
@@ -147,6 +158,80 @@ describe('GET /api/v1/client/waitlist-offers', () => {
       durationMinutes: 60,
       commitGate: 'PRO_CREATE',
       releasedHoldId: 'hold_1',
+    })
+  })
+
+  // A MOBILE offer asks the client to have the pro come to THEIR address. The
+  // card cannot say "Balayage, Tuesday 10am" and leave it there — the client
+  // would be confirming a home visit without being told so.
+  //
+  // This is the mirror of the pro's side of the same offer, which sees only a
+  // distance and a general area until this confirm happens. The client sees the
+  // whole address because it is their own.
+  describe('where a MOBILE offer happens', () => {
+    it('names the client’s own address on a mobile offer', async () => {
+      mocks.offerFindMany.mockResolvedValue([
+        offerRow({
+          locationType: 'MOBILE',
+          clientAddress: {
+            formattedAddress: '77 Orange Ave, Coronado, CA 92118',
+            label: 'Home',
+          },
+        }),
+      ])
+
+      const raw: unknown = await GET()
+      const payload = raw as OfferPayload
+
+      expect(payload.offers[0]?.locationType).toBe('MOBILE')
+      expect(payload.offers[0]?.clientAddressLabel).toBe(
+        '77 Orange Ave, Coronado, CA 92118',
+      )
+    })
+
+    it('falls back to the address LABEL when the plaintext line is gone', async () => {
+      // The encryption expand phase can leave `formattedAddress` null on a row
+      // that still exists. "Home" beats an unexplained blank.
+      mocks.offerFindMany.mockResolvedValue([
+        offerRow({
+          locationType: 'MOBILE',
+          clientAddress: { formattedAddress: null, label: 'Home' },
+        }),
+      ])
+
+      const raw: unknown = await GET()
+      const payload = raw as OfferPayload
+
+      expect(payload.offers[0]?.clientAddressLabel).toBe('Home')
+    })
+
+    it('is null on a mobile offer whose saved address is gone', async () => {
+      // `onDelete: SetNull` strands the offer; the confirm then refuses with
+      // CLIENT_SERVICE_ADDRESS_REQUIRED, so promising a place would be a lie.
+      mocks.offerFindMany.mockResolvedValue([
+        offerRow({ locationType: 'MOBILE', clientAddress: null }),
+      ])
+
+      const raw: unknown = await GET()
+      const payload = raw as OfferPayload
+
+      expect(payload.offers[0]?.clientAddressLabel).toBeNull()
+    })
+
+    it('is null on a SALON offer even if an address row came back', async () => {
+      mocks.offerFindMany.mockResolvedValue([
+        offerRow({
+          locationType: 'SALON',
+          clientAddress: { formattedAddress: '77 Orange Ave', label: 'Home' },
+        }),
+      ])
+
+      const raw: unknown = await GET()
+      const payload = raw as OfferPayload
+
+      // The client goes to the pro; their home address has nothing to do with
+      // this appointment and must not appear on its card.
+      expect(payload.offers[0]?.clientAddressLabel).toBeNull()
     })
   })
 

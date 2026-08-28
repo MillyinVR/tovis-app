@@ -23,6 +23,11 @@ type WaitlistOffer = {
   endAt: string | null
   timeZone: string
   locationType: string
+  /**
+   * MOBILE offers: the client's OWN address the pro would travel to, so this
+   * card can say where. null for an in-salon offer.
+   */
+  clientAddressLabel: string | null
   expiresAt: string | null
 }
 
@@ -186,6 +191,17 @@ export default function WaitlistOfferCards() {
                   )}{' '}
                   · {formatWhen(offer.startAt, offer.timeZone)}
                 </p>
+                {offer.locationType === 'MOBILE' ? (
+                  // Without this the card reads exactly like an in-salon offer,
+                  // and the client would be confirming a visit to their own home
+                  // without being told so. Salon offers say nothing extra —
+                  // "go to your pro" is what a booking has always meant here.
+                  <p className="mt-1 text-sm text-textMuted">
+                    {offer.clientAddressLabel
+                      ? `Your pro comes to you · ${offer.clientAddressLabel}`
+                      : 'Your pro comes to you'}
+                  </p>
+                ) : null}
               </div>
 
               <div className="mt-4 flex gap-2">
