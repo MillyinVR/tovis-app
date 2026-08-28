@@ -129,6 +129,18 @@ function holdOffering() {
   }
 }
 
+/**
+ * The offering shape `finalizeBookingFromHold` takes: the hold's, plus the
+ * service it resolves line items from. Same literal, one place, so a fixture
+ * change cannot make the RESERVE and the COMMIT disagree about the offering.
+ */
+function finalizeOffering() {
+  return {
+    ...holdOffering(),
+    serviceId: fx.serviceId,
+  }
+}
+
 async function hold(args: { start: Date; addOnIds: string[]; clientId?: string }) {
   return createHold({
     clientId: args.clientId ?? fx.clientId,
@@ -764,18 +776,7 @@ describe('updateHoldAddOns re-sizes a live hold (real DB)', () => {
       source: BookingSource.REQUESTED,
       initialStatus: BookingStatus.PENDING,
       rebookOfBookingId: null,
-      offering: {
-        id: fx.offeringId,
-        professionalId: fx.professionalId,
-        serviceId: fx.serviceId,
-        offersInSalon: true,
-        offersMobile: false,
-        salonPriceStartingAt: new Prisma.Decimal('100.00'),
-        salonDurationMinutes: BASE_DURATION_MINUTES,
-        mobilePriceStartingAt: null,
-        mobileDurationMinutes: null,
-        professionalTimeZone: ZONE,
-      },
+      offering: finalizeOffering(),
     })
 
     const booking = await db.booking.findUnique({
@@ -809,11 +810,32 @@ describe('updateHoldAddOns re-sizes a live hold (real DB)', () => {
 //   3. two concurrent widens of the SAME hold (a double-tapped add-on toggle,
 //      or two devices on one account — the realistic "two at once").
 //
-// In every case the professional's schedule lock serializes the two, so the
-// assertion is on the invariant rather than on who wins: exactly one claims the
-// tail, the loser is refused cleanly, and — the case B1-A flagged explicitly —
-// a widen that LOSES leaves its hold alive at its OLD width rather than
-// dropping it.
+// In every case the professional's schedule lock serializes the two — proven
+// below, in both directions — so the second operation ALWAYS sees the first
+// one's committed range. What the second one is then allowed to do with that
+// range is a policy question, not a locking one, and the two rivals get
+// different answers:
+//
+//   * a rival HOLD (and a client's own finalize) is refused. A client has no
+//     authority to overlap anyone.
+//   * a pro's BOOKING is admitted, and stamped `allowsOverlap` — a pro may
+//     deliberately sit on a client's live checkout
+//     (`decideBookingOverlapPermission`'s PRO branch; the pro's calendar and
+//     new-booking form both warn "overlaps a booking in progress" first, B5).
+//     The row leaves the GIST index BECAUSE the gate saw the hold, so that
+//     stamp is the durable evidence the conflict was seen and authorized —
+//     never a silent double-book.
+//
+// An earlier version of this block asserted "exactly one claims the tail" for
+// BOTH rivals, in a single test that branched on the winner. That branch is the
+// bug: `Promise.allSettled([a(), b()])` lets the pool pick the order, this
+// pairing always picked the same one, and the widen-wins half of the
+// widen-vs-booking test — which claimed the pro would be refused TIME_HELD —
+// had therefore never executed. It fails the moment the widen is given a head
+// start. So the orderings are now FORCED (`raceInLockOrder`) and asserted one
+// per test. The unsynchronized rival-hold race is kept alongside them for what
+// it is actually good at — proving no interleaving corrupts the hold — with its
+// winner deliberately left unpinned.
 describe('re-sizing a live hold under concurrency (real DB)', () => {
   /** The settled outcomes, split into fulfilled/rejected. */
   function split(results: PromiseSettledResult<unknown>[]) {
@@ -825,13 +847,61 @@ describe('re-sizing a live hold under concurrency (real DB)', () => {
     }
   }
 
+  /** The booking code a settled rejection carries, or a rethrow. */
+  function rejectionCode(result: PromiseSettledResult<unknown>): string {
+    if (result.status !== 'rejected') {
+      throw new Error('Expected a rejection, but the call succeeded')
+    }
+    const error: unknown = result.reason
+    if (isBookingError(error)) return error.code
+    throw error
+  }
+
   /** The booking code the single loser was refused with. */
   function soleRejectionCode(rejected: PromiseRejectedResult[]): string {
     const first = rejected[0]
     if (!first) throw new Error('Expected exactly one rejection, got none')
-    const error: unknown = first.reason
-    if (isBookingError(error)) return error.code
-    throw error
+    return rejectionCode(first)
+  }
+
+  /**
+   * Settle a call without ever leaving its rejection unhandled.
+   *
+   * `raceInLockOrder` awaits a timer between starting the two calls, so a
+   * promise created before that timer and only handed to `Promise.allSettled`
+   * after it would spend the gap rejected-and-unwatched — an unhandledRejection
+   * that fails the run for the wrong reason. Attaching the handler at creation
+   * closes that window.
+   */
+  function settle<T>(run: () => Promise<T>): Promise<PromiseSettledResult<T>> {
+    return run().then(
+      (value): PromiseSettledResult<T> => ({ status: 'fulfilled', value }),
+      (reason: unknown): PromiseSettledResult<T> => ({
+        status: 'rejected',
+        reason,
+      }),
+    )
+  }
+
+  /**
+   * A head start big enough to decide which call reaches the schedule lock
+   * first. The whole pre-lock path of both boundaries measures single-digit
+   * milliseconds against the local test Postgres (`performLockedCreateHold`
+   * logs its own `totalMs` at ~3ms), and this is the same 25ms margin
+   * booking-overlap-concurrency.test.ts uses to order ITS races.
+   */
+  const LOCK_HEAD_START_MS = 25
+
+  /** Run two boundary calls, `first` reaching the schedule lock first. */
+  async function raceInLockOrder<First, Second>(
+    first: () => Promise<First>,
+    second: () => Promise<Second>,
+  ): Promise<[PromiseSettledResult<First>, PromiseSettledResult<Second>]> {
+    const firstRun = settle(first)
+    await new Promise((resolve) => setTimeout(resolve, LOCK_HEAD_START_MS))
+    const secondRun = settle(second)
+
+    return Promise.all([firstRun, secondRun])
   }
 
   it('a widen and a rival hold cannot both take the tail', async () => {
@@ -891,71 +961,158 @@ describe('re-sizing a live hold under concurrency (real DB)', () => {
     }
   })
 
-  it('a widen and a booking cannot both take the tail', async () => {
-    const start = futureLocal(22, 12)
+  /** The pro putting a walk-in in the book at `start`, by hand. */
+  function proWalkIn(start: Date) {
+    return createProBooking({
+      professionalId: fx.professionalId,
+      actorUserId: fx.proUserId,
+      overrideReason: null,
+      clientId: fx.rivalClientId,
+      offeringId: fx.offeringId,
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      scheduledFor: start,
+      clientAddressId: null,
+      internalNotes: null,
+      requestedBufferMinutes: null,
+      requestedTotalDurationMinutes: null,
+      allowOutsideWorkingHours: false,
+      allowShortNotice: false,
+      allowFarFuture: false,
+    })
+  }
+
+  /** The widen this suite races: base-sized hold → base + add-on. */
+  function widen(holdId: string) {
+    return updateHoldAddOns({
+      holdId,
+      clientId: fx.clientId,
+      addOnIds: [fx.addOnId],
+    })
+  }
+
+  it('a rival hold that reaches the lock FIRST refuses the widen, which keeps its old width', async () => {
+    const start = futureLocal(24, 12)
     const tail = new Date(start.getTime() + BASE_DURATION_MINUTES * 60_000)
 
     const created = await hold({ start, addOnIds: [] })
-    const beforeWiden = await readHold(created.hold.id)
+    const before = await readHold(created.hold.id)
 
-    const results = await Promise.allSettled([
-      updateHoldAddOns({
-        holdId: created.hold.id,
-        clientId: fx.clientId,
-        addOnIds: [fx.addOnId],
-      }),
-      createProBooking({
-        professionalId: fx.professionalId,
-        actorUserId: fx.proUserId,
-        overrideReason: null,
-        clientId: fx.rivalClientId,
-        offeringId: fx.offeringId,
-        locationId: fx.salonLocationId,
-        locationType: ServiceLocationType.SALON,
-        scheduledFor: tail,
-        clientAddressId: null,
-        internalNotes: null,
-        requestedBufferMinutes: null,
-        requestedTotalDurationMinutes: null,
-        allowOutsideWorkingHours: false,
-        allowShortNotice: false,
-        allowFarFuture: false,
-      }),
-    ])
+    // The ordering the unsynchronized race above documents but never takes: the
+    // rival lands on the tail first, so the WIDEN is the loser and its rollback
+    // is what has to be right.
+    const [rival, resize] = await raceInLockOrder(
+      () => hold({ start: tail, addOnIds: [], clientId: fx.rivalClientId }),
+      () => widen(created.hold.id),
+    )
 
-    const { fulfilled, rejected } = split(results)
-    expect(fulfilled).toHaveLength(1)
-    expect(rejected).toHaveLength(1)
+    expect(rival.status).toBe('fulfilled')
+    expect(rejectionCode(resize)).toBe('TIME_HELD')
 
-    const widenWon = results[0].status === 'fulfilled'
+    // Losing the add-on must never cost the client the slot itself, and a
+    // refused re-size must not buy them more time on it either.
     const after = await readHold(created.hold.id)
+    expect(after.durationMinutesSnapshot).toBe(BASE_DURATION_MINUTES)
+    expect(after.endsAtSnapshot?.getTime()).toBe(
+      start.getTime() + BASE_DURATION_MINUTES * 60_000,
+    )
+    expect(after.expiresAt.getTime()).toBe(before.expiresAt.getTime())
+  })
 
-    if (widenWon) {
-      // The pro's walk-in is refused because the widened hold now covers it.
-      expect(soleRejectionCode(rejected)).toBe('TIME_HELD')
-      expect(after.durationMinutesSnapshot).toBe(
-        BASE_DURATION_MINUTES + ADD_ON_MINUTES,
-      )
-      await expect(
-        db.booking.count({ where: { professionalId: fx.professionalId } }),
-      ).resolves.toBe(0)
-    } else {
-      // ⚠️ THE case B1-A called out: the loser is the WIDEN, refused by a
-      // booking that reached the lock first. Its transaction rolls back, and
-      // the rollback must leave the hold ALIVE at its old width — losing the
-      // add-on must never cost the client the slot itself. This is the branch
-      // this pairing takes today, so the rollback is genuinely driven and not
-      // merely reasoned about (B1-A §7.8).
-      expect(soleRejectionCode(rejected)).toBe('TIME_BOOKED')
-      expect(after.durationMinutesSnapshot).toBe(BASE_DURATION_MINUTES)
-      expect(after.endsAtSnapshot?.getTime()).toBe(
-        start.getTime() + BASE_DURATION_MINUTES * 60_000,
-      )
-      expect(after.expiresAt.getTime()).toBe(beforeWiden.expiresAt.getTime())
-      await expect(
-        db.booking.count({ where: { professionalId: fx.professionalId } }),
-      ).resolves.toBe(1)
-    }
+  it('a booking that reaches the lock FIRST refuses the widen, which keeps its old width', async () => {
+    const start = futureLocal(25, 12)
+    const tail = new Date(start.getTime() + BASE_DURATION_MINUTES * 60_000)
+
+    const created = await hold({ start, addOnIds: [] })
+    const before = await readHold(created.hold.id)
+
+    const [booking, resize] = await raceInLockOrder(
+      () => proWalkIn(tail),
+      () => widen(created.hold.id),
+    )
+
+    expect(booking.status).toBe('fulfilled')
+    expect(rejectionCode(resize)).toBe('TIME_BOOKED')
+
+    const after = await readHold(created.hold.id)
+    expect(after.durationMinutesSnapshot).toBe(BASE_DURATION_MINUTES)
+    expect(after.endsAtSnapshot?.getTime()).toBe(
+      start.getTime() + BASE_DURATION_MINUTES * 60_000,
+    )
+    expect(after.expiresAt.getTime()).toBe(before.expiresAt.getTime())
+
+    // The booking had the tail to itself: nothing to overlap, so it stays bound
+    // by the DB EXCLUDE constraint.
+    const rows = await db.booking.findMany({
+      where: { professionalId: fx.professionalId },
+      select: { scheduledFor: true, allowsOverlap: true },
+    })
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.allowsOverlap).toBe(false)
+  })
+
+  it('a pro booking a tail the widen already took is an AUTHORIZED overlap, never a silent one', async () => {
+    const start = futureLocal(26, 12)
+    const tail = new Date(start.getTime() + BASE_DURATION_MINUTES * 60_000)
+
+    const created = await hold({ start, addOnIds: [] })
+
+    // The mirror image, and the ordering nothing in this suite used to reach.
+    // The widen commits first and the hold now covers the tail — but the rival
+    // here is the PRO, and `decideBookingOverlapPermission` lets a pro sit on a
+    // client's live checkout on purpose (both pro surfaces warn first, B5).
+    // So BOTH succeed, and "exactly one wins" is simply not the invariant on
+    // this pairing.
+    const [resize, booking] = await raceInLockOrder(
+      () => widen(created.hold.id),
+      () => proWalkIn(tail),
+    )
+
+    expect(resize.status).toBe('fulfilled')
+    expect(booking.status).toBe('fulfilled')
+
+    const after = await readHold(created.hold.id)
+    expect(after.durationMinutesSnapshot).toBe(
+      BASE_DURATION_MINUTES + ADD_ON_MINUTES,
+    )
+    expect(after.endsAtSnapshot?.getTime()).toBe(
+      start.getTime() + (BASE_DURATION_MINUTES + ADD_ON_MINUTES) * 60_000,
+    )
+
+    // 🔴 THE assertion. `allowsOverlap` is set from
+    // `decision.conflicts.length > 0`, so a `true` here is proof the gate ran
+    // INSIDE the lock and SAW the widen's committed new tail — the row is
+    // exempted from the GIST index precisely because the conflict was found and
+    // authorized. A `false` would mean the pro's booking never saw the hold at
+    // all, which is the real double-book: silent, and indistinguishable from an
+    // empty calendar.
+    const rows = await db.booking.findMany({
+      where: { professionalId: fx.professionalId },
+      select: { scheduledFor: true, allowsOverlap: true },
+    })
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.scheduledFor.getTime()).toBe(tail.getTime())
+    expect(rows[0]?.allowsOverlap).toBe(true)
+
+    // And the authority is the PRO's alone: the client whose hold this is still
+    // cannot commit over the pro's row, so the widened tail cannot become a
+    // second booking on the same minutes.
+    expect(
+      await refusalCode(() =>
+        finalizeBookingFromHold({
+          clientId: fx.clientId,
+          bookingEntryPoint: 'DIRECT_PROFILE',
+          holdId: created.hold.id,
+          openingId: null,
+          addOnIds: [fx.addOnId],
+          locationType: ServiceLocationType.SALON,
+          source: BookingSource.REQUESTED,
+          initialStatus: BookingStatus.PENDING,
+          rebookOfBookingId: null,
+          offering: finalizeOffering(),
+        }),
+      ),
+    ).toBe('TIME_BOOKED')
   })
 
   it('two concurrent widens of the SAME hold converge, and neither corrupts it', async () => {
