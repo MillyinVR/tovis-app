@@ -20,6 +20,7 @@ const mockClaimDeliveries = vi.hoisted(() => vi.fn())
 const mockCompleteDeliveryAttempt = vi.hoisted(() => vi.fn())
 const mockGetOrCreateShortLink = vi.hoisted(() => vi.fn())
 const mockBuildShortLinkUrl = vi.hoisted(() => vi.fn())
+const mockCaptureNotificationException = vi.hoisted(() => vi.fn())
 const mockPrisma = vi.hoisted(() => ({
   notificationDelivery: {
     findFirst: vi.fn(),
@@ -47,11 +48,28 @@ vi.mock('@/lib/prisma', () => ({
 // un-shortened href, the same degrade-safely behavior a real short-link mint
 // failure produces. Tests that care about the shortened path configure it
 // explicitly.
-vi.mock('@/lib/shortLink/shortLinkService', () => ({
-  getOrCreateShortLink: mockGetOrCreateShortLink,
-  buildShortLinkUrl: mockBuildShortLinkUrl,
+//
+// ShortLinkDestinationNotAllowedError is passed through from the REAL module,
+// not stubbed: resolveSmsLinkOverrides narrows on it with `instanceof` to decide
+// give-up-now vs retry-once, so a look-alike class would silently take the
+// retry branch and this file would stop testing the thing it claims to.
+vi.mock('@/lib/shortLink/shortLinkService', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/lib/shortLink/shortLinkService')>()
+
+  return {
+    getOrCreateShortLink: mockGetOrCreateShortLink,
+    buildShortLinkUrl: mockBuildShortLinkUrl,
+    ShortLinkDestinationNotAllowedError:
+      actual.ShortLinkDestinationNotAllowedError,
+  }
+})
+
+vi.mock('@/lib/observability/notificationEvents', () => ({
+  captureNotificationException: mockCaptureNotificationException,
 }))
 
+import { ShortLinkDestinationNotAllowedError } from '@/lib/shortLink/shortLinkService'
 import {
   processDueDeliveries,
   resolveIsFirstSmsToDestination,
@@ -1372,6 +1390,7 @@ describe('lib/notifications/delivery/processDueDeliveries — resolveSmsLinkOver
   beforeEach(() => {
     mockGetOrCreateShortLink.mockReset()
     mockBuildShortLinkUrl.mockReset()
+    mockCaptureNotificationException.mockReset()
   })
 
   it('returns nulls for a non-SMS channel without minting anything', async () => {
@@ -1506,6 +1525,101 @@ describe('lib/notifications/delivery/processDueDeliveries — resolveSmsLinkOver
       smsHref: 'https://tovis.me/s/HrefCode1',
       smsCalendarUrl: null,
     })
+  })
+
+  // ⚠️ The production regression, at the pipeline level. A pro booking-finalize
+  // notification carries `/pro/bookings/{id}`; before that prefix was
+  // allowlisted the mint threw and the SMS shipped the long URL instead. The
+  // allowlist itself is pinned in lib/shortLink/allowlist.test.ts — this pins
+  // that the drain actually asks for the pro path and uses what comes back.
+  it('mints a short link for a pro booking-finalize notification href', async () => {
+    const delivery = makeClaimedDelivery({
+      channel: NotificationChannel.SMS,
+      eventKey: NotificationEventKey.BOOKING_REQUEST_CREATED,
+    })
+    delivery.dispatch.href = '/pro/bookings/cmtb32x6n0007l804guk94sgl'
+    mockGetOrCreateShortLink.mockResolvedValue({ code: 'ProBk9pQ1' })
+    mockBuildShortLinkUrl.mockReturnValue('https://tovis.me/s/ProBk9pQ1')
+
+    const result = await resolveSmsLinkOverrides({
+      delivery,
+      calendarLinks: null,
+    })
+
+    expect(result.smsHref).toBe('https://tovis.me/s/ProBk9pQ1')
+    expect(mockGetOrCreateShortLink).toHaveBeenCalledWith({
+      destinationPath: '/pro/bookings/cmtb32x6n0007l804guk94sgl',
+      createdForType: 'notification_dispatch_href',
+      createdForId: delivery.dispatch.id,
+      expiresAt: null,
+    })
+    expect(mockCaptureNotificationException).not.toHaveBeenCalled()
+  })
+
+  it('retries a transient href mint failure once and uses the second result', async () => {
+    const delivery = makeClaimedDelivery({ channel: NotificationChannel.SMS })
+    mockGetOrCreateShortLink
+      .mockRejectedValueOnce(new Error('connection reset'))
+      .mockResolvedValueOnce({ code: 'Retried1' })
+    mockBuildShortLinkUrl.mockReturnValue('https://tovis.me/s/Retried1')
+
+    const result = await resolveSmsLinkOverrides({
+      delivery,
+      calendarLinks: null,
+    })
+
+    expect(result.smsHref).toBe('https://tovis.me/s/Retried1')
+    expect(mockGetOrCreateShortLink).toHaveBeenCalledTimes(2)
+    expect(mockCaptureNotificationException).not.toHaveBeenCalled()
+  })
+
+  it('captures — and stops retrying — when a transient mint fails twice', async () => {
+    const delivery = makeClaimedDelivery({ channel: NotificationChannel.SMS })
+    mockGetOrCreateShortLink.mockRejectedValue(new Error('connection reset'))
+
+    const result = await resolveSmsLinkOverrides({
+      delivery,
+      calendarLinks: null,
+    })
+
+    expect(result).toEqual({ smsHref: null, smsCalendarUrl: null })
+    expect(mockGetOrCreateShortLink).toHaveBeenCalledTimes(2)
+    expect(mockCaptureNotificationException).toHaveBeenCalledTimes(1)
+    expect(mockCaptureNotificationException).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: 'processDueDeliveries',
+        event: 'SHORT_LINK_MINT_FAILED',
+        dispatchId: delivery.dispatch.id,
+        deliveryId: delivery.id,
+      }),
+    )
+  })
+
+  // A rejected destination is deterministic — a second call returns the
+  // identical refusal — so it must NOT burn a retry, but it MUST alert: it means
+  // an allowlist gap that degrades every send of that event until someone edits
+  // lib/shortLink/allowlist.ts.
+  it('does not retry a non-allowlisted destination, but still captures it', async () => {
+    const delivery = makeClaimedDelivery({ channel: NotificationChannel.SMS })
+    delivery.dispatch.href = '/pro/dashboard'
+    mockGetOrCreateShortLink.mockRejectedValue(
+      new ShortLinkDestinationNotAllowedError('/pro/dashboard'),
+    )
+
+    const result = await resolveSmsLinkOverrides({
+      delivery,
+      calendarLinks: null,
+    })
+
+    expect(result).toEqual({ smsHref: null, smsCalendarUrl: null })
+    expect(mockGetOrCreateShortLink).toHaveBeenCalledTimes(1)
+    expect(mockCaptureNotificationException).toHaveBeenCalledTimes(1)
+    expect(mockCaptureNotificationException).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'SHORT_LINK_MINT_FAILED',
+        dispatchId: delivery.dispatch.id,
+      }),
+    )
   })
 
   it('skips the calendar mint entirely when there is no ics url', async () => {

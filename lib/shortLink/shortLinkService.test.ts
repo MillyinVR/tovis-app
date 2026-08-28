@@ -84,6 +84,30 @@ describe('getOrCreateShortLink', () => {
     expect(call[0].data.expiresAt).toBe(expiresAt)
   })
 
+  // ⚠️ The production regression. The booking-finalize pro notification
+  // (app/api/v1/bookings/finalize createFinalizeProNotification) dispatches
+  // `/pro/bookings/{id}`, and BOOKING_REQUEST_CREATED is SMS-capable for a pro
+  // (PRO_ALL_CHANNELS), so the drain mints a short link for it on every send.
+  // The prefix was missing from the allowlist, so this threw instead —
+  // recurring on every booking finalize, not a one-off.
+  it('mints a short link for the pro booking href a booking-finalize notification carries', async () => {
+    mocks.prisma.shortLink.findUnique.mockResolvedValue(null)
+    mocks.prisma.shortLink.create.mockResolvedValue({ code: 'ProBk9pQ1' })
+
+    const result = await getOrCreateShortLink({
+      destinationPath: '/pro/bookings/cmtb32x6n0007l804guk94sgl',
+      createdForType: 'notification_dispatch_href',
+      createdForId: 'cmtb32xfp000cl804qt7aqsp6',
+    })
+
+    expect(result).toEqual({ code: 'ProBk9pQ1' })
+    const call = mocks.prisma.shortLink.create.mock.calls[0]
+    if (!call) throw new Error('shortLink.create was not called')
+    expect(call[0].data.destinationPath).toBe(
+      '/pro/bookings/cmtb32x6n0007l804guk94sgl',
+    )
+  })
+
   it('throws ShortLinkDestinationNotAllowedError for a non-allowlisted path', async () => {
     mocks.prisma.shortLink.findUnique.mockResolvedValue(null)
 

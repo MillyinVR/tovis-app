@@ -8,10 +8,16 @@
 // a row written by any future code path still can't become one.
 //
 // Widening this list is a deliberate edit here, not something a caller can do
-// by passing a longer path. Prefixes below are exactly what the client SMS
-// templates embed today:
+// by passing a longer path. Prefixes below are exactly what the SMS templates
+// embed today:
 //  - the client-action magic-link prefixes (lib/clientActions/actionRegistry.ts)
 //  - /client/bookings/ — the login-gated booking detail page
+//  - /pro/bookings/ — the login-gated PRO booking detail page. Four pro events
+//    are SMS-capable (BOOKING_REQUEST_CREATED, BOOKING_RESCHEDULED,
+//    BOOKING_CANCELLED_BY_CLIENT, BOOKING_CANCELLED_BY_ADMIN — see
+//    PRO_ALL_CHANNELS in lib/notifications/eventKeys.ts) and every one of them
+//    dispatches this path. Its absence here is what made every pro
+//    booking-finalize SMS fall back to the long URL in production.
 //  - /api/v1/calendar/ics/ — the signed "add to calendar" link (lib/calendar/bookingInvite.ts)
 
 const MAX_PATH_LENGTH = 512
@@ -23,6 +29,7 @@ const ALLOWED_PATH_PREFIXES: readonly string[] = [
   '/client/appointment/',
   '/client/consent/',
   '/client/consultation/',
+  '/pro/bookings/',
   '/claim/',
   '/api/v1/calendar/ics/',
 ]
