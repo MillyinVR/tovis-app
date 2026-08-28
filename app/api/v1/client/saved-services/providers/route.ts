@@ -22,10 +22,8 @@ import {
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { PUBLICLY_LISTABLE_PRO_STATUSES } from '@/lib/proTrustState'
 import { decimalToNumber } from '@/lib/booking/snapshots'
-import {
-  boundsForRadiusMiles,
-  haversineMiles,
-} from '@/lib/discovery/nearby'
+import { boundsForRadiusMiles } from '@/lib/discovery/nearby'
+import { haversineMiles } from '@/lib/geo/distance'
 import { requireClient } from '@/app/api/_utils/auth/requireClient'
 import { mapPublicIncentiveDto } from '@/lib/lastMinute/openingDto'
 import { prisma } from '@/lib/prisma'

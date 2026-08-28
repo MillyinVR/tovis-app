@@ -27,6 +27,7 @@ import { isSortMode, sortPros, type SortMode } from './_lib/discoverSort'
 import type { DiscoverMode, DiscoverViewMode } from './_lib/discoverViewTypes'
 import type { DiscoverCategoryOption } from '@/lib/discovery/categoryTypes'
 import { isUsZip } from '@/lib/usPostalCode'
+import { haversineMiles } from '@/lib/geo/distance'
 
 type Coords = { lat: number; lng: number }
 
@@ -146,25 +147,6 @@ function coordsEqual(a: Coords | null, b: Coords, eps = 1e-5) {
   if (!a) return false
   return nearlyEqual(a.lat, b.lat, eps) && nearlyEqual(a.lng, b.lng, eps)
 }
-
-function haversineMiles(a: Coords, b: Coords) {
-  const radiusMiles = 3958.7613
-  const toRad = (degrees: number) => (degrees * Math.PI) / 180
-
-  const dLat = toRad(b.lat - a.lat)
-  const dLng = toRad(b.lng - a.lng)
-  const lat1 = toRad(a.lat)
-  const lat2 = toRad(b.lat)
-
-  const sinLat = Math.sin(dLat / 2)
-  const sinLng = Math.sin(dLng / 2)
-
-  const h = sinLat * sinLat + Math.cos(lat1) * Math.cos(lat2) * sinLng * sinLng
-  const c = 2 * Math.asin(Math.min(1, Math.sqrt(h)))
-
-  return radiusMiles * c
-}
-
 
 function zoomForRadiusMiles(radiusMiles: number) {
   if (radiusMiles <= 5) return 12

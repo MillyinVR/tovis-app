@@ -5,11 +5,11 @@ import {
   boundsForRadiusMiles,
   buildDiscoveryLocationLabel,
   buildDiscoveryOfferSummaryMap,
-  haversineMiles,
   mapProfessionalLocation,
   matchesDiscoveryOfferingFilters,
   type DiscoveryLocationDto,
 } from '@/lib/discovery/nearby'
+import { haversineMiles } from '@/lib/geo/distance'
 import { toPublicAddressView } from '@/lib/discovery/publicAddress'
 import { prisma } from '@/lib/prisma'
 import { PUBLICLY_LISTABLE_PRO_STATUSES } from '@/lib/proTrustState'

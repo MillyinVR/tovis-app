@@ -5,7 +5,7 @@
 // it end-to-end without Prisma.
 import { describe, expect, it, vi } from 'vitest'
 
-import { haversineMiles } from '@/lib/discovery/nearby'
+import { haversineMiles } from '@/lib/geo/distance'
 
 import {
   fetchProProximitySignals,

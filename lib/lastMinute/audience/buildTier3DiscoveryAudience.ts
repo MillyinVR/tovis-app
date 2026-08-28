@@ -8,7 +8,7 @@ import {
   ServiceFavorite,
   ServiceLocationType,
 } from '@prisma/client'
-import { haversineMiles } from '@/lib/discovery/nearby'
+import { haversineMiles } from '@/lib/geo/distance'
 import { isNonEmptyString } from '@/lib/guards'
 import { moneyToNumber } from '@/lib/money'
 import {

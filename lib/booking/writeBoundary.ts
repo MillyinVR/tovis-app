@@ -62,6 +62,7 @@ import {
 } from '@/lib/tenant/bookingAttribution'
 import { tenantContextFor } from '@/lib/tenant'
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
+import { haversineMiles } from '@/lib/geo/distance'
 import { upper } from '@/lib/booking/guards'
 import { deriveClientRelationshipLabel } from '@/lib/booking/relationshipLabel'
 import { isFinalizeConsultAttributionOwned } from '@/lib/booking/consultAttribution'
@@ -3451,38 +3452,6 @@ function isValidLongitude(value: number | null | undefined): value is number {
   )
 }
 
-function degreesToRadians(value: number): number {
-  return (value * Math.PI) / 180
-}
-
-function distanceMilesBetweenCoordinates(args: {
-  fromLat: number
-  fromLng: number
-  toLat: number
-  toLng: number
-}): number {
-  const earthRadiusMiles = 3958.7613
-
-  const fromLatRad = degreesToRadians(args.fromLat)
-  const toLatRad = degreesToRadians(args.toLat)
-  const deltaLatRad = degreesToRadians(args.toLat - args.fromLat)
-  const deltaLngRad = degreesToRadians(args.toLng - args.fromLng)
-
-  const sinDeltaLat = Math.sin(deltaLatRad / 2)
-  const sinDeltaLng = Math.sin(deltaLngRad / 2)
-
-  const a =
-    sinDeltaLat * sinDeltaLat +
-    Math.cos(fromLatRad) *
-      Math.cos(toLatRad) *
-      sinDeltaLng *
-      sinDeltaLng
-
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-
-  return earthRadiusMiles * c
-}
-
 async function getProfessionalMobileRadiusMiles(args: {
   tx: Prisma.TransactionClient
   professionalId: string
@@ -3579,12 +3548,10 @@ async function assertMobileBookingWithinRadius(args: {
     })
   }
 
-  const distanceMiles = distanceMilesBetweenCoordinates({
-    fromLat: args.locationLat,
-    fromLng: args.locationLng,
-    toLat: args.clientLat,
-    toLng: args.clientLng,
-  })
+  const distanceMiles = haversineMiles(
+    { lat: args.locationLat, lng: args.locationLng },
+    { lat: args.clientLat, lng: args.clientLng },
+  )
 
   if (distanceMiles > radiusMiles) {
     throw bookingError('CLIENT_SERVICE_ADDRESS_INVALID', {

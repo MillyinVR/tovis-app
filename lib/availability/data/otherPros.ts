@@ -17,8 +17,8 @@ import { decimalToNumber } from '@/lib/booking/snapshots'
 import {
   buildDiscoveryLocationLabel,
   boundsForRadiusMiles,
-  haversineMiles,
 } from '@/lib/discovery/nearby'
+import { haversineMiles } from '@/lib/geo/distance'
 import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 import { isValidIanaTimeZone } from '@/lib/timeZone'

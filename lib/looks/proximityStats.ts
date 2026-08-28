@@ -21,7 +21,7 @@
 // primary-location coordinates the DISTANCE badge already reads at serve time
 // (lib/looks/badges/attach.ts) — so it is read plainly here too.
 
-import { haversineMiles } from '@/lib/discovery/nearby'
+import { haversineMiles } from '@/lib/geo/distance'
 import type { ProProximitySignal } from '@/lib/looks/personalizedRanking'
 
 /** The viewer's current location (the request's range-checked viewerLat/Lng). */

@@ -16,7 +16,7 @@
 import { Prisma, type BoardType } from '@prisma/client'
 
 import { boardEventDateToYmd } from '@/lib/boards/context'
-import { haversineMiles } from '@/lib/discovery/nearby'
+import { haversineMiles } from '@/lib/geo/distance'
 import type { LookBadgeDto } from '@/lib/looks/types'
 import {
   selectLookBadge,
