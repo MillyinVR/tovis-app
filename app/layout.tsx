@@ -4,6 +4,7 @@ import type { Metadata, Viewport } from 'next'
 import type { CSSProperties, ReactNode } from 'react'
 import { cookies } from 'next/headers'
 import localFont from 'next/font/local'
+import { Analytics } from '@vercel/analytics/next'
 
 import './globals.css'
 import '@/lib/brand/brand.css'
@@ -177,6 +178,7 @@ export default async function RootLayout({ children }: RootLayoutProps) {
           <WorkspaceSwitchLauncher />
           <WorkspaceMismatchProvider />
         </BrandProvider>
+        <Analytics />
       </body>
     </html>
   )
