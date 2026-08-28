@@ -14,6 +14,8 @@ import '@/lib/brand/proLastMinute.css'
 import '@/lib/brand/proFinance.css'
 
 import RoleFooter from '@/app/_components/RoleFooter'
+import { ErrorHomeProvider } from '@/app/_components/boundaries/ErrorHomeProvider'
+import { resolveErrorHome } from '@/app/_components/boundaries/errorHomeHref'
 import WorkspaceSwitchLauncher from '@/app/_components/WorkspaceSwitchLauncher/WorkspaceSwitchLauncher'
 import WorkspaceMismatchProvider from '@/app/_components/WorkspaceMismatchProvider'
 import { BrandProvider } from '@/lib/brand/BrandProvider'
@@ -150,6 +152,11 @@ export default async function RootLayout({ children }: RootLayoutProps) {
   const tenantContext = await resolveTenantContextForLayout()
   const brand = getBrandForTenantContext(tenantContext)
 
+  // Resolved here, not in the boundaries: a client error.tsx cannot read the
+  // httpOnly session itself. Cookie read + JWT verify, no database round-trip
+  // (see errorHomeHref), and the layout is already force-dynamic.
+  const errorHome = await resolveErrorHome()
+
   return (
     <html lang="en" data-mode="dark" className={bodyClassName} suppressHydrationWarning>
       <body>
@@ -158,7 +165,9 @@ export default async function RootLayout({ children }: RootLayoutProps) {
             device's prefers-color-scheme). */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
         <BrandProvider brand={brand}>
-          <div style={appContentStyle}>{children}</div>
+          <ErrorHomeProvider value={errorHome}>
+            <div style={appContentStyle}>{children}</div>
+          </ErrorHomeProvider>
 
           <div id="tovis-footer-host" style={footerHostStyle}>
             <div id="tovis-footer-mount" style={footerMountStyle} />
