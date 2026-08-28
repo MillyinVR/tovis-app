@@ -18,6 +18,14 @@ import {
 export type OutreachPendingOffer = {
   id: string
   startsAt: string
+  /**
+   * MOBILE offers only: the server-composed "how far, roughly where" sentence.
+   *
+   * 🔴 This is ALL the pro is told about where they would travel until the
+   * client accepts, and the API response carries nothing more — there is no
+   * address in it to hide. Rendered verbatim; the phrasing is the server's.
+   */
+  travelSummary: string | null
 }
 
 export type OutreachEntry = {
@@ -109,11 +117,19 @@ function parseEntry(raw: unknown): OutreachEntry | null {
     return null
   }
   const offerRaw = raw.pendingOffer
+  const travelRaw = isRecord(offerRaw) ? offerRaw.travel : null
   const pendingOffer =
     isRecord(offerRaw) &&
     typeof offerRaw.id === 'string' &&
     typeof offerRaw.startsAt === 'string'
-      ? { id: offerRaw.id, startsAt: offerRaw.startsAt }
+      ? {
+          id: offerRaw.id,
+          startsAt: offerRaw.startsAt,
+          travelSummary:
+            isRecord(travelRaw) && typeof travelRaw.summary === 'string'
+              ? travelRaw.summary
+              : null,
+        }
       : null
 
   return {
@@ -204,6 +220,11 @@ function WaitlistRow({ entry }: { entry: OutreachEntry }) {
         {offeredAt ? (
           <div className="mt-1 truncate text-[11.5px] font-semibold text-toneInfo">
             {`Offered · ${offeredAt} — that time is held until they answer`}
+          </div>
+        ) : null}
+        {offeredAt && entry.pendingOffer?.travelSummary ? (
+          <div className="mt-0.5 truncate text-[11.5px] text-textMuted">
+            {`You’d travel · ${entry.pendingOffer.travelSummary}`}
           </div>
         ) : null}
       </div>

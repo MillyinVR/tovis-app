@@ -31,6 +31,21 @@ export type ClientAddressRow = Prisma.ClientAddressGetPayload<{
   select: typeof CLIENT_ADDRESS_SELECT
 }>
 
+/**
+ * THE order a client's saved addresses are considered in: the one they marked
+ * default, then the most recently touched, then oldest-first as a stable
+ * tiebreak.
+ *
+ * One rule with two consumers that must agree. `GET /api/v1/pro/clients/[id]/
+ * service-addresses` lists them in this order, so its first row is what a pro
+ * reads as "this client's address"; `createWaitlistOffer` resolves a MOBILE
+ * offer's destination by taking the first row of the same query, because the pro
+ * never picks that address themselves. If the two orderings drifted, the offer
+ * would quietly travel somewhere other than the address the pro was shown.
+ */
+export const CLIENT_ADDRESS_PREFERENCE_ORDER: Prisma.ClientAddressOrderByWithRelationInput[] =
+  [{ isDefault: 'desc' }, { updatedAt: 'desc' }, { createdAt: 'asc' }]
+
 export type NormalizedClientAddressInput = {
   label: string | null
   formattedAddress: string | null

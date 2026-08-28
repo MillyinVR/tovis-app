@@ -21,10 +21,12 @@ describe('waitlistHostableModes', () => {
     ).toEqual([ServiceLocationType.SALON])
   })
 
-  it('offers nothing to a mobile-only pro — a travel offer cannot be confirmed', () => {
+  it('offers MOBILE to a pro narrowed to travel-only', () => {
+    // Was `[]` until 2026-08-27: a mobile offer could not be confirmed, because
+    // the offer had nowhere to carry a client address. It does now.
     expect(
       waitlistHostableModes({ offersInSalon: false, offersMobile: true }),
-    ).toEqual([])
+    ).toEqual([ServiceLocationType.MOBILE])
   })
 
   it('offers nothing when neither mode survived narrowing', () => {
@@ -33,22 +35,36 @@ describe('waitlistHostableModes', () => {
     ).toEqual([])
   })
 
-  it('drops the unfulfillable half of a both-modes pro rather than promising it', () => {
+  it('offers both to a pro who can host both', () => {
     expect(
       waitlistHostableModes({ offersInSalon: true, offersMobile: true }),
-    ).toEqual([ServiceLocationType.SALON])
+    ).toEqual([ServiceLocationType.SALON, ServiceLocationType.MOBILE])
+  })
+
+  it('still drops a mode the pro cannot host', () => {
+    // The narrowing half of the rule, unchanged by widening the fulfillable
+    // list: flags arrive here already narrowed to bookable locations.
+    expect(
+      waitlistHostableModes({ offersInSalon: false, offersMobile: false }),
+    ).toEqual([])
   })
 })
 
 describe('WAITLIST_FULFILLABLE_MODES', () => {
-  // A canary, not a restatement. MOBILE is excluded because
-  // `confirmClientWaitlistOffer` books with `clientAddressId: null` and
-  // `WaitlistOffer` has nowhere to carry one — so a MOBILE offer would be
-  // created and then be impossible for the client to accept. Widening this list
-  // without that plumbing ships a promise nobody can take up, which is why this
-  // asserts the list itself and not just a behaviour derived from it.
-  it('is SALON-only until an offer can carry a client address', () => {
-    expect([...WAITLIST_FULFILLABLE_MODES]).toEqual([ServiceLocationType.SALON])
+  // A canary, not a restatement. It asserts the LIST rather than a behaviour
+  // derived from it, because the failure it guards against is a mode being added
+  // here ahead of the plumbing that lets a client actually confirm it.
+  //
+  // It was SALON-only until 2026-08-27. MOBILE joined it together with
+  // `WaitlistOffer.clientAddressId`, the radius check at offer time, and the
+  // confirm passing that address through to `performLockedCreateProBooking` —
+  // the three things that turn a mobile offer from a promise nobody can take up
+  // into a bookable one.
+  it('is exactly the modes a client can confirm unaided', () => {
+    expect([...WAITLIST_FULFILLABLE_MODES]).toEqual([
+      ServiceLocationType.SALON,
+      ServiceLocationType.MOBILE,
+    ])
   })
 })
 
@@ -57,9 +73,11 @@ describe('isWaitlistSupportedForModes', () => {
     expect(
       isWaitlistSupportedForModes({ offersInSalon: true, offersMobile: false }),
     ).toBe(true)
+    // A mobile-only pro's clients may now join: the offer they'd receive is one
+    // they can confirm.
     expect(
       isWaitlistSupportedForModes({ offersInSalon: false, offersMobile: true }),
-    ).toBe(false)
+    ).toBe(true)
     expect(
       isWaitlistSupportedForModes({ offersInSalon: false, offersMobile: false }),
     ).toBe(false)
@@ -67,19 +85,17 @@ describe('isWaitlistSupportedForModes', () => {
 })
 
 describe('waitlistRefusalMessage', () => {
-  it('tells a mobile-only pro’s client which of the two walls they hit', () => {
-    const mobileOnly = waitlistRefusalMessage({
-      kind: 'NO_HOSTABLE_MODE',
-      advertisesMobileOnly: true,
-    })
+  it('names an unhostable service without claiming a mode limit that no longer exists', () => {
     const nothingBookable = waitlistRefusalMessage({
       kind: 'NO_HOSTABLE_MODE',
-      advertisesMobileOnly: false,
     })
 
-    expect(mobileOnly).toContain('only travels to clients')
-    expect(nothingBookable).toContain('cannot take in-salon appointments')
-    expect(mobileOnly).not.toEqual(nothingBookable)
+    expect(nothingBookable).toContain('cannot take appointments')
+    // The old wording promised in-salon as the workaround. With MOBILE
+    // fulfillable that is no longer the reason anyone lands here, and a refusal
+    // that names the wrong cause sends the client to fix the wrong thing.
+    expect(nothingBookable).not.toContain('in-salon')
+    expect(nothingBookable).not.toContain('only travels')
   })
 
   it('names a missing offering as its own case', () => {

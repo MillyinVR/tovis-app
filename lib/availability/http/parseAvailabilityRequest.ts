@@ -35,6 +35,17 @@ export type ParsedAvailabilityRequest = {
    * `rescheduleBookingId`.
    */
   rebookOfBookingId: string | null
+  /**
+   * Present when a PRO is picking a time to offer a waitlisted client. The
+   * route resolves it to that client's service address SERVER-SIDE
+   * (`resolveWaitlistOfferDestinationIdForPro`) so MOBILE placement runs against
+   * the real destination — the pro's device never receives the address or its
+   * id, because at offer time they are not entitled to either.
+   *
+   * Pro-scoped data: the honouring route authenticates and checks the entry
+   * belongs to the caller, exactly as `rebookOfBookingId` does.
+   */
+  waitlistEntryId: string | null
   debug: boolean
   includeOtherPros: boolean
 
@@ -84,6 +95,7 @@ export function parseAvailabilityRequest(
     searchParams.get('rescheduleBookingId'),
   )
   const rebookOfBookingId = pickString(searchParams.get('rebookOfBookingId'))
+  const waitlistEntryId = pickString(searchParams.get('waitlistEntryId'))
 
   const debug = pickString(searchParams.get('debug')) === '1'
   const includeOtherPros =
@@ -127,6 +139,7 @@ export function parseAvailabilityRequest(
     addOnIds,
     rescheduleBookingId,
     rebookOfBookingId,
+    waitlistEntryId,
     debug,
     includeOtherPros,
 

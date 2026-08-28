@@ -257,7 +257,11 @@ describe('GET /api/v1/availability/bootstrap', () => {
       expect(body.waitlistSupported).toBe(true)
     })
 
-    it('is FALSE for a mobile-only pro — a travel waitlist cannot be offered yet', async () => {
+    it('is TRUE for a mobile-only pro — a travel waitlist can now be offered', async () => {
+      // Was FALSE until 2026-08-27: a mobile offer could be made but never
+      // confirmed (`WaitlistOffer` had nowhere to carry a client address), so
+      // promising this client a queue would have promised them a dead end. With
+      // MOBILE in WAITLIST_FULFILLABLE_MODES the queue is real.
       mocks.loadAvailabilityOfferingContext.mockResolvedValue(
         contextWithModes({ offersInSalon: false, offersMobile: true }),
       )
@@ -266,9 +270,7 @@ describe('GET /api/v1/availability/bootstrap', () => {
         await getBootstrap({ professionalId: 'pro-1', serviceId: 'service-1' })
       ).json()
 
-      expect(body.waitlistSupported).toBe(false)
-      // The offering itself still reports the mode it really has — only the
-      // waitlist claim is withdrawn.
+      expect(body.waitlistSupported).toBe(true)
       expect(body.offering.offersMobile).toBe(true)
     })
 

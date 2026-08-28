@@ -26,6 +26,7 @@ import {
   ymdSerial,
 } from '@/lib/availability/core/summaryWindow'
 import { parseAvailabilityRequest } from '@/lib/availability/http/parseAvailabilityRequest'
+import { resolveWaitlistOfferDestinationIdForPro } from '@/lib/waitlist/offerDestination'
 import {
   getScheduleConfigVersion,
   getScheduleVersion,
@@ -135,6 +136,7 @@ export async function GET(req: Request) {
       addOnIds,
       rescheduleBookingId,
       rebookOfBookingId,
+      waitlistEntryId,
       debug,
       stepRaw,
       leadRaw,
@@ -173,6 +175,35 @@ export async function GET(req: Request) {
       }
     }
 
+    // A pro picking a time to OFFER a waitlisted client. MOBILE placement needs
+    // the client's service address, and the pro is not entitled to it at offer
+    // time — so it is resolved here, server-side, from an entry this pro owns,
+    // and only its effect (which slots exist) ever reaches them. Same shape as
+    // the two branches above: pro-scoped input, authenticated before use.
+    //
+    // A null result — foreign entry, missing entry, or a client with no saved
+    // address — deliberately falls through to "no client address", which for
+    // MOBILE surfaces as CLIENT_SERVICE_ADDRESS_REQUIRED. That is the same
+    // answer `createWaitlistOffer` would give, and it tells a probing caller
+    // nothing about whose entry id they guessed.
+    let waitlistDestinationAddressId: string | null = null
+    if (waitlistEntryId) {
+      const auth = await requirePro()
+      if (!auth.ok) return auth.res
+      waitlistDestinationAddressId =
+        await resolveWaitlistOfferDestinationIdForPro({
+          professionalId: auth.professionalId,
+          waitlistEntryId,
+        })
+    }
+
+    // The server-resolved destination WINS over anything the caller sent: a pro
+    // on the waitlist path has no legitimate `clientAddressId` to supply, so
+    // honouring theirs would be honouring a guess.
+    const effectiveClientAddressId = waitlistEntryId
+      ? waitlistDestinationAddressId
+      : clientAddressId
+
     if (!dateStr) {
       return jsonFail(
         400,
@@ -195,7 +226,7 @@ export async function GET(req: Request) {
       serviceId,
       requestedLocationType,
       requestedLocationId,
-      clientAddressId,
+      clientAddressId: effectiveClientAddressId,
       scheduleConfigVersion,
       cacheEnabled: !debug,
       client: prismaRead,
@@ -231,7 +262,7 @@ export async function GET(req: Request) {
 
     const resolvedClientAddressId = resolveDebugClientAddressId({
       locationType: effectiveLocationType,
-      clientAddressId,
+      clientAddressId: effectiveClientAddressId,
     })
 
     const stepMinutes =

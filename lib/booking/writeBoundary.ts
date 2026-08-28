@@ -258,6 +258,12 @@ import {
   lapsedWaitlistOfferWhere,
 } from '@/lib/waitlist/offerLiveness'
 import { WAITLIST_FULFILLABLE_MODES } from '@/lib/waitlist/hostability'
+import { buildWaitlistOfferAreaLabel } from '@/lib/waitlist/offerArea'
+import { loadWaitlistOfferDestination } from '@/lib/waitlist/offerDestination'
+import {
+  MOBILE_CAPABLE_LOCATION_TYPES,
+  SALON_CAPABLE_LOCATION_TYPES,
+} from '@/lib/offerings/locationCapability'
 import { scheduleReviewRequestOnCompletion } from '@/lib/notifications/reviewRequests'
 import {
   applyClientCreditForBooking,
@@ -3490,6 +3496,17 @@ async function getProfessionalMobileRadiusMiles(args: {
   return professional?.mobileRadiusMiles ?? null
 }
 
+/**
+ * How far the pro would travel for a MOBILE appointment, as measured by the
+ * radius gate that admitted it.
+ *
+ * Returned rather than recomputed by anyone who needs to DISPLAY the distance
+ * (today: the pro-facing summary on a pending waitlist offer). A second caller
+ * running its own haversine is how "14 mi away" ends up on a card the gate
+ * refused at 15 — so there is one measurement, and it is this one.
+ */
+export type MobileTripDistance = { distanceMiles: number }
+
 async function assertMobileBookingWithinRadius(args: {
   tx: Prisma.TransactionClient
   professionalId: string
@@ -3510,9 +3527,13 @@ async function assertMobileBookingWithinRadius(args: {
    * demanding a live saved address.
    */
   hasSnapshotAddress?: boolean
-}): Promise<void> {
+  // Returns the distance it measured (null when this is not a MOBILE booking
+  // and nothing was measured). Every existing caller ignores it — the throw is
+  // still the contract; the number is a by-product for anyone who has to show
+  // the pro how far the trip is.
+}): Promise<MobileTripDistance | null> {
   if (args.locationType !== ServiceLocationType.MOBILE) {
-    return
+    return null
   }
 
   if (!args.clientAddressId && !args.hasSnapshotAddress) {
@@ -3572,6 +3593,8 @@ async function assertMobileBookingWithinRadius(args: {
       userMessage: `This service address is outside this professional's ${radiusMiles}-mile mobile service area.`,
     })
   }
+
+  return { distanceMiles }
 }
 
 function normalizePositiveMoneyDecimal(value: unknown): Prisma.Decimal | null {
@@ -17889,6 +17912,18 @@ async function createWaitlistOfferHold(args: {
   clientId: string
   offeringId: string
   locationId: string
+  /**
+   * The offer's own mode. The hold has to carry it because the overlap /
+   * placement machinery reads a hold's `locationType`, and a MOBILE offer
+   * reserving a SALON-shaped hold would be reserving the wrong thing.
+   *
+   * The hold deliberately carries NO client address, unlike a client-side
+   * MOBILE hold: this one is pure occupancy on the pro's own calendar, it is
+   * deleted before `confirmClientWaitlistOffer` books over it, and nothing reads
+   * an address from it. Storing one would be a second copy of the destination
+   * for no reader.
+   */
+  locationType: ServiceLocationType
   locationTimeZone: string
   startsAt: Date
   endsAtSnapshot: Date
@@ -17904,7 +17939,7 @@ async function createWaitlistOfferHold(args: {
         clientId: args.clientId,
         offeringId: args.offeringId,
         locationId: args.locationId,
-        locationType: ServiceLocationType.SALON,
+        locationType: args.locationType,
         locationTimeZone: args.locationTimeZone,
         scheduledFor: args.startsAt,
         endsAtSnapshot: args.endsAtSnapshot,
@@ -17929,7 +17964,7 @@ async function createWaitlistOfferHold(args: {
       action: 'WAITLIST_OFFER_CREATE',
       professionalId: args.professionalId,
       locationId: args.locationId,
-      locationType: ServiceLocationType.SALON,
+      locationType: args.locationType,
       requestedStart: args.startsAt,
       requestedEnd: args.endsAtSnapshot,
       conflictType: 'HOLD',
@@ -17969,7 +18004,9 @@ async function createWaitlistOfferHold(args: {
  * NOTIFIED, and notifies the client to Confirm/Decline. NO booking is created
  * yet — the client's confirm (confirmClientWaitlistOffer) materializes it.
  *
- * v1 is in-salon only. The offer runs the SAME scheduling gate the client's
+ * In-salon OR mobile — `WAITLIST_FULFILLABLE_MODES` is the list, and this
+ * function is one of the three things that list is only allowed to widen
+ * alongside. The offer runs the SAME scheduling gate the client's
  * confirm will run (`enforceProCreateScheduling` over the context
  * `performLockedCreateProBooking` re-resolves), with identical flags — because
  * the offer is a promise, and a promise the client cannot accept is a refusal
@@ -17988,6 +18025,24 @@ async function createWaitlistOfferHold(args: {
  * still-pending offer for the entry is superseded (CANCELLED) first — and its
  * reservation released BEFORE the gate runs, or a re-offer would collide with
  * the pro's own outstanding promise.
+ *
+ * ── MOBILE (2026-08-27) ───────────────────────────────────────────────────────
+ * A mobile offer promises a TRIP, so three things happen here that do not happen
+ * for a salon one:
+ *
+ *  1. The destination is resolved SERVER-SIDE from the client's own saved
+ *     addresses. The pro does not choose it and cannot see it: they are offering
+ *     a time to someone whose chart is closed to them (a waitlist relationship
+ *     is CONTACT_ONLY), so letting the caller name an address would be asking
+ *     the pro for a fact they are not entitled to know.
+ *  2. The radius gate runs NOW, at offer time, exactly as it will at confirm —
+ *     the promise-site runs the commit-site gate. An out-of-range client is
+ *     refused to the PRO, who can act on it, rather than to the client holding
+ *     an offer they cannot accept.
+ *  3. What the pro is shown before the client accepts — how far, roughly where —
+ *     is snapshotted onto the offer row from (2)'s own measurement. The exact
+ *     address stays where it was: in the client's record, opening to the pro
+ *     only once the accept creates a booking.
  */
 export async function createWaitlistOffer(
   args: CreateWaitlistOfferArgs,
@@ -18001,16 +18056,17 @@ export async function createWaitlistOffer(
   assertValidRequestedStart(args.scheduledFor)
 
   // ONE list, shared with the routes that gate on it (lib/waitlist/hostability).
-  // Everything below this guard may then assume SALON — which is why the
-  // `ServiceLocationType.SALON` literals further down are still correct. Widen
-  // WAITLIST_FULFILLABLE_MODES only together with them AND with a client address
-  // on the offer, or the client's confirm cannot accept what this promised.
-  if (!WAITLIST_FULFILLABLE_MODES.includes(args.locationType)) {
+  // Nothing below assumes a mode any more — every branch reads `locationType` —
+  // so widening that list is now a matter of the confirm being able to carry the
+  // mode, which for MOBILE it can (the offer stores a client address).
+  const locationType = args.locationType
+  if (!WAITLIST_FULFILLABLE_MODES.includes(locationType)) {
     throw bookingError('MODE_NOT_SUPPORTED', {
-      message: 'Waitlist offers support in-salon appointments only for now.',
-      userMessage: 'You can only offer in-salon times right now.',
+      message: `Waitlist offers do not support ${locationType} appointments.`,
+      userMessage: 'You can’t offer a time in that mode right now.',
     })
   }
+  const isMobileOffer = locationType === ServiceLocationType.MOBILE
 
   const startsAt = normalizeToMinute(new Date(args.scheduledFor))
   const requestedEndsAt = new Date(args.endsAt)
@@ -18088,15 +18144,17 @@ export async function createWaitlistOffer(
       if (!offering) {
         throw bookingError('OFFERING_NOT_FOUND')
       }
-      if (!offering.offersInSalon) {
+      if (isMobileOffer ? !offering.offersMobile : !offering.offersInSalon) {
         throw bookingError('MODE_NOT_SUPPORTED', {
-          message: 'Offering does not support in-salon appointments.',
-          userMessage: 'This service isn’t offered in-salon.',
+          message: `Offering does not support ${locationType} appointments.`,
+          userMessage: isMobileOffer
+            ? 'This service isn’t offered mobile.'
+            : 'This service isn’t offered in-salon.',
         })
       }
 
-      // Kept ahead of the shared resolve purely for the message: a MOBILE_BASE
-      // location id is a wrong-mode mistake the pro can correct, and
+      // Kept ahead of the shared resolve purely for the message: a location of
+      // the WRONG type for the mode is a mistake the pro can correct, and
       // pickBookableLocation would flatten it into LOCATION_NOT_FOUND.
       const requestedLocation = await tx.professionalLocation.findFirst({
         where: { id: args.locationId, professionalId: args.professionalId },
@@ -18105,13 +18163,18 @@ export async function createWaitlistOffer(
       if (!requestedLocation) {
         throw bookingError('LOCATION_NOT_FOUND')
       }
-      if (
-        requestedLocation.type !== ProfessionalLocationType.SALON &&
-        requestedLocation.type !== ProfessionalLocationType.SUITE
-      ) {
+      // The SAME per-mode location-type rule the booking paths use
+      // (lib/offerings/locationCapability), so an offer cannot be anchored to a
+      // location a booking would then reject.
+      const allowedLocationTypes = isMobileOffer
+        ? MOBILE_CAPABLE_LOCATION_TYPES
+        : SALON_CAPABLE_LOCATION_TYPES
+      if (!allowedLocationTypes.includes(requestedLocation.type)) {
         throw bookingError('BAD_LOCATION', {
-          message: 'Waitlist offers require a salon location.',
-          userMessage: 'Offer from an in-salon location.',
+          message: `Waitlist offers in ${locationType} require a matching location type.`,
+          userMessage: isMobileOffer
+            ? 'Offer from your mobile base.'
+            : 'Offer from an in-salon location.',
         })
       }
 
@@ -18130,7 +18193,7 @@ export async function createWaitlistOffer(
         tx,
         professionalId: args.professionalId,
         requestedLocationId: requestedLocation.id,
-        locationType: ServiceLocationType.SALON,
+        locationType,
         professionalTimeZone: offering.professional?.timeZone ?? null,
         fallbackTimeZone: 'UTC',
         requireValidTimeZone: true,
@@ -18167,6 +18230,58 @@ export async function createWaitlistOffer(
           stepMinutes: locationContext.stepMinutes,
         })
       const endsAt = addMinutes(startsAt, durationMinutes)
+
+      // ── Where a MOBILE offer travels, and how far ─────────────────────────
+      // Resolved from the CLIENT's own saved addresses, never from the caller:
+      // the pro is offering a time to someone whose chart they cannot open, so
+      // they are in no position to name an address, and asking them to would be
+      // the leak this whole flow exists to avoid.
+      const offerClientAddress = isMobileOffer
+        ? await loadWaitlistOfferDestination({
+            clientId: entry.clientId,
+            client: tx,
+          })
+        : null
+
+      if (isMobileOffer && !offerClientAddress) {
+        // Refused to the PRO, at offer time — the one moment someone who can act
+        // on it is looking. `performLockedCreateProBooking` would throw the same
+        // code at confirm, but by then the only person holding the offer is the
+        // client, who cannot fix it from there.
+        throw bookingError('CLIENT_SERVICE_ADDRESS_REQUIRED', {
+          message:
+            'Client has no saved service address, so a mobile offer has no destination.',
+          userMessage:
+            'This client hasn’t saved a service address yet, so there’s nowhere to travel to. Offer an in-salon time, or ask them to add one.',
+        })
+      }
+
+      // The promise-site running the commit-site gate: the identical check
+      // `performLockedCreateProBooking` will run when the client confirms. An
+      // out-of-range client is refused here, to the pro.
+      //
+      // 🔴 The distance shown to the pro is this call's RETURN VALUE, not a
+      // second measurement. There is one haversine on this path and it is the
+      // one that decided the offer was allowed at all, so the miles on the card
+      // cannot disagree with the miles the gate ruled on.
+      const tripDistance = await assertMobileBookingWithinRadius({
+        tx,
+        professionalId: args.professionalId,
+        locationType,
+        locationLat: locationContext.lat,
+        locationLng: locationContext.lng,
+        clientAddressId: offerClientAddress?.id ?? null,
+        clientLat: decimalToNumber(offerClientAddress?.lat),
+        clientLng: decimalToNumber(offerClientAddress?.lng),
+      })
+
+      // Coarse by construction: city/state or a postal prefix, built from a row
+      // that was never given the street line (see
+      // WAITLIST_OFFER_DESTINATION_SELECT). null is a legitimate answer and
+      // renders as distance alone.
+      const clientAreaLabel = offerClientAddress
+        ? buildWaitlistOfferAreaLabel(offerClientAddress)
+        : null
 
       // Supersede BEFORE the gate, not after. A still-pending offer for this
       // entry now holds its own slot, and the gate treats a hold as fatal — so
@@ -18215,7 +18330,7 @@ export async function createWaitlistOffer(
         action: 'WAITLIST_OFFER_CREATE',
         professionalId: args.professionalId,
         locationId: locationContext.locationId,
-        locationType: ServiceLocationType.SALON,
+        locationType,
         offeringId: offering.id,
         clientId: entry.clientId,
       })
@@ -18233,7 +18348,20 @@ export async function createWaitlistOffer(
           clientId: entry.clientId,
           offeringId: offering.id,
           locationId: locationContext.locationId,
-          locationType: ServiceLocationType.SALON,
+          locationType,
+          // Null on every SALON offer. On a MOBILE one this is what makes the
+          // client's confirm possible at all: it is handed straight to
+          // `performLockedCreateProBooking`, which used to be given a hardcoded
+          // null and therefore always threw CLIENT_SERVICE_ADDRESS_REQUIRED.
+          clientAddressId: offerClientAddress?.id ?? null,
+          // The pro-facing trip summary, snapshotted from the gate's own
+          // measurement above. Stored rather than derived on read so the
+          // pro-facing query never has to touch ClientAddress at all.
+          clientDistanceMiles:
+            tripDistance == null
+              ? null
+              : new Prisma.Decimal(tripDistance.distanceMiles.toFixed(2)),
+          clientAreaLabel,
           startsAt,
           endsAt,
           durationMinutes,
@@ -18260,6 +18388,7 @@ export async function createWaitlistOffer(
         clientId: entry.clientId,
         offeringId: offering.id,
         locationId: locationContext.locationId,
+        locationType,
         locationTimeZone: locationContext.timeZone,
         startsAt,
         endsAtSnapshot: schedulingDecision.requestedEnd,
@@ -18316,6 +18445,13 @@ const WAITLIST_OFFER_CONFIRM_SELECT = {
   offeringId: true,
   locationId: true,
   locationType: true,
+  // The MOBILE destination resolved when the offer was made. Only the id: the
+  // confirm hands it to `performLockedCreateProBooking`, which re-loads the row
+  // under the lock (scoped to this client + SERVICE_ADDRESS), re-checks the
+  // radius, and snapshots it onto the booking. Re-checking rather than trusting
+  // matters — the client may have edited or moved the address since the offer,
+  // and `onDelete: SetNull` may have taken it away entirely.
+  clientAddressId: true,
   startsAt: true,
   durationMinutes: true,
   expiresAt: true,
@@ -18426,7 +18562,15 @@ export async function confirmClientWaitlistOffer(
         locationId: locked.locationId,
         locationType: locked.locationType,
         scheduledFor: locked.startsAt,
-        clientAddressId: null,
+        // The destination the offer promised. Null for a SALON offer, and null
+        // for a MOBILE one whose saved address has since been deleted — which
+        // `assertMobileBookingWithinRadius` then refuses with
+        // CLIENT_SERVICE_ADDRESS_REQUIRED rather than booking a trip to nowhere.
+        //
+        // This being hardcoded `null` is what made MOBILE waitlist offers
+        // unfulfillable, and why `WAITLIST_FULFILLABLE_MODES` refused to carry
+        // the mode at all.
+        clientAddressId: locked.clientAddressId,
         internalNotes: null,
         requestedBufferMinutes: null,
         requestedTotalDurationMinutes: locked.durationMinutes,
