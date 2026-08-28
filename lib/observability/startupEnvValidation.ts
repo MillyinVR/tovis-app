@@ -15,6 +15,7 @@
 import { readOptionalEnv } from '@/lib/env'
 import { readPostmarkEmailConfig } from '@/lib/notifications/config'
 import { readSentryDsn } from '@/lib/observability/sentryConfig'
+import { captureStartupMisconfig } from '@/lib/observability/startupEvents'
 import { isAeadKeyringValid } from '@/lib/security/crypto/aead'
 
 type RequiredEnvCheck = {
@@ -113,6 +114,15 @@ export function warnOnDivergentCronSecrets(): void {
           'INTERNAL_JOB_SECRET and CRON_SECRET are both set but differ. The job guard prefers INTERNAL_JOB_SECRET, but Vercel cron sends CRON_SECRET — every scheduled job will 401. Set them to the same value (or unset INTERNAL_JOB_SECRET).',
       }),
     )
+    // The console line above is invisible to Sentry unless SENTRY_ENABLE_LOGS
+    // is on (off by default, deliberately). Page a human too — this one takes
+    // the ENTIRE cron layer down silently.
+    captureStartupMisconfig({
+      event: 'divergent_cron_secrets',
+      message:
+        'INTERNAL_JOB_SECRET and CRON_SECRET are both set but differ — every scheduled job will 401.',
+      level: 'error',
+    })
   }
 }
 
@@ -147,6 +157,12 @@ export function warnOnDatabasePoolingMisconfig(): void {
           'DATABASE_URL has no connection_limit. On serverless each instance opens its own pool; without an explicit limit, fan-out can exhaust Postgres/pooler connections. Add ?connection_limit=N sized for your pool. See docs/runbooks/deploy-and-rollback.md.',
       }),
     )
+    captureStartupMisconfig({
+      event: 'database_url_no_connection_limit',
+      message:
+        'DATABASE_URL has no connection_limit — serverless fan-out can exhaust Postgres/pooler connections.',
+      level: 'warning',
+    })
   }
 
   const directUrl = readOptionalEnv('DIRECT_URL')
@@ -161,6 +177,12 @@ export function warnOnDatabasePoolingMisconfig(): void {
           'DIRECT_URL points at the transaction pooler (port 6543 / pgbouncer=true). Prisma migrate needs a session-scoped advisory lock the transaction pooler cannot hold — migrate deploy will hang. Point DIRECT_URL at the direct/session endpoint (port 5432). See docs/runbooks/deploy-and-rollback.md.',
       }),
     )
+    captureStartupMisconfig({
+      event: 'direct_url_on_transaction_pooler',
+      message:
+        'DIRECT_URL points at the transaction pooler — migrate deploy will hang on the session advisory lock.',
+      level: 'warning',
+    })
   }
 }
 

@@ -3,6 +3,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   waitUntil: vi.fn(),
   drainDueNotifications: vi.fn(),
+  captureNotificationException: vi.fn(),
+}))
+
+// Both failure paths below are non-fatal by design (the cron backstops
+// delivery), so the capture is the ONLY thing that surfaces them — the console
+// lines they also write are invisible to Sentry unless SENTRY_ENABLE_LOGS is on,
+// and it is off by default.
+vi.mock('@/lib/observability/notificationEvents', () => ({
+  captureNotificationException: mocks.captureNotificationException,
 }))
 
 vi.mock('@vercel/functions', () => ({
@@ -64,6 +73,12 @@ describe('lib/notifications/delivery/kickNotificationDrain', () => {
       'kickNotificationDrain: drain failed',
       expect.objectContaining({ error: expect.anything() }),
     )
+    expect(mocks.captureNotificationException).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: 'kickNotificationDrain',
+        event: 'DRAIN_KICK_FAILED',
+      }),
+    )
 
     consoleErrorSpy.mockRestore()
   })
@@ -81,6 +96,15 @@ describe('lib/notifications/delivery/kickNotificationDrain', () => {
     expect(consoleWarnSpy).toHaveBeenCalledWith(
       'kickNotificationDrain: waitUntil unavailable; relying on cron',
       expect.objectContaining({ error: expect.anything() }),
+    )
+    // Warning, not error: nothing is lost, the cron still drains — but in
+    // production waitUntil should always be available, so it must be visible.
+    expect(mocks.captureNotificationException).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: 'kickNotificationDrain',
+        event: 'WAIT_UNTIL_UNAVAILABLE',
+        level: 'warning',
+      }),
     )
 
     consoleWarnSpy.mockRestore()

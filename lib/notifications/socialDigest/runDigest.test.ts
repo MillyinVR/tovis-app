@@ -14,6 +14,14 @@ const { mockPrisma } = vi.hoisted(() => ({
   },
 }))
 
+const mockCaptureNotificationException = vi.hoisted(() => vi.fn())
+
+// The cron route returns `failed` inside a 200 body, so a run where every send
+// failed still looks green from the outside. The capture is the only alarm.
+vi.mock('@/lib/observability/notificationEvents', () => ({
+  captureNotificationException: mockCaptureNotificationException,
+}))
+
 vi.mock('@/lib/prisma', () => ({ prisma: mockPrisma }))
 vi.mock('@/lib/membership/urls', () => ({
   getAppUrl: () => 'https://app.test',
@@ -252,6 +260,36 @@ describe('runSocialDigest', () => {
 
     expect(result.sent).toBe(0)
     expect(result.failed).toBe(1)
+  })
+
+  // ⚠️ The guard this exists for: a failed digest run returns 200 with
+  // `failed: N`, so nothing downstream notices. Exactly ONE capture per run —
+  // per-recipient paging would turn a provider outage into an alert storm.
+  it('captures once per run when any send failed', async () => {
+    mockCaptureNotificationException.mockClear()
+    seedOneClient()
+    const sender = vi.fn<(payload: DigestEmailPayload) => Promise<{ ok: boolean }>>().mockResolvedValue({ ok: false })
+
+    await runSocialDigest({ now: NOW, sender })
+
+    expect(mockCaptureNotificationException).toHaveBeenCalledTimes(1)
+    expect(mockCaptureNotificationException).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: 'runSocialDigest',
+        event: 'DIGEST_SENDS_FAILED',
+      }),
+    )
+  })
+
+  it('stays silent when every send succeeded', async () => {
+    mockCaptureNotificationException.mockClear()
+    seedOneClient()
+    const sender = vi.fn<(payload: DigestEmailPayload) => Promise<{ ok: boolean }>>().mockResolvedValue({ ok: true })
+
+    const result = await runSocialDigest({ now: NOW, sender })
+
+    expect(result.failed).toBe(0)
+    expect(mockCaptureNotificationException).not.toHaveBeenCalled()
   })
 
   it('queries only the digest window', async () => {

@@ -1,5 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+const mockCaptureStartupMisconfig = vi.hoisted(() => vi.fn())
+
+// These misconfigurations are detected but deliberately NOT fail-closed (the
+// server still boots), so the ONLY thing that makes them visible is the capture.
+// Mocked so each test can assert the alarm actually fired, and with what level.
+vi.mock('@/lib/observability/startupEvents', () => ({
+  captureStartupMisconfig: mockCaptureStartupMisconfig,
+}))
+
 import {
   collectMissingProductionEnv,
   isProductionRuntime,
@@ -45,6 +54,7 @@ function setFullyConfiguredProductionEnv() {
 }
 
 beforeEach(() => {
+  mockCaptureStartupMisconfig.mockReset()
   for (const key of MANAGED_ENV_KEYS) {
     originalEnv[key] = process.env[key]
     delete process.env[key]
@@ -174,6 +184,16 @@ describe('warnOnDivergentCronSecrets', () => {
     expect(spy).toHaveBeenCalledTimes(1)
     expect(spy.mock.calls[0]?.[0]).toContain('divergent_cron_secrets')
     spy.mockRestore()
+
+    // ⚠️ The point of this guard: the console line above is invisible to Sentry
+    // unless SENTRY_ENABLE_LOGS is on, and it is off by default. A cron layer
+    // that 401s every job must page.
+    expect(mockCaptureStartupMisconfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'divergent_cron_secrets',
+        level: 'error',
+      }),
+    )
   })
 
   it('does not warn when the two secrets match', () => {
@@ -185,6 +205,7 @@ describe('warnOnDivergentCronSecrets', () => {
     warnOnDivergentCronSecrets()
     expect(spy).not.toHaveBeenCalled()
     spy.mockRestore()
+    expect(mockCaptureStartupMisconfig).not.toHaveBeenCalled()
   })
 
   it('does not warn outside production', () => {
@@ -196,6 +217,7 @@ describe('warnOnDivergentCronSecrets', () => {
     warnOnDivergentCronSecrets()
     expect(spy).not.toHaveBeenCalled()
     spy.mockRestore()
+    expect(mockCaptureStartupMisconfig).not.toHaveBeenCalled()
   })
 })
 
@@ -212,6 +234,13 @@ describe('warnOnDatabasePoolingMisconfig', () => {
       events.some((e) => e.includes('database_url_no_connection_limit')),
     ).toBe(true)
     spy.mockRestore()
+
+    expect(mockCaptureStartupMisconfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'database_url_no_connection_limit',
+        level: 'warning',
+      }),
+    )
   })
 
   it('does not warn when DATABASE_URL carries a connection_limit', () => {

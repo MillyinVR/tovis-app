@@ -27,6 +27,12 @@ type CaptureNotificationExceptionInput = {
   event: string
   dispatchId?: string | null
   deliveryId?: string | null
+  /**
+   * Sentry severity. Defaults to 'error'. Pass 'warning' for a degradation that
+   * has a working backstop — the cron still drains, the next run still sends —
+   * so it is worth seeing without paging as loudly as a hard failure.
+   */
+  level?: 'error' | 'warning'
 }
 
 /**
@@ -49,6 +55,7 @@ export function captureNotificationException(
   sanitized.name = safe.name
 
   Sentry.withScope((scope) => {
+    scope.setLevel(input.level ?? 'error')
     scope.setTag('area', 'notifications')
     scope.setTag('notifications.event', input.event)
     scope.setTag('notifications.route', input.route)
@@ -61,6 +68,7 @@ export function captureNotificationException(
       event: input.event,
       dispatchId: input.dispatchId ?? null,
       deliveryId: input.deliveryId ?? null,
+      level: input.level ?? 'error',
     })
 
     Sentry.captureException(sanitized)
