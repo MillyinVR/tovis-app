@@ -23,6 +23,7 @@ import {
   isAuthorizedJobRequest,
 } from '@/app/api/_utils/auth/internalJob'
 import { expireLapsedWaitlistOffers } from '@/lib/booking/writeBoundary'
+import { captureScheduledJobException } from '@/lib/observability/scheduledJobEvents'
 import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
@@ -57,6 +58,15 @@ async function runJob(req: Request) {
     })
   } catch (error: unknown) {
     console.error('waitlist-offer-expiry sweep error', { error: safeError(error) })
+    // As this file's own header says, this job is the ONLY thing that ever acts
+    // on an offer's expiresAt. While it is down a client sits NOTIFIED forever
+    // and quietly stops being offerable, and the pro's calendar looks normal
+    // throughout — there is no second signal.
+    captureScheduledJobException({
+      error,
+      job: '/api/internal/jobs/waitlist-offer-expiry',
+      event: 'WAITLIST_OFFER_EXPIRY_SWEEP_ERROR',
+    })
     return jsonFail(500, 'Waitlist offer expiry sweep failed.')
   }
 }

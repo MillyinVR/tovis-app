@@ -14,6 +14,7 @@ import { validateDueDepositReminder } from '@/lib/notifications/depositReminders
 import { upsertClientNotification } from '@/lib/notifications/clientNotifications'
 import { prisma } from '@/lib/prisma'
 import { NotificationEventKey, Prisma } from '@prisma/client'
+import { captureScheduledJobException } from '@/lib/observability/scheduledJobEvents'
 import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
@@ -388,6 +389,15 @@ async function handleJobRequest(req: Request, method: 'GET' | 'POST') {
   } catch (err: unknown) {
     console.error(`${method} /api/internal/jobs/client-reminders error`, {
       error: safeError(err),
+    })
+    // Nothing else notices this sweep going dark. It CREATES the appointment
+    // reminders, review requests and deposit reminders that the delivery-health
+    // probe later measures, and a probe over a queue that was never filled
+    // reports healthy. The first symptom is a client who was never reminded.
+    captureScheduledJobException({
+      error: err,
+      job: '/api/internal/jobs/client-reminders',
+      event: 'CLIENT_REMINDERS_SWEEP_ERROR',
     })
 
     return jsonFail(500, 'Internal server error')

@@ -22,6 +22,7 @@ import {
   offerNextPriorityClient,
   hasActivePriorityOffer,
 } from '@/lib/lastMinute/priorityOffer/priorityOffer'
+import { captureScheduledJobException } from '@/lib/observability/scheduledJobEvents'
 import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
@@ -589,6 +590,15 @@ export async function GET(req: Request) {
     console.error('GET /api/internal/jobs/last-minute/process error', {
       error: safeError(err),
     })
+    // Sole actor on two clocks: it expires overdue priority offers and it fills
+    // openings. While it is down an offered client stays blocked on a countdown
+    // that never lands, the opening never reaches the next tier, and the pro
+    // simply sees an opening nobody took.
+    captureScheduledJobException({
+      error: err,
+      job: '/api/internal/jobs/last-minute/process',
+      event: 'LAST_MINUTE_PROCESS_SWEEP_ERROR',
+    })
 
     return jsonFail(500, 'Internal server error')
   }
@@ -600,6 +610,12 @@ export async function POST(req: Request) {
   } catch (err: unknown) {
     console.error('POST /api/internal/jobs/last-minute/process error', {
       error: safeError(err),
+    })
+    // Same reasoning as GET above: no second signal for either clock.
+    captureScheduledJobException({
+      error: err,
+      job: '/api/internal/jobs/last-minute/process',
+      event: 'LAST_MINUTE_PROCESS_SWEEP_ERROR',
     })
 
     return jsonFail(500, 'Internal server error')

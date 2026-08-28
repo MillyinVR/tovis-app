@@ -15,3 +15,10 @@ export async function register() {
     await import('./sentry.edge.config')
   }
 }
+
+// Next.js reads `onRequestError` from THIS file and nowhere else. Without it,
+// no unhandled server error reaches Sentry at all: the SDK's other route into
+// server errors is the build-time wrapping loader, which `withSentryConfig`
+// installs only on the webpack path, and this app builds with Turbopack.
+// See lib/observability/requestErrors.ts for the full derivation.
+export { captureRouteRequestError as onRequestError } from '@/lib/observability/requestErrors'

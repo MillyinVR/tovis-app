@@ -35,10 +35,24 @@ import {
 } from '@prisma/client'
 
 import { decimalToCents } from '@/lib/money'
+import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { resolveChargeCurrencyLower } from '@/lib/payments/resolveChargeCurrency'
 import { getStripe } from '@/lib/stripe/server'
 import { safeError } from '@/lib/security/logging'
 import { CREDIT_RESERVATION_TTL_HOURS } from '@/lib/credit/clientCredit'
+
+/**
+ * The slice of the Prisma client this module actually touches. Derived from the
+ * generated client (Prisma stays the source of truth), narrowed so a caller —
+ * the cron route in production, a stub in a test — can satisfy it without
+ * standing up a whole PrismaClient. A real `PrismaClient` still satisfies it.
+ */
+export type CreditSettlementDb = {
+  clientCreditEntry: Pick<
+    PrismaClient['clientCreditEntry'],
+    'findMany' | 'aggregate' | 'update' | 'updateMany'
+  >
+}
 
 /** Ceiling on transfers per run, so one bad afternoon cannot fan out unbounded. */
 const MAX_TOP_UPS_PER_RUN = 100
@@ -59,7 +73,7 @@ export type ReleaseExpiredCreditResult = {
  * ledger records what happened.
  */
 export async function releaseExpiredCreditReservations(
-  db: PrismaClient,
+  db: CreditSettlementDb,
   now: Date,
 ): Promise<ReleaseExpiredCreditResult> {
   const cutoff = new Date(
@@ -98,7 +112,7 @@ export type SettleCreditTopUpsResult = {
  * stamped with it.
  */
 export async function settleCreditTopUps(
-  db: PrismaClient,
+  db: CreditSettlementDb,
   now: Date,
 ): Promise<SettleCreditTopUpsResult> {
   const owing = await db.clientCreditEntry.findMany({
@@ -155,6 +169,17 @@ export async function settleCreditTopUps(
         amountCents,
         hasDestination: Boolean(destination),
       })
+      // Waiting does not fix this one — a spend with no amount, or a pro with
+      // no connected account, needs a human. The cron reports it in
+      // `outstandingCents` and the route's own comment says it "should not grow
+      // run over run", but nothing reads a cron's 200 body. Money the platform
+      // owes a professional must not be waiting on someone opening a log.
+      captureBookingException({
+        error: new Error('Creator credit top-up is unpayable'),
+        route: 'settleCreditTopUps',
+        event: 'CREDIT_TOP_UP_UNPAYABLE',
+        bookingId: entry.bookingId,
+      })
       continue
     }
 
@@ -196,6 +221,15 @@ export async function settleCreditTopUps(
         entryId: entry.id,
         bookingId: entry.bookingId,
         error: safeError(error),
+      })
+      // The retry above is only a backstop for a TRANSIENT failure. A permanent
+      // one (a restricted or de-authorized connected account) re-fails on every
+      // run forever, and the outstanding balance grows where nobody is looking.
+      captureBookingException({
+        error,
+        route: 'settleCreditTopUps',
+        event: 'CREDIT_TOP_UP_TRANSFER_FAILED',
+        bookingId: entry.bookingId,
       })
     }
   }

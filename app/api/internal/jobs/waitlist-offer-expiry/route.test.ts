@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   getInternalJobSecret: vi.fn(),
   isAuthorizedJobRequest: vi.fn(),
   expireLapsedWaitlistOffers: vi.fn(),
+  captureScheduledJobException: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -28,6 +29,10 @@ vi.mock('@/app/api/_utils/auth/internalJob', () => ({
 
 vi.mock('@/lib/booking/writeBoundary', () => ({
   expireLapsedWaitlistOffers: mocks.expireLapsedWaitlistOffers,
+}))
+
+vi.mock('@/lib/observability/scheduledJobEvents', () => ({
+  captureScheduledJobException: mocks.captureScheduledJobException,
 }))
 
 import { GET, POST } from './route'
@@ -114,5 +119,29 @@ describe('the waitlist offer-expiry sweep endpoint', () => {
     const res = await GET(req())
 
     expect(res.status).toBe(500)
+  })
+
+  // The 500 above is only seen by Vercel's cron log. This job is the ONLY thing
+  // that acts on an offer's expiresAt, so while it is failing a client sits
+  // NOTIFIED forever and quietly stops being offerable, with nothing else in the
+  // product looking wrong. The console line it also writes is invisible to
+  // Sentry unless SENTRY_ENABLE_LOGS is on, and it is off by default — so the
+  // capture is the only alarm that actually reaches a human.
+  it('captures the thrown sweep to Sentry, not just the console', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+    const boom = new Error('boom')
+    mocks.expireLapsedWaitlistOffers.mockRejectedValueOnce(boom)
+
+    await GET(req())
+
+    expect(mocks.captureScheduledJobException).toHaveBeenCalledWith({
+      error: boom,
+      job: '/api/internal/jobs/waitlist-offer-expiry',
+      event: 'WAITLIST_OFFER_EXPIRY_SWEEP_ERROR',
+    })
+
+    consoleErrorSpy.mockRestore()
   })
 })
