@@ -13,6 +13,7 @@ import { rateLimitExceededResponse } from '@/lib/rateLimit/response'
 import { hasDuplicateStrings, pickStringArray } from '@/lib/pick'
 import { getBookingFailPayload, isBookingError } from '@/lib/booking/errors'
 import { releaseHold, updateHoldAddOns } from '@/lib/booking/writeBoundary'
+import { broadcastChange } from '@/lib/live/broadcastAudience'
 import type {
   BookingHoldDTO,
   BookingHoldAddOnsUpdateResponseDTO,
@@ -173,6 +174,18 @@ export async function PATCH(req: Request, ctx: RouteContext) {
       addOnIds,
     })
 
+    // A widen MOVES the reservation's end, so the pro's tile has to grow with
+    // it. Gated on `mutated` for the same reason the schedule-version bump is:
+    // the selection is caller-controlled and re-sent on every page load, so an
+    // ungated ping would let a client rattle this pro's devices at will by
+    // re-sending the add-ons they already have.
+    if (result.meta.mutated) {
+      await broadcastChange({
+        topic: 'bookings',
+        professionalId: result.professionalId,
+      })
+    }
+
     return jsonOk(
       {
         hold: {
@@ -216,6 +229,17 @@ export async function DELETE(_req: Request, ctx: RouteContext) {
       holdId,
       clientId: auth.clientId,
     })
+
+    // The client walked away, so the minutes are free again and the tile must
+    // go — the other half of the create ping. Without it the pro sat on a
+    // "Checkout in progress" that had already been abandoned, right up until
+    // its countdown ran out.
+    if (result.meta.mutated) {
+      await broadcastChange({
+        topic: 'bookings',
+        professionalId: result.professionalId,
+      })
+    }
 
     return jsonOk(
       {

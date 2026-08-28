@@ -522,6 +522,13 @@ type ReleaseHoldArgs = {
 
 type ReleaseHoldResult = {
   holdId: string
+  /**
+   * Whose schedule just changed. The route needs it to tell that pro's open
+   * calendar the time is free again, and the hold row is gone by the time the
+   * route could look it up — so it comes back with the result rather than being
+   * re-read. (Same reason on `UpdateHoldAddOnsResult`.)
+   */
+  professionalId: string
   meta: MutationMeta
 }
 
@@ -588,6 +595,8 @@ type UpdateHoldAddOnsResult = {
     durationMinutes: number
     endsAt: Date
   }
+  /** Whose schedule just changed — see `ReleaseHoldResult.professionalId`. */
+  professionalId: string
   meta: MutationMeta
 }
 
@@ -8526,7 +8535,7 @@ async function performLockedUpdateHoldAddOns(args: {
   now: Date
   hold: HoldOwnershipRecord
   addOnIds: string[]
-}): Promise<{ professionalId: string; value: UpdateHoldAddOnsResult }> {
+}): Promise<UpdateHoldAddOnsResult> {
   const { tx, now, addOnIds } = args
 
   // A waitlist offer's reservation (F14) belongs to the PRO who chose that time,
@@ -8615,18 +8624,19 @@ async function performLockedUpdateHoldAddOns(args: {
 
   const requestedStart = normalizeToMinute(new Date(hold.scheduledFor))
 
-  const buildResult = (endsAt: Date, mutated: boolean) => ({
-    professionalId: hold.professionalId,
-    value: {
-      hold: {
-        id: hold.id,
-        scheduledFor: hold.scheduledFor,
-        expiresAt: hold.expiresAt,
-        durationMinutes,
-        endsAt,
-      },
-      meta: buildMeta(mutated),
+  const buildResult = (
+    endsAt: Date,
+    mutated: boolean,
+  ): UpdateHoldAddOnsResult => ({
+    hold: {
+      id: hold.id,
+      scheduledFor: hold.scheduledFor,
+      expiresAt: hold.expiresAt,
+      durationMinutes,
+      endsAt,
     },
+    professionalId: hold.professionalId,
+    meta: buildMeta(mutated),
   })
 
   // Already the right size: nothing to widen, nothing to re-check. Returning
@@ -15882,11 +15892,11 @@ export async function updateHoldAddOns(
   // a retried request) must not evict this pro's availability cache, or a client
   // could dump it at will by re-sending the selection it already has. Succeeding
   // is not the same as changing something ([[cache-is-a-third-query]], B2).
-  if (result.value.meta.mutated) {
+  if (result.meta.mutated) {
     await bumpProfessionalScheduleVersion(result.professionalId)
   }
 
-  return result.value
+  return result
 }
 
 export async function updateBookingLastMinuteDiscount(
@@ -16223,6 +16233,7 @@ export async function releaseHold(
 
       return {
         holdId: hold.id,
+        professionalId: hold.professionalId,
         meta: buildMeta(true),
       }
     },

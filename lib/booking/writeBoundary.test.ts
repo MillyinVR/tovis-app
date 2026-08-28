@@ -336,6 +336,10 @@ describe('lib/booking/writeBoundary', () => {
 
     expect(result).toEqual({
       holdId: 'hold_1',
+      // Carried back out of the locked transaction because the route needs it
+      // to tell this pro's calendar the time is free again, and the hold row is
+      // deleted by the time it could look the id up.
+      professionalId: 'pro_9',
       meta: {
         mutated: true,
         noOp: false,

@@ -3,17 +3,12 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 
+import {
+  formatHoldCountdown,
+  isHoldCountdownUrgent,
+} from '@/lib/booking/holdCountdown'
+
 const TICK_MS = 500
-const URGENT_THRESHOLD_MS = 2 * 60_000
-
-function formatMmSs(ms: number): string {
-  const clamped = Math.max(0, ms)
-  const totalSeconds = Math.floor(clamped / 1000)
-  const minutes = String(Math.floor(totalSeconds / 60)).padStart(2, '0')
-  const seconds = String(totalSeconds % 60).padStart(2, '0')
-
-  return `${minutes}:${seconds}`
-}
 
 function clearTick(intervalId: number | null): void {
   if (intervalId !== null) {
@@ -52,13 +47,13 @@ export function useHoldTimer(holdUntil: number | null) {
   const label = useMemo(() => {
     if (remainingMs === null) return null
 
-    return formatMmSs(remainingMs)
+    return formatHoldCountdown(remainingMs)
   }, [remainingMs])
 
   const urgent = useMemo(() => {
     if (remainingMs === null) return false
 
-    return remainingMs <= URGENT_THRESHOLD_MS && remainingMs > 0
+    return isHoldCountdownUrgent(remainingMs)
   }, [remainingMs])
 
   const expired = useMemo(() => {

@@ -143,6 +143,13 @@ export type BrandProCalendarLabelsCopy = {
   timeZone: string
   /** Passive double-book signal: tile a11y hint + reschedule-confirm note. */
   overlapWarning: string
+  /**
+   * Trails the live mm:ss on a HOLD tile — "07:42 left". A fragment rather than
+   * a whole sentence because the number is the message and the tile is narrow;
+   * the countdown itself is formatted by `lib/booking/holdCountdown` so the pro
+   * and the client read the same clock.
+   */
+  holdTimeLeft: string
 }
 
 export type BrandProCalendarLocationPanelCopy = {

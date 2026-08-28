@@ -14,6 +14,7 @@ import type { ClientConfirmationBadge } from '@/lib/booking/clientConfirmation'
 import type { BrandProCalendarCopy } from '@/lib/brand/types'
 import type { CalendarEvent, EntityType } from '../../_types'
 
+import { useHoldCountdown } from '@/app/pro/calendar/_hooks/useHoldCountdown'
 import { calendarStatusMeta } from '../../_utils/statusStyles'
 import { eventStatusLabel } from '../../_viewModel/proCalendarDisplay'
 
@@ -113,6 +114,12 @@ function serviceItemCountLabel(args: {
 function buildEventCardCopy(args: {
   event: CalendarEvent
   copy: BrandProCalendarCopy
+  /**
+   * `mm:ss` left on a HOLD, or null for every other kind (and for a hold whose
+   * `expiresAt` did not parse). Passed in rather than read from a clock here so
+   * this stays the pure copy builder its siblings call in tests.
+   */
+  holdCountdown?: string | null
 }): EventCardDisplayCopy {
   const { event, copy } = args
   const statusLabel = eventStatusLabel(event, copy)
@@ -133,9 +140,21 @@ function buildEventCardCopy(args: {
   // 'Held' label), but going through brand copy keeps the surface white-label
   // and keeps the anonymity a property of the CARD, not of the payload.
   if (event.kind === 'HOLD') {
+    // The second line is what the pro actually needed and never had: the same
+    // countdown the client is watching on their own checkout, so "this time is
+    // spoken for" now carries "…and for how much longer". Still anonymous — a
+    // clock names nobody.
+    //
+    // It goes on the SECONDARY line rather than trailing the title, because the
+    // title is clamped to one line and a week-view column is a seventh of the
+    // grid: appended, the number — the whole point — is the first thing an
+    // ellipsis eats. No countdown (an `expiresAt` that did not parse) leaves the
+    // card exactly as it rendered before.
     return {
       primary: copy.legend.held,
-      secondary: '',
+      secondary: args.holdCountdown
+        ? `${args.holdCountdown} ${copy.labels.holdTimeLeft}`
+        : '',
       eyebrow: copy.statusLabels.held,
       status: statusLabel,
     }
@@ -479,9 +498,23 @@ export function EventCard(props: EventCardProps) {
   const isHold = ev.kind === 'HOLD'
   const statusMeta = calendarStatusMeta({ status: ev.status, isBlocked })
 
+  // Only a HOLD gets a clock; everything else passes null and the hook never
+  // starts an interval (see its doc — this is why the countdown lives on the
+  // card and not on the grid).
+  const holdCountdown = useHoldCountdown(isHold ? ev.expiresAt : null)
+
+  // A lapsed hold reserves nothing: every conflict query filters
+  // `expiresAt > now`, so the minutes are already bookable again and a tile
+  // still sitting on them would be telling the pro their day is fuller than it
+  // is. Nothing is pushed at expiry — a hold dies by the clock, not by a
+  // request — so leaving on its own IS the mechanism. The next fetch drops the
+  // row for real.
+  if (isHold && holdCountdown.expired) return null
+
   const displayCopy = buildEventCardCopy({
     event: ev,
     copy,
+    holdCountdown: holdCountdown.label,
   })
 
   // Payment state chip — derived server-side by THE one helper
