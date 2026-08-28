@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   },
   upsertProClient: vi.fn(),
   buildAddressPrivacyWriteData: vi.fn(),
+  loadProClientRelationship: vi.fn(),
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -34,6 +35,16 @@ vi.mock('@/lib/clients/upsertProClient', () => ({
 vi.mock('@/lib/security/addressEncryption', () => ({
   buildAddressPrivacyWriteData: mocks.buildAddressPrivacyWriteData,
 }))
+
+// Only the lookup is stubbed — the refusal constant stays real, so a test can
+// never pass against a refusal shape the module no longer returns.
+vi.mock('@/lib/clients/proClientRelationship', async () => {
+  const actual = await vi.importActual<
+    typeof import('@/lib/clients/proClientRelationship')
+  >('@/lib/clients/proClientRelationship')
+
+  return { ...actual, loadProClientRelationship: mocks.loadProClientRelationship }
+})
 
 import { resolveProBookingClient } from './resolveProBookingClient'
 
@@ -110,6 +121,108 @@ describe('resolveProBookingClient', () => {
     })
 
     mocks.buildAddressPrivacyWriteData.mockReturnValue(addressPrivacyWriteData)
+
+    // Default: an established pair. Every pre-existing case here is a pro
+    // booking one of their own clients.
+    mocks.loadProClientRelationship.mockResolvedValue({
+      found: true,
+      established: true,
+      reason: 'PRIOR_BOOKING',
+    })
+  })
+
+  describe('the relationship gate', () => {
+    // A pro-created booking is auto-ACCEPTED, and a future ACCEPTED booking is
+    // full chart access. These cases are the reason the gate exists.
+    const NOT_ESTABLISHED = {
+      found: true,
+      established: false,
+      reason: null,
+    }
+
+    it('refuses a clientId this pro has no relationship with, before any write', async () => {
+      mocks.prisma.clientProfile.findUnique.mockResolvedValueOnce(
+        makeResolvedClient({ id: 'client_of_another_pro' }),
+      )
+      mocks.loadProClientRelationship.mockResolvedValueOnce(NOT_ESTABLISHED)
+
+      const result = await resolveProBookingClient({
+        professionalId: 'pro_1',
+        locationType: ServiceLocationType.SALON,
+        clientId: 'client_of_another_pro',
+      })
+
+      expect(result).toEqual({
+        ok: false,
+        status: 404,
+        error: 'Client not found.',
+        code: 'CLIENT_NOT_FOUND',
+      })
+      expect(mocks.prisma.clientAddress.create).not.toHaveBeenCalled()
+    })
+
+    it('does NOT refuse the contact-keyed path — that one is marked, not blocked', async () => {
+      // upsertProClient MATCHES on email/phone hashes, so a caller who knows a
+      // stranger's email reaches their existing profile without ever holding
+      // the id. Refusing here would also stop a second pro booking someone who
+      // already has an account, and drop a migrating pro's imported history —
+      // client identity is global by design. The booking is allowed and the
+      // write boundary stamps `proCreatedWithoutRelationship` on it instead, so
+      // the appointment is real and the chart stays shut. See
+      // tests/integration/pro-booking-client-relationship.test.ts.
+      mocks.upsertProClient.mockResolvedValueOnce({
+        ok: true,
+        clientId: 'client_matched_by_email',
+        userId: 'user_stranger',
+        email: 'stranger@example.com',
+        claimStatus: ClientClaimStatus.CLAIMED,
+      })
+      mocks.loadProClientRelationship.mockResolvedValueOnce(NOT_ESTABLISHED)
+
+      const result = await resolveProBookingClient({
+        professionalId: 'pro_1',
+        locationType: ServiceLocationType.SALON,
+        client: {
+          firstName: 'Some',
+          lastName: 'Stranger',
+          email: 'stranger@example.com',
+        },
+      })
+
+      expect(result).toMatchObject({
+        ok: true,
+        clientId: 'client_matched_by_email',
+      })
+      // The id-keyed refusal must not fire on a path that has no id.
+      expect(mocks.loadProClientRelationship).not.toHaveBeenCalled()
+    })
+
+    it('refuses a MOBILE booking before creating the service address', async () => {
+      mocks.prisma.clientProfile.findUnique.mockResolvedValueOnce(
+        makeResolvedClient({ id: 'client_of_another_pro' }),
+      )
+      mocks.loadProClientRelationship.mockResolvedValueOnce(NOT_ESTABLISHED)
+
+      const result = await resolveProBookingClient({
+        professionalId: 'pro_1',
+        locationType: ServiceLocationType.MOBILE,
+        clientId: 'client_of_another_pro',
+        serviceAddress: {
+          formattedAddress: '123 Main St, San Diego, CA 92101',
+          addressLine1: '123 Main St',
+          city: 'San Diego',
+          state: 'CA',
+          postalCode: '92101',
+          placeId: 'place_123',
+          lat: 32.7157,
+          lng: -117.1611,
+        },
+      })
+
+      expect(result).toMatchObject({ ok: false, code: 'CLIENT_NOT_FOUND' })
+      expect(mocks.prisma.clientAddress.create).not.toHaveBeenCalled()
+      expect(mocks.buildAddressPrivacyWriteData).not.toHaveBeenCalled()
+    })
   })
 
   it('returns real DB truth for an existing non-mobile clientId path', async () => {

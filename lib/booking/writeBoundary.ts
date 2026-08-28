@@ -148,6 +148,7 @@ import {
 } from '@/lib/time'
 import { classifySeriesOccurrenceCancel } from '@/lib/booking/series/cancelScope'
 import { recurringAppointmentsEnabled } from '@/lib/booking/series/flag'
+import { hasEstablishedProClientRelationship } from '@/lib/clients/proClientRelationship'
 import type {
   ProBookingSeriesCancelScope,
   ProBookingSeriesUntouchedReason,
@@ -10455,6 +10456,17 @@ async function performLockedCreateProBooking(args: {
   now: Date
   professionalId: string
   clientId: string
+  /**
+   * Whether this pro had NO established relationship with the client at the
+   * moment they wrote this booking (lib/clients/proClientRelationship.ts).
+   * Stamped onto the row; `proClientVisibilityWhere` excludes stamped rows, so
+   * the appointment is real but it is not chart consent.
+   *
+   * 🔴 Deliberately REQUIRED, with no default. Every door into this function
+   * has to state its answer out loud: an optional flag defaulting to false is
+   * how the next pro-booking path silently re-opens the hole this closed.
+   */
+  proCreatedWithoutRelationship: boolean
   offeringId: string
   addOnIds?: string[]
   locationId: string
@@ -10971,6 +10983,9 @@ async function performLockedCreateProBooking(args: {
         ...tenantAttribution,
         scheduledFor: requestedStart,
         status: getProCreatedBookingStatus(),
+        // See the arg's doc: ACCEPTED here means "the pro put it in the book",
+        // never "the client agreed to share their record".
+        proCreatedWithoutRelationship: args.proCreatedWithoutRelationship,
         allowsOverlap: overlapDecision.allowsOverlap,
         source: importMode ? BookingSource.IMPORTED : BookingSource.DISCOVERY,
         // K5 snapshot: UNKNOWN for both branches — imported history and
@@ -11812,6 +11827,29 @@ assertCanCreateRebookFromSourceBooking({
 
         scheduledFor: requestedStart,
         status: args.initialStatus,
+        // 🔴 Re-asked, not inherited and not assumed. A rebook is otherwise a
+        // laundering step: a pro can author aftercare on a booking they wrote
+        // for a stranger (the PRO_AFTERCARE_SAVE gate allows it before the
+        // source completes) and rebook from it, and an unmarked child would
+        // hand over the chart the parent was marked to protect. Asking fresh is
+        // also self-healing — the predicate does not count a MARKED booking as
+        // history, so the parent cannot vouch for the child, while a pair that
+        // has since become real (the client granted access) writes an unmarked
+        // one and the chart opens.
+        //
+        // Only when the PRO picked the time, though. A rebook the CLIENT chose
+        // off their aftercare link is the client asking for the next
+        // appointment, which is the plainest relationship there is — marking it
+        // would leave a pro unable to see the chart of someone who booked them
+        // twice. The column means "the pro wrote this for a stranger"; keep it
+        // meaning exactly that.
+        proCreatedWithoutRelationship:
+          args.startChosenBy === 'PRO' &&
+          !(await hasEstablishedProClientRelationship({
+            professionalId: source.professionalId,
+            clientId: source.clientId,
+            tx: args.tx,
+          })),
         allowsOverlap: overlapDecision.allowsOverlap,
         source: BookingSource.AFTERCARE,
         // K5 snapshot: an aftercare rebook is RR by definition — a returning
@@ -16281,6 +16319,35 @@ export async function createProBooking(
         now,
         professionalId: args.professionalId,
         clientId: args.clientId,
+        // 🔴 Asked at the WRITE, not only at the route, because this call IS
+        // the chart grant: the booking is auto-ACCEPTED and an upcoming
+        // ACCEPTED booking is the widest clause in `proClientVisibilityWhere`.
+        // Every door has to be covered, and the calendar import is a door that
+        // never touches the route — it resolves its client by EMAIL through
+        // upsertProClient, which matches an EXISTING profile, so it can land on
+        // a stranger's record as easily as a hand-typed booking could.
+        //
+        // Not a refusal: a second pro genuinely serving someone who already has
+        // an account is the normal case (client identity is global by design),
+        // and refusing would drop a migrating pro's imported history. The
+        // booking is made and MARKED, and the mark is what the chart gate reads.
+        //
+        // Inside the lock, on `tx`, deliberately. Read before it, the answer
+        // could be stale by the time the row lands — a chart share revoked in
+        // between would still be written as "established". It is also one fewer
+        // await before the schedule lock, which keeps this path's timing where
+        // every concurrency test found it.
+        //
+        // Idempotent replays are unaffected: a booking that already exists
+        // satisfies the PRIOR_BOOKING clause, and the replay short-circuit
+        // returns the stored row without re-stamping it either way.
+        proCreatedWithoutRelationship: !(await hasEstablishedProClientRelationship(
+          {
+            professionalId: args.professionalId,
+            clientId: args.clientId,
+            tx,
+          },
+        )),
         offeringId: args.offeringId,
         addOnIds: args.addOnIds ?? [],
         locationId: args.locationId,
@@ -16446,6 +16513,22 @@ export async function createBookingSeries(
   assertNonEmptyLocationId(args.locationId)
   assertValidRequestedStart(args.firstOccurrenceAt)
 
+  // The same authorization gate the single-booking path applies in
+  // lib/booking/resolveProBookingClient.ts, and for the same reason: every
+  // occurrence this materializes is an auto-ACCEPTED, future-dated booking, and
+  // a future ACCEPTED booking opens the client's chart. This route took
+  // `clientId` straight from the request body and never asked whose client it
+  // was. Checked at the WRITE, not only at the route — same rule as the kill
+  // switch above.
+  if (
+    !(await hasEstablishedProClientRelationship({
+      professionalId: args.professionalId,
+      clientId: args.clientId,
+    }))
+  ) {
+    throw bookingError('CLIENT_NOT_FOUND')
+  }
+
   if (
     !Number.isInteger(args.intervalWeeks) ||
     args.intervalWeeks < MIN_SERIES_INTERVAL_WEEKS ||
@@ -16534,6 +16617,10 @@ export async function createBookingSeries(
         now,
         professionalId: args.professionalId,
         clientId: args.clientId,
+        // createBookingSeries REFUSES an unestablished pair outright above
+        // (the series route is id-keyed, so there is no walk-in case to
+        // preserve), which is why reaching here means the pair is real.
+        proCreatedWithoutRelationship: false,
         offeringId: args.offeringId,
         addOnIds,
         locationId: location.id,
@@ -16786,6 +16873,9 @@ async function materializeSeriesOccurrenceRange(args: {
             now,
             professionalId: plan.professionalId,
             clientId: plan.clientId,
+            // An occurrence of a series whose creation already cleared the
+            // gate. The pair cannot have become a stranger since.
+            proCreatedWithoutRelationship: false,
             offeringId: plan.offeringId,
             addOnIds: plan.addOnIds,
             locationId: plan.locationId,
@@ -18322,6 +18412,10 @@ export async function confirmClientWaitlistOffer(
         now,
         professionalId: locked.professionalId,
         clientId: args.clientId,
+        // The CLIENT confirmed an offer against a WaitlistEntry they wrote
+        // themselves — the WAITLIST_ENTRY clause, and the plainest consent
+        // there is: they asked for this appointment.
+        proCreatedWithoutRelationship: false,
         offeringId: locked.offeringId,
         locationId: locked.locationId,
         locationType: locked.locationType,

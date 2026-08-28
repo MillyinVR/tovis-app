@@ -3718,6 +3718,25 @@ model Booking {
   // explicitly via lib/booking/relationshipLabel.ts.
   clientRelationshipLabel ClientRelationshipLabel @default(UNKNOWN)
 
+  // Set when a PRO wrote this booking for a client they had no established
+  // relationship with — see lib/clients/proClientRelationship.ts. The booking is
+  // REAL (a second pro genuinely serving someone who already has an account, or
+  // a migrating pro's imported calendar) and behaves like any other appointment.
+  // The one thing it must not do is stand in for consent: a pro-created booking
+  // is auto-ACCEPTED, and an upcoming ACCEPTED booking is the widest clause in
+  // `proClientVisibilityWhere`, so without this column one POST opened a
+  // stranger's whole chart — allergies, notes, photos, DOB, phone, addresses.
+  // Rows carrying it are excluded from EVERY chart-visibility clause and from
+  // the PRIOR_BOOKING clause of the relationship predicate itself (otherwise a
+  // second such booking would cite the first as history and let the pair in).
+  //
+  // 🔴 Stamped ONCE at creation and never cleared. The way back is the way it
+  // should always have been: the client grants access (ClientChartShare), or the
+  // pair builds real history — a booking the CLIENT makes is not stamped.
+  // Default false so every pre-existing row keeps exactly the access it has;
+  // nothing is revoked by deploying this.
+  proCreatedWithoutRelationship Boolean @default(false)
+
   // New-client deposit captured up front, as its OWN charge (distinct from the
   // final bill's stripe* fields). The deposit credits toward the final total.
   depositStatus                BookingDepositStatus @default(NONE)

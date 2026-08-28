@@ -76,6 +76,14 @@ vi.mock('@/lib/pro/readiness/proReadiness', () => ({
     mocks.checkProReadinessForEntryPointWithDb,
 }))
 
+// These suites are about overlap/audit behaviour, not authorization: every
+// fixture here is a pro booking their OWN client. The pro↔client relationship
+// gate has its own coverage (lib/clients/proClientRelationship.test.ts and
+// tests/integration/pro-booking-client-relationship.test.ts).
+vi.mock('@/lib/clients/proClientRelationship', () => ({
+  hasEstablishedProClientRelationship: async () => true,
+}))
+
 vi.mock('@/lib/booking/overrideAudit', () => ({
   buildBookingOverrideAuditRows: mocks.buildBookingOverrideAuditRows,
 }))

@@ -1,0 +1,17 @@
+-- Marks a booking a PRO wrote for a client they had no established relationship
+-- with (lib/clients/proClientRelationship.ts).
+--
+-- Why the column exists: a pro-created booking is auto-ACCEPTED, and "ACCEPTED
+-- and still upcoming" is a chart-access clause in proClientVisibilityWhere. So
+-- POSTing one booking for someone else's client — by id, or by the email
+-- upsertProClient matches onto their existing profile — handed the caller that
+-- client's whole chart with no consent and no prior contact. Nothing already
+-- stored can tell a pro-written booking from one the client made themselves
+-- (`source` defaults to DISCOVERY on both; `clientRelationshipLabel` is a
+-- display snapshot that is UNKNOWN on legacy rows), so the write path records
+-- the answer here at the moment it knows it.
+--
+-- Additive and default-false: every existing row keeps exactly the access it has
+-- today — this deploy revokes nothing — and the column is only ever written at
+-- booking creation, so it is safe to run ahead of the code that reads it.
+ALTER TABLE "Booking" ADD COLUMN "proCreatedWithoutRelationship" BOOLEAN NOT NULL DEFAULT false;

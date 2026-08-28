@@ -21,6 +21,7 @@ import {
 import { claimLinkRefusalResponse } from '@/app/api/_utils/claimInviteRefusals'
 import { bookinglessClaimEnabled } from '@/lib/clients/bookinglessClaimFlag'
 import { issueClaimLinkForClient } from '@/lib/clients/clientClaimLinks'
+import { loadProClientRelationship } from '@/lib/clients/proClientRelationship'
 import { queueClaimInviteDelivery } from '@/lib/clientActions/queueClaimInviteDelivery'
 import { asTrimmedString } from '@/lib/guards'
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
@@ -58,28 +59,33 @@ export async function POST(request: Request, ctx: RouteContext) {
     })
     if (limited) return limited
 
+    // Ownership: this pro created the client, OR has a booking with them, OR
+    // the client granted them chart access. A non-owned / missing client is an
+    // indistinguishable 404 (never reveal another pro's clients).
+    //
+    // The clauses used to be spelled out here, and this was the ONLY place that
+    // asked — pro booking creation didn't, which is how a pro could unlock any
+    // client's chart by POSTing a booking for them. They now live in
+    // lib/clients/proClientRelationship.ts and are shared with that path.
+    const relationship = await loadProClientRelationship({
+      professionalId: proId,
+      clientId,
+    })
+
+    if (!relationship.established) {
+      return jsonFail(404, 'Client not found.', { code: 'NOT_FOUND' })
+    }
+
     const client = await prisma.clientProfile.findUnique({
       where: { id: clientId },
       select: {
         id: true,
         userId: true,
         claimStatus: true,
-        createdByProfessionalId: true,
       },
     })
 
-    // Ownership: this pro created the client, OR has a booking with them. A
-    // non-owned / missing client is an indistinguishable 404 (never reveal
-    // another pro's clients).
-    const ownsByCreation = client?.createdByProfessionalId === proId
-    const ownsByBooking =
-      client != null &&
-      !ownsByCreation &&
-      (await prisma.booking.count({
-        where: { clientId: client.id, professionalId: proId },
-      })) > 0
-
-    if (!client || (!ownsByCreation && !ownsByBooking)) {
+    if (!client) {
       return jsonFail(404, 'Client not found.', { code: 'NOT_FOUND' })
     }
 
