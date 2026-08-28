@@ -4,7 +4,10 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { safeJson } from '@/lib/http'
-import { parseTrendingTagsResponse, type TrendingTagDto } from '@/lib/discovery/trendingTags'
+import {
+  parseTrendingTagsResponse,
+  type TrendingTagDto,
+} from '@/lib/discovery/trendingTagsContract'
 
 // Windowed most-used non-banned tags → their /looks/tags/[slug] browse pages.
 // This is the D1 tag layer's payoff in Discovery (social-first D2). Chip styling

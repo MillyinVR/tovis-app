@@ -1,3 +1,18 @@
+// ⚠️ Do NOT add `import 'server-only'` here. It is the obvious guard against
+// the leak this module caused (the `@/lib/time` barrel pulled it into 124
+// client components), and it does not work in this repo: `server-only` is not
+// an installed package — Next aliases it internally, vitest aliases it to
+// test/mocks/server-only.ts, and NOTHING else resolves it. 14 CLI entry points
+// import this module (scripts/backfill-*, scripts/create-super-admin,
+// prisma/seeds/*), and under `tsx` the specifier either fails to resolve or,
+// if the real package were installed, throws on import — its `main` is a bare
+// `throw`, and only the `react-server` export condition maps to the empty
+// module. Tried it: `pnpm run backfill:search-index` dies with
+// "Cannot find module 'server-only'" before the script's first line.
+//
+// The boundary is enforced instead by keeping server-only concerns in
+// server-only modules (see lib/booking/timeZoneTruth.ts) and by not letting a
+// client-safe barrel re-export anything that reaches here.
 import { PrismaClient } from '@prisma/client'
 import { globalRegistry } from './typed'
 

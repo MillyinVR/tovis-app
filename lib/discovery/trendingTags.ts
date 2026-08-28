@@ -7,20 +7,22 @@
 // superset), then re-rank by the actual windowed count. Reuses buildLooksFeedWhere
 // so the window inherits the exact discovery/visibility/tenant gates the feed and
 // the /looks/tags/[slug] pages use — a tag can't trend on looks a viewer can't see.
+//
+// This module is server-only: it runs the query. The DTO and the browser-side
+// parser live in the client-safe sibling `@/lib/discovery/trendingTagsContract`
+// and are re-exported below, so server call sites keep one import.
+
+import 'server-only'
 
 import { Prisma } from '@prisma/client'
 
 import { buildLooksFeedWhere } from '@/lib/looks/feed'
-import { isArray, isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 import type { TenantContext } from '@/lib/tenant'
+import type { TrendingTagDto } from '@/lib/discovery/trendingTagsContract'
 
-export type TrendingTagDto = {
-  slug: string
-  display: string
-  /** Feed-visible looks carrying this tag published within the window. */
-  lookCount: number
-}
+export { parseTrendingTagsResponse } from '@/lib/discovery/trendingTagsContract'
+export type { TrendingTagDto } from '@/lib/discovery/trendingTagsContract'
 
 const TRENDING_WINDOW_DAYS = 30
 // Pre-sort by all-time popularity to bound the candidate set — every candidate
@@ -73,28 +75,4 @@ export async function getTrendingLookTags(args: {
     .filter((tag) => tag.lookCount > 0)
     .sort((a, b) => b.lookCount - a.lookCount || a.slug.localeCompare(b.slug))
     .slice(0, limit)
-}
-
-function parseTrendingTag(raw: unknown): TrendingTagDto | null {
-  if (!isRecord(raw)) return null
-
-  const slug = typeof raw.slug === 'string' ? raw.slug.trim() : ''
-  const display = typeof raw.display === 'string' ? raw.display.trim() : ''
-  if (!slug || !display) return null
-
-  const lookCount =
-    typeof raw.lookCount === 'number' && Number.isFinite(raw.lookCount)
-      ? raw.lookCount
-      : 0
-
-  return { slug, display, lookCount }
-}
-
-/** Client-side parser for the `/api/v1/discover/trending-tags` envelope. */
-export function parseTrendingTagsResponse(raw: unknown): TrendingTagDto[] {
-  if (!isRecord(raw) || !isArray(raw.tags)) return []
-
-  return raw.tags
-    .map(parseTrendingTag)
-    .filter((tag): tag is TrendingTagDto => tag !== null)
 }
