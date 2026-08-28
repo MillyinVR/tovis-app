@@ -259,6 +259,7 @@ import {
 } from '@/lib/waitlist/offerLiveness'
 import { WAITLIST_FULFILLABLE_MODES } from '@/lib/waitlist/hostability'
 import { buildWaitlistOfferAreaLabel } from '@/lib/waitlist/offerArea'
+import { buildWaitlistOfferNotificationBody } from '@/lib/waitlist/offerNotificationCopy'
 import { loadWaitlistOfferDestination } from '@/lib/waitlist/offerDestination'
 import {
   MOBILE_CAPABLE_LOCATION_TYPES,
@@ -18402,7 +18403,10 @@ export async function createWaitlistOffer(
         data: { status: WaitlistStatus.NOTIFIED },
       })
 
-      // §12 NC1 #25: name the pro + concrete offered slot, add urgency.
+      // §12 NC1 #25: name the pro + concrete offered slot, add urgency — and,
+      // for a MOBILE offer, say that the pro comes to THEM. This is the first
+      // thing the client sees, and the in-salon wording invited them to confirm
+      // a home visit while reading a sentence about going somewhere.
       const serviceName = offering.service?.name?.trim() || 'your service'
       const offerProName = formatProfessionalPublicDisplayName(
         offering.professional,
@@ -18416,7 +18420,12 @@ export async function createWaitlistOffer(
         clientId: entry.clientId,
         eventKey: NotificationEventKey.WAITLIST_TIME_OFFERED,
         title: 'A spot opened up!',
-        body: `${offerProName} has ${offerWhen} open for your ${serviceName}. Tap to confirm before it's gone.`,
+        body: buildWaitlistOfferNotificationBody({
+          locationType,
+          proName: offerProName,
+          when: offerWhen,
+          serviceName,
+        }),
         dedupeKey: `WAITLIST_TIME_OFFERED:${offer.id}`,
         href: '/client/offers',
         data: {
