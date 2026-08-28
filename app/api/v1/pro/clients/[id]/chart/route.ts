@@ -7,7 +7,7 @@
 // technical-record gate), respecting `assertProCanViewClient` and the founder
 // technical-record flag. Decryption is applied for occupation only; encrypted
 // technical notes are intentionally NOT returned (kept web-only). PRO-only.
-import { BookingStatus, Prisma } from '@prisma/client'
+import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
@@ -26,6 +26,7 @@ import {
   CHART_BOOKING_HISTORY_TAKE,
   CHART_BOOKING_SELECT,
   chartBookingWhere,
+  chartNoShowCountWhere,
   isChartBookingFilterActive,
   parseChartBookingFilter,
 } from '@/lib/clients/chartBookingSelect'
@@ -193,11 +194,9 @@ export async function GET(req: Request, ctx: RouteContext) {
               select: BOOKING_SELECT,
             })
           : Promise.resolve(null),
-        // App-wide, on purpose: NO `professionalId`. "Has this client no-showed
-        // before?" is a question about the client, and an answer scoped to the
-        // viewing pro would read as "never" for a client who has stood up five
-        // other pros. Backed by @@index([clientId, status]) on Booking.
-        prisma.booking.count({ where: { clientId, status: BookingStatus.NO_SHOW } }),
+        // App-wide, on purpose: NO `professionalId` — see `chartNoShowCountWhere`.
+        // The web chart's header renders the same number from the same `where`.
+        prisma.booking.count({ where: chartNoShowCountWhere({ clientId }) }),
         prisma.review.count({ where: { clientId, ...visibleReviewsWhere } }),
         prisma.productRecommendation.findMany({
           where: { aftercareSummary: { booking: { clientId, professionalId: proId } } },
@@ -361,6 +360,9 @@ export async function GET(req: Request, ctx: RouteContext) {
         relationshipBadge:
           b.professionalId === proId ? deriveRelationshipBadge(b) : null,
         total: moneyToString(b.totalAmount ?? b.subtotalSnapshot) ?? null,
+        // The web card prints "90 min • $180" on one line; without this the
+        // native card could only ever show half of that pair.
+        durationMinutes: b.totalDurationMinutes ?? null,
         aftercareNotes: pickString(b.aftercareSummary?.notes),
         // The visit's own before/after frames, BEFORE-first — the same rows and
         // the same order as the web timeline's card for this booking. Empty when
@@ -388,6 +390,16 @@ export async function GET(req: Request, ctx: RouteContext) {
         proName: proName(f.professional),
         createdAt: f.createdAt.toISOString(),
       })),
+      // LEGACY, and a second projection of the SAME `photos` computed above —
+      // never a second query or a second access decision, so there is still one
+      // source of truth for "which frames may this pro see".
+      //
+      // `history[].photos` is what both surfaces now render: the web chart puts
+      // a visit's frames on that visit's card, and the native chart does the
+      // same. This flat copy stays ONLY because a build already in Apple's hands
+      // decodes it as a required field — dropping it would fail that build's
+      // whole chart, not just its photo tab. Remove it once no shipped build
+      // reads it (Tori's call, tracked with the App Store state).
       photos,
       // Technical record (formulas/consents) is founder-flag-gated and its free
       // text is encrypted at rest; native reads the gate only and links to web.

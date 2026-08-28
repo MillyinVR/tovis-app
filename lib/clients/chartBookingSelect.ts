@@ -146,3 +146,19 @@ export function chartBookingWhere(args: {
     ...(filter.withMe ? { professionalId: proId } : {}),
   }
 }
+
+/**
+ * "Has this client no-showed before?" — the `where` behind the chart's no-show
+ * count, on BOTH surfaces.
+ *
+ * App-wide on purpose: NO `professionalId`. The question is about the CLIENT,
+ * and an answer scoped to the viewing pro would read as "never" for a client
+ * who has stood up five other pros. Backed by `@@index([clientId, status])` on
+ * Booking — no other index covers `status`, so this would otherwise scan a
+ * regular's whole booking history.
+ */
+export function chartNoShowCountWhere(args: {
+  clientId: string
+}): Prisma.BookingWhereInput {
+  return { clientId: args.clientId, status: BookingStatus.NO_SHOW }
+}

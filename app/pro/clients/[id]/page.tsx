@@ -11,11 +11,9 @@ import {
   clientPublicHandle,
   clientPublicProfileHref,
 } from '@/lib/profiles/profileHrefs'
-import RemoteImage from '@/app/_components/media/RemoteImage'
 import { prisma } from '@/lib/prisma'
 import { visibleReviewsWhere } from '@/lib/reviews/visibility'
 import { getCurrentUser } from '@/lib/currentUser'
-import { moneyToString } from '@/lib/money'
 import { assertProCanViewClient } from '@/lib/clientVisibility'
 import {
   computeRelationshipIntelligence,
@@ -24,23 +22,33 @@ import {
   type IntelBooking,
   type RelationshipIntelligence,
 } from '@/lib/clients/relationshipIntelligence'
-import { renderMediaUrls } from '@/lib/media/renderUrls'
+import { renderMediaUrlsBatch } from '@/lib/media/renderUrls'
 import { readEncryptedNoteOrFallback } from '@/lib/security/notesPrivacy'
 import {
-  badgeToneForBookingStatus,
-  labelForBookingStatus,
-} from '@/lib/booking/statusLabel'
+  CHART_TABS,
+  normalizeChartTab,
+  type ChartTab,
+} from '@/lib/clients/chartTabs'
 import {
   CHART_BOOKING_FILTER_NONE,
   CHART_BOOKING_HISTORY_TAKE,
-  CHART_BOOKING_SELECT,
   chartBookingWhere,
+  chartNoShowCountWhere,
   isChartBookingFilterActive,
   parseChartBookingFilter,
+  type ChartBookingFilter,
 } from '@/lib/clients/chartBookingSelect'
+import {
+  CHART_VISIT_SELECT,
+  normalizeVisitFilter,
+  resolveVisitChartFilter,
+  retiredVisitFilterParams,
+  visitMatchesFilter,
+  type ChartVisitRow,
+  type VisitFilter,
+} from '@/lib/clients/chartVisitFilters'
 import { CHART_PHOTO_TAKE, chartPhotoWhere } from '@/lib/clients/chartPhotoQuery'
 import { comparePhotoPhase } from '@/lib/proBookingMedia'
-import RelationshipBadgePill from '@/app/_components/RelationshipBadgePill'
 import { partitionNotesByKind } from '@/lib/clients/clientNoteKinds'
 import {
   isClientTechnicalRecordEnabled,
@@ -72,6 +80,11 @@ import {
 import type { ConsultProBriefDTO } from '@/lib/dto/consult'
 
 import ChartAccessRefusedView from './ChartAccessRefusedView'
+import VisitFilterForm from './VisitFilterForm'
+import VisitHistoryList, {
+  type VisitPhoto,
+  type VisitPhotosByBooking,
+} from './VisitHistoryList'
 import EditAlertBannerForm from './EditAlertBannerForm'
 import EditDoNotRebookForm from './EditDoNotRebookForm'
 import EditClientPolicyForm from './EditClientPolicyForm'
@@ -82,7 +95,7 @@ import NewConsentForm from './NewConsentForm'
 import SendConsentFormButton from './SendConsentFormButton'
 import NewFormulaForm from './NewFormulaForm'
 import NewNoteForm from './NewNoteForm'
-import { Badge, Button, Card, buttonClassName } from '@/app/_components/ui'
+import { Badge, Card, buttonClassName } from '@/app/_components/ui'
 import type { BadgeTone } from '@/app/_components/ui'
 
 export const dynamic = 'force-dynamic'
@@ -90,39 +103,6 @@ export const dynamic = 'force-dynamic'
 type SearchParams = Record<string, string | string[] | undefined>
 
 type ChartView = 'chart' | 'public'
-
-const CHART_TABS = [
-  { id: 'notes', label: 'Notes' },
-  { id: 'allergies', label: 'Allergies' },
-  { id: 'history', label: 'History' },
-  { id: 'products', label: 'Products' },
-  { id: 'reviews-left', label: 'Reviews' },
-  { id: 'pro-feedback', label: 'Pro feedback' },
-  { id: 'photos', label: 'Photos' },
-  // Flag-gated (ENABLE_CLIENT_TECHNICAL_RECORD); only shown/queried when on.
-  { id: 'technical', label: 'Technical record' },
-] as const
-
-type ChartTab = (typeof CHART_TABS)[number]['id']
-
-type BookingFilter =
-  | 'ALL'
-  | 'WITH_ME'
-  | 'MATCHES_MY_SERVICES'
-  | 'UPCOMING'
-  | 'PAST'
-  | 'COMPLETED'
-  | 'CANCELLED'
-
-const BOOKING_FILTERS: readonly BookingFilter[] = [
-  'ALL',
-  'WITH_ME',
-  'MATCHES_MY_SERVICES',
-  'UPCOMING',
-  'PAST',
-  'COMPLETED',
-  'CANCELLED',
-]
 
 const CLIENT_DETAIL_SELECT = {
   id: true,
@@ -166,15 +146,6 @@ const CLIENT_DETAIL_SELECT = {
     },
   },
 } satisfies Prisma.ClientProfileSelect
-
-// The history rows this page renders are the SAME rows the native chart API
-// serves, so the column list lives in one place (lib/clients/chartBookingSelect).
-// `serviceId` is this page's only extra — it backs the MATCHES_MY_SERVICES
-// booking filter, which the native chart doesn't offer.
-const BOOKING_ROW_SELECT = {
-  ...CHART_BOOKING_SELECT,
-  serviceId: true,
-} satisfies Prisma.BookingSelect
 
 const PRODUCT_REC_SELECT = {
   id: true,
@@ -226,41 +197,30 @@ const PRO_FEEDBACK_SELECT = {
   },
 } satisfies Prisma.ClientProfessionalNoteSelect
 
-// Before/after timeline. Own craft (professionalId === pro) is always visible to
-// the authoring pro; another pro's craft photos stay private to their author and
-// only surface here once the CLIENT promotes them via a review (reviewId set →
-// PUBLIC), which is world-public anyway. See design doc access matrix +
-// lib/media/publicShareGuard.ts.
-const TIMELINE_MEDIA_SELECT = {
+// A visit's before/after frames. Own craft (professionalId === pro) is always
+// visible to the authoring pro; another pro's craft photos stay private to their
+// author and only surface here once the CLIENT promotes them via a review
+// (reviewId set → PUBLIC), which is world-public anyway — `chartPhotoWhere`
+// holds that matrix. See design doc access matrix + lib/media/publicShareGuard.ts.
+//
+// Only the columns a rendered tile needs: the visit's date, service and pro all
+// come from the booking row the photos now hang off, so re-reading them here
+// would be a second copy that could disagree with the card it sits inside.
+const VISIT_MEDIA_SELECT = {
   id: true,
   bookingId: true,
-  professionalId: true,
   phase: true,
   caption: true,
-  createdAt: true,
-  visibility: true,
-  reviewId: true,
   storageBucket: true,
   storagePath: true,
   thumbBucket: true,
   thumbPath: true,
   url: true,
   thumbUrl: true,
-  booking: {
-    select: {
-      scheduledFor: true,
-      locationTimeZone: true,
-      service: { select: { name: true } },
-    },
-  },
 } satisfies Prisma.MediaAssetSelect
 
 type ClientDetailRecord = Prisma.ClientProfileGetPayload<{
   select: typeof CLIENT_DETAIL_SELECT
-}>
-
-type BookingRow = Prisma.BookingGetPayload<{
-  select: typeof BOOKING_ROW_SELECT
 }>
 
 type ProductRecommendationRow = Prisma.ProductRecommendationGetPayload<{
@@ -275,35 +235,12 @@ type ProFeedbackRow = Prisma.ClientProfessionalNoteGetPayload<{
   select: typeof PRO_FEEDBACK_SELECT
 }>
 
-type TimelinePhoto = {
-  id: string
-  phase: string
-  caption: string | null
-  imageUrl: string | null
-}
-
-type TimelineVisit = {
-  bookingId: string
-  when: Date | null
-  whenLocationTimeZone: string | null
-  serviceName: string | null
-  isMine: boolean
-  photos: TimelinePhoto[]
-}
-
 function firstParam(value: string | string[] | undefined): string {
   return Array.isArray(value) ? (value[0] ?? '') : (value ?? '')
 }
 
 function normalizeView(raw: unknown): ChartView {
   return String(raw || '').trim().toLowerCase() === 'public' ? 'public' : 'chart'
-}
-
-function normalizeTab(raw: unknown): ChartTab {
-  const normalized = String(raw || '').trim().toLowerCase()
-  return CHART_TABS.some((tab) => tab.id === normalized)
-    ? (normalized as ChartTab)
-    : 'notes'
 }
 
 function chartHref(args: {
@@ -345,25 +282,6 @@ function allergyTone(severity: unknown): BadgeTone {
   return value === 'CRITICAL' || value === 'HIGH' ? 'danger' : 'warn'
 }
 
-/**
- * A booking's state in the client's visit history.
- *
- * Found by `check:booking-status-labels`, not by hand (B10): this rendered the
- * RAW ENUM — "ACCEPTED", and for the two states its own tone map had never
- * heard of, "IN_PROGRESS" and "NO_SHOW" in a neutral grey chip.
- */
-function StatusPill({ status }: { status: unknown }) {
-  const normalizedStatus = safeUpper(status)
-
-  if (!normalizedStatus) return <Badge tone="neutral">Unknown</Badge>
-
-  return (
-    <Badge tone={badgeToneForBookingStatus(normalizedStatus)}>
-      {labelForBookingStatus(normalizedStatus)}
-    </Badge>
-  )
-}
-
 function SectionCard({
   id,
   title,
@@ -398,15 +316,7 @@ function SectionCard({
   )
 }
 
-function normalizeBookingFilter(raw: unknown): BookingFilter {
-  const normalized = String(raw || '').trim().toUpperCase()
-
-  return BOOKING_FILTERS.includes(normalized as BookingFilter)
-    ? (normalized as BookingFilter)
-    : 'ALL'
-}
-
-function buildBookingSearchIndex(booking: BookingRow, tz: string): string {
+function buildBookingSearchIndex(booking: ChartVisitRow, tz: string): string {
   const parts = [
     booking.service?.name,
     booking.service?.category?.name,
@@ -429,39 +339,7 @@ function buildBookingSearchIndex(booking: BookingRow, tz: string): string {
     .join(' ')
 }
 
-// JS mirror of the old bookingWhereForFilter. We load the full client booking set
-// ONCE (it powers the header + relationship intelligence + history), so the
-// history tab filters that in-memory set rather than firing a second query.
-function bookingMatchesFilter(
-  booking: BookingRow,
-  args: {
-    bookingFilter: BookingFilter
-    proId: string
-    myServiceIds: string[]
-    now: Date
-  },
-): boolean {
-  const { bookingFilter, proId, myServiceIds, now } = args
-
-  switch (bookingFilter) {
-    case 'WITH_ME':
-      return booking.professionalId === proId
-    case 'MATCHES_MY_SERVICES':
-      return myServiceIds.includes(booking.serviceId)
-    case 'UPCOMING':
-      return booking.scheduledFor.getTime() >= now.getTime()
-    case 'PAST':
-      return booking.scheduledFor.getTime() < now.getTime()
-    case 'COMPLETED':
-      return booking.status === 'COMPLETED'
-    case 'CANCELLED':
-      return booking.status === 'CANCELLED'
-    default:
-      return true
-  }
-}
-
-function upcomingBookingFromRows(rows: BookingRow[]): BookingRow | null {
+function upcomingBookingFromRows(rows: ChartVisitRow[]): ChartVisitRow | null {
   const nowMs = Date.now()
 
   return (
@@ -475,10 +353,10 @@ function upcomingBookingFromRows(rows: BookingRow[]): BookingRow | null {
 }
 
 function filterBookingsBySearch(args: {
-  rows: BookingRow[]
+  rows: ChartVisitRow[]
   query: string
   tz: string
-}): BookingRow[] {
+}): ChartVisitRow[] {
   const normalizedQuery = args.query.toLowerCase()
 
   if (!normalizedQuery) return args.rows
@@ -499,7 +377,7 @@ function sortProductRecommendations(
 }
 
 function toIntelBookings(
-  rows: BookingRow[],
+  rows: ChartVisitRow[],
   fallbackTimeZone: string,
 ): IntelBooking[] {
   return rows.map((row) => ({
@@ -519,64 +397,59 @@ function toIntelBookings(
   }))
 }
 
-// Read-only before/after timeline assembled from MediaAsset.bookingId, gated by
-// the design doc access matrix (own craft always; others only when client-promoted).
-async function loadPhotoTimeline(
+// The client's before/after frames, grouped onto the visit each belongs to.
+//
+// ONE query for the whole chart — never one per booking — and the same
+// `chartPhotoWhere` the native chart API uses, so the access matrix (own craft
+// always; another pro's only once the CLIENT promoted it) cannot be enforced by
+// half the app. A photo with no `bookingId` (a Look, a portfolio upload) belongs
+// to no visit and is correctly absent.
+async function loadVisitPhotosByBooking(
   clientId: string,
   proId: string,
-): Promise<TimelineVisit[]> {
+): Promise<VisitPhotosByBooking> {
   const rows = await prisma.mediaAsset.findMany({
     where: chartPhotoWhere({ clientId, proId }),
     orderBy: { createdAt: 'desc' },
     take: CHART_PHOTO_TAKE,
-    select: TIMELINE_MEDIA_SELECT,
+    select: VISIT_MEDIA_SELECT,
   })
 
-  // Resolve every (signed/public) URL up front in parallel — private images each
-  // need a network round-trip, so a sequential loop would serialize them.
-  const rendered = await Promise.all(
-    rows.map(async (row) => ({
-      row,
-      urls: await renderMediaUrls(row),
-    })),
-  )
+  // ONE `createSignedUrls` round-trip per private bucket, not two per asset.
+  // The per-item `renderMediaUrls` this used to call is an N+1 waterfall at a
+  // take of CHART_PHOTO_TAKE, and it now runs on the visits view a pro opens to
+  // read history rather than on an opt-in Photos tab.
+  const rendered = await renderMediaUrlsBatch(rows)
 
-  const byBooking = new Map<string, TimelineVisit>()
+  const byBooking = new Map<string, VisitPhoto[]>()
 
-  for (const { row, urls } of rendered) {
+  for (const [index, row] of rows.entries()) {
     const bookingId = row.bookingId
     if (!bookingId) continue
 
-    let visit = byBooking.get(bookingId)
-    if (!visit) {
-      visit = {
-        bookingId,
-        when: row.booking?.scheduledFor ?? null,
-        whenLocationTimeZone: row.booking?.locationTimeZone ?? null,
-        serviceName: row.booking?.service?.name ?? null,
-        isMine: row.professionalId === proId,
-        photos: [],
-      }
-      byBooking.set(bookingId, visit)
-    }
+    // No renderable URL ⇒ no tile. The old timeline rendered a "No preview"
+    // placeholder box instead, which said nothing the pro could act on.
+    const urls = rendered[index]
+    const imageUrl = urls?.renderThumbUrl ?? urls?.renderUrl
+    if (!imageUrl) continue
 
-    visit.photos.push({
+    const photo: VisitPhoto = {
       id: row.id,
       phase: row.phase,
       caption: row.caption,
-      imageUrl: urls.renderThumbUrl ?? urls.renderUrl,
-    })
+      imageUrl,
+    }
+
+    const bucket = byBooking.get(bookingId)
+    if (bucket) bucket.push(photo)
+    else byBooking.set(bookingId, [photo])
   }
 
-  const visits = [...byBooking.values()]
-  for (const visit of visits) {
-    visit.photos.sort((a, b) => comparePhotoPhase(a.phase, b.phase))
+  for (const bucket of byBooking.values()) {
+    bucket.sort((a, b) => comparePhotoPhase(a.phase, b.phase))
   }
-  visits.sort(
-    (a, b) => (b.when?.getTime() ?? 0) - (a.when?.getTime() ?? 0),
-  )
 
-  return visits
+  return byBooking
 }
 
 type ClientNoteRow = ClientDetailRecord['notes'][number]
@@ -688,195 +561,6 @@ function ClientAllergiesList({
           </div>
         </div>
       ))}
-    </div>
-  )
-}
-
-function BookingFilterForm({
-  clientId,
-  bookingFilter,
-  bookingQ,
-}: {
-  clientId: string
-  bookingFilter: BookingFilter
-  bookingQ: string
-}) {
-  return (
-    <form
-      className="flex flex-wrap items-center justify-end gap-2"
-      method="GET"
-      action=""
-    >
-      {/* Keep the chart/public mode + active tab when applying a filter. */}
-      <input type="hidden" name="view" value="chart" />
-      <input type="hidden" name="tab" value="history" />
-
-      <div className="flex items-center gap-2">
-        <label
-          className="text-[11px] font-black text-textSecondary"
-          htmlFor="bookingFilter"
-        >
-          View
-        </label>
-
-        <select
-          id="bookingFilter"
-          name="bookingFilter"
-          defaultValue={bookingFilter}
-          className="rounded-full border border-surfaceGlass/10 bg-bgPrimary px-3 py-2 text-[12px] font-black text-textPrimary"
-        >
-          <option value="ALL">All bookings</option>
-          <option value="WITH_ME">Only bookings with me</option>
-          <option value="MATCHES_MY_SERVICES">Only services I offer</option>
-          <option value="UPCOMING">Upcoming</option>
-          <option value="PAST">Past</option>
-          <option value="COMPLETED">Completed</option>
-          <option value="CANCELLED">Cancelled</option>
-        </select>
-      </div>
-
-      <div className="flex items-center gap-2">
-        <label className="text-[11px] font-black text-textSecondary" htmlFor="q">
-          Search
-        </label>
-
-        <input
-          id="q"
-          name="q"
-          defaultValue={bookingQ}
-          placeholder="Service, category, notes, status…"
-          className="w-56 rounded-full border border-surfaceGlass/10 bg-bgPrimary px-3 py-2 text-[12px] font-semibold text-textPrimary placeholder:text-textSecondary/70"
-        />
-      </div>
-
-      <Button type="submit" variant="primary" size="sm">
-        Apply
-      </Button>
-
-      {bookingQ || bookingFilter !== 'ALL' ? (
-        <Link
-          href={chartHref({ clientId, tab: 'history' })}
-          className={buttonClassName({ variant: 'ghost', size: 'sm' })}
-        >
-          Clear
-        </Link>
-      ) : null}
-    </form>
-  )
-}
-
-function ServiceHistoryList({
-  bookingRowsFiltered,
-  bookingRowsAll,
-  proId,
-  tz,
-}: {
-  bookingRowsFiltered: BookingRow[]
-  bookingRowsAll: BookingRow[]
-  proId: string
-  tz: string
-}) {
-  if (bookingRowsFiltered.length === 0) {
-    return (
-      <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
-        No bookings match your search/filter.
-      </div>
-    )
-  }
-
-  return (
-    <div className="grid gap-3">
-      <div className="text-[11px] font-semibold text-textSecondary">
-        Showing{' '}
-        <span className="font-black text-textPrimary">
-          {bookingRowsFiltered.length}
-        </span>{' '}
-        of{' '}
-        <span className="font-black text-textPrimary">
-          {bookingRowsAll.length}
-        </span>
-      </div>
-
-      {bookingRowsFiltered.map((booking) => {
-        const durationMinutes = Math.round(
-          Number(booking.totalDurationMinutes ?? 0),
-        )
-        const total =
-          moneyToString(booking.totalAmount ?? booking.subtotalSnapshot) ??
-          '0.00'
-        const when = formatDateShortInTimeZone(
-          booking.scheduledFor,
-          resolveAppointmentDisplayTimeZone(booking.locationTimeZone, tz),
-        )
-        const proName = formatPublicProfileDisplayName({
-          businessName: booking.professional?.businessName,
-          firstName: booking.professional?.firstName,
-          lastName: booking.professional?.lastName,
-          fallback: 'Professional',
-        })
-
-        return (
-          <Link
-            key={booking.id}
-            href={`/pro/bookings/${encodeURIComponent(booking.id)}`}
-            className="block rounded-card border border-surfaceGlass/10 bg-bgPrimary p-4 hover:bg-surfaceGlass/10"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <div className="truncate text-[13px] font-black text-textPrimary">
-                    {booking.service?.name ?? 'Service'}
-                  </div>
-
-                  <StatusPill status={booking.status} />
-
-                  {/* K5 mark, ONLY on the viewing pro's own rows: it answers
-                      "did this client request ME, and had I seen them before?",
-                      so on another pro's booking it would misread. */}
-                  {booking.professionalId === proId ? (
-                    <RelationshipBadgePill booking={booking} />
-                  ) : null}
-                </div>
-
-                <div className="mt-1 text-[12px] font-semibold text-textSecondary">
-                  {booking.service?.category?.name
-                    ? `${booking.service.category.name} • `
-                    : ''}
-                  Pro:{' '}
-                  <span className="font-black text-textPrimary">
-                    {proName}
-                  </span>
-                  {booking.professionalId === proId ? (
-                    <Badge tone="neutral" size="sm" className="ml-2">
-                      Me
-                    </Badge>
-                  ) : null}
-                </div>
-
-                {booking.aftercareSummary?.notes ? (
-                  <div className="mt-2 text-[12px] font-semibold text-textSecondary">
-                    <span className="font-black text-textPrimary">
-                      Aftercare:
-                    </span>{' '}
-                    {booking.aftercareSummary.notes.slice(0, 120)}
-                    {booking.aftercareSummary.notes.length > 120 ? '…' : ''}
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="shrink-0 text-right">
-                <div className="text-[12px] font-semibold text-textSecondary">
-                  {when}
-                </div>
-
-                <div className="mt-1 text-[12px] font-black text-textPrimary">
-                  {durationMinutes ? `${durationMinutes} min` : '—'} • ${total}
-                </div>
-              </div>
-            </div>
-          </Link>
-        )
-      })}
     </div>
   )
 }
@@ -1058,89 +742,6 @@ function ProFeedbackList({
           </div>
         )
       })}
-    </div>
-  )
-}
-
-function PhotoTimeline({
-  visits,
-  tz,
-}: {
-  visits: TimelineVisit[]
-  tz: string
-}) {
-  if (visits.length === 0) {
-    return (
-      <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
-        No before/after photos for this client yet.
-      </div>
-    )
-  }
-
-  return (
-    <div className="grid gap-4">
-      {visits.map((visit) => (
-        <div
-          key={visit.bookingId}
-          className="rounded-card border border-surfaceGlass/10 bg-bgPrimary p-4"
-        >
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <div className="min-w-0 truncate text-[13px] font-black text-textPrimary">
-              {visit.serviceName ?? 'Visit'}
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              {visit.isMine ? (
-                <Badge tone="neutral" size="sm">
-                  Me
-                </Badge>
-              ) : (
-                <Badge tone="info" size="sm">
-                  Client-shared
-                </Badge>
-              )}
-              <span className="text-[11px] font-semibold text-textSecondary">
-                {visit.when
-                  ? formatDateShortInTimeZone(
-                      visit.when,
-                      resolveAppointmentDisplayTimeZone(
-                        visit.whenLocationTimeZone,
-                        tz,
-                      ),
-                    )
-                  : '—'}
-              </span>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
-            {visit.photos.map((photo) => (
-              <div key={photo.id} className="grid gap-1">
-                <div className="relative aspect-square overflow-hidden rounded-card border border-surfaceGlass/10 bg-bgSecondary">
-                  {photo.imageUrl ? (
-                    <RemoteImage
-                      src={photo.imageUrl}
-                      alt={photo.caption ?? `${photo.phase} photo`}
-                      className="h-full w-full object-cover"
-                      loading="lazy"
-                      width={240}
-                      height={240}
-                    />
-                  ) : (
-                    <div className="grid h-full w-full place-items-center text-[11px] font-semibold text-textSecondary">
-                      No preview
-                    </div>
-                  )}
-                  <span className="absolute left-1 top-1">
-                    <Badge tone="neutral" size="sm">
-                      {photo.phase}
-                    </Badge>
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
     </div>
   )
 }
@@ -1689,14 +1290,15 @@ function tabContent(args: {
   tab: ChartTab
   client: ClientDetailRecord
   proId: string
-  bookingRowsAll: BookingRow[]
-  bookingRowsFiltered: BookingRow[]
-  bookingFilter: BookingFilter
+  bookingRowsAll: ChartVisitRow[]
+  bookingRowsFiltered: ChartVisitRow[]
+  visitFilter: VisitFilter
+  chartFilter: ChartBookingFilter
   bookingQ: string
+  photosByBooking: VisitPhotosByBooking
   productRecs: ProductRecommendationRow[]
   clientLeftReviews: ClientLeftReviewRow[]
   proFeedback: ProFeedbackRow[]
-  photoVisits: TimelineVisit[]
   technicalRecord: TechnicalRecordData | null
   consultBriefs: ConsultProBriefDTO[]
   now: Date
@@ -1743,19 +1345,21 @@ function tabContent(args: {
           ) : null}
           <SectionCard
             id="history"
-            title="Service history"
-            subtitle="Search and filter all bookings for this client."
+            title="Visits"
+            subtitle="Every booking for this client, with that visit's before/after photos on the card. Your own craft is always here; another pro's photos appear only when the client has shared them publicly."
             right={
-              <BookingFilterForm
-                clientId={client.id}
-                bookingFilter={args.bookingFilter}
+              <VisitFilterForm
+                clearHref={chartHref({ clientId: client.id, tab: 'history' })}
+                visitFilter={args.visitFilter}
+                chartFilter={args.chartFilter}
                 bookingQ={args.bookingQ}
               />
             }
           >
-            <ServiceHistoryList
+            <VisitHistoryList
               bookingRowsFiltered={args.bookingRowsFiltered}
               bookingRowsAll={args.bookingRowsAll}
+              photosByBooking={args.photosByBooking}
               proId={proId}
               tz={tz}
             />
@@ -1790,16 +1394,6 @@ function tabContent(args: {
           subtitle="Notes from professionals who serviced this client in the past (shared with pros)."
         >
           <ProFeedbackList feedback={args.proFeedback} tz={tz} />
-        </SectionCard>
-      )
-    case 'photos':
-      return (
-        <SectionCard
-          id="photos"
-          title="Before / after photos"
-          subtitle="Per-visit gallery. Your own craft is always here; another pro's photos appear only when the client has shared them publicly."
-        >
-          <PhotoTimeline visits={args.photoVisits} tz={tz} />
         </SectionCard>
       )
     case 'technical':
@@ -1901,7 +1495,7 @@ export default async function ClientDetailPage(props: {
 
   const view = normalizeView(firstParam(searchParams.view))
   const technicalEnabled = isClientTechnicalRecordEnabled(proId)
-  const requestedTab = normalizeTab(firstParam(searchParams.tab))
+  const requestedTab = normalizeChartTab(firstParam(searchParams.tab))
   // The technical tab only exists when the flag is on; otherwise fall back to notes
   // (so a stale deep-link never queries the not-yet-migrated tables).
   const tab: ChartTab =
@@ -1958,41 +1552,52 @@ export default async function ClientDetailPage(props: {
   }
 
   // ---- Chart mode. ----
-  // One bookings query powers the header, relationship intelligence, AND the
-  // history tab (filtered in-memory). Heavy per-tab list queries only run for the
-  // active tab. Cheap counts run always (they feed the safety/intelligence zone).
-  const [client, bookingRowsAll, reviewCount, referredCount, wasReferred] =
-    await Promise.all([
-      prisma.clientProfile.findUnique({
-        where: { id: clientId },
-        select: {
-          ...CLIENT_DETAIL_SELECT,
-          notes: {
-            where: { professionalId: proId },
-            orderBy: { createdAt: 'desc' },
-            select: CLIENT_DETAIL_SELECT.notes.select,
-          },
+  // The unnarrowed bookings query powers the header AND relationship
+  // intelligence, and doubles as the visits list when nothing was filtered.
+  // Heavy per-tab list queries only run for the active tab. Cheap counts run
+  // always (they feed the safety/intelligence zone).
+  const [
+    client,
+    bookingRowsAll,
+    noShowCount,
+    reviewCount,
+    referredCount,
+    wasReferred,
+  ] = await Promise.all([
+    prisma.clientProfile.findUnique({
+      where: { id: clientId },
+      select: {
+        ...CLIENT_DETAIL_SELECT,
+        notes: {
+          where: { professionalId: proId },
+          orderBy: { createdAt: 'desc' },
+          select: CLIENT_DETAIL_SELECT.notes.select,
         },
-      }),
-      // The WHOLE history — it powers the header counts and relationship
-      // intelligence as well as the history tab, so it must never be narrowed.
-      prisma.booking.findMany({
-        where: { clientId },
-        orderBy: { scheduledFor: 'desc' },
-        take: CHART_BOOKING_HISTORY_TAKE,
-        select: BOOKING_ROW_SELECT,
-      }),
-      prisma.review.count({ where: { clientId, ...visibleReviewsWhere } }),
-      prisma.referral.count({
-        where: {
-          referrerClientId: clientId,
-          status: { in: ['CONFIRMED', 'CONVERTED', 'REWARDED'] },
-        },
-      }),
-      prisma.referral
-        .count({ where: { referredClientId: clientId } })
-        .then((count) => count > 0),
-    ])
+      },
+    }),
+    // The WHOLE history — it powers the header counts and relationship
+    // intelligence as well as the history tab, so it must never be narrowed.
+    prisma.booking.findMany({
+      where: { clientId },
+      orderBy: { scheduledFor: 'desc' },
+      take: CHART_BOOKING_HISTORY_TAKE,
+      select: CHART_VISIT_SELECT,
+    }),
+    // Cross-professional by design — see `chartNoShowCountWhere`. Counted in
+    // Prisma rather than off `bookingRowsAll`, which is capped at
+    // CHART_BOOKING_HISTORY_TAKE and would under-report on a long record.
+    prisma.booking.count({ where: chartNoShowCountWhere({ clientId }) }),
+    prisma.review.count({ where: { clientId, ...visibleReviewsWhere } }),
+    prisma.referral.count({
+      where: {
+        referrerClientId: clientId,
+        status: { in: ['CONFIRMED', 'CONVERTED', 'REWARDED'] },
+      },
+    }),
+    prisma.referral
+      .count({ where: { referredClientId: clientId } })
+      .then((count) => count > 0),
+  ])
 
   if (!client) redirect('/pro/clients')
 
@@ -2041,26 +1646,32 @@ export default async function ClientDetailPage(props: {
   const email = client.user?.email || ''
   const phone = client.phone || ''
 
-  // History-tab inputs. `q` / `bookingFilter` still filter the already-loaded
-  // set in memory (no extra query); `status` / `withMe` are the SERVER-side pair
-  // the native chart shares, and when either is present the history tab reads a
-  // narrowed query instead. An unrecognized status has no way to be answered
-  // with a 400 here, so the page falls back to showing everything.
+  // Visits-view inputs. `status` / `withMe` are the SERVER-side pair the native
+  // chart shares, and the view's own Status select / "Only with me" checkbox now
+  // submit them, so those two axes narrow in Prisma. `q` and what is left of
+  // `bookingFilter` still filter in memory — none of the three has a
+  // `chartBookingWhere` equivalent. An unrecognized status has no way to be
+  // answered with a 400 here, so the page falls back to showing everything.
   const bookingQ = firstParam(searchParams.q).trim()
-  const bookingFilter = normalizeBookingFilter(
-    firstParam(searchParams.bookingFilter),
-  )
+  const rawVisitFilter = firstParam(searchParams.bookingFilter)
+  const visitFilter = normalizeVisitFilter(rawVisitFilter)
   const parsedChartFilter = parseChartBookingFilter((key) =>
     firstParam(searchParams[key]),
   )
-  const chartFilter = parsedChartFilter.ok
-    ? parsedChartFilter.filter
-    : CHART_BOOKING_FILTER_NONE
+  // A `bookingFilter` that MOVED to the server params still has to mean what it
+  // meant — a saved `?bookingFilter=COMPLETED` link must not hand back every
+  // visit under a heading that says completed.
+  const chartFilter: ChartBookingFilter = resolveVisitChartFilter({
+    parsed: parsedChartFilter.ok
+      ? parsedChartFilter.filter
+      : CHART_BOOKING_FILTER_NONE,
+    retired: retiredVisitFilterParams(rawVisitFilter),
+  })
 
   let myServiceIds: string[] = []
-  let bookingRowsFiltered: BookingRow[] = []
+  let bookingRowsFiltered: ChartVisitRow[] = []
   if (tab === 'history') {
-    if (bookingFilter === 'MATCHES_MY_SERVICES') {
+    if (visitFilter === 'MATCHES_MY_SERVICES') {
       const myOfferings = await prisma.professionalServiceOffering.findMany({
         where: { professionalId: proId, isActive: true },
         select: { serviceId: true },
@@ -2074,11 +1685,15 @@ export default async function ClientDetailPage(props: {
           where: chartBookingWhere({ clientId, proId, filter: chartFilter }),
           orderBy: { scheduledFor: 'desc' },
           take: CHART_BOOKING_HISTORY_TAKE,
-          select: BOOKING_ROW_SELECT,
+          select: CHART_VISIT_SELECT,
         })
       : bookingRowsAll
     const matched = historyRows.filter((booking) =>
-      bookingMatchesFilter(booking, { bookingFilter, proId, myServiceIds, now }),
+      visitMatchesFilter(booking, {
+        filter: visitFilter,
+        myServiceIds,
+        now,
+      }),
     )
     bookingRowsFiltered = filterBookingsBySearch({
       rows: matched,
@@ -2091,23 +1706,29 @@ export default async function ClientDetailPage(props: {
   let productRecs: ProductRecommendationRow[] = []
   let clientLeftReviews: ClientLeftReviewRow[] = []
   let proFeedback: ProFeedbackRow[] = []
-  let photoVisits: TimelineVisit[] = []
+  let photosByBooking: VisitPhotosByBooking = new Map()
   let technicalRecord: TechnicalRecordData | null = null
   let consultBriefs: ConsultProBriefDTO[] = []
 
   if (tab === 'history') {
-    consultBriefs = await loadAuthorizedProConsultBriefs({
-      professionalId: proId,
-      clientId,
-    }).catch((error: unknown) => {
-      if (
-        error instanceof ProConsultBriefError &&
-        (error.code === 'HIDDEN' || error.code === 'NOT_FOUND')
-      ) {
-        return []
-      }
-      throw error
-    })
+    // In parallel: the photo fan-out signs one URL per frame over the network,
+    // so running it behind the brief query would make the merged visits view
+    // slower than either of the two tabs it replaced.
+    ;[consultBriefs, photosByBooking] = await Promise.all([
+      loadAuthorizedProConsultBriefs({
+        professionalId: proId,
+        clientId,
+      }).catch((error: unknown) => {
+        if (
+          error instanceof ProConsultBriefError &&
+          (error.code === 'HIDDEN' || error.code === 'NOT_FOUND')
+        ) {
+          return []
+        }
+        throw error
+      }),
+      loadVisitPhotosByBooking(clientId, proId),
+    ])
   }
 
   if (tab === 'products') {
@@ -2130,8 +1751,6 @@ export default async function ClientDetailPage(props: {
       take: 2000,
       select: PRO_FEEDBACK_SELECT,
     })
-  } else if (tab === 'photos') {
-    photoVisits = await loadPhotoTimeline(clientId, proId)
   } else if (tab === 'technical' && technicalEnabled) {
     // Flag-gated: only path that touches the PR4 tables/columns.
     technicalRecord = await loadTechnicalRecord(clientId, proId)
@@ -2190,6 +1809,23 @@ export default async function ClientDetailPage(props: {
                 Total bookings:{' '}
                 <span className="font-black text-textPrimary">
                   {totalVisits}
+                </span>
+              </div>
+
+              {/* Cross-professional, like the native chart's `noShowCount`: a
+                  client who has stood up five OTHER pros must not read here as
+                  never having no-showed. Tinted only when there is something to
+                  flag — a zero in danger red would cry wolf on every chart. */}
+              <div>
+                No-shows:{' '}
+                <span
+                  className={
+                    noShowCount > 0
+                      ? 'font-black text-toneDanger'
+                      : 'font-black text-textPrimary'
+                  }
+                >
+                  {noShowCount}
                 </span>
               </div>
 
@@ -2332,12 +1968,13 @@ export default async function ClientDetailPage(props: {
           proId,
           bookingRowsAll,
           bookingRowsFiltered,
-          bookingFilter,
+          visitFilter,
+          chartFilter,
           bookingQ,
+          photosByBooking,
           productRecs,
           clientLeftReviews,
           proFeedback,
-          photoVisits,
           technicalRecord,
           consultBriefs,
           now,
