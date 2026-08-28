@@ -230,6 +230,62 @@ describe('GET /api/v1/availability/bootstrap', () => {
     )
   })
 
+  // `waitlistSupported` was a hardcoded `true`, so the drawer offered a salon
+  // waitlist panel for a pro with no salon to host it in — and the pro's offer
+  // endpoint then refused every joiner. It is now derived from the SAME narrowed
+  // offering modes the drawer's In-salon toggle reads.
+  describe('waitlistSupported', () => {
+    function contextWithModes(modes: {
+      offersInSalon: boolean
+      offersMobile: boolean
+    }) {
+      const base = makeBaseContext()
+      return {
+        ...base,
+        value: {
+          ...base.value,
+          offeringPayload: { ...base.value.offeringPayload, ...modes },
+        },
+      }
+    }
+
+    it('is true for a pro who can actually host the service in-salon', async () => {
+      const body = await (
+        await getBootstrap({ professionalId: 'pro-1', serviceId: 'service-1' })
+      ).json()
+
+      expect(body.waitlistSupported).toBe(true)
+    })
+
+    it('is FALSE for a mobile-only pro — a travel waitlist cannot be offered yet', async () => {
+      mocks.loadAvailabilityOfferingContext.mockResolvedValue(
+        contextWithModes({ offersInSalon: false, offersMobile: true }),
+      )
+
+      const body = await (
+        await getBootstrap({ professionalId: 'pro-1', serviceId: 'service-1' })
+      ).json()
+
+      expect(body.waitlistSupported).toBe(false)
+      // The offering itself still reports the mode it really has — only the
+      // waitlist claim is withdrawn.
+      expect(body.offering.offersMobile).toBe(true)
+    })
+
+    it('is FALSE for a pro with no bookable location of any kind', async () => {
+      // Both flags narrowed off upstream = nothing hostable anywhere.
+      mocks.loadAvailabilityOfferingContext.mockResolvedValue(
+        contextWithModes({ offersInSalon: false, offersMobile: false }),
+      )
+
+      const body = await (
+        await getBootstrap({ professionalId: 'pro-1', serviceId: 'service-1' })
+      ).json()
+
+      expect(body.waitlistSupported).toBe(false)
+    })
+  })
+
   it('keeps a zero-slot day in availableDays as Full, but never selects it (Tori, 2026-08-18)', async () => {
     let call = 0
     mocks.computeDaySlotsFast.mockImplementation(async () => {

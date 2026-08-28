@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   liveChannelForUser: vi.fn((userId: string) => `user:${userId}`),
   createProNotification: vi.fn(),
   kickNotificationDrain: vi.fn(),
+  loadWaitlistHostability: vi.fn(),
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -99,6 +100,18 @@ vi.mock('@/lib/notifications/delivery/kickNotificationDrain', () => ({
   kickNotificationDrain: mocks.kickNotificationDrain,
 }))
 
+// The join now refuses a pro/service the pro cannot actually host. Only the
+// LOOKUP is mocked — `waitlistRefusalMessage` is the real one, so these tests
+// assert the sentence a client would really be shown.
+vi.mock('@/lib/waitlist/hostability', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/lib/waitlist/hostability')>()
+  return {
+    ...actual,
+    loadWaitlistHostability: mocks.loadWaitlistHostability,
+  }
+})
+
 import { DELETE, PATCH, POST } from './route'
 
 const ALLOWED = {
@@ -142,6 +155,11 @@ describe('POST /api/v1/waitlist', () => {
       user: { id: 'user-1' },
     })
     mocks.waitlistFindFirst.mockResolvedValue(null)
+    mocks.loadWaitlistHostability.mockResolvedValue({
+      ok: true,
+      offeringId: 'off-1',
+      modes: ['SALON'],
+    })
     mocks.waitlistCreate.mockResolvedValue({
       id: 'wl-1',
       status: 'ACTIVE',
@@ -429,6 +447,90 @@ describe('POST /api/v1/waitlist', () => {
     expect(res.status).toBe(409)
     expect(mocks.waitlistCreate).not.toHaveBeenCalled()
     expect(mocks.resolveMessageThread).not.toHaveBeenCalled()
+  })
+
+  // The join used to write the row without checking ANY of this, so a
+  // mobile-only pro silently collected salon waitlisters their own offer
+  // endpoint then refused one by one.
+  describe('refuses a combination the pro cannot host', () => {
+    it('names the mobile-only case specifically, and writes nothing', async () => {
+      mocks.loadWaitlistHostability.mockResolvedValue({
+        ok: false,
+        refusal: { kind: 'NO_HOSTABLE_MODE', advertisesMobileOnly: true },
+      })
+
+      const res = await POST(
+        postRequest({
+          professionalId: 'pro-1',
+          serviceId: 'svc-1',
+          preferenceType: 'ANY_TIME',
+        }),
+      )
+
+      expect(res.status).toBe(409)
+      const body = await res.json()
+      expect(body.message).toContain('only travels to clients')
+      // No row, no thread, and no "someone joined your waitlist" to a pro who
+      // could never act on it.
+      expect(mocks.waitlistCreate).not.toHaveBeenCalled()
+      expect(mocks.resolveMessageThread).not.toHaveBeenCalled()
+      expect(mocks.createProNotification).not.toHaveBeenCalled()
+    })
+
+    it('distinguishes "no bookable location" from the mobile-only case', async () => {
+      mocks.loadWaitlistHostability.mockResolvedValue({
+        ok: false,
+        refusal: { kind: 'NO_HOSTABLE_MODE', advertisesMobileOnly: false },
+      })
+
+      const res = await POST(
+        postRequest({
+          professionalId: 'pro-1',
+          serviceId: 'svc-1',
+          preferenceType: 'ANY_TIME',
+        }),
+      )
+
+      expect(res.status).toBe(409)
+      const body = await res.json()
+      expect(body.message).toContain('cannot take in-salon appointments')
+      expect(mocks.waitlistCreate).not.toHaveBeenCalled()
+    })
+
+    it('refuses when the pro has no active offering for the service', async () => {
+      mocks.loadWaitlistHostability.mockResolvedValue({
+        ok: false,
+        refusal: { kind: 'NO_ACTIVE_OFFERING' },
+      })
+
+      const res = await POST(
+        postRequest({
+          professionalId: 'pro-1',
+          serviceId: 'svc-1',
+          preferenceType: 'ANY_TIME',
+        }),
+      )
+
+      expect(res.status).toBe(409)
+      const body = await res.json()
+      expect(body.message).toContain('not currently offering this service')
+      expect(mocks.waitlistCreate).not.toHaveBeenCalled()
+    })
+
+    it('is checked with the pro + service actually requested', async () => {
+      await POST(
+        postRequest({
+          professionalId: 'pro-9',
+          serviceId: 'svc-9',
+          preferenceType: 'ANY_TIME',
+        }),
+      )
+
+      expect(mocks.loadWaitlistHostability).toHaveBeenCalledWith({
+        professionalId: 'pro-9',
+        serviceId: 'svc-9',
+      })
+    })
   })
 })
 

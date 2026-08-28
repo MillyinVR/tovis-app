@@ -20,6 +20,7 @@ import {
   loadAvailabilityOfferingContext,
   toAvailabilityOfferingDto,
 } from '@/lib/availability/data/offeringContext'
+import { isWaitlistSupportedForModes } from '@/lib/waitlist/hostability'
 import {
   loadOtherProsNearbyCached,
   type OtherProRow,
@@ -999,7 +1000,14 @@ export async function GET(req: Request) {
         otherPros,
         locationOptions,
         serviceArea,
-        waitlistSupported: true,
+        // Not a feature flag — "if you join this queue, can this pro actually
+        // offer you a time?". Hardcoded `true` until now, which put a salon
+        // waitlist panel in front of clients of a mobile-only pro who could
+        // never fulfil it. `offeringPayload` is already narrowed to the modes
+        // the pro has a BOOKABLE location for (loadAvailabilityOfferingContext
+        // → narrowOfferingModes), on both the fresh and cached-placement paths,
+        // so this costs no extra query on a hot path.
+        waitlistSupported: isWaitlistSupportedForModes(offeringPayload),
         offering: toAvailabilityOfferingDto(offeringPayload),
 
         // Inside the cached payload deliberately: these four queries then run

@@ -4,6 +4,10 @@ import { jsonFail, jsonOk, pickInt, pickString, requireClient } from '@/app/api/
 import { bookingErrorJsonFail } from '@/app/api/_utils/bookingResponses'
 import { cancelClientWaitlistEntry } from '@/lib/booking/writeBoundary'
 import { isBookingError } from '@/lib/booking/errors'
+import {
+  loadWaitlistHostability,
+  waitlistRefusalMessage,
+} from '@/lib/waitlist/hostability'
 import { enforceRateLimit } from '@/lib/rateLimit/enforce'
 import { clientRateLimitKey } from '@/lib/rateLimit/identity'
 import { rateLimitExceededResponse } from '@/lib/rateLimit/response'
@@ -391,6 +395,25 @@ export async function POST(req: Request) {
 
     if (existing) {
       return jsonFail(409, 'You already have an active waitlist request for this pro/service.')
+    }
+
+    // The join wrote the row unconditionally until now: no check that the pro
+    // has an active offering for this service, nor that they have a bookable
+    // location to host it in. A mobile-only pro therefore collected salon
+    // waitlisters they could never make an offer to — the pro's own offer
+    // endpoint refuses every one of them, and the client is never told why.
+    //
+    // Same resolver the offer path uses, so the queue cannot admit a
+    // combination the offer would later refuse.
+    const hostability = await loadWaitlistHostability({
+      professionalId,
+      serviceId,
+    })
+
+    if (!hostability.ok) {
+      // 409, not 400: the request is well-formed — the pro's configuration is
+      // what makes it unfulfillable, and it may become fulfillable later.
+      return jsonFail(409, waitlistRefusalMessage(hostability.refusal))
     }
 
     const entry = await prisma.waitlistEntry.create({

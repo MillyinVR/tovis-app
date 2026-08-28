@@ -9,7 +9,10 @@ import { pickStringOrEmpty } from '@/lib/pick'
 import { normalizeMoney2, moneyToCentsInt } from '@/lib/money'
 import { safeJson, readErrorMessage } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
-import type { ProLocationCapability } from '@/lib/offerings/locationCapability'
+import {
+  defaultOfferingModes,
+  type ProLocationCapability,
+} from '@/lib/offerings/locationCapability'
 import { controlClassName } from '@/app/_components/ui'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 
@@ -69,10 +72,10 @@ export default function ServicePicker({
   // Salon, because the form refuses to submit with both modes off and the read
   // boundary narrows an unhostable mode back off before any client sees it.
   const [offersInSalon, setOffersInSalon] = useState(
-    locationCapability.salon || !locationCapability.mobile,
+    () => defaultOfferingModes(locationCapability).offersInSalon,
   )
   const [offersMobile, setOffersMobile] = useState(
-    !locationCapability.salon && locationCapability.mobile,
+    () => defaultOfferingModes(locationCapability).offersMobile,
   )
 
   const [salonPrice, setSalonPrice] = useState('')
