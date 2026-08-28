@@ -20,6 +20,7 @@ import {
   bookingJsonFail,
 } from '@/app/api/_utils/bookingResponses'
 import { createHold } from '@/lib/booking/writeBoundary'
+import { broadcastChange } from '@/lib/live/broadcastAudience'
 import {
   HOLD_CREATE_OFFERING_SELECT,
   toCreateHoldOffering,
@@ -400,6 +401,28 @@ export async function POST(req: NextRequest) {
       })
       idempotencyRecordId = null
     }
+
+    // Live-sync: the pro's open calendar shows a client's checkout as an
+    // anonymous "Checkout in progress" tile with a countdown, and until this
+    // ping existed the tile only turned up whenever the grid happened to refetch
+    // next — so a pro could take a walk-in on minutes somebody was already
+    // paying for, having never been shown it. Same call finalize makes, so it
+    // reaches the web shell (`pro:{id}`) AND the phone (`user:{proUserId}`).
+    // Fail-open by construction (broadcastChange never throws): a lost ping
+    // costs freshness, never correctness — the hold is already committed and
+    // every conflict query reads it regardless.
+    //
+    // ⚠️ AWAITED, on the response path of every slot tap — one indexed lookup
+    // (the pro's userId) plus one Realtime POST. `after()` from next/server is
+    // the obvious way to move it off that path, and it was tried: it throws
+    // outside a request scope, so every direct caller of this handler — the
+    // route's own unit suite included — turns into a 500. Matching finalize's
+    // inline await instead. If this shows up in `hold_total`, that is the
+    // thread to pull, not a guess to make.
+    await broadcastChange({
+      topic: 'bookings',
+      professionalId: offering.professionalId,
+    })
 
     return withServerTiming(
       jsonOk(responseBody, 201),

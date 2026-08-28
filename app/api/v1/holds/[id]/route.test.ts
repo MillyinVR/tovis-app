@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   updateHoldAddOns: vi.fn(),
   enforceRateLimit: vi.fn(),
   rateLimitExceededResponse: vi.fn(),
+  broadcastChange: vi.fn(),
 }))
 
 vi.mock('@/lib/rateLimit/enforce', () => ({
@@ -46,6 +47,10 @@ vi.mock('@/lib/prisma', () => ({
 vi.mock('@/lib/booking/writeBoundary', () => ({
   releaseHold: mocks.releaseHold,
   updateHoldAddOns: mocks.updateHoldAddOns,
+}))
+
+vi.mock('@/lib/live/broadcastAudience', () => ({
+  broadcastChange: mocks.broadcastChange,
 }))
 
 import { GET, DELETE, PATCH } from './route'
@@ -107,6 +112,7 @@ describe('app/api/v1/holds/[id]/route.ts', () => {
 
     mocks.releaseHold.mockResolvedValue({
       holdId: 'hold_1',
+      professionalId: 'pro_1',
       meta: {
         mutated: true,
         noOp: false,
@@ -121,6 +127,7 @@ describe('app/api/v1/holds/[id]/route.ts', () => {
         durationMinutes: 90,
         endsAt: new Date('2026-03-11T21:00:00.000Z'),
       },
+      professionalId: 'pro_1',
       meta: {
         mutated: true,
         noOp: false,
@@ -426,6 +433,7 @@ describe('app/api/v1/holds/[id]/route.ts', () => {
     it('releases a caller-owned hold through the write boundary', async () => {
       mocks.releaseHold.mockResolvedValueOnce({
         holdId: 'hold_1',
+        professionalId: 'pro_1',
         meta: {
           mutated: true,
           noOp: false,
@@ -440,6 +448,15 @@ describe('app/api/v1/holds/[id]/route.ts', () => {
       expect(mocks.releaseHold).toHaveBeenCalledWith({
         holdId: 'hold_1',
         clientId: 'client_1',
+      })
+
+      // The client walked away, so the minutes are free again and the pro's
+      // "Checkout in progress" tile has to go — the other half of the ping the
+      // create route sends. Without it the pro sat on an abandoned reservation
+      // until its countdown ran out.
+      expect(mocks.broadcastChange).toHaveBeenCalledWith({
+        topic: 'bookings',
+        professionalId: 'pro_1',
       })
 
       expect(mocks.jsonOk).toHaveBeenCalledWith(
@@ -548,6 +565,40 @@ describe('app/api/v1/holds/[id]/route.ts', () => {
           meta: { mutated: true, noOp: false },
         },
       })
+    })
+
+    it('tells the pro’s calendar the reservation just grew', async () => {
+      await PATCH(patchRequest({ addOnIds: ['addon_1'] }), makeCtx('hold_1'))
+
+      // A widen MOVES the hold's end, so the anonymous tile on the pro's grid
+      // has to grow with it — otherwise the pro is looking at a reservation
+      // that is smaller than the one the finalize will take.
+      expect(mocks.broadcastChange).toHaveBeenCalledWith({
+        topic: 'bookings',
+        professionalId: 'pro_1',
+      })
+    })
+
+    it('does NOT ping when the re-size changed nothing', async () => {
+      mocks.updateHoldAddOns.mockResolvedValueOnce({
+        hold: {
+          id: 'hold_1',
+          scheduledFor: new Date('2026-03-11T19:30:00.000Z'),
+          expiresAt: new Date('2099-03-11T19:45:00.000Z'),
+          durationMinutes: 90,
+          endsAt: new Date('2026-03-11T21:00:00.000Z'),
+        },
+        professionalId: 'pro_1',
+        meta: { mutated: false, noOp: true },
+      })
+
+      await PATCH(patchRequest({ addOnIds: ['addon_1'] }), makeCtx('hold_1'))
+
+      // The selection is caller-controlled and re-sent on every page load. An
+      // ungated ping would let a client rattle this pro's phone at will by
+      // re-sending the add-ons they already have — the same reason the
+      // schedule-version bump is gated on `mutated`.
+      expect(mocks.broadcastChange).not.toHaveBeenCalled()
     })
 
     it('treats a missing addOnIds as clearing the selection', async () => {

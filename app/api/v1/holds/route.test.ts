@@ -26,6 +26,8 @@ const mocks = vi.hoisted(() => ({
   beginIdempotency: vi.fn(),
   completeIdempotency: vi.fn(),
   failIdempotency: vi.fn(),
+
+  broadcastChange: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -49,6 +51,10 @@ vi.mock('@/lib/booking/locationContext', () => ({
 
 vi.mock('@/lib/booking/writeBoundary', () => ({
   createHold: mocks.createHold,
+}))
+
+vi.mock('@/lib/live/broadcastAudience', () => ({
+  broadcastChange: mocks.broadcastChange,
 }))
 
 vi.mock('@/lib/rateLimit/enforce', () => ({
@@ -314,6 +320,15 @@ describe('POST /api/v1/holds', () => {
     expect(response.status).toBe(201)
     expect(response.headers.get('cache-control')).toBe('no-store')
     expect(response.headers.get('server-timing')).toContain('hold_total')
+
+    // The pro's calendar shows a live checkout as an anonymous tile with a
+    // countdown. Until this ping the tile only turned up whenever the grid
+    // happened to refetch next, so a pro could take a walk-in on minutes
+    // somebody was already paying for, having never been shown them.
+    expect(mocks.broadcastChange).toHaveBeenCalledWith({
+      topic: 'bookings',
+      professionalId: 'pro_123',
+    })
 
     expect(json).toEqual({
       ok: true,

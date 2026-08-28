@@ -136,7 +136,11 @@ describe('EventCard — the service colour channel', () => {
       endsAt: '2026-07-30T23:00:00.000Z',
       title: 'Checkout in progress',
       holdId: 'h1',
-      expiresAt: '2026-07-30T22:40:00.000Z',
+      // Far future on purpose: an EXPIRED hold renders nothing at all now (the
+      // card drops a tile whose minutes are already bookable again), so a
+      // fixture frozen in the past would test the empty branch instead of the
+      // stripe.
+      expiresAt: '2099-01-01T00:00:00.000Z',
       locationId: 'loc1',
       timeZone: 'America/Los_Angeles',
       localDateKey: '2026-07-30',
