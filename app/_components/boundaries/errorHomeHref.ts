@@ -17,22 +17,31 @@
 // /looks (the discovery feed you want after signing in), whereas an error page
 // wants the client's own home. Same shape, different intent — folding them
 // together would silently change one of the two.
+//
+// SERVER ONLY. The destinations themselves live in ./errorHome so that client
+// boundaries (every error.tsx) can reuse them without pulling next/headers and
+// @/lib/auth into the browser bundle.
 
 import { cookies, headers } from 'next/headers'
 
 import { parseBearerToken } from '@/lib/auth/bearerToken'
 
-export const GUEST_HOME_HREF = '/'
-export const CLIENT_HOME_HREF = '/client'
-export const PRO_HOME_HREF = '/pro'
-export const ADMIN_HOME_HREF = '/admin'
+import {
+  ADMIN_HOME,
+  CLIENT_HOME,
+  GUEST_HOME,
+  PRO_HOME,
+  type ErrorHome,
+} from './errorHome'
 
-export type ErrorHome = { href: string; label: string }
-
-export const GUEST_HOME: ErrorHome = {
-  href: GUEST_HOME_HREF,
-  label: 'Back to home',
-}
+export {
+  ADMIN_HOME_HREF,
+  CLIENT_HOME_HREF,
+  GUEST_HOME,
+  GUEST_HOME_HREF,
+  PRO_HOME_HREF,
+  type ErrorHome,
+} from './errorHome'
 
 /**
  * Resolve the viewer's home from the session token. Falls back to the guest
@@ -64,11 +73,11 @@ export async function resolveErrorHome(): Promise<ErrorHome> {
 
     switch (payload.role) {
       case 'ADMIN':
-        return { href: ADMIN_HOME_HREF, label: 'Back to admin' }
+        return ADMIN_HOME
       case 'PRO':
-        return { href: PRO_HOME_HREF, label: 'Back to your calendar' }
+        return PRO_HOME
       case 'CLIENT':
-        return { href: CLIENT_HOME_HREF, label: 'Back to home' }
+        return CLIENT_HOME
       default:
         return GUEST_HOME
     }
