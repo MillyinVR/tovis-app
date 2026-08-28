@@ -18425,6 +18425,10 @@ export async function createWaitlistOffer(
           proName: offerProName,
           when: offerWhen,
           serviceName,
+          // The client's own word for the place. They may have several saved
+          // addresses and this offer resolved to their DEFAULT, so naming it is
+          // what lets them notice it picked the wrong one before confirming.
+          addressLabel: offerClientAddress?.label ?? null,
         }),
         dedupeKey: `WAITLIST_TIME_OFFERED:${offer.id}`,
         href: '/client/offers',

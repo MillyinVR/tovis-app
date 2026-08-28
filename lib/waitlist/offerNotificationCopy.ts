@@ -10,12 +10,17 @@
 // the offer CARD had before it started naming their address; this is the same fix
 // on the notification that reaches them first.
 //
-// 🔴 The address is deliberately NOT here, and must not be added. This body is
-// rendered verbatim onto a PUSH notification (and into the in-app row) by
-// `buildStandardTemplateRenderer`, which means a lock screen — the one surface
-// where a home address is read by whoever is holding the phone. "Comes to you" is
-// the fact the client needs to decide whether to open it; WHICH address is a
-// question the offer card answers, behind the session.
+// 🔴 The STREET ADDRESS is deliberately not here, and must not be added. This
+// body is rendered verbatim onto a PUSH notification (and into the in-app row) by
+// `buildStandardTemplateRenderer`, which means a lock screen — read by whoever is
+// holding the phone, not only its owner.
+//
+// The address LABEL is different, and is included: a client can have several
+// saved addresses and the offer resolves to their DEFAULT, so "comes to you" on
+// its own leaves them unable to tell Home from Office until after they confirm.
+// The label is their own word for the place ("Home", "Mum's"), which answers
+// exactly that question and discloses nothing about where it is. The street line
+// stays on the offer card, behind the session.
 
 import { ServiceLocationType } from '@prisma/client'
 
@@ -27,7 +32,21 @@ export type WaitlistOfferNotificationCopyInput = {
   /** "Fri, Sep 4 at 10:00 AM", already formatted in the location's zone. */
   when: string
   serviceName: string
+  /**
+   * MOBILE only: the client's own label for the address being travelled to.
+   * null when they never named it — the sentence then simply omits it rather
+   * than guessing.
+   */
+  addressLabel?: string | null
 }
+
+/**
+ * Longest label that still leaves a readable sentence. A label is free text with
+ * no length limit in the schema, and a very long one would push the urgency
+ * clause out of a push preview — so an oversized label is DROPPED rather than
+ * truncated, which would render a half-word and look broken.
+ */
+const MAX_LABEL_LENGTH = 40
 
 /**
  * The notification body for a pro-proposed waitlist time.
@@ -45,7 +64,13 @@ export function buildWaitlistOfferNotificationBody(
   const urgency = "Tap to confirm before it's gone."
 
   if (input.locationType === ServiceLocationType.MOBILE) {
-    return `${input.proName} can come to you ${input.when} for your ${input.serviceName}. ${urgency}`
+    const label = input.addressLabel?.trim() ?? ''
+    const where =
+      label.length > 0 && label.length <= MAX_LABEL_LENGTH
+        ? ` at ${label}`
+        : ''
+
+    return `${input.proName} can come to you${where} on ${input.when} for your ${input.serviceName}. ${urgency}`
   }
 
   return `${input.proName} has ${input.when} open for your ${input.serviceName}. ${urgency}`

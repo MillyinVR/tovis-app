@@ -657,7 +657,10 @@ describe('what the CLIENT is TOLD when the offer lands', () => {
       select: { body: true, title: true },
     })
 
-    expect(notification.body).toContain('can come to you')
+    // Names the client's OWN label for the address, because the offer resolved
+    // to their DEFAULT and they may have several saved — without it they cannot
+    // tell Home from Office until after they confirm.
+    expect(notification.body).toContain('can come to you at Home on ')
     // The fixture's own service + pro, so this proves the real values are
     // interpolated rather than a placeholder sentence being stored.
     expect(notification.body).toContain(`${TAG} Cut`)
@@ -672,6 +675,7 @@ describe('what the CLIENT is TOLD when the offer lands', () => {
     expect(notification.body).not.toContain(NEAR_STREET)
     expect(notification.body).not.toContain('Orange Ave')
     expect(notification.body).not.toContain('Coronado')
+    expect(notification.body).not.toContain('92118')
   })
 
   it('leaves the SALON notification wording untouched', async () => {

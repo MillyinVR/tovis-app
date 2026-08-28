@@ -54,6 +54,11 @@ type DbClient = Prisma.TransactionClient | typeof prisma
  */
 export const WAITLIST_OFFER_DESTINATION_SELECT = {
   id: true,
+  // The client's OWN name for this address ("Home", "Office", "Mum's"). Used
+  // only in the notification that goes to that client, to answer "which of my
+  // addresses?" — they can have several, and the offer resolves to their
+  // default. Never shown to the pro.
+  label: true,
   lat: true, // pii-plaintext-read-ok: radius check only; never stored or returned
   lng: true, // pii-plaintext-read-ok: radius check only; never stored or returned
   city: true,
