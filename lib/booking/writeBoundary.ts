@@ -257,6 +257,7 @@ import {
   isWaitlistOfferLapsed,
   lapsedWaitlistOfferWhere,
 } from '@/lib/waitlist/offerLiveness'
+import { WAITLIST_FULFILLABLE_MODES } from '@/lib/waitlist/hostability'
 import { scheduleReviewRequestOnCompletion } from '@/lib/notifications/reviewRequests'
 import {
   applyClientCreditForBooking,
@@ -17999,7 +18000,12 @@ export async function createWaitlistOffer(
   }
   assertValidRequestedStart(args.scheduledFor)
 
-  if (args.locationType !== ServiceLocationType.SALON) {
+  // ONE list, shared with the routes that gate on it (lib/waitlist/hostability).
+  // Everything below this guard may then assume SALON — which is why the
+  // `ServiceLocationType.SALON` literals further down are still correct. Widen
+  // WAITLIST_FULFILLABLE_MODES only together with them AND with a client address
+  // on the offer, or the client's confirm cannot accept what this promised.
+  if (!WAITLIST_FULFILLABLE_MODES.includes(args.locationType)) {
     throw bookingError('MODE_NOT_SUPPORTED', {
       message: 'Waitlist offers support in-salon appointments only for now.',
       userMessage: 'You can only offer in-salon times right now.',

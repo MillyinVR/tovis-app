@@ -10,7 +10,10 @@ import {
   type RouteContext,
 } from '@/app/api/_utils/routeContext'
 import { createWaitlistOffer } from '@/lib/booking/writeBoundary'
+import { prisma } from '@/lib/prisma'
+import { loadWaitlistHostability } from '@/lib/waitlist/hostability'
 import { isBookingError } from '@/lib/booking/errors'
+import { normalizeLocationType } from '@/lib/booking/locationContext'
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
@@ -39,11 +42,26 @@ function parseIsoDate(value: unknown): Date | null {
   return Number.isFinite(date.getTime()) ? date : null
 }
 
+/** Human phrasing for the modes a waitlist offer may currently be made in. */
+function describeModes(modes: readonly ServiceLocationType[]): string {
+  const labels = modes.map((mode) =>
+    mode === ServiceLocationType.SALON ? 'in-salon' : 'mobile',
+  )
+  return labels.length ? labels.join(' or ') : 'nowhere'
+}
+
 /**
  * Pro proposes a concrete appointment time to a waitlisted client. Creates a
  * PENDING WaitlistOffer and notifies the client to Confirm/Decline — it does NOT
- * book anything (that's the client's confirm). In-salon only for v1; the slot is
- * chosen from the pro's live availability picker.
+ * book anything (that's the client's confirm). The slot is chosen from the pro's
+ * live availability picker.
+ *
+ * The mode the pro may offer in is resolved from what they can ACTUALLY host
+ * (`loadWaitlistHostability`) — the same resolver the client's join runs — not
+ * from a hardcoded `locationType !== SALON` compare, which this route used to
+ * do. That compare refused a mobile-only pro with a sentence naming no reason
+ * they could act on, and it could disagree with the queue the client had already
+ * been allowed to join.
  */
 export async function POST(
   req: Request,
@@ -70,9 +88,47 @@ export async function POST(
     const locationId = pickString(body.locationId)
     if (!locationId) return jsonFail(400, 'Missing locationId.')
 
-    const locationType = pickString(body.locationType) ?? ''
-    if (locationType !== ServiceLocationType.SALON) {
-      return jsonFail(400, 'Only in-salon offers are supported right now.')
+    // The shared parser every other booking route uses — `ServiceLocationType`
+    // or null, never a silent fallback to SALON.
+    const locationType = normalizeLocationType(body.locationType)
+    if (!locationType) {
+      return jsonFail(400, 'Invalid or missing locationType.')
+    }
+
+    // Fail-fast, to the PRO, with the reason. `createWaitlistOffer` re-validates
+    // everything under the professional's schedule lock — this exists so the
+    // refusal names what to fix rather than surfacing as a generic 400.
+    const entry = await prisma.waitlistEntry.findFirst({
+      where: { id: entryId, professionalId },
+      select: { serviceId: true },
+    })
+    if (!entry) return jsonFail(404, 'Waitlist entry not found.')
+
+    const hostability = await loadWaitlistHostability({
+      professionalId,
+      serviceId: entry.serviceId,
+    })
+
+    if (!hostability.ok) {
+      return jsonFail(
+        409,
+        hostability.refusal.kind === 'NO_ACTIVE_OFFERING'
+          ? 'You don’t have an active offering for this service, so there’s no time to offer. Add or activate the service first.'
+          : hostability.refusal.advertisesMobileOnly
+            ? 'You only offer this service mobile, and waitlist times can only be offered in-salon right now.'
+            : 'You don’t have a bookable location for this service yet, so there’s no time to offer. Add one in your locations first.',
+      )
+    }
+
+    if (!hostability.modes.includes(locationType)) {
+      // `modes` already folds together BOTH constraints — what this pro can host
+      // and what a waitlist offer can be carried to a booking in — so naming
+      // what IS allowed is one always-accurate sentence, and stays accurate on
+      // its own when WAITLIST_FULFILLABLE_MODES widens.
+      return jsonFail(
+        400,
+        `Waitlist times for this service can only be offered ${describeModes(hostability.modes)} right now.`,
+      )
     }
 
     const durationMinutes =
@@ -116,7 +172,7 @@ export async function POST(
           scheduledFor: startsAt,
           endsAt,
           locationId,
-          locationType: ServiceLocationType.SALON,
+          locationType,
           durationMinutes,
         })
 

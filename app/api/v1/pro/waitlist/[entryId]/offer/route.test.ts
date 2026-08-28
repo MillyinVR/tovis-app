@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   createWaitlistOffer: vi.fn(),
   kickNotificationDrain: vi.fn(),
   captureBookingException: vi.fn(),
+  waitlistEntryFindFirst: vi.fn(),
+  loadWaitlistHostability: vi.fn(),
   safeError: vi.fn((error: unknown) => ({
     name: error instanceof Error ? error.name : 'UnknownError',
     message: error instanceof Error ? error.message : 'Unknown error',
@@ -62,6 +64,20 @@ vi.mock('@/lib/idempotency', () => ({
     PRO_WAITLIST_OFFER: 'POST /api/v1/pro/waitlist/[entryId]/offer',
   },
 }))
+
+// The route now fails fast on what the pro can ACTUALLY host, so it reads the
+// entry (for its serviceId) before reaching the write boundary.
+vi.mock('@/lib/prisma', () => ({
+  prisma: {
+    waitlistEntry: { findFirst: mocks.waitlistEntryFindFirst },
+  },
+}))
+
+vi.mock('@/lib/waitlist/hostability', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/lib/waitlist/hostability')>()
+  return { ...actual, loadWaitlistHostability: mocks.loadWaitlistHostability }
+})
 
 import { POST } from './route'
 
@@ -113,6 +129,12 @@ describe('app/api/v1/pro/waitlist/[entryId]/offer/route.ts', () => {
       userId: 'user_1',
     })
     mocks.isBookingError.mockReturnValue(false)
+    mocks.waitlistEntryFindFirst.mockResolvedValue({ serviceId: 'svc_1' })
+    mocks.loadWaitlistHostability.mockResolvedValue({
+      ok: true,
+      offeringId: 'off_1',
+      modes: ['SALON'],
+    })
 
     mocks.withRouteIdempotency.mockImplementation(
       async (
@@ -139,17 +161,96 @@ describe('app/api/v1/pro/waitlist/[entryId]/offer/route.ts', () => {
     expect(mocks.createWaitlistOffer).not.toHaveBeenCalled()
   })
 
-  it('rejects a non-salon location type (400)', async () => {
-    const result = await POST(
+  it('rejects a MOBILE offer for a salon-capable pro, naming the product limit', async () => {
+    void (await POST(
       makeRequest({ body: { ...VALID_BODY, locationType: 'MOBILE' } }),
       makeCtx(),
-    )
+    ))
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(
       400,
-      'Only in-salon offers are supported right now.',
+      'Waitlist times for this service can only be offered in-salon right now.',
     )
     expect(mocks.createWaitlistOffer).not.toHaveBeenCalled()
+  })
+
+  it('rejects an unparseable location type (400) rather than defaulting to SALON', async () => {
+    void (await POST(
+      makeRequest({ body: { ...VALID_BODY, locationType: 'CARRIER_PIGEON' } }),
+      makeCtx(),
+    ))
+
+    expect(mocks.jsonFail).toHaveBeenCalledWith(
+      400,
+      'Invalid or missing locationType.',
+    )
+    expect(mocks.createWaitlistOffer).not.toHaveBeenCalled()
+  })
+
+  it('404s an entry that is not this pro’s, before any hostability read', async () => {
+    mocks.waitlistEntryFindFirst.mockResolvedValueOnce(null)
+
+    void (await POST(makeRequest({ body: VALID_BODY }), makeCtx()))
+
+    expect(mocks.jsonFail).toHaveBeenCalledWith(404, 'Waitlist entry not found.')
+    expect(mocks.loadWaitlistHostability).not.toHaveBeenCalled()
+    expect(mocks.createWaitlistOffer).not.toHaveBeenCalled()
+  })
+
+  describe('refuses with a reason the PRO can act on', () => {
+    it('mobile-only: says so, instead of a bare "in-salon only"', async () => {
+      mocks.loadWaitlistHostability.mockResolvedValueOnce({
+        ok: false,
+        refusal: { kind: 'NO_HOSTABLE_MODE', advertisesMobileOnly: true },
+      })
+
+      void (await POST(makeRequest({ body: VALID_BODY }), makeCtx()))
+
+      expect(mocks.jsonFail).toHaveBeenCalledWith(
+        409,
+        expect.stringContaining('only offer this service mobile'),
+      )
+      expect(mocks.createWaitlistOffer).not.toHaveBeenCalled()
+    })
+
+    it('no bookable location: points at the locations screen', async () => {
+      mocks.loadWaitlistHostability.mockResolvedValueOnce({
+        ok: false,
+        refusal: { kind: 'NO_HOSTABLE_MODE', advertisesMobileOnly: false },
+      })
+
+      void (await POST(makeRequest({ body: VALID_BODY }), makeCtx()))
+
+      expect(mocks.jsonFail).toHaveBeenCalledWith(
+        409,
+        expect.stringContaining('bookable location'),
+      )
+    })
+
+    it('no active offering: points at the service', async () => {
+      mocks.loadWaitlistHostability.mockResolvedValueOnce({
+        ok: false,
+        refusal: { kind: 'NO_ACTIVE_OFFERING' },
+      })
+
+      void (await POST(makeRequest({ body: VALID_BODY }), makeCtx()))
+
+      expect(mocks.jsonFail).toHaveBeenCalledWith(
+        409,
+        expect.stringContaining('active offering'),
+      )
+    })
+
+    it('is resolved for the entry’s OWN service, not the request body', async () => {
+      mocks.waitlistEntryFindFirst.mockResolvedValueOnce({ serviceId: 'svc_9' })
+
+      void (await POST(makeRequest({ body: VALID_BODY }), makeCtx()))
+
+      expect(mocks.loadWaitlistHostability).toHaveBeenCalledWith({
+        professionalId: 'pro_1',
+        serviceId: 'svc_9',
+      })
+    })
   })
 
   it('rejects a missing scheduledFor (400)', async () => {

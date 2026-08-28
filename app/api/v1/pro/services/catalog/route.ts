@@ -8,6 +8,10 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
+import {
+  defaultOfferingModes,
+  loadProLocationCapability,
+} from '@/lib/offerings/locationCapability'
 import { moneyToString } from '@/lib/money'
 
 export const dynamic = 'force-dynamic'
@@ -47,7 +51,13 @@ export async function GET() {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
 
-    const [categories, offerings] = await Promise.all([
+    // W6: the Add-service form must seed its Salon/Mobile toggles from the
+    // locations the pro ACTUALLY has, not from a blanket "Salon". The web form
+    // gets this as a server prop; iOS had no way to ask, so it hardcoded
+    // salon-on/mobile-off and a mobile-only pro's every service was created
+    // claiming in-salon. Derived here with the same helper the POST route
+    // applies, so the seed the form shows is the one the server would pick.
+    const [categories, offerings, capability] = await Promise.all([
       prisma.serviceCategory.findMany({
         where: { isActive: true, parentId: null },
         orderBy: { name: 'asc' },
@@ -78,6 +88,7 @@ export async function GET() {
         where: { professionalId: auth.professionalId, isActive: true },
         select: { id: true, serviceId: true },
       }),
+      loadProLocationCapability(auth.professionalId),
     ])
 
     return jsonOk({
@@ -95,6 +106,8 @@ export async function GET() {
         id: String(o.id),
         serviceId: String(o.serviceId),
       })),
+      locationCapability: capability,
+      defaultOfferingModes: defaultOfferingModes(capability),
     })
   } catch (e) {
     console.error('GET /api/v1/pro/services/catalog error:', e)

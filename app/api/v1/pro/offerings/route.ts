@@ -14,7 +14,10 @@ import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
 import { refreshProfessional } from '@/lib/search/index/refreshSearchIndex'
 import { isRecord } from '@/lib/guards'
 import { parseMoney, moneyToString } from '@/lib/money'
-import { loadProLocationCapability } from '@/lib/offerings/locationCapability'
+import {
+  defaultOfferingModes,
+  loadProLocationCapability,
+} from '@/lib/offerings/locationCapability'
 import {
   OfferingAlreadyActiveError,
   offeringToDto,
@@ -218,15 +221,15 @@ export async function POST(request: Request) {
         ? { salon: false, mobile: false }
         : await loadProLocationCapability(professionalId)
 
+    // The seed rule itself lives with the capability helper, so this route, the
+    // web form and the iOS form cannot drift to three different answers.
+    const derived = defaultOfferingModes(capability)
+
     const offersInSalon =
-      typeof offersInSalonIn === 'boolean'
-        ? offersInSalonIn
-        : capability.salon || !capability.mobile
+      typeof offersInSalonIn === 'boolean' ? offersInSalonIn : derived.offersInSalon
 
     const offersMobile =
-      typeof offersMobileIn === 'boolean'
-        ? offersMobileIn
-        : !capability.salon && capability.mobile
+      typeof offersMobileIn === 'boolean' ? offersMobileIn : derived.offersMobile
 
     if (!offersInSalon && !offersMobile) {
       return jsonFail(400, 'Enable at least Salon or Mobile.')

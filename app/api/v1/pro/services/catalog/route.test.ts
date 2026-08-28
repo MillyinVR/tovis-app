@@ -17,11 +17,12 @@ const mocks = vi.hoisted(() => {
   const requirePro = vi.fn()
   const serviceCategory = { findMany: vi.fn() }
   const professionalServiceOffering = { findMany: vi.fn() }
+  const professionalLocation = { findMany: vi.fn() }
   return {
     jsonOk,
     jsonFail,
     requirePro,
-    prisma: { serviceCategory, professionalServiceOffering },
+    prisma: { serviceCategory, professionalServiceOffering, professionalLocation },
   }
 })
 
@@ -39,6 +40,10 @@ import { GET } from './route'
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // W6: the route now also derives the pro's real location capability, so the
+  // iOS add-service form can seed its Salon/Mobile toggles from it. Driven
+  // through the REAL `loadProLocationCapability`, off mocked location rows.
+  mocks.prisma.professionalLocation.findMany.mockResolvedValue([])
 })
 
 describe('GET /api/v1/pro/services/catalog', () => {
@@ -99,5 +104,43 @@ describe('GET /api/v1/pro/services/catalog', () => {
     expect(body.categories[0].children[0].services[0].defaultDurationMinutes).toBe(60)
     expect(body.categories[0].children[0].services[0].isAddOnEligible).toBe(true)
     expect(body.offerings).toEqual([{ id: 'off_1', serviceId: 'svc_balayage' }])
+  })
+
+  // The iOS add-service form has no other way to ask, and hardcoded
+  // salon-on/mobile-off in its absence.
+  it('ships the pro’s real capability + the server’s own mode defaults', async () => {
+    mocks.requirePro.mockResolvedValue({ ok: true, professionalId: 'pro_1' })
+    mocks.prisma.serviceCategory.findMany.mockResolvedValue([])
+    mocks.prisma.professionalServiceOffering.findMany.mockResolvedValue([])
+    // A mobile-only pro: one bookable MOBILE_BASE, no salon.
+    mocks.prisma.professionalLocation.findMany.mockResolvedValue([
+      { type: 'MOBILE_BASE' },
+    ])
+
+    const body = await (await GET()).json()
+
+    expect(body.locationCapability).toEqual({ salon: false, mobile: true })
+    // NOT salon-on: this is the pair the POST route would derive for them.
+    expect(body.defaultOfferingModes).toEqual({
+      offersInSalon: false,
+      offersMobile: true,
+    })
+  })
+
+  it('falls back to salon for a pro with no bookable location at all', async () => {
+    mocks.requirePro.mockResolvedValue({ ok: true, professionalId: 'pro_1' })
+    mocks.prisma.serviceCategory.findMany.mockResolvedValue([])
+    mocks.prisma.professionalServiceOffering.findMany.mockResolvedValue([])
+    mocks.prisma.professionalLocation.findMany.mockResolvedValue([])
+
+    const body = await (await GET()).json()
+
+    expect(body.locationCapability).toEqual({ salon: false, mobile: false })
+    // A form cannot submit with both modes off, and the read boundary narrows
+    // an unhostable claim back off before any client sees it.
+    expect(body.defaultOfferingModes).toEqual({
+      offersInSalon: true,
+      offersMobile: false,
+    })
   })
 })

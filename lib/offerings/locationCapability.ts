@@ -92,3 +92,29 @@ export function narrowOfferingModes<T extends { offersInSalon: boolean; offersMo
     offersMobile: offering.offersMobile && capability.mobile,
   }
 }
+
+/**
+ * The modes to pre-select for an offering whose creator has not stated them.
+ *
+ * ONE rule, three consumers: `POST /api/v1/pro/offerings` applies it server-side
+ * when a flag is omitted, the web Add-service form seeds its toggles with it,
+ * and `GET /api/v1/pro/services/catalog` ships it to the iOS form so that form
+ * does not have to re-derive it in Swift. Before it was extracted, the web form
+ * and the POST route each spelled the same expression out, and iOS did neither —
+ * it hardcoded salon-on/mobile-off, which is how a mobile-only pro creating a
+ * service on the phone still wrote `offersInSalon: true`.
+ *
+ * A pro with NEITHER capability yet (no bookable location at all) gets salon,
+ * because a form refuses to submit with both modes off and the read boundary
+ * (`narrowOfferingModes`) takes an unhostable mode back off before any client
+ * sees it.
+ */
+export function defaultOfferingModes(capability: ProLocationCapability): {
+  offersInSalon: boolean
+  offersMobile: boolean
+} {
+  return {
+    offersInSalon: capability.salon || !capability.mobile,
+    offersMobile: !capability.salon && capability.mobile,
+  }
+}
