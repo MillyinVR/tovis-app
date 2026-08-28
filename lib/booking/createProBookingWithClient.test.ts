@@ -553,6 +553,7 @@ describe('createProBookingWithClient', () => {
       allowShortNotice: true,
       allowFarFuture: false,
       depositRequested: false,
+      confirmHoldOverlap: false,
       requestId: null,
       idempotencyKey: null,
     })

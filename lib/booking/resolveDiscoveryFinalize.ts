@@ -15,7 +15,6 @@
 import {
   BookingDiscoveryProvenance,
   BookingSource,
-  BookingStatus,
   ClientRelationshipLabel,
   DepositScope,
   LookPostStatus,
@@ -24,6 +23,7 @@ import {
 } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
+import { countEstablishedBookings } from '@/lib/booking/establishedBookingCount'
 import { resolveDiscoveryProvenance } from '@/lib/booking/discoveryProvenance'
 import { deriveClientRelationshipLabel } from '@/lib/booking/relationshipLabel'
 import {
@@ -47,13 +47,6 @@ export const DISCOVERY_VIEW_EVENT_TYPE = 'DISCOVERY_VIEW'
 // Only honor a discovery-view attribution recorded within this window before the
 // booking, so a months-old browse doesn't silently trigger a fee.
 const DISCOVERY_VIEW_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000
-
-const ESTABLISHED_BOOKING_STATUSES: BookingStatus[] = [
-  BookingStatus.PENDING,
-  BookingStatus.ACCEPTED,
-  BookingStatus.IN_PROGRESS,
-  BookingStatus.COMPLETED,
-]
 
 export type FinalizeDiscoveryDirective = Readonly<{
   provenance: BookingDiscoveryProvenance
@@ -210,26 +203,12 @@ export async function resolveDiscoveryFinalize(args: {
       professionalId: args.professionalId,
       since: discoveryViewLookbackFrom,
     }),
-    prisma.booking.count({
-      where: {
-        clientId: args.clientId,
-        professionalId: args.professionalId,
-        OR: [
-          // Any non-cancelled booking = an existing relationship.
-          { status: { in: ESTABLISHED_BOOKING_STATUSES } },
-          // A cancelled booking still establishes the pair IF its discovery fee was
-          // captured and NOT refunded (the client paid to establish — forfeited or
-          // deposit-only-refunded). Refund-reset: once the fee is refunded
-          // (discoveryFeeRefundedAt set), this no longer matches, so the pair
-          // reverts to "new" and the fee re-charges on the next discovery booking.
-          {
-            status: BookingStatus.CANCELLED,
-            discoveryFeeAmount: { gt: 0 },
-            depositPaidAt: { not: null },
-            discoveryFeeRefundedAt: null,
-          },
-        ],
-      },
+    // THE pair-history count (lib/booking/establishedBookingCount.ts) — shared
+    // with the pro's live-hold decision so the fee, the NR/RR mark and the
+    // popup's new-or-returning label can never disagree about who is new.
+    countEstablishedBookings({
+      clientId: args.clientId,
+      professionalId: args.professionalId,
     }),
     prisma.proClientInvite.count({
       where: {

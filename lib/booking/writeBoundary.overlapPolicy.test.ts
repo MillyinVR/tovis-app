@@ -911,6 +911,7 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
     })
 
     expect(mocks.decideBookingOverlapPermission).toHaveBeenCalledWith({
+      now: TEST_NOW,
       actor: {
         kind: 'CLIENT',
         userId: 'client_1',
@@ -1233,10 +1234,12 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
     })
 
     expect(mocks.decideBookingOverlapPermission).toHaveBeenCalledWith({
+      now: TEST_NOW,
       actor: {
         kind: 'PRO',
         userId: 'user_pro_1',
         professionalId: 'pro_1',
+        liveHoldOverlap: 'ASK_THE_PRO',
       },
       source: {
         kind: 'PRO_CREATED',
@@ -1327,6 +1330,7 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
     })
 
     expect(mocks.decideBookingOverlapPermission).toHaveBeenCalledWith({
+      now: TEST_NOW,
       actor: {
         kind: 'CLIENT',
         userId: 'client_1',
@@ -1449,10 +1453,12 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
     })
 
     expect(mocks.decideBookingOverlapPermission).toHaveBeenCalledWith({
+      now: TEST_NOW,
       actor: {
         kind: 'PRO',
         userId: 'user_pro_1',
         professionalId: 'pro_1',
+        liveHoldOverlap: 'ASK_THE_PRO',
       },
       source: {
         kind: 'PRO_CREATED',
@@ -1529,6 +1535,8 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
           kind: 'PRO',
           userId: 'user_pro_1',
           professionalId: 'pro_1',
+          // Unattended: the import has no human at this slot to ask.
+          liveHoldOverlap: 'NO_DECISION_SURFACE',
         },
       }),
     )
@@ -1832,10 +1840,13 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
     })
 
     expect(mocks.decideBookingOverlapPermission).toHaveBeenCalledWith({
+      now: TEST_NOW,
       actor: {
         kind: 'PRO',
         userId: 'pro_1',
         professionalId: 'pro_1',
+        // The pro authoring aftercare — no dialog on that screen to ask from.
+        liveHoldOverlap: 'NO_DECISION_SURFACE',
       },
       source: {
         kind: 'PRO_CREATED',

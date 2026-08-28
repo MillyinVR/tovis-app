@@ -44,6 +44,7 @@ import {
   type SlotReadinessCode,
 } from '@/lib/booking/slotReadiness'
 import { decideBookingOverlapPermission } from '@/lib/booking/overlapPolicy'
+import { isBookingError } from '@/lib/booking/errors'
 import { getWorkingWindowForDay } from '@/lib/scheduling/workingHours'
 import { utcDateToLocalParts } from '@/lib/time'
 import { createProBooking } from '@/lib/booking/writeBoundary'
@@ -2130,25 +2131,25 @@ describe('findBookingAndHoldConflicts against real Postgres', () => {
     ).resolves.toBe(2)
   })
 
-  // B5 — the pro path treats a client's LIVE HOLD as an authorized overlap.
+  // B5 follow-up — the pro path now STOPS on a client's live hold and asks.
   //
-  // The sibling test above pins the same behaviour over a BOOKING, which is the
-  // intended one: the pro can see that booking on their calendar and chooses to
-  // stack on it. Over a HOLD the pro could see NOTHING — not on the calendar,
-  // not in either overlap warning — so the "authorization" was fictional and
-  // the client mid-checkout was refused at their own confirm.
+  // The sibling test above pins the unchanged behaviour over a BOOKING: the pro
+  // can see that appointment on their calendar and chooses to stack on it, with
+  // no friction. That is their book.
   //
-  // Tori's call (2026-07-25) is to keep ALLOWING it and make it visible, so this
-  // test pins the write behaviour deliberately: if it ever starts refusing, that
-  // is a product change, not a bug fix. What B5 changed is that the pro is now
-  // told — see the route + overlap-warning suites.
+  // A live HOLD is different, and used to be treated the same: somebody is on
+  // the checkout screen paying for these exact minutes, the pro was told
+  // nothing, and the client was then refused at their own confirm. B5 (2026-07
+  // -25) deliberately kept ALLOWING that and made the tile visible; the test
+  // that stood here pinned it and said in as many words that a refusal would be
+  // "a product change, not a bug fix".
   //
-  // ⚠️ Note what this does NOT go through: the existing
-  // "blocks booking creation when an active hold already occupies..." case uses
-  // `createLockedBooking`, a hand-rolled helper that calls getTimeRangeConflict
-  // directly and never reaches decideBookingOverlapPermission. Its name reads
-  // like it covers this; it does not. [[a-suites-name-is-not-its-coverage]]
-  it('a pro walk-in over a live client hold is authorized, and the client is then refused', async () => {
+  // That product change is this one (Tori, 2026-08-28). The first attempt is
+  // refused with HOLD_OVERLAP_NEEDS_CONFIRMATION and a payload naming the
+  // service, the slot, the expiry and whether the held client is NEW or
+  // RETURNING to this pro — and nothing else about them. A second attempt
+  // carrying the pro's answer books exactly as before.
+  it('refuses a pro walk-in over a live client hold until the pro answers, then books', async () => {
     if (!fixtures) throw new Error('Fixtures not initialized')
     const fx = fixtures
 
@@ -2166,7 +2167,7 @@ describe('findBookingAndHoldConflicts against real Postgres', () => {
       locationType: ServiceLocationType.SALON,
     })
 
-    const result = await createProBooking({
+    const attempt = {
       professionalId: fx.professionalId,
       actorUserId: fx.proUserId,
       clientId: fx.clients[1].clientId,
@@ -2182,6 +2183,34 @@ describe('findBookingAndHoldConflicts against real Postgres', () => {
       allowOutsideWorkingHours: false,
       allowShortNotice: false,
       allowFarFuture: false,
+    }
+
+    // FIRST attempt — the question, not a dead end.
+    const refusal = await createProBooking(attempt).then(
+      () => null,
+      (error: unknown) => error,
+    )
+
+    expect(isBookingError(refusal)).toBe(true)
+    if (!isBookingError(refusal)) throw new Error('expected a BookingError')
+
+    expect(refusal.code).toBe('HOLD_OVERLAP_NEEDS_CONFIRMATION')
+    expect(refusal.heldSlot).not.toBeNull()
+    expect(refusal.heldSlot?.holdId).toBe(holdId)
+    // clients[0] has never booked this pro, so they are NEW to them.
+    expect(refusal.heldSlot?.relationship).toBe('NEW')
+    expect(refusal.heldSlot?.expiresAt).toEqual(expect.any(String))
+    expect(refusal.heldSlot?.additionalHeldSlots).toBe(0)
+
+    // Nothing was written. The pro was asked, not overruled.
+    await expect(
+      db.booking.count({ where: { professionalId: fx.professionalId } }),
+    ).resolves.toBe(0)
+
+    // SECOND attempt — the pro's answer.
+    const result = await createProBooking({
+      ...attempt,
+      confirmHoldOverlap: true,
     })
 
     const created = await db.booking.findUnique({
@@ -2189,8 +2218,8 @@ describe('findBookingAndHoldConflicts against real Postgres', () => {
       select: { allowsOverlap: true, status: true },
     })
 
-    // Created, not refused — and flagged so the DB EXCLUDE constraint is
-    // deliberately disarmed for this row.
+    // Created, and flagged so the DB EXCLUDE constraint is deliberately
+    // disarmed for this row — exactly as the silent path used to do.
     expect(created?.status).toBe(BookingStatus.ACCEPTED)
     expect(created?.allowsOverlap).toBe(true)
 
@@ -2221,6 +2250,7 @@ describe('findBookingAndHoldConflicts against real Postgres', () => {
     ])
 
     const clientDecision = decideBookingOverlapPermission({
+      now: new Date(),
       actor: {
         kind: 'CLIENT',
         userId: fx.clients[0].clientId,

@@ -57,6 +57,7 @@ import {
   normalizeJsonObjectPayload,
   type JsonObjectPayload,
 } from '@/app/api/_utils/jsonPayload'
+import { CONFIRM_HOLD_OVERLAP_FIELD } from '@/lib/booking/holdOverlapPrompt'
 import { updateProBooking } from '@/lib/booking/writeBoundary'
 import {
   applyAutoCancelRefund,
@@ -176,6 +177,7 @@ function buildProBookingUpdateIdempotencyBody(args: {
   hasDuration: boolean
   hasServiceItems: boolean
   overrideReason: string | null
+  confirmHoldOverlap: boolean
 }): JsonObjectPayload {
   return normalizeJsonObjectPayload({
     professionalId: args.professionalId,
@@ -194,6 +196,9 @@ function buildProBookingUpdateIdempotencyBody(args: {
     hasDuration: args.hasDuration,
     hasServiceItems: args.hasServiceItems,
     overrideReason: args.overrideReason,
+    // Part of the hash on purpose: the confirming retry IS a different logical
+    // request, so it must not replay (or 409 against) the attempt that asked.
+    confirmHoldOverlap: args.confirmHoldOverlap,
   })
 }
 
@@ -646,6 +651,11 @@ export async function PATCH(req: Request, ctx: RouteContext) {
       return bookingJsonFail('INVALID_SCHEDULED_FOR')
     }
 
+    // The pro's answer to the live-hold decision — see the POST route. Only
+    // consulted when the occupied range actually moves.
+    const confirmHoldOverlap =
+      pickBool(rec[CONFIRM_HOLD_OVERLAP_FIELD]) ?? false
+
     const nextBuffer =
       rec.bufferMinutes != null ? pickInt(rec.bufferMinutes) : null
     if (hasBuffer && nextBuffer == null) {
@@ -711,6 +721,7 @@ export async function PATCH(req: Request, ctx: RouteContext) {
         hasDuration,
         hasServiceItems,
         overrideReason,
+        confirmHoldOverlap,
       }),
       messages: {
         missingKey: 'Missing idempotency key.',
@@ -743,6 +754,7 @@ export async function PATCH(req: Request, ctx: RouteContext) {
       hasBuffer,
       hasDuration,
       hasServiceItems,
+      confirmHoldOverlap,
       requestId,
       idempotencyKey: idempotency.idempotencyKey,
     })

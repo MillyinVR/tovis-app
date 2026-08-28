@@ -711,6 +711,10 @@ export function useCalendarData(args: UseCalendarDataArgs) {
     confirmChangeOverride: confirm.confirmChangeOverride,
     cancelChangeOverride: confirm.cancelChangeOverride,
 
+    holdOverlapDecision: confirm.holdOverlapDecision,
+    proceedOverHold: confirm.proceedOverHold,
+    waitForHold: confirm.waitForHold,
+
     ui: {
       suppressClickRef: dragDrop.ui.suppressClickRef,
       suppressClickBriefly: dragDrop.ui.suppressClickBriefly,

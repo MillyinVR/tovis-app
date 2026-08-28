@@ -14,7 +14,7 @@ import type { ClientConfirmationBadge } from '@/lib/booking/clientConfirmation'
 import type { BrandProCalendarCopy } from '@/lib/brand/types'
 import type { CalendarEvent, EntityType } from '../../_types'
 
-import { useHoldCountdown } from '@/app/pro/calendar/_hooks/useHoldCountdown'
+import { useHoldCountdown } from '@/app/pro/_hooks/useHoldCountdown'
 import { calendarStatusMeta } from '../../_utils/statusStyles'
 import { eventStatusLabel } from '../../_viewModel/proCalendarDisplay'
 

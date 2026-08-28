@@ -243,6 +243,7 @@ function expectedBaseUpdateArgs(overrides?: Record<string, unknown>) {
     hasBuffer: false,
     hasDuration: false,
     hasServiceItems: false,
+    confirmHoldOverlap: false,
     requestId: null,
     idempotencyKey: 'idem_pro_booking_update_1',
     ...(overrides ?? {}),
@@ -269,6 +270,7 @@ function expectedBaseIdempotencyRequestBody(
     hasDuration: false,
     hasServiceItems: false,
     overrideReason: null,
+    confirmHoldOverlap: false,
     ...(overrides ?? {}),
   }
 }

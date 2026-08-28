@@ -16,6 +16,12 @@ import {
   type BookingOverrideFlag,
   type BookingOverridePrompt,
 } from '@/lib/booking/overridePrompts'
+import {
+  CONFIRM_HOLD_OVERLAP_FIELD,
+  readHoldOverlapDecision,
+  type HeldSlotDecision,
+} from '@/lib/booking/holdOverlapPrompt'
+import { HoldOverlapDecisionDialog } from '@/app/pro/_components/HoldOverlapDecisionDialog'
 import type {
   ProBookingNewClientDTO,
   ProBookingNewOfferingDTO,
@@ -761,6 +767,15 @@ export default function NewBookingForm({
   >([])
   const [overrideReason, setOverrideReason] = useState('')
 
+  // B5 follow-up: a client is mid-checkout on the minutes the pro just asked
+  // for. Same soft-confirmation shape as the override prompt above — the server
+  // refuses once with the decision, the pro answers, and the next submit
+  // carries `confirmHoldOverlap` (which also mints a fresh idempotency key,
+  // since the key is keyed on the body).
+  const [holdOverlapDecision, setHoldOverlapDecision] =
+    useState<HeldSlotDecision | null>(null)
+  const [holdOverlapConfirmed, setHoldOverlapConfirmed] = useState(false)
+
   // Carries the submit key across a network-error retry so a request that
   // actually landed can't double-book. Keyed to the exact body, so editing
   // the form (or an override retry, which adds flags) mints a fresh key.
@@ -1098,11 +1113,34 @@ export default function NewBookingForm({
     setOverridePrompt(null)
     setAuthorizedOverrideFlags([])
     setOverrideReason('')
+    // Same rule for the live-hold answer, and for the same reason: the pro
+    // agreed to book over ONE client's checkout on ONE slot. Carrying that
+    // consent to a different time (or a different service, which changes the
+    // window) would book over somebody they were never shown.
+    setHoldOverlapDecision(null)
+    setHoldOverlapConfirmed(false)
   }, [scheduledAt, locationId, locationType, offeringId, selectedAddOnIds])
 
   const overrideAuthorized = overridePrompt
     ? authorizedOverrideFlags.includes(overridePrompt.flag)
     : true
+
+  /** The pro chose to take the slot: remember it, close, and re-submit. */
+  function proceedOverHold() {
+    setHoldOverlapConfirmed(true)
+    setHoldOverlapDecision(null)
+    void submitBooking({ confirmHoldOverlap: true })
+  }
+
+  /**
+   * The pro chose to leave the client to it. The attempt is simply abandoned —
+   * nothing to persist, exactly as if they had navigated away. The form keeps
+   * everything they typed, so waiting a minute and pressing Book again is the
+   * whole recovery.
+   */
+  function waitForHold() {
+    setHoldOverlapDecision(null)
+  }
 
   function toggleOverrideAuthorized(flag: BookingOverrideFlag, next: boolean) {
     setAuthorizedOverrideFlags((current) => {
@@ -1390,11 +1428,24 @@ export default function NewBookingForm({
 
   const submitDisabled = submitBlockers.length > 0
 
-  async function handleSubmit(e: React.FormEvent) {
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    void submitBooking()
+  }
+
+  /**
+   * `confirmHoldOverlap` is passed in rather than read off state because the
+   * popup's "book it anyway" re-submits immediately: a `setState` in the same
+   * tick would not be visible to this call, and the retry would ask the same
+   * question forever.
+   */
+  async function submitBooking(options?: { confirmHoldOverlap?: boolean }) {
     setError(null)
 
     if (loading) return
+
+    const confirmHoldOverlap =
+      options?.confirmHoldOverlap ?? holdOverlapConfirmed
 
     if (clientMode === 'existing' && !clientId) {
       setError('Select an existing client or switch to new client.')
@@ -1510,6 +1561,16 @@ export default function NewBookingForm({
 
     const trimmedOverrideReason = overrideReason.trim()
     const overrideBody = overrideBodyFromFlags(authorizedOverrideFlags)
+    // Present only once the pro has actually answered — an absent field is
+    // "ask me", which is what every first attempt must be.
+    //
+    // Single bookings only. A SERIES is materialized unattended, so its source
+    // refuses on ANY conflict before the pro branch is reached — the decision
+    // can never be raised there, and a field the route would ignore is one more
+    // thing to wonder about later.
+    const holdOverlapBody = confirmHoldOverlap
+      ? { [CONFIRM_HOLD_OVERLAP_FIELD]: true }
+      : {}
 
     setLoading(true)
 
@@ -1555,6 +1616,7 @@ export default function NewBookingForm({
             internalNotes: internalNotes.trim() || null,
             overrideReason: trimmedOverrideReason || null,
             depositRequested,
+            ...holdOverlapBody,
             ...overrideBody,
           })
 
@@ -1595,6 +1657,23 @@ export default function NewBookingForm({
 
   if (!res.ok) {
     submitIdempotencyKeyRef.current = null
+
+    // A client is checking out for these minutes right now. Not a dead end —
+    // the pro is shown who is holding it (new or returning to them, and nothing
+    // else) and decides. Checked before the override prompt because it is a
+    // different KIND of answer: an override says "my own rule doesn't apply
+    // here", this one says "take it from someone mid-payment".
+    //
+    // `holdOverlapConfirmed` guards the loop: once answered, a second refusal
+    // with the same code would be a server bug, and re-opening the popup would
+    // trap the pro in it.
+    const heldSlot = readHoldOverlapDecision(data)
+
+    if (heldSlot && !confirmHoldOverlap) {
+      setHoldOverlapDecision(heldSlot)
+      setError(null)
+      return
+    }
 
     // If the failure is an unauthorized, pro-overridable scheduling rule, turn
     // it into a soft confirmation instead of a dead-end error: surface the
@@ -2630,6 +2709,15 @@ export default function NewBookingForm({
           fieldClassName={field}
         />
       ) : null}
+
+      <HoldOverlapDecisionDialog
+        decision={holdOverlapDecision}
+        intent="create"
+        timeZone={bookingTimeZone}
+        busy={loading}
+        onProceed={proceedOverHold}
+        onWait={waitForHold}
+      />
 
       {error ? (
         <div className="rounded-card border border-toneDanger/20 bg-toneDanger/10 px-3 py-2 text-[12px] font-black text-toneDanger">

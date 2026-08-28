@@ -4,6 +4,7 @@
 // LastMinuteSettings row with its service rules + blocks, plus the active
 // offerings, and shapes them into the workspace payload the client expects.
 import { Prisma } from '@prisma/client'
+import { offeringDisplayName } from '@/lib/pro/offeringDisplayName'
 
 import type { LastMinuteWorkspaceInitial } from '@/app/pro/last-minute/LastMinuteWorkspaceClient'
 import {
@@ -76,12 +77,6 @@ function pickOfferingBasePrice(offering: ActiveOfferingRow): NullableMoney {
     offering.service.minPrice ??
     null
   )
-}
-
-function offeringDisplayName(offering: ActiveOfferingRow): string {
-  const title = offering.title?.trim()
-
-  return title ? title : offering.service.name
 }
 
 function mapOfferingToPayload(

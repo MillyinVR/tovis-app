@@ -1,5 +1,7 @@
 // lib/booking/errors.ts
 
+import type { HeldSlotDecision } from "@/lib/booking/holdOverlapPrompt";
+
 export type BookingErrorCode =
   | "BOOKING_ID_REQUIRED"
   | "HOLD_ID_REQUIRED"
@@ -45,6 +47,7 @@ export type BookingErrorCode =
   | "TIME_BLOCKED"
   | "TIME_BOOKED"
   | "TIME_HELD"
+  | "HOLD_OVERLAP_NEEDS_CONFIRMATION"
   | "TIME_NOT_AVAILABLE"
   | "ADDONS_INVALID"
   | "INVALID_SERIES_RECURRENCE"
@@ -126,6 +129,7 @@ export type BookingErrorMeta = {
 
 export type BookingErrorDescriptor = BookingErrorMeta & {
   code: BookingErrorCode;
+  heldSlot?: HeldSlotDecision;
 };
 
 /**
@@ -140,7 +144,18 @@ export type BookingErrorDescriptor = BookingErrorMeta & {
  */
 export type BookingErrorOverrides = Partial<
   Pick<BookingErrorMeta, "message" | "userMessage" | "uiAction">
->;
+> & {
+  /**
+   * The live-hold decision payload, on HOLD_OVERLAP_NEEDS_CONFIRMATION only.
+   *
+   * Carried here rather than as a loose `details: Record<string, unknown>` so
+   * what reaches the wire is a NAMED, closed type
+   * (`lib/booking/holdOverlapPrompt.ts`) that can be read in one screen and
+   * checked for identity leaks by reading it. An open bag would let any future
+   * throw site put a client's name on a response nobody re-reviewed.
+   */
+  heldSlot?: HeldSlotDecision;
+};
 
 export type BookingErrorResponse = {
   ok: false;
@@ -471,6 +486,30 @@ const BOOKING_ERROR_CATALOG: Record<BookingErrorCode, BookingErrorMeta> = {
     uiAction: "PICK_NEW_SLOT",
     message: "Requested time is currently held.",
     userMessage: "Someone is already holding that time. Please try another slot.",
+  },
+
+  /**
+   * NOT a dead end — a question. A pro asked for minutes a client is checking
+   * out on right now, and has not been shown the decision yet. The body carries
+   * `heldSlot`; the pro answers by re-submitting with `confirmHoldOverlap:
+   * true`, which authorizes the overlap and logs it as an informed choice.
+   *
+   * 409 like every other "that time is taken" refusal, and `retryable: false`
+   * for the same reason those are: re-sending the SAME request cannot succeed.
+   * The retry that works carries a different body.
+   *
+   * `uiAction: NONE` because none of the catalog's remedies fit — the pro is not
+   * being sent to pick a new slot, they are being asked a question the popup
+   * asks. A surface that does not know this code falls back to showing
+   * `userMessage`, which is honest on its own.
+   */
+  HOLD_OVERLAP_NEEDS_CONFIRMATION: {
+    httpStatus: 409,
+    retryable: false,
+    uiAction: "NONE",
+    message: "A live client hold covers this time; the pro must confirm the overlap.",
+    userMessage:
+      "A client is checking out for this time right now. Choose whether to book over them.",
   },
   TIME_NOT_AVAILABLE: {
     httpStatus: 409,
@@ -937,6 +976,7 @@ export function getBookingErrorDescriptor(
     uiAction: overrides?.uiAction ?? meta.uiAction,
     message: overrides?.message ?? meta.message,
     userMessage: overrides?.userMessage ?? meta.userMessage,
+    ...(overrides?.heldSlot ? { heldSlot: overrides.heldSlot } : {}),
   };
 }
 
@@ -956,6 +996,8 @@ export class BookingError extends Error {
   readonly retryable: boolean;
   readonly uiAction: BookingErrorUiAction;
   readonly userMessage: string;
+  /** Set only on HOLD_OVERLAP_NEEDS_CONFIRMATION — see BookingErrorOverrides. */
+  readonly heldSlot: HeldSlotDecision | null;
 
   constructor(
     code: BookingErrorCode,
@@ -970,6 +1012,7 @@ export class BookingError extends Error {
     this.retryable = descriptor.retryable;
     this.uiAction = descriptor.uiAction;
     this.userMessage = descriptor.userMessage;
+    this.heldSlot = descriptor.heldSlot ?? null;
   }
 }
 
@@ -1047,6 +1090,7 @@ export function getBookingFailPayload(
     retryable: boolean;
     uiAction: BookingErrorUiAction;
     message: string;
+    heldSlot?: HeldSlotDecision;
   };
 } {
   const descriptor = getBookingErrorDescriptor(code, overrides);
@@ -1059,6 +1103,10 @@ export function getBookingFailPayload(
       retryable: descriptor.retryable,
       uiAction: descriptor.uiAction,
       message: descriptor.message,
+      // Spread-if-present rather than `heldSlot: … ?? null`: every other booking
+      // failure keeps the exact body it has today, so nothing downstream has to
+      // learn to ignore a null key it never asked for.
+      ...(descriptor.heldSlot ? { heldSlot: descriptor.heldSlot } : {}),
     },
   };
 }

@@ -1,14 +1,23 @@
-// app/pro/calendar/_hooks/useHoldCountdown.ts
+// app/pro/_hooks/useHoldCountdown.ts
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
 
-import { formatHoldCountdown } from '@/lib/booking/holdCountdown'
+import {
+  formatHoldCountdown,
+  isHoldCountdownUrgent,
+} from '@/lib/booking/holdCountdown'
 
 const TICK_MS = 1_000
 
 /**
- * The live time left on a client's checkout reservation, for the pro's tile.
+ * The live time left on a client's checkout reservation.
+ *
+ * Pro-wide rather than calendar-private since the live-hold decision popup
+ * shows the same clock on `/pro/bookings/new` — one ticker, so the tile, the
+ * popup and the client's own checkout cannot read three different countdowns
+ * off one reservation. The FORMAT is `lib/booking/holdCountdown`; this owns the
+ * ticking.
  *
  * ⚠️ The ticker is deliberately per-card and starts ONLY when `expiresAtIso` is
  * present. Every other kind of event passes `null`, so a calendar full of
@@ -25,6 +34,15 @@ const TICK_MS = 1_000
 export function useHoldCountdown(expiresAtIso: string | null): {
   label: string | null
   expired: boolean
+  /**
+   * Close enough to lapsing to deserve a louder tone
+   * (`lib/booking/holdCountdown`'s threshold, shared with iOS).
+   *
+   * Derived here rather than at the call site because the answer moves with the
+   * clock: computing it during a render would be reading a clock outside this
+   * ticker, which is both impure and a second source of "how long is left".
+   */
+  urgent: boolean
 } {
   const expiresAtMs = useMemo(() => {
     if (!expiresAtIso) return null
@@ -63,5 +81,6 @@ export function useHoldCountdown(expiresAtIso: string | null): {
   return {
     label: remainingMs === null ? null : formatHoldCountdown(remainingMs),
     expired: remainingMs !== null && remainingMs <= 0,
+    urgent: remainingMs !== null && isHoldCountdownUrgent(remainingMs),
   }
 }

@@ -504,4 +504,176 @@ describe('useConfirmChange', () => {
       'You are not allowed to use that override.',
     )
   })
+  // ── The live-hold decision (B5 follow-up, Tori 2026-08-28) ────────────────
+  //
+  // A drag can land on minutes a client is checking out for. Same machinery as
+  // the override prompt — keep the pending change and its optimistic position,
+  // ask, retry — with one difference that matters: "wait" is the safe answer,
+  // so it rolls the drag back rather than leaving the appointment sitting on
+  // somebody's payment.
+
+  const HELD_SLOT = {
+    holdId: 'hold_1',
+    relationship: 'RETURNING',
+    serviceName: 'Signature Manicure',
+    startsAt: '2026-06-12T16:00:00.000Z',
+    endsAt: '2026-06-12T17:15:00.000Z',
+    expiresAt: '2026-06-12T15:40:00.000Z',
+    additionalHeldSlots: 0,
+  }
+
+  function holdDecisionBody() {
+    return {
+      ok: false,
+      code: 'HOLD_OVERLAP_NEEDS_CONFIRMATION',
+      heldSlot: HELD_SLOT,
+    }
+  }
+
+  it('asks before dragging an appointment onto a live client hold', async () => {
+    mocks.safeJson.mockResolvedValueOnce(holdDecisionBody())
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 409 })
+
+    const { result, setEvents, setError, reloadCalendar } =
+      renderConfirmChange()
+
+    act(() => {
+      result.current.openConfirm(makeMoveChange())
+    })
+
+    await act(async () => {
+      await result.current.applyConfirm()
+    })
+
+    // No dead end, no rollback, nothing written.
+    expect(setError).not.toHaveBeenCalled()
+    expect(setEvents).not.toHaveBeenCalled()
+    expect(reloadCalendar).not.toHaveBeenCalled()
+    expect(result.current.holdOverlapDecision).toEqual(HELD_SLOT)
+    expect(result.current.confirmOpen).toBe(false)
+    expect(result.current.pendingChange).not.toBeNull()
+
+    const body = JSON.parse(String(bookingPatchCalls()[0]?.[1]?.body))
+    expect(body.confirmHoldOverlap).toBeUndefined()
+  })
+
+  it('retries WITH the confirmation, on a fresh idempotency key', async () => {
+    mocks.safeJson
+      .mockResolvedValueOnce(holdDecisionBody())
+      .mockResolvedValueOnce({ ok: true })
+
+    fetchMock
+      .mockResolvedValueOnce({ ok: false, status: 409 })
+      .mockResolvedValueOnce({ ok: true, status: 200 })
+
+    const { result, reloadCalendar } = renderConfirmChange()
+
+    act(() => {
+      result.current.openConfirm(makeMoveChange())
+    })
+
+    await act(async () => {
+      await result.current.applyConfirm()
+    })
+
+    await act(async () => {
+      result.current.proceedOverHold()
+    })
+
+    const patchCalls = bookingPatchCalls()
+    expect(patchCalls).toHaveLength(2)
+
+    const first = JSON.parse(String(patchCalls[0]?.[1]?.body))
+    const second = JSON.parse(String(patchCalls[1]?.[1]?.body))
+
+    expect(first.confirmHoldOverlap).toBeUndefined()
+    expect(second.confirmHoldOverlap).toBe(true)
+    // Still the same move — the pro answered a question, they did not re-drag.
+    expect(second.scheduledFor).toBe(first.scheduledFor)
+
+    // 🔴 The key is hashed from the payload, so the answer has to be IN the
+    // payload or the ledger 409s the retry as "same key, different body".
+    const firstKey = (patchCalls[0]?.[1]?.headers ?? {})['Idempotency-Key']
+    const secondKey = (patchCalls[1]?.[1]?.headers ?? {})['Idempotency-Key']
+    expect(firstKey).toBeTruthy()
+    expect(secondKey).not.toBe(firstKey)
+
+    expect(result.current.holdOverlapDecision).toBeNull()
+    expect(result.current.pendingChange).toBeNull()
+    expect(reloadCalendar).toHaveBeenCalled()
+  })
+
+  it('rolls the drag back when the pro chooses to wait', async () => {
+    mocks.safeJson.mockResolvedValueOnce(holdDecisionBody())
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 409 })
+
+    const { result, setEvents, reloadCalendar } = renderConfirmChange()
+
+    act(() => {
+      result.current.openConfirm(makeMoveChange())
+    })
+
+    await act(async () => {
+      await result.current.applyConfirm()
+    })
+
+    await act(async () => {
+      result.current.waitForHold()
+    })
+
+    // The appointment goes back where it was, and nothing was written.
+    expect(setEvents).toHaveBeenCalledTimes(1)
+    expect(bookingPatchCalls()).toHaveLength(1)
+    expect(result.current.holdOverlapDecision).toBeNull()
+    expect(result.current.pendingChange).toBeNull()
+    expect(reloadCalendar).not.toHaveBeenCalled()
+  })
+
+  // The two questions can both apply to one drag: the scheduling rules are
+  // checked before the overlap policy, so the override retry can be the attempt
+  // that first meets the hold. Answering it must not lose the override flags.
+  it('carries the override flags through the hold answer', async () => {
+    mocks.safeJson
+      .mockResolvedValueOnce({ ok: false, code: 'ADVANCE_NOTICE_REQUIRED' })
+      .mockResolvedValueOnce(holdDecisionBody())
+      .mockResolvedValueOnce({ ok: true })
+
+    fetchMock
+      .mockResolvedValueOnce({ ok: false, status: 400 })
+      .mockResolvedValueOnce({ ok: false, status: 409 })
+      .mockResolvedValueOnce({ ok: true, status: 200 })
+
+    const { result, reloadCalendar } = renderConfirmChange()
+
+    act(() => {
+      result.current.openConfirm(makeMoveChange())
+    })
+
+    await act(async () => {
+      await result.current.applyConfirm()
+    })
+
+    expect(result.current.changeOverridePrompt?.flag).toBe('allowShortNotice')
+
+    await act(async () => {
+      await result.current.confirmChangeOverride()
+    })
+
+    expect(result.current.holdOverlapDecision).toEqual(HELD_SLOT)
+
+    await act(async () => {
+      result.current.proceedOverHold()
+    })
+
+    const patchCalls = bookingPatchCalls()
+    expect(patchCalls).toHaveLength(3)
+
+    const final = JSON.parse(String(patchCalls[2]?.[1]?.body))
+    expect(final.confirmHoldOverlap).toBe(true)
+    // The override the pro already granted is still there.
+    expect(final.allowShortNotice).toBe(true)
+
+    expect(result.current.pendingChange).toBeNull()
+    expect(reloadCalendar).toHaveBeenCalled()
+  })
 })

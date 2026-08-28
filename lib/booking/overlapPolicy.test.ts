@@ -27,10 +27,45 @@ const clientActor: BookingOverlapActor = {
   clientId: 'client_1',
 }
 
+const now = new Date('2026-06-01T16:00:00.000Z')
+
+/**
+ * The unattended pro paths (import, series, waitlist confirm, aftercare save).
+ * Used by every pre-existing case so they keep asserting exactly what they
+ * always did: B5's unconditional pro authority.
+ */
 const proActor: BookingOverlapActor = {
   kind: 'PRO',
   userId: 'user_pro_1',
   professionalId: 'pro_1',
+  liveHoldOverlap: 'NO_DECISION_SURFACE',
+}
+
+/** The interactive pro create/reschedule, before the pro has been asked. */
+const proActorAsking: BookingOverlapActor = {
+  ...proActor,
+  liveHoldOverlap: 'ASK_THE_PRO',
+}
+
+/** The interactive pro create/reschedule, after they chose to proceed. */
+const proActorConfirmed: BookingOverlapActor = {
+  ...proActor,
+  liveHoldOverlap: 'PRO_CONFIRMED',
+}
+
+const liveHoldConflict: SchedulingConflict = {
+  kind: 'HOLD',
+  id: 'hold_conflict_1',
+  professionalId: 'pro_1',
+  startsAt: new Date('2026-06-01T17:15:00.000Z'),
+  endsAt: new Date('2026-06-01T18:15:00.000Z'),
+  expiresAt: new Date('2026-06-01T16:08:00.000Z'),
+}
+
+const lapsedHoldConflict: SchedulingConflict = {
+  ...liveHoldConflict,
+  id: 'hold_conflict_lapsed',
+  expiresAt: new Date('2026-06-01T15:50:00.000Z'),
 }
 
 const adminActor: BookingOverlapActor = {
@@ -69,6 +104,7 @@ function makeAftercareSlot(
 describe('decideBookingOverlapPermission', () => {
   it('allows a normal client booking when there is no conflict', () => {
     const decision = decideBookingOverlapPermission({
+      now,
       actor: clientActor,
       source: broadDiscoverySource,
       requestedWindow,
@@ -84,6 +120,7 @@ describe('decideBookingOverlapPermission', () => {
 
   it('blocks a normal client booking when there is a conflict', () => {
     const decision = decideBookingOverlapPermission({
+      now,
       actor: clientActor,
       source: broadDiscoverySource,
       requestedWindow,
@@ -100,6 +137,7 @@ describe('decideBookingOverlapPermission', () => {
 
   it('allows a pro-created overlapping booking', () => {
     const decision = decideBookingOverlapPermission({
+      now,
       actor: proActor,
       source: { kind: 'PRO_CREATED' },
       requestedWindow,
@@ -119,6 +157,7 @@ describe('decideBookingOverlapPermission', () => {
   // holds the time as a calendar block instead.
   it('refuses a calendar import that overlaps, despite the PRO actor', () => {
     const decision = decideBookingOverlapPermission({
+      now,
       actor: proActor,
       source: { kind: 'CALENDAR_IMPORT' },
       requestedWindow,
@@ -133,12 +172,12 @@ describe('decideBookingOverlapPermission', () => {
 
   it('refuses a calendar import that overlaps a HOLD, not just a booking', () => {
     const holdConflict: SchedulingConflict = {
-      ...conflict,
-      kind: 'HOLD',
+      ...liveHoldConflict,
       id: 'hold_conflict_1',
     }
 
     const decision = decideBookingOverlapPermission({
+      now,
       actor: proActor,
       source: { kind: 'CALENDAR_IMPORT' },
       requestedWindow,
@@ -153,6 +192,7 @@ describe('decideBookingOverlapPermission', () => {
   // The refusal is scoped to conflicts only — a clean import still books.
   it('allows a calendar import when there is no conflict', () => {
     const decision = decideBookingOverlapPermission({
+      now,
       actor: proActor,
       source: { kind: 'CALENDAR_IMPORT' },
       requestedWindow,
@@ -170,6 +210,7 @@ describe('decideBookingOverlapPermission', () => {
   // property of the source, not of who holds the pen.
   it('refuses a calendar import even for an ADMIN actor', () => {
     const decision = decideBookingOverlapPermission({
+      now,
       actor: adminActor,
       source: { kind: 'CALENDAR_IMPORT' },
       requestedWindow,
@@ -186,6 +227,7 @@ describe('decideBookingOverlapPermission', () => {
   // as CALENDAR_IMPORT, same reason — a property of the SOURCE.
   it('refuses a series occurrence that overlaps, despite the PRO actor', () => {
     const decision = decideBookingOverlapPermission({
+      now,
       actor: proActor,
       source: { kind: 'SERIES_MATERIALIZATION' },
       requestedWindow,
@@ -200,12 +242,12 @@ describe('decideBookingOverlapPermission', () => {
 
   it('refuses a series occurrence that overlaps a HOLD, not just a booking', () => {
     const holdConflict: SchedulingConflict = {
-      ...conflict,
-      kind: 'HOLD',
+      ...liveHoldConflict,
       id: 'hold_conflict_series',
     }
 
     const decision = decideBookingOverlapPermission({
+      now,
       actor: proActor,
       source: { kind: 'SERIES_MATERIALIZATION' },
       requestedWindow,
@@ -217,8 +259,173 @@ describe('decideBookingOverlapPermission', () => {
     expect(decision.code).toBe('SERIES_OVERLAP_NOT_ALLOWED')
   })
 
+  // ── The live-hold decision (B5 follow-up, Tori 2026-08-28) ──────────────────
+  //
+  // Everything above pins B5's rule: a pro may overlap anything. These pin the
+  // ONE exception — a client is mid-checkout on these exact minutes — and, just
+  // as importantly, its edges.
+
+  it('asks the pro before booking over a LIVE hold', () => {
+    const decision = decideBookingOverlapPermission({
+      now,
+      actor: proActorAsking,
+      source: { kind: 'PRO_CREATED' },
+      requestedWindow,
+      conflicts: [liveHoldConflict],
+    })
+
+    expect(decision.ok).toBe(false)
+    if (decision.ok) throw new Error('expected a blocked decision')
+    expect(decision.code).toBe('PRO_HOLD_DECISION_REQUIRED')
+    // The conflicts ride along so the caller can describe the hold.
+    expect(decision.conflicts).toEqual([liveHoldConflict])
+  })
+
+  it('books over a live hold once the pro has answered, as its own mode', () => {
+    const decision = decideBookingOverlapPermission({
+      now,
+      actor: proActorConfirmed,
+      source: { kind: 'PRO_CREATED' },
+      requestedWindow,
+      conflicts: [liveHoldConflict],
+    })
+
+    expect(decision.ok).toBe(true)
+    if (!decision.ok) throw new Error('expected an allowed decision')
+    // A distinct mode, not PRO_AUTHORIZED_OVERLAP: the audit trail has to be
+    // able to say the choice was informed.
+    expect(decision.mode).toBe('PRO_CONFIRMED_HOLD_OVERLAP')
+  })
+
+  it('still asks when a live hold rides alongside an ordinary booking conflict', () => {
+    const decision = decideBookingOverlapPermission({
+      now,
+      actor: proActorAsking,
+      source: { kind: 'PRO_CREATED' },
+      requestedWindow,
+      conflicts: [conflict, liveHoldConflict],
+    })
+
+    expect(decision.ok).toBe(false)
+    if (decision.ok) throw new Error('expected a blocked decision')
+    expect(decision.code).toBe('PRO_HOLD_DECISION_REQUIRED')
+  })
+
+  // The edge that keeps the friction scoped. A hold past its expiry reserves
+  // nothing — every conflict query filters `expiresAt > now`, so one normally
+  // cannot even reach here — and asking about it would be asking about nobody.
+  it('does NOT ask about a LAPSED hold', () => {
+    const decision = decideBookingOverlapPermission({
+      now,
+      actor: proActorAsking,
+      source: { kind: 'PRO_CREATED' },
+      requestedWindow,
+      conflicts: [lapsedHoldConflict],
+    })
+
+    expect(decision.ok).toBe(true)
+    if (!decision.ok) throw new Error('expected an allowed decision')
+    expect(decision.mode).toBe('PRO_AUTHORIZED_OVERLAP')
+  })
+
+  // A hold expiring at exactly `now` is over: the conflict query's `gt: now`
+  // says so, and the two must agree or the popup would ask about minutes the
+  // write path already considers free.
+  it('treats a hold expiring exactly at now as lapsed', () => {
+    const decision = decideBookingOverlapPermission({
+      now,
+      actor: proActorAsking,
+      source: { kind: 'PRO_CREATED' },
+      requestedWindow,
+      conflicts: [{ ...liveHoldConflict, expiresAt: now }],
+    })
+
+    expect(decision.ok).toBe(true)
+    if (!decision.ok) throw new Error('expected an allowed decision')
+    expect(decision.mode).toBe('PRO_AUTHORIZED_OVERLAP')
+  })
+
+  it('does NOT ask about another APPOINTMENT — that friction was never wanted', () => {
+    const decision = decideBookingOverlapPermission({
+      now,
+      actor: proActorAsking,
+      source: { kind: 'PRO_CREATED' },
+      requestedWindow,
+      conflicts: [conflict],
+    })
+
+    expect(decision.ok).toBe(true)
+    if (!decision.ok) throw new Error('expected an allowed decision')
+    expect(decision.mode).toBe('PRO_AUTHORIZED_OVERLAP')
+  })
+
+  // The unattended paths — aftercare save, series, import, waitlist confirm.
+  // There is no dialog to carry the question, so failing the write with one
+  // would strand the caller. Today's behaviour, pinned so a later change to the
+  // default cannot quietly turn it into a refusal.
+  it('does not ask on a path with no decision surface', () => {
+    const decision = decideBookingOverlapPermission({
+      now,
+      actor: proActor,
+      source: { kind: 'PRO_CREATED' },
+      requestedWindow,
+      conflicts: [liveHoldConflict],
+    })
+
+    expect(decision.ok).toBe(true)
+    if (!decision.ok) throw new Error('expected an allowed decision')
+    expect(decision.mode).toBe('PRO_AUTHORIZED_OVERLAP')
+  })
+
+  // The gate is the PRO's. An admin override answers to a different rule and a
+  // client can never overlap at all, so neither ever meets this question.
+  it('leaves the ADMIN override untouched by the hold decision', () => {
+    const decision = decideBookingOverlapPermission({
+      now,
+      actor: adminActor,
+      source: { kind: 'ADMIN_OVERRIDE' },
+      requestedWindow,
+      conflicts: [liveHoldConflict],
+    })
+
+    expect(decision.ok).toBe(true)
+    if (!decision.ok) throw new Error('expected an allowed decision')
+    expect(decision.mode).toBe('ADMIN_AUTHORIZED_OVERLAP')
+  })
+
+  it('still refuses a CLIENT on a live hold, with the client code', () => {
+    const decision = decideBookingOverlapPermission({
+      now,
+      actor: clientActor,
+      source: broadDiscoverySource,
+      requestedWindow,
+      conflicts: [liveHoldConflict],
+    })
+
+    expect(decision.ok).toBe(false)
+    if (decision.ok) throw new Error('expected a blocked decision')
+    expect(decision.code).toBe('CLIENT_OVERLAP_NOT_ALLOWED')
+  })
+
+  // An UNATTENDED source outranks the pro's stance, in both directions: an
+  // import must not be able to confirm its way through a live hold either.
+  it('refuses an import over a live hold even when the stance says confirmed', () => {
+    const decision = decideBookingOverlapPermission({
+      now,
+      actor: proActorConfirmed,
+      source: { kind: 'CALENDAR_IMPORT' },
+      requestedWindow,
+      conflicts: [liveHoldConflict],
+    })
+
+    expect(decision.ok).toBe(false)
+    if (decision.ok) throw new Error('expected a blocked decision')
+    expect(decision.code).toBe('IMPORT_OVERLAP_NOT_ALLOWED')
+  })
+
   it('refuses a series occurrence even for an ADMIN actor', () => {
     const decision = decideBookingOverlapPermission({
+      now,
       actor: adminActor,
       source: { kind: 'SERIES_MATERIALIZATION' },
       requestedWindow,
@@ -235,6 +442,7 @@ describe('decideBookingOverlapPermission', () => {
   // the point of materializing real rows in the first place.
   it('allows a series occurrence when there is no conflict', () => {
     const decision = decideBookingOverlapPermission({
+      now,
       actor: proActor,
       source: { kind: 'SERIES_MATERIALIZATION' },
       requestedWindow,
@@ -250,6 +458,7 @@ describe('decideBookingOverlapPermission', () => {
 
   it('allows an admin override overlapping booking', () => {
     const decision = decideBookingOverlapPermission({
+      now,
       actor: adminActor,
       source: { kind: 'ADMIN_OVERRIDE' },
       requestedWindow,
@@ -268,6 +477,7 @@ describe('decideBookingOverlapPermission', () => {
     // conflict at confirm always means the time has since been taken — the
     // pro's pre-selected slot never authorizes a silent double-book.
     const decision = decideBookingOverlapPermission({
+      now,
       actor: clientActor,
       source: {
         kind: 'AFTERCARE_REBOOK',
@@ -292,6 +502,7 @@ describe('decideBookingOverlapPermission', () => {
 
   it('blocks an aftercare rebook overlap when no preselected slot exists', () => {
     const decision = decideBookingOverlapPermission({
+      now,
       actor: clientActor,
       source: {
         kind: 'AFTERCARE_REBOOK',
@@ -312,6 +523,7 @@ describe('decideBookingOverlapPermission', () => {
 
   it('blocks an aftercare rebook overlap when the preselected slot has a different start', () => {
     const decision = decideBookingOverlapPermission({
+      now,
       actor: clientActor,
       source: {
         kind: 'AFTERCARE_REBOOK',
@@ -340,6 +552,7 @@ describe('decideBookingOverlapPermission', () => {
 
   it('blocks an aftercare rebook overlap when the preselected slot has a different end', () => {
     const decision = decideBookingOverlapPermission({
+      now,
       actor: clientActor,
       source: {
         kind: 'AFTERCARE_REBOOK',
@@ -362,6 +575,7 @@ describe('decideBookingOverlapPermission', () => {
 
   it('blocks an aftercare rebook overlap when the preselected slot belongs to another pro', () => {
     const decision = decideBookingOverlapPermission({
+      now,
       actor: clientActor,
       source: {
         kind: 'AFTERCARE_REBOOK',
@@ -384,6 +598,7 @@ describe('decideBookingOverlapPermission', () => {
 
   it('blocks an invalid booking window', () => {
     const decision = decideBookingOverlapPermission({
+      now,
       actor: clientActor,
       source: broadDiscoverySource,
       requestedWindow: {

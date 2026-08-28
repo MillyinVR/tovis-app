@@ -22,6 +22,7 @@ import {
   bookingJsonFail,
 } from '@/app/api/_utils/bookingResponses'
 import { normalizeJsonValue } from '@/app/api/_utils/jsonPayload'
+import { CONFIRM_HOLD_OVERLAP_FIELD } from '@/lib/booking/holdOverlapPrompt'
 import { normalizeLocationType } from '@/lib/booking/locationContext'
 import { computeRequestedEndUtc } from '@/lib/booking/slotReadiness'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
@@ -369,6 +370,13 @@ export async function POST(req: Request) {
     // there, never silently dropped.
     const depositRequested = pickBool(body.depositRequested) ?? false
 
+    // The pro's answer to the live-hold decision. Only ever sent on a SECOND
+    // attempt, after this route already refused the first with
+    // HOLD_OVERLAP_NEEDS_CONFIRMATION and the surface put the choice in front
+    // of them. Absent (the default) means "ask me".
+    const confirmHoldOverlap =
+      pickBool(body[CONFIRM_HOLD_OVERLAP_FIELD]) ?? false
+
     if (!scheduledFor) {
       return bookingJsonFail('INVALID_SCHEDULED_FOR')
     }
@@ -416,6 +424,10 @@ export async function POST(req: Request) {
         allowShortNotice,
         allowFarFuture,
         depositRequested,
+        // Part of the hash on purpose: the confirming retry IS a different
+        // logical request, so it must not replay (or 409 against) the attempt
+        // that asked the question.
+        confirmHoldOverlap,
       },
     })
 
@@ -458,6 +470,7 @@ export async function POST(req: Request) {
       allowShortNotice,
       allowFarFuture,
       depositRequested,
+      confirmHoldOverlap,
       requestId,
       idempotencyKey,
     })
