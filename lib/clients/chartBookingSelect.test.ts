@@ -8,6 +8,7 @@ import {
   CHART_BOOKING_HISTORY_TAKE,
   CHART_BOOKING_SELECT,
   chartBookingWhere,
+  chartNoShowCountWhere,
   isChartBookingFilterActive,
   parseChartBookingFilter,
 } from '@/lib/clients/chartBookingSelect'
@@ -138,5 +139,24 @@ describe('CHART_BOOKING_HISTORY_TAKE', () => {
     // It was 2000 on web and 500 on the API: the same chart, silently truncated
     // shorter on device with nothing to say so.
     expect(CHART_BOOKING_HISTORY_TAKE).toBe(2000)
+  })
+})
+
+describe('chartNoShowCountWhere', () => {
+  // Both the web chart's header stat and the API's `noShowCount` read this. The
+  // scope is the whole point: "has this client no-showed?" is a question about
+  // the CLIENT, so an answer narrowed to the viewing pro would read as "never"
+  // for someone who has stood up five other pros.
+  it('is scoped to the client and the NO_SHOW status only', () => {
+    expect(chartNoShowCountWhere({ clientId: 'client-1' })).toEqual({
+      clientId: 'client-1',
+      status: BookingStatus.NO_SHOW,
+    })
+  })
+
+  it('never narrows by professional', () => {
+    expect(chartNoShowCountWhere({ clientId: 'client-1' })).not.toHaveProperty(
+      'professionalId',
+    )
   })
 })
