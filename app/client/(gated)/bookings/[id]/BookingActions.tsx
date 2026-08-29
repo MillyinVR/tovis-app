@@ -3,7 +3,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { BookingStatus, SessionStep } from '@prisma/client'
+import { BookingStatus, SessionStep } from '@/lib/prismaEnums'
 import { DEFAULT_TIME_ZONE, sanitizeTimeZone } from '@/lib/timeZone'
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
 import { errorFromResponse, safeJson } from '@/lib/http'

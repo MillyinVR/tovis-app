@@ -16,7 +16,7 @@
 // `BookingStatus` directly. The legacy `BookingStatus = 'PENDING' | 'ACCEPTED'
 // | 'COMPLETED' | 'CANCELLED'` union (missing IN_PROGRESS) is forbidden.
 
-import { BookingStatus, SessionStep } from '@prisma/client'
+import { BookingStatus, SessionStep } from '@/lib/prismaEnums'
 
 import { isInsideClientCancellationWindow } from '@/lib/booking/constants'
 import { isTerminalBookingStatus } from '@/lib/booking/lifecycleContract'

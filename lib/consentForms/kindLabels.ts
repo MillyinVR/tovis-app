@@ -5,7 +5,7 @@
 // will add a third; a per-surface copy is how "Service waiver" and "Waiver" end
 // up on the same screen.
 
-import { ClientConsentKind } from '@prisma/client'
+import { ClientConsentKind } from '@/lib/prismaEnums'
 
 export const CONSENT_KIND_LABELS: Record<ClientConsentKind, string> = {
   GENERAL_CONSENT: 'General consent',

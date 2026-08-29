@@ -19,7 +19,7 @@ import type {
   AvailabilityCover,
   AvailabilityTrust,
 } from './types'
-import { ProNameDisplay } from '@prisma/client'
+import { ProNameDisplay } from '@/lib/prismaEnums'
 import { isRecord } from '@/lib/guards'
 
 function pickString(x: unknown): string | null {

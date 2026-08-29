@@ -1,7 +1,7 @@
 // app/pro/services/PrepayScopePicker.tsx
 'use client'
 
-import { OfferingPrepayScope } from '@prisma/client'
+import { OfferingPrepayScope } from '@/lib/prismaEnums'
 
 import { cn } from '@/lib/utils'
 

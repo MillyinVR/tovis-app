@@ -3,7 +3,7 @@
 
 import Link from 'next/link'
 import { useState } from 'react'
-import { ClientCreatorTier } from '@prisma/client'
+import { ClientCreatorTier } from '@/lib/prismaEnums'
 
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import BoardStripCard from '@/app/_components/boards/BoardStripCard'

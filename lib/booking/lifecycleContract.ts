@@ -44,7 +44,7 @@
 //   "Send aftercare + complete"   — AFTER_PHOTOS → DONE / COMPLETED
 //
 
-import { BookingStatus, SessionStep } from '@prisma/client'
+import { BookingStatus, SessionStep } from '@/lib/prismaEnums'
 
 // ─── Actors ──────────────────────────────────────────────────────────────────
 

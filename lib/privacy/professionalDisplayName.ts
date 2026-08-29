@@ -1,14 +1,20 @@
 // lib/privacy/professionalDisplayName.ts
-import { Prisma, ProNameDisplay } from '@prisma/client'
+import type { Prisma } from '@prisma/client'
 
-export const professionalPublicDisplayNameSelect =
-  Prisma.validator<Prisma.ProfessionalProfileSelect>()({
-    businessName: true,
-    firstName: true,
-    lastName: true,
-    handle: true,
-    nameDisplay: true,
-  })
+import { ProNameDisplay } from '@/lib/prismaEnums'
+
+// `satisfies` rather than `Prisma.validator<T>()(…)`: the two check the same
+// thing and both preserve the literal type a `select:` needs, but `validator` is
+// a runtime call, so it is a VALUE import of '@prisma/client' — and this module
+// is reached by 42 client entry points. Same form as the other select consts in
+// lib/booking (depositCredit, paymentBadge, relationshipLabel).
+export const professionalPublicDisplayNameSelect = {
+  businessName: true,
+  firstName: true,
+  lastName: true,
+  handle: true,
+  nameDisplay: true,
+} satisfies Prisma.ProfessionalProfileSelect
 
 export type ProfessionalPublicDisplayNameSource = {
   businessName?: string | null

@@ -25,7 +25,7 @@
 //
 // Time is rendered through `@/lib/time` (never raw Intl/toLocale*).
 
-import { AftercareRebookMode, BookingCheckoutStatus } from '@prisma/client'
+import { AftercareRebookMode, BookingCheckoutStatus } from '@/lib/prismaEnums'
 
 import { formatInTimeZone, getZonedParts } from '@/lib/time'
 import { initialsForName } from '@/lib/initials'

@@ -34,7 +34,7 @@
 // lib/booking/paymentBadge.ts and lib/booking/moneyTrail.ts. The caller owns
 // the query + authz.
 
-import { BookingDepositStatus } from '@prisma/client'
+import { BookingDepositStatus } from '@/lib/prismaEnums'
 import type { Prisma } from '@prisma/client'
 
 import { decimalToCents } from '@/lib/money'

@@ -1,5 +1,5 @@
 // lib/booking/constants.ts
-import { BookingStatus } from '@prisma/client'
+import { BookingStatus } from '@/lib/prismaEnums'
 
 export const MAX_SLOT_DURATION_MINUTES = 12 * 60
 export const MAX_BUFFER_MINUTES = 180

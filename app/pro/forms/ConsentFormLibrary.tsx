@@ -9,7 +9,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { ClientConsentKind } from '@prisma/client'
+import { ClientConsentKind } from '@/lib/prismaEnums'
 
 import { Badge, Button } from '@/app/_components/ui'
 import {

@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { PhotoReleaseStatus } from '@prisma/client'
+import { PhotoReleaseStatus } from '@/lib/prismaEnums'
 
 type Props = {
   clientId: string

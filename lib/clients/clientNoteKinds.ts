@@ -5,7 +5,7 @@
 // isolation. The kind→visibility mapping is the security-relevant bit: a
 // DO_NOT_REBOOK entry is ALWAYS author-scoped (PRIVATE_TO_AUTHOR), never shared.
 
-import { ClientNoteKind, ClientNoteVisibility } from '@prisma/client'
+import { ClientNoteKind, ClientNoteVisibility } from '@/lib/prismaEnums'
 
 export const CLIENT_NOTE_KIND_LABELS: Record<ClientNoteKind, string> = {
   GENERAL: 'General',

@@ -7,7 +7,7 @@ import {
   LookPostVisibility,
   MediaType,
   MediaVisibility,
-} from '@prisma/client'
+} from '@/lib/prismaEnums'
 import { isRecord } from '@/lib/guards'
 import { pickStringOrEmpty } from '@/lib/pick'
 import { safeJsonRecord, readErrorMessage } from '@/lib/http'

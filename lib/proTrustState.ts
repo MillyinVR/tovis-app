@@ -27,11 +27,7 @@
 // booking; it lives in lib/pro/readiness/proReadiness.ts, because it is about
 // a credential that lapsed rather than one never reviewed.
 
-import {
-  MediaVisibility,
-  Role,
-  VerificationStatus,
-} from '@prisma/client'
+import { MediaVisibility, Role, VerificationStatus } from '@/lib/prismaEnums'
 
 /**
  * Whether each verification status bars a pro from the marketplace.
