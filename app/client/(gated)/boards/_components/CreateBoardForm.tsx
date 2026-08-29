@@ -4,7 +4,7 @@
 import Link from 'next/link'
 import { useState } from 'react'
 import { useFormStatus } from 'react-dom'
-import { BoardType } from '@prisma/client'
+import { BoardType } from '@/lib/prismaEnums'
 
 import { cn } from '@/lib/utils'
 import { ToggleChip } from '@/app/_components/ui'

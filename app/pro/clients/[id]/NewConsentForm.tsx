@@ -6,7 +6,7 @@ import {
   ClientConsentKind,
   ConsentProofMethod,
   PatchTestResult,
-} from '@prisma/client'
+} from '@/lib/prismaEnums'
 
 import type { ConsentFormOption } from '@/lib/consentForms/loader'
 import {

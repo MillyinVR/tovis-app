@@ -19,7 +19,7 @@
 // iOS mirrors this table in TovisKit `BookingStatusPresentation`; the two are
 // tied together by the pro-bookings contract fixture (that list's `statusLabel`
 // is computed HERE and sent over the wire).
-import { BookingStatus } from '@prisma/client'
+import { BookingStatus } from '@/lib/prismaEnums'
 
 import type { BadgeTone } from '@/app/_components/ui'
 

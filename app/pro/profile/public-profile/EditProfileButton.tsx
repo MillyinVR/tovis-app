@@ -11,7 +11,7 @@ import {
 } from 'react'
 import { useRouter } from 'next/navigation'
 
-import { ProNameDisplay } from '@prisma/client'
+import { ProNameDisplay } from '@/lib/prismaEnums'
 
 import { asTrimmedString, type UnknownRecord } from '@/lib/guards'
 import { errorMessageFromUnknown, readErrorMessage, safeJson } from '@/lib/http'

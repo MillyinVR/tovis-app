@@ -16,7 +16,7 @@ import {
   NoShowFeeReason,
   NoShowFeeStatus,
   StripePaymentStatus,
-} from '@prisma/client'
+} from '@/lib/prismaEnums'
 
 import type { BookingMoneyTrail } from '@/lib/booking/moneyTrail'
 import {

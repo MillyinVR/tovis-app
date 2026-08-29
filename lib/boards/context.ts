@@ -15,7 +15,7 @@
 // signals (occasion tag slugs + service-category slugs). It is pure — no
 // Prisma, no clock reads — so everything is unit-testable.
 
-import { BoardType } from '@prisma/client'
+import { BoardType } from '@/lib/prismaEnums'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 

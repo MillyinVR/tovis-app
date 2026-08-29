@@ -8,7 +8,7 @@ import {
   ProNameDisplay,
   Role,
   VerificationStatus,
-} from '@prisma/client'
+} from '@/lib/prismaEnums'
 
 import { isRecord } from '@/lib/guards'
 import { formatProfessionLabel } from '@/lib/profiles/publicProfileFormatting'

@@ -44,12 +44,15 @@
 //     reaches lib/prisma through lib/booking/writeBoundary.ts and is correct as
 //     it stands — treating that as a violation would be a false positive.
 //
-// NOT covered, deliberately: a direct `@prisma/client` VALUE import in a client
-// component (importing an enum object rather than a type). That is a real and
-// separate problem — it is what still puts a 124 KB chunk on 53 routes — but it
-// needs a client-safe enum surface designed first, and a guard that starts out
-// failing teaches people to append to an allowlist. Build that surface, then
-// widen this guard.
+// ALSO covered, as of the client-safe enum surface: a direct `@prisma/client`
+// VALUE import anywhere in the client-reachable graph — importing an enum OBJECT
+// rather than a type. That is the other half of the same leak, and it is what
+// put a 121.5 KB chunk on 53 routes. lib/prismaEnums.ts now provides those enum
+// values without the package, so the rule can be enforced instead of noted.
+//
+// One exception remains, named in CLIENT_VALUE_IMPORT_EXCEPTIONS below. It is a
+// real defect with a real fix, not a blanket escape hatch — see the comment
+// there before considering a second entry.
 //
 // Usage:
 //   node tools/check-no-client-prisma-import.mjs
@@ -166,6 +169,76 @@ function readHead(file) {
 const isClientModule = (file) => USE_CLIENT_RE.test(readHead(file))
 const isServerActionModule = (file) => USE_SERVER_RE.test(readHead(file))
 
+/**
+ * The only client-reachable modules still allowed to VALUE-import
+ * '@prisma/client'.
+ *
+ * lib/money.ts constructs and type-tests `Prisma.Decimal` — `new
+ * Prisma.Decimal(…)`, `value instanceof Prisma.Decimal`. That is a runtime
+ * class, not an enum, so the client-safe enum surface does nothing for it and
+ * there is no honest one-line fix: swapping in a standalone decimal.js would
+ * make `instanceof` fail against the Decimals Prisma itself returns, and
+ * parseMoney's result is written to the database.
+ *
+ * The real fix is the split #1027 used elsewhere — a client-safe formatting half
+ * (which needs no Decimal constructor; moneyToNumber already has a documented
+ * duck-typed fallback for foreign-realm Decimals) and a server half keeping
+ * parseMoney. That is a money-semantics change across 28 client entry points and
+ * wants its own PR and its own review, so it is NOT bundled here.
+ *
+ * (lib/money.test.ts needs no entry: nothing imports a test file, so it never
+ * enters the client-reachable set in the first place.)
+ *
+ * ⚠️ This is a defect list, not an allowlist. If you are here because a NEW
+ * module fails this guard, the answer is lib/prismaEnums.ts or `import type` —
+ * not a third entry. The list should only ever get shorter.
+ */
+const CLIENT_VALUE_IMPORT_EXCEPTIONS = new Set(['lib/money.ts'])
+
+/** Does this module import the '@prisma/client' PACKAGE in a non-erasable way? */
+function importsPrismaPackageAsValue(file) {
+  let src
+  try {
+    src = fs.readFileSync(file, 'utf8')
+  } catch {
+    return false
+  }
+  for (const m of src.matchAll(FROM_RE)) {
+    if (m[2] !== '@prisma/client') continue
+    if (!isTypeOnlyClause(m[1])) return true
+  }
+  for (const m of src.matchAll(DYNAMIC_RE)) {
+    if (m[1] === '@prisma/client') return true
+  }
+  return false
+}
+
+/**
+ * Everything a client bundle can pull in: BFS over value imports from every
+ * 'use client' module, stopping at a 'use server' RPC boundary — the same rules
+ * findPathToPrisma walks, so both rules agree on what "reaches the browser"
+ * means.
+ */
+function clientReachableSet(clientModules, depsCache) {
+  const reachable = new Set(clientModules)
+  const queue = [...clientModules]
+  while (queue.length > 0) {
+    const current = queue.shift()
+    let deps = depsCache.get(current)
+    if (deps === undefined) {
+      deps = valueImportsOf(current)
+      depsCache.set(current, deps)
+    }
+    for (const dep of deps) {
+      if (reachable.has(dep)) continue
+      if (isServerActionModule(dep)) continue
+      reachable.add(dep)
+      queue.push(dep)
+    }
+  }
+  return reachable
+}
+
 /** Shortest value-import path from `entry` to lib/prisma.ts, or null. */
 function findPathToPrisma(entry, depsCache) {
   const seen = new Set([entry])
@@ -276,9 +349,48 @@ function main() {
     process.exit(1)
   }
 
+  // ── Second rule: no VALUE import of '@prisma/client' in client-reachable code.
+  //
+  // A value import of the package cannot be erased, so it ships the same browser
+  // build the rule above exists to keep out — no lib/prisma.ts needed. Enum
+  // VALUES come from lib/prismaEnums.ts instead; enum TYPES may still come from
+  // '@prisma/client' via `import type`, which erases.
+  const reachable = clientReachableSet(clientModules, depsCache)
+
+  const valueImporters = []
+  for (const file of reachable) {
+    const rel = path.relative(ROOT, file).split(path.sep).join('/')
+    if (CLIENT_VALUE_IMPORT_EXCEPTIONS.has(rel)) continue
+    if (importsPrismaPackageAsValue(file)) valueImporters.push(rel)
+  }
+
+  if (valueImporters.length > 0) {
+    console.error('\ncheck-no-client-prisma-import: failed\n')
+    console.error(
+      "These modules are reachable from a client component and VALUE-import\n" +
+        "'@prisma/client'. That import cannot be erased, so it ships the package's\n" +
+        'browser build — 121.5 KB of ScalarFieldEnum maps naming every column of\n' +
+        'every model — to the browser.\n\n' +
+        'If you need an enum VALUE (`BookingStatus.PENDING`, `Object.values(Role)`):\n' +
+        "  import { BookingStatus } from '@/lib/prismaEnums'\n\n" +
+        'If you only need the TYPE, say so and the import disappears at compile time:\n' +
+        "  import type { BookingStatus } from '@prisma/client'\n\n" +
+        'If the enum is not in lib/prismaEnums.ts yet, add its name to\n' +
+        'CLIENT_SAFE_ENUMS in tools/generate-client-safe-enums.mjs and run that\n' +
+        'script with --write. Do NOT hand-edit the generated file.\n',
+    )
+    for (const v of valueImporters) console.error(`  ${v}`)
+    console.error(
+      `\nFound ${valueImporters.length} client-reachable value import(s) of '@prisma/client'.`,
+    )
+    process.exit(1)
+  }
+
   console.log(
     `check-no-client-prisma-import: passed ` +
-      `(${clientModules.length} client modules, none reach ${TARGET})`,
+      `(${clientModules.length} client modules, none reach ${TARGET}; ` +
+      `${reachable.size} client-reachable modules, none value-import '@prisma/client'` +
+      `${CLIENT_VALUE_IMPORT_EXCEPTIONS.size > 0 ? ` bar ${CLIENT_VALUE_IMPORT_EXCEPTIONS.size} known exception(s)` : ''})`,
   )
 }
 

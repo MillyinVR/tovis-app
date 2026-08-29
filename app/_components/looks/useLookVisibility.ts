@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useState } from 'react'
-import { LookPostVisibility } from '@prisma/client'
+import { LookPostVisibility } from '@/lib/prismaEnums'
 
 import { COPY } from '@/lib/copy'
 

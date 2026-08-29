@@ -1,6 +1,6 @@
 'use client'
 
-import { ProNameDisplay } from '@prisma/client'
+import { ProNameDisplay } from '@/lib/prismaEnums'
 import Link from 'next/link'
 import { use, useEffect, useMemo, useState } from 'react'
 import { formatMoneyFromUnknown as formatMoney } from '@/lib/money'

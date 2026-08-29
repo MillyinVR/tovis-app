@@ -96,16 +96,6 @@
       ],
       "type": "string"
     },
-    "$Enums.ClientRelationshipLabel": {
-      "enum": [
-        "UNKNOWN",
-        "NR",
-        "NNR",
-        "RR",
-        "RNR"
-      ],
-      "type": "string"
-    },
     "$Enums.ConsultAgreementKind": {
       "enum": [
         "SENSITIVE_DATA_CONSENT",
@@ -6677,7 +6667,14 @@
       "type": "object"
     },
     "ClientRelationshipLabel": {
-      "$ref": "#/definitions/%24Enums.ClientRelationshipLabel"
+      "enum": [
+        "UNKNOWN",
+        "NR",
+        "NNR",
+        "RR",
+        "RNR"
+      ],
+      "type": "string"
     },
     "ClientReviewMediaAssetSummaryDTO": {
       "properties": {

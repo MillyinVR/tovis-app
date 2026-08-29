@@ -29,7 +29,7 @@ import {
   BookingCheckoutStatus,
   BookingDepositStatus,
   StripePaymentStatus,
-} from '@prisma/client'
+} from '@/lib/prismaEnums'
 import type { Prisma } from '@prisma/client'
 
 import type { BadgeTone } from '@/app/_components/ui'

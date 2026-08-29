@@ -4,7 +4,7 @@
 import type { FormEvent } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { BookingServiceItemType } from '@prisma/client'
+import { BookingServiceItemType } from '@/lib/prismaEnums'
 
 import {
   errorFromResponse,

@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
-import { ClientNoteKind } from '@prisma/client'
+import { ClientNoteKind } from '@/lib/prismaEnums'
 import {
   errorFromResponse,
   HTTP_STATUS_COPY,

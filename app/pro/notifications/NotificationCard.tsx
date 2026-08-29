@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
-import { NotificationEventKey } from '@prisma/client'
+import { NotificationEventKey } from '@/lib/prismaEnums'
 
 type NotificationCardProps = {
   id: string

@@ -1,4 +1,4 @@
-import { ClientCreatorTier } from '@prisma/client'
+import { ClientCreatorTier } from '@/lib/prismaEnums'
 
 import { COPY } from '@/lib/copy'
 import { cn } from '@/lib/utils'

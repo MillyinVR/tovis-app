@@ -28,7 +28,7 @@
 // rule would let the preview and the write disagree, which is the exact defect
 // class [[drifted-duplicate-is-a-bug-report]] describes.
 
-import { BookingStatus } from '@prisma/client'
+import { BookingStatus } from '@/lib/prismaEnums'
 
 import type {
   ProBookingSeriesCancelScope,

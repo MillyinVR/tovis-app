@@ -29,7 +29,7 @@
 // DISCOVERY, which was never a real signal for those paths — a pro importing a
 // book of loyal regulars must not open the app to a wall of NNR).
 
-import { BookingSource, ClientRelationshipLabel } from '@prisma/client'
+import { BookingSource, ClientRelationshipLabel } from '@/lib/prismaEnums'
 import type { Prisma } from '@prisma/client'
 
 import type { BadgeTone } from '@/app/_components/ui'

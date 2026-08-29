@@ -31,11 +31,11 @@
 //      is SKIPPED ENTIRELY when the pro has no requirements, which today is
 //      every pro: a pro who never binds a form pays nothing.
 
-import {
-  Prisma,
-  type ClientConsentKind,
-  type PrismaClient,
-} from '@prisma/client'
+// `Prisma` is named only in TYPE positions here (Prisma.TransactionClient,
+// Prisma.ProfessionalServiceOfferingSelect), so the whole clause erases.
+import type { Prisma, PrismaClient } from '@prisma/client'
+
+import type { ClientConsentKind } from '@/lib/prismaEnums'
 
 import type { BadgeTone } from '@/app/_components/ui'
 import { CONSENT_KIND_LABELS } from '@/lib/consentForms/kindLabels'
