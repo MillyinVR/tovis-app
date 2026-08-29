@@ -36,10 +36,16 @@ import {
 
 type Phase = 'upload' | 'map' | 'done'
 
+type OfferingModes = { offersInSalon: boolean; offersMobile: boolean }
+
 type PreviewResponse = {
   ok: boolean
   catalog?: CatalogOption[]
   rows?: ServicePreviewRow[]
+  // W6: the server's own derivation from the pro's bookable locations. Optional
+  // so a preview from a server predating it still renders — the commit then
+  // derives the same answer itself, because we omit the flags either way.
+  defaultOfferingModes?: OfferingModes
   error?: string
 }
 type CommitResponse = {
@@ -76,7 +82,11 @@ function graceFor(price: number, min: number): PriceGrace {
   }
 }
 
-function buildRow(p: ServicePreviewRow, byId: Map<string, CatalogOption>): Row {
+function buildRow(
+  p: ServicePreviewRow,
+  byId: Map<string, CatalogOption>,
+  modes: OfferingModes,
+): Row {
   const serviceId = p.bestServiceId
   const mapped = serviceId ? byId.get(serviceId) : undefined
   const price = p.sourcePrice ?? mapped?.minPrice ?? null
@@ -105,9 +115,13 @@ function buildRow(p: ServicePreviewRow, byId: Map<string, CatalogOption>): Row {
     sourceDurationMinutes: p.sourceDurationMinutes ?? undefined,
     suggestedServiceId: serviceId,
     selection,
+    // DISPLAY only (ServiceMapRow's Salon/Mobile pills). Never put on the wire:
+    // commit omits both flags and derives them, so what the pills show is what
+    // the server would pick. Hardcoding salon-on here is how a mobile-only pro
+    // was shown — and written — an entirely in-salon menu.
     offering: {
-      offersInSalon: true,
-      offersMobile: false,
+      offersInSalon: modes.offersInSalon,
+      offersMobile: modes.offersMobile,
       salonPrice: price ?? undefined,
       salonDurationMinutes: duration ?? undefined,
     },
@@ -190,8 +204,11 @@ export function MigrateServicesClient({ copy }: { copy: MigrationCopy['services'
         return
       }
       const byId = new Map(data.catalog.map((c) => [c.id, c]))
+      // Fallback matches `defaultOfferingModes` for a pro with no bookable
+      // location at all — the one case the old hardcoded pair was right about.
+      const modes = data.defaultOfferingModes ?? { offersInSalon: true, offersMobile: false }
       setCatalog(data.catalog)
-      setRows(data.rows.map((p) => buildRow(p, byId)))
+      setRows(data.rows.map((p) => buildRow(p, byId, modes)))
       setRampConfigs(new Map())
       setPhase('map')
     } catch {
@@ -269,13 +286,20 @@ export function MigrateServicesClient({ copy }: { copy: MigrationCopy['services'
       const cfg = rampConfigs.get(r.rowId) ?? DEFAULT_RAMP
       return [
         {
+          // W6: state NEITHER mode — the commit route derives both from the
+          // pro's bookable locations. This wizard has no mode toggle, so there
+          // is nothing for the pro to have stated; hardcoding the pair here is
+          // exactly what bypassed that derivation.
           serviceId: r.selection.serviceId,
-          offersInSalon: true,
-          offersMobile: false,
+          // A CSV menu carries ONE price and ONE duration per service, with no
+          // mode attached. Send them for BOTH modes: the mode the server picks
+          // is the one it stores a price for, and `storedPrice` drops the other.
+          // Sending only salon pricing would turn a correct mobile derivation
+          // into a priceless mobile offering.
           salonPrice: r.offering.salonPrice ?? null,
           salonDurationMinutes: r.offering.salonDurationMinutes ?? null,
-          mobilePrice: null,
-          mobileDurationMinutes: null,
+          mobilePrice: r.offering.salonPrice ?? null,
+          mobileDurationMinutes: r.offering.salonDurationMinutes ?? null,
           ramp: { stepMode: cfg.mode, stepValue: cfg.value, cadenceWeeks: cfg.cadenceWeeks },
         },
       ]

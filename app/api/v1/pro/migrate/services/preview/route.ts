@@ -26,7 +26,19 @@ export async function POST(request: Request) {
       rows,
     })
 
-    return jsonOk({ catalog: preview.catalog, rows: preview.rows }, 200)
+    // `locationCapability` / `defaultOfferingModes` are the SAME two fields
+    // `GET /api/v1/pro/services/catalog` ships to the Add-service form. Both
+    // import wizards seed their Salon/Mobile display from them instead of
+    // hardcoding salon-on/mobile-off.
+    return jsonOk(
+      {
+        catalog: preview.catalog,
+        rows: preview.rows,
+        locationCapability: preview.locationCapability,
+        defaultOfferingModes: preview.defaultOfferingModes,
+      },
+      200,
+    )
   } catch (error) {
     console.error('POST /api/v1/pro/migrate/services/preview error', error)
     return jsonFail(500, 'Internal server error')

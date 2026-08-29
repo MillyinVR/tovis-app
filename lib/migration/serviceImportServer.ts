@@ -11,6 +11,11 @@ import { Prisma, ServiceLocationType } from '@prisma/client'
 import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 import {
+  defaultOfferingModes,
+  loadProLocationCapability,
+  type ProLocationCapability,
+} from '@/lib/offerings/locationCapability'
+import {
   OfferingAlreadyActiveError,
   writeOffering,
 } from '@/lib/offerings/writeOffering'
@@ -62,6 +67,20 @@ export type ServiceMenuInputRow = {
 export type ServiceImportPreview = {
   catalog: CatalogOption[]
   rows: ServicePreviewRow[]
+  /**
+   * W6: which modes this pro can ACTUALLY be booked in, from their bookable
+   * locations. Same field, same shape, same helper as
+   * `GET /api/v1/pro/services/catalog` ships to the Add-service form — the
+   * import wizard is the second consumer, not a second derivation.
+   */
+  locationCapability: ProLocationCapability
+  /**
+   * The Salon/Mobile pair the commit route would itself pick for a row that
+   * states neither, so the wizard can SHOW the modes it is about to import as.
+   * Both clients used to hardcode salon-on/mobile-off here, which is how a
+   * mobile-only pro's whole imported menu claimed in-salon.
+   */
+  defaultOfferingModes: { offersInSalon: boolean; offersMobile: boolean }
 }
 
 async function loadCatalogOptions(professionalId: string): Promise<CatalogOption[]> {
@@ -80,7 +99,10 @@ export async function previewServiceImport(args: {
   professionalId: string
   rows: ServiceMenuInputRow[]
 }): Promise<ServiceImportPreview> {
-  const catalog = await loadCatalogOptions(args.professionalId)
+  const [catalog, locationCapability] = await Promise.all([
+    loadCatalogOptions(args.professionalId),
+    loadProLocationCapability(args.professionalId),
+  ])
   const entries: MatchCatalogEntry[] = catalog.map((c) => ({
     id: c.id,
     name: c.name,
@@ -105,14 +127,28 @@ export async function previewServiceImport(args: {
     }
   })
 
-  return { catalog, rows }
+  return {
+    catalog,
+    rows,
+    locationCapability,
+    defaultOfferingModes: defaultOfferingModes(locationCapability),
+  }
 }
 
 // One confirmed mapping the pro is committing.
 export type ServiceImportDecision = {
   serviceId: string
-  offersInSalon: boolean
-  offersMobile: boolean
+  /**
+   * W6: `null` means the caller did NOT state this mode, and commit derives it
+   * from the pro's bookable locations. Distinct from a stated `false`, which
+   * turns the mode off however capable the pro is.
+   *
+   * An absent flag used to parse as `false`; both clients therefore hardcoded
+   * the pair rather than trip the NO_MODE refusal, and a mobile-only pro's
+   * every imported service was written salon-only.
+   */
+  offersInSalon: boolean | null
+  offersMobile: boolean | null
   salonPrice: number | null
   salonDurationMinutes: number | null
   mobilePrice: number | null
@@ -141,6 +177,21 @@ export async function commitServiceImport(args: {
   const catalog = await loadCatalogOptions(args.professionalId)
   const minByService = new Map(catalog.map((c) => [c.id, c.minPrice]))
 
+  // W6: when a row leaves a mode unstated, DERIVE it from the locations the pro
+  // actually has — the same helper and the same seed rule
+  // `POST /api/v1/pro/offerings` applies, so an imported offering and a
+  // hand-added one cannot disagree about a mobile-only pro.
+  //
+  // Derived once per COMMIT, not per row: capability is a property of the pro,
+  // and one import is 50+ decisions. Only paid for when something was actually
+  // left unstated — a caller that states every flag makes no extra query.
+  const capability: ProLocationCapability = args.decisions.every(
+    (d) => typeof d.offersInSalon === 'boolean' && typeof d.offersMobile === 'boolean',
+  )
+    ? { salon: false, mobile: false }
+    : await loadProLocationCapability(args.professionalId)
+  const derivedModes = defaultOfferingModes(capability)
+
   const results: ServiceCommitRowResult[] = []
   let created = 0
   let skipped = 0
@@ -159,7 +210,13 @@ export async function commitServiceImport(args: {
       })
       continue
     }
-    if (!d.offersInSalon && !d.offersMobile) {
+    // Resolve BEFORE the refusal: a row that states nothing must get its chance
+    // to resolve via capability. `defaultOfferingModes` never yields neither
+    // mode, so NO_MODE now only fires on an explicit both-off decision.
+    const offersInSalon = d.offersInSalon ?? derivedModes.offersInSalon
+    const offersMobile = d.offersMobile ?? derivedModes.offersMobile
+
+    if (!offersInSalon && !offersMobile) {
       skipped += 1
       results.push({
         serviceId: d.serviceId,
@@ -190,8 +247,8 @@ export async function commitServiceImport(args: {
             })
           : null
 
-      const salonRamp = buildModeRamp(d.offersInSalon, d.salonPrice)
-      const mobileRamp = buildModeRamp(d.offersMobile, d.mobilePrice)
+      const salonRamp = buildModeRamp(offersInSalon, d.salonPrice)
+      const mobileRamp = buildModeRamp(offersMobile, d.mobilePrice)
 
       const storedPrice = (
         enabled: boolean,
@@ -207,11 +264,11 @@ export async function commitServiceImport(args: {
           tx,
           professionalId: args.professionalId,
           serviceId: d.serviceId,
-          offersInSalon: d.offersInSalon,
-          offersMobile: d.offersMobile,
-          salonPrice: storedPrice(d.offersInSalon, d.salonPrice, salonRamp),
+          offersInSalon,
+          offersMobile,
+          salonPrice: storedPrice(offersInSalon, d.salonPrice, salonRamp),
           salonDurationMinutes: d.salonDurationMinutes,
-          mobilePrice: storedPrice(d.offersMobile, d.mobilePrice, mobileRamp),
+          mobilePrice: storedPrice(offersMobile, d.mobilePrice, mobileRamp),
           mobileDurationMinutes: d.mobileDurationMinutes,
         })
 
@@ -298,8 +355,19 @@ function asString(value: unknown): string {
   return typeof value === 'string' ? value : ''
 }
 
-function asBool(value: unknown, fallback: boolean): boolean {
-  return typeof value === 'boolean' ? value : fallback
+/**
+ * A mode flag the caller either STATED or left out.
+ *
+ * Same `hasOwnProperty` distinction `POST /api/v1/pro/offerings` makes, so the
+ * two write paths agree on what "unstated" means. Where that route 400s on a
+ * present-but-non-boolean, this one has no per-row error channel, so a garbage
+ * value degrades to `null` (derive) rather than the old silent `false` — it can
+ * never switch a mode ON that the pro's locations cannot host.
+ */
+function asStatedBool(record: Record<string, unknown>, key: string): boolean | null {
+  if (!Object.prototype.hasOwnProperty.call(record, key)) return null
+  const value = record[key]
+  return typeof value === 'boolean' ? value : null
 }
 
 export function parseServiceMenuRows(body: unknown): ServiceMenuInputRow[] | null {
@@ -319,8 +387,8 @@ export function parseServiceDecisions(body: unknown): ServiceImportDecision[] | 
     const rampIn = isRecord(d.ramp) ? d.ramp : {}
     const decision: ServiceImportDecision = {
       serviceId,
-      offersInSalon: asBool(d.offersInSalon, false),
-      offersMobile: asBool(d.offersMobile, false),
+      offersInSalon: asStatedBool(d, 'offersInSalon'),
+      offersMobile: asStatedBool(d, 'offersMobile'),
       salonPrice: asNumber(d.salonPrice),
       salonDurationMinutes: asNumber(d.salonDurationMinutes),
       mobilePrice: asNumber(d.mobilePrice),
