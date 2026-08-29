@@ -62,6 +62,20 @@ export const BookingDepositStatus = {
 export type BookingDepositStatus =
   (typeof BookingDepositStatus)[keyof typeof BookingDepositStatus]
 
+export const BookingDiscoveryProvenance = {
+  UNKNOWN: 'UNKNOWN',
+  LOOKS_FEED: 'LOOKS_FEED',
+  DISCOVERY_SEARCH: 'DISCOVERY_SEARCH',
+  DIRECT_PROFILE: 'DIRECT_PROFILE',
+  NAME_SEARCH: 'NAME_SEARCH',
+  NFC: 'NFC',
+  AFTERCARE: 'AFTERCARE',
+  PRO_CREATED: 'PRO_CREATED',
+} as const
+
+export type BookingDiscoveryProvenance =
+  (typeof BookingDiscoveryProvenance)[keyof typeof BookingDiscoveryProvenance]
+
 export const BookingRefundStatus = {
   PENDING: 'PENDING',
   SUCCEEDED: 'SUCCEEDED',
@@ -99,6 +113,16 @@ export const BookingStatus = {
 } as const
 
 export type BookingStatus = (typeof BookingStatus)[keyof typeof BookingStatus]
+
+export const ClientChartShareStatus = {
+  REQUESTED: 'REQUESTED',
+  GRANTED: 'GRANTED',
+  DECLINED: 'DECLINED',
+  REVOKED: 'REVOKED',
+} as const
+
+export type ClientChartShareStatus =
+  (typeof ClientChartShareStatus)[keyof typeof ClientChartShareStatus]
 
 export const ClientConsentKind = {
   GENERAL_CONSENT: 'GENERAL_CONSENT',
@@ -156,6 +180,13 @@ export const ConsentProofMethod = {
 
 export type ConsentProofMethod =
   (typeof ConsentProofMethod)[keyof typeof ConsentProofMethod]
+
+export const DepositType = {
+  FLAT: 'FLAT',
+  PERCENT: 'PERCENT',
+} as const
+
+export type DepositType = (typeof DepositType)[keyof typeof DepositType]
 
 export const LookPostStatus = {
   DRAFT: 'DRAFT',

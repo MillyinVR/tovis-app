@@ -49,14 +49,32 @@ const IGNORE_DIRS = new Set([
   '.claude',
 ])
 
+// Enough of the file to be sure a leading directive is in it. 500 was not:
+// app/client/(gated)/settings/ClientChartSharingSettings.tsx carries an
+// explanatory header and its 'use client' lands at byte 491. This guard and
+// check-no-client-prisma-import must agree on what reaches the browser, so they
+// read the same window and use the same matcher.
+const HEAD_BYTES = 8000
+
 const FROM_RE =
   /(?:^|\n)[ \t]*(?:import|export)[ \t]+([\s\S]*?)[ \t]*from[ \t]*['"]([^'"]+)['"]/g
 const SIDE_EFFECT_RE = /(?:^|\n)[ \t]*import[ \t]*['"]([^'"]+)['"]/g
 const DYNAMIC_RE = /\bimport[ \t]*\([ \t]*['"]([^'"]+)['"][ \t]*\)/g
 
+// A leading directive, after any run of header comments.
+//
+// WARNING: the `\\s*` after the line-comment arm is load-bearing. Without it the
+// matcher accepted `// header` + newline + `'use client'` but NOT the far
+// commoner form with a BLANK LINE between them — one blank line, and a client
+// component read as a server module. That silently hid 23 of this repo's 342
+// client components from both this guard and check-client-safe-enum-scope,
+// including the two that kept the @prisma/client browser chunk on three routes
+// after the money.ts split had removed every other cause. A guard that
+// under-reports its own input set passes for the wrong reason, which is worse
+// than failing.
 const DIRECTIVE_RE = (name) =>
   new RegExp(
-    `^\\s*(?:\\/\\/[^\\n]*\\n|\\/\\*[\\s\\S]*?\\*\\/\\s*)*['"]use ${name}['"]`,
+    `^\\s*(?:\\/\\/[^\\n]*\\n\\s*|\\/\\*[\\s\\S]*?\\*\\/\\s*)*['"]use ${name}['"]`,
   )
 const USE_CLIENT_RE = DIRECTIVE_RE('client')
 const USE_SERVER_RE = DIRECTIVE_RE('server')
@@ -207,7 +225,7 @@ function main() {
   }
 
   const files = SCAN_DIRS.flatMap((dir) => listFiles(path.join(ROOT, dir)))
-  const clientEntries = files.filter((f) => USE_CLIENT_RE.test(read(f).slice(0, 500)))
+  const clientEntries = files.filter((f) => USE_CLIENT_RE.test(read(f).slice(0, HEAD_BYTES)))
 
   // Everything a client bundle can pull in, by the same rules as
   // check-no-client-prisma-import.
@@ -217,7 +235,7 @@ function main() {
     const current = queue.shift()
     for (const dep of valueDeps(current)) {
       if (reachable.has(dep)) continue
-      if (USE_SERVER_RE.test(read(dep).slice(0, 500))) continue
+      if (USE_SERVER_RE.test(read(dep).slice(0, HEAD_BYTES))) continue
       reachable.add(dep)
       queue.push(dep)
     }

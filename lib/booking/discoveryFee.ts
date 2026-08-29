@@ -29,7 +29,7 @@
 // `establishedBookingCount` so that it EXCLUDES cancelled bookings whose discovery fee
 // was refunded. See app/api/v1/bookings/finalize for the query.
 
-import { BookingDiscoveryProvenance } from '@prisma/client'
+import { BookingDiscoveryProvenance } from '@/lib/prismaEnums'
 
 import { envFlagEnabled } from '@/lib/env'
 

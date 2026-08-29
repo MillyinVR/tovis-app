@@ -13,7 +13,8 @@ import { requirePro } from '@/app/api/_utils/auth/requirePro'
 import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
 import { refreshProfessional } from '@/lib/search/index/refreshSearchIndex'
 import { isRecord } from '@/lib/guards'
-import { parseMoney, moneyToString } from '@/lib/money'
+import { moneyToString } from '@/lib/money'
+import { parseMoney } from '@/lib/moneyDecimal'
 import {
   defaultOfferingModes,
   loadProLocationCapability,

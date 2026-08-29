@@ -10,7 +10,8 @@
 import { NoShowFeeType, Prisma } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
-import { moneyToFixed2String, parseMoney } from '@/lib/money'
+import { moneyToFixed2String } from '@/lib/money'
+import { parseMoney } from '@/lib/moneyDecimal'
 import type { ProNoShowSettingsDTO } from '@/lib/dto/noShowSettings'
 
 type ProNoShowSettingsRow = {

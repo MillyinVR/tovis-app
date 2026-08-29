@@ -9,7 +9,7 @@ import { pickBool, pickInt, pickMethod, pickString } from '@/app/api/_utils/pick
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { writeAdminAuditLog } from '@/lib/admin/auditLog'
 import { hasAdminPermission } from '@/lib/adminPermissions'
-import { parseMoney } from '@/lib/money'
+import { parseMoney } from '@/lib/moneyDecimal'
 import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'

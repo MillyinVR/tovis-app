@@ -4,7 +4,10 @@ import {
   formatCents,
   formatMoneyFromUnknown,
   formatRoundedDollars,
+  isDecimalLike,
+  moneyToFixed2String,
   moneyToNumber,
+  moneyToString,
   parseTipAmount,
 } from './money'
 
@@ -180,4 +183,214 @@ describe('formatCents', () => {
       )
     }
   })
+})
+
+// ── The brand check that replaced `instanceof Prisma.Decimal` ────────────────
+//
+// lib/money.ts no longer imports the Prisma.Decimal CLASS — that value import
+// is what shipped @prisma/client's browser build to 22 routes. It recognises a
+// Decimal by decimal.js's own cross-realm brand instead.
+//
+// Everything below reads a REAL `new Prisma.Decimal(...)`, so these are not
+// tests of a mock: they are the evidence that the replacement still sees the
+// exact objects Prisma hands back from a query, and formats them identically.
+
+/**
+ * The corpus. Every value is exercised against every Decimal-reading export.
+ *
+ * Money in this app is non-negative and 2dp (parseMoney's own regex enforces
+ * that), but moneyToNumber is documented as the SSOT for non-money Decimal
+ * columns too — latitude/longitude — so negatives and high precision are real
+ * inputs, not hypotheticals.
+ */
+const DECIMAL_CORPUS = [
+  '0',
+  '0.00',
+  '0.01',
+  '0.10',
+  '0.50',
+  '1',
+  '49.99',
+  '50',
+  '80.00',
+  '80.50',
+  '99.99',
+  '100',
+  '1200',
+  '999999.99',
+  '37.774929', // a real latitude
+  '-122.419418', // a real longitude
+  '-0.01',
+  '-49.99',
+  '0.005', // rounds at the 2dp boundary
+  '0.004',
+  '2.675', // the classic float-rounding trap
+]
+
+describe('isDecimalLike', () => {
+  // ⚠️ This is the drift alarm for the whole change. The brand is decimal.js's
+  // (`Decimal.isDecimal` is `obj instanceof Decimal || obj.toStringTag === tag`)
+  // and Prisma bundles decimal.js — but it bundles it MINIFIED and privately,
+  // with no runtime dependency we could pin. If Prisma ever swaps the
+  // implementation, `isDecimalLike` would quietly return false for every Decimal
+  // in the app and money would start rendering as null. This test is what makes
+  // that loud instead.
+  it('recognises a real Prisma.Decimal', () => {
+    for (const raw of DECIMAL_CORPUS) {
+      expect(isDecimalLike(new Prisma.Decimal(raw))).toBe(true)
+    }
+  })
+
+  it('recognises a Decimal from a FOREIGN realm, which instanceof cannot', () => {
+    // @prisma/client bundles its own minified decimal.js and declares no
+    // runtime dependency on the package, so a Decimal built by any other copy
+    // is a different class. `instanceof Prisma.Decimal` is false for it; the
+    // brand is not. This stands in for that second copy.
+    const foreign = {
+      toStringTag: '[object Decimal]',
+      toNumber: () => 49.99,
+      toString: () => '49.99',
+    }
+
+    expect(foreign instanceof Prisma.Decimal).toBe(false)
+    expect(isDecimalLike(foreign)).toBe(true)
+    expect(moneyToNumber(foreign)).toBe(49.99)
+    expect(formatMoneyFromUnknown(foreign)).toBe('$49.99')
+  })
+
+  it('does not brand ordinary values as Decimals', () => {
+    for (const value of [
+      null,
+      undefined,
+      0,
+      49.99,
+      '49.99',
+      '',
+      {},
+      [],
+      new Date(0),
+      { toStringTag: 'Decimal' },
+      { toStringTag: '[object Object]' },
+      Object.create(null),
+    ]) {
+      expect(isDecimalLike(value)).toBe(false)
+    }
+  })
+})
+
+describe('Decimal readers: brand check vs instanceof Prisma.Decimal', () => {
+  // The pre-change implementations, transcribed from lib/money.ts as it stood
+  // before the split (git 66957d65). The ONLY difference is the type test:
+  // `value instanceof Prisma.Decimal` where the shipped code now says
+  // `isDecimalLike(value)`. Running both over the corpus is the proof that
+  // swapping the test changed no output.
+  function moneyToNumberBefore(value: unknown): number | null {
+    if (value === null || value === undefined) return null
+    if (typeof value === 'number') return Number.isFinite(value) ? value : null
+    if (typeof value === 'string') {
+      const n = Number(value)
+      return Number.isFinite(n) ? n : null
+    }
+    if (value instanceof Prisma.Decimal) {
+      const n = value.toNumber()
+      return Number.isFinite(n) ? n : null
+    }
+    if (typeof value === 'object') {
+      const maybeToString = (value as { toString?: unknown }).toString
+      if (typeof maybeToString === 'function') {
+        const n = Number(String(maybeToString.call(value)))
+        return Number.isFinite(n) ? n : null
+      }
+    }
+    return null
+  }
+
+  function formatMoneyFromUnknownBefore(value: unknown): string | null {
+    if (value === null || value === undefined) return null
+    if (value instanceof Prisma.Decimal) {
+      const fixed = moneyToFixed2String(value)
+      return fixed === null ? null : `$${fixed}`
+    }
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? `$${value.toFixed(2)}` : null
+    }
+    if (typeof value === 'string') {
+      const trimmed = value.trim()
+      if (!trimmed) return null
+      const parsed = Number(trimmed)
+      if (Number.isFinite(parsed)) return `$${parsed.toFixed(2)}`
+      return trimmed.startsWith('$') ? trimmed : `$${trimmed}`
+    }
+    return null
+  }
+
+  it('moneyToNumber is identical for every value in the corpus', () => {
+    for (const raw of DECIMAL_CORPUS) {
+      const before = moneyToNumberBefore(new Prisma.Decimal(raw))
+      const after = moneyToNumber(new Prisma.Decimal(raw))
+      // Object.is, not toBe's loose zero handling: 0 and -0 must not pass for
+      // each other in a comparison whose whole job is proving nothing moved.
+      expect(Object.is(after, before), `moneyToNumber("${raw}")`).toBe(true)
+    }
+  })
+
+  it('formatMoneyFromUnknown is identical for every value in the corpus', () => {
+    for (const raw of DECIMAL_CORPUS) {
+      expect(
+        formatMoneyFromUnknown(new Prisma.Decimal(raw)),
+        `formatMoneyFromUnknown("${raw}")`,
+      ).toBe(formatMoneyFromUnknownBefore(new Prisma.Decimal(raw)))
+    }
+  })
+
+  // The other three Decimal readers never type-tested a Decimal at all — they
+  // call .toString() / .toNumber() on it — so the split could not have touched
+  // them, and `git show 66957d65:lib/money.ts` says their source is character
+  // for character what it was. Pinned anyway, because they are on the
+  // client-reachable surface and "obviously unaffected" is how a regression
+  // ships.
+  //
+  // Every expectation below was READ OFF the running code, not predicted, and
+  // several are warts worth having written down:
+  //   • a Decimal normalises its own trailing zeros, so moneyToString(0.10) is
+  //     "0.1" where moneyToString("0.10") is "0.10" — the two branches of the
+  //     same function disagree, and always have;
+  //   • moneyToFixed2String TRUNCATES rather than rounds (37.774929 -> "37.77");
+  //   • it rejects negatives outright (regex `^\d+(\.\d+)?$`), which is why
+  //     formatMoneyFromUnknown returns null for a negative Decimal while
+  //     formatRoundedDollars happily renders "$-122".
+  it.each([
+    // raw            toString      fixed2      rounded        number        money
+    ['0',            '0',          '0.00',     '$0',                0,       '$0.00'],
+    ['0.00',         '0',          '0.00',     '$0',                0,       '$0.00'],
+    ['0.01',         '0.01',       '0.01',     '$0',             0.01,       '$0.01'],
+    ['0.10',         '0.1',        '0.10',     '$0',              0.1,       '$0.10'],
+    ['0.50',         '0.5',        '0.50',     '$1',              0.5,       '$0.50'],
+    ['1',            '1',          '1.00',     '$1',                1,       '$1.00'],
+    ['49.99',        '49.99',      '49.99',    '$50',           49.99,       '$49.99'],
+    ['50',           '50',         '50.00',    '$50',              50,       '$50.00'],
+    ['80.00',        '80',         '80.00',    '$80',              80,       '$80.00'],
+    ['80.50',        '80.5',       '80.50',    '$81',            80.5,       '$80.50'],
+    ['99.99',        '99.99',      '99.99',    '$100',          99.99,       '$99.99'],
+    ['100',          '100',        '100.00',   '$100',            100,       '$100.00'],
+    ['1200',         '1200',       '1200.00',  '$1,200',         1200,       '$1200.00'],
+    ['999999.99',    '999999.99',  '999999.99','$1,000,000', 999999.99,      '$999999.99'],
+    ['37.774929',    '37.774929',  '37.77',    '$38',       37.774929,       '$37.77'],
+    ['-122.419418',  '-122.419418', null,      '$-122',   -122.419418,        null],
+    ['-0.01',        '-0.01',       null,      '$-0',           -0.01,        null],
+    ['-49.99',       '-49.99',      null,      '$-50',         -49.99,        null],
+    ['0.005',        '0.005',      '0.00',     '$0',            0.005,       '$0.00'],
+    ['0.004',        '0.004',      '0.00',     '$0',            0.004,       '$0.00'],
+    ['2.675',        '2.675',      '2.67',     '$3',            2.675,       '$2.67'],
+  ])(
+    'reads Prisma.Decimal("%s") identically through every export',
+    (raw, asString, asFixed2, asRounded, asNumber, asMoney) => {
+      const d = new Prisma.Decimal(raw)
+      expect(moneyToString(d)).toBe(asString)
+      expect(moneyToFixed2String(d)).toBe(asFixed2)
+      expect(formatRoundedDollars(d)).toBe(asRounded)
+      expect(moneyToNumber(d)).toBe(asNumber)
+      expect(formatMoneyFromUnknown(d)).toBe(asMoney)
+    },
+  )
 })

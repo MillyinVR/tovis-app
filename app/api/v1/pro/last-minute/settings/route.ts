@@ -2,7 +2,7 @@
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { LastMinuteVisibilityMode, Prisma } from '@prisma/client'
-import { parseMoney } from '@/lib/money'
+import { parseMoney } from '@/lib/moneyDecimal'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 
 export const dynamic = 'force-dynamic'

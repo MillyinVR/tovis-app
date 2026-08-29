@@ -1,7 +1,7 @@
 // app/api/v1/pro/last-minute/rules/route.ts
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
-import { parseMoney } from '@/lib/money'
+import { parseMoney } from '@/lib/moneyDecimal'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import type { Prisma } from '@prisma/client'
 

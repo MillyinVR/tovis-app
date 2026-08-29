@@ -51,7 +51,8 @@ import {
 } from '@/lib/payments/acceptedMethods'
 import { DEFAULT_CHARGE_CURRENCY } from '@/lib/payments/resolveChargeCurrency'
 import { computeLastMinuteDiscount } from '@/lib/lastMinutePricing'
-import { formatMoneyFromUnknown, parseMoney } from '@/lib/money'
+import { formatMoneyFromUnknown } from '@/lib/money'
+import { parseMoney } from '@/lib/moneyDecimal'
 import {
   pickPublicTierPlan,
   pickRecipientTierPlan,

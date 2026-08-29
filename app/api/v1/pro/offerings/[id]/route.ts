@@ -12,7 +12,8 @@ import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeCon
 import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
 import { refreshProfessional } from '@/lib/search/index/refreshSearchIndex'
 import { isRecord } from '@/lib/guards'
-import { parseMoney, moneyToString } from '@/lib/money'
+import { moneyToString } from '@/lib/money'
+import { parseMoney } from '@/lib/moneyDecimal'
 import { buildAddressPrivacyWriteData } from '@/lib/security/addressEncryption'
 import {
   defaultWorkingHours,

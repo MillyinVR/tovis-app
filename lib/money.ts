@@ -1,9 +1,51 @@
 // lib/money.ts
-import { Prisma } from '@prisma/client'
+import type { Prisma } from '@prisma/client'
 import { DISPLAY_LOCALE } from '@/lib/locale'
 import { resolveChargeCurrency } from '@/lib/payments/resolveChargeCurrency'
 
 export type MoneyInput = Prisma.Decimal | string | number
+
+const DECIMAL_BRAND = '[object Decimal]'
+
+/**
+ * A Prisma.Decimal, recognised WITHOUT importing the class.
+ *
+ * `@prisma/client` declares no runtime dependencies: it bundles its own minified
+ * copy of decimal.js (`Prisma.Decimal.name` is `'i'`). So `instanceof
+ * Prisma.Decimal` is a VALUE import of that package, and a value import cannot
+ * be erased — it drags the package's browser build (121.6 KB of ScalarFieldEnum
+ * maps naming every column of every model) into every client bundle downstream.
+ * That is the whole of what this file used to cost 22 routes.
+ *
+ * Installing decimal.js directly does not fix it: the package copy and Prisma's
+ * bundled copy are DIFFERENT classes, and `instanceof` fails in both directions
+ * (verified — see lib/money.test.ts). The brand does not. This is decimal.js's
+ * own `Decimal.isDecimal`, which is written exactly this way for exactly this
+ * reason:
+ *
+ *   isDecimal = (obj) => obj instanceof Decimal || obj.toStringTag === tag
+ *
+ * so it recognises a Decimal from ANY realm — including the one Prisma returns
+ * from a query, which is the only kind this file ever sees. `moneyToNumber`
+ * already carried a duck-typed fallback for the same reason; this makes the
+ * whole file honest about it rather than only that one function.
+ *
+ * lib/money.test.ts asserts a real `Prisma.Decimal` still satisfies this. If
+ * Prisma ever swaps decimal.js out, that test fails loudly rather than this
+ * predicate quietly returning false for every Decimal in the app.
+ *
+ * It narrows to `Prisma.Decimal` — the TYPE, which `import type` erases, so it
+ * still costs the browser nothing. Asserting the whole class off one branded
+ * property is exactly the assertion decimal.js's own `isDecimal` makes, and
+ * only decimal.js's prototype sets the brand. Narrowing to a smaller structural
+ * type instead would force `MoneyInput` wider for every caller, which is a
+ * bigger claim than this change needs to make.
+ */
+export function isDecimalLike(value: unknown): value is Prisma.Decimal {
+  if (typeof value !== 'object' || value === null) return false
+  if (!('toStringTag' in value)) return false
+  return value.toStringTag === DECIMAL_BRAND
+}
 
 function stripTrailingZeros(value: string): string {
   return value.replace(/\.00$/, '')
@@ -156,13 +198,15 @@ export function moneyToNumber(value: unknown): number | null {
     return Number.isFinite(n) ? n : null
   }
 
-  if (value instanceof Prisma.Decimal) {
+  if (isDecimalLike(value)) {
     const n = value.toNumber()
     return Number.isFinite(n) ? n : null
   }
 
-  // Decimal-like objects (e.g. instances from a different Prisma client realm,
-  // where `instanceof` fails) — fall back to their string representation.
+  // Anything else that can describe itself as a number — fall back to its string
+  // representation. A Decimal from another realm no longer lands here (the brand
+  // check above catches it, which `instanceof` could not), so this is now the
+  // last resort for genuinely unbranded values rather than the Decimal path.
   if (typeof value === 'object') {
     const maybeToString = (value as { toString?: unknown }).toString
     if (typeof maybeToString === 'function') {
@@ -212,33 +256,6 @@ export function parseTipAmount(value: unknown): ParseTipAmountResult {
 }
 
 /**
- * Parse a money input into Prisma.Decimal.
- *
- * Accepts valid dollar values like:
- * - "49.99"
- * - "49"
- * - 49.99
- */
-export function parseMoney(input: unknown): Prisma.Decimal {
-  if (typeof input === 'number') {
-    if (!Number.isFinite(input)) throw new Error('Invalid money amount.')
-    return new Prisma.Decimal(input.toFixed(2))
-  }
-
-  if (typeof input === 'string') {
-    const normalized = normalizeMoney2(input)
-    if (!normalized) throw new Error('Invalid money amount.')
-    return new Prisma.Decimal(normalized)
-  }
-
-  if (input instanceof Prisma.Decimal) {
-    return input
-  }
-
-  throw new Error('Invalid money amount.')
-}
-
-/**
  * Display an untyped value (Prisma.Decimal, number, or money string) as "$X.XX".
  * Single source of truth for showing a money value whose type isn't known at the
  * call site (e.g. snapshot fields). Returns null when it can't be interpreted as
@@ -248,7 +265,7 @@ export function parseMoney(input: unknown): Prisma.Decimal {
 export function formatMoneyFromUnknown(value: unknown): string | null {
   if (value === null || value === undefined) return null
 
-  if (value instanceof Prisma.Decimal) {
+  if (isDecimalLike(value)) {
     const fixed = moneyToFixed2String(value)
     return fixed === null ? null : `$${fixed}`
   }
