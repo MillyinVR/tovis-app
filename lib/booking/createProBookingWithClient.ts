@@ -20,6 +20,7 @@ import { createClientClaimInviteDelivery } from '@/lib/clientActions/createClien
 import { upsertClientClaimLink } from '@/lib/clients/clientClaimLinks'
 import { asTrimmedString, isRecord } from '@/lib/guards'
 import { enqueueDispatch } from '@/lib/notifications/dispatch/enqueueDispatch'
+import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { prisma } from '@/lib/prisma'
 import { checkProReadinessForEntryPoint } from '@/lib/pro/readiness/proReadiness'
 import type { TenantContext } from '@/lib/tenant/context'
@@ -28,6 +29,8 @@ import {
   resolveProBookingClient,
   type ProBookingServiceAddressInput,
 } from '@/lib/booking/resolveProBookingClient'
+
+const ROUTE = 'createProBookingWithClient'
 
 type NewClientInput = {
   firstName?: unknown
@@ -201,6 +204,21 @@ async function tryCreateInvite(args: {
       bookingId: args.bookingId,
       clientId: args.clientId,
     })
+    // Not a degradation — an invariant violation. The booking above committed
+    // against this very clientId, so the row has to exist; a null here means it
+    // was deleted mid-flight or the id never referred to a ClientProfile. The
+    // pro sees a successfully created booking either way, and the client is
+    // simply never invited to claim it, so nothing else will ever say so.
+    captureBookingException({
+      error: new Error(
+        'Pro-created booking committed against a clientId with no ClientProfile row',
+      ),
+      route: ROUTE,
+      event: 'INVITE_CLIENT_LOOKUP_MISSING',
+      bookingId: args.bookingId,
+      professionalId: args.professionalId,
+      clientId: args.clientId,
+    })
 
     return null
   }
@@ -255,6 +273,19 @@ async function tryCreateInvite(args: {
       bookingId: args.bookingId,
       clientId: args.clientId,
       error,
+    })
+    // upsertClientClaimLink is a DB write, and every reason it could refuse
+    // (already claimed, no contact method) is checked above — so a throw here is
+    // infrastructure, not policy. Swallowed on purpose so a claim-link failure
+    // never fails the pro's booking, which means this is the only signal that an
+    // UNCLAIMED client silently never got a way to claim their booking.
+    captureBookingException({
+      error,
+      route: ROUTE,
+      event: 'INVITE_CREATE_FAILED',
+      bookingId: args.bookingId,
+      professionalId: args.professionalId,
+      clientId: args.clientId,
     })
 
     return null
@@ -312,6 +343,19 @@ async function tryEnqueueBookingConfirmedDelivery(args: {
         clientId: args.clientId,
       },
     )
+    // Same invariant violation as the invite lookup above, on the other
+    // post-commit leg: the booking exists, its client row does not, and the
+    // client is never told they have an appointment.
+    captureBookingException({
+      error: new Error(
+        'Pro-created booking committed against a clientId with no ClientProfile row',
+      ),
+      route: ROUTE,
+      event: 'BOOKING_CONFIRMED_CLIENT_LOOKUP_MISSING',
+      bookingId: args.bookingId,
+      professionalId: args.professionalId,
+      clientId: args.clientId,
+    })
 
     return
   }

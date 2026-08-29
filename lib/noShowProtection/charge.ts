@@ -30,6 +30,7 @@ import {
   noShowFeeAmountToCents,
 } from '@/lib/noShowProtection/fee'
 import { parseCancellationPolicySnapshot } from '@/lib/noShowProtection/policyDisclosure'
+import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { resolveChargeCurrencyLower } from '@/lib/payments/resolveChargeCurrency'
 
 /**
@@ -233,6 +234,21 @@ export async function assessAndChargeNoShowFee(args: {
           bookingId: booking.id,
           message: error instanceof Error ? error.message : String(error),
         })
+        // WARNING: no money moves on this path and the no-show already
+        // committed, so nothing is corrupted. What is lost is the client's ONLY
+        // notice that their deposit was kept as the penalty — the comment above
+        // says as much — and because the fee is suppressed there is no receipt,
+        // no charge and no other message to infer it from. A client who is never
+        // told is a chargeback waiting to happen, which is why this is worth
+        // seeing even though it is not an outage.
+        captureBookingException({
+          error,
+          route: 'assessAndChargeNoShowFee',
+          event: 'DEPOSIT_KEPT_NOTICE_FAILED',
+          level: 'warning',
+          bookingId: booking.id,
+          professionalId: booking.professionalId,
+        })
       })
       return { kind: 'NOT_CHARGEABLE', reason: 'deposit_kept_suppresses_fee' }
     }
@@ -360,6 +376,14 @@ export async function assessAndChargeNoShowFee(args: {
     }
   } catch (error: unknown) {
     // Off-session declines (card error / authentication_required) land here.
+    //
+    // ⚠️ DELIBERATELY NOT Sentry-captured, and not an oversight — a declined
+    // card is the single most ROUTINE outcome on this path, not a defect, so
+    // capturing it would page on customer behaviour and bury the real faults.
+    // It is also not silent: the FAILED NoShowFee row written just below is a
+    // durable, queryable record with the PaymentIntent id attached. The throw
+    // path — where no row is written at all — is the one that alarms, and it
+    // does so in the two fee orchestrators that call this function.
     const stripePaymentIntentId = stripePaymentIntentIdFromError(error)
     console.error('assessAndChargeNoShowFee: off-session charge failed', {
       bookingId: booking.id,

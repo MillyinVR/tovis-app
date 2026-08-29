@@ -16,6 +16,7 @@ import { BookingStatus, NoShowFeeReason, NoShowFeeStatus } from '@prisma/client'
 const mocks = vi.hoisted(() => ({
   assessAndChargeNoShowFee: vi.fn(),
   noShowProtectionEnabled: vi.fn(),
+  captureBookingException: vi.fn(),
 }))
 
 vi.mock('@/lib/noShowProtection/charge', () => ({
@@ -24,6 +25,10 @@ vi.mock('@/lib/noShowProtection/charge', () => ({
 
 vi.mock('@/lib/noShowProtection/flag', () => ({
   noShowProtectionEnabled: mocks.noShowProtectionEnabled,
+}))
+
+vi.mock('@/lib/observability/bookingEvents', () => ({
+  captureBookingException: mocks.captureBookingException,
 }))
 
 import { runLateChangeFeeOrchestration } from './lateChangeFeeOrchestration'
@@ -125,6 +130,59 @@ describe('runLateChangeFeeOrchestration', () => {
     expect(spy).toHaveBeenCalled()
 
     spy.mockRestore()
+  })
+
+  // Console-only was the WRONG answer here, and this asserts the fix.
+  //
+  // The swallow above is correct — the reschedule already committed — but it
+  // used to be the whole story. A THROW from the assessor happens before it
+  // records anything, so unlike a declined card (which writes a FAILED
+  // NoShowFee row) this leaves NO row; no cron retries no-show fees; and the
+  // request succeeds. A late-change fee the client owed goes uncharged with the
+  // console line as its only trace. This capture is that trace.
+  it('captures a thrown charge error — no FAILED row exists for a sweep to find', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const boom = new Error('stripe boom')
+    mocks.assessAndChargeNoShowFee.mockRejectedValue(boom)
+
+    await expect(run({ operation: 'PATCH /api/v1/bookings/[id]/reschedule' })).resolves.toEqual({
+      chargedCents: 0,
+    })
+
+    expect(mocks.captureBookingException).toHaveBeenCalledTimes(1)
+    expect(mocks.captureBookingException).toHaveBeenCalledWith({
+      error: boom,
+      route: 'PATCH /api/v1/bookings/[id]/reschedule',
+      event: 'LATE_CHANGE_FEE_CHARGE_THREW',
+      bookingId: 'bk_1',
+    })
+
+    spy.mockRestore()
+  })
+
+  // The other half of the judgement: a fee that was ASSESSED and came back
+  // FAILED (the routine declined card) must NOT capture. It already wrote a
+  // durable FAILED row, and paging on customer card behaviour is how a real
+  // alert gets ignored.
+  it('does NOT capture when the assessor returns FAILED — that row is the record', async () => {
+    mocks.assessAndChargeNoShowFee.mockResolvedValue({
+      kind: 'ATTEMPTED' as const,
+      status: NoShowFeeStatus.FAILED,
+      amount: '40.00',
+      stripePaymentIntentId: 'pi_declined',
+      alreadyCharged: false,
+    })
+
+    await expect(run()).resolves.toEqual({ chargedCents: 0 })
+
+    expect(mocks.captureBookingException).not.toHaveBeenCalled()
+  })
+
+  // And the happy path stays quiet.
+  it('does NOT capture on a successful charge', async () => {
+    await expect(run()).resolves.toEqual({ chargedCents: 4000 })
+
+    expect(mocks.captureBookingException).not.toHaveBeenCalled()
   })
 
   // Only a confirmed booking is billable; the assessor enforces it, but the

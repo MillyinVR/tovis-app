@@ -17,6 +17,17 @@ type CaptureBookingExceptionInput = {
   clientId?: string | null
   holdId?: string | null
   event?: string | null
+  /**
+   * Sentry severity. Defaults to 'error' — every caller before the money/booking
+   * console triage relied on that default, so omitting it changes nothing.
+   *
+   * Pass 'warning' for a degradation whose blast radius is already bounded by a
+   * second signal the operator can act on: the acting human sees a failure
+   * message, or a durable row records it. Worth seeing without paging as loudly
+   * as a failure nobody is told about. Same distinction captureNotificationException
+   * draws.
+   */
+  level?: 'error' | 'warning'
 }
 
 /**
@@ -39,6 +50,7 @@ export function captureBookingException(
       : new Error(String(input.error))
 
   Sentry.withScope((scope) => {
+    scope.setLevel(input.level ?? 'error')
     scope.setTag('area', 'booking')
     scope.setTag('booking.route', input.route)
 
@@ -55,6 +67,7 @@ export function captureBookingException(
       professionalId: input.professionalId ?? null,
       clientId: input.clientId ?? null,
       holdId: input.holdId ?? null,
+      level: input.level ?? 'error',
     })
 
     Sentry.captureException(err)
