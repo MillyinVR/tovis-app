@@ -4,7 +4,7 @@ import type { ServiceLocationType, Prisma } from '@prisma/client'
 import { jsonFail, jsonOk, pickString, requirePro, upper } from '@/app/api/_utils'
 import { requireProBooking } from '@/app/api/_utils/auth/requireProBooking'
 import { computeLastMinuteDiscount } from '@/lib/lastMinutePricing'
-import { parseMoney } from '@/lib/money'
+import { parseMoney } from '@/lib/moneyDecimal'
 import { updateBookingLastMinuteDiscount } from '@/lib/booking/writeBoundary'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 

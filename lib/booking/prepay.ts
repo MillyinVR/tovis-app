@@ -36,7 +36,7 @@
 //
 // Pure: no DB access, no Stripe I/O. The caller owns the query.
 
-import { DepositType, OfferingPrepayScope } from '@prisma/client'
+import { DepositType, OfferingPrepayScope } from '@/lib/prismaEnums'
 
 import {
   computeDepositCents,

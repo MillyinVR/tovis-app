@@ -24,7 +24,7 @@
 // That combined charge must clear Stripe's minimum, so if deposit + clientFee is below
 // the floor we collect nothing rather than create an un-processable sub-minimum charge.
 
-import { DepositType } from '@prisma/client'
+import { DepositType } from '@/lib/prismaEnums'
 
 import { computePlatformFees } from '@/lib/booking/discoveryFee'
 

@@ -50,9 +50,8 @@
 // put a 121.5 KB chunk on 53 routes. lib/prismaEnums.ts now provides those enum
 // values without the package, so the rule can be enforced instead of noted.
 //
-// One exception remains, named in CLIENT_VALUE_IMPORT_EXCEPTIONS below. It is a
-// real defect with a real fix, not a blanket escape hatch — see the comment
-// there before considering a second entry.
+// CLIENT_VALUE_IMPORT_EXCEPTIONS below is now EMPTY: the rule holds with no
+// carve-outs. See the comment there before adding one.
 //
 // Usage:
 //   node tools/check-no-client-prisma-import.mjs
@@ -83,8 +82,21 @@ const SIDE_EFFECT_RE = /(?:^|\n)[ \t]*import[ \t]*['"]([^'"]+)['"]/g
 // Dynamic `import('…')`
 const DYNAMIC_RE = /\bimport[ \t]*\([ \t]*['"]([^'"]+)['"][ \t]*\)/g
 
+// A leading directive, after any run of header comments.
+//
+// WARNING: the `\\s*` after the line-comment arm is load-bearing. Without it the
+// matcher accepted `// header` + newline + `'use client'` but NOT the far
+// commoner form with a BLANK LINE between them — one blank line, and a client
+// component read as a server module. That silently hid 23 of this repo's 342
+// client components from both this guard and check-client-safe-enum-scope,
+// including the two that kept the @prisma/client browser chunk on three routes
+// after the money.ts split had removed every other cause. A guard that
+// under-reports its own input set passes for the wrong reason, which is worse
+// than failing.
 const DIRECTIVE_RE = (name) =>
-  new RegExp(`^\\s*(?:\\/\\/[^\\n]*\\n|\\/\\*[\\s\\S]*?\\*\\/\\s*)*['"]use ${name}['"]`)
+  new RegExp(
+    `^\\s*(?:\\/\\/[^\\n]*\\n\\s*|\\/\\*[\\s\\S]*?\\*\\/\\s*)*['"]use ${name}['"]`,
+  )
 const USE_CLIENT_RE = DIRECTIVE_RE('client')
 const USE_SERVER_RE = DIRECTIVE_RE('server')
 
@@ -158,9 +170,17 @@ function valueImportsOf(file, sourceOverride) {
   return out
 }
 
+// Enough of the file to be sure a leading directive is in it. 500 was not:
+// app/client/(gated)/settings/ClientChartSharingSettings.tsx carries an
+// explanatory header and its 'use client' lands at byte 491 — nine bytes from
+// being invisible to this guard, on a file nobody would think to keep short.
+// The directive must lead the file, so anything past a few KB of header cannot
+// be one.
+const HEAD_BYTES = 8000
+
 function readHead(file) {
   try {
-    return fs.readFileSync(file, 'utf8').slice(0, 500)
+    return fs.readFileSync(file, 'utf8').slice(0, HEAD_BYTES)
   } catch {
     return ''
   }
@@ -170,30 +190,32 @@ const isClientModule = (file) => USE_CLIENT_RE.test(readHead(file))
 const isServerActionModule = (file) => USE_SERVER_RE.test(readHead(file))
 
 /**
- * The only client-reachable modules still allowed to VALUE-import
- * '@prisma/client'.
+ * Client-reachable modules allowed to VALUE-import '@prisma/client'.
  *
- * lib/money.ts constructs and type-tests `Prisma.Decimal` — `new
- * Prisma.Decimal(…)`, `value instanceof Prisma.Decimal`. That is a runtime
- * class, not an enum, so the client-safe enum surface does nothing for it and
- * there is no honest one-line fix: swapping in a standalone decimal.js would
- * make `instanceof` fail against the Decimals Prisma itself returns, and
- * parseMoney's result is written to the database.
+ * EMPTY, and it should stay that way.
  *
- * The real fix is the split #1027 used elsewhere — a client-safe formatting half
- * (which needs no Decimal constructor; moneyToNumber already has a documented
- * duck-typed fallback for foreign-realm Decimals) and a server half keeping
- * parseMoney. That is a money-semantics change across 28 client entry points and
- * wants its own PR and its own review, so it is NOT bundled here.
+ * It held lib/money.ts until the split below. That entry read: "there is no
+ * honest one-line fix — swapping in a standalone decimal.js would make
+ * `instanceof` fail against the Decimals Prisma itself returns, and parseMoney's
+ * result is written to the database." Both halves of that were true. Installing
+ * decimal.js really does not work: @prisma/client declares no runtime
+ * dependencies and bundles its own minified copy, so the two Decimals are
+ * different classes and `instanceof` fails in BOTH directions.
  *
- * (lib/money.test.ts needs no entry: nothing imports a test file, so it never
- * enters the client-reachable set in the first place.)
+ * What the entry had not established is that the file did not need the class.
+ * Exactly one export constructed a Decimal — parseMoney — and nothing
+ * client-reachable called it; the other client-reachable exports only ever READ
+ * a Decimal Prisma had already returned. So parseMoney moved to
+ * lib/moneyDecimal.ts unchanged, keeping the real class for the DB write, and
+ * the two remaining `instanceof` reads became decimal.js's own cross-realm brand
+ * check (lib/money.ts `isDecimalLike`), which needs no import at all.
  *
- * ⚠️ This is a defect list, not an allowlist. If you are here because a NEW
- * module fails this guard, the answer is lib/prismaEnums.ts or `import type` —
- * not a third entry. The list should only ever get shorter.
+ * ⚠️ If you are here because a NEW module fails this guard, the answer is
+ * lib/prismaEnums.ts for an enum VALUE, `import type` for a TYPE, or the split
+ * above when you genuinely need a runtime class on the server — not an entry
+ * here. This list only ever gets shorter, and it has run out of room to.
  */
-const CLIENT_VALUE_IMPORT_EXCEPTIONS = new Set(['lib/money.ts'])
+const CLIENT_VALUE_IMPORT_EXCEPTIONS = new Set([])
 
 /** Does this module import the '@prisma/client' PACKAGE in a non-erasable way? */
 function importsPrismaPackageAsValue(file) {
@@ -292,6 +314,23 @@ function assertMatchersWork() {
   }
   if (!USE_CLIENT_RE.test("// leading comment\n'use client'\n")) {
     throw new Error("check-no-client-prisma-import self-test: 'use client' after comment not detected")
+  }
+  // The case that was silently failing: a BLANK LINE between the header comment
+  // and the directive. 23 client components are written this way.
+  if (!USE_CLIENT_RE.test("// leading comment\n\n'use client'\n")) {
+    throw new Error(
+      "check-no-client-prisma-import self-test: 'use client' after a blank line not detected",
+    )
+  }
+  if (!USE_CLIENT_RE.test("/* block */\n\n'use client'\n")) {
+    throw new Error(
+      "check-no-client-prisma-import self-test: 'use client' after a block comment and blank line not detected",
+    )
+  }
+  if (!USE_SERVER_RE.test("// app/x/actions.ts\n\n'use server'\n")) {
+    throw new Error(
+      "check-no-client-prisma-import self-test: 'use server' after a blank line not detected",
+    )
   }
   if (!USE_SERVER_RE.test("// app/x/actions.ts\n'use server'\n")) {
     throw new Error("check-no-client-prisma-import self-test: 'use server' not detected")

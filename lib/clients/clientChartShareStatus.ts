@@ -26,7 +26,7 @@
 // docs in `prisma/schema.prisma`. Anything reading "is it shared" must go
 // through {@link clientChartShareGrantsAccess} rather than compare strings, so
 // a fifth status added later cannot silently default to "open".
-import { ClientChartShareStatus } from '@prisma/client'
+import { ClientChartShareStatus } from '@/lib/prismaEnums'
 
 /**
  * What the CLIENT is told about this status. Phrased with the pro as the

@@ -10,7 +10,7 @@ import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
 import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import { writeAdminAuditLog } from '@/lib/admin/auditLog'
 import { hasAdminPermission } from '@/lib/adminPermissions'
-import { parseMoney } from '@/lib/money'
+import { parseMoney } from '@/lib/moneyDecimal'
 import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'

@@ -37,7 +37,8 @@ import {
   type PrismaClient,
 } from '@prisma/client'
 
-import { decimalToCents, parseMoney } from '@/lib/money'
+import { decimalToCents } from '@/lib/money'
+import { parseMoney } from '@/lib/moneyDecimal'
 import { envFlagEnabled } from '@/lib/env'
 import { normalizeRequiredId } from '@/lib/guards'
 
