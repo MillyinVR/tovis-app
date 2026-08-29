@@ -22,6 +22,7 @@ import {
 } from '@/lib/booking/cancelRefund'
 import { assessAndChargeNoShowFee } from '@/lib/noShowProtection/charge'
 import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
+import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { safeError } from '@/lib/security/logging'
 
 export async function runCancelRefundOrchestration(args: {
@@ -80,6 +81,18 @@ export async function runCancelRefundOrchestration(args: {
       priorStatus: args.priorStatus,
     }).catch((error: unknown) => {
       console.error(`${args.operation} late-cancel fee error`, safeError(error))
+      // Twin of the late-change path: a THROW from assessAndChargeNoShowFee
+      // happens before it records anything, so unlike a declined card there is
+      // no FAILED NoShowFee row, and no sweep retries no-show fees. The cancel
+      // is already committed and best-effort by design, so nothing fails the
+      // request either — this capture is the only signal that a late-cancel fee
+      // was owed and never charged.
+      captureBookingException({
+        error,
+        route: args.operation,
+        event: 'LATE_CANCEL_FEE_CHARGE_THREW',
+        bookingId: args.bookingId,
+      })
       return null
     })
 

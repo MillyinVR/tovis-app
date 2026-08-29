@@ -28,6 +28,7 @@ import { NoShowFeeReason, NoShowFeeStatus, BookingStatus } from '@prisma/client'
 
 import { assessAndChargeNoShowFee } from '@/lib/noShowProtection/charge'
 import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
+import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { safeError } from '@/lib/security/logging'
 
 export type LateChangeFeeSummary = {
@@ -68,6 +69,20 @@ export async function runLateChangeFeeOrchestration(args: {
     windowAnchor: args.previousScheduledFor,
   }).catch((error: unknown) => {
     console.error(`${args.operation} late-change fee error`, safeError(error))
+    // The comment above promises "a FAILED NoShowFee row + Sentry capture make
+    // it retryable" — and that is true of the charge helper's OWN catch, which
+    // records a FAILED row for a declined card. It is NOT true here: reaching
+    // this catch means assessAndChargeNoShowFee THREW, before it ever wrote a
+    // row. So there is no FAILED row, no cron retries no-show fees (checked:
+    // nothing under app/api/internal/jobs references NoShowFee), and the
+    // reschedule already committed by design. Billable money owed, with the
+    // console line as its only trace.
+    captureBookingException({
+      error,
+      route: args.operation,
+      event: 'LATE_CHANGE_FEE_CHARGE_THREW',
+      bookingId: args.bookingId,
+    })
     return null
   })
 

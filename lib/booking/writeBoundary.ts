@@ -353,6 +353,7 @@ import { isActiveAftercareRebookedBooking } from '@/lib/aftercare/aftercareReboo
 // Must come after recordStepTransition import so the contract module loads first.
 import '@/lib/observability/bookingEvents'
 import {
+  captureBookingException,
   captureOverlapBackstopFired,
   captureStripeAmountMismatch,
 } from '@/lib/observability/bookingEvents'
@@ -2979,6 +2980,29 @@ async function maybeCreateAftercareAccessDeliveryInBoundary(args: {
         error: safeError(error),
       },
     )
+    // WARNING, not error: the pro is told ("We could not send aftercare to the
+    // client. Please try again."), so this is never silent. But that message is
+    // the same whatever the cause, and the throw below is a mapped bookingError
+    // the route turns into a clean response — so it never reaches onRequestError
+    // either. A broken delivery pipeline would show up only as pros retrying.
+    //
+    // ⚠️ This event arrives in Sentry DEGRADED: beforeSend's private-media
+    // string pattern matches the literal word "aftercare", so the message and
+    // both the route and event tags below land as [REDACTED]. The ids, the
+    // level and the stack trace survive, and the stack is what Sentry groups
+    // on — so it is still triageable, just not by tag. Pre-existing, not
+    // introduced here (eight /aftercare/ and /consultation/ routes already
+    // capture this way); pinned by the CANARY test in
+    // lib/observability/bookingEvents.captureException.test.ts.
+    captureBookingException({
+      error,
+      route: 'upsertBookingAftercare',
+      event: 'AFTERCARE_ACCESS_DELIVERY_ENQUEUE_FAILED',
+      level: 'warning',
+      bookingId: args.booking.id,
+      professionalId: args.booking.professionalId,
+      clientId: args.booking.clientId,
+    })
 
     return throwAftercareDeliveryFailed()
   }
@@ -12645,6 +12669,21 @@ if (args.notifyClient) {
         resolveResult: schedulingContextResult,
       },
     )
+    // WARNING: the pro is refused with TIMEZONE_REQUIRED, so it is not silent —
+    // but it is also not something they can fix. Reaching here means a stored
+    // ProfessionalLocation (or the booking's own locationTimeZone) holds a value
+    // the timezone resolver rejects, which blocks every reschedule on that
+    // location until someone repairs the row. Data integrity, not user error.
+    captureBookingException({
+      error: new Error(
+        `updateProBooking could not resolve an appointment timezone: ${schedulingContextResult.error}`,
+      ),
+      route: 'updateProBooking',
+      event: 'APPOINTMENT_TIMEZONE_UNRESOLVABLE',
+      level: 'warning',
+      bookingId: existing.id,
+      professionalId: existing.professionalId,
+    })
     throw bookingError('TIMEZONE_REQUIRED')
   }
 
@@ -19332,6 +19371,23 @@ export async function expireLapsedWaitlistOffers(args: {
       console.error('expireLapsedWaitlistOffers: offer failed', {
         waitlistOfferId: candidate.id,
         error: safeError(error),
+      })
+      // A cron sweep with nobody on the other end: `result.failed` is returned
+      // in a 200 body that nothing reads. An offer that keeps failing to expire
+      // holds its reserved window shut against every other client indefinitely,
+      // and the next run re-attempts the same row, so a persistent fault repeats
+      // silently rather than resolving.
+      //
+      // Volume is bounded, not unbounded: WAITLIST_OFFER_EXPIRY_BATCH caps this
+      // at 200 events per run and the cron is hourly (vercel.json "35 * * * *"),
+      // so the worst case is one Sentry issue collecting 200/hour — the same
+      // shape as the credit-settlement captures (MAX_TOP_UPS_PER_RUN = 100) the
+      // Tier 1 triage already accepted.
+      captureBookingException({
+        error,
+        route: 'expireLapsedWaitlistOffers',
+        event: 'WAITLIST_OFFER_EXPIRY_FAILED',
+        professionalId: candidate.professionalId,
       })
     }
   }
