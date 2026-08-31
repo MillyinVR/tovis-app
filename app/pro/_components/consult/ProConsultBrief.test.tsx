@@ -9,6 +9,7 @@ const confidence = { min: 0.4, max: 0.7 }
 const brief: ConsultProBriefDTO = {
   consultId: 'consult_1',
   bookingId: 'booking_1',
+  lookPostId: null,
   professionalId: 'pro_1',
   serviceCategoryId: 'hair_color',
   briefRevisionId: 'brief_1',

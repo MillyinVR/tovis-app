@@ -244,9 +244,9 @@ import {
 import { maybeCreateAiConsultInvitation } from '@/lib/notifications/aiConsultInvitation'
 import { isAiConsultC6ExposureEnabledForPro } from '@/lib/consult/access'
 import {
-  AI_CONSULT_ELIGIBILITY_BOOKING_SELECT,
-  evaluateAiConsultBookingEligibility,
-} from '@/lib/consult/eligibility'
+  CONSULT_ANCHOR_SELECT,
+  evaluateConsultAnchor,
+} from '@/lib/consult/anchor'
 import {
   computeDepositReminderRunAt,
   scheduleDepositReminderOnBooking,
@@ -9881,11 +9881,8 @@ async function resolveFinalizeConsultAttribution(args: {
     where: { id: args.consultId },
     select: {
       id: true,
-      clientId: true,
-      professionalId: true,
-      serviceCategoryId: true,
       status: true,
-      booking: { select: AI_CONSULT_ELIGIBILITY_BOOKING_SELECT },
+      ...CONSULT_ANCHOR_SELECT,
     },
   })
 
@@ -9902,13 +9899,13 @@ async function resolveFinalizeConsultAttribution(args: {
     throw bookingError('CONSULT_NOT_FOUND')
   }
 
-  const eligibility = evaluateAiConsultBookingEligibility(
-    consult.booking,
-    args.now,
-  )
-  if (!eligibility.eligible) {
+  // A consult attributed to a new booking may itself be anchored to a booking
+  // or, since Book the Look (B2), to a look — evaluateConsultAnchor answers
+  // both without this call site knowing which.
+  const anchor = evaluateConsultAnchor(consult, args.now)
+  if (!anchor.eligible) {
     throw bookingError(
-      eligibility.hidden ? 'CONSULT_NOT_FOUND' : 'CONSULT_UNAVAILABLE',
+      anchor.hidden ? 'CONSULT_NOT_FOUND' : 'CONSULT_UNAVAILABLE',
     )
   }
 

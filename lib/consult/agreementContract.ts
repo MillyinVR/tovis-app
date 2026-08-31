@@ -4,7 +4,6 @@ import {
   Prisma,
 } from '@prisma/client'
 
-import { AI_CONSULT_PILOT_CATEGORY_SLUGS } from '@/lib/consult/eligibility'
 import type {
   ConsultAgreementAcceptanceDTO,
   ConsultAgreementRequirementDTO,
@@ -14,7 +13,10 @@ import type {
 } from '@/lib/dto/consult'
 import { prisma } from '@/lib/prisma'
 
-import { isAiConsultEnabledForPro } from './access'
+import {
+  CONSULT_ANCHOR_SELECT,
+  evaluateConsultAnchorScope,
+} from './anchor'
 import { ConsultWriteError } from './errors'
 
 export const CONSULT_REQUIRED_AGREEMENT_KINDS = Object.freeze([
@@ -101,37 +103,13 @@ export async function findOwnedPilotConsult(args: {
 }): Promise<OwnedPilotConsult | null> {
   const session = await prisma.consultSession.findUnique({
     where: { id: args.consultSessionId },
-    select: {
-      id: true,
-      clientId: true,
-      professionalId: true,
-      serviceCategoryId: true,
-      booking: {
-        select: {
-          clientId: true,
-          professionalId: true,
-          service: {
-            select: {
-              categoryId: true,
-              category: { select: { slug: true } },
-            },
-          },
-        },
-      },
-    },
+    select: { id: true, ...CONSULT_ANCHOR_SELECT },
   })
 
   if (
     !session ||
     session.clientId !== args.clientId ||
-    session.booking.clientId !== args.clientId ||
-    session.booking.professionalId !== session.professionalId ||
-    session.booking.service.categoryId !== session.serviceCategoryId ||
-    !session.booking.service.category.slug ||
-    !AI_CONSULT_PILOT_CATEGORY_SLUGS.includes(
-      session.booking.service.category.slug,
-    ) ||
-    !isAiConsultEnabledForPro(session.professionalId)
+    !evaluateConsultAnchorScope(session).eligible
   ) {
     return null
   }

@@ -63,7 +63,9 @@ const scope = {
   clientId: 'client_1',
   professionalId: 'pro_1',
   serviceCategoryId: 'hair_color',
+  serviceCategory: { slug: 'hair-color' },
   bookingId: 'booking_1',
+  anchorLookPostId: null,
   status: ConsultSessionStatus.COMPLETED,
   client: { userId: 'user_1' },
   booking: {

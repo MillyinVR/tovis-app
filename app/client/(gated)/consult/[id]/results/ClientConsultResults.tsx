@@ -57,15 +57,27 @@ export default function ClientConsultResults({
       ? copy.unknownLabel
       : `${copy.levelPrefix} ${level.min}–${level.max}`
 
+  // A consult is anchored to a booking or, since Book the Look, to a look —
+  // and ClientPage without a `back` leaves the client's only exit as a tab, so
+  // each anchor names its own way out.
+  const backLink = results.bookingId
+    ? {
+        href: `/client/bookings/${encodeURIComponent(results.bookingId)}`,
+        label: copy.backToBooking,
+      }
+    : results.lookPostId
+      ? {
+          href: `/looks/${encodeURIComponent(results.lookPostId)}`,
+          label: copy.backToLook,
+        }
+      : undefined
+
   return (
     <ClientPage
       eyebrow={copy.eyebrow}
       title={copy.title}
       lede={copy.intro}
-      back={{
-        href: `/client/bookings/${encodeURIComponent(results.bookingId)}`,
-        label: copy.backToBooking,
-      }}
+      back={backLink}
       width="wide"
     >
       <div className="grid gap-6">

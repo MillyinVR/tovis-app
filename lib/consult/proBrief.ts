@@ -40,7 +40,8 @@ export class ProConsultBriefError extends Error {
 
 type BriefSession = {
   id: string
-  bookingId: string
+  bookingId: string | null
+  anchorLookPostId: string | null
   professionalId: string
   serviceCategoryId: string
   createdAt: Date
@@ -79,6 +80,7 @@ async function loadSessionBrief(
   return {
     consultId: session.id,
     bookingId: session.bookingId,
+    lookPostId: session.anchorLookPostId,
     professionalId: session.professionalId,
     serviceCategoryId: session.serviceCategoryId,
     briefRevisionId: result.briefRevisionId,
@@ -144,6 +146,7 @@ export async function loadAuthorizedProConsultBriefs(
       select: {
         id: true,
         bookingId: true,
+        anchorLookPostId: true,
         professionalId: true,
         serviceCategoryId: true,
         createdAt: true,

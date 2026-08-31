@@ -41,6 +41,9 @@ export type ConsultWriteErrorCode =
   | 'INSPIRATION_STORAGE_UNAVAILABLE'
   | 'INSPIRATION_INVALID_ANSWER'
   | 'INSPIRATION_QUESTION_OUT_OF_ORDER'
+  // Book the Look (B2): a look that cannot anchor a consult — no service
+  // linkage, or a linkage outside the pilot vertical. `detail` names which.
+  | 'LOOK_NOT_CONSULTABLE'
 
 export class ConsultWriteError extends Error {
   constructor(

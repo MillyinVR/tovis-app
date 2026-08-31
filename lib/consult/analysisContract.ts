@@ -49,10 +49,7 @@ import {
   CONSULT_CAPTURE_MEDIA_TYPES,
   type ConsultCaptureMediaType,
 } from './captureVision'
-import {
-  AI_CONSULT_ELIGIBILITY_BOOKING_SELECT,
-  evaluateAiConsultBookingEligibility,
-} from './eligibility'
+import { CONSULT_ANCHOR_SELECT, evaluateConsultAnchor } from './anchor'
 import { ConsultWriteError } from './errors'
 import { mapStoredHairColorAnalysisRevision } from './analysisRevision'
 import {
@@ -80,22 +77,19 @@ type ClientActor = {
 
 const ANALYSIS_SCOPE_SELECT = {
   id: true,
-  clientId: true,
-  professionalId: true,
-  serviceCategoryId: true,
   status: true,
   revisionSequence: true,
   client: { select: { userId: true } },
-  serviceCategory: { select: { id: true, slug: true, isActive: true } },
   professional: {
     select: { homeTenantId: true, homeTenant: { select: { isActive: true } } },
   },
+  ...CONSULT_ANCHOR_SELECT,
+  serviceCategory: { select: { id: true, slug: true, isActive: true } },
   booking: {
     select: {
-      clientId: true,
       proTenantId: true,
       locationType: true,
-      ...AI_CONSULT_ELIGIBILITY_BOOKING_SELECT,
+      ...CONSULT_ANCHOR_SELECT.booking.select,
     },
   },
 } satisfies Prisma.ConsultSessionSelect
@@ -231,18 +225,19 @@ async function requireScope(
     !session ||
     session.clientId !== args.clientId ||
     session.client.userId !== args.actorUserId ||
-    session.booking.clientId !== session.clientId ||
-    session.booking.professionalId !== session.professionalId ||
-    session.booking.service.categoryId !== session.serviceCategoryId ||
-    session.booking.proTenantId !== session.professional.homeTenantId ||
+    // A booking anchor must sit in the professional's own tenant. A look
+    // anchor has no tenant of its own; the pro's home tenant is checked for
+    // both arms just below.
+    (session.booking &&
+      session.booking.proTenantId !== session.professional.homeTenantId) ||
     session.serviceCategory.slug !== 'hair-color'
   ) {
     throw new ConsultWriteError('NOT_FOUND', 'Consult session not found.')
   }
-  const eligibility = evaluateAiConsultBookingEligibility(session.booking, args.now)
-  if (!eligibility.eligible || !session.serviceCategory.isActive || !session.professional.homeTenant.isActive) {
+  const anchor = evaluateConsultAnchor(session, args.now)
+  if (!anchor.eligible || !session.serviceCategory.isActive || !session.professional.homeTenant.isActive) {
     throw new ConsultWriteError(
-      eligibility.eligible || !eligibility.hidden ? 'BOOKING_INELIGIBLE' : 'NOT_FOUND',
+      anchor.eligible || !anchor.hidden ? 'BOOKING_INELIGIBLE' : 'NOT_FOUND',
       'Consult is unavailable for this booking.',
     )
   }
@@ -470,6 +465,21 @@ function offeringMode(offering: RecommendationOffering, locationType: ServiceLoc
       }
 }
 
+/**
+ * Which of the pro's two price/duration columns a recommendation is read from.
+ *
+ * A booking already chose salon or mobile. A look-anchored consult has not — the
+ * booking proposal is B4 — so it reads the salon column, which is where a pro's
+ * primary prices live and where the safety services (patch and strand tests) are
+ * performed. This is a READING choice for the reference lookup only; deriving a
+ * real price for a look is the translation module's job (B3), not this one's.
+ */
+const CONSULT_LOOK_ANCHOR_LOCATION_TYPE = ServiceLocationType.SALON
+
+function recommendationLocationType(session: AnalysisScope): ServiceLocationType {
+  return session.booking?.locationType ?? CONSULT_LOOK_ANCHOR_LOCATION_TYPE
+}
+
 function safetyOffering(
   offerings: readonly RecommendationOffering[],
   locationType: ServiceLocationType,
@@ -501,7 +511,7 @@ function requireSafetyOfferings(
   for (const requirement of requirements) {
     const offering = safetyOffering(
       offerings,
-      session.booking.locationType,
+      recommendationLocationType(session),
       requirement,
     )
     if (!offering) {

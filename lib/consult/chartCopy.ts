@@ -86,6 +86,14 @@ export async function copyConsultCapturesToChart(args: {
   if (!session || !session.chartCopyOptIn || session.chartCopyCompletedAt) {
     return
   }
+  // A chart copy is BOOKING media: a MediaAsset is anchored to a booking and a
+  // primary service, and it lands on the pro's booking-media surfaces. A
+  // look-anchored consult has no visit to file the photos under yet (the
+  // booking proposal is B4), so there is nothing honest to write and the copy
+  // is skipped rather than invented against some other booking. The raw
+  // captures still purge on the normal path.
+  const booking = session.booking
+  if (!booking) return
 
   const captures = await prisma.consultCapture.findMany({
     where: {
@@ -127,9 +135,9 @@ export async function copyConsultCapturesToChart(args: {
       data: copied.map((object) =>
         buildMediaAssetCreateData({
           professionalId: session.professionalId,
-          proTenantId: session.booking.proTenantId,
-          primaryServiceId: session.booking.serviceId,
-          bookingId: session.booking.id,
+          proTenantId: booking.proTenantId,
+          primaryServiceId: booking.serviceId,
+          bookingId: booking.id,
           uploadedByUserId: session.client.userId,
           uploadedByRole: Role.CLIENT,
           storageBucket: CONSULT_CAPTURE_BUCKET,

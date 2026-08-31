@@ -226,5 +226,7 @@ export function consultWriteErrorResponse(error: unknown): Response | null {
       return consultAgreementFail(400, 'Invalid inspiration answer.', 'CONSULT_INSPIRATION_INVALID_ANSWER')
     case 'INSPIRATION_QUESTION_OUT_OF_ORDER':
       return consultAgreementFail(409, 'Answer the current inspiration question first.', 'CONSULT_INSPIRATION_QUESTION_OUT_OF_ORDER')
+    case 'LOOK_NOT_CONSULTABLE':
+      return consultAgreementFail(409, 'This look cannot start a consultation.', 'CONSULT_LOOK_NOT_CONSULTABLE')
   }
 }

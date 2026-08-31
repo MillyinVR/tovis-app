@@ -26,11 +26,8 @@ import {
   CONSULT_PRO_BRIEF_SCHEMA_VERSION,
   toBriefJsonPayload,
 } from './briefContract'
+import { CONSULT_ANCHOR_SELECT, evaluateConsultAnchor } from './anchor'
 import { HAIR_COLOR_CAPTURE_SHOT_KEYS } from './capturePack'
-import {
-  AI_CONSULT_ELIGIBILITY_BOOKING_SELECT,
-  evaluateAiConsultBookingEligibility,
-} from './eligibility'
 import { ConsultWriteError } from './errors'
 import {
   HAIR_COLOR_INTAKE_PACK_ID,
@@ -43,6 +40,7 @@ import {
   CONSULT_INSPIRATION_REFERENCE_NOTE,
   normalizeStoredInspirationPayload,
 } from './inspirationPack'
+import { seedLockedConsultAnchorInspiration } from './inspirationSeed'
 
 type ClientActor = {
   readonly type: typeof ConsultActorType.CLIENT
@@ -121,31 +119,17 @@ async function requireClientIntakeEligibility(
   const session = await tx.consultSession.findUnique({
     where: { id: consultSessionId },
     select: {
-      clientId: true,
-      professionalId: true,
-      serviceCategoryId: true,
       client: { select: { userId: true } },
-      booking: {
-        select: {
-          clientId: true,
-          ...AI_CONSULT_ELIGIBILITY_BOOKING_SELECT,
-        },
-      },
+      ...CONSULT_ANCHOR_SELECT,
     },
   })
-  if (
-    !session ||
-    session.client.userId !== actor.id ||
-    session.booking.clientId !== session.clientId ||
-    session.booking.professionalId !== session.professionalId ||
-    session.booking.service.categoryId !== session.serviceCategoryId
-  ) {
+  if (!session || session.client.userId !== actor.id) {
     throw new ConsultWriteError('NOT_FOUND', 'Consult session not found.')
   }
-  const eligibility = evaluateAiConsultBookingEligibility(session.booking)
-  if (!eligibility.eligible) {
+  const anchor = evaluateConsultAnchor(session)
+  if (!anchor.eligible) {
     throw new ConsultWriteError(
-      eligibility.hidden ? 'NOT_FOUND' : 'BOOKING_INELIGIBLE',
+      anchor.hidden ? 'NOT_FOUND' : 'BOOKING_INELIGIBLE',
       'Consult is unavailable for this booking.',
     )
   }
@@ -785,7 +769,7 @@ export async function appendHairColorIntakeRevision(args: {
 }) {
   return prisma.$transaction(async (tx) => {
     await lockSession(tx, args.consultSessionId)
-    await requireClientIntakeEligibility(
+    const scope = await requireClientIntakeEligibility(
       tx,
       args.consultSessionId,
       args.actor,
@@ -921,6 +905,19 @@ export async function appendHairColorIntakeRevision(args: {
         toStatus: ConsultSessionStatus.MEDIA_READY,
       })
       status = ConsultSessionStatus.MEDIA_READY
+
+      // Book the Look: the client tapped a picture to get here, so she is not
+      // asked for one again. Seeded at exactly this transition because the
+      // database refuses an inspiration row before MEDIA_READY with both legal
+      // prerequisites active — see lib/consult/inspirationSeed.ts. A
+      // booking-anchored consult has no look anchor and no-ops here.
+      await seedLockedConsultAnchorInspiration(tx, {
+        consultSessionId: args.consultSessionId,
+        clientId: scope.clientId,
+        professionalId: scope.professionalId,
+        anchorLookPostId: scope.anchorLookPostId,
+        actor: args.actor,
+      })
     }
 
     return { revision, status, replayed: false }

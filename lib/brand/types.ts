@@ -568,6 +568,8 @@ export type BrandContact = {
 
 export type BrandClientConsultResultsCopy = {
   backToBooking: string
+  /** Book the Look: a consult started from a look goes back to the look. */
+  backToLook: string
   eyebrow: string
   title: string
   intro: string
