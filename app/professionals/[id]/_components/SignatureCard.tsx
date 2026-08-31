@@ -14,6 +14,7 @@ import Link from 'next/link'
 
 import BeforeAfterReveal from '@/app/_components/media/BeforeAfterReveal'
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import { resolveFocalPoint } from '@/lib/media/focalPoint'
 import { COPY } from '@/lib/copy'
 import type { PublicProfileSignatureDto } from '@/lib/profiles/publicProfileMappers'
 
@@ -41,6 +42,7 @@ export default function SignatureCard({
             src={tile.src}
             alt={tile.caption ?? 'Signature work'}
             className="brand-pp-signature-img"
+            focalPoint={resolveFocalPoint(tile.focalX, tile.focalY)}
             intrinsic
           />
         )}

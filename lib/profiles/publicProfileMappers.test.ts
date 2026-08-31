@@ -18,6 +18,7 @@ import {
   mapPublicOfferingToDto,
   mapPublicProfileHeaderToDto,
   mapPublicPortfolioTileToDto,
+  mapPublicProfileSignatureToDto,
   mapPublicProfileStatsToDto,
   mapPublicReviewMediaAssetToDto,
 } from './publicProfileMappers'
@@ -76,6 +77,8 @@ function makePortfolioRow(
     mediaType: MediaType
     beforeAsset: typeof beforeImage | null
     services: ServiceTagRow[]
+    focalX: number | null
+    focalY: number | null
   }>,
 ) {
   return {
@@ -92,6 +95,8 @@ function makePortfolioRow(
     thumbPath: null,
     url: 'https://cdn.example.com/after_1.jpg',
     thumbUrl: 'https://cdn.example.com/after_1_thumb.jpg',
+    focalX: null as number | null,
+    focalY: null as number | null,
     beforeAsset: null as typeof beforeImage | null,
     services: [] as ServiceTagRow[],
     ...(overrides ?? {}),
@@ -183,6 +188,37 @@ describe('mapPublicPortfolioTileToDto before/after pairing', () => {
     expect(
       (await mapPublicPortfolioTileToDto(makePortfolioRow(), 'look_9'))?.lookId,
     ).toBe('look_9')
+  })
+})
+
+describe('mapPublicPortfolioTileToDto focal point', () => {
+  // The profile's surfaces cover-crop this tile to frames that are NOT the
+  // capture's own aspect (a 3:4 grid cell, a 4:5 Signature card), so without a
+  // focal they crop blind-centre. The select carries focalX/focalY purely so
+  // these two surfaces can centre on the face like the feed already does.
+  it('carries the stored focal through to the tile', async () => {
+    const tile = await mapPublicPortfolioTileToDto(
+      makePortfolioRow({ focalX: 0.42, focalY: 0.31 }),
+    )
+    expect(tile?.focalX).toBe(0.42)
+    expect(tile?.focalY).toBe(0.31)
+  })
+
+  it('is null when the asset carries no focal — the pre-C6 centre crop', async () => {
+    const tile = await mapPublicPortfolioTileToDto(makePortfolioRow())
+    expect(tile?.focalX).toBeNull()
+    expect(tile?.focalY).toBeNull()
+  })
+
+  it('reaches the Signature card, which crops hardest of all', async () => {
+    const signature = await mapPublicProfileSignatureToDto({
+      lookId: 'look_9',
+      asset: makePortfolioRow({ focalX: 0.5, focalY: 0.2 }),
+      engagement: { likeCount: 0, commentCount: 0, recreatedCount: 0 },
+      priceLine: null,
+    })
+    expect(signature?.tile.focalX).toBe(0.5)
+    expect(signature?.tile.focalY).toBe(0.2)
   })
 })
 

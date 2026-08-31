@@ -344,41 +344,68 @@ export default function LookDetailClient({
           <span aria-hidden>←</span> Back to Looks
         </Link>
 
-        <section className="relative mt-3 overflow-hidden rounded-card border border-surfaceGlass/10 bg-bgSecondary">
-          <div className="grid max-h-[520px] place-items-center bg-bgPrimary pr-[92px]">
+        {/*
+          Capped to the same 560px column `LookSlide` gives a feed slide, and
+          centred — so one look is the same width whether you scroll onto it or
+          land on it from a shared link. The cap belongs on the SECTION rather
+          than on the media alone: `RightActionRail` and the export button are
+          absolutely positioned against this box, so capping only the picture
+          would leave the rail floating hundreds of pixels off its right edge on
+          a desktop viewport.
+        */}
+        <section className="relative mx-auto mt-3 w-full max-w-[560px] overflow-hidden rounded-card border border-surfaceGlass/10 bg-bgSecondary">
+          {/*
+            One 4:5 portrait frame for all three branches, centred in the page.
+
+            🔴 What this replaces, and why: the hero was `max-h-[520px]` around an
+            `h-auto w-full` image, which is a HEIGHT CAP on a width-driven image —
+            so the crop was a function of the viewport. On a phone the photo fitted
+            whole; at the 960px page width it rendered 836 wide × 1115 tall and the
+            section's `overflow-hidden` silently threw away 53% of it, blind-centre,
+            top and bottom. That is the screen a shared link lands on.
+
+            The old `pr-[92px]` is gone too. `RightActionRail` is absolutely
+            positioned into the bottom-right corner, so reserving a full 92px column
+            for it pushed the entire photograph off-centre to dodge something that
+            only ever covered one corner — the feed's own rail overlays its slide
+            exactly this way.
+
+            4:5 is `PublishCrop.instagramFeed`, the same frame iOS's hero and the
+            Signature card use, so one look is one shape everywhere.
+          */}
+          <div className="relative aspect-4/5 w-full overflow-hidden bg-bgPrimary">
             {item.primaryMedia.mediaType === 'VIDEO' ? (
               <video
                 src={item.primaryMedia.url}
                 controls
                 playsInline
                 preload="metadata"
-                className="h-auto w-full max-h-[520px]"
+                className="absolute inset-0 h-full w-full object-cover"
               />
             ) : item.before ? (
-              // Paired before/after → the reveal slider is the money-shot. Its
-              // 4:5 aspect is capped so the frame stays within the 520px band;
-              // passVerticalScroll keeps the page scrollable under a touch drag.
-              <div className="w-full max-w-[416px]">
-                <BeforeAfterReveal
-                  beforeSrc={
-                    item.before.thumbUrl ??
-                    item.before.fullUrl ??
-                    item.primaryMedia.url
-                  }
-                  afterSrc={item.primaryMedia.url}
-                  beforeAlt={
-                    item.caption ? `Before — ${item.caption}` : 'Before'
-                  }
-                  afterAlt={item.caption || `Look by ${proDisplayName}`}
-                  className="w-full"
-                  passVerticalScroll
-                />
-              </div>
+              // Paired before/after → the reveal slider is the money-shot.
+              // `passVerticalScroll` keeps the page scrollable under a touch drag.
+              <BeforeAfterReveal
+                beforeSrc={
+                  item.before.thumbUrl ??
+                  item.before.fullUrl ??
+                  item.primaryMedia.url
+                }
+                afterSrc={item.primaryMedia.url}
+                beforeAlt={item.caption ? `Before — ${item.caption}` : 'Before'}
+                afterAlt={item.caption || `Look by ${proDisplayName}`}
+                className="brand-before-after-fill absolute inset-0 h-full w-full"
+                passVerticalScroll
+              />
             ) : (
               <RemoteImage
                 src={item.primaryMedia.url}
                 alt={item.caption || `Look by ${proDisplayName}`}
-                className="block h-auto w-full"
+                className="absolute inset-0 block h-full w-full object-cover"
+                focalPoint={resolveFocalPoint(
+                  item.primaryMedia.focalX,
+                  item.primaryMedia.focalY,
+                )}
                 intrinsic
               />
             )}
@@ -587,7 +614,10 @@ export default function LookDetailClient({
                         asset.media.focalX,
                         asset.media.focalY,
                       )}
-                      className="h-24 w-full rounded-card border border-surfaceGlass/10 bg-bgPrimary"
+                      // 3:4 like every other browse tile, not a fixed 96px band —
+                      // a landscape strip over an upright capture was cropping ~60%
+                      // of each thumbnail away.
+                      className="aspect-3/4 w-full rounded-card border border-surfaceGlass/10 bg-bgPrimary"
                     />
                   ))}
                 </div>

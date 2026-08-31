@@ -1627,9 +1627,15 @@ select {
   margin: var(--pp-gap) var(--pp-bleed) 0;
 }
 
+/* 🔴 3:4 PORTRAIT, not square, and it must match iOS `MediaGridLayout.portraitAspect`
+   exactly — the two grids render the same tiles from the same DTO, and they used
+   to disagree (web square, iOS 3:4), so one photo had two crops depending on
+   which client you opened. Beauty work is shot upright: a square cell takes 25%
+   of a 3:4 capture's height off the top and bottom, which is the hair and the
+   chin. Every browse grid in the app (discover, search, tag, this one) is 3:4. */
 .brand-pp-tile {
   position: relative;
-  aspect-ratio: 1 / 1;
+  aspect-ratio: 3 / 4;
   overflow: hidden;
   background: rgb(var(--bg-secondary));
 }
@@ -1719,29 +1725,46 @@ select {
   background: rgb(var(--bg-surface));
 }
 
+/* 🔴 An ASPECT, never a fixed height. Three hard-coded heights over a column
+   whose width changes at every breakpoint meant the Signature's crop drifted
+   with the viewport — 1.37 landscape on a phone, 1.68 on a desktop, where it
+   cut 55% of a portrait capture's height away. It is the biggest, most
+   deliberate photograph on the page and it was the worst crop in the product.
+
+   4:5 is `PublishCrop.instagramFeed`, the same constant iOS's Signature card
+   uses — portrait, so it flatters an upright capture, and tall enough that the
+   promoted post reads as promoted without running the page off the screen. */
 .brand-pp-signature-media {
   position: relative;
-  height: 290px;
+  aspect-ratio: 4 / 5;
   overflow: hidden;
   background: rgb(var(--bg-secondary));
 }
 
-@media (min-width: 768px) {
-  .brand-pp-signature-media {
-    height: 360px;
-  }
-}
-
-@media (min-width: 1100px) {
-  .brand-pp-signature-media {
-    height: 420px;
-  }
-}
-
+/* 🔴 Absolutely positioned, for the same reason `.brand-pp-tile-img` is: its
+   parent's height now comes from an `aspect-ratio`, and an in-flow child asking
+   for 100% of a height that is itself being derived is circular — the browser
+   falls back to the image's natural ratio and the card comes out whatever shape
+   the photo happened to be. Out of flow, the aspect-ratio is the only thing
+   sizing the box and `object-fit: cover` crops to it. */
 .brand-pp-signature-img {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+/* The paired Signature renders `BeforeAfterReveal`, whose `.brand-before-after-fill`
+   variant fills its parent with an in-flow `height: 100%`. That is correct for the
+   variant's four other callers, which all sit in parents with a definite pixel
+   height — but this parent is now sized by `aspect-ratio`, so the same rule walks
+   into the circular-height trap described on `.brand-pp-tile-img`. Scoped here
+   rather than changed on the shared class, so nothing else moves. */
+.brand-pp-signature-media .brand-before-after-reveal.brand-before-after-fill {
+  position: absolute;
+  inset: 0;
+  height: auto;
 }
 
 .brand-pp-signature-eyebrow {
