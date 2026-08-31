@@ -310,6 +310,11 @@ export const EXPORT_BOUNDARY: Readonly<Record<string, ExportDisposition>> = {
     reason:
       'Pro-authored, content-free quality annotation used for audit and evaluation; it is not client-facing consult content and is not disclosed in either party\'s user export.',
   },
+  ConsultServiceEstimate: {
+    status: 'OMITTED',
+    reason:
+      "Pro-facing translation of the consult onto the professional's own service menu: her list prices and durations, plus the reason each line is there. It states nothing about the client that consultSessions does not already export, and it is the professional's commercial record rather than the client's personal data, so it is disclosed in neither party's user export.",
+  },
 
   // ------------------------------------------------- undecided (K16-A backlog)
   // Recorded, not resolved. Each of these links to the subject and is neither

@@ -111,6 +111,31 @@
       ],
       "type": "string"
     },
+    "$Enums.ConsultServiceEstimateLineSource": {
+      "enum": [
+        "LOOK_LINKED_SERVICE",
+        "ANALYSIS_RECOMMENDATION"
+      ],
+      "type": "string"
+    },
+    "$Enums.ConsultServiceEstimateRefusalCode": {
+      "enum": [
+        "LOOK_SERVICE_UNLINKED",
+        "SERVICE_NOT_ON_MENU",
+        "MENU_MODE_UNAVAILABLE",
+        "MENU_PRICE_UNSET",
+        "MENU_DURATION_UNSET",
+        "PRO_SCHEDULING_NOT_READY"
+      ],
+      "type": "string"
+    },
+    "$Enums.ConsultServiceEstimateStatus": {
+      "enum": [
+        "ESTIMATED",
+        "REFUSED"
+      ],
+      "type": "string"
+    },
     "$Enums.ConsultSessionStatus": {
       "enum": [
         "CONSENT_REQUIRED",
@@ -10046,6 +10071,16 @@
         "serviceCategoryId": {
           "type": "string"
         },
+        "serviceEstimate": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultServiceEstimateDTO"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "sourceAnalysisRevision": {
           "type": "number"
         },
@@ -10221,6 +10256,146 @@
         "UNKNOWN"
       ],
       "type": "string"
+    },
+    "ConsultServiceEstimateDTO": {
+      "properties": {
+        "bufferMinutes": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "derivationVersion": {
+          "type": "string"
+        },
+        "lines": {
+          "items": {
+            "$ref": "#/definitions/ConsultServiceEstimateLineDTO"
+          },
+          "type": "array"
+        },
+        "locationType": {
+          "$ref": "#/definitions/ServiceLocationType",
+          "description": "Which of the pro's two price/duration columns the lines were read from."
+        },
+        "refusalCode": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultServiceEstimateRefusalCode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set exactly when `status` is REFUSED: the pro's menu can't express it."
+        },
+        "schemaVersion": {
+          "type": "number"
+        },
+        "sourceAnalysisRevisionId": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/ConsultServiceEstimateStatus"
+        },
+        "stepMinutes": {
+          "description": "Null only on a PRO_SCHEDULING_NOT_READY refusal.",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "status",
+        "refusalCode",
+        "locationType",
+        "stepMinutes",
+        "bufferMinutes",
+        "schemaVersion",
+        "derivationVersion",
+        "sourceAnalysisRevisionId",
+        "lines",
+        "createdAt"
+      ],
+      "type": "object"
+    },
+    "ConsultServiceEstimateLineDTO": {
+      "properties": {
+        "estimatedDurationMinutes": {
+          "description": "Rounded UP to `stepMinutes` — an estimate never understates the day.",
+          "type": "number"
+        },
+        "estimatedPrice": {
+          "type": "string"
+        },
+        "offeringId": {
+          "type": "string"
+        },
+        "proFinalAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "proFinalDurationMinutes": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "proFinalNote": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "proFinalPrice": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rationale": {
+          "description": "What in the look or the analysis put this line here. Never invented.",
+          "type": "string"
+        },
+        "serviceId": {
+          "type": "string"
+        },
+        "serviceName": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/ConsultServiceEstimateLineSource"
+        }
+      },
+      "required": [
+        "serviceId",
+        "offeringId",
+        "serviceName",
+        "source",
+        "rationale",
+        "estimatedPrice",
+        "estimatedDurationMinutes",
+        "proFinalPrice",
+        "proFinalDurationMinutes",
+        "proFinalNote",
+        "proFinalAt"
+      ],
+      "type": "object"
+    },
+    "ConsultServiceEstimateLineSource": {
+      "$ref": "#/definitions/%24Enums.ConsultServiceEstimateLineSource"
+    },
+    "ConsultServiceEstimateRefusalCode": {
+      "$ref": "#/definitions/%24Enums.ConsultServiceEstimateRefusalCode"
+    },
+    "ConsultServiceEstimateStatus": {
+      "$ref": "#/definitions/%24Enums.ConsultServiceEstimateStatus"
     },
     "ConsultSessionDTO": {
       "properties": {

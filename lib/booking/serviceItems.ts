@@ -80,6 +80,25 @@ export function snapToStepMinutes(value: number, stepMinutes: number): number {
   return Math.round(value / step) * step
 }
 
+/**
+ * Round a duration UP to the pro's slot granularity, never down.
+ *
+ * `snapToStepMinutes` rounds to the NEAREST step, which is right for a booking
+ * whose width the pro already agreed to: a committed 50-minute service snaps to
+ * 45 and the pro is the one who set 50.
+ *
+ * An ESTIMATE has no such agreement behind it. Book the Look decision 11
+ * (docs/product/BOOK-THE-LOOK-DIRECTION.md): duration is the dangerous
+ * estimate — a price miss is corrected in the chair, a duration miss breaks the
+ * pro's whole day — so an estimated width is sized UP to the next slot and
+ * never understated. Same clamp on the step as its sibling, so the two agree
+ * about what a step is.
+ */
+export function ceilToStepMinutes(value: number, stepMinutes: number): number {
+  const step = clampInt(stepMinutes || 15, 5, 60)
+  return Math.ceil(value / step) * step
+}
+
 // Coerce an unknown duration value to a positive, clamped minute count, or null
 // when it isn't a usable duration. Shared by the booking write boundary and the
 // add-on resolver so a service/add-on line's duration snapshot is normalized the
@@ -120,7 +139,12 @@ export function sumDecimal(values: Prisma.Decimal[]): Prisma.Decimal {
   return values.reduce((acc, value) => acc.add(value), new Prisma.Decimal(0))
 }
 
-function pickModePrice(args: {
+/**
+ * The one of the offering's two price columns this booking mode is priced from.
+ * Exported because B3's service estimate stores that exact Decimal, and reading
+ * the column with its own ternary is how the two would drift.
+ */
+export function pickModePrice(args: {
   locationType: ServiceLocationType
   salonPriceStartingAt: Prisma.Decimal | null
   mobilePriceStartingAt: Prisma.Decimal | null

@@ -254,6 +254,11 @@ export const DELETE_BOUNDARY: Readonly<Record<string, DeleteDisposition>> = {
     reason:
       "Deleted through the client-owned consult when the client is the subject. When the professional is the subject, the content-free quality signal remains with the client's consult while the professional profile is anonymized.",
   },
+  ConsultServiceEstimate: {
+    status: 'DELETE',
+    reason:
+      "The line-item service estimate derived for the client's own look-anchored consult (its lines cascade with it). Deleted through that consult when the client is the subject. When the PROFESSIONAL is the subject her profile is anonymized rather than deleted, so the estimate stays with the client's consult — and it names her own menu prices, which are her business record, not the client's personal data.",
+  },
   ConsultCapture: {
     status: 'DELETE',
     reason:

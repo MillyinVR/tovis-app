@@ -41,6 +41,12 @@ import {
   normalizeStoredInspirationPayload,
 } from './inspirationPack'
 import { seedLockedConsultAnchorInspiration } from './inspirationSeed'
+import {
+  CONSULT_SERVICE_ESTIMATE_DERIVATION_VERSION,
+  CONSULT_SERVICE_ESTIMATE_SCHEMA_VERSION,
+  buildConsultServiceEstimate,
+  type ConsultServiceEstimateAnalysisInput,
+} from './serviceEstimate'
 
 type ClientActor = {
   readonly type: typeof ConsultActorType.CLIENT
@@ -680,12 +686,16 @@ export async function finalizeLockedHairColorAnalysis(
     )
   }
 
+  // Normalized once: the brief and B3's service estimate must read the SAME
+  // recommendation references, or the estimate could price a service the brief
+  // never showed.
+  const briefAnalysis = normalizeStoredHairColorAnalysisPayload(revision.payload)
   const briefPayload = buildHairColorProBriefPayload({
     intakeRevisionId: intakeRevision.id,
     intakeAnswers: intake.answers,
     analysisRevisionId: revision.id,
     analysisRevision: revision.revision,
-    analysis: normalizeStoredHairColorAnalysisPayload(revision.payload),
+    analysis: briefAnalysis,
     inspiration: {
       revisionId: inspirationRevision.id,
       source: inspiration.source,
@@ -726,7 +736,81 @@ export async function finalizeLockedHairColorAnalysis(
       revisionId: briefRevision.id,
     },
   })
+
+  await writeLookServiceEstimate(tx, {
+    consultSessionId: args.consultSessionId,
+    analysisRevisionId: revision.id,
+    analysis: briefAnalysis,
+  })
+
   return revision
+}
+
+/**
+ * Book the Look, B3: the line-item service estimate for a LOOK-anchored
+ * consult (docs/product/BOOK-THE-LOOK-DIRECTION.md, decisions 6, 7 and 11).
+ *
+ * Written here, inside the same locked transaction that finalized the analysis
+ * and the brief, so a completed look-anchored consult always has exactly one
+ * estimate — priced lines or a typed refusal — and never a window in which the
+ * pro's brief exists with no estimate beside it.
+ *
+ * A BOOKING-anchored consult gets none: its booking already carries real
+ * BookingServiceItem prices, so there is nothing to translate, and the shipped
+ * booking-attached flow (#1016 / iOS #375) keeps its exact behaviour.
+ */
+async function writeLookServiceEstimate(
+  tx: Prisma.TransactionClient,
+  args: {
+    consultSessionId: string
+    analysisRevisionId: string
+    analysis: ConsultServiceEstimateAnalysisInput
+  },
+) {
+  const session = await tx.consultSession.findUnique({
+    where: { id: args.consultSessionId },
+    select: {
+      anchorLookPostId: true,
+      professionalId: true,
+      serviceCategoryId: true,
+    },
+  })
+  if (!session?.anchorLookPostId) return
+
+  const draft = await buildConsultServiceEstimate(tx, {
+    professionalId: session.professionalId,
+    serviceCategoryId: session.serviceCategoryId,
+    anchorLookPostId: session.anchorLookPostId,
+    analysis: args.analysis,
+  })
+
+  await tx.consultServiceEstimate.create({
+    data: {
+      consultSessionId: args.consultSessionId,
+      professionalId: session.professionalId,
+      sourceAnalysisRevisionId: args.analysisRevisionId,
+      status: draft.status,
+      refusalCode: draft.refusalCode,
+      locationType: draft.locationType,
+      stepMinutes: draft.stepMinutes,
+      bufferMinutes: draft.bufferMinutes,
+      schemaVersion: CONSULT_SERVICE_ESTIMATE_SCHEMA_VERSION,
+      derivationVersion: CONSULT_SERVICE_ESTIMATE_DERIVATION_VERSION,
+      lines: {
+        create: draft.lines.map((line) => ({
+          sortOrder: line.sortOrder,
+          serviceId: line.serviceId,
+          offeringId: line.offeringId,
+          serviceName: line.serviceName,
+          source: line.source,
+          rationale: line.rationale,
+          estimatedPrice: line.estimatedPrice,
+          estimatedDurationMinutes: line.estimatedDurationMinutes,
+        })),
+      },
+    },
+    select: { id: true },
+  })
 }
 
 function intakeRequestHash(args: {

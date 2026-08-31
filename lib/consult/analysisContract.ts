@@ -51,6 +51,10 @@ import {
 } from './captureVision'
 import { CONSULT_ANCHOR_SELECT, evaluateConsultAnchor } from './anchor'
 import { ConsultWriteError } from './errors'
+import {
+  loadConsultProMenuOfferings,
+  type ConsultProMenuOffering,
+} from './proMenu'
 import { mapStoredHairColorAnalysisRevision } from './analysisRevision'
 import {
   HAIR_COLOR_INTAKE_PACK_VERSION,
@@ -410,42 +414,19 @@ const INTENT_PATTERNS: Readonly<Record<ConsultAnalysisServiceIntent, RegExp>> = 
   PATCH_TEST: /^patch test$/i,
 }
 
-type RecommendationOffering = Awaited<
-  ReturnType<typeof loadRecommendationOfferings>
->[number]
+// The menu read moved to lib/consult/proMenu.ts when B3's translation module
+// became its second reader: the estimate must price off the SAME list the
+// recommendations were matched against, or it could price a service this
+// matcher never saw.
+type RecommendationOffering = ConsultProMenuOffering
 
 async function loadRecommendationOfferings(
   tx: Prisma.TransactionClient,
   session: AnalysisScope,
 ) {
-  return tx.professionalServiceOffering.findMany({
-    where: {
-      professionalId: session.professionalId,
-      isActive: true,
-      service: {
-        isActive: true,
-        categoryId: session.serviceCategoryId,
-        category: { isActive: true, slug: 'hair-color' },
-      },
-    },
-    select: {
-      serviceId: true,
-      offersInSalon: true,
-      offersMobile: true,
-      salonPriceStartingAt: true,
-      salonDurationMinutes: true,
-      mobilePriceStartingAt: true,
-      mobileDurationMinutes: true,
-      service: {
-        select: {
-          name: true,
-          description: true,
-          categoryId: true,
-          defaultDurationMinutes: true,
-        },
-      },
-    },
-    orderBy: { serviceId: 'asc' },
+  return loadConsultProMenuOfferings(tx, {
+    professionalId: session.professionalId,
+    serviceCategoryId: session.serviceCategoryId,
   })
 }
 
