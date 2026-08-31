@@ -7,7 +7,11 @@
 import type {
   ConsultAgreementKind,
   ConsultInspirationSource,
+  ConsultServiceEstimateLineSource,
+  ConsultServiceEstimateRefusalCode,
+  ConsultServiceEstimateStatus,
   ConsultSessionStatus,
+  ServiceLocationType,
 } from '@prisma/client'
 
 // GET/POST /api/v1/client/consult — the pre-visit AI consult session.
@@ -856,6 +860,50 @@ export type ConsultBriefFeedbackDTO = {
   createdAt: string
 }
 
+// Book the Look, B3 — the pro-facing line-item service estimate for a
+// look-anchored consult (docs/product/BOOK-THE-LOOK-DIRECTION.md, decision 6).
+//
+// PRO-FACING ONLY. Nothing here reaches a client surface in this slice: the
+// client sees "Starting at $X" with B4's booking flow (decision 5), and a LOOK
+// still never names the service that produced it (B1). This type is reachable
+// solely from the pro brief, which is already founder-gated and
+// pro-authenticated.
+//
+// Prices are decimal STRINGS, matching how every other money field crosses this
+// wire — a JSON number would round.
+export type ConsultServiceEstimateLineDTO = {
+  serviceId: string
+  offeringId: string
+  serviceName: string
+  source: ConsultServiceEstimateLineSource
+  /** What in the look or the analysis put this line here. Never invented. */
+  rationale: string
+  estimatedPrice: string
+  /** Rounded UP to `stepMinutes` — an estimate never understates the day. */
+  estimatedDurationMinutes: number
+  // The pro's correction, once B5/B6 records one. Null until then.
+  proFinalPrice: string | null
+  proFinalDurationMinutes: number | null
+  proFinalNote: string | null
+  proFinalAt: string | null
+}
+
+export type ConsultServiceEstimateDTO = {
+  status: ConsultServiceEstimateStatus
+  /** Set exactly when `status` is REFUSED: the pro's menu can't express it. */
+  refusalCode: ConsultServiceEstimateRefusalCode | null
+  /** Which of the pro's two price/duration columns the lines were read from. */
+  locationType: ServiceLocationType
+  /** Null only on a PRO_SCHEDULING_NOT_READY refusal. */
+  stepMinutes: number | null
+  bufferMinutes: number | null
+  schemaVersion: number
+  derivationVersion: string
+  sourceAnalysisRevisionId: string
+  lines: ConsultServiceEstimateLineDTO[]
+  createdAt: string
+}
+
 export type ConsultProBriefDTO = {
   consultId: string
   // See ConsultClientResultsDTO: exactly one anchor is set, and `lookPostId`
@@ -879,6 +927,11 @@ export type ConsultProBriefDTO = {
   safetyFlags: ConsultAnalysisPayloadDTO['safetyFlags']
   achievabilityDirection: ConsultBriefAchievabilityDirectionDTO
   recommendationDirections: ConsultBriefRecommendationDirectionDTO[]
+  // Book the Look, B3. OPTIONAL on the wire — like `lookPostId` above, so the
+  // published schema grows by addition only and shipped iOS fixtures stay
+  // valid. Present only for a LOOK-anchored consult; a booking-anchored one has
+  // real BookingServiceItem prices and nothing to translate.
+  serviceEstimate?: ConsultServiceEstimateDTO | null
   feedback: ConsultBriefFeedbackDTO | null
   createdAt: string
 }

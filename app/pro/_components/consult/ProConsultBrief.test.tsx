@@ -1,7 +1,10 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 
-import type { ConsultProBriefDTO } from '@/lib/dto/consult'
+import type {
+  ConsultProBriefDTO,
+  ConsultServiceEstimateDTO,
+} from '@/lib/dto/consult'
 
 import ProConsultBrief from './ProConsultBrief'
 
@@ -129,6 +132,55 @@ const brief: ConsultProBriefDTO = {
   createdAt: '2026-08-01T00:00:00.000Z',
 }
 
+// Book the Look, B3. A LOOK-anchored brief carries the estimate; a
+// booking-anchored one (the `brief` above) carries none.
+const estimate: ConsultServiceEstimateDTO = {
+  status: 'ESTIMATED',
+  refusalCode: null,
+  locationType: 'SALON',
+  stepMinutes: 30,
+  bufferMinutes: 15,
+  schemaVersion: 1,
+  derivationVersion: 'look-estimate-v1',
+  sourceAnalysisRevisionId: 'analysis_1',
+  createdAt: '2026-08-01T00:00:00.000Z',
+  lines: [
+    {
+      serviceId: 'svc_balayage',
+      offeringId: 'off_balayage',
+      serviceName: 'Balayage',
+      source: 'LOOK_LINKED_SERVICE',
+      rationale: 'The look this consult was started from is linked to Balayage.',
+      estimatedPrice: '180.00',
+      estimatedDurationMinutes: 60,
+      proFinalPrice: null,
+      proFinalDurationMinutes: null,
+      proFinalNote: null,
+      proFinalAt: null,
+    },
+    {
+      serviceId: 'svc_gloss',
+      offeringId: 'off_gloss',
+      serviceName: 'Toner Gloss',
+      source: 'ANALYSIS_RECOMMENDATION',
+      rationale: 'A gloss keeps this tone from going brassy.',
+      estimatedPrice: '45.00',
+      estimatedDurationMinutes: 30,
+      proFinalPrice: null,
+      proFinalDurationMinutes: null,
+      proFinalNote: null,
+      proFinalAt: null,
+    },
+  ],
+}
+
+const lookBrief: ConsultProBriefDTO = {
+  ...brief,
+  bookingId: null,
+  lookPostId: 'look_1',
+  serviceEstimate: estimate,
+}
+
 describe('ProConsultBrief', () => {
   it('renders client words first, AI observations second, and the separate safety section unconditionally', () => {
     const html = renderToStaticMarkup(
@@ -159,5 +211,65 @@ describe('ProConsultBrief', () => {
     expect(html).toContain('Skin undertone')
     expect(html).toContain('Soft curtain bangs')
     expect(html).toContain('Hooded eyes are opened by a lifted curl.')
+  })
+
+  it('renders no service-estimate section for a booking-anchored brief', () => {
+    const html = renderToStaticMarkup(
+      <ProConsultBrief brief={brief} timeZone="UTC" />,
+    )
+    expect(html).not.toContain('Service estimate')
+  })
+
+  it('renders each estimate line with the pro’s own price, duration and reason', () => {
+    const html = renderToStaticMarkup(
+      <ProConsultBrief brief={lookBrief} timeZone="UTC" />,
+    )
+
+    expect(html).toContain('Service estimate')
+    expect(html).toContain('From the look')
+    expect(html).toContain('Balayage')
+    expect(html).toContain('$180.00')
+    expect(html).toContain('60 min')
+    expect(html).toContain('From the analysis')
+    expect(html).toContain('Toner Gloss')
+    expect(html).toContain('$45.00')
+    expect(html).toContain('A gloss keeps this tone from going brassy.')
+
+    // The total is summed in cents, and the buffer is named rather than folded
+    // into the chair time.
+    expect(html).toContain('$225.00')
+    expect(html).toContain('90 min')
+    expect(html).toContain('15 min buffer')
+
+    // The estimate sits AFTER the directions, so nothing about price can push
+    // the safety section or the client's own words down the page.
+    expect(html.indexOf('Safety flags')).toBeLessThan(
+      html.indexOf('Service estimate'),
+    )
+    expect(html.indexOf('Directions to discuss')).toBeLessThan(
+      html.indexOf('Service estimate'),
+    )
+  })
+
+  it('renders a refusal as a reason, never as a missing or zero price', () => {
+    const html = renderToStaticMarkup(
+      <ProConsultBrief
+        brief={{
+          ...lookBrief,
+          serviceEstimate: {
+            ...estimate,
+            status: 'REFUSED',
+            refusalCode: 'SERVICE_NOT_ON_MENU',
+            lines: [],
+          },
+        }}
+        timeZone="UTC"
+      />,
+    )
+
+    expect(html).toContain('No estimate:')
+    expect(html).toContain('not an active offering on your menu')
+    expect(html).not.toContain('$')
+    expect(html).not.toContain('Estimated total')
   })
 })

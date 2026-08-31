@@ -670,6 +670,16 @@ export const DELETE_RULES: readonly DeleteRule[] = [
         : null,
   }),
   deleteRule({
+    model: 'ConsultServiceEstimate',
+    notes:
+      "Deleted with the client-owned consult; its lines cascade. A professional account deletion anonymizes her profile instead, so the estimate stays with the client's consult.",
+    delegate: (db) => db.consultServiceEstimate,
+    where: (s) =>
+      s.clientProfileId
+        ? { consultSession: { clientId: s.clientProfileId } }
+        : null,
+  }),
+  deleteRule({
     model: 'TapIntent',
     delegate: (db) => db.tapIntent,
     where: (s) => ({ userId: s.userId }),

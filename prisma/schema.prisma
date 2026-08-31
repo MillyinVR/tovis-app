@@ -2032,13 +2032,14 @@ model ProfessionalProfile {
   scheduleConfigVersion Int @default(0)
 
   // Relationships
-  user                 User                          @relation(fields: [userId], references: [id])
-  locations            ProfessionalLocation[]
-  offerings            ProfessionalServiceOffering[]
-  bookings             Booking[]
-  calendarBlocks       CalendarBlock[]
-  consultSessions      ConsultSession[]
-  consultBriefFeedback ConsultBriefFeedback[]
+  user                    User                          @relation(fields: [userId], references: [id])
+  locations               ProfessionalLocation[]
+  offerings               ProfessionalServiceOffering[]
+  bookings                Booking[]
+  calendarBlocks          CalendarBlock[]
+  consultSessions         ConsultSession[]
+  consultBriefFeedback    ConsultBriefFeedback[]
+  consultServiceEstimates ConsultServiceEstimate[]
 
   calendarFeedSubscription CalendarFeedSubscription?
 
@@ -7314,6 +7315,7 @@ model ConsultSession {
   captures             ConsultCapture[]
   inspirations         ConsultInspiration[]
   uploadSessions       UploadSession[]
+  serviceEstimate      ConsultServiceEstimate?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -7454,8 +7456,9 @@ model ConsultRevision {
 
   createdAt DateTime @default(now())
 
-  auditEvents   ConsultAuditEvent[]
-  briefFeedback ConsultBriefFeedback?
+  auditEvents      ConsultAuditEvent[]
+  briefFeedback    ConsultBriefFeedback?
+  serviceEstimates ConsultServiceEstimate[] @relation("ConsultServiceEstimateAnalysis")
 
   @@unique([consultSessionId, revision])
   @@unique([consultSessionId, idempotencyKey])
@@ -7578,4 +7581,141 @@ model ConsultAuditEvent {
   @@index([revisionId])
   @@index([captureId])
   @@index([inspirationId])
+}
+
+enum ConsultServiceEstimateStatus {
+  /// At least the floor line was derived from the pro's own menu.
+  ESTIMATED
+  /// The pro's menu cannot express this look. `refusalCode` says which way.
+  REFUSED
+}
+
+enum ConsultServiceEstimateRefusalCode {
+  /// The anchoring Look names no service any more — nothing to price.
+  LOOK_SERVICE_UNLINKED
+  /// The look's service is not an active offering on this pro's menu.
+  SERVICE_NOT_ON_MENU
+  /// On the menu, but not offered in the mode the estimate is read for.
+  MENU_MODE_UNAVAILABLE
+  /// On the menu and offered, but the pro has set no price for that mode.
+  MENU_PRICE_UNSET
+  /// On the menu and offered, but the pro has set no duration for that mode.
+  MENU_DURATION_UNSET
+  /// No bookable location, so no slot granularity to size a duration against.
+  PRO_SCHEDULING_NOT_READY
+}
+
+enum ConsultServiceEstimateLineSource {
+  /// The Look's own service linkage (lib/looks/serviceOwnership.ts) — the
+  /// deterministic FLOOR of every estimate, priced at the pro's listed price.
+  LOOK_LINKED_SERVICE
+  /// Beyond the floor. Only ever a service the ANALYSIS referenced, and the
+  /// line carries that analysis rationale.
+  ANALYSIS_RECOMMENDATION
+}
+
+/// Book the Look, slice B3 — the translation module's output
+/// (docs/product/BOOK-THE-LOOK-DIRECTION.md, decisions 6, 7 and 11).
+///
+/// One estimate per look-anchored consult, written in the same locked
+/// transaction that finalizes the analysis and the pro brief, so a completed
+/// look-anchored consult always has exactly one — either priced lines or a
+/// typed refusal. Booking-anchored consults get none: their booking already
+/// carries real BookingServiceItem prices, and there is nothing to translate.
+///
+/// PRO-FACING ONLY in this slice. The client-facing "Starting at $X" label
+/// (decision 5) ships with B4's booking flow.
+model ConsultServiceEstimate {
+  id String @id @default(cuid())
+
+  consultSessionId String         @unique
+  consultSession   ConsultSession @relation(fields: [consultSessionId], references: [id], onDelete: Cascade)
+
+  professionalId String
+  professional   ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Restrict)
+
+  /// The ANALYSIS revision this estimate was derived from. The estimate is a
+  /// pure function of exactly that payload plus the pro's menu at this instant,
+  /// so the pin is what makes a later correction pair interpretable.
+  sourceAnalysisRevisionId String
+  sourceAnalysisRevision   ConsultRevision @relation("ConsultServiceEstimateAnalysis", fields: [sourceAnalysisRevisionId], references: [id], onDelete: Cascade)
+
+  status      ConsultServiceEstimateStatus
+  refusalCode ConsultServiceEstimateRefusalCode?
+
+  /// Which of the pro's two price/duration columns every line was read from.
+  /// A look-anchored consult has chosen no mode yet (that is B4's booking
+  /// proposal), so this is SALON — where a pro's primary prices live — and it
+  /// is recorded rather than assumed by any reader.
+  locationType ServiceLocationType
+
+  /// The scheduling facts the durations were sized against, read from the same
+  /// ProfessionalLocation columns availability reads. Null only on a
+  /// PRO_SCHEDULING_NOT_READY refusal, where there was no bookable location.
+  stepMinutes   Int?
+  bufferMinutes Int?
+
+  /// This contract's own version, and the version of the derivation RULES that
+  /// produced the lines. The analysis engine's schema/prompt versions are not
+  /// copied here — they live on the pinned revision above.
+  schemaVersion     Int
+  derivationVersion String
+
+  lines ConsultServiceEstimateLine[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([professionalId, createdAt])
+  @@index([sourceAnalysisRevisionId])
+}
+
+/// One line of a service estimate: a service on the pro's OWN menu, at the
+/// pro's OWN price and duration, with the reason it is here.
+///
+/// The pro-final columns exist from day one and are deliberately empty in B3.
+/// Decision 7 makes the (AI estimate, pro final) pair per line the training
+/// signal for price AND duration accuracy, so no estimate is ever stored
+/// without a place for its correction to land. B5/B6 write them.
+model ConsultServiceEstimateLine {
+  id String @id @default(cuid())
+
+  estimateId String
+  estimate   ConsultServiceEstimate @relation(fields: [estimateId], references: [id], onDelete: Cascade)
+
+  sortOrder Int
+
+  /// Snapshot links, not FKs — deliberately, for the reason
+  /// ConsultSession.anchorLookPostId is one: a pro removing a service from her
+  /// menu must never be blocked by, or silently rewrite, a record of what was
+  /// once estimated. `serviceName` is that menu row's name at estimate time.
+  serviceId   String
+  offeringId  String
+  serviceName String
+
+  source ConsultServiceEstimateLineSource
+
+  /// What in the look or the analysis put this line here. For a floor line, the
+  /// look's own service linkage; beyond the floor, the analysis recommendation's
+  /// own rationale. Never invented.
+  rationale String
+
+  /// Read from the pro's own offering columns. `estimatedDurationMinutes` is
+  /// rounded UP to `ConsultServiceEstimate.stepMinutes` (decision 11).
+  estimatedPrice           Decimal @db.Decimal(10, 2)
+  estimatedDurationMinutes Int
+
+  /// The pro's correction. Written by B5/B6, never by B3.
+  proFinalPrice           Decimal?  @db.Decimal(10, 2)
+  proFinalDurationMinutes Int?
+  proFinalNote            String?
+  proFinalAt              DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([estimateId, serviceId])
+  @@index([estimateId, sortOrder])
+  /// The price-learning read: every correction pair recorded for one service.
+  @@index([serviceId, proFinalAt])
 }

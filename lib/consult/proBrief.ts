@@ -13,6 +13,7 @@ import { assertProCanViewClient } from '@/lib/clientVisibility'
 import type {
   ConsultBriefFeedbackRatingDTO,
   ConsultProBriefDTO,
+  ConsultServiceEstimateDTO,
 } from '@/lib/dto/consult'
 import { prisma } from '@/lib/prisma'
 
@@ -21,6 +22,7 @@ import {
   ImmutableConsultResultError,
   loadLatestImmutableConsultResult,
 } from './immutableResult'
+import { loadConsultServiceEstimatesByConsultId } from './serviceEstimate'
 
 export { selectLatestConsultRevision } from './immutableResult'
 
@@ -60,6 +62,7 @@ export function sortConsultBriefHistory<
 async function loadSessionBrief(
   tx: Prisma.TransactionClient,
   session: BriefSession,
+  serviceEstimate: ConsultServiceEstimateDTO | null,
 ): Promise<ConsultProBriefDTO> {
   let result
   try {
@@ -96,6 +99,9 @@ async function loadSessionBrief(
     safetyFlags: payload.safetyFlags,
     achievabilityDirection: payload.achievabilityDirection,
     recommendationDirections: payload.recommendationDirections,
+    // Book the Look, B3. Omitted rather than nulled for a booking-anchored
+    // consult, which has no estimate to carry.
+    ...(session.anchorLookPostId ? { serviceEstimate } : {}),
     feedback: feedback
       ? { rating: feedback.rating, createdAt: feedback.createdAt.toISOString() }
       : null,
@@ -154,9 +160,17 @@ export async function loadAuthorizedProConsultBriefs(
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: bookingId ? 2 : 200,
     })
+    const estimates = await loadConsultServiceEstimatesByConsultId(
+      tx,
+      sessions
+        .filter((session) => session.anchorLookPostId)
+        .map((session) => session.id),
+    )
     const briefs: ConsultProBriefDTO[] = []
     for (const session of sessions) {
-      briefs.push(await loadSessionBrief(tx, session))
+      briefs.push(
+        await loadSessionBrief(tx, session, estimates.get(session.id) ?? null),
+      )
     }
     return sortConsultBriefHistory(briefs)
   })

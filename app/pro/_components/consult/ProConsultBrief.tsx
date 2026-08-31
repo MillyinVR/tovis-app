@@ -1,4 +1,8 @@
-import type { ConsultProBriefDTO } from '@/lib/dto/consult'
+import type {
+  ConsultProBriefDTO,
+  ConsultServiceEstimateDTO,
+} from '@/lib/dto/consult'
+import { formatCents, formatMoneyFromUnknown, moneyToCentsInt } from '@/lib/money'
 import { formatInTimeZone } from '@/lib/time'
 
 import ConsultBriefFeedbackButtons from './ConsultBriefFeedbackButtons'
@@ -64,6 +68,127 @@ const STYLE_DOMAIN_LABELS: Record<
   LASHES: 'Lashes',
   MAKEUP: 'Makeup',
   COLOR_PALETTE: 'Color palette',
+}
+
+// ── Book the Look, B3: the line-item service estimate ────────────────────────
+//
+// PRO-FACING. Read-only here by design: adjust/flag is B5's, and a booking
+// proposal is B4's. This slice only has to show her what her own menu says.
+
+const ESTIMATE_REFUSAL_COPY: Record<
+  NonNullable<ConsultServiceEstimateDTO['refusalCode']>,
+  string
+> = {
+  LOOK_SERVICE_UNLINKED:
+    'The look this consult started from no longer names a service, so there was nothing to price.',
+  SERVICE_NOT_ON_MENU:
+    'The service behind this look is not an active offering on your menu, so no price could come from your own list.',
+  MENU_MODE_UNAVAILABLE:
+    'That service is not offered in this mode on your menu.',
+  MENU_PRICE_UNSET: 'That service has no price set on your menu for this mode.',
+  MENU_DURATION_UNSET:
+    'That service has no duration set on your menu for this mode.',
+  PRO_SCHEDULING_NOT_READY:
+    'There is no bookable location yet, so a duration could not be sized to your day.',
+}
+
+const ESTIMATE_SOURCE_LABELS: Record<
+  ConsultServiceEstimateDTO['lines'][number]['source'],
+  string
+> = {
+  LOOK_LINKED_SERVICE: 'From the look',
+  ANALYSIS_RECOMMENDATION: 'From the analysis',
+}
+
+const ESTIMATE_MODE_LABELS: Record<
+  ConsultServiceEstimateDTO['locationType'],
+  string
+> = {
+  SALON: 'in-salon',
+  MOBILE: 'mobile',
+}
+
+function ServiceEstimate({
+  consultId,
+  estimate,
+}: {
+  consultId: string
+  estimate: ConsultServiceEstimateDTO
+}) {
+  // Summed in integer cents, never in floats: a displayed total is still money.
+  const totalCents = estimate.lines.reduce<number | null>((total, line) => {
+    if (total === null) return null
+    const cents = moneyToCentsInt(line.estimatedPrice)
+    return cents === null ? null : total + cents
+  }, 0)
+  const totalMinutes = estimate.lines.reduce(
+    (total, line) => total + line.estimatedDurationMinutes,
+    0,
+  )
+
+  return (
+    <section aria-labelledby={`${consultId}-service-estimate`}>
+      <h3
+        id={`${consultId}-service-estimate`}
+        className="text-[14px] font-black text-textPrimary"
+      >
+        Service estimate
+      </h3>
+      <p className="mt-1 text-[12px] text-textSecondary">
+        Derived only from your own {ESTIMATE_MODE_LABELS[estimate.locationType]}{' '}
+        prices and durations — nothing here is invented. Durations are rounded up
+        to your slot length. You make the final call.
+      </p>
+
+      {estimate.status === 'REFUSED' ? (
+        <p className="mt-2 rounded-xl border border-toneWarn/30 bg-toneWarn/10 p-3 text-[12.5px] text-textPrimary">
+          No estimate:{' '}
+          {estimate.refusalCode
+            ? ESTIMATE_REFUSAL_COPY[estimate.refusalCode]
+            : 'your menu cannot express this look.'}
+        </p>
+      ) : (
+        <>
+          <ul className="mt-2 grid gap-2">
+            {estimate.lines.map((line) => (
+              <li
+                key={line.serviceId}
+                className="rounded-xl border border-surfaceGlass/10 bg-bgPrimary p-3"
+              >
+                <div className="font-mono text-[10px] font-bold uppercase tracking-[0.12em] text-microAccent">
+                  {ESTIMATE_SOURCE_LABELS[line.source]}
+                </div>
+                <div className="mt-1 flex flex-wrap items-baseline justify-between gap-x-3">
+                  <span className="text-[12.5px] font-black text-textPrimary">
+                    {line.serviceName}
+                  </span>
+                  <span className="text-[12.5px] font-semibold text-textPrimary">
+                    {formatMoneyFromUnknown(line.estimatedPrice)} ·{' '}
+                    {line.estimatedDurationMinutes} min
+                  </span>
+                </div>
+                <p className="mt-1 text-[12px] text-textSecondary">
+                  {line.rationale}
+                </p>
+              </li>
+            ))}
+          </ul>
+          <div className="mt-2 flex flex-wrap items-baseline justify-between gap-x-3 border-t border-surfaceGlass/10 pt-2">
+            <span className="text-[12px] font-bold uppercase tracking-wide text-textMuted">
+              Estimated total
+            </span>
+            <span className="text-[13px] font-black text-textPrimary">
+              {totalCents === null ? '—' : formatCents(totalCents)} ·{' '}
+              {totalMinutes} min
+              {estimate.bufferMinutes
+                ? ` + ${estimate.bufferMinutes} min buffer`
+                : ''}
+            </span>
+          </div>
+        </>
+      )}
+    </section>
+  )
 }
 
 export default function ProConsultBrief({
@@ -294,6 +419,13 @@ export default function ProConsultBrief({
           ))}
         </ul>
       </section>
+
+      {brief.serviceEstimate ? (
+        <ServiceEstimate
+          consultId={brief.consultId}
+          estimate={brief.serviceEstimate}
+        />
+      ) : null}
 
       {feedbackEnabled || brief.feedback ? (
         <div className="border-t border-surfaceGlass/10 pt-4">
