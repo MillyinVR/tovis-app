@@ -7053,7 +7053,8 @@
         "CONSULT_INSPIRATION_OBJECT_INVALID",
         "CONSULT_INSPIRATION_STORAGE_UNAVAILABLE",
         "CONSULT_INSPIRATION_INVALID_ANSWER",
-        "CONSULT_INSPIRATION_QUESTION_OUT_OF_ORDER"
+        "CONSULT_INSPIRATION_QUESTION_OUT_OF_ORDER",
+        "CONSULT_LOOK_NOT_CONSULTABLE"
       ],
       "type": "string"
     },
@@ -8804,7 +8805,10 @@
           "type": "string"
         },
         "bookingId": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "briefRevision": {
           "type": "number"
@@ -8826,6 +8830,12 @@
         },
         "intakeRevisionId": {
           "type": "string"
+        },
+        "lookPostId": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "meCardTeaser": {
           "properties": {
@@ -9811,6 +9821,110 @@
       ],
       "type": "object"
     },
+    "ConsultLookAvailabilityDTO": {
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "consult": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultLookSessionDTO"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultLookUnavailableReasonDTO"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "available",
+        "reason",
+        "consult"
+      ],
+      "type": "object"
+    },
+    "ConsultLookAvailabilityResponseDTO": {
+      "properties": {
+        "availability": {
+          "$ref": "#/definitions/ConsultLookAvailabilityDTO"
+        }
+      },
+      "required": [
+        "availability"
+      ],
+      "type": "object"
+    },
+    "ConsultLookSessionDTO": {
+      "properties": {
+        "createdAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "lookPostId": {
+          "type": "string"
+        },
+        "professionalId": {
+          "type": "string"
+        },
+        "serviceCategoryId": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/ConsultSessionStatus"
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "lookPostId",
+        "professionalId",
+        "serviceCategoryId",
+        "createdAt"
+      ],
+      "type": "object"
+    },
+    "ConsultLookStartRequestDTO": {
+      "properties": {
+        "lookPostId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "lookPostId"
+      ],
+      "type": "object"
+    },
+    "ConsultLookStartResponseDTO": {
+      "properties": {
+        "consult": {
+          "$ref": "#/definitions/ConsultLookSessionDTO"
+        }
+      },
+      "required": [
+        "consult"
+      ],
+      "type": "object"
+    },
+    "ConsultLookUnavailableReasonDTO": {
+      "enum": [
+        "LOOK_SERVICE_UNLINKED",
+        "LOOK_VERTICAL_NOT_ENABLED"
+      ],
+      "type": "string"
+    },
     "ConsultMeCardTeaserTapResponseDTO": {
       "properties": {
         "replayed": {
@@ -9849,7 +9963,10 @@
           "$ref": "#/definitions/ConsultBriefAiObservationsDTO"
         },
         "bookingId": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "briefRevision": {
           "type": "number"
@@ -9884,6 +10001,12 @@
         },
         "intakeRevisionId": {
           "type": "string"
+        },
+        "lookPostId": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "professionalId": {
           "type": "string"

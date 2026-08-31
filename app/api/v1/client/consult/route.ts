@@ -83,7 +83,12 @@ export async function POST(req: Request) {
       update: {},
     })
 
-    return jsonOk({ consult: toConsultSessionDTO(session) })
+    // Keyed by bookingId, so the row always carries one. The mapper refuses a
+    // look-anchored row rather than emit a null bookingId on a wire shape
+    // shipped native clients decode as non-optional.
+    const consult = toConsultSessionDTO(session)
+    if (!consult) throw new Error('Booking consult session has no bookingId.')
+    return jsonOk({ consult })
   } catch (e: unknown) {
     console.error('POST /api/v1/client/consult error', { error: safeError(e) })
     return jsonFail(500, 'Internal server error')

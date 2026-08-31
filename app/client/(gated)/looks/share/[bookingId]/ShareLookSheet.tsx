@@ -63,7 +63,9 @@ export default function ShareLookSheet({ data }: { data: ShareLookPageData }) {
 
   const [before, setBefore] = useState<SlotState>(() => initialSlot(data.prefill.before))
   const [after, setAfter] = useState<SlotState>(() => initialSlot(data.prefill.after))
-  const [name, setName] = useState(data.suggestedName)
+  // Starts empty on purpose (Book the Look) — see loadShareLookPage.ts. The
+  // placeholder carries the suggestion; a default never carries the taxonomy.
+  const [name, setName] = useState('')
   const [caption, setCaption] = useState('')
   const [isPublic, setIsPublic] = useState(true)
   const [submitting, setSubmitting] = useState(false)

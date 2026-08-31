@@ -7243,9 +7243,14 @@ enum ConsultInspirationStatus {
 /// precedent): a client runs a consult tied to an upcoming booking, and the
 /// resulting brief surfaces to the pro before the appointment.
 ///
-/// Phase 0 creation derives the category, professional and booking anchors from
-/// the owned booking. All are required, and `bookingId` is unique: one consult
-/// per booking. Standalone consults are outside the founder pilot.
+/// Booking-anchored creation derives the category, professional and booking
+/// anchors from the owned booking; `bookingId` is unique, so one consult per
+/// booking. Book-the-look (B2) adds a second anchor: a consult may instead be
+/// anchored to (anchorLookPostId + professionalId) with NO booking, created by
+/// a client tapping "book this look". Exactly one anchor is set at creation and
+/// the pro/category are derived from the Look's own service linkage
+/// (lib/looks/serviceOwnership.ts). Consults with neither anchor remain
+/// impossible — a database CHECK enforces it.
 ///
 /// Durable consult content is append-only in ConsultRevision. Raw consult
 /// photos are explicitly NOT durable and have no table in this foundation;
@@ -7266,8 +7271,22 @@ model ConsultSession {
   professionalId String
   professional   ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Restrict)
 
-  bookingId String  @unique
-  booking   Booking @relation("ConsultAnchorBooking", fields: [bookingId], references: [id], onDelete: Restrict)
+  // Anchor — exactly one of these is set at creation, and a database CHECK
+  // (20260925000000) refuses a row with neither. Book-the-look decision 12
+  // (docs/product/BOOK-THE-LOOK-DIRECTION.md): the booking-attached consult
+  // becomes ONE mode of a more general thing, so `bookingId` relaxes from
+  // required to optional rather than being repurposed. Existing rows keep
+  // their booking and their behaviour exactly.
+  bookingId String?  @unique
+  booking   Booking? @relation("ConsultAnchorBooking", fields: [bookingId], references: [id], onDelete: Restrict)
+
+  /// The Look this consult was started from ("book this look"), when there is
+  /// no booking yet. A snapshot link rather than an FK, for the same reason
+  /// ConsultInspiration.sourceLookPostId is one: deleting or unpublishing a
+  /// Look must keep its own ownership/publication semantics and must never be
+  /// blocked — or silently rewritten — by a consultation. Reads re-run the
+  /// canonical Look authorization policy (lib/looks/access.ts).
+  anchorLookPostId String?
 
   inspiredBookings Booking[] @relation("ConsultInspiredBookings")
 
@@ -7299,6 +7318,14 @@ model ConsultSession {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // One look-anchored consult per (client, look, pro), so "book this look"
+  // is idempotent under a retried tap. Booking-anchored rows all carry a NULL
+  // anchorLookPostId and therefore never collide here (Postgres treats every
+  // NULL as distinct in a unique index); their one-per-booking rule stays the
+  // `bookingId` unique above. This index also serves the only read the anchor
+  // has — "does this client already have a consult on this look with this
+  // pro?" — so anchorLookPostId gets no index of its own.
+  @@unique([clientId, professionalId, anchorLookPostId])
   @@index([clientId, createdAt])
   @@index([professionalId, status])
   @@index([serviceCategoryId])

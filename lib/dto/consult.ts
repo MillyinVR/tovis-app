@@ -36,6 +36,48 @@ export type ConsultAvailabilityResponseDTO = {
   availability: ConsultAvailabilityDTO
 }
 
+// GET/POST /api/v1/client/consult/look — a consult anchored to a LOOK and a
+// professional, with NO booking (Book the Look, B2). A DELIBERATELY SEPARATE
+// type from ConsultSessionDTO rather than a nullable `bookingId` on it: shipped
+// iOS builds decode `ConsultSession.bookingId` as a non-optional String, and
+// the booking-anchored availability endpoint they read (#1016) must keep its
+// exact shape. The look-anchored surfaces are new, so they get new types and
+// the published schema grows by addition only.
+export type ConsultLookSessionDTO = {
+  id: string
+  status: ConsultSessionStatus
+  lookPostId: string
+  professionalId: string
+  serviceCategoryId: string
+  createdAt: string
+}
+
+// Why a look may not be consultable, when saying so leaks nothing. A Look with
+// no service linkage, or one linked outside the pilot vertical, is a refusal
+// the client can be told about; the founder gate stays a silent
+// `available: false` with no reason, exactly like the booking endpoint.
+export type ConsultLookUnavailableReasonDTO =
+  | 'LOOK_SERVICE_UNLINKED'
+  | 'LOOK_VERTICAL_NOT_ENABLED'
+
+export type ConsultLookAvailabilityDTO = {
+  available: boolean
+  reason: ConsultLookUnavailableReasonDTO | null
+  consult: ConsultLookSessionDTO | null
+}
+
+export type ConsultLookAvailabilityResponseDTO = {
+  availability: ConsultLookAvailabilityDTO
+}
+
+export type ConsultLookStartRequestDTO = {
+  lookPostId: string
+}
+
+export type ConsultLookStartResponseDTO = {
+  consult: ConsultLookSessionDTO
+}
+
 // Exact immutable wording currently required for one legal prerequisite.
 // Production owns publication; the client contract never supplies wording.
 export type ConsultAgreementVersionDTO = {
@@ -816,7 +858,10 @@ export type ConsultBriefFeedbackDTO = {
 
 export type ConsultProBriefDTO = {
   consultId: string
-  bookingId: string
+  // See ConsultClientResultsDTO: exactly one anchor is set, and `lookPostId`
+  // is optional on the wire to keep the fixture contract purely additive.
+  bookingId: string | null
+  lookPostId?: string | null
   professionalId: string
   serviceCategoryId: string
   briefRevisionId: string
@@ -857,7 +902,17 @@ export type ConsultBriefFeedbackResponseDTO = {
 
 export type ConsultClientResultsDTO = {
   consultId: string
-  bookingId: string
+  // Exactly one of these is set — a consult is anchored to a booking or, since
+  // Book the Look (B2), to a look. `bookingId` widened rather than being joined
+  // by a nullable twin so results stay ONE shape and ONE mapper; a widening
+  // keeps every previously valid document valid, and a look-anchored consult is
+  // unreachable from any shipped native build, whose only consult entry points
+  // are keyed by bookingId. `lookPostId` is OPTIONAL on the wire so the
+  // cross-repo fixture contract stays a pure addition — a tovis-ios fixture
+  // written before this field still validates (see
+  // tools/check-ios-fixture-contract.mjs).
+  bookingId: string | null
+  lookPostId?: string | null
   serviceCategoryId: string
   briefRevisionId: string
   briefRevision: number
@@ -958,6 +1013,7 @@ export type ConsultAgreementErrorCode =
   | 'CONSULT_INSPIRATION_STORAGE_UNAVAILABLE'
   | 'CONSULT_INSPIRATION_INVALID_ANSWER'
   | 'CONSULT_INSPIRATION_QUESTION_OUT_OF_ORDER'
+  | 'CONSULT_LOOK_NOT_CONSULTABLE'
 
 export type ConsultAgreementErrorDTO = {
   ok: false

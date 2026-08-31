@@ -26,10 +26,7 @@ import { normalizeSelfProfile } from '@/lib/personalization/selfProfile'
 import { prisma } from '@/lib/prisma'
 
 import { requireCurrentConsultAgreementAcceptances } from './agreementContract'
-import {
-  AI_CONSULT_ELIGIBILITY_BOOKING_SELECT,
-  evaluateAiConsultBookingEligibility,
-} from './eligibility'
+import { CONSULT_ANCHOR_SELECT, evaluateConsultAnchor } from './anchor'
 import { ConsultWriteError } from './errors'
 import {
   evaluateHairColorIntakeProgress,
@@ -45,16 +42,8 @@ const INTAKE_READABLE_STATES = new Set<ConsultSessionStatus>([
 
 const INTAKE_SCOPE_SELECT = {
   id: true,
-  clientId: true,
-  professionalId: true,
-  serviceCategoryId: true,
   status: true,
-  booking: {
-    select: {
-      clientId: true,
-      ...AI_CONSULT_ELIGIBILITY_BOOKING_SELECT,
-    },
-  },
+  ...CONSULT_ANCHOR_SELECT,
 } satisfies Prisma.ConsultSessionSelect
 
 type IntakeScope = Prisma.ConsultSessionGetPayload<{
@@ -84,23 +73,14 @@ async function requireOwnedEligibleScope(
     where: { id: args.consultSessionId },
     select: INTAKE_SCOPE_SELECT,
   })
-  if (
-    !session ||
-    session.clientId !== args.clientId ||
-    session.booking.clientId !== args.clientId ||
-    session.booking.professionalId !== session.professionalId ||
-    session.booking.service.categoryId !== session.serviceCategoryId
-  ) {
+  if (!session || session.clientId !== args.clientId) {
     throw new ConsultWriteError('NOT_FOUND', 'Consult session not found.')
   }
 
-  const eligibility = evaluateAiConsultBookingEligibility(
-    session.booking,
-    args.now,
-  )
-  if (!eligibility.eligible) {
+  const anchor = evaluateConsultAnchor(session, args.now)
+  if (!anchor.eligible) {
     throw new ConsultWriteError(
-      eligibility.hidden ? 'NOT_FOUND' : 'BOOKING_INELIGIBLE',
+      anchor.hidden ? 'NOT_FOUND' : 'BOOKING_INELIGIBLE',
       'Consult is unavailable for this booking.',
     )
   }

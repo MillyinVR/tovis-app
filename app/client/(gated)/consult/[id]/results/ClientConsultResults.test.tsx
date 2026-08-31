@@ -27,6 +27,7 @@ function results(withSafety = true): ConsultClientResultsDTO {
   return {
     consultId: 'consult_1',
     bookingId: 'booking_1',
+    lookPostId: null,
     serviceCategoryId: 'hair_color',
     briefRevisionId: 'brief_7',
     briefRevision: 7,
@@ -137,6 +138,32 @@ function results(withSafety = true): ConsultClientResultsDTO {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+})
+
+describe('ClientConsultResults — the way back out', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('a booking-anchored consult goes back to its booking', () => {
+    render(<ClientConsultResults results={results()} copy={copy} />)
+    const back = screen.getByRole('link', { name: copy.backToBooking })
+    expect(back).toHaveAttribute('href', '/client/bookings/booking_1')
+  })
+
+  it('a look-anchored consult goes back to the LOOK, not a booking', () => {
+    render(
+      <ClientConsultResults
+        results={{ ...results(), bookingId: null, lookPostId: 'look_9' }}
+        copy={copy}
+      />,
+    )
+    const back = screen.getByRole('link', { name: copy.backToLook })
+    expect(back).toHaveAttribute('href', '/looks/look_9')
+    expect(
+      screen.queryByRole('link', { name: copy.backToBooking }),
+    ).toBeNull()
+  })
 })
 
 describe('ClientConsultResults', () => {

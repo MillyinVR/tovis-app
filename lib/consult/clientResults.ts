@@ -14,10 +14,7 @@ import { prisma } from '@/lib/prisma'
 
 import { isAiConsultC7ExposureEnabledForPro } from './access'
 import { requireCurrentConsultAgreementAcceptances } from './agreementContract'
-import {
-  AI_CONSULT_ELIGIBILITY_BOOKING_SELECT,
-  evaluateAiConsultBookingEligibility,
-} from './eligibility'
+import { CONSULT_ANCHOR_SELECT, evaluateConsultAnchor } from './anchor'
 import {
   ImmutableConsultResultError,
   loadLatestImmutableConsultResult,
@@ -44,18 +41,9 @@ type AuthorizedClientResultRequest = {
 
 const CLIENT_RESULT_SCOPE_SELECT = {
   id: true,
-  clientId: true,
-  professionalId: true,
-  serviceCategoryId: true,
-  bookingId: true,
   status: true,
   client: { select: { userId: true } },
-  booking: {
-    select: {
-      clientId: true,
-      ...AI_CONSULT_ELIGIBILITY_BOOKING_SELECT,
-    },
-  },
+  ...CONSULT_ANCHOR_SELECT,
 } satisfies Prisma.ConsultSessionSelect
 
 type ClientResultScope = Prisma.ConsultSessionGetPayload<{
@@ -86,10 +74,7 @@ async function requireAuthorizedClientResultScope(
   if (
     !session ||
     session.clientId !== args.clientId ||
-    session.client.userId !== args.actorUserId ||
-    session.booking.clientId !== session.clientId ||
-    session.booking.professionalId !== session.professionalId ||
-    session.booking.service.categoryId !== session.serviceCategoryId
+    session.client.userId !== args.actorUserId
   ) {
     throw new ClientConsultResultsError('NOT_FOUND')
   }
@@ -99,14 +84,9 @@ async function requireAuthorizedClientResultScope(
   if (session.status !== ConsultSessionStatus.COMPLETED) {
     throw new ClientConsultResultsError('UNAVAILABLE')
   }
-  const eligibility = evaluateAiConsultBookingEligibility(
-    session.booking,
-    args.now ?? new Date(),
-  )
-  if (!eligibility.eligible) {
-    throw new ClientConsultResultsError(
-      eligibility.hidden ? 'HIDDEN' : 'UNAVAILABLE',
-    )
+  const anchor = evaluateConsultAnchor(session, args.now ?? new Date())
+  if (!anchor.eligible) {
+    throw new ClientConsultResultsError(anchor.hidden ? 'HIDDEN' : 'UNAVAILABLE')
   }
   try {
     await requireCurrentConsultAgreementAcceptances(tx, session.id)
@@ -126,6 +106,7 @@ function clientResultsDto(args: {
   return {
     consultId: args.scope.id,
     bookingId: args.scope.bookingId,
+    lookPostId: args.scope.anchorLookPostId,
     serviceCategoryId: args.scope.serviceCategoryId,
     briefRevisionId: args.result.briefRevisionId,
     briefRevision: args.result.briefRevision,

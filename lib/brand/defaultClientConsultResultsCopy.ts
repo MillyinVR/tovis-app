@@ -4,6 +4,7 @@ export const defaultClientConsultResultsCopy: BrandClientConsultResultsCopy = {
   // Names the DESTINATION only — ClientPage renders the ← glyph itself, and
   // lib/copy.ts's glossary says "booking", never "appointment".
   backToBooking: 'Booking',
+  backToLook: 'Look',
   eyebrow: 'Your beauty consult',
   title: 'Directions to discuss with your professional',
   intro:

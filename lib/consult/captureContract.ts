@@ -47,10 +47,7 @@ import {
   type ConsultCaptureMediaType,
   type ConsultCaptureQualityResult,
 } from './captureVision'
-import {
-  AI_CONSULT_ELIGIBILITY_BOOKING_SELECT,
-  evaluateAiConsultBookingEligibility,
-} from './eligibility'
+import { CONSULT_ANCHOR_SELECT, evaluateConsultAnchor } from './anchor'
 import { ConsultWriteError } from './errors'
 import {
   advanceLockedConsultToAnalysisIfReady,
@@ -96,20 +93,11 @@ type ClientActor = {
 
 const CAPTURE_SCOPE_SELECT = {
   id: true,
-  clientId: true,
-  professionalId: true,
-  serviceCategoryId: true,
-  bookingId: true,
   status: true,
   chartCopyOptIn: true,
   chartCopyDecidedAt: true,
   client: { select: { userId: true } },
-  booking: {
-    select: {
-      clientId: true,
-      ...AI_CONSULT_ELIGIBILITY_BOOKING_SELECT,
-    },
-  },
+  ...CONSULT_ANCHOR_SELECT,
 } satisfies Prisma.ConsultSessionSelect
 
 type CaptureScope = Prisma.ConsultSessionGetPayload<{
@@ -191,17 +179,14 @@ async function requireScope(
   if (
     !session ||
     session.clientId !== args.clientId ||
-    session.client.userId !== args.actorUserId ||
-    session.booking.clientId !== session.clientId ||
-    session.booking.professionalId !== session.professionalId ||
-    session.booking.service.categoryId !== session.serviceCategoryId
+    session.client.userId !== args.actorUserId
   ) {
     throw new ConsultWriteError('NOT_FOUND', 'Consult session not found.')
   }
-  const eligibility = evaluateAiConsultBookingEligibility(session.booking, args.now)
-  if (!eligibility.eligible) {
+  const anchor = evaluateConsultAnchor(session, args.now)
+  if (!anchor.eligible) {
     throw new ConsultWriteError(
-      eligibility.hidden ? 'NOT_FOUND' : 'BOOKING_INELIGIBLE',
+      anchor.hidden ? 'NOT_FOUND' : 'BOOKING_INELIGIBLE',
       'Consult is unavailable for this booking.',
     )
   }

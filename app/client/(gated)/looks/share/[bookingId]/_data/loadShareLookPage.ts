@@ -20,11 +20,9 @@ export type ShareLookPrefillPhoto = {
 export type ShareLookPageData = {
   bookingId: string
   serviceId: string
-  serviceName: string
   professionalName: string
   professionalAvatarUrl: string | null
   visitDateLabel: string
-  suggestedName: string
   prefill: {
     before: ShareLookPrefillPhoto | null
     after: ShareLookPrefillPhoto | null
@@ -106,7 +104,6 @@ export async function loadShareLookPage(
       status: true,
       scheduledFor: true,
       locationTimeZone: true,
-      service: { select: { name: true } },
       professional: {
         select: {
           businessName: true,
@@ -134,18 +131,21 @@ export async function loadShareLookPage(
     loadPrefillPhoto(booking.id, booking.professionalId, MediaPhase.AFTER),
   ])
 
-  const serviceName = booking.service?.name ?? 'Your booking'
-
+  // 🔴 Book the Look: this loader used to hand the sheet the booking's SERVICE
+  // NAME as the look's default title (`suggestedName`), which wrote taxonomy
+  // into future look titles through a DEFAULT rather than a render — the one
+  // way service names were still walking back onto the feed after B1. The name
+  // field starts empty instead; its placeholder ("e.g. Glazed donut blonde")
+  // already teaches the non-taxonomic naming we want, and the sheet already
+  // requires a non-blank name, so nothing is lost but the taxonomy.
   return {
     bookingId: booking.id,
     serviceId: booking.serviceId,
-    serviceName,
     professionalName: formatProfessionalPublicDisplayName(
       booking.professional,
     ),
     professionalAvatarUrl: booking.professional?.avatarUrl ?? null,
     visitDateLabel: formatVisitDate(booking.scheduledFor, booking.locationTimeZone),
-    suggestedName: serviceName,
     prefill: { before, after },
   }
 }

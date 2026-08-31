@@ -26,10 +26,7 @@ import { prisma } from '@/lib/prisma'
 
 import { requireCurrentConsultAgreementAcceptances } from './agreementContract'
 import { isAiConsultC6ExposureEnabledForPro } from './access'
-import {
-  AI_CONSULT_ELIGIBILITY_BOOKING_SELECT,
-  evaluateAiConsultBookingEligibility,
-} from './eligibility'
+import { CONSULT_ANCHOR_SELECT, evaluateConsultAnchor } from './anchor'
 import { ConsultWriteError } from './errors'
 import {
   buildExactClientDetails,
@@ -76,17 +73,13 @@ const READABLE_STATUSES = new Set<ConsultSessionStatus>([
 
 const SCOPE_SELECT = {
   id: true,
-  clientId: true,
-  professionalId: true,
-  serviceCategoryId: true,
-  bookingId: true,
   status: true,
   client: { select: { userId: true } },
+  ...CONSULT_ANCHOR_SELECT,
   booking: {
     select: {
-      clientId: true,
       totalDurationMinutes: true,
-      ...AI_CONSULT_ELIGIBILITY_BOOKING_SELECT,
+      ...CONSULT_ANCHOR_SELECT.booking.select,
     },
   },
 } satisfies Prisma.ConsultSessionSelect
@@ -166,17 +159,14 @@ async function requireScope(
   if (
     !session ||
     session.clientId !== args.clientId ||
-    session.client.userId !== args.actorUserId ||
-    session.booking.clientId !== session.clientId ||
-    session.booking.professionalId !== session.professionalId ||
-    session.booking.service.categoryId !== session.serviceCategoryId
+    session.client.userId !== args.actorUserId
   ) {
     throw new ConsultWriteError('NOT_FOUND', 'Not found.')
   }
-  const eligibility = evaluateAiConsultBookingEligibility(session.booking, args.now)
-  if (!eligibility.eligible) {
+  const anchor = evaluateConsultAnchor(session, args.now)
+  if (!anchor.eligible) {
     throw new ConsultWriteError(
-      eligibility.hidden ? 'NOT_FOUND' : 'BOOKING_INELIGIBLE',
+      anchor.hidden ? 'NOT_FOUND' : 'BOOKING_INELIGIBLE',
       'Consult is unavailable for this booking.',
     )
   }
@@ -189,7 +179,22 @@ async function requireScope(
   return session
 }
 
-function useExpiresAt(session: InspirationScope): Date {
+/**
+ * How long an uploaded inspiration photo may be USED for.
+ *
+ * A booking-anchored consult keys this to the appointment: the pro may look at
+ * the reference until a day after the visit ends. A look-anchored consult has
+ * no appointment yet (the booking proposal is B4), so it gets a fixed window
+ * from the upload instead — long enough to finish the consult and read the
+ * results, short enough that a private client upload is not parked
+ * indefinitely on a consult that never becomes a visit.
+ */
+export const CONSULT_LOOK_ANCHOR_INSPIRATION_USE_TTL_MS = 30 * 24 * 60 * 60 * 1000
+
+function useExpiresAt(session: InspirationScope, now: Date): Date {
+  if (!session.booking) {
+    return new Date(now.getTime() + CONSULT_LOOK_ANCHOR_INSPIRATION_USE_TTL_MS)
+  }
   return new Date(
     session.booking.scheduledFor.getTime() +
       session.booking.totalDurationMinutes * 60_000 +
@@ -765,7 +770,7 @@ export async function issueConsultInspirationUpload(args: {
           sourceIdempotencyKey: idempotencyKey,
           sourceRequestHash: requestHash,
           uploadExpiresAt: new Date(now.getTime() + CONSULT_INSPIRATION_UPLOAD_TTL_MS),
-          useExpiresAt: useExpiresAt(session),
+          useExpiresAt: useExpiresAt(session, now),
         },
       })
       await tx.consultAuditEvent.create({
