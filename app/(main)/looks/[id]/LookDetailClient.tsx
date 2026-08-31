@@ -509,20 +509,6 @@ export default function LookDetailClient({
               </div>
             </div>
 
-            {item.service ? (
-              <div className="flex flex-wrap gap-2">
-                <span className="rounded-full border border-surfaceGlass/12 bg-surfaceGlass/8 px-3 py-1 text-[11px] font-black text-textPrimary">
-                  {item.service.name}
-                </span>
-
-                {item.service.category ? (
-                  <span className="rounded-full border border-surfaceGlass/12 bg-surfaceGlass/8 px-3 py-1 text-[11px] font-black text-textPrimary">
-                    {item.service.category.name}
-                  </span>
-                ) : null}
-              </div>
-            ) : null}
-
             {item.caption ? (
               <div className="text-sm text-textPrimary/90">{item.caption}</div>
             ) : null}

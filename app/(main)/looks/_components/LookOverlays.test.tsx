@@ -96,6 +96,54 @@ describe('LookOverlays follower count', () => {
   })
 })
 
+describe('LookOverlays service names (Book the Look, B1)', () => {
+  it('never renders the look\u2019s service name', () => {
+    renderOverlay(makeItem({ serviceName: 'Fade' }))
+    expect(screen.queryByText('Fade')).not.toBeInTheDocument()
+  })
+
+  it('never renders the look\u2019s service category', () => {
+    renderOverlay(makeItem({ category: 'Hair' }))
+    expect(screen.queryByText('Hair')).not.toBeInTheDocument()
+  })
+
+  it('renders nothing at all when the service name was the only content', () => {
+    const { container } = render(
+      <LookOverlays
+        item={makeItem({
+          professional: null,
+          clientAuthor: null,
+          caption: null,
+          serviceName: 'Fade',
+          category: 'Hair',
+          priceStartingAt: null,
+        })}
+        rightRailBottom={100}
+        onToggleFollow={vi.fn()}
+      />,
+    )
+    // Before B1 the service pill alone kept the overlay alive; it must not.
+    expect(container).toBeEmptyDOMElement()
+  })
+})
+
+describe('LookOverlays starting price', () => {
+  it('keeps "From $X" \u2014 the price survives de-servicing', () => {
+    renderOverlay(makeItem({ priceStartingAt: 250 }))
+    expect(screen.getByText('From $250')).toBeInTheDocument()
+  })
+
+  it('renders the price even with no service name on the look', () => {
+    renderOverlay(makeItem({ serviceName: null, category: null, priceStartingAt: 85 }))
+    expect(screen.getByText('From $85')).toBeInTheDocument()
+  })
+
+  it('shows no price pill when the look carries no price', () => {
+    renderOverlay(makeItem({ priceStartingAt: null }))
+    expect(screen.queryByText(/^From \$/)).not.toBeInTheDocument()
+  })
+})
+
 describe('LookOverlays follow button', () => {
   it('shows FOLLOW and fires onToggleFollow when not following', () => {
     const { onToggleFollow } = renderOverlay(makeItem())
