@@ -7,10 +7,10 @@ import ProProfileLink from '@/app/_components/ProProfileLink'
 import { resolveFocalPoint } from '@/lib/media/focalPoint'
 import EmptyState from '@/app/_components/boundaries/EmptyState'
 import { asTrimmedString, isRecord } from '@/lib/guards'
-import { formatRoundedDollars } from '@/lib/money'
 import { safeJson } from '@/lib/http'
 import { cn } from '@/lib/utils'
 import { parseLooksFeedEnvelope } from '@/lib/looks/parsers'
+import { formatLookStartingPrice } from '@/lib/looks/startingPrice'
 import { pickProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import { useViewerLocation } from '@/lib/useViewerLocation'
 import { viewerLocationToDrawerContextFields } from '@/lib/viewerLocation'
@@ -32,11 +32,6 @@ interface LooksBookableGridProps {
   showEmptyState?: boolean
   // Section label; pass null to render the grid without an internal heading.
   heading?: string | null
-}
-
-function formatStartingPrice(price: number | null): string | null {
-  const dollars = formatRoundedDollars(price)
-  return dollars ? `From ${dollars}` : null
 }
 
 function buildLooksUrl(categorySlug: string | null, cursor: string | null): string {
@@ -200,9 +195,11 @@ export default function LooksBookableGrid({
               const proName = look.professional
                 ? pickProfessionalPublicDisplayName(look.professional)
                 : null
-              const tag = look.category ?? look.serviceName
-              const priceLabel = formatStartingPrice(look.priceStartingAt)
-              const serviceLabel = look.serviceName ?? look.caption
+              // Book the Look (B1): a look names no service and no service
+              // category — its caption is what describes it, and the starting
+              // price is the only figure it carries.
+              const lookLabel = look.caption?.trim() || null
+              const priceLabel = formatLookStartingPrice(look.priceStartingAt)
 
               return (
                 <article
@@ -212,7 +209,7 @@ export default function LooksBookableGrid({
                   <div className="relative aspect-3/4 overflow-hidden bg-bgPrimary/45">
                     <RemoteImage
                       src={look.thumbUrl ?? look.url}
-                      alt={serviceLabel ?? 'Look'}
+                      alt={lookLabel ?? 'Look'}
                       width={300}
                       height={400}
                       className="h-full w-full object-cover"
@@ -224,12 +221,6 @@ export default function LooksBookableGrid({
                       aria-hidden
                       className="absolute inset-0 bg-linear-to-b from-transparent via-transparent to-bgPrimary/60"
                     />
-
-                    {tag ? (
-                      <div className="absolute left-1.5 top-1.5 rounded-md bg-bgPrimary/70 px-1.5 py-1 font-mono text-[9px] font-black uppercase tracking-widest text-textPrimary backdrop-blur-md">
-                        {tag}
-                      </div>
-                    ) : null}
 
                     {priceLabel ? (
                       <div className="absolute right-1.5 top-1.5 rounded-full bg-bgPrimary/70 px-2 py-1 font-mono text-[9px] font-black uppercase tracking-[0.08em] text-textPrimary backdrop-blur-md">
@@ -246,9 +237,7 @@ export default function LooksBookableGrid({
                         'transition hover:bg-accentPrimaryHover',
                       )}
                       aria-label={
-                        proName
-                          ? `Book ${serviceLabel ?? 'this look'} with ${proName}`
-                          : `Book ${serviceLabel ?? 'this look'}`
+                        proName ? `Book this look with ${proName}` : 'Book this look'
                       }
                     >
                       Book
@@ -263,9 +252,9 @@ export default function LooksBookableGrid({
                       />
                     </div>
 
-                    {serviceLabel ? (
+                    {lookLabel ? (
                       <div className="mt-0.5 truncate text-[11px] font-semibold text-textMuted">
-                        {serviceLabel}
+                        {lookLabel}
                       </div>
                     ) : null}
                   </div>

@@ -13,16 +13,15 @@ import {
   CREATOR_STANDING_SELECT,
   type CreatorStandingValue,
 } from '@/lib/clients/creatorStanding'
-import { COPY } from '@/lib/copy'
 import { getViewerClientFollowState } from '@/lib/follows'
 import { asTrimmedString } from '@/lib/guards'
 import { normalizeHandle } from '@/lib/handles'
 import { lookNameFromCaption } from '@/lib/looks/publication/clientLookService'
+import { formatLookStartingPrice } from '@/lib/looks/startingPrice'
 import {
   boardVisibleLookItemWhere,
   publicLookVisibilityWhere,
 } from '@/lib/looks/selects'
-import { formatRoundedDollars } from '@/lib/money'
 import { prisma } from '@/lib/prisma'
 import {
   formatProfessionalPublicDisplayName,
@@ -41,6 +40,17 @@ export type PublicClientLook = {
   href: string
   /** The pro whose work the look shows — "Noor Haddad · Balayage". */
   proName: string
+  // ⚠️ The `proName` doc above still shows the card line as
+  // "Noor Haddad · Balayage" — that composition is GONE. Book the Look (B1)
+  // took service names off every client-facing look surface, so the card now
+  // renders `proName` alone. (The JSDoc is left as-is deliberately: it is
+  // published verbatim into schema/api/tovis-api.schema.json, and B1 ships no
+  // schema change.)
+  //
+  // ⚠️ BACKSTAGE, deliberately unrendered — but the field STAYS on the wire:
+  // this type is re-exported through `lib/dto/index.ts`, shipped iOS builds
+  // read it, and the look↔service linkage is raw material for the translation
+  // module (B3). Do not "clean up" as dead — removing it breaks the API.
   serviceName: string | null
   /**
    * Already composed as "From $250". Never a bare figure: a look's price is a
@@ -276,7 +286,6 @@ async function loadPublicClientProfileWhere(
 
   const looks: PublicClientLook[] = client.authoredLooks.map((row, index) => {
     const urls = lookUrls[index]
-    const amount = formatRoundedDollars(row.priceStartingAt)
     return {
       id: row.id,
       name: lookNameFromCaption(row.caption),
@@ -286,9 +295,7 @@ async function loadPublicClientProfileWhere(
       proName: formatProfessionalPublicDisplayName(row.professional),
       serviceName: row.service?.name ?? null,
       // ⚠️ Always "From $X", never a bare figure — see PublicClientLook.
-      priceLabel: amount
-        ? `${COPY.bookingConfirmation.priceFrom} ${amount}`
-        : null,
+      priceLabel: formatLookStartingPrice(row.priceStartingAt),
       recreatedCount: recreationsByLook.get(row.id) ?? 0,
       spotlighted: row.featuredAt !== null,
       recreateHref: `/looks/${encodeURIComponent(row.id)}?book=1`,

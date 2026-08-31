@@ -144,8 +144,10 @@ function LookCard({ look }: { look: PublicClientLook }) {
             <div className="truncate text-[18px] font-bold tracking-[-0.02em] text-textPrimary">
               {look.name}
             </div>
+            {/* Book the Look (B1): the pro's name only — a look no longer
+                names the service that produced it. */}
             <div className="mt-1 truncate text-[10px] font-bold uppercase tracking-[0.08em] text-textSecondary">
-              {[look.proName, look.serviceName].filter(Boolean).join(' · ')}
+              {look.proName}
             </div>
           </div>
         </div>

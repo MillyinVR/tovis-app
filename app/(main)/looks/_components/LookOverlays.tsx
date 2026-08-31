@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import type { CSSProperties } from 'react'
-import { moneyToString } from '@/lib/money'
+import { formatLookStartingPrice } from '@/lib/looks/startingPrice'
 import { formatFollowerLabel } from '@/lib/profiles/publicProfileFormatting'
 import { pickProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import type { LookBadgeTone } from '@/lib/looks/types'
@@ -72,19 +72,16 @@ export default function LookOverlays({ item: m, rightRailBottom, onToggleFollow 
       : null
   const displayName = posterName
 
-  const serviceLabel = pickTrimmed(m.serviceName)
   const caption = pickTrimmed(m.caption)
 
   // Cap the chips shown inline so the overlay stays legible; the detail page
   // renders the full set. Order is the DTO's (slug asc, banned already dropped).
   const tags = (m.tags ?? []).slice(0, 3)
 
-  // "From $X" — the attainable half of the daydream. Only for priced looks.
-  const priceAmount =
-    typeof m.priceStartingAt === 'number' && m.priceStartingAt > 0
-      ? moneyToString(m.priceStartingAt)
-      : null
-  const priceLabel = priceAmount ? `From $${priceAmount}` : null
+  // "From $X" — the attainable half of the daydream, and since B1 the only
+  // number a look carries. Composed by the shared helper so the feed, the
+  // bookable grid and /u/[handle] can never disagree about the same look.
+  const priceLabel = formatLookStartingPrice(m.priceStartingAt)
 
   const isReviewSpotlight = Boolean(m.reviewId)
   const reviewHeadline = pickTrimmed(m.reviewHeadline)
@@ -101,7 +98,7 @@ export default function LookOverlays({ item: m, rightRailBottom, onToggleFollow 
   const badge = m.badge ?? null
 
   const hasAnyContent = Boolean(
-    displayName || captionText || serviceLabel || priceLabel || badge,
+    displayName || captionText || priceLabel || badge,
   )
   if (!hasAnyContent) return null
 
@@ -118,7 +115,7 @@ export default function LookOverlays({ item: m, rightRailBottom, onToggleFollow 
     overflow: 'hidden',
   }
 
-  // Spotlight rating line shown below service pill
+  // Spotlight rating line, shown alongside the other pills
   const metaParts: string[] = []
   if (reviewRating !== null) metaParts.push(`★ ${formatRating(reviewRating)}`)
   if (reviewHelpfulCount !== null) metaParts.push(formatHelpful(reviewHelpfulCount))
@@ -274,7 +271,7 @@ export default function LookOverlays({ item: m, rightRailBottom, onToggleFollow 
       ) : null}
 
       {/* Row 3: Pills */}
-      {(badge || serviceLabel || priceLabel || spotlightMeta) ? (
+      {(badge || priceLabel || spotlightMeta) ? (
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {badge ? (
             <div
@@ -294,27 +291,6 @@ export default function LookOverlays({ item: m, rightRailBottom, onToggleFollow 
               }}
             >
               {badge.label}
-            </div>
-          ) : null}
-
-          {serviceLabel ? (
-            <div
-              style={{
-                padding: '4px 10px',
-                background: 'rgb(var(--bg-secondary) / 0.65)',
-                border: '1px solid rgb(var(--surface-glass) / 0.18)',
-                borderRadius: 999,
-                backdropFilter: 'blur(8px)',
-                WebkitBackdropFilter: 'blur(8px)',
-                fontFamily: 'var(--font-mono)',
-                fontSize: 11,
-                fontWeight: 500,
-                letterSpacing: '0.08em',
-                textTransform: 'uppercase' as const,
-                color: 'rgb(var(--text-primary) / 0.9)',
-              }}
-            >
-              {serviceLabel}
             </div>
           ) : null}
 

@@ -543,6 +543,19 @@ describe('app/(main)/looks/[id]/LookDetailClient', () => {
     })
   })
 
+  // Book the Look (B1): the detail page used to render a service chip and a
+  // service-category chip above the caption. The taxonomy is backstage now —
+  // but `service.id` must still reach the availability drawer, so this pairs
+  // with the drawer-context test below.
+  it('renders neither the service name nor its category', async () => {
+    installFetchMock()
+
+    render(<LookDetailClient initialItem={makeDetailItem()} />)
+
+    expect(screen.queryByText('Fade')).not.toBeInTheDocument()
+    expect(screen.queryByText('Hair')).not.toBeInTheDocument()
+  })
+
   it('opens availability with post-derived context, carrying the primary media id', async () => {
     installFetchMock()
 
