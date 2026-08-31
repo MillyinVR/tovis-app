@@ -174,6 +174,14 @@ export type PublicPortfolioTileDto = {
    * names server-side); empty when the media carries no service tags.
    */
   serviceNames: string[]
+  /**
+   * The subject focal point (camera C6) of `src`, [0,1] from the top-left, or
+   * null for center. Every profile surface cover-crops this tile to a different
+   * frame (a 3:4 grid cell, a 4:5 Signature card), so each one needs the focal
+   * to place its window on the face rather than the geometric middle.
+   */
+  focalX: number | null
+  focalY: number | null
   before: PairedBeforeDto | null
   /**
    * Likes, comments and "N recreated this" for the backing look. Always present
@@ -603,6 +611,8 @@ export async function mapPublicPortfolioTileToDto(
     isFeaturedInPortfolio: asset.isFeaturedInPortfolio,
     serviceIds: pickServiceIds(asset.services),
     serviceNames: pickServiceTagNames(asset.services),
+    focalX: asset.focalX ?? null,
+    focalY: asset.focalY ?? null,
     before,
     engagement: {
       likeCount: normalizeCount(engagement.likeCount),

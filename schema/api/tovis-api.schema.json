@@ -19074,6 +19074,19 @@
           "$ref": "#/definitions/PublicPortfolioTileEngagement",
           "description": "Likes, comments and \"N recreated this\" for the backing look. Always present (zeroed when the tile has no look); a caller renders a zero as NOTHING, never as a literal \"0\" — an empty grid tile is quieter than one advertising no engagement."
         },
+        "focalX": {
+          "description": "The subject focal point (camera C6) of `src`, [0,1] from the top-left, or null for center. Every profile surface cover-crops this tile to a different frame (a 3:4 grid cell, a 4:5 Signature card), so each one needs the focal to place its window on the face rather than the geometric middle.",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "focalY": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "id": {
           "type": "string"
         },
@@ -19134,6 +19147,8 @@
         "isFeaturedInPortfolio",
         "serviceIds",
         "serviceNames",
+        "focalX",
+        "focalY",
         "before",
         "engagement"
       ],

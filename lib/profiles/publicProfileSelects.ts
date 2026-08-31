@@ -139,6 +139,13 @@ export const publicPortfolioMediaAssetSelect =
     url: true,
     thumbUrl: true,
 
+    // The subject focal point (camera C6), so the profile's cover-cropped
+    // surfaces center on the face like the feed already does. Without these the
+    // grid tile and the Signature card crop blind-center — which on a portrait
+    // capture in a portrait tile is usually the client's chin.
+    focalX: true,
+    focalY: true,
+
     // Opt-in before/after pairing → render the comparison slider when present.
     beforeAsset: {
       select: pairedBeforeAssetSelect,

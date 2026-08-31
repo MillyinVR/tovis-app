@@ -86,7 +86,11 @@ export default async function LookTagPage({
             <Link
               key={tile.id}
               href={`/looks/${tile.id}`}
-              className="relative aspect-[4/5] overflow-hidden rounded-card bg-bgSurface"
+              // 3:4 — every browse grid in the app (discover, search, the public
+              // profile) is 3:4, and iOS renders this same tag feed through the
+              // shared `LooksGrid` at 3:4. This tile was the one 4:5 outlier, so a
+              // look changed shape between the tag page and everywhere else.
+              className="relative aspect-3/4 overflow-hidden rounded-card bg-bgSurface"
             >
               {tile.thumbUrl ? (
                 <RemoteImage

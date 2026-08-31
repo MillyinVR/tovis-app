@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react'
 import Link from 'next/link'
 
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import { resolveFocalPoint } from '@/lib/media/focalPoint'
 import { COPY } from '@/lib/copy'
 import type { PublicPortfolioTileDto } from '@/lib/profiles/publicProfileMappers'
 
@@ -175,6 +176,7 @@ function PortfolioTile({ tile }: { tile: PublicPortfolioTileDto }) {
         src={tile.src}
         alt={tile.caption ?? 'Portfolio'}
         className="brand-pp-tile-img transition duration-200 group-hover:scale-[1.02]"
+        focalPoint={resolveFocalPoint(tile.focalX, tile.focalY)}
         intrinsic
       />
 
