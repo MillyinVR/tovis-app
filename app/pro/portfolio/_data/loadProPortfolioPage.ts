@@ -1,17 +1,16 @@
 // app/pro/portfolio/_data/loadProPortfolioPage.ts
 import 'server-only'
 
-import { redirect } from 'next/navigation'
-import { BookingStatus, MediaType, Prisma, Role } from '@prisma/client'
+import { BookingStatus, MediaType, Prisma } from '@prisma/client'
 
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
-import { getCurrentUser } from '@/lib/currentUser'
 import { isNonNull } from '@/lib/guards'
 import { mapPortfolioTileToDto } from '@/lib/looks/mappers'
 import { portfolioTileMediaSelect } from '@/lib/looks/selects'
 import { isUnpromotedPrivateMedia } from '@/lib/media/publicShareGuard'
 import { reachableClientWhere } from '@/lib/notifications/contactMethod'
+import { loadServiceTagOptions } from '@/lib/media/serviceTagOptions'
 import { pickString } from '@/lib/pick'
 import { prisma } from '@/lib/prisma'
 import { canListProPublicly } from '@/lib/proTrustState'
@@ -61,6 +60,10 @@ const tileSelect = Prisma.validator<Prisma.MediaAssetSelect>()({
   // resolves them (`portfolioTileMediaSelect`). Restating them here is what let
   // the two pro grids drift apart before this screen merged them.
   ...portfolioTileMediaSelect,
+  // The stored pairing, which `portfolioTileMediaSelect` resolves only as a
+  // renderable `beforeAsset`. The tile editor's picker needs the raw column:
+  // an unrenderable pairing would otherwise show as "None" over a real one.
+  beforeAssetId: true,
   bookingId: true,
   reviewId: true,
   createdAt: true,
@@ -120,35 +123,6 @@ export type ProPortfolioSearchParams = {
 }
 
 /**
- * The RSC entry point: authenticate, then build. `redirect()` throws, so it
- * belongs here and NOT in {@link buildProPortfolioModel} — an API route calling
- * a loader that redirects would answer a native client with a 307 to /login
- * instead of a 401.
- */
-export async function loadProPortfolioPage({
-  searchParams,
-}: {
-  searchParams?: ProPortfolioSearchParams | null
-}): Promise<ProPortfolioPageModel> {
-  const user = await getCurrentUser()
-
-  if (!user || user.role !== Role.PRO || !user.professionalProfile) {
-    redirect(
-      `/login?from=${encodeURIComponent(PRO_PORTFOLIO_ROUTES.portfolio)}`,
-    )
-  }
-
-  const model = await buildProPortfolioModel({
-    professionalId: user.professionalProfile.id,
-    searchParams,
-  })
-
-  if (!model) redirect(PRO_PORTFOLIO_ROUTES.proHome)
-
-  return model
-}
-
-/**
  * Everything the screen shows, for one pro.
  *
  * 🔴 Shared with `GET /api/v1/pro/portfolio` — that route exists for NATIVE
@@ -182,7 +156,7 @@ export async function buildProPortfolioModel({
     ...proOwnMediaWhere,
   }
 
-  const [rows, total] = await Promise.all([
+  const [rows, total, serviceOptions] = await Promise.all([
     prisma.mediaAsset.findMany({
       where: ownedWhere,
       orderBy: { createdAt: 'desc' },
@@ -192,6 +166,9 @@ export async function buildProPortfolioModel({
     // Same `where` as the page read, or the header would count rows the grid
     // deliberately never shows.
     prisma.mediaAsset.count({ where: ownedWhere }),
+    // Loaded with the page so opening a tile's editor costs no round-trip, and
+    // from the same helper the PATCH validates against.
+    loadServiceTagOptions(),
   ])
 
   // Attributed bookings ("N booked from this photo") for every look on screen,
@@ -314,6 +291,8 @@ export async function buildProPortfolioModel({
     publicProfileHref: canListProPublicly(pro.verificationStatus)
       ? `/professionals/${encodeURIComponent(pro.id)}`
       : null,
+
+    serviceOptions,
   }
 }
 
@@ -388,6 +367,7 @@ async function buildTile(
     mediaType: base.mediaType,
     serviceIds: base.serviceIds,
     before: base.before,
+    beforeAssetId: row.beforeAssetId ?? null,
     mark: resolveMark(row.id, pro),
     engagement: isPublic && look ? buildEngagement(look, bookedByLookId) : null,
     hold: resolveHold(row, reachableClientIds),

@@ -31,6 +31,7 @@ import { pickString } from '@/lib/pick'
 import { prisma } from '@/lib/prisma'
 import { canListProPublicly } from '@/lib/proTrustState'
 import { visibleReviewsWhere } from '@/lib/reviews/visibility'
+import { buildProPortfolioModel } from '@/app/pro/portfolio/_data/loadProPortfolioPage'
 
 import {
   PRO_PROFILE_MANAGEMENT_ROUTES,
@@ -186,6 +187,7 @@ export async function loadProProfileManagementPage({
     followersCount,
     unreadNotificationCount,
     reviews,
+    portfolio,
   ] = await Promise.all([
     loadReviewStats(pro.id),
     prisma.professionalFavorite.count({
@@ -205,6 +207,12 @@ export async function loadProProfileManagementPage({
     tab === 'reviews'
       ? loadReviews(pro.id, await loadClientLinkViewer(user))
       : Promise.resolve<ProProfileManagementReview[]>([]),
+    // The library is several queries deep, so the other two tabs never pay for
+    // it. `buildProPortfolioModel` is the SAME builder the native API calls, so
+    // web and iOS cannot disagree about what is public or what a photo waits on.
+    tab === 'portfolio'
+      ? buildProPortfolioModel({ professionalId: pro.id, searchParams })
+      : Promise.resolve(null),
   ])
 
   const averageRatingLabel = formatAverageRating(reviewStats.averageRating)
@@ -228,6 +236,8 @@ export async function loadProProfileManagementPage({
     paymentSettingsInitial: buildPaymentSettingsInitial(pro),
     noShowFeatureEnabled: noShowProtectionEnabled(),
 
+    portfolio,
+
     reviews: {
       items: reviews,
       reviewCount: reviewStats.reviewCount,
@@ -237,11 +247,9 @@ export async function loadProProfileManagementPage({
 }
 
 /**
- * 🔴 `portfolio` is no longer a tab here — it moved to `/pro/portfolio`, which
- * merged this grid with "My media" into one library. The page redirects
- * `?tab=portfolio` there, so this only ever resolves the two remaining tabs.
- * The default moved from `portfolio` to `services`: leaving it would have made
- * a bare `/pro/profile/public-profile` resolve to a tab that no longer renders.
+ * 🔴 `portfolio` is the DEFAULT tab, so a bare `/pro/profile/public-profile`
+ * lands on the pro's own work. It was briefly a separate screen; nothing linked
+ * to that screen, which is how the library ended up unreachable.
  */
 export function pickProProfileManagementTab(
   searchParams: ProProfileManagementSearchParams | null | undefined,
@@ -254,22 +262,9 @@ export function pickProProfileManagementTab(
         ? rawValue[0]
         : null
 
-  return raw === 'reviews' ? raw : 'services'
-}
+  if (raw === 'reviews' || raw === 'services') return raw
 
-/** True when a legacy `?tab=portfolio` link should be sent to the new library. */
-export function isRetiredPortfolioTab(
-  searchParams: ProProfileManagementSearchParams | null | undefined,
-): boolean {
-  const rawValue = searchParams?.tab
-  const raw =
-    typeof rawValue === 'string'
-      ? rawValue
-      : Array.isArray(rawValue)
-        ? rawValue[0]
-        : null
-
-  return raw === 'portfolio'
+  return 'portfolio'
 }
 
 async function loadReviewStats(
@@ -516,6 +511,11 @@ function buildStats(args: {
       key: 'looks',
       label: 'Looks',
       value: formatCompactCount(args.publishedLooksCount),
+      // 🔴 The only navigation link to the pro dashboard in the whole product.
+      // It replaced a "Your Looks performance" row in the profile's Growth
+      // list; removing that row without putting the link here would have left
+      // `/pro/dashboard` reachable from nothing.
+      href: PRO_PROFILE_MANAGEMENT_ROUTES.proHome,
     },
     {
       key: 'followers',

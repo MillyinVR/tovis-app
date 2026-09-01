@@ -8,13 +8,19 @@ import type {
   VerificationStatus,
 } from '@prisma/client'
 
-import type { LooksPortfolioTileDto } from '@/lib/looks/types'
 import type { PairedBeforeDto } from '@/lib/media/pairedBefore'
+import type { ProPortfolioPageModel } from '@/app/pro/portfolio/_data/proPortfolioTypes'
 
-// 🔴 `portfolio` was a third tab here until the library merge. It now lives at
-// `/pro/portfolio` together with what used to be "My media"; this page keeps the
-// two tabs that are genuinely about the profile itself.
-export type ProProfileManagementTab = 'services' | 'reviews'
+/**
+ * The pro's own profile is their library, the way it is in every app they
+ * already use: one grid under the header, and services / reviews beside it.
+ *
+ * 🔴 `portfolio` is the DEFAULT. It was briefly a separate screen at
+ * `/pro/portfolio` — merged with what used to be "My media" — and nothing in
+ * the app linked to it, so the library was unreachable for any pro who didn't
+ * already know the URL. It is a tab again, and `/pro/portfolio` redirects here.
+ */
+export type ProProfileManagementTab = 'portfolio' | 'services' | 'reviews'
 
 export type ProProfileManagementSearchParams = Record<
   string,
@@ -48,6 +54,15 @@ export type ProProfileManagementStat = {
   key: ProProfileManagementStatKey
   label: string
   value: string
+  /**
+   * Where the tile leads, when it leads anywhere. `looks` carries the pro's
+   * creator analytics — which used to be a "Your Looks performance" row buried
+   * in a settings list, and was the ONLY link to `/pro/dashboard` anywhere in
+   * the product. Moving it onto the number it describes is why that row could
+   * go; dropping the row without this would have orphaned the dashboard the
+   * same way the library was orphaned.
+   */
+  href?: string
 }
 
 export type ProProfileManagementEditProfileInitial = {
@@ -94,11 +109,6 @@ export type ProProfileManagementPaymentSettingsInitial = {
   paymentNote: string | null
 }
 
-export type ProProfileManagementServiceOption = {
-  id: string
-  name: string
-}
-
 export type ProProfileManagementReviewMedia = {
   id: string
   url: string
@@ -143,24 +153,6 @@ export type ProProfileManagementProfile = {
   vanityQrSvg: string | null // inline SVG QR, present only when the link is live
 }
 
-export type ProProfileManagementPortfolio = {
-  tiles: LooksPortfolioTileDto[]
-  serviceOptions: ProProfileManagementServiceOption[]
-  // §18d — the media id currently set as the pro's creator-page cover banner
-  // (null when unset → branded fallback). Drives the per-tile "Cover" badge +
-  // the OwnerMediaMenu "Set/Remove cover" action.
-  coverMediaAssetId: string | null
-  // The media id set as the pro's SIGNATURE post — their own chosen highlight,
-  // promoted above the grid on the public profile. Drives the per-tile
-  // "Signature" badge + the OwnerMediaMenu "Set/Remove Signature" action.
-  //
-  // 🔴 This REPLACED a "Featured" badge that was pure fiction: it was drawn from
-  // `index === 0` over an `orderBy: { createdAt: 'desc' }` list, so it crowned
-  // whatever the pro uploaded most recently and dressed it as a curated choice.
-  // No such field existed on MediaAsset. This one is a real FK the pro sets.
-  signatureMediaAssetId: string | null
-}
-
 export type ProProfileManagementReviews = {
   items: ProProfileManagementReview[]
   reviewCount: number
@@ -183,6 +175,12 @@ export type ProProfileManagementPageModel = {
    * Gates the "No-show & late-cancel fees" section in the payment settings modal.
    */
   noShowFeatureEnabled: boolean
+
+  /**
+   * The library, present only while the portfolio tab is the active one — it is
+   * several queries deep, and the services/reviews tabs must not pay for it.
+   */
+  portfolio: ProPortfolioPageModel | null
 
   reviews: ProProfileManagementReviews
 }

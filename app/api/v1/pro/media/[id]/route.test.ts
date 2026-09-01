@@ -453,6 +453,49 @@ describe('app/api/v1/pro/media/[id]/route.ts', () => {
       })
     })
 
+    it('leaves the caption alone when the body omits it', async () => {
+      // 🔴 A partial save — re-tagging services, re-pairing a before/after —
+      // sends no `caption`. This used to resolve to `null` and be written
+      // unconditionally, so every such save WIPED the caption. The write must
+      // not mention the column at all.
+      mocks.mediaAssetUpdate.mockResolvedValueOnce({
+        id: 'media_1',
+        caption: 'Before caption',
+        visibility: MediaVisibility.PRO_CLIENT,
+        isEligibleForLooks: false,
+        isFeaturedInPortfolio: false,
+      })
+
+      const res = await PATCH(
+        makeJsonRequest({ serviceIds: ['svc_1'] }),
+        makeCtx(),
+      )
+
+      expect(res.status).toBe(200)
+
+      const call = mocks.mediaAssetUpdate.mock.calls[0]?.[0]
+      expect(call).toBeDefined()
+      expect(call.data).not.toHaveProperty('caption')
+    })
+
+    it('clears the caption when the body sends an explicit null', async () => {
+      mocks.mediaAssetUpdate.mockResolvedValueOnce({
+        id: 'media_1',
+        caption: null,
+        visibility: MediaVisibility.PRO_CLIENT,
+        isEligibleForLooks: false,
+        isFeaturedInPortfolio: false,
+      })
+
+      const res = await PATCH(makeJsonRequest({ caption: null }), makeCtx())
+
+      expect(res.status).toBe(200)
+
+      const call = mocks.mediaAssetUpdate.mock.calls[0]?.[0]
+      expect(call).toBeDefined()
+      expect(call.data.caption).toBeNull()
+    })
+
     it('updates without replacing services when serviceIds are omitted', async () => {
       mocks.mediaAssetUpdate.mockResolvedValueOnce({
         id: 'media_1',

@@ -1,4 +1,6 @@
 // app/pro/profile/public-profile/_components/ProProfileManagementShell.tsx
+import ProPortfolioScreen from '@/app/pro/portfolio/_components/ProPortfolioScreen'
+
 import ServicesManagerSection from '../../_sections/ServicesManagerSection'
 
 import type { ProProfileManagementPageModel } from '../_data/proProfileManagementTypes'
@@ -48,6 +50,12 @@ export default function ProProfileManagementShell({
           <ProProfileActions routes={model.routes} />
 
           <ProProfileTabs activeTab={model.tab} routes={model.routes} />
+
+          {/* The library, not a mirror of it: the same model the native app
+              reads, with its filters, its zones and its per-tile sheet. */}
+          {model.tab === 'portfolio' && model.portfolio ? (
+            <ProPortfolioScreen model={model.portfolio} />
+          ) : null}
 
           {model.tab === 'services' ? <ServicesTab /> : null}
 

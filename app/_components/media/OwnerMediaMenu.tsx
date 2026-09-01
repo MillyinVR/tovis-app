@@ -1,21 +1,22 @@
 // app/_components/media/OwnerMediaMenu.tsx
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { UI_SIZES } from '@/app/(main)/ui/layoutConstants'
 import { zClass } from '@/lib/zIndex'
 import { MediaVisibility } from '@/lib/prismaEnums'
 import { cn } from '@/lib/utils'
-import { safeJson } from '@/lib/http'
-import { isRecord } from '@/lib/guards'
-import { pickString } from '@/lib/pick'
-import RemoteImage from '@/app/_components/media/RemoteImage'
-import { FieldLabel } from '@/app/_components/ui'
+
+import ProMediaEditFields, { Field } from './ProMediaEditFields'
+import {
+  pickErrorMessage,
+  safeJsonObject,
+  useProMediaEdit,
+} from './useProMediaEdit'
 
 type Visibility = MediaVisibility
 type ServiceOption = { id: string; name: string }
-type BeforeOption = { id: string; thumbUrl: string; phase: string }
 
 type Props = {
   mediaId: string
@@ -50,54 +51,45 @@ type Props = {
   isSignature?: boolean
 }
 
-type JsonObject = Record<string, unknown>
-
-const CAPTION_MAX = 300
-
-async function safeJsonObject(res: Response): Promise<JsonObject> {
-  const data = await safeJson(res)
-  return isRecord(data) ? data : {}
-}
-
-function pickErrorMessage(data: JsonObject, fallback: string) {
-  const e = data.error
-  if (typeof e === 'string' && e.trim()) return e.trim()
-
-  const m = data.message
-  if (typeof m === 'string' && m.trim()) return m.trim()
-
-  return fallback
-}
-
-function uniqueStrings(input: string[]) {
-  const out: string[] = []
-  const seen = new Set<string>()
-  for (const v of input) {
-    const s = (v || '').trim()
-    if (!s) continue
-    if (seen.has(s)) continue
-    seen.add(s)
-    out.push(s)
-  }
-  return out
-}
-
 /**
  * ✅ Single source of truth:
  * visibility is derived from the two public surfaces.
  */
-function visibilityFromFlags(flags: { isEligibleForLooks: boolean; isFeaturedInPortfolio: boolean }): Visibility {
-  return flags.isEligibleForLooks || flags.isFeaturedInPortfolio ? MediaVisibility.PUBLIC : MediaVisibility.PRO_CLIENT
+function visibilityFromFlags(flags: {
+  isEligibleForLooks: boolean
+  isFeaturedInPortfolio: boolean
+}): Visibility {
+  return flags.isEligibleForLooks || flags.isFeaturedInPortfolio
+    ? MediaVisibility.PUBLIC
+    : MediaVisibility.PRO_CLIENT
 }
 
-export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVideo = false, isCover = false, isSignature = false }: Props) {
+/**
+ * The owner's controls on `/media/[id]`.
+ *
+ * The caption / pairing / service-tag fields and the PATCH+DELETE writes live in
+ * `useProMediaEdit` + `ProMediaEditFields`, shared with the pro library's manage
+ * sheet. What stays here is what only this surface has: the ⋯ menu, the cover
+ * and Signature actions, and the two visibility flags — which the library
+ * deliberately does not offer, because there publishing is one act rather than
+ * two toggles the pro has to reason about.
+ */
+export default function OwnerMediaMenu({
+  mediaId,
+  initial,
+  serviceOptions,
+  isVideo = false,
+  isCover = false,
+  isSignature = false,
+}: Props) {
   const router = useRouter()
 
   const [openMenu, setOpenMenu] = useState(false)
   const [openEdit, setOpenEdit] = useState(false)
 
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  // Actions that live outside the shared editor keep their own busy flag.
+  const [actionBusy, setActionBusy] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
 
   // §18d — creator-page cover banner. Optimistic so the menu label flips instantly.
   const [cover, setCover] = useState(Boolean(isCover))
@@ -105,27 +97,33 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
   // The pro's own Signature post. Same optimistic treatment as the cover.
   const [signature, setSignature] = useState(Boolean(isSignature))
 
-  // Edit state
-  const [caption, setCaption] = useState(initial.caption ?? '')
-  const [isEligibleForLooks, setIsEligibleForLooks] = useState(Boolean(initial.isEligibleForLooks))
-  const [isFeaturedInPortfolio, setIsFeaturedInPortfolio] = useState(Boolean(initial.isFeaturedInPortfolio))
-  const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>(uniqueStrings(initial.serviceIds ?? []))
-  const [serviceQuery, setServiceQuery] = useState('')
+  const [isEligibleForLooks, setIsEligibleForLooks] = useState(
+    Boolean(initial.isEligibleForLooks),
+  )
+  const [isFeaturedInPortfolio, setIsFeaturedInPortfolio] = useState(
+    Boolean(initial.isFeaturedInPortfolio),
+  )
 
-  // Before/after pairing state. `beforeAssetId` is the chosen "before" (null =
-  // unpaired). Only sent to the server when the pro actually touches the picker,
-  // so an unrelated save doesn't clobber the default-on auto-pairing.
-  const [beforeAssetId, setBeforeAssetId] = useState<string | null>(initial.beforeAssetId ?? null)
-  const [pairingTouched, setPairingTouched] = useState(false)
-  const [beforeOptions, setBeforeOptions] = useState<BeforeOption[]>([])
-  const [beforeOptionsLoaded, setBeforeOptionsLoaded] = useState(false)
+  const edit = useProMediaEdit({
+    mediaId,
+    initial: {
+      caption: initial.caption ?? null,
+      serviceIds: initial.serviceIds ?? [],
+      beforeAssetId: initial.beforeAssetId ?? null,
+    },
+    serviceOptions,
+    isVideo,
+    active: openEdit,
+  })
 
   const wrapRef = useRef<HTMLDivElement | null>(null)
-  const busy = saving
+  const busy = edit.saving || actionBusy
 
   const isPublicSurfaceOn = isEligibleForLooks || isFeaturedInPortfolio
-  const computedVisibility = visibilityFromFlags({ isEligibleForLooks, isFeaturedInPortfolio })
-  const mustHaveService = selectedServiceIds.length > 0
+  const computedVisibility = visibilityFromFlags({
+    isEligibleForLooks,
+    isFeaturedInPortfolio,
+  })
 
   // Close the 3-dot menu when clicking outside
   useEffect(() => {
@@ -139,73 +137,16 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
     return () => document.removeEventListener('mousedown', onDoc)
   }, [])
 
-  // Lazy-load the booking's candidate "before" photos the first time the edit
-  // modal opens for an image (videos can't have a before/after pairing).
-  useEffect(() => {
-    if (!openEdit || isVideo || beforeOptionsLoaded) return
-    let cancelled = false
-    void (async () => {
-      try {
-        const res = await fetch(
-          `/api/v1/pro/media/${encodeURIComponent(mediaId)}/before-options`,
-          { cache: 'no-store' },
-        )
-        const data = await safeJsonObject(res)
-        if (cancelled) return
-        const raw = Array.isArray(data.options) ? data.options : []
-        const clean: BeforeOption[] = raw
-          .filter(isRecord)
-          .map((o) => ({
-            id: pickString(o.id) ?? '',
-            thumbUrl: pickString(o.thumbUrl) ?? '',
-            phase: pickString(o.phase) ?? '',
-          }))
-          .filter((o) => o.id && o.thumbUrl)
-        setBeforeOptions(clean)
-        setBeforeOptionsLoaded(true)
-      } catch {
-        if (!cancelled) setBeforeOptionsLoaded(true)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [openEdit, isVideo, beforeOptionsLoaded, mediaId])
-
   // Footer + safe-area math so the modal never hides behind bottom nav
   const footerPx = UI_SIZES.footerHeight ?? 0
   const modalMaxHeight = `calc(100dvh - ${footerPx}px - 18px)`
   const actionSafePaddingBottom = `calc(${footerPx}px + env(safe-area-inset-bottom, 0px) + 14px)`
 
-  const filteredServices = useMemo(() => {
-    const q = serviceQuery.trim().toLowerCase()
-    if (!q) return serviceOptions
-    return serviceOptions.filter((s) => s.name.toLowerCase().includes(q))
-  }, [serviceOptions, serviceQuery])
-
-  const selectedServiceMap = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const s of serviceOptions) map.set(s.id, s.name)
-    return map
-  }, [serviceOptions])
-
-  function toggleService(id: string) {
-    setSelectedServiceIds((prev) => {
-      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-      return uniqueStrings(next)
-    })
-    setError(null)
-  }
-
-  function removeService(id: string) {
-    setSelectedServiceIds((prev) => prev.filter((x) => x !== id))
-    setError(null)
-  }
-
   function closeEdit() {
     if (busy) return
     setOpenEdit(false)
-    setError(null)
+    edit.setError(null)
+    setActionError(null)
   }
 
   /**
@@ -214,7 +155,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
    * - Selecting PRO_CLIENT turns both public surfaces off.
    */
   function onChangeVisibility(next: Visibility) {
-    setError(null)
+    edit.setError(null)
 
     if (next === MediaVisibility.PUBLIC) {
       // If user wants "public" and neither surface is on, turn on portfolio by default.
@@ -230,83 +171,43 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
   }
 
   async function saveEdits() {
-    if (saving) return
-    setError(null)
+    if (busy) return
 
-    // Hard rule: media must always have >= 1 service tag
-    if (!mustHaveService) {
-      setError('Attach at least 1 service before saving.')
-      return
-    }
+    // The flags ride along because this surface still owns them; the shared
+    // editor sends only caption / tags / pairing.
+    const ok = await edit.save({
+      isEligibleForLooks,
+      isFeaturedInPortfolio,
+      // optional compatibility: send computed visibility (server should still normalize)
+      visibility: computedVisibility,
+    })
+    if (!ok) return
 
-    setSaving(true)
-
-    try {
-      const res = await fetch(`/api/v1/pro/media/${encodeURIComponent(mediaId)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          caption: caption.trim().slice(0, CAPTION_MAX) || null,
-
-          // ✅ single truth = flags
-          isEligibleForLooks,
-          isFeaturedInPortfolio,
-          serviceIds: selectedServiceIds,
-
-          // Only send the pairing when the pro actually changed it, so a normal
-          // save doesn't override the server's default-on auto-pairing.
-          ...(pairingTouched ? { beforeAssetId } : {}),
-
-          // optional compatibility: send computed visibility (server should still normalize)
-          visibility: computedVisibility,
-        }),
-      })
-
-      const data = await safeJsonObject(res)
-      if (!res.ok) {
-        throw new Error(pickErrorMessage(data, `Request failed (${res.status})`))
-      }
-
-      setOpenEdit(false)
-      setOpenMenu(false)
-      router.refresh()
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to save.')
-    } finally {
-      setSaving(false)
-    }
+    setOpenEdit(false)
+    setOpenMenu(false)
+    router.refresh()
   }
 
   async function deleteMedia() {
-    if (saving) return
-    setError(null)
+    if (busy) return
+    setActionError(null)
 
     if (typeof window === 'undefined') return
     const ok = window.confirm('Delete this media? This cannot be undone.')
     if (!ok) return
 
-    setSaving(true)
-    try {
-      const res = await fetch(`/api/v1/pro/media/${encodeURIComponent(mediaId)}`, { method: 'DELETE' })
-      const data = await safeJsonObject(res)
-      if (!res.ok) {
-        throw new Error(pickErrorMessage(data, `Request failed (${res.status})`))
-      }
+    const removed = await edit.remove()
+    if (!removed) return
 
-      setOpenMenu(false)
-      setOpenEdit(false)
-      router.refresh()
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to delete.')
-    } finally {
-      setSaving(false)
-    }
+    setOpenMenu(false)
+    setOpenEdit(false)
+    router.refresh()
   }
 
   async function toggleCover() {
-    if (saving) return
-    setError(null)
-    setSaving(true)
+    if (busy) return
+    setActionError(null)
+    setActionBusy(true)
 
     const nextCover = !cover
     try {
@@ -323,16 +224,18 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
       setOpenMenu(false)
       router.refresh()
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to update cover.')
+      setActionError(
+        e instanceof Error ? e.message : 'Failed to update cover.',
+      )
     } finally {
-      setSaving(false)
+      setActionBusy(false)
     }
   }
 
   async function toggleSignature() {
-    if (saving) return
-    setError(null)
-    setSaving(true)
+    if (busy) return
+    setActionError(null)
+    setActionBusy(true)
 
     const nextSignature = !signature
     try {
@@ -352,13 +255,15 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
       setOpenMenu(false)
       router.refresh()
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to update Signature.')
+      setActionError(
+        e instanceof Error ? e.message : 'Failed to update Signature.',
+      )
     } finally {
-      setSaving(false)
+      setActionBusy(false)
     }
   }
 
-  const canSave = !busy && mustHaveService
+  const canSave = edit.canSave && !actionBusy
 
   return (
     <div ref={wrapRef} className="relative">
@@ -393,7 +298,8 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
             onClick={() => {
               setOpenMenu(false)
               setOpenEdit(true)
-              setError(null)
+              edit.setError(null)
+              setActionError(null)
             }}
             className="block w-full px-4 py-3 text-left text-[13px] font-black text-textPrimary hover:bg-surfaceGlass/10"
           >
@@ -405,10 +311,10 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
             <button
               type="button"
               onClick={toggleCover}
-              disabled={saving}
+              disabled={busy}
               className={cn(
                 'block w-full px-4 py-3 text-left text-[13px] font-black text-textPrimary hover:bg-surfaceGlass/10',
-                saving ? 'cursor-not-allowed opacity-70' : '',
+                busy ? 'cursor-not-allowed opacity-70' : '',
               )}
             >
               {cover ? 'Remove cover photo' : 'Set as cover photo'}
@@ -420,10 +326,10 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
             <button
               type="button"
               onClick={toggleSignature}
-              disabled={saving}
+              disabled={busy}
               className={cn(
                 'block w-full px-4 py-3 text-left text-[13px] font-black text-textPrimary hover:bg-surfaceGlass/10',
-                saving ? 'cursor-not-allowed opacity-70' : '',
+                busy ? 'cursor-not-allowed opacity-70' : '',
               )}
             >
               {signature ? 'Remove Signature' : 'Set as Signature'}
@@ -437,6 +343,12 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
           >
             Delete
           </button>
+
+          {actionError ? (
+            <div className="border-t border-surfaceGlass/10 px-4 py-3 text-[11px] font-semibold text-toneDanger">
+              {actionError}
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -460,7 +372,9 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
             <div className="flex items-center justify-between gap-3 border-b border-surfaceGlass/10 px-4 py-3">
               <div className="grid">
                 <div className="text-[13px] font-black text-textPrimary">Edit media</div>
-                <div className="text-[11px] font-semibold text-textSecondary">Luxury controls. Zero confusion.</div>
+                <div className="text-[11px] font-semibold text-textSecondary">
+                  Caption, tags and where it appears.
+                </div>
               </div>
 
               <button
@@ -482,31 +396,11 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
             {/* Body */}
             <div className="looksNoScrollbar overflow-y-auto p-4">
               <div className="grid gap-4">
-                {/* Caption */}
+                {/* Visibility (derived) — this surface's own, not the shared editor's. */}
                 <Field
-                  label="Caption"
-                  right={
-                    <span className="text-[11px] font-semibold text-textSecondary">
-                      {caption.trim().length}/{CAPTION_MAX}
-                    </span>
-                  }
+                  label="Who can view"
+                  hint="Public requires Looks or Portfolio enabled. Private means neither is enabled."
                 >
-                  <textarea
-                    value={caption}
-                    onChange={(e) => setCaption(e.target.value.slice(0, CAPTION_MAX))}
-                    rows={3}
-                    disabled={busy}
-                    className={cn(
-                      'w-full resize-y rounded-[16px] border border-surfaceGlass/10 bg-bgPrimary/35',
-                      'px-3 py-3 text-[13px] text-textPrimary outline-none',
-                      'focus:ring-2 focus:ring-accentPrimary/35',
-                    )}
-                    placeholder="Write a caption…"
-                  />
-                </Field>
-
-                {/* Visibility (derived) */}
-                <Field label="Who can view" hint="Public requires Looks or Portfolio enabled. Private means neither is enabled.">
                   <Segmented<Visibility>
                     value={computedVisibility}
                     disabled={busy}
@@ -526,7 +420,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
                     value={isEligibleForLooks}
                     setValue={(v) => {
                       setIsEligibleForLooks(v)
-                      setError(null)
+                      edit.setError(null)
                     }}
                     disabled={busy}
                   />
@@ -537,193 +431,17 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
                     value={isFeaturedInPortfolio}
                     setValue={(v) => {
                       setIsFeaturedInPortfolio(v)
-                      setError(null)
+                      edit.setError(null)
                     }}
                     disabled={busy}
                   />
                 </div>
 
-                {/* Before / after pairing (images only) */}
-                {!isVideo ? (
-                  <Field
-                    label="Before / after"
-                    hint="Pair a “before” photo to show a comparison slider on your public portfolio."
-                  >
-                    <div className="flex flex-wrap gap-2 rounded-[18px] border border-surfaceGlass/10 bg-bgPrimary/25 p-3">
-                      {!beforeOptionsLoaded ? (
-                        <div className="grid h-16 place-items-center px-2 text-[11px] font-semibold text-textSecondary">
-                          Loading…
-                        </div>
-                      ) : beforeOptions.length === 0 && beforeAssetId === null ? (
-                        <div className="grid h-16 place-items-center px-2 text-[11px] font-semibold text-textSecondary">
-                          No before photos from this booking to pair.
-                        </div>
-                      ) : (
-                        <>
-                          <button
-                            type="button"
-                            disabled={busy}
-                            onClick={() => {
-                              setBeforeAssetId(null)
-                              setPairingTouched(true)
-                              setError(null)
-                            }}
-                            className={cn(
-                              'grid h-16 w-16 place-items-center rounded-xl border text-[11px] font-black transition',
-                              beforeAssetId === null
-                                ? 'border-accentPrimary/40 bg-accentPrimary/15 text-accentPrimary'
-                                : 'border-surfaceGlass/12 bg-bgPrimary/30 text-textSecondary hover:bg-surfaceGlass/5',
-                              busy ? 'cursor-not-allowed opacity-70' : '',
-                            )}
-                            title="No before/after pairing"
-                          >
-                            None
-                          </button>
+                <ProMediaEditFields edit={edit} />
 
-                          {beforeOptions.map((opt) => {
-                            const on = beforeAssetId === opt.id
-                            return (
-                              <button
-                                key={opt.id}
-                                type="button"
-                                disabled={busy}
-                                onClick={() => {
-                                  setBeforeAssetId(opt.id)
-                                  setPairingTouched(true)
-                                  setError(null)
-                                }}
-                                className={cn(
-                                  'relative h-16 w-16 overflow-hidden rounded-xl border transition',
-                                  on
-                                    ? 'border-accentPrimary shadow-[0_0_0_2px_rgb(var(--accent-primary)/0.45)]'
-                                    : 'border-surfaceGlass/12 hover:border-surfaceGlass/30',
-                                  busy ? 'cursor-not-allowed opacity-70' : '',
-                                )}
-                                title={
-                                  opt.phase === 'BEFORE'
-                                    ? 'Before photo'
-                                    : 'Photo from this booking'
-                                }
-                              >
-                                <RemoteImage
-                                  src={opt.thumbUrl}
-                                  alt="Before candidate"
-                                  width={128}
-                                  height={128}
-                                  className="h-full w-full object-cover"
-                                />
-                                {on ? (
-                                  <span className="absolute bottom-1 right-1 grid h-4 w-4 place-items-center rounded-full bg-accentPrimary text-[10px] font-black text-bgPrimary">
-                                    ✓
-                                  </span>
-                                ) : null}
-                              </button>
-                            )
-                          })}
-                        </>
-                      )}
-                    </div>
-                  </Field>
-                ) : null}
-
-                {/* Services */}
-                <Field
-                  label="Services attached"
-                  hint="At least 1 service is required."
-                  right={<span className="text-[11px] font-semibold text-textSecondary">{selectedServiceIds.length} selected</span>}
-                >
-                  {selectedServiceIds.length ? (
-                    <div className="flex flex-wrap gap-2 rounded-[18px] border border-surfaceGlass/10 bg-bgPrimary/25 p-3">
-                      {selectedServiceIds.slice(0, 10).map((id) => {
-                        const name = selectedServiceMap.get(id) || 'Service'
-                        return (
-                          <button
-                            key={id}
-                            type="button"
-                            disabled={busy}
-                            onClick={() => removeService(id)}
-                            className={cn(
-                              'inline-flex items-center gap-2 rounded-full px-3 py-1',
-                              'border border-surfaceGlass/12 bg-bgPrimary/30 backdrop-blur-xl',
-                              'text-[12px] font-extrabold text-textPrimary',
-                              busy ? 'opacity-70' : 'hover:bg-surfaceGlass/10',
-                            )}
-                            title="Remove"
-                          >
-                            <span className="max-w-[220px] truncate">{name}</span>
-                            <span className="text-textSecondary" aria-hidden="true">
-                              ✕
-                            </span>
-                          </button>
-                        )
-                      })}
-                      {selectedServiceIds.length > 10 ? (
-                        <div className="rounded-full border border-surfaceGlass/10 bg-bgPrimary/25 px-3 py-1 text-[12px] font-extrabold text-textSecondary">
-                          +{selectedServiceIds.length - 10} more
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : (
-                    <div className="rounded-[18px] border border-toneDanger/30 bg-toneDanger/10 p-3 text-[12px] font-semibold text-toneDanger">
-                      Attach at least 1 service to save.
-                    </div>
-                  )}
-
-                  <div className="mt-3">
-                    <input
-                      value={serviceQuery}
-                      onChange={(e) => setServiceQuery(e.target.value)}
-                      placeholder="Search services…"
-                      disabled={busy}
-                      className={cn(
-                        'w-full rounded-[16px] border border-surfaceGlass/10 bg-bgPrimary/35',
-                        'px-3 py-2 text-[13px] text-textPrimary outline-none',
-                        'focus:ring-2 focus:ring-accentPrimary/35',
-                      )}
-                    />
-                  </div>
-
-                  <div className="mt-2 max-h-[260px] overflow-auto rounded-[18px] border border-surfaceGlass/10 bg-bgPrimary/20">
-                    {filteredServices.map((s) => {
-                      const on = selectedServiceIds.includes(s.id)
-                      return (
-                        <button
-                          key={s.id}
-                          type="button"
-                          disabled={busy}
-                          onClick={() => toggleService(s.id)}
-                          className={cn(
-                            'flex w-full items-center justify-between gap-3 px-4 py-3 text-left',
-                            'border-b border-surfaceGlass/5 last:border-b-0',
-                            busy ? 'opacity-70' : 'hover:bg-surfaceGlass/5',
-                          )}
-                        >
-                          <span className="text-[13px] font-black text-textPrimary">{s.name}</span>
-
-                          <span
-                            className={cn(
-                              'inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-black',
-                              on
-                                ? 'border border-accentPrimary/30 bg-accentPrimary/20 text-accentPrimary'
-                                : 'border border-surfaceGlass/10 bg-bgPrimary/25 text-textSecondary',
-                            )}
-                          >
-                            <span className={cn('h-1.5 w-1.5 rounded-full', on ? 'bg-accentPrimary' : 'bg-surfaceGlass/35')} />
-                            {on ? 'Selected' : 'Add'}
-                          </span>
-                        </button>
-                      )
-                    })}
-
-                    {filteredServices.length === 0 ? (
-                      <div className="px-4 py-4 text-[12px] font-semibold text-textSecondary">No services found.</div>
-                    ) : null}
-                  </div>
-                </Field>
-
-                {error ? (
+                {actionError ? (
                   <div className="rounded-[14px] border border-toneDanger/30 bg-toneDanger/10 p-3 text-[12px] font-semibold text-toneDanger">
-                    {error}
+                    {actionError}
                   </div>
                 ) : null}
               </div>
@@ -762,9 +480,9 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
                       'rounded-[16px] border px-4 py-3 text-[13px] font-black transition',
                       !canSave
                         ? 'cursor-not-allowed border-surfaceGlass/10 bg-bgPrimary text-textSecondary opacity-70'
-                        : 'border-accentPrimary/40 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
+                        : 'border-accentPrimary/40 bg-accentPrimary text-onAccent hover:bg-accentPrimaryHover',
                     )}
-                    title={!mustHaveService ? 'Attach at least 1 service' : undefined}
+                    title={!edit.hasService ? 'Attach at least 1 service' : undefined}
                   >
                     {busy ? 'Saving…' : 'Save'}
                   </button>
@@ -774,31 +492,6 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions, isVid
           </div>
         </div>
       ) : null}
-    </div>
-  )
-}
-
-function Field({
-  label,
-  hint,
-  right,
-  children,
-}: {
-  label: string
-  hint?: string
-  right?: React.ReactNode
-  children: React.ReactNode
-}) {
-  return (
-    <div className="grid gap-2">
-      <div className="flex items-end justify-between gap-2">
-        <div className="grid">
-          <FieldLabel>{label}</FieldLabel>
-          {hint ? <div className="mt-0.5 text-[11px] font-semibold text-textPrimary/55">{hint}</div> : null}
-        </div>
-        {right ? <div>{right}</div> : null}
-      </div>
-      {children}
     </div>
   )
 }
@@ -902,7 +595,7 @@ function HermesToggleRow({
           )}
           aria-hidden="true"
         >
-          <div className="absolute inset-0 rounded-full bg-gradient-to-b from-white/10 to-transparent" />
+          <div className="absolute inset-0 rounded-full bg-gradient-to-b from-surfaceGlass/10 to-transparent" />
 
           <div
             className={cn(
