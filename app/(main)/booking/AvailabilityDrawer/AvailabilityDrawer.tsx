@@ -21,6 +21,7 @@ import type {
 } from './types'
 
 import SheetCover from './components/SheetCover'
+import { useBrand } from '@/lib/brand/BrandProvider'
 import { daySupplyIsScarce, daySupplyLabel } from '@/lib/booking/daySupply'
 import type { BookingErrorCode } from '@/lib/booking/errors'
 import { asTrimmedString, getRecordProp, isRecord } from '@/lib/guards'
@@ -537,6 +538,7 @@ export default function AvailabilityDrawer(props: {
 
   const router = useRouter()
   const debug = useDebugFlag()
+  const { brand } = useBrand()
 
   const viewerTz = useMemo(() => getViewerTimeZoneClient(), [])
   const [locationType, setLocationType] = useState<ServiceLocationType | null>(
@@ -1759,6 +1761,16 @@ export default function AvailabilityDrawer(props: {
     ? fmtSelectedLine(selected.slotISO, appointmentTz)
     : null
 
+  // The sheet's title when the look has no name of its own (Tori, 2026-08-31).
+  // On the CONSULT path it must never be the service name: that is the one
+  // screen whose whole point is that she is booking an outcome, and B1's rule
+  // is that a look never names the service that produced it. The named-service
+  // door — a client who picked a service off a menu — keeps the service name it
+  // has always shown.
+  const sheetTitle = consultId
+    ? brand.clientConsultBooking.sheetUnnamedLookTitle
+    : (summary?.serviceName ?? null)
+
   // A consult proposal has no add-on step to promise — the next screen reviews
   // what the consultation put together and books it.
   const continueLabel = onConfirmHold
@@ -1789,7 +1801,7 @@ export default function AvailabilityDrawer(props: {
                 freeCancellationHours: null,
               }
             }
-            serviceName={summary?.serviceName ?? null}
+            title={sheetTitle}
             proName={primary ? formatProfessionalPublicDisplayName(primary) : ''}
             proAvatarUrl={primary?.avatarUrl ?? null}
             proHref={

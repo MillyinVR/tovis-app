@@ -689,6 +689,19 @@ export type BrandClientConsultBookingCopy = {
 
   reviewEyebrow: string
   reviewTitle: string
+
+  /**
+   * The booking sheet's title when the look being booked has no name of its own
+   * (Tori, 2026-08-31, riding B5).
+   *
+   * The sheet's fallback chain is `look name → this → "Book an appointment"`,
+   * and it applies ONLY on the consult path. The named-service door keeps the
+   * service name it has always fallen back to — that is a client who picked a
+   * service and should see it. On the consult path there is no service the
+   * client chose, and naming one is the exact taxonomy leak B1 removed from
+   * every other look surface.
+   */
+  sheetUnnamedLookTitle: string
 }
 
 export type BrandConfig = {

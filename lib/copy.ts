@@ -99,6 +99,43 @@ export const COPY = {
     receiptTitle: 'Your consultation booking',
   },
 
+  /**
+   * Book the Look, B5 — the PRO's side of the same booking
+   * (docs/product/BOOK-THE-LOOK-DIRECTION.md, decision 4's pro half).
+   *
+   * ⚠️ Deliberately NOT `consultProposal` above. That block is what the CLIENT
+   * reads; every sentence in it is addressed to her ("Your consultation
+   * booking", "your pro makes the final call"). Reusing it on the pro's screen
+   * was tried and looked at in a browser: her own review surface greeted her
+   * with "YOUR consultation booking" about someone else's appointment.
+   *
+   * ⚠️ `placementBeforeDecision` and `placementAfterAcceptance` are the ONE
+   * thing that differs between the review's two placements. They live next to
+   * each other on purpose — decision 4 says the auto-accept toggle chooses
+   * WHERE the surface renders, never what it says, and two sentences in one
+   * place is how that stays true.
+   */
+  consultProposalReview: {
+    title: 'What your client booked',
+    placementBeforeDecision:
+      'This booking is waiting on you. Here is what your client committed to — check the lines before you accept or decline below.',
+    placementAfterAcceptance:
+      'You accept bookings automatically, so this one is already on your calendar. Here is what your client committed to.',
+    /**
+     * 🔴 Load-bearing honesty, not reassurance. The revision-notice threshold —
+     * how far a pro may move a price or a duration before the client is told
+     * and offered a cancel/refund — is still an open Tori decision, so B5
+     * records her numbers and changes nothing the client can see. A surface
+     * that let her believe otherwise would be worse than no surface.
+     */
+    agreedNote:
+      'That is the figure your client was shown and agreed to. Your numbers below are recorded beside it — they do not change her booking, her price or her time, and she is not told about them.',
+    savedNote:
+      'Recorded. Your client has not been told — settle the final number with her in the chair.',
+    closedNote:
+      'This booking is closed, so nothing further can be recorded against it.',
+  },
+
   bookings: {
     titleFallback: 'Booking',
     backToBookings: '← Back to bookings',

@@ -76,4 +76,10 @@ export const defaultClientConsultBookingCopy: BrandClientConsultBookingCopy = {
   // slot, so it is described as held rather than as a queue.
   reviewEyebrow: 'From your consultation',
   reviewTitle: 'Your look',
+
+  // The booking sheet's title for an unnamed look on THIS path. Never the
+  // service name: a LOOK never names the service that produced it (B1), and
+  // this is the one screen whose entire point is that she is booking an
+  // outcome rather than picking off a menu.
+  sheetUnnamedLookTitle: 'Book this look',
 }
