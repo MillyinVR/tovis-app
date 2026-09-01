@@ -763,12 +763,14 @@ describe('the proximity expiry', () => {
     ).toEqual({ status: BookingStatus.ACCEPTED })
   })
 
-  // 🔴 The BLAST RADIUS claim, made checkable. Every pro with autoAcceptBookings
-  // off has pending requests today that expire never, and auto-cancelling those
-  // is a product change Tori has not made. This sweep is scoped to bookings that
-  // carry a B4 proposal, and this is the case that fails if that scope is ever
-  // widened by accident.
-  it('does not touch a PENDING booking that came from no proposal', async () => {
+  // 🔴 The BLAST RADIUS case, INVERTED (Tori, 2026-08-31). This used to assert
+  // that the sweep left an ordinary pending request alone, because widening it
+  // was a product change nobody had made. Tori made it: the expiry now applies
+  // to EVERY pending request on the same rules and windows. The case is kept,
+  // pointed the other way, because it is still the one that proves what the
+  // sweep's `where` clause actually reaches — a booking with no proposal behind
+  // it at all.
+  it('releases a PENDING booking that came from no proposal', async () => {
     const start = futureLocal(11, 10)
     const held = await holdFromConsult({ start, consultId: null })
     const finalized = await commit({
@@ -792,14 +794,17 @@ describe('the proximity expiry', () => {
     })
 
     expect(
-      result.results.some((row) => row.bookingId === finalized.booking.id),
-    ).toBe(false)
+      result.results.some(
+        (row) =>
+          row.bookingId === finalized.booking.id && row.outcome === 'expired',
+      ),
+    ).toBe(true)
     expect(
       await db.booking.findUniqueOrThrow({
         where: { id: finalized.booking.id },
         select: { status: true },
       }),
-    ).toEqual({ status: BookingStatus.PENDING })
+    ).toEqual({ status: BookingStatus.CANCELLED })
   })
 
   it('observes without releasing when the kill switch is off', async () => {

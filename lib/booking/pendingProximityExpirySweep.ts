@@ -1,7 +1,8 @@
 // lib/booking/pendingProximityExpirySweep.ts
 //
-// Book the Look, slice B4 — release a PENDING request the professional never
-// answered, before its appointment arrives.
+// Release a PENDING request the professional never answered, before its
+// appointment arrives. Shipped for Book the Look (B4) and widened to every
+// pro's pending requests on 2026-08-31 — see SCOPE below.
 //
 // WHY THIS IS THE PRICE OF REQUEST-MODE IMPULSE. Decision 4 routes a
 // book-the-look commitment through the pro's existing `autoAcceptBookings`
@@ -12,17 +13,22 @@
 // paid, unconfirmed appointment she then turns up for. Nothing in the repo did
 // that: `stale-sessions` observes 48h-old PENDING rows and mutates nothing.
 //
-// SCOPE, and why it is narrow on purpose. This sweep only touches bookings that
-// carry a B4 booking PROPOSAL — the population this slice creates. Every pro
-// with `autoAcceptBookings` off has pending requests today that expire never,
-// and auto-cancelling those is a product change Tori has not made; the
-// direction doc raises pending expiry specifically as the safety piece for
-// book-the-look. Widening it later is this file's `where` clause plus that
-// decision, not a rewrite.
+// SCOPE — WIDENED (Tori, 2026-08-31). This sweep began scoped to bookings
+// carrying a B4 booking PROPOSAL, because auto-cancelling every pro's pending
+// requests was a product change nobody had made. Tori has now made it: the
+// expiry applies to EVERY pending request, on the same rules and the same two
+// windows. The reasoning that justified it for book-the-look was never actually
+// specific to book-the-look — a client who paid to hold a slot and turns up to
+// an appointment the pro never confirmed is in the same position however she
+// booked, and today those requests expire never.
+//
+// 🔴 THIS IS NOT FOUNDER-GATED and it touches every professional's pending
+// bookings. `PENDING_PROXIMITY_EXPIRY_ENABLED` (default on) is the kill switch
+// if the blast radius surprises anyone; turning it off returns the sweep to
+// observing and releasing nothing.
 //
 // Safety:
-//   - Only status=PENDING, appointment still in the future, and only a booking
-//     with a consult proposal.
+//   - Only status=PENDING and an appointment still in the future.
 //   - TWO thresholds: the appointment is within the proximity window AND the
 //     request has had its minimum answer window. The second is what keeps a
 //     3 AM booking for a 1 PM slot from being cancelled at 3:01
@@ -100,7 +106,7 @@ const CANDIDATE_SELECT = {
 } satisfies Prisma.BookingSelect
 
 /**
- * Release unanswered book-the-look requests whose appointment is close.
+ * Release any unanswered PENDING request whose appointment is close.
  * Never throws.
  */
 export async function expireProximatePendingBookings(opts?: {
@@ -125,10 +131,11 @@ export async function expireProximatePendingBookings(opts?: {
       // blocks availability (which is forward-looking), and cancelling it would
       // tell the client about a slot that has already gone by.
       scheduledFor: { gt: now, lte: proximityCutoff },
-      // The minimum answer window. Without this the impulse case cancels itself.
+      // The minimum answer window. Without this the impulse case cancels itself
+      // — and it is doing MORE work now than it did when this sweep only saw
+      // book-the-look requests: an ordinary pro-side request created minutes
+      // before a same-day appointment is exactly the shape this protects.
       createdAt: { lte: minAnswerCutoff },
-      // Scoped to Book the Look's own population — see the header.
-      consultBookingProposal: { isNot: null },
     },
     select: CANDIDATE_SELECT,
     orderBy: { scheduledFor: 'asc' },
