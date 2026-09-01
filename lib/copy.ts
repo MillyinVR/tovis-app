@@ -90,6 +90,13 @@ export const COPY = {
     commitInstant: 'This time is yours as soon as you book.',
     commitRequest:
       'This time is held for you — your pro confirms in the morning.',
+    /**
+     * The receipt's heading for the lines a consultation put together (B4b).
+     * The booking's own subtotal covers only the FLOOR offering it was
+     * finalized through, so this section is where the rest of the appointment
+     * lives until the pro finalizes it in the chair (decision 8).
+     */
+    receiptTitle: 'Your consultation booking',
   },
 
   bookings: {

@@ -16,6 +16,11 @@ import {
   RESCHEDULE_TARGET_SELECT,
   resolveRescheduleCommitDurationMinutes,
 } from '@/lib/booking/rescheduleWidth'
+import {
+  ConsultProposalEntryError,
+  loadAuthorizedConsultBookingProposal,
+} from '@/lib/consult/proposalEntry'
+import type { ConsultBookingProposalAvailabilityDTO } from '@/lib/dto/consult'
 import { prisma } from '@/lib/prisma'
 
 type AvailabilityDbClient = Prisma.TransactionClient | typeof prisma
@@ -43,6 +48,19 @@ export type RescheduleAvailabilityContext = {
   owner: RescheduleAvailabilityOwner
 }
 
+/**
+ * Who is asking, when the answer is sized by a consult's booking PROPOSAL.
+ *
+ * Book the Look, B4b. Per-client data — the honouring route authenticates and
+ * the proposal derivation re-checks ownership, the founder gate, COMPLETED, the
+ * anchor and live agreements before it answers.
+ */
+export type ConsultProposalAvailabilityContext = {
+  consultId: string
+  clientId: string
+  actorUserId: string
+}
+
 export type ResolveAvailabilityDurationArgs = {
   professionalId: string
   offeringId: string
@@ -50,6 +68,15 @@ export type ResolveAvailabilityDurationArgs = {
   locationType: ServiceLocationType
   baseDurationMinutes: number
   reschedule: RescheduleAvailabilityContext | null
+  /**
+   * Set when the grid is picking a time for a consult's booking proposal. The
+   * hold and the finalize both size that booking by the WHOLE estimate
+   * (`resolveConsultProposalForCommit`), so the offer must be that wide too —
+   * otherwise the last starts of the day are advertised and then refused
+   * ([[offer-reserve-commit-are-three-windows]]). Mutually exclusive with both
+   * `reschedule` and `rebookOf`.
+   */
+  consult?: ConsultProposalAvailabilityContext | null
   /**
    * Set when the answer sizes an AFTERCARE REBOOK of this booking. The rebook
    * commit clones the source booking's service items — base plus add-ons, at
@@ -101,6 +128,21 @@ export async function resolveAvailabilityDurationMinutes(
       code: 'INVALID_AVAILABILITY_CONTEXT',
       userMessage: 'This request mixes a reschedule with a rebook.',
     }
+  }
+
+  if (args.consult && (args.reschedule || args.rebookOf)) {
+    // Same rule, third width: a consult proposal sizes from its estimate, a
+    // reschedule from the booking it moves, a rebook from the booking it
+    // clones. Refuse rather than silently letting one win.
+    return {
+      ok: false,
+      code: 'INVALID_AVAILABILITY_CONTEXT',
+      userMessage: 'This request mixes a consultation with another booking.',
+    }
+  }
+
+  if (args.consult) {
+    return resolveConsultProposalDurationMinutes(args, args.consult)
   }
 
   if (args.rebookOf) {
@@ -187,6 +229,78 @@ export async function resolveAvailabilityDurationMinutes(
     }
 
     throw error
+  }
+}
+
+/**
+ * Width for a consult's BOOKING PROPOSAL (Book the Look, B4b).
+ *
+ * Runs the SAME derivation the hold and the finalize run
+ * (`buildConsultBookingProposal`, reached here through the preview loader), so
+ * the three windows are one number. Sizing this grid from the offering's base
+ * would advertise starts the consult-sized hold then refuses — the exact
+ * failure B3-A fixed for reschedules.
+ *
+ * Refuses rather than falling back. A REFUSED estimate, an analysis routed to
+ * safety prerequisites, or a mode the pro does not offer for one of the lines
+ * all produce a typed refusal; there is no base-offering-sized consolation
+ * grid, because a grid the commit cannot honour is worse than no grid.
+ */
+async function resolveConsultProposalDurationMinutes(
+  args: ResolveAvailabilityDurationArgs,
+  consult: ConsultProposalAvailabilityContext,
+): Promise<ResolveAvailabilityDurationResult> {
+  // Add-ons on top of a proposal are B7 and have no shape yet — refused at the
+  // hold and at finalize, so the offer must refuse them too rather than sizing
+  // a window neither of them will accept.
+  if (args.addOnIds.length > 0) {
+    return {
+      ok: false,
+      code: 'ADDONS_INVALID',
+      userMessage:
+        'Add-ons can’t be chosen for a consultation booking yet. Your pro will go through extras with you.',
+    }
+  }
+
+  let availability: ConsultBookingProposalAvailabilityDTO
+  try {
+    availability = await loadAuthorizedConsultBookingProposal({
+      consultSessionId: consult.consultId,
+      clientId: consult.clientId,
+      actorUserId: consult.actorUserId,
+      locationType: args.locationType,
+    })
+  } catch (error: unknown) {
+    if (error instanceof ConsultProposalEntryError) {
+      // HIDDEN and NOT_FOUND answer identically for the same anti-enumeration
+      // reason the proposal endpoint has: while the pilot is dark for a pro,
+      // her consults answer exactly like a client who has none.
+      return {
+        ok: false,
+        code:
+          error.code === 'UNAVAILABLE'
+            ? 'CONSULT_UNAVAILABLE'
+            : 'CONSULT_NOT_FOUND',
+      }
+    }
+
+    throw error
+  }
+
+  if (!availability.available || !availability.proposal) {
+    return { ok: false, code: 'CONSULT_PROPOSAL_UNAVAILABLE' }
+  }
+
+  // The grid must be for the proposal's FLOOR — the look's own linked service.
+  // Sizing some other offering's grid by this proposal's width would offer
+  // starts against a service the commit will refuse to book.
+  if (availability.proposal.offeringId !== args.offeringId) {
+    return { ok: false, code: 'CONSULT_PROPOSAL_OFFERING_MISMATCH' }
+  }
+
+  return {
+    ok: true,
+    durationMinutes: availability.proposal.totalDurationMinutes,
   }
 }
 

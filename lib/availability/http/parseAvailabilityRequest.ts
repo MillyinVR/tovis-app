@@ -46,6 +46,15 @@ export type ParsedAvailabilityRequest = {
    * belongs to the caller, exactly as `rebookOfBookingId` does.
    */
   waitlistEntryId: string | null
+  /**
+   * Present when the caller is picking a time for a consult's BOOKING PROPOSAL
+   * (Book the Look, B4b). The offer is then sized by the whole estimate's
+   * duration rather than the offering's base — the same width the hold reserves
+   * and the finalize commits ([[offer-reserve-commit-are-three-windows]]).
+   * Per-client data, so the honouring routes authenticate first, exactly as
+   * `rescheduleBookingId` does.
+   */
+  consultId: string | null
   debug: boolean
   includeOtherPros: boolean
 
@@ -96,6 +105,7 @@ export function parseAvailabilityRequest(
   )
   const rebookOfBookingId = pickString(searchParams.get('rebookOfBookingId'))
   const waitlistEntryId = pickString(searchParams.get('waitlistEntryId'))
+  const consultId = pickString(searchParams.get('consultId'))
 
   const debug = pickString(searchParams.get('debug')) === '1'
   const includeOtherPros =
@@ -140,6 +150,7 @@ export function parseAvailabilityRequest(
     rescheduleBookingId,
     rebookOfBookingId,
     waitlistEntryId,
+    consultId,
     debug,
     includeOtherPros,
 

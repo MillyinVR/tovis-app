@@ -627,6 +627,14 @@ export type BrandClientConsultResultsCopy = {
   whyItFlattersLabel: string
   recommendationsTitle: string
   recommendationDiscussionPrefix: string
+  /**
+   * Book the Look, B4b — the CTA that turns a finished look-anchored consult
+   * into a booking. Rendered only when the consult is anchored to a LOOK; a
+   * booking-anchored consult (#1016) already has its booking.
+   */
+  bookLookTitle: string
+  bookLookBody: string
+  bookLookCta: string
   meCardEyebrow: string
   meCardTitle: string
   meCardBody: string
@@ -634,6 +642,53 @@ export type BrandClientConsultResultsCopy = {
   meCardTappedLabel: string
   meCardSendingLabel: string
   meCardError: string
+}
+
+/**
+ * Book the Look, B4b — chrome for the client's booking door on a look-anchored
+ * consult. See lib/brand/defaultClientConsultBookingCopy.ts: the price label,
+ * the estimate framing and the commit sentence are NOT here — the server
+ * composes those onto ConsultBookingProposalDTO so the page cannot promise
+ * something the booking will not do.
+ */
+export type BrandClientConsultBookingCopy = {
+  backToResults: string
+  eyebrow: string
+  title: string
+  intro: string
+
+  modeTitle: string
+  modeBody: string
+  modeSalonLabel: string
+  modeMobileLabel: string
+  modeUnavailableLabel: string
+
+  proposalTitle: string
+  proposalBody: string
+  durationLabel: string
+  chooseTimeCta: string
+  chooseModeFirst: string
+
+  refusalTitle: string
+  /** One explained state per typed refusal — never a dead end. */
+  refusalMessages: Record<
+    | 'ESTIMATE_MISSING'
+    | 'ESTIMATE_REFUSED'
+    | 'SAFETY_REVIEW_REQUIRED'
+    | 'OFFERING_OFF_MENU'
+    | 'MODE_NOT_OFFERED'
+    | 'MODE_PRICE_UNSET'
+    | 'MODE_DURATION_UNSET'
+    | 'PRO_SCHEDULING_NOT_READY'
+    | 'SLOT_TOO_LONG',
+    string
+  >
+  /** Used when a future server adds a refusal code this build doesn't know. */
+  refusalMessageUnknown: string
+  messageProCta: string
+
+  reviewEyebrow: string
+  reviewTitle: string
 }
 
 export type BrandConfig = {
@@ -646,4 +701,5 @@ export type BrandConfig = {
   contact: BrandContact
   proCalendar: BrandProCalendarCopy
   clientConsultResults: BrandClientConsultResultsCopy
+  clientConsultBooking: BrandClientConsultBookingCopy
 }

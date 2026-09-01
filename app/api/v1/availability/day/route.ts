@@ -8,6 +8,7 @@ import { jsonFail, jsonOk, requireClient, requirePro } from '@/app/api/_utils'
 import type { AvailabilityDayOk, AvailabilityOffering } from '@/app/(main)/booking/AvailabilityDrawer/types'
 import {
   resolveAvailabilityDurationMinutes,
+  type ConsultProposalAvailabilityContext,
   type RescheduleAvailabilityContext,
 } from '@/lib/availability/data/durationContext'
 import { loadBusyIntervals } from '@/lib/availability/data/busyIntervals'
@@ -137,6 +138,7 @@ export async function GET(req: Request) {
       rescheduleBookingId,
       rebookOfBookingId,
       waitlistEntryId,
+      consultId,
       debug,
       stepRaw,
       leadRaw,
@@ -158,6 +160,21 @@ export async function GET(req: Request) {
       reschedule = {
         bookingId: rescheduleBookingId,
         owner: { kind: 'CLIENT', clientId: auth.clientId },
+      }
+    }
+
+    // Book the Look, B4b — a consult's booking proposal is offered the width of
+    // its WHOLE estimate, the same width the hold reserves and the finalize
+    // commits. Per-client data, so this branch authenticates exactly as the
+    // reschedule one above does.
+    let consult: ConsultProposalAvailabilityContext | null = null
+    if (consultId) {
+      const auth = await requireClient()
+      if (!auth.ok) return auth.res
+      consult = {
+        consultId,
+        clientId: auth.clientId,
+        actorUserId: auth.user.id,
       }
     }
 
@@ -303,6 +320,7 @@ export async function GET(req: Request) {
       baseDurationMinutes,
       reschedule,
       rebookOf,
+      consult,
       client: prismaRead,
     })
 

@@ -18,6 +18,7 @@ import { getCurrentUser } from '@/lib/currentUser'
 import { formatRoundedDollars, moneyToString } from '@/lib/money'
 import { mapsHrefFromLocation } from '@/lib/maps'
 import { messageStartHref } from '@/lib/messages'
+import { formatConsultProposalStartingPrice } from '@/lib/looks/startingPrice'
 import {
   formatProfessionalPublicDisplayName,
   professionalPublicDisplayNameSelect,
@@ -109,6 +110,27 @@ const bookingReceiptSelect = {
 
   professional: {
     select: bookingReceiptProfessionalSelect,
+  },
+
+  // Book the Look, B4b — present only when this booking came from a
+  // consultation's proposal. It is the record of what the client was actually
+  // shown and agreed to: the base service item below covers only the FLOOR
+  // offering the booking was finalized through, so without these lines the
+  // receipt would understate the appointment by every beyond-floor line.
+  consultBookingProposal: {
+    select: {
+      totalDurationMinutes: true,
+      startingAtPrice: true,
+      lines: {
+        orderBy: { sortOrder: 'asc' },
+        select: {
+          id: true,
+          serviceName: true,
+          price: true,
+          durationMinutes: true,
+        },
+      },
+    },
   },
 } satisfies Prisma.BookingSelect
 
@@ -356,12 +378,31 @@ export default async function BookingReceiptPage(props: PageProps) {
     booking.subtotalSnapshot ??
     (items.length ? sumDecimal(items.map((item) => item.priceSnapshot)) : null)
 
+  const CONFIRM = COPY.bookingConfirmation
+
+  // Book the Look, B4b — a booking that came from a consultation's proposal.
+  const consultProposal = booking.consultBookingProposal
+
   // ⚠️ STARTING price, never a settled one — the snapshot is fed by
   // salonPriceStartingAt / service.minPrice, and a consultation can revise the
   // total before the service happens. Always rendered behind COPY's "From".
-  const subtotalLabel = formatRoundedDollars(subtotalDecimal)
+  //
+  // 🔴 SUPPRESSED on a consultation booking. `subtotalSnapshot` covers only the
+  // FLOOR offering the booking was finalized through — the beyond-floor lines
+  // are deliberately not BookingServiceItem rows (they are the pro's to settle
+  // in the chair, decision 8) — so this figure is SMALLER than the "Starting
+  // at" the client agreed to. Seen live: "From $180" printed directly above
+  // "Starting at $225" on the same receipt. The consultation section below
+  // carries the number she agreed to, with decision 5's framing beside it.
+  const subtotalLabel = consultProposal
+    ? null
+    : formatRoundedDollars(subtotalDecimal)
 
-  const CONFIRM = COPY.bookingConfirmation
+  // The "Starting at $X" the client agreed to, composed by the SAME function
+  // that composed it before the tap — never re-assembled here.
+  const consultStartingAtLabel = consultProposal
+    ? formatConsultProposalStartingPrice(consultProposal.startingAtPrice)
+    : null
 
   // The hero is the CLIENT's moment. A pro opening the same URL is looking at a
   // request someone sent *them*, so they keep a plain header — "Request sent"
@@ -381,11 +422,26 @@ export default async function BookingReceiptPage(props: PageProps) {
     : isLive
       ? CONFIRM.titleSettled
       : CONFIRM.titleClosed
-  const heroBody = isWaiting
-    ? `${proName} ${CONFIRM.hasYourRequest}`
-    : isLive
-      ? CONFIRM.settledBody
-      : CONFIRM.closedBody
+  // 🔴 The truth for HER pro's toggle. B4 promised one of exactly two sentences
+  // before the tap ("yours as soon as you book" / "held for you — your pro
+  // confirms in the morning"); the receipt repeats the one the booking's ACTUAL
+  // status realised, so the promise and the outcome are the same words.
+  //
+  // It replaces the generic pending body deliberately: "has your request" is
+  // silent about the fact that a PENDING booking ALREADY owns the slot
+  // (BOOKING_BLOCKING_STATUSES, EXCLUDE-backed), which is the whole reason
+  // decision 3's impulse booking is honest in request mode.
+  const heroBody = consultProposal
+    ? isWaiting
+      ? COPY.consultProposal.commitRequest
+      : isLive
+        ? COPY.consultProposal.commitInstant
+        : CONFIRM.closedBody
+    : isWaiting
+      ? `${proName} ${CONFIRM.hasYourRequest}`
+      : isLive
+        ? CONFIRM.settledBody
+        : CONFIRM.closedBody
 
   const addOnNames = addOnItems.map((item) => item.service.name).filter(Boolean)
 
@@ -529,6 +585,50 @@ export default async function BookingReceiptPage(props: PageProps) {
           ) : null}
         </dl>
       </section>
+
+      {/* What the consultation put together, as agreed. The booking's own
+          subtotal covers only the FLOOR offering it was finalized through, so
+          this is where the rest of the appointment lives until the pro finalizes
+          in the chair (decision 8, B6). Decision 5's framing travels with the
+          figure here exactly as it did before the tap. */}
+      {isClientViewer && consultProposal ? (
+        <section
+          data-testid="booking-consult-proposal-receipt"
+          className="mt-4 rounded-card border border-textPrimary/12 bg-bgSurface px-4 py-4"
+        >
+          <h2 className="font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-textMuted">
+            {COPY.consultProposal.receiptTitle}
+          </h2>
+
+          <ul className="mt-3 grid gap-2">
+            {consultProposal.lines.map((line) => (
+              <li
+                key={line.id}
+                className="flex items-baseline justify-between gap-3 text-[13.5px]"
+              >
+                <span className="min-w-0 font-semibold text-textPrimary">
+                  {line.serviceName}
+                </span>
+                <span className="shrink-0 text-[12px] font-semibold text-textSecondary">
+                  {line.durationMinutes} min ·{' '}
+                  {formatRoundedDollars(line.price) ??
+                    `$${moneyToString(line.price)}`}
+                </span>
+              </li>
+            ))}
+          </ul>
+
+          {consultStartingAtLabel ? (
+            <div className="mt-3 text-[18px] font-black leading-none text-textPrimary">
+              {consultStartingAtLabel}
+            </div>
+          ) : null}
+          <p className="mt-2 text-[12px] font-semibold leading-5 text-textSecondary">
+            {COPY.consultProposal.estimateNote}{' '}
+            {COPY.consultProposal.proDecides}
+          </p>
+        </section>
+      ) : null}
 
       {isClientViewer && isWaiting ? (
         <section className="mt-4 rounded-card border border-textPrimary/12 bg-bgSurface px-4 py-4">

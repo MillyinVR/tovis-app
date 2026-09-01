@@ -12,6 +12,7 @@ import type {
 import { toRecord } from '@/lib/typed'
 import {
   resolveAvailabilityDurationMinutes,
+  type ConsultProposalAvailabilityContext,
   type RescheduleAvailabilityContext,
 } from '@/lib/availability/data/durationContext'
 import { loadBusyIntervals } from '@/lib/availability/data/busyIntervals'
@@ -555,6 +556,7 @@ export async function GET(req: Request) {
       requestedSummaryDaysRaw,
       addOnIds,
       rescheduleBookingId,
+      consultId,
       debug,
       includeOtherPros,
       stepRaw,
@@ -587,6 +589,21 @@ export async function GET(req: Request) {
       reschedule = {
         bookingId: rescheduleBookingId,
         owner: { kind: 'CLIENT', clientId: auth.clientId },
+      }
+    }
+
+    // Book the Look, B4b — the grid for a consult's booking proposal is sized by
+    // the WHOLE estimate, the same width the hold reserves and the finalize
+    // commits. Authenticated on this branch only, exactly like the reschedule
+    // above; the proposal derivation re-checks ownership and the founder gate.
+    let consult: ConsultProposalAvailabilityContext | null = null
+    if (consultId) {
+      const auth = await requireClient()
+      if (!auth.ok) return auth.res
+      consult = {
+        consultId,
+        clientId: auth.clientId,
+        actorUserId: auth.user.id,
       }
     }
 
@@ -712,6 +729,7 @@ export async function GET(req: Request) {
       locationType: effectiveLocationType,
       baseDurationMinutes,
       reschedule,
+      consult,
       client: prismaRead,
     })
 
@@ -732,32 +750,39 @@ export async function GET(req: Request) {
     const tenantContext = await resolveTenantContextForRequest(req)
     const tenantScope = tenantCacheScope(tenantContext)
 
-    const summaryKeyExtra = debug
-      ? null
-      : buildSummaryCacheKey({
-          tenantScope,
-          professionalId,
-          serviceId,
-          locationId,
-          locationType: effectiveLocationType,
-          timeZone,
-          windowStartDate,
-          windowEndDate,
-          windowDays: summaryWindow.windowDays,
-          stepMinutes,
-          leadTimeMinutes,
-          locationBufferMinutes,
-          maxAdvanceDays,
-          includeOtherPros,
-          scheduleVersion,
-          scheduleConfigVersion,
-          addOnIds,
-          excludeBookingId: reschedule?.bookingId ?? null,
-          viewerLat,
-          viewerLng,
-          radiusMiles,
-          clientAddressId: resolvedClientAddressId,
-        })
+    // 🔴 `buildSummaryCacheKey` does NOT hash the resolved width — it hashes
+    // `addOnIds` and `excludeBookingId`, the two things that USED to move it. A
+    // consult proposal moves it through neither, so a proposal-sized window
+    // would be stored under, and served from, the public base-width key. Skipped
+    // rather than key-surgered: this is founder-pilot traffic, and a widened
+    // key would cold-start every public window for it.
+    const summaryKeyExtra =
+      debug || consult
+        ? null
+        : buildSummaryCacheKey({
+            tenantScope,
+            professionalId,
+            serviceId,
+            locationId,
+            locationType: effectiveLocationType,
+            timeZone,
+            windowStartDate,
+            windowEndDate,
+            windowDays: summaryWindow.windowDays,
+            stepMinutes,
+            leadTimeMinutes,
+            locationBufferMinutes,
+            maxAdvanceDays,
+            includeOtherPros,
+            scheduleVersion,
+            scheduleConfigVersion,
+            addOnIds,
+            excludeBookingId: reschedule?.bookingId ?? null,
+            viewerLat,
+            viewerLng,
+            radiusMiles,
+            clientAddressId: resolvedClientAddressId,
+          })
 
     const hasViewer =
       typeof viewerLat === 'number' && typeof viewerLng === 'number'

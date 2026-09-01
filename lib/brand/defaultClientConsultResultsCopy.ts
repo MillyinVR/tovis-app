@@ -63,6 +63,10 @@ export const defaultClientConsultResultsCopy: BrandClientConsultResultsCopy = {
   whyItFlattersLabel: 'Why this flatters you',
   recommendationsTitle: 'Hair-color directions',
   recommendationDiscussionPrefix: 'A direction to discuss with your professional:',
+  bookLookTitle: 'Ready to book this look?',
+  bookLookBody:
+    'Your professional gets everything above with the booking, so you both start from the same place.',
+  bookLookCta: 'Book this look',
   meCardEyebrow: 'Me card · locked',
   meCardTitle: 'Your fuller analysis can live here later',
   meCardBody:

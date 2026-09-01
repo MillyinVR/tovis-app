@@ -256,6 +256,10 @@ export function useAvailability(
   const ctxViewerRadiusMiles = context.viewerRadiusMiles
   const ctxViewerPlaceId = context.viewerPlaceId
   const ctxInitialStartDate = context.initialStartDate ?? null
+  // Book the Look, B4b: part of the prefetch ARGS, so it has to be part of the
+  // memo's identity — a proposal-sized window must never be reused for a plain
+  // booking flow (or the reverse) if this drawer's context ever changes in place.
+  const ctxConsultId = context.consultId ?? null
 
   const contextRef = useRef(context)
   contextRef.current = context
@@ -366,6 +370,7 @@ export function useAvailability(
       ctxViewerRadiusMiles,
       ctxViewerPlaceId,
       ctxInitialStartDate,
+      ctxConsultId,
       locationType,
       requestedLocationId,
       normalizedClientAddressId,
@@ -384,6 +389,7 @@ export function useAvailability(
       mediaId: primaryPrefetchArgs.mediaId,
       clientAddressId: primaryPrefetchArgs.clientAddressId,
       rescheduleBookingId: primaryPrefetchArgs.rescheduleBookingId,
+      consultId: primaryPrefetchArgs.consultId,
       viewer: primaryPrefetchArgs.viewer,
       startDate: ctxInitialStartDate,
       days: INITIAL_WINDOW_DAYS,
@@ -414,6 +420,7 @@ export function useAvailability(
     ctxViewerRadiusMiles,
     ctxViewerPlaceId,
     ctxInitialStartDate,
+    ctxConsultId,
     locationType,
     requestedLocationId,
     normalizedClientAddressId,
@@ -432,6 +439,7 @@ export function useAvailability(
       mediaId: fullPrefetchArgs.mediaId,
       clientAddressId: fullPrefetchArgs.clientAddressId,
       rescheduleBookingId: fullPrefetchArgs.rescheduleBookingId,
+      consultId: fullPrefetchArgs.consultId,
       viewer: fullPrefetchArgs.viewer,
       startDate: ctxInitialStartDate,
       days: INITIAL_WINDOW_DAYS,
