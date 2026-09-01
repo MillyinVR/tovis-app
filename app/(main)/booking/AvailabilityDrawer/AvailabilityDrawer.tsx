@@ -691,6 +691,14 @@ export default function AvailabilityDrawer(props: {
       context.serviceId ?? '',
       context.offeringId ?? '',
       context.source ?? '',
+      // Book the Look, B4b. The consult and the mode it was derived for are
+      // part of WHICH booking this sheet is for: a client who backs out, picks
+      // the other mode on the proposal page and re-opens is looking at a
+      // different width, a different price and a different proposal. Without
+      // these the ids above are all identical across that switch, so the sheet
+      // would keep the previous mode's day selection and hold.
+      context.consultId ?? '',
+      context.lockedLocationType ?? '',
     ].join('|')
   }, [
     discoveryIds.lookPostId,
@@ -699,6 +707,8 @@ export default function AvailabilityDrawer(props: {
     context.serviceId,
     context.offeringId,
     context.source,
+    context.consultId,
+    context.lockedLocationType,
   ])
 
   const mobileAddressGateRequested =
