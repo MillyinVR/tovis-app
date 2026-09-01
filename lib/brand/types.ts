@@ -691,6 +691,25 @@ export type BrandClientConsultBookingCopy = {
   reviewTitle: string
 
   /**
+   * Book the Look, B7 — the enhancement offer on the review step
+   * (docs/product/BOOK-THE-LOOK-DIRECTION.md, decision 10).
+   *
+   * ⚠️ Chrome only, again. The reason a client is shown for each enhancement is
+   * the ANALYSIS's own sentence and arrives on
+   * `ConsultBookingProposalRecommendationDTO.outcome`; so do its "+$40" and
+   * "+20 min". Nothing here may name a service — that is decision 1, and the
+   * wire deliberately carries no service name to name.
+   *
+   * `enhancementsBody` is load-bearing rather than decorative: it is where the
+   * screen says out loud that nothing is added unless she adds it.
+   */
+  enhancementsTitle: string
+  enhancementsBody: string
+  enhancementAddLabel: string
+  enhancementAddedLabel: string
+  enhancementsPendingLabel: string
+
+  /**
    * The booking sheet's title when the look being booked has no name of its own
    * (Tori, 2026-08-31, riding B5).
    *

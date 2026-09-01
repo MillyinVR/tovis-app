@@ -169,6 +169,7 @@ function review(
     proFinalTotalDurationMinutes: null,
     reviewedAt: null,
     lines: [reviewLine()],
+    declinedRecommendations: [],
     ...overrides,
   }
 }

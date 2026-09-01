@@ -57,6 +57,7 @@ import {
 } from '@prisma/client'
 
 import type {
+  ConsultProposalDeclinedRecommendationDTO,
   ConsultProposalReviewDTO,
   ConsultProposalReviewLineDTO,
   ConsultProposalReviewLineStatusDTO,
@@ -66,7 +67,12 @@ import { moneyToFixed2String, normalizeMoney2 } from '@/lib/money'
 import { prisma } from '@/lib/prisma'
 
 import { isAiConsultC6ExposureEnabledForPro } from './access'
+import {
+  loadConsultProMenuOfferings,
+  type ConsultProMenuOffering,
+} from './proMenu'
 import { CONSULT_PROPOSAL_REVIEW_NOTE_MAX_LENGTH } from './proProposalReviewLimits'
+import { priceLine } from './serviceEstimate'
 
 export { CONSULT_PROPOSAL_REVIEW_NOTE_MAX_LENGTH } from './proProposalReviewLimits'
 
@@ -233,6 +239,10 @@ const PROPOSAL_REVIEW_SELECT = {
   id: true,
   bookingId: true,
   consultSessionId: true,
+  // B7 — the menu the declined enhancements are re-priced against is the SAME
+  // list the estimate and the analysis matcher read (lib/consult/proMenu.ts),
+  // and that list is scoped by the consult's own category.
+  consultSession: { select: { serviceCategoryId: true, professionalId: true } },
   estimateId: true,
   locationType: true,
   stepMinutes: true,
@@ -259,6 +269,10 @@ type ProposalReviewRow = Prisma.ConsultBookingProposalGetPayload<{
 
 type EstimateLineRow = {
   id: string
+  sortOrder: number
+  serviceId: string
+  offeringId: string
+  serviceName: string
   rationale: string
   proFinalPrice: Prisma.Decimal | null
   proFinalDurationMinutes: number | null
@@ -305,9 +319,66 @@ function toReviewLineDTO(
   }
 }
 
+/**
+ * The enhancements the analysis recommended and this client did not take (B7).
+ *
+ * Pure, so the page and the API twin cannot disagree about what is on offer.
+ *
+ * Three rules, all of them the same rule the client's side follows:
+ *   • RE-PRICED, never read off the estimate. The estimate prices the SALON
+ *     column; this booking may be a mobile one, and offering the pro a salon
+ *     figure to attach would put the wrong number in front of a client who is
+ *     about to approve it (rule 3).
+ *   • DROPPED, never invented. A declined line whose offering has left her menu,
+ *     or that she no longer prices in this mode, is not offered — she cannot
+ *     attach what she cannot sell, and the consultation-proposal route would
+ *     refuse the line anyway.
+ *   • IN THE ESTIMATE'S OWN ORDER, which is the analysis's order, so the
+ *     strongest recommendation is the first thing she sees.
+ */
+export function deriveDeclinedRecommendations(args: {
+  estimateLines: readonly EstimateLineRow[]
+  /** The estimate lines that ARE on the booking. */
+  committedEstimateLineIds: ReadonlySet<string>
+  menu: readonly ConsultProMenuOffering[]
+  locationType: ServiceLocationType
+  stepMinutes: number
+}): ConsultProposalDeclinedRecommendationDTO[] {
+  const byOfferingId = new Map(
+    args.menu.map((offering) => [offering.id, offering]),
+  )
+
+  const declined: ConsultProposalDeclinedRecommendationDTO[] = []
+
+  for (const line of args.estimateLines) {
+    if (args.committedEstimateLineIds.has(line.id)) continue
+
+    const offering = byOfferingId.get(line.offeringId)
+    if (!offering || offering.serviceId !== line.serviceId) continue
+
+    const priced = priceLine(offering, args.locationType, args.stepMinutes)
+    if (!priced.ok) continue
+
+    declined.push({
+      estimateLineId: line.id,
+      serviceId: line.serviceId,
+      offeringId: offering.id,
+      // Today's name off her menu, not the estimate's snapshot: she is being
+      // shown something to add to an appointment happening now.
+      serviceName: offering.service.name,
+      rationale: line.rationale,
+      price: moneyToFixed2String(priced.price) ?? '0.00',
+      durationMinutes: priced.durationMinutes,
+    })
+  }
+
+  return declined
+}
+
 function toReviewDTO(args: {
   proposal: ProposalReviewRow
   estimateLines: ReadonlyMap<string, EstimateLineRow>
+  declinedRecommendations: ConsultProposalDeclinedRecommendationDTO[]
   bookingStatus: BookingStatus
 }): ConsultProposalReviewDTO {
   const lines = args.proposal.lines.map((line) =>
@@ -366,6 +437,7 @@ function toReviewDTO(args: {
     proFinalTotalDurationMinutes,
     reviewedAt,
     lines,
+    declinedRecommendations: args.declinedRecommendations,
   }
 }
 
@@ -377,12 +449,17 @@ async function loadEstimateLines(
     where: { estimateId },
     select: {
       id: true,
+      sortOrder: true,
+      serviceId: true,
+      offeringId: true,
+      serviceName: true,
       rationale: true,
       proFinalPrice: true,
       proFinalDurationMinutes: true,
       proFinalNote: true,
       proFinalAt: true,
     },
+    orderBy: { sortOrder: 'asc' },
   })
   return new Map(rows.map((row) => [row.id, row]))
 }
@@ -420,6 +497,51 @@ async function readAuthorizedProposal(
   return { proposal, bookingStatus: booking.status }
 }
 
+/**
+ * Everything `toReviewDTO` needs beyond the proposal itself, read inside the
+ * caller's transaction. One function, called from both entry points, so the
+ * read path and the write path cannot answer differently about what is on
+ * offer.
+ */
+async function loadReviewSideInputs(
+  tx: Prisma.TransactionClient,
+  proposal: ProposalReviewRow,
+): Promise<{
+  estimateLines: Map<string, EstimateLineRow>
+  declinedRecommendations: ConsultProposalDeclinedRecommendationDTO[]
+}> {
+  const estimateLines = await loadEstimateLines(tx, proposal.estimateId)
+
+  const committedEstimateLineIds = new Set(
+    proposal.lines.map((line) => line.estimateLineId),
+  )
+
+  // Skip the menu read entirely when nothing was declined — most proposals, and
+  // this surface renders on every pro booking page that has one.
+  const hasDeclined = [...estimateLines.values()].some(
+    (line) => !committedEstimateLineIds.has(line.id),
+  )
+  const menu = hasDeclined
+    ? await loadConsultProMenuOfferings(tx, {
+        professionalId: proposal.consultSession.professionalId,
+        serviceCategoryId: proposal.consultSession.serviceCategoryId,
+      })
+    : []
+
+  return {
+    estimateLines,
+    declinedRecommendations: deriveDeclinedRecommendations({
+      estimateLines: [...estimateLines.values()],
+      committedEstimateLineIds,
+      menu,
+      locationType: proposal.locationType as ServiceLocationType,
+      // The granularity this booking was actually sized against, not today's:
+      // an attached line must round the same way its neighbours did.
+      stepMinutes: proposal.stepMinutes,
+    }),
+  }
+}
+
 export async function loadAuthorizedProProposalReview(args: {
   professionalId: string
   bookingId: string
@@ -432,10 +554,11 @@ export async function loadAuthorizedProProposalReview(args: {
     const found = await readAuthorizedProposal(tx, args)
     if (!found) return null
 
-    const estimateLines = await loadEstimateLines(tx, found.proposal.estimateId)
+    const side = await loadReviewSideInputs(tx, found.proposal)
     return toReviewDTO({
       proposal: found.proposal,
-      estimateLines,
+      estimateLines: side.estimateLines,
+      declinedRecommendations: side.declinedRecommendations,
       bookingStatus: found.bookingStatus,
     })
   })
@@ -515,10 +638,11 @@ export async function recordProProposalReview(args: {
       }
     }
 
-    const estimateLines = await loadEstimateLines(tx, found.proposal.estimateId)
+    const side = await loadReviewSideInputs(tx, found.proposal)
     return toReviewDTO({
       proposal: found.proposal,
-      estimateLines,
+      estimateLines: side.estimateLines,
+      declinedRecommendations: side.declinedRecommendations,
       bookingStatus: found.bookingStatus,
     })
   })

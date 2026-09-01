@@ -11,15 +11,24 @@
 // 🔴 The answer is a PREVIEW. It is re-derived inside the finalize transaction
 // before anything is written, because a pro's menu, prices and bookable
 // locations can all move between the preview and the tap.
+//
+// B7 — `enhancementIds` is the second question parameter, for the same reason
+// the mode is one: it names WHICH answer is wanted, and it reserves nothing.
+// Absent means the floor alone, because a recommendation the client has not
+// asked for is one she has not agreed to (decision 10, opt-in never
+// pre-checked). Ids only; every figure in the answer is derived from the pro's
+// own menu, so nothing a client can edit here decides what she is charged.
 
 import { ServiceLocationType } from '@prisma/client'
 
 import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
+import { pickStringArray } from '@/lib/pick'
 import {
   resolveRouteParams,
   type RouteContext,
 } from '@/app/api/_utils/routeContext'
 import { normalizeLocationType } from '@/lib/booking/locationContext'
+import { MAX_CONSULT_ENHANCEMENT_LINE_IDS } from '@/lib/consult/enhancementOffer'
 import {
   ConsultProposalEntryError,
   loadAuthorizedConsultBookingProposal,
@@ -72,8 +81,8 @@ export async function GET(request: Request, context: RouteContext) {
   })
   if (!rateLimit.allowed) return rateLimitExceededResponse(rateLimit)
 
-  const requested = new URL(request.url).searchParams.get('locationType')
-  const locationType = normalizeLocationType(requested)
+  const url = new URL(request.url)
+  const locationType = normalizeLocationType(url.searchParams.get('locationType'))
   if (!locationType) {
     // A mode is REQUIRED, with no default. Defaulting to SALON would answer a
     // question the client did not ask and hand her a salon price for what she
@@ -84,12 +93,25 @@ export async function GET(request: Request, context: RouteContext) {
     })
   }
 
+  // Comma-separated, like every other id list this codebase puts in a query
+  // string. Capped at the same ceiling the finalize accepts: a longer list
+  // cannot describe more enhancements than an estimate can have, so it is a
+  // script rather than a person, and truncating it beats deriving from it.
+  const enhancementIds = pickStringArray(
+    (url.searchParams.get('enhancementIds') ?? '')
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean),
+    MAX_CONSULT_ENHANCEMENT_LINE_IDS,
+  )
+
   try {
     const proposal = await loadAuthorizedConsultBookingProposal({
       consultSessionId: id,
       clientId: auth.clientId,
       actorUserId: auth.user.id,
       locationType: locationType satisfies ServiceLocationType,
+      enhancementSelection: enhancementIds,
     })
     return jsonOk<ConsultBookingProposalResponseDTO>({ proposal })
   } catch (error: unknown) {

@@ -247,6 +247,7 @@ import {
   resolveConsultProposalForCommit,
   type ResolvedConsultProposal,
 } from '@/lib/consult/proposalCommit'
+import type { ConsultBookingProposalEnhancementSelection } from '@/lib/consult/bookingProposal'
 import {
   computeDepositReminderRunAt,
   scheduleDepositReminderOnBooking,
@@ -567,7 +568,8 @@ type CreateHoldArgs = {
   // every estimate line's rounded duration — rather than by this offering's
   // own default, because the appointment being reserved is the whole look and
   // not just the one service the look is linked to (decision 11). Mutually
-  // exclusive with `addOnIds`: client-selectable enhancements are B7.
+  // exclusive with `addOnIds` — see the refusal in performLockedCreateHold for
+  // why B7 did not lift that.
   consultId?: string | null
   offering: {
     id: string
@@ -674,6 +676,18 @@ type FinalizeBookingFromHoldArgs = {
   locationType: ServiceLocationType
   source: BookingSource
   consultId?: string | null
+  /**
+   * Book the Look, B7 — the estimate lines the client opted into on the review
+   * step (decision 10). Absent or empty means the FLOOR alone, which is the
+   * default everywhere she has not chosen: a recommendation she did not tick is
+   * a price she did not agree to.
+   *
+   * Ids, never numbers. What each one costs and how long it takes is re-derived
+   * here from the pro's own menu, so nothing the client can edit decides what
+   * she is charged. An id that does not belong to this consult's estimate is
+   * ignored — a stale link narrows the booking, it never widens it.
+   */
+  consultEnhancementLineIds?: string[] | null
   initialStatus: BookingStatus
   rebookOfBookingId: string | null
   fallbackTimeZone?: string
@@ -8318,6 +8332,12 @@ async function resolveConsultProposalForBookingCommit(args: {
   serviceCategoryId: string | null
   offeringId: string
   locationType: ServiceLocationType
+  /**
+   * Book the Look, B7. `'ALL'` from the HOLD, the client's own answer from the
+   * FINALIZE. See `resolveConsultProposalForCommit` — the reservation is the
+   * widest case on purpose, so the commit can only ever be narrower.
+   */
+  enhancementSelection: ConsultBookingProposalEnhancementSelection
 }): Promise<ResolvedConsultProposal | null> {
   const resolved = await resolveConsultProposalForCommit(args.tx, {
     consultId: args.consultId,
@@ -8325,6 +8345,7 @@ async function resolveConsultProposalForBookingCommit(args: {
     professionalId: args.professionalId,
     serviceCategoryId: args.serviceCategoryId,
     locationType: args.locationType,
+    enhancementSelection: args.enhancementSelection,
     now: args.now,
   })
 
@@ -8427,14 +8448,23 @@ async function performLockedCreateHold(args: {
 
   // Book the Look, B4. Same reasoning as the reschedule refusal above, for the
   // same reason: two sources want to decide how much time is reserved, and
-  // silently ignoring one of them is worse than refusing. A consult proposal's
-  // width is the whole estimate; client-selected enhancements on top of it are
-  // B7 and have no shape here yet.
+  // silently ignoring one of them is worse than refusing.
+  //
+  // 🔴 B7 did NOT lift this, and the reason is worth writing down because the
+  // slice's name suggests otherwise. Decision 10's "add-ons as recommendations"
+  // is answered by the ESTIMATE, not by the pro's `OfferingAddOn` catalog: an
+  // enhancement is a beyond-floor estimate line the client can decline
+  // (`ConsultBookingProposalEnhancementSelection`), phrased by the analysis's
+  // own reason and priced from her menu by the same derivation as every other
+  // line. An `OfferingAddOn` is something the PRO pinned to one offering — not
+  // AI-recommended, and any add-on service the analysis DOES recommend and that
+  // is on her menu is already a beyond-floor line. So the two remain mutually
+  // exclusive, and a consult booking's extras ride `consultEnhancementLineIds`.
   if (consultId && addOnIds.length > 0) {
     throw bookingError('ADDONS_INVALID', {
       message: 'Add-ons cannot be combined with a consultation proposal.',
       userMessage:
-        'Add-ons can’t be chosen for a consultation booking yet. Your pro will go through extras with you.',
+        'Add-ons can’t be chosen for a consultation booking. Your pro will go through extras with you.',
     })
   }
 
@@ -8589,6 +8619,13 @@ if (locationType === ServiceLocationType.MOBILE && clientAddressId && !selectedC
             serviceCategoryId: offering.serviceCategoryId ?? null,
             offeringId: offering.id,
             locationType,
+            // 🔴 B7: the widest thing this booking could become. The client
+            // opts into enhancements on the REVIEW step, after this
+            // reservation exists — so it must already cover every one of them,
+            // and her opting in then fills space that is already held rather
+            // than asking for more. Under-reserving here is the duration miss
+            // decision 11 is about; over-reserving for a few minutes is not.
+            enhancementSelection: 'ALL',
           })
         )?.totalDurationMinutes ??
         // A booking-anchored consult carries no proposal; the hold is sized the
@@ -10008,6 +10045,8 @@ async function performLockedFinalizeBookingFromHold(args: {
   aftercareClientActionTokenId?: string | null
   openingId: string | null
   addOnIds: string[]
+  /** B7 — see `FinalizeBookingFromHoldArgs.consultEnhancementLineIds`. */
+  consultEnhancementLineIds: string[]
   locationType: ServiceLocationType
   source: BookingSource
   consultId: string | null
@@ -10373,22 +10412,28 @@ async function performLockedFinalizeBookingFromHold(args: {
         serviceCategoryId: args.offering.serviceCategoryId ?? null,
         offeringId: args.offering.id,
         locationType: validatedHold.value.locationType,
+        // 🔴 B7: exactly what she ticked, and nothing else. The HOLD was sized
+        // for 'ALL', so this set is always a subset of the reserved width —
+        // that is the one direction this asymmetry may ever run.
+        enhancementSelection: args.consultEnhancementLineIds,
       })
     : null
 
-  // Client-selected add-ons on top of a consult proposal are B7 and have no
-  // shape yet; the hold refuses the combination too, and this is the commit-site
-  // half of that same rule.
+  // `OfferingAddOn` add-ons on top of a consult proposal stay refused; the hold
+  // refuses the combination too, and this is the commit-site half of that same
+  // rule. B7's enhancements are proposal LINES, not add-ons — see the hold's
+  // refusal for why the two did not merge.
   if (consultProposal && resolvedAddOns.length > 0) {
     throw bookingError('ADDONS_INVALID', {
       message: 'Add-ons cannot be combined with a consultation proposal.',
       userMessage:
-        'Add-ons can’t be chosen for a consultation booking yet. Your pro will go through extras with you.',
+        'Add-ons can’t be chosen for a consultation booking. Your pro will go through extras with you.',
     })
   }
 
-  // 🔴 A consult proposal sizes the slot by the whole ESTIMATE — every line's
-  // rounded duration — not by the base offering. It is deliberately NOT clamped:
+  // 🔴 A consult proposal sizes the slot by its own LINES — the floor plus the
+  // enhancements the client opted into (B7) — not by the base offering. It is
+  // deliberately NOT clamped:
   // `deriveConsultBookingProposal` refuses past MAX_SLOT_DURATION_MINUTES rather
   // than shortening, because a silently truncated appointment is exactly the
   // duration miss decision 11 protects against. The clamp below still governs
@@ -16838,6 +16883,7 @@ export async function finalizeBookingFromHold(
         aftercareClientActionTokenId: args.aftercareClientActionTokenId ?? null,
         openingId: args.openingId,
         addOnIds: args.addOnIds,
+        consultEnhancementLineIds: args.consultEnhancementLineIds ?? [],
         locationType: args.locationType,
         source: args.source,
         consultId: args.consultId ?? null,

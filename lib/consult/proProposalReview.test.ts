@@ -5,14 +5,17 @@
 // submission is allowed to be. Both decide things a component must never decide
 // twice, so each rule gets a case that fails if the rule is relaxed.
 
+import { Prisma, ServiceLocationType } from '@prisma/client'
 import { describe, expect, it } from 'vitest'
 
 import {
   CONSULT_PROPOSAL_REVIEW_NOTE_MAX_LENGTH,
   ProProposalReviewError,
+  deriveDeclinedRecommendations,
   deriveProposalReviewLineStatus,
   parseProposalReviewSubmission,
 } from './proProposalReview'
+import type { ConsultProMenuOffering } from './proMenu'
 
 const AT = '2026-08-31T12:00:00.000Z'
 
@@ -173,5 +176,125 @@ describe('parseProposalReviewSubmission', () => {
     expect(() =>
       submission([{ estimateLineId: '   ', price: '180', durationMinutes: 90 }]),
     ).toThrow(ProProposalReviewError)
+  })
+})
+
+// ── B7 — "recommended attach at session close" (decision 10's pro half) ───────
+
+const CATEGORY_ID = 'cat_hair_color'
+
+function menuOffering(
+  serviceId: string,
+  overrides: Partial<ConsultProMenuOffering> = {},
+): ConsultProMenuOffering {
+  return {
+    id: `off_${serviceId}`,
+    serviceId,
+    offersInSalon: true,
+    offersMobile: true,
+    salonPriceStartingAt: new Prisma.Decimal('40.00'),
+    salonDurationMinutes: 20,
+    mobilePriceStartingAt: new Prisma.Decimal('55.00'),
+    mobileDurationMinutes: 40,
+    ...overrides,
+    service: {
+      name: `Service ${serviceId}`,
+      description: null,
+      categoryId: CATEGORY_ID,
+      defaultDurationMinutes: 30,
+      ...overrides.service,
+    },
+  }
+}
+
+function estimateLine(serviceId: string) {
+  return {
+    id: `line_${serviceId}`,
+    sortOrder: 1,
+    serviceId,
+    offeringId: `off_${serviceId}`,
+    serviceName: `Stale ${serviceId}`,
+    rationale: 'A gloss keeps this tone from going brassy.',
+    proFinalPrice: null,
+    proFinalDurationMinutes: null,
+    proFinalNote: null,
+    proFinalAt: null,
+  }
+}
+
+function declined(args: {
+  menu?: ConsultProMenuOffering[]
+  committed?: string[]
+  locationType?: ServiceLocationType
+  stepMinutes?: number
+}) {
+  return deriveDeclinedRecommendations({
+    estimateLines: [estimateLine('svc_floor'), estimateLine('svc_gloss')],
+    committedEstimateLineIds: new Set(args.committed ?? ['line_svc_floor']),
+    menu: args.menu ?? [
+      menuOffering('svc_floor'),
+      menuOffering('svc_gloss'),
+    ],
+    locationType: args.locationType ?? ServiceLocationType.SALON,
+    stepMinutes: args.stepMinutes ?? 30,
+  })
+}
+
+describe('deriveDeclinedRecommendations', () => {
+  it('offers only what the client did not take', () => {
+    const result = declined({})
+    expect(result.map((row) => row.estimateLineId)).toEqual(['line_svc_gloss'])
+  })
+
+  it('offers nothing when she took everything', () => {
+    expect(
+      declined({ committed: ['line_svc_floor', 'line_svc_gloss'] }),
+    ).toEqual([])
+  })
+
+  // 🔴 B5 rule 3, still: the estimate prices the SALON column. Putting a salon
+  // figure in front of a pro to attach to a MOBILE booking would hand the
+  // client a number she is about to approve and that nobody derived for her.
+  it('re-prices under the mode this booking was made in', () => {
+    const salon = declined({})
+    expect(salon[0]?.price).toBe('40.00')
+    expect(salon[0]?.durationMinutes).toBe(30)
+
+    const mobile = declined({ locationType: ServiceLocationType.MOBILE })
+    expect(mobile[0]?.price).toBe('55.00')
+    // 40 minutes rounded UP to the pro's 30-minute step.
+    expect(mobile[0]?.durationMinutes).toBe(60)
+  })
+
+  it('carries the estimate’s own reason, never an invented one', () => {
+    expect(declined({})[0]?.rationale).toBe(
+      'A gloss keeps this tone from going brassy.',
+    )
+  })
+
+  it('shows today’s menu name, not the estimate’s snapshot', () => {
+    expect(declined({})[0]?.serviceName).toBe('Service svc_gloss')
+  })
+
+  // She cannot attach what she can no longer sell, and the consultation
+  // proposal route would refuse the line anyway.
+  it('drops a declined line whose offering has left her menu', () => {
+    expect(declined({ menu: [menuOffering('svc_floor')] })).toEqual([])
+  })
+
+  it('drops a declined line she no longer prices in this mode', () => {
+    const result = declined({
+      menu: [
+        menuOffering('svc_floor'),
+        menuOffering('svc_gloss', { mobilePriceStartingAt: null }),
+      ],
+      locationType: ServiceLocationType.MOBILE,
+    })
+    expect(result).toEqual([])
+  })
+
+  it('drops a line whose offering id now points at a different service', () => {
+    const swapped = { ...menuOffering('svc_something_else'), id: 'off_svc_gloss' }
+    expect(declined({ menu: [menuOffering('svc_floor'), swapped] })).toEqual([])
   })
 })

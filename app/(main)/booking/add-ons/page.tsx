@@ -17,9 +17,12 @@ import {
   ConsultProposalEntryError,
   loadAuthorizedConsultBookingProposal,
 } from '@/lib/consult/proposalEntry'
+import { MAX_CONSULT_ENHANCEMENT_LINE_IDS } from '@/lib/consult/enhancementOffer'
 import { getCurrentUser } from '@/lib/currentUser'
 import type { ConsultBookingProposalDTO } from '@/lib/dto/consult'
-import type { BookingSource, ServiceLocationType } from '@prisma/client'
+import { BookingStatus, type BookingSource, type ServiceLocationType } from '@prisma/client'
+import { getClientSubmittedBookingStatus } from '@/lib/booking/statusRules'
+import { COPY } from '@/lib/copy'
 
 /**
  * Book the Look, B4b — when this step carries a `consultId` it is not an add-on
@@ -31,12 +34,19 @@ import type { BookingSource, ServiceLocationType } from '@prisma/client'
  * screen would be a copy of `AddOnsClient`'s finalize path — and the copy is
  * where the two would drift.
  *
- * Add-ons on top of a proposal are B7; the hold route and the write boundary
- * both refuse the combination today, so this page never offers it.
+ * B7 (decision 10) makes it a picker again, of a different kind. The pro's
+ * `OfferingAddOn` catalog is still refused here — the hold route and the write
+ * boundary both say why — but the ANALYSIS's own beyond-floor recommendations
+ * are offered as enhancements the client opts into. They ride the URL as
+ * `enhancementIds`, and this server component re-derives the whole proposal for
+ * that set on every toggle: the price, the length and each "+$40" come back
+ * from the same function the finalize runs, so no total is ever assembled in
+ * the browser.
  */
 async function loadConsultProposalForReview(args: {
   consultId: string
   holdId: string | null
+  enhancementLineIds: string[]
 }): Promise<ConsultBookingProposalDTO | null> {
   const user = await getCurrentUser().catch(() => null)
   if (!user || user.role !== 'CLIENT' || !user.clientProfile?.id) return null
@@ -61,6 +71,12 @@ async function loadConsultProposalForReview(args: {
       clientId: user.clientProfile.id,
       actorUserId: user.id,
       locationType: hold.locationType,
+      // 🔴 B7: exactly what the URL claims, and the URL only ever carries what
+      // this page put there. An id that is not one of this estimate's lines is
+      // ignored by the derivation, so a hand-edited link can only ever book
+      // LESS than the hold reserved — never more, and never at a price the
+      // server did not derive.
+      enhancementSelection: args.enhancementLineIds,
     })
     return answer.proposal
   } catch (error: unknown) {
@@ -247,6 +263,13 @@ export default async function BookingAddOnsPage({
   const mediaId = cleanString(pickOne(sp.mediaId) ?? null)
   const lookPostId = cleanString(pickOne(sp.lookPostId) ?? null)
   const consultId = cleanString(pickOne(sp.consultId) ?? null)
+  // Book the Look, B7 — the enhancements she has ticked so far. Comma-separated
+  // like every other id list in this codebase's query strings, capped the same
+  // way the finalize caps them.
+  const enhancementLineIds = parseCommaIds(
+    cleanString(pickOne(sp.enhancementIds) ?? null),
+    MAX_CONSULT_ENHANCEMENT_LINE_IDS,
+  )
 
   // The look/pro/time/hold the sheet already knew — see lib/booking/addOnsContext.
   const addOnsContext = await loadAddOnsContext({ holdId, mediaId })
@@ -267,6 +290,7 @@ export default async function BookingAddOnsPage({
     consultProposal = await loadConsultProposalForReview({
       consultId,
       holdId,
+      enhancementLineIds,
     })
 
     if (!consultProposal) {
@@ -296,21 +320,45 @@ export default async function BookingAddOnsPage({
     }
   }
 
+  // The pro this booking is for. Read once and used twice below — the no-show
+  // policy gate and the commit sentence both need her, and two lookups of the
+  // same row is how the two answers drift apart.
+  const offeringProfessional = offeringId
+    ? await prisma.professionalServiceOffering.findUnique({
+        where: { id: offeringId },
+        select: { professionalId: true, professional: { select: { autoAcceptBookings: true } } },
+      })
+    : null
+
   // The pro's no-show / late-cancel fee policy the client must agree to before
   // booking (M15). Non-null only when the pro charges fees and the flag is on;
   // when present, AddOnsClient shows it + requires the agreement checkbox.
   let cancellationPolicy: string | null = null
-  if (offeringId && noShowProtectionEnabled()) {
-    const offering = await prisma.professionalServiceOffering.findUnique({
-      where: { id: offeringId },
-      select: { professionalId: true },
-    })
-    if (offering) {
-      cancellationPolicy = cancellationPolicyDisclosure(
-        await getProNoShowSettings(offering.professionalId),
-      )
-    }
+  if (offeringProfessional && noShowProtectionEnabled()) {
+    cancellationPolicy = cancellationPolicyDisclosure(
+      await getProNoShowSettings(offeringProfessional.professionalId),
+    )
   }
+
+  // 🔴 The ORDINARY booking's commit sentence, and the whole reason it is
+  // composed here rather than hardcoded in the component: this screen printed
+  // "No charge until the pro confirms" to everyone, including clients of a pro
+  // whose `autoAcceptBookings` is ON — for whom there is no confirmation and
+  // the sentence describes a step that never happens. (Carried from B4b, where
+  // the CONSULT branch was given a server-composed `commitNote` for exactly
+  // this reason and the non-consult branch was left as it was.)
+  //
+  // Routed through the same `getClientSubmittedBookingStatus` fork the commit
+  // runs, so the promise on this screen cannot disagree with the booking that
+  // follows. Null when there is no offering to read a pro from, which the
+  // component renders as no sentence rather than as a guess.
+  const commitNote = offeringProfessional
+    ? getClientSubmittedBookingStatus(
+        offeringProfessional.professional.autoAcceptBookings,
+      ) === BookingStatus.ACCEPTED
+      ? COPY.bookingCommit.instant
+      : COPY.bookingCommit.request
+    : null
 
   // ✅ server-hydrate initial selection (prevents client flicker)
   const initialSelectedIds = (() => {
@@ -347,6 +395,8 @@ export default async function BookingAddOnsPage({
       initialError={initialError}
       initialSelectedIds={initialSelectedIds}
       cancellationPolicy={cancellationPolicy}
+      commitNote={commitNote}
+      enhancementLineIds={enhancementLineIds}
     />
   )
 }

@@ -27,7 +27,12 @@ import {
 import type {
   ConsultBookingProposalAvailabilityDTO,
   ConsultBookingProposalDTO,
+  ConsultBookingProposalRecommendationDTO,
 } from '@/lib/dto/consult'
+import {
+  formatEnhancementDurationDelta,
+  formatEnhancementPriceDelta,
+} from './enhancementOffer'
 import { getClientSubmittedBookingStatus } from '@/lib/booking/statusRules'
 import { COPY } from '@/lib/copy'
 import { formatConsultProposalStartingPrice } from '@/lib/looks/startingPrice'
@@ -39,7 +44,9 @@ import { requireCurrentConsultAgreementAcceptances } from './agreementContract'
 import { CONSULT_ANCHOR_SELECT, evaluateConsultAnchor } from './anchor'
 import {
   buildConsultBookingProposal,
+  type ConsultBookingProposalAnalysisInput,
   type ConsultBookingProposalDraft,
+  type ConsultBookingProposalEnhancementSelection,
   type ConsultBookingProposalEstimateInput,
 } from './bookingProposal'
 import { normalizeStoredHairColorAnalysisPayload } from './analysisRevision'
@@ -157,6 +164,11 @@ export async function requireAuthorizedProposalScope(
  * recognise a safety prerequisite by a line's NAME would be one renamed service
  * away from booking a chemical treatment the analysis declined to recommend.
  *
+ * B7 reads the SAME array for a second purpose: an enhancement's client-facing
+ * reason is that recommendation's own `rationale`, matched by its resolved
+ * SERVICE reference — never composed from a service name, for the reason
+ * decision 1 gives.
+ *
  * It reads the revision the estimate PINNED rather than the latest one, because
  * that pin is what makes the estimate interpretable at all: the lines and the
  * safety answer must come from the same analysis.
@@ -166,7 +178,7 @@ export async function loadProposalDerivationInputs(
   consultSessionId: string,
 ): Promise<{
   estimate: ConsultProposalEstimateRow | null
-  analysisRecommendations: ReadonlyArray<{ serviceIntent: string }>
+  analysisRecommendations: ConsultBookingProposalAnalysisInput
 }> {
   const estimate = await tx.consultServiceEstimate.findUnique({
     where: { consultSessionId },
@@ -175,7 +187,7 @@ export async function loadProposalDerivationInputs(
 
   if (!estimate) return { estimate: null, analysisRecommendations: [] }
 
-  let analysisRecommendations: ReadonlyArray<{ serviceIntent: string }>
+  let analysisRecommendations: ConsultBookingProposalAnalysisInput
   try {
     analysisRecommendations = normalizeStoredHairColorAnalysisPayload(
       estimate.sourceAnalysisRevision.payload,
@@ -211,9 +223,13 @@ export function toProposalEstimateInput(
  *
  * `offeringId` is the FLOOR line's offering — the look's own linked service.
  * That is the offering a hold and a finalize are placed against: the booking's
- * base service item is the look itself, while the beyond-floor lines size the
- * slot and the starting price. Presenting them to the client as separately
- * selectable enhancements is B7, deliberately not this slice.
+ * base service item is the look itself, while the lines size the slot and the
+ * starting price.
+ *
+ * B7: the beyond-floor lines are now the client's to take or leave. `lines` is
+ * the floor plus what she opted into — so `startingAtPrice` and
+ * `totalDurationMinutes` are what she is actually committing to — and
+ * `recommendations` is the whole offer, selected or not.
  */
 export function toConsultBookingProposalDTO(args: {
   consultId: string
@@ -268,6 +284,19 @@ export function toConsultBookingProposalDTO(args: {
       price: moneyToFixed2String(line.price) ?? '0.00',
       durationMinutes: line.durationMinutes,
     })),
+    recommendations: args.draft.recommendations.map(
+      (recommendation): ConsultBookingProposalRecommendationDTO => ({
+        estimateLineId: recommendation.estimateLineId,
+        // The analysis's own sentence. No service name is carried onto this
+        // wire at all — see the DTO's comment.
+        outcome: recommendation.outcome,
+        priceDeltaLabel: formatEnhancementPriceDelta(recommendation.price),
+        durationDeltaLabel: formatEnhancementDurationDelta(
+          recommendation.durationMinutes,
+        ),
+        selected: recommendation.selected,
+      }),
+    ),
   }
 }
 
@@ -284,6 +313,14 @@ export async function loadAuthorizedConsultBookingProposal(args: {
   clientId: string
   actorUserId: string
   locationType: ServiceLocationType
+  /**
+   * B7 — which enhancements this answer is for. REQUIRED, with no default: the
+   * two callers want opposite things and neither guess is safe. A client-facing
+   * preview passes her own (possibly empty) selection; availability and the
+   * hold pass `'ALL'`, because they are reserving space she can still fill in.
+   * Defaulting either way would silently give one of them the other's answer.
+   */
+  enhancementSelection: ConsultBookingProposalEnhancementSelection
   now?: Date
 }): Promise<ConsultBookingProposalAvailabilityDTO> {
   return prisma.$transaction(async (tx) => {
@@ -298,6 +335,7 @@ export async function loadAuthorizedConsultBookingProposal(args: {
       locationType: args.locationType,
       estimate: toProposalEstimateInput(estimate),
       analysisRecommendations,
+      enhancementSelection: args.enhancementSelection,
     })
 
     if (draft.status === 'REFUSED') {

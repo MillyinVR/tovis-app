@@ -21,6 +21,11 @@
 // look takes rather than the time its one linked service takes. That is the
 // difference between an impulse booking and a lie about the pro's day
 // (decision 11).
+//
+// 🔴 B7: the HOLD asks for `'ALL'` enhancements and the FINALIZE asks for the
+// client's own selection. That asymmetry is the design, not a bug — the
+// reservation covers everything she could still tick on the review step, so
+// opting in fills space already held and the commit can only ever be narrower.
 
 import 'server-only'
 
@@ -31,6 +36,7 @@ import {
   buildConsultBookingProposal,
   CONSULT_BOOKING_PROPOSAL_DERIVATION_VERSION,
   CONSULT_BOOKING_PROPOSAL_SCHEMA_VERSION,
+  type ConsultBookingProposalEnhancementSelection,
   type ConsultBookingProposalLineDraft,
   type ConsultBookingProposalRefusalCode,
 } from './bookingProposal'
@@ -89,6 +95,14 @@ export async function resolveConsultProposalForCommit(
     professionalId: string
     serviceCategoryId: string | null
     locationType: ServiceLocationType
+    /**
+     * B7 — which enhancements this commit is for. The HOLD passes `'ALL'` and
+     * the FINALIZE passes the client's own answer, which is why the two are
+     * allowed to differ: the reservation is deliberately the widest thing the
+     * booking could become, so the commit is always narrower than or equal to
+     * the slot already held. Never the other way round.
+     */
+    enhancementSelection: ConsultBookingProposalEnhancementSelection
     now: Date
   },
 ): Promise<ConsultProposalCommitResult> {
@@ -127,6 +141,7 @@ export async function resolveConsultProposalForCommit(
     locationType: args.locationType,
     estimate: toProposalEstimateInput(inputs.estimate),
     analysisRecommendations: inputs.analysisRecommendations,
+    enhancementSelection: args.enhancementSelection,
   })
 
   if (draft.status === 'REFUSED') {

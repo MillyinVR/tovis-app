@@ -87,6 +87,7 @@ import {
   CONSULT_BOOKING_PROPOSAL_DERIVATION_VERSION,
   CONSULT_BOOKING_PROPOSAL_SCHEMA_VERSION,
 } from '@/lib/consult/bookingProposal'
+import { loadAuthorizedProProposalReview } from '@/lib/consult/proProposalReview'
 import { minutesSinceMidnightInTimeZone } from '@/lib/time'
 
 import { resetConsultLookFakes } from './_support/consultLookFakes'
@@ -170,6 +171,8 @@ async function commit(args: {
   holdId: string
   consultId: string | null
   autoAccept: boolean
+  /** B7 — the enhancements the client opted into. Default: the look alone. */
+  consultEnhancementLineIds?: string[]
 }) {
   return finalizeBookingFromHold({
     clientId: fx.clientId,
@@ -177,6 +180,7 @@ async function commit(args: {
     holdId: args.holdId,
     openingId: null,
     addOnIds: [],
+    consultEnhancementLineIds: args.consultEnhancementLineIds ?? [],
     locationType: ServiceLocationType.SALON,
     source: BookingSource.REQUESTED,
     consultId: args.consultId,
@@ -210,6 +214,22 @@ async function driveToProposal(
 ): Promise<string> {
   const lookPostId = await createLook(db, fx.balayageServiceId)
   return runConsultToCompletion(db, lookPostId, label, answers)
+}
+
+/**
+ * B7 — the id of this consult's ONE beyond-floor line (the gloss the fake
+ * analysis recommends). It is what the client's opt-in names, on the wire and
+ * in the URL.
+ */
+async function glossEnhancementId(consultId: string): Promise<string> {
+  const line = await db.consultServiceEstimateLine.findFirstOrThrow({
+    where: {
+      estimate: { consultSessionId: consultId },
+      serviceId: fx.glossServiceId,
+    },
+    select: { id: true },
+  })
+  return line.id
 }
 
 beforeAll(async () => {
@@ -268,42 +288,65 @@ describe('row level security', () => {
   })
 })
 
+type PreviewProposal = {
+  available: boolean
+  reason: string | null
+  proposal: {
+    offeringId: string
+    totalDurationMinutes: number
+    startingAtPrice: string
+    startingAtLabel: string
+    estimateNote: string
+    proDecidesNote: string
+    autoAccepts: boolean
+    commitNote: string
+    lines: Array<{ serviceName: string; price: string; durationMinutes: number }>
+    recommendations: Array<{
+      estimateLineId: string
+      outcome: string
+      priceDeltaLabel: string | null
+      durationDeltaLabel: string | null
+      selected: boolean
+    }>
+  } | null
+}
+
+async function preview(
+  consultId: string,
+  enhancementIds: string[] = [],
+): Promise<PreviewProposal> {
+  const query = enhancementIds.length
+    ? `?locationType=SALON&enhancementIds=${enhancementIds.join(',')}`
+    : '?locationType=SALON'
+  const response = await getProposal(
+    new Request(
+      `http://test/api/v1/client/consult/${consultId}/proposal${query}`,
+    ),
+    context(consultId),
+  )
+  expect(response.status).toBe(200)
+  return (await body(response)).proposal as PreviewProposal
+}
+
 describe('the proposal a client is shown', () => {
-  it('prices the whole estimate as one "Starting at", with the pro-decides framing', async () => {
+  // 🔴 B7 (decision 10) changed what this endpoint answers by DEFAULT: the look
+  // alone. A recommendation she has not asked for is a price she has not agreed
+  // to, and B6's in-chair notice only means something if the figure it measures
+  // against was hers.
+  it('quotes the LOOK by default, with the pro-decides framing', async () => {
     const consultId = await driveToProposal('preview')
-
-    const response = await getProposal(
-      new Request(
-        `http://test/api/v1/client/consult/${consultId}/proposal?locationType=SALON`,
-      ),
-      context(consultId),
-    )
-    expect(response.status).toBe(200)
-
-    const proposal = (await body(response)).proposal as {
-      available: boolean
-      reason: string | null
-      proposal: {
-        offeringId: string
-        totalDurationMinutes: number
-        startingAtPrice: string
-        startingAtLabel: string
-        estimateNote: string
-        proDecidesNote: string
-        autoAccepts: boolean
-        commitNote: string
-        lines: Array<{ serviceName: string; price: string; durationMinutes: number }>
-      } | null
-    }
+    const proposal = await preview(consultId)
 
     expect(proposal.available).toBe(true)
     expect(proposal.reason).toBeNull()
     expect(proposal.proposal?.offeringId).toBe(fx.balayageOfferingId)
-    expect(proposal.proposal?.totalDurationMinutes).toBe(PROPOSAL_MINUTES)
-    expect(proposal.proposal?.startingAtPrice).toBe(PROPOSAL_PRICE)
+    expect(proposal.proposal?.totalDurationMinutes).toBe(
+      BALAYAGE_ESTIMATED_MINUTES,
+    )
+    expect(proposal.proposal?.startingAtPrice).toBe('180.00')
     // Composed through the copy table, never assembled by a caller, and never a
     // bare figure (Tori's standing rule).
-    expect(proposal.proposal?.startingAtLabel).toBe('Starting at $225')
+    expect(proposal.proposal?.startingAtLabel).toBe('Starting at $180')
     expect(proposal.proposal?.estimateNote).toContain('your photos')
     expect(proposal.proposal?.proDecidesNote).toContain('final call')
     // The seeded pro has the schema default (autoAcceptBookings false), so the
@@ -311,7 +354,7 @@ describe('the proposal a client is shown', () => {
     // is already hers, the confirmation is not (decision 4).
     expect(proposal.proposal?.autoAccepts).toBe(false)
     expect(proposal.proposal?.commitNote).toContain('held for you')
-    expect(proposal.proposal?.lines).toHaveLength(2)
+    expect(proposal.proposal?.lines).toHaveLength(1)
     // 🔴 The client's line carries no rationale and no source — the reasons are
     // the pro's half of decision 6, and a look never names its service (B1).
     expect(Object.keys(proposal.proposal?.lines[0] ?? {}).sort()).toEqual([
@@ -319,6 +362,57 @@ describe('the proposal a client is shown', () => {
       'price',
       'serviceName',
     ])
+  })
+
+  // B7 — the offer itself. Phrased by OUTCOME, priced by the server, and off.
+  it('offers the analysis’s enhancement by outcome, unticked, with its deltas', async () => {
+    const consultId = await driveToProposal('preview-offer')
+    const proposal = await preview(consultId)
+
+    expect(proposal.proposal?.recommendations).toHaveLength(1)
+    const [recommendation] = proposal.proposal?.recommendations ?? []
+    expect(recommendation?.estimateLineId).toBe(
+      await glossEnhancementId(consultId),
+    )
+    // The analysis's OWN sentence, not a service name — decision 10's register.
+    expect(recommendation?.outcome).toBe(
+      'The mid-lengths would otherwise read brassy in weeks.',
+    )
+    expect(recommendation?.priceDeltaLabel).toBe('+$45')
+    expect(recommendation?.durationDeltaLabel).toBe('+30 min')
+    expect(recommendation?.selected).toBe(false)
+
+    // 🔴 No service name anywhere on the offer. A look never names the service
+    // that produced it, and this is the wire that would leak it.
+    expect(Object.keys(recommendation ?? {}).sort()).toEqual([
+      'durationDeltaLabel',
+      'estimateLineId',
+      'outcome',
+      'priceDeltaLabel',
+      'selected',
+    ])
+  })
+
+  it('folds a chosen enhancement into the same line-item estimate', async () => {
+    const consultId = await driveToProposal('preview-chosen')
+    const glossId = await glossEnhancementId(consultId)
+    const proposal = await preview(consultId, [glossId])
+
+    expect(proposal.proposal?.lines).toHaveLength(2)
+    expect(proposal.proposal?.totalDurationMinutes).toBe(PROPOSAL_MINUTES)
+    expect(proposal.proposal?.startingAtPrice).toBe(PROPOSAL_PRICE)
+    expect(proposal.proposal?.startingAtLabel).toBe('Starting at $225')
+    expect(proposal.proposal?.recommendations[0]?.selected).toBe(true)
+  })
+
+  // A hand-edited link. It must narrow the booking, never widen it or break it.
+  it('ignores an enhancement id that is not this estimate’s', async () => {
+    const consultId = await driveToProposal('preview-bogus')
+    const proposal = await preview(consultId, ['line_not_ours'])
+
+    expect(proposal.available).toBe(true)
+    expect(proposal.proposal?.lines).toHaveLength(1)
+    expect(proposal.proposal?.startingAtPrice).toBe('180.00')
   })
 
   it('promises instant booking when the pro auto-accepts, through the same fork', async () => {
@@ -418,18 +512,23 @@ describe('the proposal a client is shown', () => {
 })
 
 describe('the same fork, both toggle states', () => {
-  it('auto-accept ON commits an ACCEPTED booking sized by the estimate', async () => {
+  it('auto-accept ON commits an ACCEPTED booking sized by what she took', async () => {
     const consultId = await driveToProposal('autoon')
     const start = futureLocal(4, 10)
 
     const held = await holdFromConsult({ start, consultId })
-    // The reservation is the WHOLE estimate, not the base offering's 50→60.
+    // 🔴 The RESERVATION is the whole estimate — the widest thing this booking
+    // could become — not the base offering's 50→60 and not the floor alone. B7
+    // lets her tick an enhancement AFTER this hold exists, so the hold must
+    // already cover it: opting in fills space already held, and the commit is
+    // always narrower than or equal to it.
     expect(held.hold.durationMinutes).toBe(PROPOSAL_MINUTES)
 
     const finalized = await commit({
       holdId: held.hold.id,
       consultId,
       autoAccept: true,
+      consultEnhancementLineIds: [await glossEnhancementId(consultId)],
     })
     bookingIds.push(finalized.booking.id)
 
@@ -460,6 +559,7 @@ describe('the same fork, both toggle states', () => {
       holdId: held.hold.id,
       consultId,
       autoAccept: false,
+      consultEnhancementLineIds: [await glossEnhancementId(consultId)],
     })
     bookingIds.push(finalized.booking.id)
 
@@ -523,6 +623,9 @@ describe('the same fork, both toggle states', () => {
       holdId: held.hold.id,
       consultId,
       autoAccept: false,
+      // Booked WITH the enhancement, so the 60-minutes-in assertion below is
+      // still about the estimate's width rather than about the buffer.
+      consultEnhancementLineIds: [await glossEnhancementId(consultId)],
     })
     bookingIds.push(finalized.booking.id)
     expect(finalized.booking.status).toBe(BookingStatus.PENDING)
@@ -563,6 +666,124 @@ describe('the same fork, both toggle states', () => {
       await db.bookingHold.deleteMany({ where: { clientId: other.id } })
       await db.clientProfile.deleteMany({ where: { id: other.id } })
     }
+  })
+})
+
+// ── B7 — what she agreed to is what is committed (decision 10) ───────────────
+describe('the enhancement she declined is not on her booking', () => {
+  it('commits the floor alone, and records a proposal that says so', async () => {
+    const consultId = await driveToProposal('b7-declined')
+    const start = futureLocal(7, 10)
+
+    const held = await holdFromConsult({ start, consultId })
+    const finalized = await commit({
+      holdId: held.hold.id,
+      consultId,
+      autoAccept: false,
+      // She ticked nothing. This is the default on every surface.
+    })
+    bookingIds.push(finalized.booking.id)
+
+    const booking = await db.booking.findUniqueOrThrow({
+      where: { id: finalized.booking.id },
+      select: { totalDurationMinutes: true },
+    })
+    expect(booking.totalDurationMinutes).toBe(BALAYAGE_ESTIMATED_MINUTES)
+
+    const proposal = await db.consultBookingProposal.findUniqueOrThrow({
+      where: { bookingId: finalized.booking.id },
+      select: {
+        totalDurationMinutes: true,
+        startingAtPrice: true,
+        lines: { select: { serviceId: true, source: true } },
+      },
+    })
+    expect(proposal.totalDurationMinutes).toBe(BALAYAGE_ESTIMATED_MINUTES)
+    expect(proposal.startingAtPrice.toString()).toBe('180')
+    expect(proposal.lines).toHaveLength(1)
+    expect(proposal.lines[0]?.serviceId).toBe(fx.balayageServiceId)
+    expect(proposal.lines[0]?.source).toBe('LOOK_LINKED_SERVICE')
+  })
+
+  // 🔴 The safety property the whole design rests on. Whatever she chooses, the
+  // committed width never exceeds the width the hold reserved — so there is no
+  // selection that can overrun a reservation or double-book a pro's day.
+  it('never commits wider than the hold reserved, either way', async () => {
+    for (const [index, take] of [false, true].entries()) {
+      const consultId = await driveToProposal(`b7-width-${index}`)
+      const start = futureLocal(8 + index, 10)
+
+      const held = await holdFromConsult({ start, consultId })
+      const finalized = await commit({
+        holdId: held.hold.id,
+        consultId,
+        autoAccept: false,
+        consultEnhancementLineIds: take
+          ? [await glossEnhancementId(consultId)]
+          : [],
+      })
+      bookingIds.push(finalized.booking.id)
+
+      const booking = await db.booking.findUniqueOrThrow({
+        where: { id: finalized.booking.id },
+        select: { totalDurationMinutes: true },
+      })
+      expect(booking.totalDurationMinutes).toBeLessThanOrEqual(
+        held.hold.durationMinutes,
+      )
+    }
+  })
+
+  // Decision 10's PRO half: what she declined comes back at session close,
+  // priced from the pro's own menu under the mode this booking was made in.
+  it('offers the declined enhancement back to the pro at session close', async () => {
+    const consultId = await driveToProposal('b7-attach')
+    const start = futureLocal(10, 10)
+
+    const held = await holdFromConsult({ start, consultId })
+    const finalized = await commit({
+      holdId: held.hold.id,
+      consultId,
+      autoAccept: false,
+    })
+    bookingIds.push(finalized.booking.id)
+
+    const review = await loadAuthorizedProProposalReview({
+      professionalId: fx.professionalId,
+      bookingId: finalized.booking.id,
+    })
+
+    expect(review?.lines).toHaveLength(1)
+    expect(review?.declinedRecommendations).toHaveLength(1)
+    const [declined] = review?.declinedRecommendations ?? []
+    expect(declined?.estimateLineId).toBe(await glossEnhancementId(consultId))
+    expect(declined?.offeringId).toBe(fx.glossOfferingId)
+    expect(declined?.price).toBe(GLOSS_PRICE)
+    expect(declined?.durationMinutes).toBe(GLOSS_ESTIMATED_MINUTES)
+    // Her half of decision 6: the reason, and her own menu's name for it.
+    expect(declined?.rationale).toContain('brassy')
+    expect(declined?.serviceName).toBeTruthy()
+  })
+
+  it('offers nothing back when she took the enhancement', async () => {
+    const consultId = await driveToProposal('b7-attach-none')
+    const start = futureLocal(11, 10)
+
+    const held = await holdFromConsult({ start, consultId })
+    const finalized = await commit({
+      holdId: held.hold.id,
+      consultId,
+      autoAccept: false,
+      consultEnhancementLineIds: [await glossEnhancementId(consultId)],
+    })
+    bookingIds.push(finalized.booking.id)
+
+    const review = await loadAuthorizedProProposalReview({
+      professionalId: fx.professionalId,
+      bookingId: finalized.booking.id,
+    })
+    expect(review?.lines).toHaveLength(2)
+    expect(review?.declinedRecommendations).toEqual([])
   })
 })
 

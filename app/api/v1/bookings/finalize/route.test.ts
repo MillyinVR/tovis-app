@@ -315,6 +315,7 @@ function makeExpectedFinalizeArgs(
     holdId: string
     openingId: string | null
     addOnIds: string[]
+    consultEnhancementLineIds: string[]
     locationType: ServiceLocationType
     source: BookingSource
     consultId: string | null
@@ -335,6 +336,9 @@ function makeExpectedFinalizeArgs(
     holdId: overrides.holdId ?? 'hold_1',
     openingId: overrides.openingId ?? null,
     addOnIds: overrides.addOnIds ?? [],
+    // B7 — the enhancements the client opted into. Empty is the ordinary case:
+    // a recommendation she did not tick is a price she did not agree to.
+    consultEnhancementLineIds: overrides.consultEnhancementLineIds ?? [],
     locationType: overrides.locationType ?? ServiceLocationType.SALON,
     source,
     consultId: overrides.consultId ?? null,
@@ -945,6 +949,10 @@ describe('POST /api/v1/bookings/finalize', () => {
         holdId: 'hold_1',
         openingId: null,
         addOnIds: [],
+        // B7 — part of the idempotency BODY on purpose: two finalizes that
+        // differ only by the enhancements chosen are two different bookings,
+        // and without this the second would replay the first at the wrong price.
+        consultEnhancementLineIds: [],
         locationType: ServiceLocationType.SALON,
         source: BookingSource.REQUESTED,
         bookingEntryPoint: 'DIRECT_PROFILE',

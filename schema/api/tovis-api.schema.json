@@ -8159,6 +8159,13 @@
           "description": "The identity of what would be booked, so the client flow (B4b) never has to assemble it: the pro whose grid to read, the floor offering's SERVICE (what availability is keyed on) and the look this consult is anchored to (the discovery reference finalize attributes the booking to).\n\n🔴 `serviceId` is a routing key, not a label. A LOOK never names the service that produced it (B1) — nothing client-side may render this.",
           "type": "string"
         },
+        "recommendations": {
+          "description": "Book the Look, B7 — the enhancements the analysis recommends on top of the look (decision 10). Opt-in: `selected` is false unless this client asked for it, and `lines` above already reflects whatever she did ask for.\n\nEmpty for a consult whose analysis recommended nothing beyond the look itself, which every surface renders as no section rather than an empty one.",
+          "items": {
+            "$ref": "#/definitions/ConsultBookingProposalRecommendationDTO"
+          },
+          "type": "array"
+        },
         "serviceId": {
           "type": "string"
         },
@@ -8192,7 +8199,8 @@
         "proDecidesNote",
         "autoAccepts",
         "commitNote",
-        "lines"
+        "lines",
+        "recommendations"
       ],
       "type": "object"
     },
@@ -8214,6 +8222,41 @@
         "serviceName",
         "price",
         "durationMinutes"
+      ],
+      "type": "object"
+    },
+    "ConsultBookingProposalRecommendationDTO": {
+      "description": "One enhancement, as the client is offered it (B7, decision 10).\n\n🔴 THERE IS NO SERVICE NAME ON THIS TYPE, ON PURPOSE. Decision 10 gives the register — \"a gloss keeps this tone from going brassy\", never \"add Toner Gloss\" — and decision 1 says a look never names the service that produced it. A `serviceName` field here would be one careless render away from putting the taxonomy back on the client's screen, so the wire simply does not carry one.\n\n`outcome` is the ANALYSIS's own rationale for this recommendation, read from the revision the estimate pinned. Never re-written and never composed from a service name.\n\nBoth labels are composed on the SERVER (lib/consult/enhancementOffer.ts) and are null when there is nothing to print — a complimentary enhancement has no price delta, an instant one has no duration delta. Never render \"+$0\".",
+      "properties": {
+        "durationDeltaLabel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "estimateLineId": {
+          "description": "The estimate line this offers. It is also the id the client's answer names, on the wire and in the URL — never a price and never a duration, so nothing she can edit decides what she is charged.",
+          "type": "string"
+        },
+        "outcome": {
+          "type": "string"
+        },
+        "priceDeltaLabel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "selected": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "estimateLineId",
+        "outcome",
+        "priceDeltaLabel",
+        "durationDeltaLabel",
+        "selected"
       ],
       "type": "object"
     },
@@ -10420,6 +10463,46 @@
       ],
       "type": "string"
     },
+    "ConsultProposalDeclinedRecommendationDTO": {
+      "description": "One enhancement the client declined, as the pro is offered it back (B7).\n\nThe numbers are RE-DERIVED from her live menu under the booking's own mode — not read off the estimate, whose prices are the salon column (B5, rule 3). They seed her in-chair line item, and she can edit it like any other.",
+      "properties": {
+        "durationMinutes": {
+          "type": "number"
+        },
+        "estimateLineId": {
+          "description": "The estimate line, so the correction pair still lands where B3 put it.",
+          "type": "string"
+        },
+        "offeringId": {
+          "description": "Her own offering — the in-chair form identifies a BASE service by this.",
+          "type": "string"
+        },
+        "price": {
+          "description": "Decimal string, under the mode this booking was made in.",
+          "type": "string"
+        },
+        "rationale": {
+          "description": "Decision 6's \"why\", copied from the estimate line. Never invented.",
+          "type": "string"
+        },
+        "serviceId": {
+          "type": "string"
+        },
+        "serviceName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "estimateLineId",
+        "serviceId",
+        "offeringId",
+        "serviceName",
+        "rationale",
+        "price",
+        "durationMinutes"
+      ],
+      "type": "object"
+    },
     "ConsultProposalReviewDTO": {
       "properties": {
         "bookingId": {
@@ -10430,6 +10513,13 @@
         },
         "consultId": {
           "type": "string"
+        },
+        "declinedRecommendations": {
+          "description": "Book the Look, B7 — decision 10's PRO half: \"recommended attach at session close\". The enhancements the analysis recommended and this client did NOT take, priced under the mode she booked, so the pro can put one back on the appointment in one tap while the person is in her chair.\n\nEmpty when the analysis recommended nothing beyond the look, when she took everything, or when a declined line can no longer be priced on the pro's live menu — she cannot attach what she can no longer sell, and a row that 400s on send is worse than no row.\n\n⚠️ PRO-FACING, which is why `serviceName` is on this type and deliberately NOT on the client's `ConsultBookingProposalRecommendationDTO`. Decision 6 is that the pro sees her own menu, line by line, with the reason for each; decision 1 is that the CLIENT never sees the taxonomy. Both are true, and these are the two different types that keep them true.",
+          "items": {
+            "$ref": "#/definitions/ConsultProposalDeclinedRecommendationDTO"
+          },
+          "type": "array"
         },
         "editable": {
           "description": "Whether corrections may still be recorded. False once the booking has reached a terminal state — there is no longer a day to protect or a price to settle, and a correction recorded then would be a pair about nothing.",
@@ -10506,7 +10596,8 @@
         "proFinalTotalPrice",
         "proFinalTotalDurationMinutes",
         "reviewedAt",
-        "lines"
+        "lines",
+        "declinedRecommendations"
       ],
       "type": "object"
     },

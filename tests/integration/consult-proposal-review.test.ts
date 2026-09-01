@@ -148,16 +148,37 @@ function proposalOffering() {
 
 const bookingIds: string[] = []
 
-/** Drive a consult to a committed booking carrying a proposal. */
+/**
+ * Drive a consult to a committed booking carrying a proposal.
+ *
+ * B7 — the client TAKES the analysis's enhancement here by default, because
+ * this suite's subject is the pro reviewing a multi-line booking. Her opt-in is
+ * what puts the second line on it at all (decision 10); a declined enhancement
+ * is exercised in tests/integration/consult-booking-proposal.test.ts.
+ */
 async function bookedProposal(args: {
   label: string
   hour: number
   autoAccept: boolean
   daysAhead?: number
+  takeEnhancements?: boolean
 }): Promise<{ bookingId: string; consultId: string }> {
   const lookPostId = await createLook(db, fx.balayageServiceId)
   const consultId = await runConsultToCompletion(db, lookPostId, args.label)
   const start = futureLocal(args.daysAhead ?? 30, args.hour)
+
+  const enhancementIds =
+    args.takeEnhancements === false
+      ? []
+      : (
+          await db.consultServiceEstimateLine.findMany({
+            where: {
+              estimate: { consultSessionId: consultId },
+              source: 'ANALYSIS_RECOMMENDATION',
+            },
+            select: { id: true },
+          })
+        ).map((line) => line.id)
 
   const hold = await createHold({
     clientId: fx.clientId,
@@ -177,6 +198,7 @@ async function bookedProposal(args: {
     holdId: hold.hold.id,
     openingId: null,
     addOnIds: [],
+    consultEnhancementLineIds: enhancementIds,
     locationType: ServiceLocationType.SALON,
     source: BookingSource.REQUESTED,
     consultId,

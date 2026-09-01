@@ -1,10 +1,11 @@
 // app/(main)/booking/add-ons/ui/AddOnsClient.tsx
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 
 import { endAvailabilityMetric } from '../../AvailabilityDrawer/perf/availabilityPerf'
+import { formatDurationLabel } from '@/lib/format/duration'
 import { formatRoundedDollars } from '@/lib/money'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import type { AddOnsContext } from '@/lib/booking/addOnsContext'
@@ -40,13 +41,28 @@ type Props = {
    * server's own derivation, re-run for this mode by the page — never a number
    * this component composes, and never one the drawer handed forward.
    *
-   * Add-ons and a proposal are mutually exclusive today (B7 has not happened):
-   * `addOns` arrives empty on this branch, which also means the hold-resize
-   * effect below never fires.
+   * The pro's `OfferingAddOn` catalog and a proposal stay mutually exclusive
+   * (B7 answered decision 10 with the analysis's own beyond-floor lines
+   * instead): `addOns` arrives empty on this branch, which also means the
+   * hold-resize effect below never fires.
    */
   consultId: string | null
   consultProposal: ConsultBookingProposalDTO | null
   consultCopy: BrandClientConsultBookingCopy
+  /**
+   * Book the Look, B7 — the enhancements currently ticked, as the SERVER read
+   * them out of the URL. Held here rather than derived from `consultProposal`
+   * so a toggle can be echoed optimistically while the server component
+   * re-renders, without the tick ever deciding a number.
+   */
+  enhancementLineIds: string[]
+  /**
+   * The ordinary booking's "what happens when you tap" sentence, composed on
+   * the server from the pro's own `autoAcceptBookings` (see the page). Null
+   * when there is no offering to read a pro from; a consultation booking uses
+   * `consultProposal.commitNote` instead.
+   */
+  commitNote: string | null
   addOns: AddOnDTO[]
   selectionPrompt?: string | null
   initialError?: string | null
@@ -63,16 +79,6 @@ const MAX_ADD_ON_IDS = 50
 
 function readString(value: unknown): string | null {
   return typeof value === 'string' ? value : null
-}
-
-function formatMinutes(min: number): string | null {
-  if (!Number.isFinite(min) || min <= 0) return null
-  if (min < 60) return `${min} min`
-
-  const hours = Math.floor(min / 60)
-  const minutes = min % 60
-
-  return minutes ? `${hours}h ${minutes}m` : `${hours}h`
 }
 
 function formatMoneyLabel(value: string): string {
@@ -254,6 +260,8 @@ export default function AddOnsClient({
   consultId,
   consultProposal,
   consultCopy,
+  enhancementLineIds,
+  commitNote,
   addOns,
   selectionPrompt,
   initialError,
@@ -498,6 +506,59 @@ export default function AddOnsClient({
     }
   }, [addOns, selected])
 
+  // ── Book the Look, B7 — the enhancement offer ──────────────────────────────
+  //
+  // 🔴 THE URL IS THE SELECTION, AND THE SERVER IS THE ANSWER. A tick rewrites
+  // `enhancementIds` and lets this route's server component re-derive the whole
+  // proposal for that set — the lines, the length, the "Starting at" and each
+  // "+$40" all come back from the same function the finalize will run. Nothing
+  // below adds a price to a price; there is no arithmetic in this component to
+  // disagree with the server's.
+  //
+  // It also means a reload, a back-button and the login round-trip all restore
+  // exactly what she chose, for free — the same reason the add-on selection
+  // above lives in the URL rather than in state.
+  const [enhancementPending, startEnhancementTransition] = useTransition()
+
+  const selectedEnhancementIds = useMemo(
+    () => new Set(enhancementLineIds),
+    [enhancementLineIds],
+  )
+
+  function toggleEnhancement(estimateLineId: string) {
+    if (!pathname) return
+    if (!consultProposal) return
+
+    const next = new Set(selectedEnhancementIds)
+    if (next.has(estimateLineId)) {
+      next.delete(estimateLineId)
+    } else {
+      next.add(estimateLineId)
+    }
+
+    // Written back in the SERVER's own order, filtered to ids it actually
+    // offered: the URL must never carry an id this proposal does not know, or a
+    // reload would send the finalize something the derivation will ignore and
+    // the two screens would quietly disagree about what was booked.
+    const ids = consultProposal.recommendations
+      .filter((recommendation) => next.has(recommendation.estimateLineId))
+      .map((recommendation) => recommendation.estimateLineId)
+
+    const nextSearchParams = new URLSearchParams(searchString)
+    if (ids.length > 0) {
+      nextSearchParams.set('enhancementIds', ids.join(','))
+    } else {
+      nextSearchParams.delete('enhancementIds')
+    }
+
+    const query = nextSearchParams.toString()
+    startEnhancementTransition(() => {
+      router.replace(query ? `${pathname}?${query}` : pathname, {
+        scroll: false,
+      })
+    })
+  }
+
   const grouped = useMemo(() => {
     const groups = new Map<string, AddOnDTO[]>()
 
@@ -567,6 +628,10 @@ export default function AddOnsClient({
           // produced it, and the write boundary re-derives the proposal under
           // the session lock before it sizes or prices anything.
           consultId,
+          // B7: the enhancements she ticked, as ids. The write boundary
+          // re-derives what each one costs and how long it takes from the pro's
+          // menu — this list decides WHICH, never HOW MUCH.
+          consultEnhancementLineIds: enhancementLineIds,
           addOnIds: selectedIds,
           cancellationPolicyAccepted: policyAccepted,
         }),
@@ -592,6 +657,16 @@ export default function AddOnsClient({
 
         if (selectedIds.length > 0) {
           fromQuery.set('addOnIds', selectedKey)
+        }
+
+        // B7: without this the login round-trip drops her enhancements and she
+        // lands back on a cheaper booking than the one she was about to make.
+        if (consultId) {
+          fromQuery.set('consultId', consultId)
+        }
+
+        if (enhancementLineIds.length > 0) {
+          fromQuery.set('enhancementIds', enhancementLineIds.join(','))
         }
 
         const from = `/booking/add-ons?${fromQuery.toString()}`
@@ -814,11 +889,16 @@ export default function AddOnsClient({
                 key={`${index}:${line.serviceName}`}
                 className="flex items-baseline justify-between gap-3 rounded-card border border-textPrimary/10 bg-bgPrimary/35 px-3 py-2.5"
               >
-                <span className="min-w-0 text-[13px] font-black text-textPrimary">
+                {/* 🔴 `break-words`, not just `min-w-0`: a flex item can be
+                    allowed to shrink and STILL overflow when its content is one
+                    unbroken token. Seen in a browser — a long service name ran
+                    underneath its own "30 min · $45", the same shape as the pro
+                    header card's overlap. */}
+                <span className="min-w-0 break-words text-[13px] font-black text-textPrimary">
                   {line.serviceName}
                 </span>
                 <span className="shrink-0 text-[11px] font-semibold text-textSecondary">
-                  {formatMinutes(line.durationMinutes) ?? '—'} ·{' '}
+                  {formatDurationLabel(line.durationMinutes) ?? '—'} ·{' '}
                   {formatMoneyLabel(line.price)}
                 </span>
               </div>
@@ -830,7 +910,7 @@ export default function AddOnsClient({
               {consultCopy.durationLabel}
             </span>
             <span className="font-black text-textPrimary">
-              {formatMinutes(consultProposal.totalDurationMinutes) ?? '—'}
+              {formatDurationLabel(consultProposal.totalDurationMinutes) ?? '—'}
             </span>
           </div>
 
@@ -841,6 +921,93 @@ export default function AddOnsClient({
           ) : null}
           <div className="mt-2 text-[11px] font-semibold leading-5 text-textSecondary">
             {consultProposal.estimateNote} {consultProposal.proDecidesNote}
+          </div>
+        </div>
+      ) : null}
+
+      {/* Book the Look, B7 — the enhancement offer (decision 10).
+          🔴 Every card is phrased by OUTCOME. `outcome` is the analysis's own
+          reason and the wire carries NO service name to fall back on, because a
+          look never names the service that produced it (decision 1). The two
+          deltas are composed server-side and are null when there is nothing to
+          print, so a complimentary enhancement never reads "+$0".
+          🔴 Nothing starts ticked. `selected` is the SERVER's answer for the
+          ids in the URL, so the only way a card is on is that she turned it
+          on — which is what makes the total above a number she agreed to. */}
+      {!error && consultProposal && consultProposal.recommendations.length ? (
+        <div
+          data-testid="booking-consult-enhancements"
+          className="tovis-glass mt-4 rounded-card border border-textPrimary/10 bg-bgSecondary p-4"
+        >
+          <div className="text-[12px] font-black text-textSecondary">
+            {consultCopy.enhancementsTitle}
+          </div>
+          <p className="mt-1 text-[11px] font-semibold leading-5 text-textSecondary">
+            {consultCopy.enhancementsBody}
+          </p>
+
+          <div className="mt-3 grid gap-2">
+            {consultProposal.recommendations.map((recommendation) => {
+              const active = recommendation.selected
+              const deltas = [
+                recommendation.durationDeltaLabel,
+                recommendation.priceDeltaLabel,
+              ].filter((label): label is string => Boolean(label))
+
+              return (
+                <button
+                  key={recommendation.estimateLineId}
+                  type="button"
+                  data-testid={`booking-consult-enhancement-${recommendation.estimateLineId}`}
+                  aria-pressed={active}
+                  disabled={enhancementPending || submitting}
+                  onClick={() =>
+                    toggleEnhancement(recommendation.estimateLineId)
+                  }
+                  className={[
+                    'rounded-card border px-4 py-3 text-left transition',
+                    'border-textPrimary/10 disabled:opacity-70',
+                    active
+                      ? 'bg-accentPrimary text-bgPrimary'
+                      : 'bg-bgPrimary/35 text-textPrimary hover:bg-textPrimary/10',
+                  ].join(' ')}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-[13px] font-black leading-5">
+                        {recommendation.outcome}
+                      </div>
+
+                      {deltas.length ? (
+                        <div
+                          className={[
+                            'mt-2 text-[11px] font-semibold',
+                            active
+                              ? 'text-bgPrimary/90'
+                              : 'text-textSecondary',
+                          ].join(' ')}
+                        >
+                          {deltas.join(' · ')}
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <span
+                      className={[
+                        'shrink-0 rounded-full border px-3 py-1 text-[11px] font-black',
+                        active
+                          ? 'border-bgPrimary/25 bg-bgPrimary/15 text-bgPrimary'
+                          : 'border-textPrimary/10 bg-bgPrimary/35 text-textPrimary',
+                      ].join(' ')}
+                    >
+                      {active
+                        ? consultCopy.enhancementAddedLabel
+                        : consultCopy.enhancementAddLabel}
+                    </span>
+                  </div>
+                </button>
+              )
+            })}
           </div>
         </div>
       ) : null}
@@ -863,7 +1030,7 @@ export default function AddOnsClient({
               <div className="mt-3 grid gap-2">
                 {items.map((addOn) => {
                   const active = Boolean(selected[addOn.id])
-                  const minutesLabel = formatMinutes(addOn.minutes)
+                  const minutesLabel = formatDurationLabel(addOn.minutes)
                   const priceLabel = formatMoneyLabel(addOn.price)
 
                   return (
@@ -1012,6 +1179,10 @@ export default function AddOnsClient({
               disabled={
                 submitting ||
                 syncingHold ||
+                // Never book a selection the SERVER has not answered for: the
+                // numbers on this screen belong to the previous set until the
+                // re-derivation lands. Same rule as `syncingHold` above.
+                enhancementPending ||
                 !holdId ||
                 !offeringId ||
                 // A consultation review with no proposal has nothing to book:
@@ -1026,7 +1197,9 @@ export default function AddOnsClient({
                 ? 'Booking…'
                 : syncingHold
                   ? 'Updating your hold…'
-                  : 'Complete booking'}
+                  : enhancementPending
+                    ? consultCopy.enhancementsPendingLabel
+                    : 'Complete booking'}
             </button>
 
             {/* "Skip" means "book without add-ons". There are none to skip on a
@@ -1054,9 +1227,11 @@ export default function AddOnsClient({
               data-testid="booking-complete-note"
               className="mt-2 text-center text-[11px] font-semibold text-textSecondary"
             >
-              {consultProposal
-                ? consultProposal.commitNote
-                : 'No charge until the pro confirms.'}
+              {/* 🔴 Both branches are the SERVER's sentence now. The
+                  non-consult one used to be this hardcoded string, which told
+                  every client of an auto-accepting pro to wait for a
+                  confirmation that never comes. */}
+              {consultProposal ? consultProposal.commitNote : commitNote}
             </div>
           </div>
         </div>
