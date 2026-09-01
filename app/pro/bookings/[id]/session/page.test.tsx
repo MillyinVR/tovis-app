@@ -13,6 +13,12 @@ import {
 
 const mocks = vi.hoisted(() => ({
   bookingFindUnique: vi.fn(),
+  // B6 — the decline-deposit question reads the booking on its own
+  // (lib/consult/inChairDeclineOutcome.ts). Every fixture here is an ORDINARY
+  // booking with no consult proposal behind it, so it answers null and the
+  // audit table is never touched — which is the gate this mock proves exists.
+  bookingFindFirst: vi.fn(),
+  bookingCloseoutAuditLogFindFirst: vi.fn(),
   mediaAssetCount: vi.fn(),
   aftercareSummaryFindFirst: vi.fn(),
   professionalPaymentSettingsFindUnique: vi.fn(),
@@ -54,6 +60,10 @@ vi.mock('@/lib/prisma', () => ({
   prisma: {
     booking: {
       findUnique: mocks.bookingFindUnique,
+      findFirst: mocks.bookingFindFirst,
+    },
+    bookingCloseoutAuditLog: {
+      findFirst: mocks.bookingCloseoutAuditLogFindFirst,
     },
     mediaAsset: {
       count: mocks.mediaAssetCount,
@@ -332,6 +342,11 @@ function hasTestId(node: PageNode, testId: string): boolean {
 describe('app/pro/bookings/[id]/session/page.tsx', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+
+    // Ordinary bookings: no look-anchored proposal, so B6's deposit question
+    // never applies and the audit read below is never reached.
+    mocks.bookingFindFirst.mockResolvedValue(null)
+    mocks.bookingCloseoutAuditLogFindFirst.mockResolvedValue(null)
 
     mocks.redirect.mockImplementation((href: string) => {
       throw makeRedirectError(href)

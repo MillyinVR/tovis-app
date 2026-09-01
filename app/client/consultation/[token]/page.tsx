@@ -6,6 +6,11 @@ import { use, useEffect, useMemo, useState } from 'react'
 import { formatMoneyFromUnknown as formatMoney } from '@/lib/money'
 
 import SectionCard from '@/app/client/_components/SectionCard'
+import ConsultRevisionNotice from '@/app/client/_components/ConsultRevisionNotice'
+import type {
+  ConsultRevisionNotice as ConsultRevisionNoticeData,
+  ConsultRevisionReason,
+} from '@/lib/consult/inChairFinalization'
 import { CreateAccountInviteCard } from '@/app/client/_public/CreateAccountInviteCard'
 import { isRecord } from '@/lib/guards'
 import {
@@ -132,6 +137,12 @@ type PublicConsultationDto = {
   approval: ApprovalDto
   token: TokenDto
   actionState: ActionState
+  /**
+   * B6 — the server's verdict on how far this proposal moved from what the
+   * client committed to. Null on every ordinary consultation, and a notice
+   * whose `bigChange` is false renders nothing.
+   */
+  revision: ConsultRevisionNoticeData | null
 }
 
 type DecisionApproveResponse = {
@@ -488,6 +499,58 @@ function parseToken(value: unknown): TokenDto | null {
   }
 }
 
+/**
+ * The revision notice, narrowed off the wire.
+ *
+ * Every field is required and every one is refused rather than defaulted: a
+ * notice with a missing number would render "You booked $0, now $180", which is
+ * a worse lie than showing nothing. The verdict itself (`bigChange`) is the
+ * server's and is never recomputed here.
+ */
+function parseRevisionNotice(value: unknown): ConsultRevisionNoticeData | null {
+  if (!isRecord(value)) return null
+
+  const bigChange = readBoolean(value.bigChange)
+  const committedPriceCents = readNumber(value.committedPriceCents)
+  const finalPriceCents = readNumber(value.finalPriceCents)
+  const priceIncreaseCents = readNumber(value.priceIncreaseCents)
+  const committedDurationMinutes = readNumber(value.committedDurationMinutes)
+  const finalDurationMinutes = readNumber(value.finalDurationMinutes)
+  const durationIncreaseMinutes = readNumber(value.durationIncreaseMinutes)
+
+  if (
+    bigChange === null ||
+    committedPriceCents === null ||
+    finalPriceCents === null ||
+    priceIncreaseCents === null ||
+    committedDurationMinutes === null ||
+    finalDurationMinutes === null ||
+    durationIncreaseMinutes === null ||
+    !Array.isArray(value.reasons)
+  ) {
+    return null
+  }
+
+  const reasons: ConsultRevisionReason[] = []
+  for (const reason of value.reasons) {
+    if (reason === 'PRICE' || reason === 'DURATION') reasons.push(reason)
+  }
+
+  const ratio = readNumber(value.priceIncreaseRatio)
+
+  return {
+    bigChange,
+    reasons,
+    committedPriceCents,
+    finalPriceCents,
+    priceIncreaseCents,
+    priceIncreaseRatio: ratio,
+    committedDurationMinutes,
+    finalDurationMinutes,
+    durationIncreaseMinutes,
+  }
+}
+
 function parsePublicConsultationDto(value: unknown): PublicConsultationDto | null {
   if (!isRecord(value)) return null
 
@@ -503,6 +566,7 @@ function parsePublicConsultationDto(value: unknown): PublicConsultationDto | nul
     approval,
     token,
     actionState,
+    revision: parseRevisionNotice(value.revision),
   }
 }
 
@@ -891,6 +955,8 @@ export default function PublicConsultationPage({ params }: PageProps) {
             ) : null
           }
         >
+          <ConsultRevisionNotice notice={data.revision} />
+
           {proposedItems.length > 0 ? (
             <div className="grid gap-2">
               {proposedItems.map((item) => (

@@ -38,6 +38,7 @@ import AppointmentPrepSection from './AppointmentPrepSection'
 import ClientBookingActionsCard from './ClientBookingActionsCard'
 import ClientConfirmationCard from './ClientConfirmationCard'
 import ConsultationDecisionCard from './ConsultationDecisionCard'
+import { loadConsultRevisionForClient } from '@/lib/consult/inChairRevision'
 import ReviewSection from './ReviewSection'
 import { loadClientBookingPage } from './_data/loadClientBookingPage'
 import { buildBookingViewModel } from './_view/buildBookingViewModel'
@@ -1022,6 +1023,17 @@ export default async function ClientBookingPage(props: {
       : null
 
   const showConsultationApproval = Boolean(viewModel.showConsultationApproval)
+
+  // B6 — has the pro's proposal moved past the revision threshold? Loaded only
+  // when there is actually a proposal awaiting her answer, so an ordinary
+  // booking's page runs the query it always ran. Null on every non-consult
+  // booking, and a `bigChange: false` notice renders nothing.
+  const consultRevision = showConsultationApproval
+    ? await loadConsultRevisionForClient({
+        bookingId: booking.id,
+        clientId,
+      })
+    : null
   const consultApprovalMode = step === 'consult' && showConsultationApproval
   const shouldShowReview = reviewCloseoutEligible && step === 'aftercare'
 
@@ -1105,6 +1117,7 @@ export default async function ClientBookingPage(props: {
             notes={consultationNotes}
             proposedTotalLabel={proposedTotalLabel}
             proposedServicesJson={booking.consultation?.proposedServicesJson ?? null}
+            revision={consultRevision?.notice ?? null}
           />
         ) : (
           <div className="text-[12px] font-semibold text-textSecondary">

@@ -617,6 +617,12 @@ enum BookingCloseoutAuditAction {
   CONSULTATION_REJECTED_REMOTE
   CONSULTATION_APPROVED_IN_PERSON
   CONSULTATION_REJECTED_IN_PERSON
+  /// Book the Look, B6 — the PRO's explicit keep-or-refund answer about a
+  /// client's deposit after that client DECLINED the finalized number in the
+  /// chair (Tori, 2026-08-31: the pro decides each time). Distinct from
+  /// CONSULTATION_REJECTED, which is the CLIENT's decision: this row says who
+  /// chose and which way, and a REFUND choice has a BookingRefund beside it.
+  CONSULTATION_DECLINE_DEPOSIT_DECIDED
   PAYMENT_METHOD_UPDATED
   PAYMENT_AUTHORIZED
   PAYMENT_COLLECTED

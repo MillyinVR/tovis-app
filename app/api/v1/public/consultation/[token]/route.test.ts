@@ -311,6 +311,9 @@ describe('GET /api/v1/public/consultation/[token]', () => {
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toEqual({
       ok: true,
+      // B6 — an ordinary consultation has no look-anchored proposal to be
+      // judged against, so there is no revision notice to render.
+      revision: null,
       booking: {
         id: 'booking_1',
         status: 'ACCEPTED',

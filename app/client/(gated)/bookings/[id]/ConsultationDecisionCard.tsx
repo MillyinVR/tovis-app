@@ -11,6 +11,8 @@ import {
   idempotencyHeaders,
 } from '@/lib/idempotency/client'
 import { isRecord } from '@/lib/guards'
+import ConsultRevisionNotice from '@/app/client/_components/ConsultRevisionNotice'
+import type { ConsultRevisionNotice as ConsultRevisionNoticeData } from '@/lib/consult/inChairFinalization'
 
 const STATUS_COPY = {
   401: 'Please log in again.',
@@ -86,9 +88,15 @@ export default function ConsultationDecisionCard(props: {
   notes: string
   proposedTotalLabel: string | null
   proposedServicesJson?: unknown
+  /**
+   * B6 — the server's verdict on how far this proposal moved from what the
+   * client committed to. Null on every ordinary booking; a notice with
+   * `bigChange: false` renders nothing, exactly as a small adjustment should.
+   */
+  revision?: ConsultRevisionNoticeData | null
   disabled?: boolean
 }) {
-  const { bookingId, appointmentTz, notes, proposedTotalLabel, proposedServicesJson, disabled } = props
+  const { bookingId, appointmentTz, notes, proposedTotalLabel, proposedServicesJson, revision, disabled } = props
   const router = useRouter()
 
   const [loading, setLoading] = useState<DecisionAction | null>(null)
@@ -202,6 +210,8 @@ export default function ConsultationDecisionCard(props: {
       <div className="mt-1 whitespace-pre-wrap text-sm text-textPrimary">
         {notes?.trim() ? notes : COPY.consultationDecisionCard.noNotes}
       </div>
+
+      <ConsultRevisionNotice notice={revision ?? null} />
 
       <div className="mt-4 flex flex-wrap gap-2">
         <button

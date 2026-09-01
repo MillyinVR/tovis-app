@@ -43,6 +43,7 @@ function review(
       {
         estimateLineId: 'line_floor',
         serviceId: 'svc_floor',
+        offeringId: 'off_floor',
         serviceName: 'Full balayage',
         source: 'LOOK_LINKED_SERVICE',
         rationale: 'The look this consult started from is linked to it.',
@@ -57,6 +58,7 @@ function review(
       {
         estimateLineId: 'line_gloss',
         serviceId: 'svc_gloss',
+        offeringId: 'off_gloss',
         serviceName: 'Gloss',
         source: 'ANALYSIS_RECOMMENDATION',
         rationale: 'Keeps the tone from going brassy.',

@@ -1051,6 +1051,12 @@ export type ConsultProposalReviewLineDTO = {
    */
   estimateLineId: string
   serviceId: string
+  /**
+   * The pro's own offering this line was re-derived from — carried so the
+   * in-chair finalization (B6) can put the line straight into her consultation
+   * proposal, which identifies a base service by offering and not by service.
+   */
+  offeringId: string
   serviceName: string
   source: ConsultServiceEstimateLineSource
   /**

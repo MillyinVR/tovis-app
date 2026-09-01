@@ -10545,6 +10545,10 @@
           "description": "The ESTIMATE line this correction is stored against — the row that carries the frozen AI half and the writable pro-final half (B3). It is also this line's identity in a review submission.",
           "type": "string"
         },
+        "offeringId": {
+          "description": "The pro's own offering this line was re-derived from — carried so the in-chair finalization (B6) can put the line straight into her consultation proposal, which identifies a base service by offering and not by service.",
+          "type": "string"
+        },
         "proFinalAt": {
           "type": [
             "string",
@@ -10598,6 +10602,7 @@
       "required": [
         "estimateLineId",
         "serviceId",
+        "offeringId",
         "serviceName",
         "source",
         "rationale",

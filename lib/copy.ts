@@ -136,6 +136,71 @@ export const COPY = {
       'This booking is closed, so nothing further can be recorded against it.',
   },
 
+  /**
+   * Book the Look, B6 — IN-CHAIR FINALIZATION (direction doc, decision 8).
+   *
+   * Two audiences, kept apart on purpose (the same mistake B5's block above
+   * records): `seed*` is the PRO reading her own form, `revision*` is the
+   * CLIENT reading a number she is being asked to accept. Nothing is shared
+   * between them, because nothing should be.
+   */
+  consultInChair: {
+    seedTitle: 'Priced from her consultation',
+    seedBody:
+      'These are the services her consultation matched, at your numbers. Adjust anything that changed once you have seen her hair, then send it for approval — what she approves is what she pays.',
+  },
+
+  /**
+   * The revision notice. Shown ONLY when the pro's number crosses the threshold
+   * Tori set on 2026-08-31 (>~10% on price, or 30+ minutes longer); a smaller
+   * adjustment says none of this and the client simply sees the proposal.
+   *
+   * 🔴 WHAT THE LAST SENTENCE MAY AND MAY NOT PROMISE. Tori's decision pairs
+   * this notice with "a cancel-for-full-refund option". A client-initiated
+   * cancel is NOT deliverable today and this copy must not imply it is: the
+   * proposal route refuses until the appointment has been STARTED, so every
+   * booking this notice can appear on is IN_PROGRESS, and IN_PROGRESS →
+   * CANCELLED is admin-only under the M8 lifecycle contract
+   * (`recordStatusTransitionOrRefuse`, lib/booking/writeBoundary.ts) — a client
+   * cancel there is refused as BOOKING_STATUS_CHANGE_NOT_ALLOWED. Verified in a
+   * browser, not reasoned about.
+   *
+   * What IS deliverable, and what this therefore says, is the other half of the
+   * same day's decisions: she can say no, and the pro then makes an explicit,
+   * recorded keep-or-refund call on her deposit before she leaves
+   * (lib/consult/inChairDeclineOutcome.ts). Do not upgrade this to "full
+   * refund" wording unless the lifecycle contract is widened first.
+   */
+  consultRevisionNotice: {
+    title: 'This is more than you booked',
+    /** Composed as `${priceLead} ${bookedLabel} X, ${nowLabel} Y.` */
+    priceLead: 'The price has gone up:',
+    durationLead: 'It will also take longer:',
+    bookedLabel: 'You booked',
+    nowLabel: 'now',
+    body:
+      'Your pro can explain what changed before you agree to it. If you say no, she settles your deposit with you there and then — nothing is decided behind your back.',
+  },
+
+  /**
+   * The pro's keep-or-refund answer after a client declines the finalized
+   * number in the chair (Tori, 2026-08-31). Written to be answerable, not
+   * agonised over: it names the amount, it says what each button does, and it
+   * says plainly that the answer is written down.
+   *
+   * This is the escape the client-facing notice above points at, so the two
+   * must keep describing the same event.
+   */
+  consultDeclineDeposit: {
+    title: 'Her deposit',
+    body: 'She declined the price, so this one is yours to call. She paid',
+    keep: 'Keep it',
+    refund: 'Refund it',
+    working: 'Saving…',
+    keptRecorded: 'Recorded: you kept her deposit of',
+    refundedRecorded: 'Recorded: you refunded her deposit of',
+  },
+
   bookings: {
     titleFallback: 'Booking',
     backToBookings: '← Back to bookings',
