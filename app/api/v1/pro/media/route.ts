@@ -32,6 +32,7 @@ import type {
 } from '@/lib/dto/mediaAttach'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { renderMediaUrlsBatch } from '@/lib/media/renderUrls'
+import { loadServiceTagOptions } from '@/lib/media/serviceTagOptions'
 import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
@@ -489,12 +490,7 @@ export async function GET() {
           },
         },
       }),
-      prisma.service.findMany({
-        where: { isActive: true },
-        orderBy: { name: 'asc' },
-        take: 500,
-        select: { id: true, name: true },
-      }),
+      loadServiceTagOptions(),
       // §18d — the pro's current cover banner, to flag the cover tile (§18e).
       prisma.professionalProfile.findUnique({
         where: { id: professionalId },

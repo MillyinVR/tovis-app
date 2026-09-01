@@ -4,12 +4,16 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 
+import ProMediaEditFields from '@/app/_components/media/ProMediaEditFields'
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import { useProMediaEdit } from '@/app/_components/media/useProMediaEdit'
 import { formatCompactCount } from '@/lib/format/compactCount'
 import { readAnyErrorMessageOr, safeJson } from '@/lib/http'
 import { DEFAULT_TIME_ZONE, formatRelativeDayAgo, getViewerTimeZone } from '@/lib/time'
 import { cn } from '@/lib/utils'
 import { zClass } from '@/lib/zIndex'
+
+import type { ServiceTagOption } from '@/lib/media/serviceTagOptions'
 
 import type {
   ProPortfolioNudgeBlock,
@@ -18,6 +22,7 @@ import type {
 
 type Props = {
   tile: ProPortfolioTile | null
+  serviceOptions: ServiceTagOption[]
   onClose: () => void
 }
 
@@ -30,31 +35,47 @@ type Props = {
  * Retract is reached from manage, because taking something down should cost one
  * more deliberate tap than putting it up.
  */
-export default function ProPortfolioSheets({ tile, onClose }: Props) {
+export default function ProPortfolioSheets({ tile, serviceOptions, onClose }: Props) {
   // Keyed by tile id so the manage→retract step resets when a different photo
   // is opened, without an effect that writes state during render.
   return tile ? (
-    <SheetForTile key={tile.id} tile={tile} onClose={onClose} />
+    <SheetForTile
+      key={tile.id}
+      tile={tile}
+      serviceOptions={serviceOptions}
+      onClose={onClose}
+    />
   ) : null
 }
 
 function SheetForTile({
   tile,
+  serviceOptions,
   onClose,
 }: {
   tile: ProPortfolioTile
+  serviceOptions: ServiceTagOption[]
   onClose: () => void
 }) {
   const [retracting, setRetracting] = useState(false)
 
-  if (tile.hold) return <ConsentSheet tile={tile} onClose={onClose} />
-  if (tile.publishedAt === null) return <PublishSheet tile={tile} onClose={onClose} />
+  if (tile.hold) {
+    return (
+      <ConsentSheet tile={tile} serviceOptions={serviceOptions} onClose={onClose} />
+    )
+  }
+  if (tile.publishedAt === null) {
+    return (
+      <PublishSheet tile={tile} serviceOptions={serviceOptions} onClose={onClose} />
+    )
+  }
 
   return retracting ? (
     <RetractSheet tile={tile} onClose={onClose} onKeep={() => setRetracting(false)} />
   ) : (
     <ManageSheet
       tile={tile}
+      serviceOptions={serviceOptions}
       onClose={onClose}
       onRetract={() => setRetracting(true)}
     />
@@ -145,7 +166,15 @@ function SheetHead({
  * two independent toggles (as the old edit modal did) is a lie the pro has to
  * unlearn the first time they use it.
  */
-function PublishSheet({ tile, onClose }: { tile: ProPortfolioTile; onClose: () => void }) {
+function PublishSheet({
+  tile,
+  serviceOptions,
+  onClose,
+}: {
+  tile: ProPortfolioTile
+  serviceOptions: ServiceTagOption[]
+  onClose: () => void
+}) {
   const router = useRouter()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -222,7 +251,173 @@ function PublishSheet({ tile, onClose }: { tile: ProPortfolioTile; onClose: () =
       <p className="mt-[11px] text-center text-[12px] text-textMuted">
         You can take it back down any time.
       </p>
+
+      <TileEditor tile={tile} serviceOptions={serviceOptions} onDone={onClose} />
     </Sheet>
+  )
+}
+
+/**
+ * Editing the ASSET — caption, service tags, before/after pairing — plus the one
+ * irreversible action, folded into whichever sheet the tile opened.
+ *
+ * This is what "My media" used to be a whole separate screen for. Splitting it
+ * off meant a pro fixed a caption somewhere other than the library that shows
+ * the caption; worse, the two screens disagreed about what a photo even was
+ * (that one drew two independent visibility toggles the server welds together).
+ *
+ * 🔴 It offers no visibility control of its own. Public-vs-private is the
+ * publish / make-private act above it, and the shared editor never sends the
+ * flags — so saving a caption here cannot silently change where a photo appears.
+ *
+ * Collapsed by default: the sheet's first job is the decision it was opened for.
+ */
+function TileEditor({
+  tile,
+  serviceOptions,
+  onDone,
+}: {
+  tile: ProPortfolioTile
+  serviceOptions: ServiceTagOption[]
+  onDone: () => void
+}) {
+  const router = useRouter()
+  const [open, setOpen] = useState(false)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+
+  const edit = useProMediaEdit({
+    mediaId: tile.id,
+    initial: {
+      caption: tile.caption,
+      serviceIds: tile.serviceIds,
+      beforeAssetId: tile.beforeAssetId,
+    },
+    serviceOptions,
+    isVideo: tile.isVideo,
+    active: open,
+  })
+
+  const save = async () => {
+    const ok = await edit.save()
+    if (!ok) return
+    onDone()
+    router.refresh()
+  }
+
+  const remove = async () => {
+    const ok = await edit.remove()
+    if (!ok) return
+    onDone()
+    router.refresh()
+  }
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className={cn(
+          'brand-focus mt-3 flex h-[42px] w-full items-center justify-center rounded-[14px]',
+          'border border-textPrimary/10 bg-textPrimary/5 text-[13px] font-bold text-textSecondary',
+          'transition hover:border-textPrimary/25 hover:text-textPrimary',
+        )}
+      >
+        Edit details
+      </button>
+    )
+  }
+
+  return (
+    <section className="mt-4 border-t border-textPrimary/10 pt-4" aria-label="Edit details">
+      <ProMediaEditFields edit={edit} />
+
+      <div className="mt-4 flex gap-2">
+        <button
+          type="button"
+          onClick={() => {
+            if (edit.saving) return
+            setOpen(false)
+            setConfirmingDelete(false)
+            edit.setError(null)
+          }}
+          disabled={edit.saving}
+          className={cn(
+            'brand-focus flex h-[46px] flex-1 items-center justify-center rounded-[14px]',
+            'border border-textPrimary/10 bg-textPrimary/5 text-[13.5px] font-bold text-textPrimary',
+            'transition',
+            edit.saving ? 'cursor-not-allowed opacity-70' : 'hover:border-textPrimary/25',
+          )}
+        >
+          Cancel
+        </button>
+
+        <button
+          type="button"
+          onClick={save}
+          disabled={!edit.canSave}
+          title={!edit.hasService ? 'Attach at least 1 service' : undefined}
+          className={cn(
+            'brand-focus flex h-[46px] flex-1 items-center justify-center rounded-[14px]',
+            'bg-accentPrimary text-[13.5px] font-bold text-onAccent transition',
+            !edit.canSave ? 'cursor-not-allowed opacity-70' : 'hover:bg-accentPrimaryHover',
+          )}
+        >
+          {edit.saving ? 'Saving…' : 'Save changes'}
+        </button>
+      </div>
+
+      {/* Deleting is the one thing here that cannot be undone, so it costs a
+          second deliberate tap — the same shape as taking a photo down. */}
+      {confirmingDelete ? (
+        <div className="mt-4 rounded-[16px] border border-toneDanger/30 bg-toneDanger/10 p-[14px_15px]">
+          <p className="text-[13px] font-semibold leading-relaxed text-textPrimary">
+            Delete this photo for good?
+          </p>
+          <p className="mt-1 text-[12.5px] leading-relaxed text-textMuted">
+            It leaves your library, your profile and anywhere a client saved it.
+            This cannot be undone.
+          </p>
+          <div className="mt-3 flex gap-2">
+            <button
+              type="button"
+              onClick={() => setConfirmingDelete(false)}
+              disabled={edit.saving}
+              className={cn(
+                'brand-focus flex h-[42px] flex-1 items-center justify-center rounded-[12px]',
+                'border border-textPrimary/10 bg-textPrimary/5 text-[13px] font-bold text-textPrimary',
+                edit.saving ? 'cursor-not-allowed opacity-70' : 'hover:border-textPrimary/25',
+              )}
+            >
+              Keep it
+            </button>
+            <button
+              type="button"
+              onClick={remove}
+              disabled={edit.saving}
+              className={cn(
+                'brand-focus flex h-[42px] flex-1 items-center justify-center rounded-[12px]',
+                'bg-toneDanger text-[13px] font-bold text-onAccent transition',
+                edit.saving ? 'cursor-not-allowed opacity-70' : 'hover:opacity-90',
+              )}
+            >
+              {edit.saving ? 'Deleting…' : 'Delete for good'}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setConfirmingDelete(true)}
+          className={cn(
+            'brand-focus mt-3 flex h-[42px] w-full items-center justify-center rounded-[14px]',
+            'border border-toneDanger/25 text-[13px] font-bold text-toneDanger',
+            'transition hover:border-toneDanger/50',
+          )}
+        >
+          Delete this photo
+        </button>
+      )}
+    </section>
   )
 }
 
@@ -247,7 +442,15 @@ function Destination({ title, body }: { title: string; body: string }) {
  * product "ask for permission" and "send the aftercare again" are the same act.
  * The frame drew them as two buttons; two buttons for one action would be a lie.
  */
-function ConsentSheet({ tile, onClose }: { tile: ProPortfolioTile; onClose: () => void }) {
+function ConsentSheet({
+  tile,
+  serviceOptions,
+  onClose,
+}: {
+  tile: ProPortfolioTile
+  serviceOptions: ServiceTagOption[]
+  onClose: () => void
+}) {
   const hold = tile.hold
   const [busy, setBusy] = useState(false)
   const [sent, setSent] = useState(false)
@@ -336,6 +539,11 @@ function ConsentSheet({ tile, onClose }: { tile: ProPortfolioTile; onClose: () =
       <p className="mt-3 text-center text-[12px] leading-snug text-textMuted">
         Nothing is public until {hold.clientFirstName} allows it.
       </p>
+
+      {/* Editing an asset is not publishing it. A held photo's caption and
+          service tags are the pro's own, and getting them right while waiting
+          on the client is exactly when they'd want to. */}
+      <TileEditor tile={tile} serviceOptions={serviceOptions} onDone={onClose} />
     </Sheet>
   )
 }
@@ -350,10 +558,12 @@ function ConsentSheet({ tile, onClose }: { tile: ProPortfolioTile; onClose: () =
  */
 function ManageSheet({
   tile,
+  serviceOptions,
   onClose,
   onRetract,
 }: {
   tile: ProPortfolioTile
+  serviceOptions: ServiceTagOption[]
   onClose: () => void
   onRetract: () => void
 }) {
@@ -421,6 +631,8 @@ function ManageSheet({
       >
         Make private — take it off my profile
       </button>
+
+      <TileEditor tile={tile} serviceOptions={serviceOptions} onDone={onClose} />
     </Sheet>
   )
 }

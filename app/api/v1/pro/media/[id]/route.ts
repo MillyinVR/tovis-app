@@ -81,8 +81,19 @@ export async function PATCH(req: Request, ctx: RouteContext) {
 
     const body = (await req.json().catch(() => ({}))) as Record<string, unknown>
 
+    // 🔴 Only written when the body carries the key. This used to write
+    // `caption` unconditionally, so a PATCH that omitted it resolved to `null`
+    // and silently WIPED the caption — which every partial save does: a sheet
+    // that only re-tags services, or only re-pairs a before/after, sends
+    // neither caption nor flags. The flags below were already conditional; the
+    // caption was the one field a partial write destroyed.
+    const captionProvided = Object.prototype.hasOwnProperty.call(body, 'caption')
     const captionRaw = body.caption
-    const caption = captionRaw === null ? null : (pickString(captionRaw) ?? null)
+    const caption = !captionProvided
+      ? undefined
+      : captionRaw === null
+        ? null
+        : (pickString(captionRaw) ?? null)
 
     const looksPatch = pickBool(body.isEligibleForLooks)
     const portfolioPatch = pickBool(body.isFeaturedInPortfolio)
@@ -156,7 +167,7 @@ export async function PATCH(req: Request, ctx: RouteContext) {
     }
 
     const data: Parameters<typeof prisma.mediaAsset.update>[0]['data'] = {
-      caption,
+      ...(caption === undefined ? {} : { caption }),
       visibility: nextVisibility,
       ...(looksPatch === null ? {} : { isEligibleForLooks: looksPatch }),
       ...(portfolioPatch === null ? {} : { isFeaturedInPortfolio: portfolioPatch }),

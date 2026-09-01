@@ -19,7 +19,10 @@
 
 import type { MediaType } from '@prisma/client'
 
+import { PRO_PUBLIC_PROFILE_PATH } from '@/lib/routes'
+
 import type { PairedBeforeDto } from '@/lib/media/pairedBefore'
+import type { ServiceTagOption } from '@/lib/media/serviceTagOptions'
 
 /**
  * The zone a photo sits in. This carries public-vs-private INSTEAD of a badge —
@@ -105,6 +108,14 @@ export type ProPortfolioTile = {
   serviceIds: string[]
   /** Opt-in before/after pairing → the tile renders a comparison slider. */
   before: PairedBeforeDto | null
+  /**
+   * The stored pairing, which is NOT the same fact as `before`: that one is
+   * null whenever the paired row can't be rendered as a slider (a video
+   * "after", an unreadable asset), while this is the column the editor's
+   * picker must reflect. Selecting `before.id` instead would show "None" over
+   * a pairing that exists.
+   */
+  beforeAssetId: string | null
   /** The pro's own decision, if any. At most one chip. */
   mark: ProPortfolioMark | null
   /** Set only on PUBLIC tiles. */
@@ -152,6 +163,21 @@ export type ProPortfolioFilterKey =
   | 'VIDEO'
   | 'UPLOADS'
   | 'SESSIONS'
+
+/** Narrows a raw query value to a filter key — used by the search box. */
+export function isProPortfolioFilterKey(
+  value: string | null | undefined,
+): value is ProPortfolioFilterKey {
+  return (
+    value === 'ALL' ||
+    value === 'PUBLIC' ||
+    value === 'PRIVATE' ||
+    value === 'WAITING' ||
+    value === 'VIDEO' ||
+    value === 'UPLOADS' ||
+    value === 'SESSIONS'
+  )
+}
 
 export type ProPortfolioFilter = {
   key: ProPortfolioFilterKey
@@ -216,16 +242,50 @@ export type ProPortfolioPageModel = {
    * unreachable on every viewport.
    */
   publicProfileHref: string | null
+
+  /**
+   * The taggable service taxonomy the tile editor offers. Loaded with the page
+   * (one query, `loadServiceTagOptions`) rather than fetched per opened sheet,
+   * and drawn from the SAME query the PATCH validates `serviceIds` against.
+   */
+  serviceOptions: ServiceTagOption[]
 }
 
 export type ProPortfolioRoutes = {
+  /**
+   * Where the library actually lives: the pro's own profile, portfolio tab.
+   *
+   * 🔴 The VALUE moved; the KEY must not. It no longer points at
+   * `/pro/portfolio` — that route was the merged library and nothing in the app
+   * ever linked to it (not the header tabs, not the footer, not the account
+   * menu, not the profile), so the only pros who could reach it were the ones
+   * with `/pro/media` in muscle memory riding its redirect. The grid belongs on
+   * the profile, and `/pro/portfolio` now redirects there.
+   *
+   * Renaming this key to `library` would break every shipped iOS build:
+   * `ProLibraryRoutes.portfolio` in TovisKit is a non-optional `String`, so a
+   * missing key fails the whole decode and the native library screen goes dark.
+   */
   portfolio: string
   uploadNew: string
   proHome: string
 }
 
+/** The library tab's own href, optionally narrowed by filter/search. */
+export function proLibraryHref(params?: {
+  filter?: ProPortfolioFilterKey
+  q?: string | null
+}): string {
+  const search = new URLSearchParams({ tab: 'portfolio' })
+  if (params?.filter && params.filter !== 'ALL') search.set('filter', params.filter)
+  const q = params?.q?.trim()
+  if (q) search.set('q', q)
+
+  return `${PRO_PUBLIC_PROFILE_PATH}?${search.toString()}`
+}
+
 export const PRO_PORTFOLIO_ROUTES: ProPortfolioRoutes = {
-  portfolio: '/pro/portfolio',
+  portfolio: proLibraryHref(),
   uploadNew: '/pro/media/new',
   proHome: '/pro',
 }

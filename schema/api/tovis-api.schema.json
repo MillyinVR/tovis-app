@@ -18091,6 +18091,13 @@
             "null"
           ]
         },
+        "serviceOptions": {
+          "description": "The taggable service taxonomy the tile editor offers. Loaded with the page (one query, `loadServiceTagOptions`) rather than fetched per opened sheet, and drawn from the SAME query the PATCH validates `serviceIds` against.",
+          "items": {
+            "$ref": "#/definitions/ServiceTagOption"
+          },
+          "type": "array"
+        },
         "showSearch": {
           "description": "Search only earns its place once the library is large.",
           "type": "boolean"
@@ -18117,13 +18124,15 @@
         "lead",
         "groups",
         "isBlank",
-        "publicProfileHref"
+        "publicProfileHref",
+        "serviceOptions"
       ],
       "type": "object"
     },
     "ProPortfolioRoutes": {
       "properties": {
         "portfolio": {
+          "description": "Where the library actually lives: the pro's own profile, portfolio tab.\n\n🔴 The VALUE moved; the KEY must not. It no longer points at `/pro/portfolio` — that route was the merged library and nothing in the app ever linked to it (not the header tabs, not the footer, not the account menu, not the profile), so the only pros who could reach it were the ones with `/pro/media` in muscle memory riding its redirect. The grid belongs on the profile, and `/pro/portfolio` now redirects there.\n\nRenaming this key to `library` would break every shipped iOS build: `ProLibraryRoutes.portfolio` in TovisKit is a non-optional `String`, so a missing key fails the whole decode and the native library screen goes dark.",
           "type": "string"
         },
         "proHome": {
@@ -18152,6 +18161,13 @@
             }
           ],
           "description": "Opt-in before/after pairing → the tile renders a comparison slider."
+        },
+        "beforeAssetId": {
+          "description": "The stored pairing, which is NOT the same fact as `before`: that one is null whenever the paired row can't be rendered as a slider (a video \"after\", an unreadable asset), while this is the column the editor's picker must reflect. Selecting `before.id` instead would show \"None\" over a pairing that exists.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "caption": {
           "type": [
@@ -18226,6 +18242,7 @@
         "mediaType",
         "serviceIds",
         "before",
+        "beforeAssetId",
         "mark",
         "engagement",
         "hold",
@@ -20644,6 +20661,22 @@
     },
     "ServiceLocationType": {
       "$ref": "#/definitions/%24Enums.ServiceLocationType"
+    },
+    "ServiceTagOption": {
+      "description": "One taggable service, in the shape the editor's picker renders.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "type": "object"
     },
     "SessionBooking": {
       "properties": {

@@ -13,6 +13,7 @@ import OwnerMediaMenu from '@/app/_components/media/OwnerMediaMenu'
 import { UI_SIZES } from '@/app/(main)/ui/layoutConstants'
 import { getCurrentUser } from '@/lib/currentUser'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
+import { loadServiceTagOptions } from '@/lib/media/serviceTagOptions'
 import { pickString } from '@/lib/pick'
 import { prisma } from '@/lib/prisma'
 import { pickServiceTagNames } from '@/lib/profiles/publicProfileMappers'
@@ -120,12 +121,7 @@ export default async function MediaDetailPage({ params }: PageProps) {
 
   const [serviceOptions, ownerProfile] = isOwner
     ? await Promise.all([
-        prisma.service.findMany({
-          where: { isActive: true },
-          orderBy: { name: 'asc' },
-          take: 500,
-          select: { id: true, name: true },
-        }),
+        loadServiceTagOptions(),
         // §18d — is this media the owner's current cover banner?
         prisma.professionalProfile.findUnique({
           where: { id: media.professionalId },

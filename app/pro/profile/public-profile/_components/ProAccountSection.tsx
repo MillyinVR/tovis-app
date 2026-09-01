@@ -12,7 +12,6 @@ import {
   LogOut,
   Star,
   Trash2,
-  TrendingUp,
   Users,
   type LucideIcon,
 } from 'lucide-react'
@@ -48,8 +47,11 @@ const ACCOUNT_ROWS: NavRow[] = [
   },
 ]
 
+// 🔴 "Your Looks performance" is NOT a row here any more — it is the Looks stat
+// tile in the header, next to the number it explains. Anything that removes
+// that link must put `/pro/dashboard` somewhere else first: this row was, for a
+// while, the only navigation to the dashboard in the entire product.
 const GROWTH_ROWS: NavRow[] = [
-  { label: 'Your Looks performance', href: '/pro/dashboard', Icon: TrendingUp },
   { label: 'Referral activity', href: '/pro/referral-rewards', Icon: Gift },
   { label: 'Membership', href: '/pro/membership', Icon: Star },
 ]

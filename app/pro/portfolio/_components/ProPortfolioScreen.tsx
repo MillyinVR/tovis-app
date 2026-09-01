@@ -11,11 +11,13 @@ import { formatCompactCount } from '@/lib/format/compactCount'
 
 import ProPortfolioSheets from './ProPortfolioSheets'
 import ProPortfolioTileCard from './ProPortfolioTile'
-import type {
-  ProPortfolioFilter,
-  ProPortfolioGroup,
-  ProPortfolioPageModel,
-  ProPortfolioTile,
+import {
+  isProPortfolioFilterKey,
+  proLibraryHref,
+  type ProPortfolioFilter,
+  type ProPortfolioGroup,
+  type ProPortfolioPageModel,
+  type ProPortfolioTile,
 } from '../_data/proPortfolioTypes'
 
 export default function ProPortfolioScreen({
@@ -27,7 +29,7 @@ export default function ProPortfolioScreen({
 
   return (
     /* 🔴 A <section>, not a <main>. `app/pro/layout` already renders the page's
-       <main>, so this nested a second landmark inside it on every pro route.
+       <main>, and this now renders INSIDE the profile page's own scroll shell.
 
        And no two-column grid. `.brand-pro-layout-main > *` caps every child at
        --mobile-shell-width (430px) unless a screen opts out by name the way
@@ -36,77 +38,19 @@ export default function ProPortfolioScreen({
        every desktop width. Measured 1440/1280/1024/820/768: identical. The side
        rail was the designer's own first thing to cut if the screen fought
        itself, and this is the screen fighting itself. */
-    <section
-      aria-labelledby="pro-portfolio-title"
-      className="w-full px-4 pb-24 pt-6"
-    >
-      <header className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <div className="brand-cap text-[10px] text-accentPrimary">My work</div>
-          <h1
-            id="pro-portfolio-title"
-            className="mt-2 font-display text-[27px] font-bold tracking-[-0.035em] text-textPrimary"
-          >
-            {model.title}
-          </h1>
-          <p className="mt-[7px] max-w-[520px] text-[13.5px] leading-relaxed text-textMuted">
-            {model.subtitle}
-          </p>
-        </div>
+    /* The inset matches its sibling tabs exactly (`.brand-pro-profile-services`
+       and `.brand-pro-profile-reviews` are both `padding: 16px 16px 40px`). The
+       shell itself has no horizontal padding — every section supplies its own —
+       so without this the grid ran edge to edge under an inset tab row. */
+    <section aria-label="Your work" className="w-full px-4 pb-10 pt-4">
+      {/* The page title, the avatar, the stats and the Upload button all live
+          in the profile header directly above this. Repeating them here is what
+          made the old standalone screen read as a second, rival profile. */}
+      <p className="text-[13px] leading-relaxed text-textMuted">
+        {model.subtitle}
+      </p>
 
-        <div className="flex flex-none flex-col items-stretch gap-2">
-          <Link
-            href={model.routes.uploadNew}
-            className={cn(
-              'brand-focus inline-flex h-10 items-center justify-center gap-2 rounded-[14px] px-[14px]',
-              'border border-textPrimary/10 bg-textPrimary/5 text-[13.5px] font-bold text-textPrimary',
-              'transition hover:border-textPrimary/25',
-            )}
-          >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.2"
-              strokeLinecap="round"
-              aria-hidden="true"
-            >
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-            Upload
-          </Link>
-
-          {/* Was rail-only, and the rail never rendered — so on every viewport
-              the pro had no way from here to the page this screen describes. */}
-          {model.publicProfileHref ? (
-            <Link
-              href={model.publicProfileHref}
-              className={cn(
-                'brand-focus inline-flex h-9 items-center justify-center gap-1.5 rounded-[12px] px-3',
-                'text-[12.5px] font-bold text-textSecondary transition hover:text-textPrimary',
-              )}
-            >
-              View profile
-              <svg
-                width="13"
-                height="13"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-                aria-hidden="true"
-              >
-                <path d="M9 6l6 6-6 6" />
-              </svg>
-            </Link>
-          ) : null}
-        </div>
-      </header>
-
-      <div className="mt-[22px]">
+      <div className="mt-[18px]">
         <div className="min-w-0">
           {model.showSearch ? <SearchBox initial={model.searchQuery} /> : null}
 
@@ -160,7 +104,11 @@ export default function ProPortfolioScreen({
         </div>
       </div>
 
-      <ProPortfolioSheets tile={openTile} onClose={() => setOpenTile(null)} />
+      <ProPortfolioSheets
+        tile={openTile}
+        serviceOptions={model.serviceOptions}
+        onClose={() => setOpenTile(null)}
+      />
     </section>
   )
 }
@@ -233,11 +181,9 @@ function ShowMoreLink({
   zone: ProPortfolioGroup['zone']
   remaining: number
 }) {
-  const filter = zone
-
   return (
     <Link
-      href={`/pro/portfolio?filter=${filter}`}
+      href={proLibraryHref({ filter: zone })}
       className={cn(
         'brand-focus mt-3 flex h-[42px] w-full items-center justify-center rounded-[14px]',
         'border border-textPrimary/10 bg-textPrimary/5 text-[13.5px] font-bold text-textPrimary',
@@ -265,11 +211,7 @@ function FilterRow({ filters }: { filters: ProPortfolioFilter[] }) {
           type="button"
           aria-pressed={filter.active}
           onClick={() =>
-            router.push(
-              filter.key === 'ALL'
-                ? '/pro/portfolio'
-                : `/pro/portfolio?filter=${filter.key}`,
-            )
+            router.push(proLibraryHref({ filter: filter.key }))
           }
           className={cn(
             'brand-focus inline-flex h-8 flex-none items-center gap-1.5 rounded-[10px] px-3',
@@ -293,10 +235,14 @@ function SearchBox({ initial }: { initial: string | null }) {
   const [value, setValue] = useState(initial ?? '')
 
   const submit = (next: string) => {
-    const search = new URLSearchParams(params?.toString() ?? '')
-    if (next.trim()) search.set('q', next.trim())
-    else search.delete('q')
-    router.push(`/pro/portfolio${search.size ? `?${search}` : ''}`)
+    // Preserve whatever filter the pro is already standing in; only `q` moves.
+    const current = params?.get('filter')
+    router.push(
+      proLibraryHref({
+        filter: isProPortfolioFilterKey(current) ? current : undefined,
+        q: next,
+      }),
+    )
   }
 
   return (
