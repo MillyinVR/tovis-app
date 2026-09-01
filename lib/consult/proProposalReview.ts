@@ -243,6 +243,7 @@ const PROPOSAL_REVIEW_SELECT = {
     select: {
       estimateLineId: true,
       serviceId: true,
+      offeringId: true,
       serviceName: true,
       source: true,
       price: true,
@@ -280,6 +281,7 @@ function toReviewLineDTO(
   return {
     estimateLineId: line.estimateLineId,
     serviceId: line.serviceId,
+    offeringId: line.offeringId,
     serviceName: line.serviceName,
     source: line.source as ConsultServiceEstimateLineSource,
     // An estimate line that has gone missing would mean the estimate was

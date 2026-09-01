@@ -7,6 +7,7 @@ import {
   rateLimitIdentity,
   tokenRateLimitIdentity,
 } from '@/app/api/_utils/rateLimit'
+import { deriveConsultRevisionState } from '@/lib/consult/inChairRevision'
 import { asTrimmedString } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 import {
@@ -105,6 +106,12 @@ export async function GET(_request: Request, ctx: RouteContext<{ token: string }
             locationType: true,
             locationTimeZone: true,
             clientTimeZoneAtBooking: true,
+            // B6 — the figures the client committed to, so the revision notice
+            // can be judged against them on this surface exactly as it is on
+            // her signed-in booking page.
+            consultBookingProposal: {
+              select: { startingAtPrice: true, totalDurationMinutes: true },
+            },
             service: {
               select: {
                 id: true,
@@ -273,6 +280,27 @@ export async function GET(_request: Request, ctx: RouteContext<{ token: string }
           revokedAt: asIso(token.revokedAt),
           revokeReason: token.revokeReason,
         },
+        // Book the Look, B6 — has the pro's number moved past the revision
+        // threshold? Derived on the SERVER from the same rows the signed-in
+        // page uses, so the emailed link and her booking page cannot describe
+        // one change two ways. Null on every ordinary consultation.
+        //
+        // Neither surface offers a cancel BUTTON — a client cannot cancel a
+        // started appointment (IN_PROGRESS → CANCELLED is admin-only under the
+        // M8 lifecycle contract), so the notice names the escape that works.
+        // See the header of app/client/_components/ConsultRevisionNotice.tsx.
+        revision:
+          deriveConsultRevisionState({
+            id: token.booking.id,
+            clientId: token.booking.client.id,
+            consultBookingProposal: token.booking.consultBookingProposal,
+            consultationApproval: {
+              id: approval.id,
+              status: approval.status,
+              proposedTotal: approval.proposedTotal,
+              proposedServicesJson: approval.proposedServicesJson,
+            },
+          })?.notice ?? null,
         actionState: {
           canApproveOrReject,
           isExpired: token.expiresAt.getTime() <= now.getTime(),

@@ -1,0 +1,17 @@
+-- Book the Look, B6 — in-chair finalization.
+--
+-- CONSULTATION_DECLINE_DEPOSIT_DECIDED records the pro's explicit answer to
+-- "your client declined the number — what happens to her deposit?" (Tori,
+-- 2026-08-31: the pro decides each time, and the choice is recorded with who
+-- made it and which way it went).
+--
+-- It is deliberately its OWN action rather than metadata on
+-- CONSULTATION_REJECTED. That row is the CLIENT's decision; this one is the
+-- PRO's, made afterwards, and money hangs off it — the two must be separately
+-- queryable, and the table's @@unique([bookingId, action, idempotencyKey]) is
+-- what makes this one answerable only once per booking.
+--
+-- Additive enum value. Postgres allows ALTER TYPE … ADD VALUE inside a
+-- transaction block (PG 12+) provided the value is not USED in the same
+-- transaction — nothing here uses it.
+ALTER TYPE "BookingCloseoutAuditAction" ADD VALUE IF NOT EXISTS 'CONSULTATION_DECLINE_DEPOSIT_DECIDED';

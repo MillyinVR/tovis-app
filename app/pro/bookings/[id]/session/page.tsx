@@ -18,6 +18,7 @@ import {
 import ConsultationForm, {
   type ConsultationInitialItem,
 } from '../ConsultationForm'
+import ConsultDeclineDepositChoice from './_components/ConsultDeclineDepositChoice'
 import PendingActionButton from './PendingActionButton'
 import ElapsedTimer from './_components/ElapsedTimer'
 import MarkPaidButton from './MarkPaidButton'
@@ -52,6 +53,19 @@ import {
   sessionHubHref,
 } from '@/lib/proSession/sessionFlow'
 import { formatCents, moneyToFixed2String, type MoneyInput } from '@/lib/money'
+import {
+  buildConsultationItemsFromProposalJson,
+  buildInChairConsultationItems,
+  inChairConsultationInitialPrice,
+} from '@/lib/consult/inChairFinalization'
+import {
+  loadAuthorizedProProposalReview,
+  ProProposalReviewError,
+} from '@/lib/consult/proProposalReview'
+import {
+  loadConsultDeclineDepositState,
+  type ConsultDeclineDepositState,
+} from '@/lib/consult/inChairDeclineOutcome'
 import {
   DEPOSIT_CREDIT_SELECT,
   deriveDepositCredit,
@@ -695,6 +709,8 @@ function ConsultationView({
   initialNotes,
   initialPrice,
   initialItems,
+  showSeedNote,
+  declineDeposit,
   totalLabel,
   durationLabel,
   consultRejected,
@@ -710,6 +726,10 @@ function ConsultationView({
   initialNotes: string
   initialPrice: string
   initialItems: ConsultationInitialItem[]
+  /** B6 — the form is opened on the consult's own lines; say so. */
+  showSeedNote: boolean
+  /** B6 — the deposit question a decline in the chair leaves open, or null. */
+  declineDeposit: ConsultDeclineDepositState | null
   totalLabel: string
   durationLabel: string
   consultRejected: boolean
@@ -791,6 +811,28 @@ function ConsultationView({
                     </>
                   ) : null}
                   . Update the proposal and resend it when ready.
+                </div>
+
+                {declineDeposit ? (
+                  <ConsultDeclineDepositChoice
+                    bookingId={bookingId}
+                    depositChargeCents={declineDeposit.depositChargeCents}
+                    decidedChoice={declineDeposit.decidedChoice}
+                  />
+                ) : null}
+              </SessionCard>
+            </div>
+          ) : null}
+
+          {showSeedNote ? (
+            <div className="mb-3">
+              <SessionCard>
+                <div className="brand-pro-session-section-title">
+                  {COPY.consultInChair.seedTitle}
+                </div>
+
+                <div className="brand-pro-session-card-body">
+                  {COPY.consultInChair.seedBody}
                 </div>
               </SessionCard>
             </div>
@@ -1602,6 +1644,7 @@ export default async function ProBookingSessionPage(props: PageProps) {
         select: {
           status: true,
           proposedTotal: true,
+          proposedServicesJson: true,
           notes: true,
           approvedAt: true,
           rejectedAt: true,
@@ -1659,9 +1702,31 @@ export default async function ProBookingSessionPage(props: PageProps) {
   const durationLabel =
     durationMinutes > 0 ? `${durationMinutes} min` : 'Duration TBD'
 
+  // ── Book the Look, B6 ────────────────────────────────────────────────────
+  // The pro's own review of what this client committed to (B5, #1046). Read
+  // ONCE, here, because two things below depend on it: the TOTAL card and the
+  // consultation form's seed. Founder-gated exactly as B5's surface is —
+  // `HIDDEN` means this pro is not in the pilot, which is not an error on a
+  // page with plenty else to render, so every reader falls back.
+  const proposalReview = await loadAuthorizedProProposalReview({
+    professionalId,
+    bookingId: booking.id,
+  }).catch((error: unknown) => {
+    if (error instanceof ProProposalReviewError) return null
+    throw error
+  })
+
+  // On a look-anchored booking the booking's OWN total is the floor
+  // offering's price, which is the one number on this screen that nobody
+  // agreed to: not what the client committed to and not what the pro is about
+  // to send. Seen in a browser as "TOTAL $180.00" above a form footing at $285
+  // on a booking the client took at $225. The proposal's `startingAtPrice` —
+  // the figure a person was shown and said yes to — sits between the two
+  // existing fallbacks, so an ordinary booking is untouched.
   const totalLabel =
     firstMoneyLabel(
       booking.consultationApproval?.proposedTotal,
+      proposalReview?.startingAtPrice,
       booking.totalAmount,
       booking.subtotalSnapshot,
     ) || '—'
@@ -1691,16 +1756,61 @@ export default async function ProBookingSessionPage(props: PageProps) {
   const depositCreditLabel =
     depositCredit.creditCents > 0 ? formatCents(depositCredit.creditCents) : null
 
-  const initialPrice = firstMoneyText(
-    booking.consultationApproval?.proposedTotal,
-    booking.totalAmount,
-    booking.subtotalSnapshot,
+  // ── What the in-chair consultation form OPENS ON ─────────────────────────
+  //
+  // Decision 8: the pro adjusts prices per her recommendation and sends the
+  // consultation for approval. She must not retype numbers she has already
+  // given, so the form is seeded, in this order of recency:
+  //
+  //   1. THE PROPOSAL SHE ALREADY SENT, when one exists. It is the most recent
+  //      answer and it is the one the client is looking at.
+  //   2. THE CONSULT'S OWN LINES, corrected by her B5 review, when this booking
+  //      came from a look. Load-bearing, not a nicety: such a booking carries
+  //      exactly ONE BookingServiceItem — the floor offering — so without this
+  //      the whole look collapses to its cheapest line the moment she opens the
+  //      form (see lib/consult/inChairFinalization.ts).
+  //   3. The booking's own service items — every ordinary booking, unchanged.
+  const sentProposalItems = buildConsultationItemsFromProposalJson(
+    booking.consultationApproval?.proposedServicesJson ?? null,
   )
+
+  // Kept as one object so the lines and the total are decided together: a form
+  // seeded from the consult whose TOTAL came from somewhere else is exactly the
+  // drift this slice exists to remove. An empty line list is treated as no seed
+  // at all rather than as a form with no services on it.
+  const consultSeed =
+    proposalReview && proposalReview.lines.length > 0
+      ? {
+          items: buildInChairConsultationItems(proposalReview),
+          price: inChairConsultationInitialPrice(proposalReview),
+        }
+      : null
+
+  const initialPrice =
+    firstMoneyText(booking.consultationApproval?.proposedTotal) ||
+    consultSeed?.price ||
+    firstMoneyText(booking.totalAmount, booking.subtotalSnapshot)
 
   const initialNotes =
     booking.consultationApproval?.notes ?? booking.consultationNotes ?? ''
 
-  const initialItems = buildInitialConsultationItems(booking.serviceItems)
+  const initialItems =
+    sentProposalItems ??
+    consultSeed?.items ??
+    buildInitialConsultationItems(booking.serviceItems)
+
+  // Only when the numbers on the form came from the consult AND she has not
+  // sent anything yet — the one state in which she needs telling where they
+  // came from. Once she has sent a proposal, the form is showing her own.
+  const showInChairSeedNote = !sentProposalItems && consultSeed !== null
+
+  // B6 — a client who declined in the chair leaves ONE question open: her
+  // deposit. Asked only of look-anchored bookings that actually hold money, and
+  // answered only once (lib/consult/inChairDeclineOutcome.ts).
+  const declineDepositState = await loadConsultDeclineDepositState({
+    bookingId: booking.id,
+    professionalId,
+  })
 
   const consultationProof = booking.consultationApproval?.proof ?? null
   const hasConsultationProof = Boolean(consultationProof?.id)
@@ -1868,6 +1978,8 @@ export default async function ProBookingSessionPage(props: PageProps) {
           subtitle={subtitle}
           bookingStatus={bookingStatus}
           approvalStatus={approvalStatus}
+          showSeedNote={showInChairSeedNote}
+          declineDeposit={declineDepositState}
           effectiveStep={effectiveStep}
           initialNotes={initialNotes}
           initialPrice={initialPrice}
