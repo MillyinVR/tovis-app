@@ -54,6 +54,8 @@ export type BookingErrorCode =
   | "CLIENT_NOT_FOUND"
   | "CONSULT_NOT_FOUND"
   | "CONSULT_UNAVAILABLE"
+  | "CONSULT_PROPOSAL_UNAVAILABLE"
+  | "CONSULT_PROPOSAL_OFFERING_MISMATCH"
   | "MISSING_MEDIA_ID"
   | "OPENING_NOT_AVAILABLE"
   | "BOOKING_NOT_RESCHEDULABLE"
@@ -560,6 +562,30 @@ const BOOKING_ERROR_CATALOG: Record<BookingErrorCode, BookingErrorMeta> = {
     uiAction: "NONE",
     message: "Consult is unavailable for this booking.",
     userMessage: "This consult cannot be attached to that booking.",
+  },
+  // Book the Look, B4. The estimate could not be turned into a proposal for the
+  // mode being booked — the analysis routed to safety prerequisites, the pro
+  // does not offer a line in this mode, or her menu moved since the preview.
+  // Retryable: the client's own next step is to look again (the other mode may
+  // work, and the preview endpoint names the specific reason).
+  CONSULT_PROPOSAL_UNAVAILABLE: {
+    httpStatus: 409,
+    retryable: true,
+    uiAction: "NONE",
+    message: "No bookable proposal for this consult in this mode.",
+    userMessage:
+      "This look isn’t bookable right now. Your pro will need to confirm the details first.",
+  },
+  // The hold or finalize named an offering that is not this proposal's floor —
+  // the look's own linked service. Refused rather than re-pointed: silently
+  // booking a different service than the one the slot was sized for is exactly
+  // the duration miss this slice exists to prevent.
+  CONSULT_PROPOSAL_OFFERING_MISMATCH: {
+    httpStatus: 409,
+    retryable: false,
+    uiAction: "NONE",
+    message: "Offering does not match this consult proposal.",
+    userMessage: "That service doesn’t match this consultation. Please start again.",
   },
   MISSING_MEDIA_ID: {
     httpStatus: 400,

@@ -69,7 +69,6 @@ import {
   deriveClientRelationshipLabel,
   isReturningClient,
 } from '@/lib/booking/relationshipLabel'
-import { isFinalizeConsultAttributionOwned } from '@/lib/booking/consultAttribution'
 import {
   DEPOSIT_CREDIT_SELECT,
   deriveDepositCredit,
@@ -242,11 +241,12 @@ import {
   upsertClientNotification,
 } from '@/lib/notifications/clientNotifications'
 import { maybeCreateAiConsultInvitation } from '@/lib/notifications/aiConsultInvitation'
-import { isAiConsultC6ExposureEnabledForPro } from '@/lib/consult/access'
+import { resolveConsultCommitScope } from '@/lib/consult/commitScope'
 import {
-  CONSULT_ANCHOR_SELECT,
-  evaluateConsultAnchor,
-} from '@/lib/consult/anchor'
+  persistConsultBookingProposal,
+  resolveConsultProposalForCommit,
+  type ResolvedConsultProposal,
+} from '@/lib/consult/proposalCommit'
 import {
   computeDepositReminderRunAt,
   scheduleDepositReminderOnBooking,
@@ -562,9 +562,17 @@ type CreateHoldArgs = {
   // `addOnIds`: a reschedule keeps the booking's original add-ons, which are
   // already inside its committed width.
   rescheduleBookingId?: string | null
+  // Book the Look, B4: the completed consult this hold is being placed FROM.
+  // When set, the reservation is sized by that consult's booking proposal —
+  // every estimate line's rounded duration — rather than by this offering's
+  // own default, because the appointment being reserved is the whole look and
+  // not just the one service the look is linked to (decision 11). Mutually
+  // exclusive with `addOnIds`: client-selectable enhancements are B7.
+  consultId?: string | null
   offering: {
     id: string
     professionalId: string
+    serviceCategoryId?: string | null
     offersInSalon: boolean
     offersMobile: boolean
     salonDurationMinutes: number | null
@@ -8289,6 +8297,58 @@ async function resolveRescheduleHoldDurationMinutes(args: {
 }
 
 /**
+ * Book the Look, B4 — the minutes a hold or a booking must reserve for a
+ * consult's proposal, re-derived inside the caller's transaction.
+ *
+ * The width is the SUM of every estimate line's rounded duration, not the base
+ * offering's default: the client is committing to the look, and a slot sized by
+ * its one linked service is a lie about the pro's day (decision 11).
+ *
+ * Refuses rather than falling back. A REFUSED estimate, an analysis that routed
+ * to safety prerequisites, or a mode the pro does not offer for one of the
+ * lines all produce a typed refusal — there is no salon-priced consolation
+ * number, and no base-offering-sized consolation slot.
+ */
+async function resolveConsultProposalForBookingCommit(args: {
+  tx: Prisma.TransactionClient
+  now: Date
+  consultId: string
+  clientId: string
+  professionalId: string
+  serviceCategoryId: string | null
+  offeringId: string
+  locationType: ServiceLocationType
+}): Promise<ResolvedConsultProposal | null> {
+  const resolved = await resolveConsultProposalForCommit(args.tx, {
+    consultId: args.consultId,
+    clientId: args.clientId,
+    professionalId: args.professionalId,
+    serviceCategoryId: args.serviceCategoryId,
+    locationType: args.locationType,
+    now: args.now,
+  })
+
+  if (!resolved.ok) {
+    if (resolved.kind === 'HIDDEN') throw bookingError('CONSULT_NOT_FOUND')
+    if (resolved.kind === 'INELIGIBLE') throw bookingError('CONSULT_UNAVAILABLE')
+    // A BOOKING-anchored consult (the shipped #1016 mode) has nothing to
+    // translate. `null` means "not a book-the-look commit" and the caller keeps
+    // its ordinary sizing — it is not a refusal.
+    if (resolved.kind === 'NOT_LOOK_ANCHORED') return null
+    throw bookingError('CONSULT_PROPOSAL_UNAVAILABLE')
+  }
+
+  // The offering must be the proposal's FLOOR — the look's own linked service.
+  // Re-pointing the booking at whatever was requested would silently book a
+  // different service than the slot was sized for.
+  if (resolved.proposal.floorOfferingId !== args.offeringId) {
+    throw bookingError('CONSULT_PROPOSAL_OFFERING_MISMATCH')
+  }
+
+  return resolved.proposal
+}
+
+/**
  * The minutes a hold must RESERVE for a selection of add-ons: the same
  * `base + add-ons` arithmetic finalize commits to, resolved inside the caller's
  * transaction so the numbers cannot drift between the two.
@@ -8331,6 +8391,7 @@ async function performLockedCreateHold(args: {
   bookingEntryPoint: ProBookingEntryPoint
   addOnIds: string[]
   rescheduleBookingId: string | null
+  consultId: string | null
   offering: CreateHoldArgs['offering']
   requestedStart: Date
   requestedLocationId: string | null
@@ -8344,6 +8405,7 @@ async function performLockedCreateHold(args: {
     bookingEntryPoint,
     addOnIds,
     rescheduleBookingId,
+    consultId,
     offering,
     requestedStart,
     requestedLocationId,
@@ -8360,6 +8422,26 @@ async function performLockedCreateHold(args: {
       message: 'Add-ons cannot be changed while rescheduling a booking.',
       userMessage:
         'Add-ons can’t be changed while moving this appointment. Pick a new time first.',
+    })
+  }
+
+  // Book the Look, B4. Same reasoning as the reschedule refusal above, for the
+  // same reason: two sources want to decide how much time is reserved, and
+  // silently ignoring one of them is worse than refusing. A consult proposal's
+  // width is the whole estimate; client-selected enhancements on top of it are
+  // B7 and have no shape here yet.
+  if (consultId && addOnIds.length > 0) {
+    throw bookingError('ADDONS_INVALID', {
+      message: 'Add-ons cannot be combined with a consultation proposal.',
+      userMessage:
+        'Add-ons can’t be chosen for a consultation booking yet. Your pro will go through extras with you.',
+    })
+  }
+
+  if (consultId && rescheduleBookingId) {
+    throw bookingError('CONSULT_UNAVAILABLE', {
+      message: 'A consultation proposal cannot reschedule an existing booking.',
+      userMessage: 'Please move that appointment from the booking itself.',
     })
   }
 
@@ -8479,12 +8561,15 @@ if (locationType === ServiceLocationType.MOBILE && clientAddressId && !selectedC
 
   // Reserve what the COMMIT will take, not what the offering currently says.
   //
-  // Two different commits, so two different widths (B1-A + B3):
+  // Three different commits, so three different widths (B1-A + B3 + B4):
   //  - finalize takes `base + add-ons` → size from the selection;
   //  - reschedule takes the BOOKING's committed `totalDurationMinutes`, which
-  //    drifts from the offering's base whenever the pro edits a duration.
-  // Both are resolved through the very helper the commit site runs, inside this
-  // transaction, so neither can drift from what it promised.
+  //    drifts from the offering's base whenever the pro edits a duration;
+  //  - a consult proposal takes the whole ESTIMATE — every line's rounded
+  //    duration — because the client is booking the look, not the one service
+  //    the look happens to be linked to.
+  // All three are resolved through the very helper the commit site runs, inside
+  // this transaction, so none can drift from what it promised.
   const durationMinutes = rescheduleBookingId
     ? await resolveRescheduleHoldDurationMinutes({
         tx,
@@ -8493,14 +8578,38 @@ if (locationType === ServiceLocationType.MOBILE && clientAddressId && !selectedC
         offeringId: offering.id,
         professionalId: offering.professionalId,
       })
-    : await resolveHoldDurationWithAddOns({
-        tx,
-        professionalId: offering.professionalId,
-        offeringId: offering.id,
-        addOnIds,
-        locationType,
-        baseDurationMinutes: validatedContextResult.durationMinutes,
-      })
+    : consultId
+      ? (
+          await resolveConsultProposalForBookingCommit({
+            tx,
+            now,
+            consultId,
+            clientId,
+            professionalId: offering.professionalId,
+            serviceCategoryId: offering.serviceCategoryId ?? null,
+            offeringId: offering.id,
+            locationType,
+          })
+        )?.totalDurationMinutes ??
+        // A booking-anchored consult carries no proposal; the hold is sized the
+        // ordinary way. `addOnIds` is empty here — the refusal above forbids
+        // combining the two — so this is exactly the base width.
+        (await resolveHoldDurationWithAddOns({
+          tx,
+          professionalId: offering.professionalId,
+          offeringId: offering.id,
+          addOnIds,
+          locationType,
+          baseDurationMinutes: validatedContextResult.durationMinutes,
+        }))
+      : await resolveHoldDurationWithAddOns({
+          tx,
+          professionalId: offering.professionalId,
+          offeringId: offering.id,
+          addOnIds,
+          locationType,
+          baseDurationMinutes: validatedContextResult.durationMinutes,
+        })
 
   locationContextOrNull = locationContext
   durationMinutesOrNull = durationMinutes
@@ -9852,6 +9961,15 @@ function buildResolvedAddOnServiceItemRows(args: {
   }))
 }
 
+/**
+ * The consult (if any) to stamp on a booking being finalized.
+ *
+ * The permission itself lives in `lib/consult/commitScope.ts` — the hold now
+ * asks the same question, to size its slot by the consult's proposal before any
+ * booking exists, and a second spelling of a permission is how a new door ends
+ * up with none of the controls the old one applies. This function is the
+ * booking vocabulary around that one answer: which refusal code a client sees.
+ */
 async function resolveFinalizeConsultAttribution(args: {
   tx: Prisma.TransactionClient
   now: Date
@@ -9862,54 +9980,23 @@ async function resolveFinalizeConsultAttribution(args: {
 }): Promise<string | null> {
   if (!args.consultId) return null
 
-  // C6 is intentionally darker than C1-C5. A founder-gated consult is still
-  // hidden until the explicit live-evaluation ship gate is checked in.
-  if (!isAiConsultC6ExposureEnabledForPro(args.professionalId)) {
-    throw bookingError('CONSULT_NOT_FOUND')
-  }
-
-  // Serialize attribution against lifecycle/revocation writers, which use the
-  // same session lock. The booking is stamped only from a coherent completed
-  // consult state, never a stale pre-revocation read.
-  await args.tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-    SELECT "id" FROM "ConsultSession"
-    WHERE "id" = ${args.consultId}
-    FOR UPDATE
-  `)
-
-  const consult = await args.tx.consultSession.findUnique({
-    where: { id: args.consultId },
-    select: {
-      id: true,
-      status: true,
-      ...CONSULT_ANCHOR_SELECT,
-    },
+  const scope = await resolveConsultCommitScope(args.tx, {
+    consultId: args.consultId,
+    clientId: args.clientId,
+    professionalId: args.professionalId,
+    serviceCategoryId: args.serviceCategoryId,
+    now: args.now,
   })
 
-  // Keep ownership, tenant, and vertical mismatches indistinguishable.
-  if (
-    !consult ||
-    !isFinalizeConsultAttributionOwned({
-      candidate: consult,
-      clientId: args.clientId,
-      professionalId: args.professionalId,
-      serviceCategoryId: args.serviceCategoryId,
-    })
-  ) {
-    throw bookingError('CONSULT_NOT_FOUND')
-  }
-
-  // A consult attributed to a new booking may itself be anchored to a booking
-  // or, since Book the Look (B2), to a look — evaluateConsultAnchor answers
-  // both without this call site knowing which.
-  const anchor = evaluateConsultAnchor(consult, args.now)
-  if (!anchor.eligible) {
+  if (!scope.ok) {
+    // Ownership, tenant, vertical and founder-gate misses stay
+    // indistinguishable; only an ineligible anchor names itself.
     throw bookingError(
-      anchor.hidden ? 'CONSULT_NOT_FOUND' : 'CONSULT_UNAVAILABLE',
+      scope.hidden ? 'CONSULT_NOT_FOUND' : 'CONSULT_UNAVAILABLE',
     )
   }
 
-  return consult.id
+  return scope.session.id
 }
 
 async function performLockedFinalizeBookingFromHold(args: {
@@ -10268,11 +10355,51 @@ async function performLockedFinalizeBookingFromHold(args: {
     0,
   )
 
-  const totalDurationMinutes = clampInt(
-    baseDurationMinutes + addOnsDurationTotal,
-    15,
-    MAX_SLOT_DURATION_MINUTES,
-  )
+  // Book the Look, B4. Resolved HERE rather than beside the attribution stamp
+  // above so it reads the hold's own validated mode: `args.locationType` is
+  // checked against the hold by `validateHoldForClientMutation`, and the
+  // proposal's prices and durations are mode-specific, so the mode it is
+  // derived for must be the one the slot was actually held in.
+  //
+  // Null for a booking-anchored consult (#1016), which has nothing to
+  // translate — that path keeps its ordinary sizing untouched.
+  const consultProposal = sourceConsultSessionId
+    ? await resolveConsultProposalForBookingCommit({
+        tx: args.tx,
+        now: args.now,
+        consultId: sourceConsultSessionId,
+        clientId: args.clientId,
+        professionalId: args.offering.professionalId,
+        serviceCategoryId: args.offering.serviceCategoryId ?? null,
+        offeringId: args.offering.id,
+        locationType: validatedHold.value.locationType,
+      })
+    : null
+
+  // Client-selected add-ons on top of a consult proposal are B7 and have no
+  // shape yet; the hold refuses the combination too, and this is the commit-site
+  // half of that same rule.
+  if (consultProposal && resolvedAddOns.length > 0) {
+    throw bookingError('ADDONS_INVALID', {
+      message: 'Add-ons cannot be combined with a consultation proposal.',
+      userMessage:
+        'Add-ons can’t be chosen for a consultation booking yet. Your pro will go through extras with you.',
+    })
+  }
+
+  // 🔴 A consult proposal sizes the slot by the whole ESTIMATE — every line's
+  // rounded duration — not by the base offering. It is deliberately NOT clamped:
+  // `deriveConsultBookingProposal` refuses past MAX_SLOT_DURATION_MINUTES rather
+  // than shortening, because a silently truncated appointment is exactly the
+  // duration miss decision 11 protects against. The clamp below still governs
+  // every other client finalize, where the client can shrink her own selection.
+  const totalDurationMinutes =
+    consultProposal?.totalDurationMinutes ??
+    clampInt(
+      baseDurationMinutes + addOnsDurationTotal,
+      15,
+      MAX_SLOT_DURATION_MINUTES,
+    )
 
   const decision = await evaluateFinalizeDecision({
     tx: args.tx,
@@ -10459,6 +10586,11 @@ async function performLockedFinalizeBookingFromHold(args: {
         allowsOverlap: overlapDecision.allowsOverlap,
         source: args.source,
         sourceConsultSessionId,
+        // Book the Look, B4 provenance: WHICH derivation of that consult
+        // produced these lines and this slot width. Stamped at the write, where
+        // the answer is known ([[nothing-stored-says-who-created-a-booking]]);
+        // null for every booking that did not come from a proposal.
+        sourceConsultServiceEstimateId: consultProposal?.estimateId ?? null,
         discoveryProvenance,
         // K5 snapshot: derived by the resolver alongside provenance (same
         // established-booking count as the fee), stamped once here, never at
@@ -10618,6 +10750,24 @@ async function performLockedFinalizeBookingFromHold(args: {
     }
 
     throw error
+  }
+
+  // Book the Look, B4: the record of what this client committed to, beside the
+  // booking and inside the same transaction. Written BEFORE the service item so
+  // that a booking carrying `sourceConsultServiceEstimateId` never exists in a
+  // committed state without the proposal that explains it.
+  //
+  // 🔴 The base service item below stays the FLOOR offering at the floor's own
+  // charged price. The beyond-floor lines size the slot and the "Starting at"
+  // figure the client was shown, but they are not BookingServiceItem rows: they
+  // are not add-ons she selected, and the pro sets the real total in the chair
+  // (decision 8, B6). The proposal row is where those lines live meanwhile, so
+  // nothing about the number she agreed to is lost.
+  if (consultProposal) {
+    await persistConsultBookingProposal(args.tx, {
+      bookingId: created.id,
+      proposal: consultProposal,
+    })
   }
 
   const baseItem = await args.tx.bookingServiceItem.create({
@@ -15731,6 +15881,98 @@ export async function releaseUnpaidDepositBookingBySystem(args: {
   })
 }
 
+/**
+ * Reason surfaced to the client when the pending-proximity expiry sweep (B4)
+ * cancels a request the professional never answered. Rides the standard cancel
+ * notification's "Reason:" suffix.
+ */
+export const PENDING_PROXIMITY_EXPIRY_REASON =
+  'Your pro didn’t confirm this in time, so the request was released and anything you paid is being refunded. You can book again anytime.'
+
+export type ExpirePendingProximityOutcome =
+  | { expired: true; bookingId: string }
+  | {
+      expired: false
+      reason: 'NOT_FOUND' | 'STATUS_NOT_PENDING' | 'ALREADY_STARTED'
+    }
+
+/**
+ * Book the Look, slice B4 — SYSTEM expiry of a PENDING request whose
+ * appointment is close and which the professional never answered
+ * (docs/product/BOOK-THE-LOOK-DIRECTION.md, "the new safety piece").
+ *
+ * Cancels the booking (freeing the slot), stamps SYSTEM provenance
+ * (`cancelledByRole = null`) and notifies the client with an expiry-specific
+ * reason. The DEPOSIT REFUND is deliberately NOT here: Stripe I/O cannot live
+ * inside this transaction, so the sweep runs
+ * `applyDiscoveryDepositCancelRefund({ actorKind: 'system' })` after it commits,
+ * the same two-phase shape every other cancel path uses.
+ *
+ * The status is re-checked under a `SELECT … FOR UPDATE` row lock, not merely
+ * in the candidate query: the accept path takes the professional's schedule
+ * lock, but the sweep must not race a pro who is accepting this very request.
+ * Under the row lock we either observe ACCEPTED and skip, or we cancel first
+ * and the pro's accept fails on a CANCELLED booking. Either way the client is
+ * never told "expired" about an appointment that is going ahead.
+ */
+export async function expirePendingBookingBySystem(args: {
+  bookingId: string
+}): Promise<ExpirePendingProximityOutcome> {
+  assertNonEmptyBookingId(args.bookingId)
+
+  // professionalId is needed to take the schedule lock; it never changes.
+  const ref = await prisma.booking.findUnique({
+    where: { id: args.bookingId },
+    select: { professionalId: true },
+  })
+  if (!ref) return { expired: false, reason: 'NOT_FOUND' }
+
+  return withLockedProfessionalTransaction(ref.professionalId, async ({ tx }) => {
+    const rows = await tx.$queryRaw<
+      Array<{ status: BookingStatus; startedAt: Date | null }>
+    >`
+      SELECT "status", "startedAt"
+      FROM "Booking"
+      WHERE "id" = ${args.bookingId}
+      FOR UPDATE
+    `
+    const locked = rows[0]
+    if (!locked) return { expired: false, reason: 'NOT_FOUND' }
+
+    // Only an UNANSWERED request expires. An accepted, cancelled, completed or
+    // no-showed booking is somebody's decision, and this sweep does not have
+    // standing to reverse one.
+    if (locked.status !== BookingStatus.PENDING) {
+      return { expired: false, reason: 'STATUS_NOT_PENDING' }
+    }
+
+    // Belt and braces: a PENDING booking should never carry `startedAt`, and a
+    // session already underway must never be cancelled out from under the pro.
+    if (locked.startedAt) {
+      return { expired: false, reason: 'ALREADY_STARTED' }
+    }
+
+    await performLockedCancel({
+      tx,
+      bookingId: args.bookingId,
+      actor: { kind: 'system' },
+      notifyClient: true,
+      reason: PENDING_PROXIMITY_EXPIRY_REASON,
+      allowedStatuses: [BookingStatus.PENDING],
+    })
+
+    // Drop the pending deposit-reminder so it never fires for a released
+    // request (mirrors the unpaid-deposit release sweep).
+    await cancelScheduledClientNotificationsForBooking({
+      tx,
+      bookingId: args.bookingId,
+      eventKeys: [NotificationEventKey.DEPOSIT_REMINDER],
+    })
+
+    return { expired: true, bookingId: args.bookingId }
+  })
+}
+
 export async function startBookingSession(
   args: StartBookingSessionArgs,
 ): Promise<StartBookingSessionResult> {
@@ -16147,6 +16389,7 @@ export async function createHold(
         bookingEntryPoint: args.bookingEntryPoint,
         addOnIds: args.addOnIds,
         rescheduleBookingId: args.rescheduleBookingId ?? null,
+        consultId: args.consultId ?? null,
         offering: args.offering,
         requestedStart: args.requestedStart,
         requestedLocationId: args.requestedLocationId,

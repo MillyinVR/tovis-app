@@ -144,13 +144,21 @@ function refused(
  * `priceStartingAt` is a number, which is fine for its callers and wrong for
  * storage, so the Decimal is taken straight off the column by `pickModePrice`.
  */
-function priceLine(
+export type ConsultOfferingLinePricing =
+  | { ok: true; price: Prisma.Decimal; durationMinutes: number }
+  | { ok: false; refusalCode: ConsultServiceEstimateRefusalCode }
+
+/**
+ * ⚠️ Exported for B4's booking proposal, which RE-DERIVES every line under the
+ * mode the client chose (`lib/consult/bookingProposal.ts`). It must apply the
+ * same zero-allowed / negative-refused rule and the same round-UP, or a mobile
+ * booking could be priced or sized by a rule the estimate never used.
+ */
+export function priceLine(
   offering: ConsultProMenuOffering,
   locationType: ServiceLocationType,
   stepMinutes: number,
-):
-  | { ok: true; price: Prisma.Decimal; durationMinutes: number }
-  | { ok: false; refusalCode: ConsultServiceEstimateRefusalCode } {
+): ConsultOfferingLinePricing {
   const scheduling = validateOfferingScheduling({ offering, locationType })
   if (!scheduling.ok) {
     return {

@@ -48,7 +48,15 @@ import { safeError } from '@/lib/security/logging'
 // importer names it from here.
 export { CLIENT_FULL_REFUND_WINDOW_MS } from '@/lib/booking/constants'
 
-export type CancelRefundActorKind = 'client' | 'pro' | 'admin'
+/**
+ * `'system'` is Book the Look, B4: the pending-proximity expiry sweep, which
+ * cancels an unanswered request before its slot arrives. It is deliberately its
+ * own kind rather than being borrowed from `'admin'` — the refund record's
+ * `initiatedByRole` would then name a human who did nothing — and it refunds in
+ * full for the same reason a pro cancellation does: the client did everything
+ * asked of her and did not get an appointment.
+ */
+export type CancelRefundActorKind = 'client' | 'pro' | 'admin' | 'system'
 
 export type AutoCancelRefundResult =
   | RefundResult
@@ -89,6 +97,13 @@ export function isAutoCancelRefundEligible(args: {
     return false
   }
 
+  // A SYSTEM expiry is not the client's doing and not a pro exercising
+  // discretion: the appointment simply never happened. Refund, without reading
+  // the client cancellation window — she did not cancel anything.
+  if (args.actorKind === 'system') {
+    return true
+  }
+
   // A pro/admin move never stamps this, so it can only mean the client
   // themselves moved the booking out of the window they are now claiming.
   if (args.lateChangeAt) {
@@ -105,9 +120,13 @@ export function isAutoCancelRefundEligible(args: {
   )
 }
 
-function actorKindToRole(kind: CancelRefundActorKind): Role {
+function actorKindToRole(kind: CancelRefundActorKind): Role | null {
   if (kind === 'pro') return Role.PRO
   if (kind === 'admin') return Role.ADMIN
+  // No human initiated a sweep cancellation. `initiatedByRole` is nullable for
+  // exactly this, and it mirrors `Booking.cancelledByRole` being null on a
+  // SYSTEM cancel — the refund record must not invent an actor.
+  if (kind === 'system') return null
   return Role.CLIENT
 }
 

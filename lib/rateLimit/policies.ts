@@ -18,6 +18,7 @@ export type RateLimitBucket =
   | 'account-invite:mint:token'
   | 'client:consult:write'
   | 'client:consult:vision'
+  | 'client:consult:proposal'
   | 'client:rebook:token'
   | 'client:checkout:token'
   | 'client:deposit:token'
@@ -302,6 +303,21 @@ export const RATE_LIMITS: Record<RateLimitBucket, RateLimitConfig> = {
     limit: 40,
     windowSeconds: 24 * 60 * 60,
     prefix: 'rl:client:consult:vision',
+    mode: 'redis-only',
+  },
+  // Book the Look, B4: the booking-proposal PREVIEW
+  // (GET /api/v1/client/consult/[id]/proposal). A read, not a write, and it
+  // calls no provider — so it gets neither of the two buckets above, both of
+  // which are sized for a cost the preview does not incur.
+  //
+  // It is not free either: each call takes the consult's session lock, runs the
+  // full results-grade authorization and reads the pro's menu, and the client
+  // legitimately flips between SALON and MOBILE to compare. 30/60s leaves a
+  // person comparing modes entirely unbothered while capping a loop.
+  'client:consult:proposal': {
+    limit: 30,
+    windowSeconds: 60,
+    prefix: 'rl:client:consult:proposal',
     mode: 'redis-only',
   },
   'pro:bookings:write': {

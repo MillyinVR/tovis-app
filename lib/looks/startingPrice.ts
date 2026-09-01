@@ -28,11 +28,47 @@ import { formatRoundedDollars, moneyToNumber, type MoneyInput } from '@/lib/mone
 export function formatLookStartingPrice(
   price: MoneyInput | null | undefined,
 ): string | null {
+  return composeStartingPrice(price, COPY.bookingConfirmation.priceFrom)
+}
+
+/**
+ * A consult booking proposal's client-facing price — "Starting at $340"
+ * (Book the Look, B4; docs/product/BOOK-THE-LOOK-DIRECTION.md, decision 5).
+ *
+ * Lives HERE, beside the look label, rather than in lib/consult: this module is
+ * the home of the standing rule that a client-facing price is a STARTING price
+ * composed from the brand copy table and never a bare figure. A second module
+ * spelling that out again is how the look label drifted three ways before B1
+ * consolidated it — so the two labels share one composer and differ only in
+ * their word.
+ *
+ * The word IS different on purpose. "From $250" is what a look's card promises
+ * anyone scrolling; this number was derived from THIS client's photos against
+ * THIS pro's menu, so a white-label deployment must be able to retitle them
+ * apart.
+ *
+ * ⚠️ Never render this without the estimate framing beside it
+ * (`COPY.consultProposal.estimateNote` + `proDecides`). Decision 5 makes
+ * "the pro makes the final call" part of the price, not a footnote to it.
+ *
+ * Returns null on a non-positive total, exactly as the look label does — the
+ * caller renders no price rather than "Starting at $0".
+ */
+export function formatConsultProposalStartingPrice(
+  price: MoneyInput | null | undefined,
+): string | null {
+  return composeStartingPrice(price, COPY.consultProposal.startingAt)
+}
+
+function composeStartingPrice(
+  price: MoneyInput | null | undefined,
+  word: string,
+): string | null {
   const amount = moneyToNumber(price)
   if (amount === null || amount <= 0) return null
 
   const dollars = formatRoundedDollars(amount)
   if (!dollars) return null
 
-  return `${COPY.bookingConfirmation.priceFrom} ${dollars}`
+  return `${word} ${dollars}`
 }

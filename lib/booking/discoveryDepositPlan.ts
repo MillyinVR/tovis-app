@@ -129,7 +129,12 @@ export function computeDiscoveryDepositPlan(args: {
   }
 }
 
-export type DepositRefundActorKind = 'client' | 'pro' | 'admin'
+/**
+ * `'system'` (Book the Look, B4) is the pending-proximity expiry sweep. It
+ * refunds like a pro cancellation — deposit AND the one-time platform fee —
+ * because the client was never given the appointment she paid to hold.
+ */
+export type DepositRefundActorKind = 'client' | 'pro' | 'admin' | 'system'
 
 export type DepositRefundPlan = Readonly<{
   /** Deposit portion to return to the client (clawed back from the pro). */
@@ -179,7 +184,11 @@ export function resolveDepositRefundPlan(args: {
   const depositCents = Math.max(0, Math.round(args.depositCents))
   const feeCents = Math.max(0, Math.round(args.feeCents))
 
-  if (args.actorKind === 'pro' || args.actorKind === 'admin') {
+  if (
+    args.actorKind === 'pro' ||
+    args.actorKind === 'admin' ||
+    args.actorKind === 'system'
+  ) {
     return {
       refundDepositCents: depositCents,
       refundFee: true,

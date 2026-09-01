@@ -3598,6 +3598,20 @@ model Booking {
   sourceConsultSessionId String?
   sourceConsultSession   ConsultSession? @relation("ConsultInspiredBookings", fields: [sourceConsultSessionId], references: [id], onDelete: SetNull)
 
+  /// Book the Look, slice B4 — the ESTIMATE this booking was proposed from.
+  /// `sourceConsultSessionId` above says which consult informed the booking;
+  /// this says which derivation of it produced the lines and the slot width, and
+  /// it is stamped by the write boundary at the moment it knows the answer
+  /// (nothing-stored-says-who-created-a-booking). Without it, "this booking came
+  /// from that look" survives only as long as the consult has exactly one
+  /// estimate, and B5's correction pair has nothing to attach to.
+  sourceConsultServiceEstimateId String?
+  sourceConsultServiceEstimate   ConsultServiceEstimate? @relation("ConsultEstimateInspiredBookings", fields: [sourceConsultServiceEstimateId], references: [id], onDelete: SetNull)
+
+  /// The mode-reconciled proposal the client actually committed to, when this
+  /// booking came from one. One per booking; see ConsultBookingProposal.
+  consultBookingProposal ConsultBookingProposal?
+
   scheduledFor DateTime
   status       BookingStatus @default(PENDING)
 
@@ -3991,6 +4005,7 @@ model Booking {
   @@index([clientHomeTenantId])
   @@index([sourceLookPostId])
   @@index([sourceConsultSessionId])
+  @@index([sourceConsultServiceEstimateId])
   @@index([seriesId])
 }
 
@@ -7316,6 +7331,7 @@ model ConsultSession {
   inspirations         ConsultInspiration[]
   uploadSessions       UploadSession[]
   serviceEstimate      ConsultServiceEstimate?
+  bookingProposals     ConsultBookingProposal[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -7663,6 +7679,12 @@ model ConsultServiceEstimate {
 
   lines ConsultServiceEstimateLine[]
 
+  /// Bookings proposed from this estimate (B4). Plural because a client may
+  /// commit, cancel and commit again off the same analysis; the PROPOSAL row is
+  /// what pins each one to the mode and prices it was actually sold at.
+  inspiredBookings Booking[]                @relation("ConsultEstimateInspiredBookings")
+  proposals        ConsultBookingProposal[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -7718,4 +7740,105 @@ model ConsultServiceEstimateLine {
   @@index([estimateId, sortOrder])
   /// The price-learning read: every correction pair recorded for one service.
   @@index([serviceId, proFinalAt])
+}
+
+/// Book the Look, slice B4 — what the client actually committed to.
+///
+/// A `ConsultServiceEstimate` is priced in the SALON column, because a
+/// look-anchored consult has not chosen a mode yet (B3,
+/// CONSULT_LOOK_ESTIMATE_LOCATION_TYPE). B4 is where she chooses, and a
+/// hand-configured pro's mobile column can differ from her salon one — so every
+/// line is RE-DERIVED under the chosen mode and the result is stored here rather
+/// than the salon numbers being reused for a mobile booking.
+///
+/// One row per booking, written inside the finalize transaction. It is the
+/// provenance stamp that lets B5 attach a correction pair to the right prices
+/// and B6 find the lines in the chair.
+///
+/// 🔴 NOT a durable offer. The proposal is re-derived from the pro's live menu
+/// at preview AND again at commit; this row records the commit's answer, never
+/// authorizes a later one.
+model ConsultBookingProposal {
+  id String @id @default(cuid())
+
+  /// The committed booking. Unique — this is a record of one commitment, not a
+  /// standing quote.
+  bookingId String  @unique
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  consultSessionId String
+  consultSession   ConsultSession @relation(fields: [consultSessionId], references: [id], onDelete: Restrict)
+
+  estimateId String
+  estimate   ConsultServiceEstimate @relation(fields: [estimateId], references: [id], onDelete: Restrict)
+
+  /// The mode the client chose, and which of the pro's two column pairs every
+  /// line below was re-derived from.
+  locationType ServiceLocationType
+
+  /// The scheduling facts the slot was sized against, read from the same
+  /// ProfessionalLocation columns availability reads.
+  stepMinutes   Int
+  bufferMinutes Int
+
+  /// The width this booking reserved: the SUM of every line's rounded duration
+  /// below. Decision 11 — a price miss is corrected in the chair, a duration
+  /// miss breaks the pro's day, so the slot is sized by the whole estimate and
+  /// never by the base offering's default.
+  totalDurationMinutes Int
+
+  /// The client-facing "Starting at $X" figure, as shown at commit: the sum of
+  /// every line's re-derived price. Stored because it is a number a person was
+  /// shown and agreed to — the booking's own subtotal covers only the base
+  /// offering it was finalized through, which is deliberately narrower.
+  startingAtPrice Decimal @db.Decimal(10, 2)
+
+  /// This contract's version, and the version of the RE-DERIVATION rules.
+  schemaVersion     Int
+  derivationVersion String
+
+  lines ConsultBookingProposalLine[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([consultSessionId, createdAt])
+  @@index([estimateId])
+}
+
+/// One line of a committed proposal, re-derived under the chosen mode.
+///
+/// Deliberately a COPY of the estimate line rather than a pointer to it: the
+/// estimate's own price is the salon one, and the correction pair B5 records
+/// must compare the pro's final against the number this client was actually
+/// sold — not against a salon figure a mobile client never saw.
+model ConsultBookingProposalLine {
+  id String @id @default(cuid())
+
+  proposalId String
+  proposal   ConsultBookingProposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+
+  /// The estimate line this was re-derived from, so the (salon estimate,
+  /// mode-reconciled proposal, pro final) chain stays walkable.
+  estimateLineId String
+
+  sortOrder Int
+
+  /// Snapshot links, not FKs — same reason ConsultServiceEstimateLine's are.
+  serviceId   String
+  offeringId  String
+  serviceName String
+
+  source ConsultServiceEstimateLineSource
+
+  /// Re-derived under `ConsultBookingProposal.locationType` from the pro's own
+  /// offering columns. `durationMinutes` is rounded UP to `stepMinutes`.
+  price           Decimal @db.Decimal(10, 2)
+  durationMinutes Int
+
+  createdAt DateTime @default(now())
+
+  @@unique([proposalId, serviceId])
+  @@index([proposalId, sortOrder])
+  @@index([estimateLineId])
 }

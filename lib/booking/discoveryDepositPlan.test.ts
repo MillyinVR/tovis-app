@@ -229,6 +229,27 @@ describe('resolveDepositRefundPlan', () => {
     ).toEqual({ refundDepositCents: 2000, refundFee: true, refundAmountCents: 2500 })
   })
 
+  // Book the Look, B4: the pending-proximity expiry sweep. The client did
+  // everything asked of her and did not get an appointment, so she keeps none of
+  // the cost — deposit AND the one-time platform fee, exactly like a pro
+  // cancellation. It must NOT read the client cancellation window: she never
+  // cancelled anything, so being "late" is not a thing she can be.
+  it('system expiry refunds deposit AND fee, whatever the window says', () => {
+    for (const clientWithinFullRefundWindow of [true, false]) {
+      expect(
+        resolveDepositRefundPlan({
+          ...AMOUNTS,
+          actorKind: 'system',
+          clientWithinFullRefundWindow,
+        }),
+      ).toEqual({
+        refundDepositCents: 2000,
+        refundFee: true,
+        refundAmountCents: 2500,
+      })
+    }
+  })
+
   it('client cancel >=24h refunds the deposit but KEEPS the fee', () => {
     expect(
       resolveDepositRefundPlan({
