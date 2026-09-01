@@ -1,5 +1,5 @@
 import React from 'react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 import AftercareForm from './AftercareForm'
@@ -154,7 +154,26 @@ async function clickSendToClient() {
 }
 
 describe('app/pro/bookings/[id]/aftercare/AftercareForm', () => {
+  // 🔴 The clock is FROZEN for this whole file, and that is load-bearing.
+  //
+  // Several tests drive the BOOKED_NEXT_APPOINTMENT flow with a hard-coded
+  // availability slot at `2026-09-01T17:00:00.000Z`, and `validateBeforePost`
+  // refuses a rebook whose `startsAt <= Date.now()` ("The next appointment must
+  // be in the future"). Those tests therefore depended, silently, on the machine
+  // clock being earlier than that instant — so they passed for months and then
+  // began failing FOREVER at 17:00 UTC on 2026-09-01, in CI and locally alike,
+  // with an assertion about `null` that says nothing about the real cause (the
+  // POST simply never happens, because validation short-circuits first).
+  //
+  // Only `Date` is faked: `waitFor` / `findBy*` need real setTimeout/setInterval
+  // to poll, and faking those makes this file's async assertions hang instead of
+  // resolving. 12:00Z is 05:00 in America/Los_Angeles, so the form's "today" is
+  // unambiguously 2026-09-01 — the same reasoning the min-date test below spells
+  // out — and it sits before the 17:00Z slot, which is what the fixtures need.
   beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'], shouldAdvanceTime: true })
+    vi.setSystemTime(new Date('2026-09-01T12:00:00.000Z'))
+
     vi.clearAllMocks()
 
     mocks.fetch.mockReset()
@@ -168,6 +187,12 @@ describe('app/pro/bookings/[id]/aftercare/AftercareForm', () => {
     })
 
     window.dispatchEvent = vi.fn()
+  })
+
+  afterEach(() => {
+    // Hand the real clock back, so a frozen Date cannot leak into another file
+    // sharing this worker.
+    vi.useRealTimers()
   })
 
   it('sends aftercare and navigates to the wrap-up screen', async () => {
