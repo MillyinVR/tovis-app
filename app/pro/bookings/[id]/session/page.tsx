@@ -16,6 +16,7 @@ import {
 } from '@prisma/client'
 
 import ConsultationForm, {
+  type ConsultationAttachOption,
   type ConsultationInitialItem,
 } from '../ConsultationForm'
 import ConsultDeclineDepositChoice from './_components/ConsultDeclineDepositChoice'
@@ -709,6 +710,7 @@ function ConsultationView({
   initialNotes,
   initialPrice,
   initialItems,
+  attachOptions,
   showSeedNote,
   declineDeposit,
   totalLabel,
@@ -726,6 +728,8 @@ function ConsultationView({
   initialNotes: string
   initialPrice: string
   initialItems: ConsultationInitialItem[]
+  /** B7 — the enhancements she declined, offered back at session close. */
+  attachOptions: ConsultationAttachOption[]
   /** B6 — the form is opened on the consult's own lines; say so. */
   showSeedNote: boolean
   /** B6 — the deposit question a decline in the chair leaves open, or null. */
@@ -843,6 +847,11 @@ function ConsultationView({
             initialNotes={initialNotes}
             initialPrice={initialPrice}
             initialItems={initialItems}
+            attachOptions={attachOptions}
+            attachCopy={{
+              title: COPY.consultInChair.attachTitle,
+              body: COPY.consultInChair.attachBody,
+            }}
           />
 
           <div className="brand-pro-session-help-text">
@@ -878,11 +887,13 @@ function ChangeServiceSection({
   initialNotes,
   initialPrice,
   initialItems,
+  attachOptions,
 }: {
   bookingId: string
   initialNotes: string
   initialPrice: string | number | null
   initialItems: ConsultationInitialItem[]
+  attachOptions: ConsultationAttachOption[]
 }) {
   return (
     <details className="brand-pro-session-change-service mt-4 mb-4">
@@ -901,6 +912,11 @@ function ChangeServiceSection({
         initialNotes={initialNotes}
         initialPrice={initialPrice}
         initialItems={initialItems}
+        attachOptions={attachOptions}
+        attachCopy={{
+          title: COPY.consultInChair.attachTitle,
+          body: COPY.consultInChair.attachBody,
+        }}
       />
     </details>
   )
@@ -1804,6 +1820,26 @@ export default async function ProBookingSessionPage(props: PageProps) {
   // came from. Once she has sent a proposal, the form is showing her own.
   const showInChairSeedNote = !sentProposalItems && consultSeed !== null
 
+  // ── B7 — "recommended attach at session close" (decision 10's pro half) ────
+  //
+  // The enhancements her analysis recommended and this client did NOT take,
+  // priced by the server under the mode this booking was made in. Offered on
+  // the form so one tap puts a line back on the proposal she is about to send.
+  //
+  // Available on EVERY consult booking, not only on a fresh form: she may
+  // already have sent a proposal, and the moment a client is in the chair
+  // saying "actually, could we…" is exactly when this is worth having.
+  const attachOptions: ConsultationAttachOption[] =
+    proposalReview?.declinedRecommendations.map((recommendation) => ({
+      estimateLineId: recommendation.estimateLineId,
+      serviceId: recommendation.serviceId,
+      offeringId: recommendation.offeringId,
+      label: recommendation.serviceName,
+      rationale: recommendation.rationale,
+      price: recommendation.price,
+      durationMinutes: recommendation.durationMinutes,
+    })) ?? []
+
   // B6 — a client who declined in the chair leaves ONE question open: her
   // deposit. Asked only of look-anchored bookings that actually hold money, and
   // answered only once (lib/consult/inChairDeclineOutcome.ts).
@@ -1895,6 +1931,7 @@ export default async function ProBookingSessionPage(props: PageProps) {
       initialNotes={initialNotes}
       initialPrice={initialPrice}
       initialItems={initialItems}
+      attachOptions={attachOptions}
     />
   ) : null
 
@@ -1984,6 +2021,7 @@ export default async function ProBookingSessionPage(props: PageProps) {
           initialNotes={initialNotes}
           initialPrice={initialPrice}
           initialItems={initialItems}
+          attachOptions={attachOptions}
           totalLabel={totalLabel}
           durationLabel={durationLabel}
           consultRejected={consultRejected}

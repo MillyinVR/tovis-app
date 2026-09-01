@@ -77,6 +77,21 @@ export const defaultClientConsultBookingCopy: BrandClientConsultBookingCopy = {
   reviewEyebrow: 'From your consultation',
   reviewTitle: 'Your look',
 
+  // Book the Look, B7 — the enhancement offer (decision 10). Phrased around
+  // what each one DOES for her; the sentences themselves come from her own
+  // analysis, and no service is ever named.
+  //
+  // 🔴 "Nothing is added unless you add it" is the promise the whole slice
+  // rests on: a recommendation she did not choose is a price she did not agree
+  // to, and B6's in-chair notice only means anything if the number it measures
+  // against was hers.
+  enhancementsTitle: 'Recommended for this look',
+  enhancementsBody:
+    'Your analysis suggests these on top of the look itself. Nothing is added unless you add it, and your professional still makes the final call.',
+  enhancementAddLabel: 'Add',
+  enhancementAddedLabel: 'Added',
+  enhancementsPendingLabel: 'Updating your booking…',
+
   // The booking sheet's title for an unnamed look on THIS path. Never the
   // service name: a LOOK never names the service that produced it (B1), and
   // this is the one screen whose entire point is that she is booking an

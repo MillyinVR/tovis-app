@@ -12,6 +12,8 @@ import { MAX_SLOT_DURATION_MINUTES } from '@/lib/booking/constants'
 
 import {
   deriveConsultBookingProposal,
+  type ConsultBookingProposalAnalysisInput,
+  type ConsultBookingProposalEnhancementSelection,
   type ConsultBookingProposalEstimateInput,
 } from './bookingProposal'
 import type { ConsultProMenuOffering } from './proMenu'
@@ -59,12 +61,41 @@ function estimate(
   }
 }
 
+/**
+ * One stored analysis recommendation.
+ *
+ * `serviceId` is what makes it a SERVICE reference — the same link B3 builds a
+ * beyond-floor line from, and (B7) the link that carries the client-facing
+ * reason back onto the offer. Omitting it produces the SERVICE_CATEGORY form:
+ * the matcher found nothing on this pro's menu.
+ */
+function recommendation(
+  serviceIntent: string,
+  options: { serviceId?: string; rationale?: string } = {},
+): ConsultBookingProposalAnalysisInput[number] {
+  return {
+    serviceIntent: serviceIntent as ConsultBookingProposalAnalysisInput[number]['serviceIntent'],
+    title: `Title ${serviceIntent}`,
+    rationale: options.rationale ?? `Because of ${serviceIntent}.`,
+    achievability: 'LIKELY_SINGLE_APPOINTMENT',
+    discussWithProfessional: true,
+    reference: options.serviceId
+      ? {
+          type: 'SERVICE',
+          serviceId: options.serviceId,
+          serviceCategoryId: CATEGORY_ID,
+        }
+      : { type: 'SERVICE_CATEGORY', serviceId: null, serviceCategoryId: CATEGORY_ID },
+  }
+}
+
 function derive(args: {
   menu: ConsultProMenuOffering[]
   estimate?: ConsultBookingProposalEstimateInput | null
-  analysisRecommendations?: Array<{ serviceIntent: string }>
+  analysisRecommendations?: ConsultBookingProposalAnalysisInput
   locationType?: ServiceLocationType
   stepMinutes?: number
+  enhancementSelection?: ConsultBookingProposalEnhancementSelection
 }) {
   return deriveConsultBookingProposal({
     locationType: args.locationType ?? ServiceLocationType.SALON,
@@ -79,9 +110,14 @@ function derive(args: {
     // is NOT "no safety flags" — every analysis carries ALLERGY_HISTORY_UNKNOWN,
     // which is why the gate reads service intents instead.
     analysisRecommendations: args.analysisRecommendations ?? [
-      { serviceIntent: 'BALAYAGE' },
-      { serviceIntent: 'TONER_GLOSS' },
+      recommendation('BALAYAGE', { serviceId: 'svc_balayage' }),
+      recommendation('TONER_GLOSS', { serviceId: 'svc_gloss' }),
     ],
+    // 🔴 'ALL' is the DEFAULT HERE ON PURPOSE. It is what availability and the
+    // hold pass — the widest thing the booking could become — and it is the
+    // reading every case below this line was written against. The client's own
+    // selection is exercised in its own block at the bottom of this file.
+    enhancementSelection: args.enhancementSelection ?? 'ALL',
   })
 }
 
@@ -106,8 +142,8 @@ describe('an estimate is not automatically a proposal', () => {
       // chemical work: the tests plus a professional colour review, replacing
       // the colour recommendations entirely.
       analysisRecommendations: [
-        { serviceIntent: 'PATCH_TEST' },
-        { serviceIntent: 'COLOR_CONSULTATION' },
+        recommendation('PATCH_TEST'),
+        recommendation('COLOR_CONSULTATION'),
       ],
     })
 
@@ -120,8 +156,8 @@ describe('an estimate is not automatically a proposal', () => {
     const result = derive({
       menu: [floor],
       analysisRecommendations: [
-        { serviceIntent: 'STRAND_TEST' },
-        { serviceIntent: 'COLOR_CONSULTATION' },
+        recommendation('STRAND_TEST'),
+        recommendation('COLOR_CONSULTATION'),
       ],
     })
     expect(result.refusalCode).toBe('SAFETY_REVIEW_REQUIRED')
@@ -135,7 +171,9 @@ describe('an estimate is not automatically a proposal', () => {
   it('proposes normally for an analysis that recommended real colour work', () => {
     const result = derive({
       menu: [floor],
-      analysisRecommendations: [{ serviceIntent: 'BALAYAGE' }],
+      analysisRecommendations: [
+        recommendation('BALAYAGE', { serviceId: 'svc_balayage' }),
+      ],
     })
     expect(result.status).toBe('PROPOSED')
   })
@@ -372,5 +410,240 @@ describe('nothing is invented', () => {
     if (result.status !== 'PROPOSED') throw new Error('expected a proposal')
     expect(result.lines[0]?.estimateLineId).toBe('line_svc_balayage')
     expect(result.lines[0]?.source).toBe('LOOK_LINKED_SERVICE')
+  })
+})
+
+// ── B7 — beyond the floor is a recommendation, not a bill ────────────────────
+//
+// Decision 10: the enhancements the analysis suggests are OPT-IN. The floor —
+// the look she tapped Book on — is never declinable. These cases fail if either
+// half is relaxed.
+describe('the client chooses what is beyond the floor', () => {
+  const gloss = offering({
+    serviceId: 'svc_gloss',
+    salonPriceStartingAt: new Prisma.Decimal('40.00'),
+    salonDurationMinutes: 20,
+  })
+
+  const twoLines = () =>
+    estimate([{ serviceId: 'svc_balayage' }, { serviceId: 'svc_gloss' }])
+
+  // 🔴 The load-bearing case. An empty selection is what every surface passes
+  // before she has chosen anything, and it must produce the LOOK — not the look
+  // plus everything the analysis could think of.
+  it('proposes the floor alone when she has chosen nothing', () => {
+    const result = derive({
+      menu: [floor, gloss],
+      estimate: twoLines(),
+      enhancementSelection: [],
+    })
+
+    if (result.status !== 'PROPOSED') throw new Error('expected a proposal')
+    expect(result.lines).toHaveLength(1)
+    expect(result.lines[0]?.serviceId).toBe('svc_balayage')
+    expect(result.startingAtPrice.toString()).toBe('180')
+    expect(result.totalDurationMinutes).toBe(90)
+  })
+
+  it('adds exactly what she ticked, priced and sized by the server', () => {
+    const result = derive({
+      menu: [floor, gloss],
+      estimate: twoLines(),
+      enhancementSelection: ['line_svc_gloss'],
+    })
+
+    if (result.status !== 'PROPOSED') throw new Error('expected a proposal')
+    expect(result.lines.map((line) => line.serviceId)).toEqual([
+      'svc_balayage',
+      'svc_gloss',
+    ])
+    // 180 + 40, and 90 + ceil(20 → 30).
+    expect(result.startingAtPrice.toString()).toBe('220')
+    expect(result.totalDurationMinutes).toBe(120)
+  })
+
+  it('offers every priced enhancement, with the analysis’s own reason', () => {
+    const result = derive({
+      menu: [floor, gloss],
+      estimate: twoLines(),
+      enhancementSelection: [],
+      analysisRecommendations: [
+        recommendation('BALAYAGE', { serviceId: 'svc_balayage' }),
+        recommendation('TONER_GLOSS', {
+          serviceId: 'svc_gloss',
+          rationale: 'A gloss keeps this tone from going brassy.',
+        }),
+      ],
+    })
+
+    if (result.status !== 'PROPOSED') throw new Error('expected a proposal')
+    expect(result.recommendations).toHaveLength(1)
+    expect(result.recommendations[0]).toMatchObject({
+      estimateLineId: 'line_svc_gloss',
+      outcome: 'A gloss keeps this tone from going brassy.',
+      selected: false,
+    })
+    expect(result.recommendations[0]?.price.toString()).toBe('40')
+    expect(result.recommendations[0]?.durationMinutes).toBe(30)
+  })
+
+  // The FLOOR is the look. It has no card, because there is no version of this
+  // booking without it.
+  it('never offers the floor as something to decline', () => {
+    const result = derive({
+      menu: [floor, gloss],
+      estimate: twoLines(),
+      enhancementSelection: [],
+    })
+
+    if (result.status !== 'PROPOSED') throw new Error('expected a proposal')
+    expect(
+      result.recommendations.some((r) => r.serviceId === 'svc_balayage'),
+    ).toBe(false)
+  })
+
+  it('marks a ticked enhancement selected, so the screen cannot decide that itself', () => {
+    const result = derive({
+      menu: [floor, gloss],
+      estimate: twoLines(),
+      enhancementSelection: ['line_svc_gloss'],
+    })
+
+    if (result.status !== 'PROPOSED') throw new Error('expected a proposal')
+    expect(result.recommendations[0]?.selected).toBe(true)
+  })
+
+  // A hand-edited link, or one left over from a consult whose estimate has
+  // moved on. It must narrow the booking, never widen or break it.
+  it('ignores an id that is not one of this estimate’s lines', () => {
+    const result = derive({
+      menu: [floor, gloss],
+      estimate: twoLines(),
+      enhancementSelection: ['line_from_somewhere_else'],
+    })
+
+    if (result.status !== 'PROPOSED') throw new Error('expected a proposal')
+    expect(result.lines).toHaveLength(1)
+    expect(result.startingAtPrice.toString()).toBe('180')
+  })
+
+  // 🔴 The asymmetry that makes B7 safe. Rule 4 (an off-menu line refuses the
+  // whole proposal) still governs anything ON the booking — but an extra she
+  // did NOT take going off the pro's menu says nothing about the booking she
+  // actually made, and taking her floor down with it would be absurd.
+  it('refuses an off-menu line she TOOK, and quietly drops one she did not', () => {
+    const declined = derive({
+      menu: [floor],
+      estimate: twoLines(),
+      enhancementSelection: [],
+    })
+    expect(declined.status).toBe('PROPOSED')
+    if (declined.status !== 'PROPOSED') return
+    expect(declined.lines).toHaveLength(1)
+    expect(declined.recommendations).toHaveLength(0)
+
+    const taken = derive({
+      menu: [floor],
+      estimate: twoLines(),
+      enhancementSelection: ['line_svc_gloss'],
+    })
+    expect(taken.status).toBe('REFUSED')
+    expect(taken.refusalCode).toBe('OFFERING_OFF_MENU')
+  })
+
+  it('refuses a taken enhancement the pro no longer prices in this mode', () => {
+    const unpriced = offering({
+      serviceId: 'svc_gloss',
+      mobilePriceStartingAt: null,
+    })
+
+    const taken = derive({
+      menu: [offering({ serviceId: 'svc_balayage' }), unpriced],
+      estimate: twoLines(),
+      locationType: ServiceLocationType.MOBILE,
+      enhancementSelection: ['line_svc_gloss'],
+    })
+    expect(taken.refusalCode).toBe('MODE_PRICE_UNSET')
+
+    const declined = derive({
+      menu: [offering({ serviceId: 'svc_balayage' }), unpriced],
+      estimate: twoLines(),
+      locationType: ServiceLocationType.MOBILE,
+      enhancementSelection: [],
+    })
+    expect(declined.status).toBe('PROPOSED')
+  })
+
+  // An enhancement nobody can explain cannot be phrased by OUTCOME, and the one
+  // thing it must never fall back to is the service name (decision 1). So it is
+  // not offered — but it is still LINED for 'ALL', which is what keeps the hold
+  // sized for the widest case.
+  it('does not offer an enhancement whose analysis reason is missing, but still sizes for it', () => {
+    const noReason = derive({
+      menu: [floor, gloss],
+      estimate: twoLines(),
+      enhancementSelection: [],
+      analysisRecommendations: [
+        recommendation('BALAYAGE', { serviceId: 'svc_balayage' }),
+        // Matched to no service on her menu — the SERVICE_CATEGORY form.
+        recommendation('TONER_GLOSS'),
+      ],
+    })
+    if (noReason.status !== 'PROPOSED') throw new Error('expected a proposal')
+    expect(noReason.recommendations).toEqual([])
+
+    const widest = derive({
+      menu: [floor, gloss],
+      estimate: twoLines(),
+      enhancementSelection: 'ALL',
+      analysisRecommendations: [
+        recommendation('BALAYAGE', { serviceId: 'svc_balayage' }),
+        recommendation('TONER_GLOSS'),
+      ],
+    })
+    if (widest.status !== 'PROPOSED') throw new Error('expected a proposal')
+    expect(widest.totalDurationMinutes).toBe(120)
+  })
+
+  // 🔴 The whole safety story of this slice in one assertion: whatever she
+  // chooses, the commit is never wider than what the hold reserved.
+  it('never proposes more than the ’ALL’ reservation the hold was sized by', () => {
+    const held = derive({
+      menu: [floor, gloss],
+      estimate: twoLines(),
+      enhancementSelection: 'ALL',
+    })
+    if (held.status !== 'PROPOSED') throw new Error('expected a proposal')
+
+    for (const selection of [[], ['line_svc_gloss']]) {
+      const committed = derive({
+        menu: [floor, gloss],
+        estimate: twoLines(),
+        enhancementSelection: selection,
+      })
+      if (committed.status !== 'PROPOSED') throw new Error('expected a proposal')
+      expect(committed.totalDurationMinutes).toBeLessThanOrEqual(
+        held.totalDurationMinutes,
+      )
+    }
+  })
+
+  it('re-numbers sortOrder contiguously when an enhancement is declined', () => {
+    const result = derive({
+      menu: [
+        floor,
+        gloss,
+        offering({ serviceId: 'svc_treatment', salonDurationMinutes: 15 }),
+      ],
+      estimate: estimate([
+        { serviceId: 'svc_balayage' },
+        { serviceId: 'svc_gloss' },
+        { serviceId: 'svc_treatment' },
+      ]),
+      enhancementSelection: ['line_svc_treatment'],
+    })
+
+    if (result.status !== 'PROPOSED') throw new Error('expected a proposal')
+    expect(result.lines.map((line) => line.sortOrder)).toEqual([0, 1])
   })
 })

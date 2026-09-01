@@ -100,6 +100,31 @@ export const COPY = {
   },
 
   /**
+   * What the ORDINARY booking confirm step promises — a client who picked a
+   * service off a menu, not a look off a consultation.
+   *
+   * ⚠️ Deliberately NOT `consultProposal.commit*` above. Those sentences are
+   * addressed to someone who has just been through a consultation ("your pro
+   * confirms in the morning" is true of a 3 AM impulse booking and odd on a
+   * Tuesday afternoon), and a reused copy key ships the wrong audience's voice.
+   *
+   * 🔴 `request` is the sentence this screen has always shown. `instant` exists
+   * because it was shown to EVERYONE, including clients of a pro whose
+   * `autoAcceptBookings` is on — where there is no confirmation to wait for and
+   * "No charge until the pro confirms" describes a step that never happens.
+   * Both are chosen by the same `getClientSubmittedBookingStatus` fork the
+   * commit runs, so the promise cannot disagree with the booking.
+   *
+   * Neither says anything about a deposit: a deposit is decided by the pro's
+   * own settings at finalize, and this line is not the place to make a claim
+   * about money that the write path may contradict.
+   */
+  bookingCommit: {
+    request: 'No charge until the pro confirms.',
+    instant: 'This time is yours as soon as you book.',
+  },
+
+  /**
    * Book the Look, B5 — the PRO's side of the same booking
    * (docs/product/BOOK-THE-LOOK-DIRECTION.md, decision 4's pro half).
    *
@@ -148,6 +173,25 @@ export const COPY = {
     seedTitle: 'Priced from her consultation',
     seedBody:
       'These are the services her consultation matched, at your numbers. Adjust anything that changed once you have seen her hair, then send it for approval — what she approves is what she pays.',
+
+    /**
+     * Book the Look, B7 — decision 10's pro half: "recommended attach at
+     * session close".
+     *
+     * 🔴 Her screen, her vocabulary. This side NAMES the services, because
+     * decision 6 is that the pro sees the line-item derivation with the reason
+     * for each line; decision 1's "a look never names the service" is about the
+     * CLIENT's screen and does not apply here.
+     *
+     * The body is careful about one thing: adding a line does NOT change the
+     * appointment on its own. It goes onto the proposal the client then
+     * approves, exactly like every other in-chair change — and saying so is
+     * what stops a pro believing she has just re-priced someone's booking with
+     * one tap.
+     */
+    attachTitle: 'Her analysis also suggested',
+    attachBody:
+      'She didn’t take these when she booked. Add one and it joins the proposal below — she still approves the new total before anything changes.',
   },
 
   /**

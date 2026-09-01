@@ -39,6 +39,18 @@
 //    here a dropped line silently changes the price AND the width a person is
 //    being asked to commit to.
 //
+// 5. BEYOND THE FLOOR IS A RECOMMENDATION, NOT A BILL (B7, decision 10). The
+//    look itself — the floor — is what she tapped Book on, and it is never
+//    declinable. Every OTHER line is an enhancement the analysis recommends,
+//    and it is on her booking only if she asked for it: `enhancementSelection`
+//    names the estimate lines she opted into, and the default is NONE. A price
+//    she did not choose is a price she did not agree to, which is the whole
+//    point of B6's "the final number was agreed".
+//
+//    ⚠️ `'ALL'` is a real caller, not a test convenience. Availability and the
+//    HOLD size themselves with it deliberately — see the note on
+//    `ConsultBookingProposalEnhancementSelection`.
+//
 // This module is the DERIVATION only. It is run twice — once to preview, once
 // again inside the commit transaction — because a preview is a promise about a
 // menu that can move ([[re-check-at-execution]]). It never persists anything;
@@ -55,6 +67,7 @@ import {
 
 import { resolveBookingLocationContext } from '@/lib/booking/locationContext'
 import { MAX_SLOT_DURATION_MINUTES } from '@/lib/booking/constants'
+import type { ConsultAnalysisPayloadDTO } from '@/lib/dto/consult'
 
 import { analysisRoutedToSafetyPrerequisites } from './safetyRouting'
 
@@ -111,6 +124,53 @@ export type ConsultBookingProposalLineDraft = {
   durationMinutes: number
 }
 
+/**
+ * WHICH beyond-floor lines are on this booking (B7, decision 10).
+ *
+ * An array of `ConsultServiceEstimateLine` ids is the CLIENT's answer: exactly
+ * the enhancements she opted into, and an empty array — the default everywhere
+ * she has not chosen — means the floor alone. An id that does not belong to
+ * this estimate is ignored rather than refused: a stale link is not a reason to
+ * refuse a booking, and the floor is unaffected by it.
+ *
+ * 🔴 `'ALL'` means "size for the widest thing this booking could become". It is
+ * what AVAILABILITY and the HOLD pass, and it is deliberate: the client opts in
+ * on the review step, AFTER the slot is reserved, so the reservation must
+ * already cover every enhancement she could still tick. Opting in then fills
+ * space that is already held — it can never overrun the hold, and it can never
+ * produce a "that no longer fits" refusal at the end of checkout. The commit is
+ * always narrower than or equal to what was reserved (decision 11's safe
+ * direction: over-reserve, never under-reserve).
+ */
+export type ConsultBookingProposalEnhancementSelection =
+  | 'ALL'
+  | readonly string[]
+
+/**
+ * One enhancement the client may add, as she is offered it.
+ *
+ * 🔴 `outcome` is the ANALYSIS's own reason, in its own words — decision 10's
+ * register ("a gloss keeps this tone from going brassy"), never "add Toner
+ * Gloss". There is no `serviceName` on this type ON PURPOSE: decision 1 says a
+ * look never names the service that produced it, and a recommendation with a
+ * name field would be one careless `{rec.serviceName}` away from putting the
+ * taxonomy back on the client's screen.
+ *
+ * A recommendation whose analysis reason cannot be found is not offered at all
+ * (see `deriveConsultBookingProposal`) — an enhancement nobody can explain is
+ * not one to sell.
+ */
+export type ConsultBookingProposalRecommendationDraft = {
+  /** The estimate line this offers, and the id the client's answer names. */
+  estimateLineId: string
+  serviceId: string
+  outcome: string
+  /** Re-derived under the chosen mode, exactly as a line is. */
+  price: Prisma.Decimal
+  durationMinutes: number
+  selected: boolean
+}
+
 export type ConsultBookingProposalDraft =
   | {
       status: 'PROPOSED'
@@ -124,7 +184,14 @@ export type ConsultBookingProposalDraft =
       totalDurationMinutes: number
       /** Sum of the line prices — the client-facing "Starting at" figure. */
       startingAtPrice: Prisma.Decimal
+      /** The floor plus the enhancements she opted into. Nothing else. */
       lines: ConsultBookingProposalLineDraft[]
+      /**
+       * Every enhancement she COULD have, whether or not she took it — the
+       * offer, in the analysis's order. Priced under the same mode as the
+       * lines, so a surface never has to compose "+$40" itself.
+       */
+      recommendations: ConsultBookingProposalRecommendationDraft[]
     }
   | {
       status: 'REFUSED'
@@ -150,7 +217,7 @@ export type ConsultBookingProposalEstimateInput = {
 }
 
 /**
- * The analysis material the safety gate reads — nothing else from the payload.
+ * The analysis material this derivation reads — nothing else from the payload.
  *
  * 🔴 The RECOMMENDATIONS, not `safetyFlags`. Every hair-color analysis carries a
  * safety flag: `addRequiredSafetyFlags` adds ALLERGY_HISTORY_UNKNOWN
@@ -158,10 +225,38 @@ export type ConsultBookingProposalEstimateInput = {
  * "any safety flag" would refuse every proposal ever made and look, from the
  * outside, exactly like a feature that does not work. The real routing signal
  * is `analysisRoutedToSafetyPrerequisites` — see its comment.
+ *
+ * B7 widened this from `{ serviceIntent }` to the whole recommendation, because
+ * the SAME array answers the second question decision 10 asks: what does this
+ * enhancement DO for her. The reason a client is shown is the analysis's own
+ * `rationale`, read from the revision the estimate pinned — never re-written,
+ * never composed from a service name.
  */
-export type ConsultBookingProposalSafetyInput = ReadonlyArray<{
-  serviceIntent: string
-}>
+export type ConsultBookingProposalAnalysisInput =
+  ConsultAnalysisPayloadDTO['recommendations']
+
+/**
+ * The reason to show for one enhancement, or null when the pinned analysis has
+ * nothing to say about it.
+ *
+ * Matched by the recommendation's own resolved SERVICE reference — the same
+ * link B3 built the beyond-floor line from — so the sentence and the line are
+ * two halves of one recommendation rather than two guesses that happen to
+ * agree. A SERVICE_CATEGORY reference never matches: it means the matcher found
+ * nothing on this pro's menu, which is exactly why no line was priced from it.
+ */
+function outcomeForService(
+  recommendations: ConsultBookingProposalAnalysisInput,
+  serviceId: string,
+): string | null {
+  for (const recommendation of recommendations) {
+    if (recommendation.reference.type !== 'SERVICE') continue
+    if (recommendation.reference.serviceId !== serviceId) continue
+    const outcome = recommendation.rationale.trim()
+    return outcome.length > 0 ? outcome : null
+  }
+  return null
+}
 
 function refused(
   refusalCode: ConsultBookingProposalRefusalCode,
@@ -208,7 +303,9 @@ export function deriveConsultBookingProposal(args: {
   menu: readonly ConsultProMenuOffering[]
   estimate: ConsultBookingProposalEstimateInput | null
   /** The stored analysis's own recommendations. See the type's comment. */
-  analysisRecommendations: ConsultBookingProposalSafetyInput
+  analysisRecommendations: ConsultBookingProposalAnalysisInput
+  /** Which enhancements are on this booking (B7). See the type's comment. */
+  enhancementSelection: ConsultBookingProposalEnhancementSelection
 }): ConsultBookingProposalDraft {
   const { locationType } = args
 
@@ -241,7 +338,14 @@ export function deriveConsultBookingProposal(args: {
     args.menu.map((offering) => [offering.id, offering]),
   )
 
+  const selectAll = args.enhancementSelection === 'ALL'
+  const selectedLineIds = selectAll
+    ? null
+    : new Set(args.enhancementSelection)
+
   const lines: ConsultBookingProposalLineDraft[] = []
+  const recommendations: ConsultBookingProposalRecommendationDraft[] = []
+  let hasFloor = false
   let totalDurationMinutes = 0
   let startingAtPrice = new Prisma.Decimal(0)
 
@@ -249,22 +353,65 @@ export function deriveConsultBookingProposal(args: {
     (a, b) => a.sortOrder - b.sortOrder,
   )
 
-  for (const [index, estimateLine] of ordered.entries()) {
+  for (const estimateLine of ordered) {
+    const isFloor = estimateLine.source === 'LOOK_LINKED_SERVICE'
+    // B7, rule 5. The floor is the look she tapped Book on — never declinable.
+    const selected =
+      isFloor || selectAll || Boolean(selectedLineIds?.has(estimateLine.id))
+
     // Read the offering by its OWN id, not by service: the estimate stored
     // which menu row it priced, and a pro who replaced that row has changed the
     // thing the client is being quoted.
     const offering = byOfferingId.get(estimateLine.offeringId)
     if (!offering || offering.serviceId !== estimateLine.serviceId) {
-      return refused('OFFERING_OFF_MENU', locationType)
+      // 🔴 Rule 4 still holds for anything ON the booking: a line she is being
+      // charged for that has left the menu refuses the whole thing, because
+      // dropping it would silently change the price AND the width she is
+      // committing to. But an enhancement she DECLINED going off the pro's menu
+      // says nothing about the booking she actually made — refusing it would
+      // take the floor down with an extra nobody asked for.
+      if (selected) return refused('OFFERING_OFF_MENU', locationType)
+      continue
     }
 
     const priced = priceLine(offering, locationType, args.stepMinutes)
     if (!priced.ok) {
-      return refused(toProposalRefusal(priced.refusalCode), locationType)
+      // Same asymmetry, same reason: a mode the pro no longer prices refuses
+      // only if that line is on the booking.
+      if (selected) {
+        return refused(toProposalRefusal(priced.refusalCode), locationType)
+      }
+      continue
     }
 
+    if (!isFloor) {
+      // The offer. An enhancement whose analysis reason cannot be found is not
+      // offered — decision 10 phrases these by OUTCOME, and a card with no
+      // outcome to print could only fall back to the service name, which is
+      // exactly what decision 1 forbids. It stays out of `recommendations`, so
+      // the client can never select it; it is still LINED when the caller asked
+      // for 'ALL', which is what keeps the reservation the widest case.
+      const outcome = outcomeForService(
+        args.analysisRecommendations,
+        estimateLine.serviceId,
+      )
+      if (outcome) {
+        recommendations.push({
+          estimateLineId: estimateLine.id,
+          serviceId: estimateLine.serviceId,
+          outcome,
+          price: priced.price,
+          durationMinutes: priced.durationMinutes,
+          selected,
+        })
+      }
+    }
+
+    if (!selected) continue
+    if (isFloor) hasFloor = true
+
     lines.push({
-      sortOrder: index,
+      sortOrder: lines.length,
       estimateLineId: estimateLine.id,
       serviceId: estimateLine.serviceId,
       offeringId: offering.id,
@@ -278,6 +425,15 @@ export function deriveConsultBookingProposal(args: {
 
     totalDurationMinutes += priced.durationMinutes
     startingAtPrice = startingAtPrice.add(priced.price)
+  }
+
+  // An ESTIMATED estimate always carries exactly one floor line (B3's database
+  // trigger says so), and the floor is never declinable — so reaching here
+  // without one means the estimate is not what it claims to be. Refused rather
+  // than proposed: every downstream caller identifies the offering to book by
+  // the floor, and a proposal with no floor is not a proposal.
+  if (!hasFloor) {
+    return refused('ESTIMATE_REFUSED', locationType)
   }
 
   // Refused, never CLAMPED. Finalize clamps a base+add-ons width to this
@@ -297,6 +453,7 @@ export function deriveConsultBookingProposal(args: {
     totalDurationMinutes,
     startingAtPrice,
     lines,
+    recommendations,
   }
 }
 
@@ -314,7 +471,8 @@ export async function buildConsultBookingProposal(
     serviceCategoryId: string
     locationType: ServiceLocationType
     estimate: ConsultBookingProposalEstimateInput | null
-    analysisRecommendations: ConsultBookingProposalSafetyInput
+    analysisRecommendations: ConsultBookingProposalAnalysisInput
+    enhancementSelection: ConsultBookingProposalEnhancementSelection
   },
 ): Promise<ConsultBookingProposalDraft> {
   // Slot granularity and buffer come from the pro's bookable location for the
@@ -344,5 +502,6 @@ export async function buildConsultBookingProposal(
     menu,
     estimate: args.estimate,
     analysisRecommendations: args.analysisRecommendations,
+    enhancementSelection: args.enhancementSelection,
   })
 }

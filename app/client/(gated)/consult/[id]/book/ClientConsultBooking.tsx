@@ -26,6 +26,7 @@ import type {
   ConsultBookingProposalDTO,
 } from '@/lib/dto/consult'
 import { messageStartHref } from '@/lib/messages'
+import { formatDurationLabel } from '@/lib/format/duration'
 import { formatRoundedDollars } from '@/lib/money'
 import { useViewerLocation } from '@/lib/useViewerLocation'
 import { viewerLocationToDrawerContextFields } from '@/lib/viewerLocation'
@@ -33,15 +34,6 @@ import { viewerLocationToDrawerContextFields } from '@/lib/viewerLocation'
 import ClientPage from '../../../_components/ClientPage'
 
 type Mode = 'SALON' | 'MOBILE'
-
-function formatDuration(minutes: number): string {
-  if (!Number.isFinite(minutes) || minutes <= 0) return '—'
-  if (minutes < 60) return `${minutes} min`
-
-  const hours = Math.floor(minutes / 60)
-  const rest = minutes % 60
-  return rest ? `${hours}h ${rest}m` : `${hours}h`
-}
 
 /**
  * Decision 5, rendered: the number NEVER stands on its own. `startingAtLabel` is
@@ -260,11 +252,15 @@ export default function ClientConsultBooking({
                   key={`${index}:${line.serviceName}`}
                   className="flex items-baseline justify-between gap-3 rounded-xl border border-surfaceGlass/10 bg-bgPrimary px-3 py-2.5"
                 >
-                  <span className="min-w-0 text-[13px] font-semibold text-textPrimary">
+                  {/* `break-words` for the reason the review step's copy of
+                      this row carries it: a flex item that may shrink can still
+                      overflow when its content is one unbroken token, and the
+                      name then runs under its own price. */}
+                  <span className="min-w-0 break-words text-[13px] font-semibold text-textPrimary">
                     {line.serviceName}
                   </span>
                   <span className="shrink-0 text-[12px] font-semibold text-textMuted">
-                    {formatDuration(line.durationMinutes)} ·{' '}
+                    {formatDurationLabel(line.durationMinutes) ?? '—'} ·{' '}
                     {formatRoundedDollars(line.price) ?? `$${line.price}`}
                   </span>
                 </li>
@@ -276,7 +272,7 @@ export default function ClientConsultBooking({
                 {copy.durationLabel}
               </span>
               <span className="font-black text-textPrimary">
-                {formatDuration(proposal.totalDurationMinutes)}
+                {formatDurationLabel(proposal.totalDurationMinutes) ?? '—'}
               </span>
             </div>
 

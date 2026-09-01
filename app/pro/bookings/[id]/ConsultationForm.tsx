@@ -39,11 +39,35 @@ export type ConsultationInitialItem = {
   source: 'BOOKING' | 'PROPOSAL'
 }
 
+/**
+ * Book the Look, B7 — one enhancement the client declined, offered back to the
+ * pro at session close (decision 10's pro half).
+ *
+ * Every figure is the SERVER's, re-derived under the mode this booking was made
+ * in (lib/consult/proProposalReview.ts). Tapping it seeds a line item she can
+ * then edit like any other — it does not change the appointment, and nothing
+ * happens to the client's booking until she sends the proposal and the client
+ * approves it.
+ */
+export type ConsultationAttachOption = {
+  estimateLineId: string
+  serviceId: string
+  offeringId: string
+  label: string
+  /** The analysis's reason this was recommended. Her "why", from the estimate. */
+  rationale: string
+  price: string
+  durationMinutes: number
+}
+
 type Props = {
   bookingId: string
   initialNotes: string
   initialPrice: string | number | null
   initialItems?: ConsultationInitialItem[]
+  /** B7 — the declined enhancements, or none. See the type above. */
+  attachOptions?: ConsultationAttachOption[]
+  attachCopy?: { title: string; body: string }
 }
 
 type ServiceOption = {
@@ -382,6 +406,8 @@ export default function ConsultationForm({
   initialNotes,
   initialPrice,
   initialItems = [],
+  attachOptions = [],
+  attachCopy,
 }: Props) {
   const router = useRouter()
 
@@ -551,6 +577,61 @@ export default function ConsultationForm({
           categoryName: selectedService.categoryName,
           price,
           durationMinutes,
+          notes: '',
+          sortOrder: previousItems.length,
+          source: 'PROPOSAL',
+        },
+      ]),
+    )
+  }
+
+  /**
+   * B7 — put a declined enhancement back on the appointment.
+   *
+   * Keyed on the SERVICE already being on the form, not on whether this button
+   * was pressed: she may have added the same service by hand from the dropdown
+   * above, and offering it a second time would let her send two lines for one
+   * service. (An estimate cannot hold the same service twice —
+   * `@@unique([estimateId, serviceId])` — so the service id is a safe identity
+   * here.)
+   */
+  const attachedServiceIds = useMemo(
+    () => new Set(items.map((item) => item.serviceId)),
+    [items],
+  )
+
+  const availableAttachOptions = useMemo(
+    () =>
+      attachOptions.filter(
+        (option) => !attachedServiceIds.has(option.serviceId),
+      ),
+    [attachOptions, attachedServiceIds],
+  )
+
+  function attachRecommendation(option: ConsultationAttachOption) {
+    setError(null)
+    setMessage(null)
+
+    setItems((previousItems) =>
+      sortLineItems([
+        ...previousItems,
+        {
+          // Stable and derived, not random: re-tapping the same recommendation
+          // cannot produce a second row with a different key.
+          key: `attach:${option.estimateLineId}`,
+          bookingServiceItemId: null,
+          offeringId: option.offeringId,
+          serviceId: option.serviceId,
+          // BASE, like every other line the consult put on this form. It is a
+          // service she is performing, not an `OfferingAddOn` the client picked
+          // off the pro's catalog — those two never mix on a consult booking.
+          itemType: BookingServiceItemType.BASE,
+          label: option.label,
+          categoryName: null,
+          price: option.price,
+          durationMinutes: String(option.durationMinutes),
+          // Empty for the reason lib/consult/inChairFinalization.ts leaves it
+          // empty: a line-item note goes TO the client on the approval screen.
           notes: '',
           sortOrder: previousItems.length,
           source: 'PROPOSAL',
@@ -927,6 +1008,62 @@ export default function ConsultationForm({
           consult approvals.
         </div>
       )}
+
+      {/* Book the Look, B7 — "recommended attach at session close" (decision
+          10). Only what she can still SELL: the server drops any declined line
+          whose offering has left her menu or that she no longer prices in this
+          booking's mode, so every row here is one the proposal route will
+          accept. Disappears as she adds them, and renders nothing at all when
+          there is nothing to offer. */}
+      {availableAttachOptions.length > 0 && attachCopy ? (
+        <div className="brand-pro-session-line-item">
+          <div className="brand-pro-session-section-title">
+            {attachCopy.title}
+          </div>
+
+          <div className="brand-pro-session-card-body">{attachCopy.body}</div>
+
+          {availableAttachOptions.map((option) => (
+            <div
+              key={option.estimateLineId}
+              data-testid={`consult-attach-${option.estimateLineId}`}
+              className="brand-pro-session-line-row"
+            >
+              <div className="brand-pro-session-line-main">
+                <div className="brand-pro-session-line-title">
+                  {option.label}
+                </div>
+
+                <div className="brand-pro-session-line-price-sub">
+                  {option.rationale}
+                </div>
+              </div>
+
+              <div className="brand-pro-session-line-price">
+                <div className="brand-pro-session-line-price-value">
+                  ${option.price}
+                </div>
+
+                <div className="brand-pro-session-line-price-sub">
+                  {option.durationMinutes} min
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => attachRecommendation(option)}
+                  disabled={saving}
+                  className="brand-pro-session-button brand-focus"
+                  data-variant="ghost"
+                  data-full="false"
+                >
+                  <AddIcon />
+                  Add
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       <label>
         <span className="brand-pro-session-section-title">

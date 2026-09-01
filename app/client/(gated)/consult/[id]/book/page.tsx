@@ -48,6 +48,12 @@ export default async function ClientConsultBookingPage({ params }: PageProps) {
     consultSessionId: id,
     clientId: user.clientProfile.id,
     actorUserId: user.id,
+    // Book the Look, B7 — this door quotes the LOOK, and nothing else. The
+    // analysis's enhancements are offered on the review step, where she is one
+    // tap from committing and the slot is already held for the widest case; an
+    // empty selection here is what makes "Starting at" a starting price rather
+    // than a number that then drops (decision 10, opt-in never pre-checked).
+    enhancementSelection: [] as const,
   }
 
   let salon

@@ -237,7 +237,8 @@ export async function resolveAvailabilityDurationMinutes(
  *
  * Runs the SAME derivation the hold and the finalize run
  * (`buildConsultBookingProposal`, reached here through the preview loader), so
- * the three windows are one number. Sizing this grid from the offering's base
+ * this window and the hold's are one number — and the finalize's is that number
+ * or less, never more (B7; see `enhancementSelection` below). Sizing this grid from the offering's base
  * would advertise starts the consult-sized hold then refuses — the exact
  * failure B3-A fixed for reschedules.
  *
@@ -250,15 +251,16 @@ async function resolveConsultProposalDurationMinutes(
   args: ResolveAvailabilityDurationArgs,
   consult: ConsultProposalAvailabilityContext,
 ): Promise<ResolveAvailabilityDurationResult> {
-  // Add-ons on top of a proposal are B7 and have no shape yet — refused at the
-  // hold and at finalize, so the offer must refuse them too rather than sizing
-  // a window neither of them will accept.
+  // `OfferingAddOn` add-ons on top of a proposal stay refused at the hold and at
+  // finalize (B7 answered decision 10 with estimate LINES instead — see the
+  // hold's own refusal in lib/booking/writeBoundary.ts), so the offer must
+  // refuse them too rather than sizing a window neither of them will accept.
   if (args.addOnIds.length > 0) {
     return {
       ok: false,
       code: 'ADDONS_INVALID',
       userMessage:
-        'Add-ons can’t be chosen for a consultation booking yet. Your pro will go through extras with you.',
+        'Add-ons can’t be chosen for a consultation booking. Your pro will go through extras with you.',
     }
   }
 
@@ -269,6 +271,12 @@ async function resolveConsultProposalDurationMinutes(
       clientId: consult.clientId,
       actorUserId: consult.actorUserId,
       locationType: args.locationType,
+      // 🔴 B7: the grid is sized for the WIDEST thing this booking could become.
+      // The client opts into enhancements on the review step, after a slot from
+      // this grid has already been held, so a grid sized for the floor alone
+      // would advertise starts she then cannot fill. Same reason, same value as
+      // the hold — see `ConsultBookingProposalEnhancementSelection`.
+      enhancementSelection: 'ALL',
     })
   } catch (error: unknown) {
     if (error instanceof ConsultProposalEntryError) {

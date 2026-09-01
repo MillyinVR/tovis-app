@@ -986,6 +986,45 @@ export type ConsultBookingProposalDTO = {
    */
   commitNote: string
   lines: ConsultBookingProposalLineDTO[]
+  /**
+   * Book the Look, B7 — the enhancements the analysis recommends on top of the
+   * look (decision 10). Opt-in: `selected` is false unless this client asked
+   * for it, and `lines` above already reflects whatever she did ask for.
+   *
+   * Empty for a consult whose analysis recommended nothing beyond the look
+   * itself, which every surface renders as no section rather than an empty one.
+   */
+  recommendations: ConsultBookingProposalRecommendationDTO[]
+}
+
+/**
+ * One enhancement, as the client is offered it (B7, decision 10).
+ *
+ * 🔴 THERE IS NO SERVICE NAME ON THIS TYPE, ON PURPOSE. Decision 10 gives the
+ * register — "a gloss keeps this tone from going brassy", never "add Toner
+ * Gloss" — and decision 1 says a look never names the service that produced it.
+ * A `serviceName` field here would be one careless render away from putting the
+ * taxonomy back on the client's screen, so the wire simply does not carry one.
+ *
+ * `outcome` is the ANALYSIS's own rationale for this recommendation, read from
+ * the revision the estimate pinned. Never re-written and never composed from a
+ * service name.
+ *
+ * Both labels are composed on the SERVER (lib/consult/enhancementOffer.ts) and
+ * are null when there is nothing to print — a complimentary enhancement has no
+ * price delta, an instant one has no duration delta. Never render "+$0".
+ */
+export type ConsultBookingProposalRecommendationDTO = {
+  /**
+   * The estimate line this offers. It is also the id the client's answer names,
+   * on the wire and in the URL — never a price and never a duration, so nothing
+   * she can edit decides what she is charged.
+   */
+  estimateLineId: string
+  outcome: string
+  priceDeltaLabel: string | null
+  durationDeltaLabel: string | null
+  selected: boolean
 }
 
 export type ConsultBookingProposalAvailabilityDTO = {
@@ -1116,6 +1155,45 @@ export type ConsultProposalReviewDTO = {
   /** The most recent correction on any line, or null when there is none. */
   reviewedAt: string | null
   lines: ConsultProposalReviewLineDTO[]
+  /**
+   * Book the Look, B7 — decision 10's PRO half: "recommended attach at session
+   * close". The enhancements the analysis recommended and this client did NOT
+   * take, priced under the mode she booked, so the pro can put one back on the
+   * appointment in one tap while the person is in her chair.
+   *
+   * Empty when the analysis recommended nothing beyond the look, when she took
+   * everything, or when a declined line can no longer be priced on the pro's
+   * live menu — she cannot attach what she can no longer sell, and a row that
+   * 400s on send is worse than no row.
+   *
+   * ⚠️ PRO-FACING, which is why `serviceName` is on this type and deliberately
+   * NOT on the client's `ConsultBookingProposalRecommendationDTO`. Decision 6
+   * is that the pro sees her own menu, line by line, with the reason for each;
+   * decision 1 is that the CLIENT never sees the taxonomy. Both are true, and
+   * these are the two different types that keep them true.
+   */
+  declinedRecommendations: ConsultProposalDeclinedRecommendationDTO[]
+}
+
+/**
+ * One enhancement the client declined, as the pro is offered it back (B7).
+ *
+ * The numbers are RE-DERIVED from her live menu under the booking's own mode —
+ * not read off the estimate, whose prices are the salon column (B5, rule 3).
+ * They seed her in-chair line item, and she can edit it like any other.
+ */
+export type ConsultProposalDeclinedRecommendationDTO = {
+  /** The estimate line, so the correction pair still lands where B3 put it. */
+  estimateLineId: string
+  serviceId: string
+  /** Her own offering — the in-chair form identifies a BASE service by this. */
+  offeringId: string
+  serviceName: string
+  /** Decision 6's "why", copied from the estimate line. Never invented. */
+  rationale: string
+  /** Decimal string, under the mode this booking was made in. */
+  price: string
+  durationMinutes: number
 }
 
 export type ConsultProposalReviewResponseDTO = {

@@ -29,6 +29,7 @@ import {
   bookingJsonFail,
 } from '@/app/api/_utils/bookingResponses'
 import { normalizeLocationType } from '@/lib/booking/locationContext'
+import { MAX_CONSULT_ENHANCEMENT_LINE_IDS } from '@/lib/consult/enhancementOffer'
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 import { broadcastChange } from '@/lib/live/broadcastAudience'
 import { getClientSubmittedBookingStatus } from '@/lib/booking/statusRules'
@@ -138,6 +139,13 @@ type ParsedFinalizeBody = {
   requestedRebookOfBookingId: string | null
   locationType: ServiceLocationType | null
   addOnIds: string[]
+  /**
+   * Book the Look, B7 — the estimate lines the client opted into on the review
+   * step. Ids only: the write boundary re-derives what each one costs and how
+   * long it takes from the pro's own menu, so nothing here decides a price.
+   * Empty is the ordinary case and means the look alone (decision 10).
+   */
+  consultEnhancementLineIds: string[]
   source: BookingSource
   /** The client ticked "I agree to the cancellation policy" at the confirm step. */
   cancellationPolicyAccepted: boolean
@@ -154,6 +162,7 @@ type ValidatedFinalizeBody = {
   requestedRebookOfBookingId: string | null
   locationType: ServiceLocationType
   addOnIds: string[]
+  consultEnhancementLineIds: string[]
   source: BookingSource
 }
 
@@ -237,6 +246,10 @@ function parseFinalizeBody(body: UnknownRecord): ParsedFinalizeBody {
   const requestedRebookOfBookingId = pickString(body.rebookOfBookingId)
   const locationType = normalizeLocationType(body.locationType)
   const addOnIds = pickStringArray(body.addOnIds)
+  const consultEnhancementLineIds = pickStringArray(
+    body.consultEnhancementLineIds,
+    MAX_CONSULT_ENHANCEMENT_LINE_IDS,
+  )
 
   const source = normalizeSourceFromRequest({
     sourceRaw: body.source,
@@ -256,6 +269,7 @@ function parseFinalizeBody(body: UnknownRecord): ParsedFinalizeBody {
     requestedRebookOfBookingId,
     locationType,
     addOnIds,
+    consultEnhancementLineIds,
     source,
     cancellationPolicyAccepted: body.cancellationPolicyAccepted === true,
   }
@@ -266,6 +280,20 @@ function validateParsedFinalizeBody(
 ): { ok: true; body: ValidatedFinalizeBody } | { ok: false; response: Response } {
   if (hasDuplicateStrings(body.addOnIds)) {
     return { ok: false, response: bookingJsonFail('ADDONS_INVALID') }
+  }
+
+  // Refused rather than de-duplicated, for the same reason the add-on list
+  // above is: a body naming one enhancement twice is a caller that does not
+  // know what it is asking for, and the honest answer is to say so while it can
+  // still be fixed. Ignoring an id is only safe when it is an id we never saw.
+  if (hasDuplicateStrings(body.consultEnhancementLineIds)) {
+    return {
+      ok: false,
+      response: bookingJsonFail('CONSULT_PROPOSAL_UNAVAILABLE', {
+        message: 'Duplicate consultation enhancement ids.',
+        userMessage: 'Please go back and choose your extras again.',
+      }),
+    }
   }
 
   if (!body.locationType) {
@@ -307,6 +335,7 @@ function validateParsedFinalizeBody(
       requestedRebookOfBookingId: body.requestedRebookOfBookingId,
       locationType: body.locationType,
       addOnIds: body.addOnIds,
+      consultEnhancementLineIds: body.consultEnhancementLineIds,
       source: body.source,
     },
   }
@@ -579,6 +608,10 @@ function buildFinalizeIdempotencyRequestBody(args: {
     holdId: args.body.holdId,
     openingId: args.body.openingId,
     addOnIds: args.body.addOnIds,
+    // B7: two finalizes that differ ONLY by the enhancements chosen are two
+    // different bookings. Left out of this body, the second would replay the
+    // first and quietly book the wrong price.
+    consultEnhancementLineIds: args.body.consultEnhancementLineIds,
     locationType: args.body.locationType,
     source: args.body.source,
     bookingEntryPoint: args.bookingEntryPoint,
@@ -783,6 +816,7 @@ export async function POST(request: Request) {
           holdId: body.holdId,
           openingId: body.openingId,
           addOnIds: body.addOnIds,
+          consultEnhancementLineIds: body.consultEnhancementLineIds,
           locationType: body.locationType,
           source: body.source,
           consultId: body.consultId,

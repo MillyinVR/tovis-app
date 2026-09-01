@@ -153,15 +153,17 @@ function parseHoldCreateBody(rawBody: unknown): ParsedHoldRequest | Response {
     return bookingJsonFail('ADDONS_INVALID')
   }
 
-  // Add-ons on top of a consult proposal are B7 and have no shape yet. Refused
-  // here as well as at the boundary, for the same reason the reschedule pair
-  // below is: the contract should be visible on the wire, not only in the
-  // write path.
+  // `OfferingAddOn` add-ons on top of a consult proposal stay refused — B7
+  // answered decision 10 with the estimate's own beyond-floor LINES instead,
+  // which never travel as `addOnIds` (see the refusal in
+  // `performLockedCreateHold`). Refused here as well as at the boundary, for
+  // the same reason the reschedule pair below is: the contract should be
+  // visible on the wire, not only in the write path.
   if (consultId && addOnIds.length > 0) {
     return bookingJsonFail('ADDONS_INVALID', {
       message: 'Add-ons cannot be combined with a consultation proposal.',
       userMessage:
-        'Add-ons can’t be chosen for a consultation booking yet. Your pro will go through extras with you.',
+        'Add-ons can’t be chosen for a consultation booking. Your pro will go through extras with you.',
     })
   }
 

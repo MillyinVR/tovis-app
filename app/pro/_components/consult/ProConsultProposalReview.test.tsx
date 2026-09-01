@@ -71,6 +71,7 @@ function review(
         reviewStatus: 'NOT_REVIEWED',
       },
     ],
+    declinedRecommendations: [],
     ...overrides,
   }
 }
