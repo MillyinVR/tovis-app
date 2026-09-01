@@ -408,6 +408,26 @@ export default function LookDetailClient({
             4:5 is `PublishCrop.instagramFeed`, the same frame iOS's hero and the
             Signature card use, so one look is one shape everywhere.
           */}
+          {/*
+            🔴 This wrapper is what keeps `RightActionRail` ON the photograph.
+
+            The rail is `position: absolute; bottom: 16` and 432px tall. Anchored
+            to the <section> — which is the media PLUS the caption/stats block —
+            its bottom sat 16px above the bottom of the TEXT, so the stack crossed
+            the media/text boundary and its lower ~150px (bookmark, share, Report)
+            landed on top of "@tori / Views / View profile". Measured on prod at
+            both widths: media ended at y=510 (mobile) / y=759 (desktop) while the
+            rail ran to y=660 / y=909.
+
+            That predates the 4:5 hero — the same arithmetic held when the media
+            was `max-h-[520px]` — so this is not a regression, it is a defect the
+            hero change made visible by finally giving the media a definite box.
+
+            NOT `overflow-hidden`: `RightActionRail` renders `SaveToBoardModal` as
+            a sibling of the rail inside its own fragment, and clipping this box
+            would clip the modal.
+          */}
+          <div className="relative">
           <div className="relative aspect-4/5 w-full overflow-hidden bg-bgPrimary">
             {item.primaryMedia.mediaType === 'VIDEO' ? (
               <video
@@ -504,6 +524,7 @@ export default function LookDetailClient({
               }))
             }}
           />
+          </div>
 
           <div className="grid gap-3 p-4">
             <div className="grid gap-1">
