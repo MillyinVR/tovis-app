@@ -1,7 +1,8 @@
 // app/_components/media/OwnerMediaMenu.tsx
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
 import { UI_SIZES } from '@/app/(main)/ui/layoutConstants'
 import { zClass } from '@/lib/zIndex'
@@ -117,7 +118,48 @@ export default function OwnerMediaMenu({
   })
 
   const wrapRef = useRef<HTMLDivElement | null>(null)
+  const buttonRef = useRef<HTMLButtonElement | null>(null)
+  const menuRef = useRef<HTMLDivElement | null>(null)
   const busy = edit.saving || actionBusy
+
+  /**
+   * 🔴 Both the ⋯ menu and the edit modal are PORTALLED to `document.body`.
+   *
+   * This component is handed to `MediaFullscreenViewer` through its `topRight`
+   * slot, and that slot is an `absolute z-20` bar. A non-`auto` z-index opens a
+   * stacking context, so anything rendered inside the slot is trapped there: a
+   * `zClass` on the modal only ranks it *within* the z-20 bar, and the viewer's
+   * caption block — a later sibling at the same z-20 — paints straight over it.
+   * Measured: `elementFromPoint` at the Save button returned the caption, and
+   * even a forced click fired no PATCH. Raising the z-index does NOT fix this;
+   * only leaving the ancestor's stacking context does.
+   *
+   * `mounted` keeps the first client render identical to the server's (no
+   * portal), so hydration doesn't mismatch.
+   */
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
+
+  /**
+   * The portalled menu can no longer be placed by `absolute right-0` against the
+   * ⋯ button, so it is anchored to that button's viewport rect instead. Only
+   * read while `openMenu` is true, and re-measured on every open.
+   */
+  const [menuAnchor, setMenuAnchor] = useState<{ top: number; right: number } | null>(null)
+
+  const measureMenuAnchor = useCallback((): { top: number; right: number } | null => {
+    const btn = buttonRef.current
+    if (!btn) return null
+    const r = btn.getBoundingClientRect()
+    // `mt-2` (8px) below the button, right edges flush, never off the left edge.
+    return { top: r.bottom + 8, right: Math.max(8, window.innerWidth - r.right) }
+  }, [])
+
+  function toggleMenu() {
+    const next = !openMenu
+    if (next) setMenuAnchor(measureMenuAnchor())
+    setOpenMenu(next)
+  }
 
   const isPublicSurfaceOn = isEligibleForLooks || isFeaturedInPortfolio
   const computedVisibility = visibilityFromFlags({
@@ -125,17 +167,31 @@ export default function OwnerMediaMenu({
     isFeaturedInPortfolio,
   })
 
-  // Close the 3-dot menu when clicking outside
+  // Close the 3-dot menu when clicking outside. The menu is portalled, so it is
+  // NOT inside `wrapRef` any more — miss it here and mousedown would unmount the
+  // menu before its own item's click could fire.
   useEffect(() => {
     function onDoc(e: MouseEvent) {
-      const el = wrapRef.current
-      if (!el) return
-      if (el.contains(e.target as Node)) return
+      const target = e.target as Node
+      if (wrapRef.current?.contains(target)) return
+      if (menuRef.current?.contains(target)) return
       setOpenMenu(false)
     }
     document.addEventListener('mousedown', onDoc)
     return () => document.removeEventListener('mousedown', onDoc)
   }, [])
+
+  // Keep the portalled menu glued to the ⋯ button if the viewport changes.
+  useEffect(() => {
+    if (!openMenu) return
+    const reposition = () => setMenuAnchor(measureMenuAnchor())
+    window.addEventListener('resize', reposition)
+    window.addEventListener('scroll', reposition, true)
+    return () => {
+      window.removeEventListener('resize', reposition)
+      window.removeEventListener('scroll', reposition, true)
+    }
+  }, [openMenu, measureMenuAnchor])
 
   // Footer + safe-area math so the modal never hides behind bottom nav
   const footerPx = UI_SIZES.footerHeight ?? 0
@@ -269,8 +325,9 @@ export default function OwnerMediaMenu({
     <div ref={wrapRef} className="relative">
       {/* ⋯ button */}
       <button
+        ref={buttonRef}
         type="button"
-        onClick={() => setOpenMenu((v) => !v)}
+        onClick={toggleMenu}
         className={cn(
           'tap-target',
           'inline-flex h-10 w-10 items-center justify-center rounded-full',
@@ -284,214 +341,223 @@ export default function OwnerMediaMenu({
         <span className="text-[20px] leading-none">⋯</span>
       </button>
 
-      {/* Menu */}
-      {openMenu ? (
-        <div
-          className={cn(
-            'absolute right-0 mt-2 w-44 overflow-hidden rounded-[16px]',
-            'border border-surfaceGlass/12 bg-bgPrimary/70 backdrop-blur-xl',
-            'shadow-[0_18px_60px_rgb(var(--shadow-color)/0.55)]',
-          )}
-        >
-          <button
-            type="button"
-            onClick={() => {
-              setOpenMenu(false)
-              setOpenEdit(true)
-              edit.setError(null)
-              setActionError(null)
-            }}
-            className="block w-full px-4 py-3 text-left text-[13px] font-black text-textPrimary hover:bg-surfaceGlass/10"
-          >
-            Edit
-          </button>
-
-          {/* §18d — cover banner (images only). */}
-          {!isVideo ? (
-            <button
-              type="button"
-              onClick={toggleCover}
-              disabled={busy}
-              className={cn(
-                'block w-full px-4 py-3 text-left text-[13px] font-black text-textPrimary hover:bg-surfaceGlass/10',
-                busy ? 'cursor-not-allowed opacity-70' : '',
-              )}
-            >
-              {cover ? 'Remove cover photo' : 'Set as cover photo'}
-            </button>
-          ) : null}
-
-          {/* The pro's own Signature post (photos only, like the cover). */}
-          {!isVideo ? (
-            <button
-              type="button"
-              onClick={toggleSignature}
-              disabled={busy}
-              className={cn(
-                'block w-full px-4 py-3 text-left text-[13px] font-black text-textPrimary hover:bg-surfaceGlass/10',
-                busy ? 'cursor-not-allowed opacity-70' : '',
-              )}
-            >
-              {signature ? 'Remove Signature' : 'Set as Signature'}
-            </button>
-          ) : null}
-
-          <button
-            type="button"
-            onClick={deleteMedia}
-            className="block w-full px-4 py-3 text-left text-[13px] font-black text-toneDanger hover:bg-surfaceGlass/10"
-          >
-            Delete
-          </button>
-
-          {actionError ? (
-            <div className="border-t border-surfaceGlass/10 px-4 py-3 text-[11px] font-semibold text-toneDanger">
-              {actionError}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-
-      {/* Edit modal */}
-      {openEdit ? (
-        <div className={`fixed inset-0 ${zClass.modal} bg-scrim/60`} onClick={closeEdit}>
+      {/* Menu — portalled out of the viewer's `z-20` slot; see `mounted`. */}
+      {mounted && openMenu && menuAnchor
+        ? createPortal(
           <div
+            ref={menuRef}
+            style={{ top: menuAnchor.top, right: menuAnchor.right }}
             className={cn(
-              'mx-auto mt-4 w-full max-w-[560px] overflow-hidden rounded-[18px]',
-              'border border-surfaceGlass/12 bg-bgPrimary/70 backdrop-blur-2xl',
-              'shadow-[0_22px_90px_rgb(var(--shadow-color)/0.70)]',
-              'grid grid-rows-[auto_1fr_auto]',
+              'fixed w-44 overflow-hidden rounded-[16px]',
+              zClass.nestedModal,
+              'border border-surfaceGlass/12 bg-bgPrimary/70 backdrop-blur-xl',
+              'shadow-[0_18px_60px_rgb(var(--shadow-color)/0.55)]',
             )}
-            style={{ maxHeight: modalMaxHeight }}
-            onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-            aria-label="Edit media"
           >
-            {/* Header */}
-            <div className="flex items-center justify-between gap-3 border-b border-surfaceGlass/10 px-4 py-3">
-              <div className="grid">
-                <div className="text-[13px] font-black text-textPrimary">Edit media</div>
-                <div className="text-[11px] font-semibold text-textSecondary">
-                  Caption, tags and where it appears.
-                </div>
-              </div>
+            <button
+              type="button"
+              onClick={() => {
+                setOpenMenu(false)
+                setOpenEdit(true)
+                edit.setError(null)
+                setActionError(null)
+              }}
+              className="block w-full px-4 py-3 text-left text-[13px] font-black text-textPrimary hover:bg-surfaceGlass/10"
+            >
+              Edit
+            </button>
 
+            {/* §18d — cover banner (images only). */}
+            {!isVideo ? (
               <button
                 type="button"
-                onClick={closeEdit}
+                onClick={toggleCover}
+                disabled={busy}
                 className={cn(
-                  'tap-target',
-                  'grid h-9 w-9 place-items-center rounded-full border text-[14px] font-black',
-                  busy
-                    ? 'cursor-not-allowed border-surfaceGlass/10 text-textSecondary opacity-70'
-                    : 'border-surfaceGlass/12 bg-bgPrimary/30 text-textPrimary hover:bg-surfaceGlass/10',
+                  'block w-full px-4 py-3 text-left text-[13px] font-black text-textPrimary hover:bg-surfaceGlass/10',
+                  busy ? 'cursor-not-allowed opacity-70' : '',
                 )}
-                aria-label="Close"
               >
-                ✕
+                {cover ? 'Remove cover photo' : 'Set as cover photo'}
               </button>
-            </div>
+            ) : null}
 
-            {/* Body */}
-            <div className="looksNoScrollbar overflow-y-auto p-4">
-              <div className="grid gap-4">
-                {/* Visibility (derived) — this surface's own, not the shared editor's. */}
-                <Field
-                  label="Who can view"
-                  hint="Public requires Looks or Portfolio enabled. Private means neither is enabled."
-                >
-                  <Segmented<Visibility>
-                    value={computedVisibility}
-                    disabled={busy}
-                    onChange={(v) => onChangeVisibility(v)}
-                    options={[
-                      { value: MediaVisibility.PUBLIC, label: 'Public', sub: 'Visible to clients' },
-                      { value: MediaVisibility.PRO_CLIENT, label: 'Client + you', sub: 'Private (not public)' },
-                    ]}
-                  />
-                </Field>
+            {/* The pro's own Signature post (photos only, like the cover). */}
+            {!isVideo ? (
+              <button
+                type="button"
+                onClick={toggleSignature}
+                disabled={busy}
+                className={cn(
+                  'block w-full px-4 py-3 text-left text-[13px] font-black text-textPrimary hover:bg-surfaceGlass/10',
+                  busy ? 'cursor-not-allowed opacity-70' : '',
+                )}
+              >
+                {signature ? 'Remove Signature' : 'Set as Signature'}
+              </button>
+            ) : null}
 
-                {/* Toggles */}
-                <div className="rounded-[18px] border border-surfaceGlass/12 bg-bgPrimary/25 p-3">
-                  <HermesToggleRow
-                    label="Show in Looks feed"
-                    hint="Discovery feed + more exposure."
-                    value={isEligibleForLooks}
-                    setValue={(v) => {
-                      setIsEligibleForLooks(v)
-                      edit.setError(null)
-                    }}
-                    disabled={busy}
-                  />
-                  <div className="my-2 h-px bg-surfaceGlass/8" />
-                  <HermesToggleRow
-                    label="Feature in public portfolio"
-                    hint="Appears on your profile grid."
-                    value={isFeaturedInPortfolio}
-                    setValue={(v) => {
-                      setIsFeaturedInPortfolio(v)
-                      edit.setError(null)
-                    }}
-                    disabled={busy}
-                  />
-                </div>
-
-                <ProMediaEditFields edit={edit} />
-
-                {actionError ? (
-                  <div className="rounded-[14px] border border-toneDanger/30 bg-toneDanger/10 p-3 text-[12px] font-semibold text-toneDanger">
-                    {actionError}
-                  </div>
-                ) : null}
-              </div>
-            </div>
-
-            {/* Actions */}
-            <div
-              className="border-t border-surfaceGlass/10 bg-bgPrimary/85 px-4 py-3 backdrop-blur-2xl"
-              style={{ paddingBottom: actionSafePaddingBottom }}
+            <button
+              type="button"
+              onClick={deleteMedia}
+              className="block w-full px-4 py-3 text-left text-[13px] font-black text-toneDanger hover:bg-surfaceGlass/10"
             >
-              <div className="flex items-center justify-between gap-2">
-                <div className="text-[11px] font-semibold text-textPrimary/55">
-                  {computedVisibility === MediaVisibility.PRO_CLIENT ? 'Private to client + you.' : 'Public visibility enabled.'}
+              Delete
+            </button>
+
+            {actionError ? (
+              <div className="border-t border-surfaceGlass/10 px-4 py-3 text-[11px] font-semibold text-toneDanger">
+                {actionError}
+              </div>
+            ) : null}
+          </div>,
+            document.body,
+          )
+        : null}
+
+      {/* Edit modal — portalled for the same reason as the menu. */}
+      {mounted && openEdit
+        ? createPortal(
+          <div className={`fixed inset-0 ${zClass.nestedModal} bg-scrim/60`} onClick={closeEdit}>
+            <div
+              className={cn(
+                'mx-auto mt-4 w-full max-w-[560px] overflow-hidden rounded-[18px]',
+                'border border-surfaceGlass/12 bg-bgPrimary/70 backdrop-blur-2xl',
+                'shadow-[0_22px_90px_rgb(var(--shadow-color)/0.70)]',
+                'grid grid-rows-[auto_1fr_auto]',
+              )}
+              style={{ maxHeight: modalMaxHeight }}
+              onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+              aria-label="Edit media"
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between gap-3 border-b border-surfaceGlass/10 px-4 py-3">
+                <div className="grid">
+                  <div className="text-[13px] font-black text-textPrimary">Edit media</div>
+                  <div className="text-[11px] font-semibold text-textSecondary">
+                    Caption, tags and where it appears.
+                  </div>
                 </div>
 
-                <div className="flex justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={closeEdit}
-                    disabled={busy}
-                    className={cn(
-                      'rounded-[16px] border px-4 py-3 text-[13px] font-black transition',
-                      busy
-                        ? 'cursor-not-allowed border-surfaceGlass/10 bg-bgPrimary text-textSecondary opacity-70'
-                        : 'border-surfaceGlass/12 bg-bgPrimary/35 text-textPrimary hover:bg-surfaceGlass/5',
-                    )}
-                  >
-                    Cancel
-                  </button>
+                <button
+                  type="button"
+                  onClick={closeEdit}
+                  className={cn(
+                    'tap-target',
+                    'grid h-9 w-9 place-items-center rounded-full border text-[14px] font-black',
+                    busy
+                      ? 'cursor-not-allowed border-surfaceGlass/10 text-textSecondary opacity-70'
+                      : 'border-surfaceGlass/12 bg-bgPrimary/30 text-textPrimary hover:bg-surfaceGlass/10',
+                  )}
+                  aria-label="Close"
+                >
+                  ✕
+                </button>
+              </div>
 
-                  <button
-                    type="button"
-                    onClick={saveEdits}
-                    disabled={!canSave}
-                    className={cn(
-                      'rounded-[16px] border px-4 py-3 text-[13px] font-black transition',
-                      !canSave
-                        ? 'cursor-not-allowed border-surfaceGlass/10 bg-bgPrimary text-textSecondary opacity-70'
-                        : 'border-accentPrimary/40 bg-accentPrimary text-onAccent hover:bg-accentPrimaryHover',
-                    )}
-                    title={!edit.hasService ? 'Attach at least 1 service' : undefined}
+              {/* Body */}
+              <div className="looksNoScrollbar overflow-y-auto p-4">
+                <div className="grid gap-4">
+                  {/* Visibility (derived) — this surface's own, not the shared editor's. */}
+                  <Field
+                    label="Who can view"
+                    hint="Public requires Looks or Portfolio enabled. Private means neither is enabled."
                   >
-                    {busy ? 'Saving…' : 'Save'}
-                  </button>
+                    <Segmented<Visibility>
+                      value={computedVisibility}
+                      disabled={busy}
+                      onChange={(v) => onChangeVisibility(v)}
+                      options={[
+                        { value: MediaVisibility.PUBLIC, label: 'Public', sub: 'Visible to clients' },
+                        { value: MediaVisibility.PRO_CLIENT, label: 'Client + you', sub: 'Private (not public)' },
+                      ]}
+                    />
+                  </Field>
+
+                  {/* Toggles */}
+                  <div className="rounded-[18px] border border-surfaceGlass/12 bg-bgPrimary/25 p-3">
+                    <HermesToggleRow
+                      label="Show in Looks feed"
+                      hint="Discovery feed + more exposure."
+                      value={isEligibleForLooks}
+                      setValue={(v) => {
+                        setIsEligibleForLooks(v)
+                        edit.setError(null)
+                      }}
+                      disabled={busy}
+                    />
+                    <div className="my-2 h-px bg-surfaceGlass/8" />
+                    <HermesToggleRow
+                      label="Feature in public portfolio"
+                      hint="Appears on your profile grid."
+                      value={isFeaturedInPortfolio}
+                      setValue={(v) => {
+                        setIsFeaturedInPortfolio(v)
+                        edit.setError(null)
+                      }}
+                      disabled={busy}
+                    />
+                  </div>
+
+                  <ProMediaEditFields edit={edit} />
+
+                  {actionError ? (
+                    <div className="rounded-[14px] border border-toneDanger/30 bg-toneDanger/10 p-3 text-[12px] font-semibold text-toneDanger">
+                      {actionError}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div
+                className="border-t border-surfaceGlass/10 bg-bgPrimary/85 px-4 py-3 backdrop-blur-2xl"
+                style={{ paddingBottom: actionSafePaddingBottom }}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-[11px] font-semibold text-textPrimary/55">
+                    {computedVisibility === MediaVisibility.PRO_CLIENT ? 'Private to client + you.' : 'Public visibility enabled.'}
+                  </div>
+
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={closeEdit}
+                      disabled={busy}
+                      className={cn(
+                        'rounded-[16px] border px-4 py-3 text-[13px] font-black transition',
+                        busy
+                          ? 'cursor-not-allowed border-surfaceGlass/10 bg-bgPrimary text-textSecondary opacity-70'
+                          : 'border-surfaceGlass/12 bg-bgPrimary/35 text-textPrimary hover:bg-surfaceGlass/5',
+                      )}
+                    >
+                      Cancel
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={saveEdits}
+                      disabled={!canSave}
+                      className={cn(
+                        'rounded-[16px] border px-4 py-3 text-[13px] font-black transition',
+                        !canSave
+                          ? 'cursor-not-allowed border-surfaceGlass/10 bg-bgPrimary text-textSecondary opacity-70'
+                          : 'border-accentPrimary/40 bg-accentPrimary text-onAccent hover:bg-accentPrimaryHover',
+                      )}
+                      title={!edit.hasService ? 'Attach at least 1 service' : undefined}
+                    >
+                      {busy ? 'Saving…' : 'Save'}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        </div>
-      ) : null}
+          </div>,
+            document.body,
+          )
+        : null}
     </div>
   )
 }
