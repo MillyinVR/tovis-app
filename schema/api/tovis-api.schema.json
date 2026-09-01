@@ -10420,6 +10420,259 @@
       ],
       "type": "string"
     },
+    "ConsultProposalReviewDTO": {
+      "properties": {
+        "bookingId": {
+          "type": "string"
+        },
+        "bufferMinutes": {
+          "type": "number"
+        },
+        "consultId": {
+          "type": "string"
+        },
+        "editable": {
+          "description": "Whether corrections may still be recorded. False once the booking has reached a terminal state — there is no longer a day to protect or a price to settle, and a correction recorded then would be a pair about nothing.",
+          "type": "boolean"
+        },
+        "lines": {
+          "items": {
+            "$ref": "#/definitions/ConsultProposalReviewLineDTO"
+          },
+          "type": "array"
+        },
+        "locationType": {
+          "$ref": "#/definitions/ServiceLocationType",
+          "description": "The mode the client chose; every proposed number below is read from it."
+        },
+        "placement": {
+          "description": "Decision 4's pro half: ONE review surface, and the booking's own status decides only WHERE the page puts it. A booking still waiting on her is reviewed BEFORE the accept/decline she already has; one her auto-accept toggle already accepted is reviewed AFTER it.\n\nAnswered by the server so the placement and the sentence that explains it cannot be decided twice.",
+          "enum": [
+            "BEFORE_DECISION",
+            "AFTER_ACCEPTANCE"
+          ],
+          "type": "string"
+        },
+        "proFinalTotalDurationMinutes": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "proFinalTotalPrice": {
+          "description": "The pro's totals, summed on the server from her recorded finals with the proposed number standing in for any line she has not reviewed. Null when she has reviewed nothing at all, so the surface shows no second total rather than one identical to the client's.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reviewedAt": {
+          "description": "The most recent correction on any line, or null when there is none.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "startingAtLabel": {
+          "description": "The composed \"Starting at $X\" label, or null when the total is not positive.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "startingAtPrice": {
+          "description": "What the client agreed to. Echoed from the stored proposal, never re-derived.",
+          "type": "string"
+        },
+        "stepMinutes": {
+          "type": "number"
+        },
+        "totalDurationMinutes": {
+          "description": "The width this booking reserved: the sum of the proposed line durations.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "bookingId",
+        "consultId",
+        "placement",
+        "editable",
+        "locationType",
+        "stepMinutes",
+        "bufferMinutes",
+        "totalDurationMinutes",
+        "startingAtPrice",
+        "startingAtLabel",
+        "proFinalTotalPrice",
+        "proFinalTotalDurationMinutes",
+        "reviewedAt",
+        "lines"
+      ],
+      "type": "object"
+    },
+    "ConsultProposalReviewErrorCode": {
+      "enum": [
+        "CONSULT_PROPOSAL_REVIEW_NOT_FOUND",
+        "CONSULT_PROPOSAL_REVIEW_INVALID_REQUEST",
+        "CONSULT_PROPOSAL_REVIEW_NOT_EDITABLE",
+        "CONSULT_PROPOSAL_REVIEW_UNAVAILABLE"
+      ],
+      "type": "string"
+    },
+    "ConsultProposalReviewErrorDTO": {
+      "properties": {
+        "code": {
+          "$ref": "#/definitions/ConsultProposalReviewErrorCode"
+        },
+        "error": {
+          "type": "string"
+        },
+        "ok": {
+          "const": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ok",
+        "error",
+        "code"
+      ],
+      "type": "object"
+    },
+    "ConsultProposalReviewLineDTO": {
+      "properties": {
+        "estimateLineId": {
+          "description": "The ESTIMATE line this correction is stored against — the row that carries the frozen AI half and the writable pro-final half (B3). It is also this line's identity in a review submission.",
+          "type": "string"
+        },
+        "proFinalAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "proFinalDurationMinutes": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "proFinalNote": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "proFinalPrice": {
+          "description": "The pro's correction, once recorded. Null until she reviews the line.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "proposedDurationMinutes": {
+          "description": "The width this line reserved in the pro's day, rounded up to her step.",
+          "type": "number"
+        },
+        "proposedPrice": {
+          "description": "What the client was sold, under HER chosen mode. Decimal string.",
+          "type": "string"
+        },
+        "rationale": {
+          "description": "Decision 6's \"why\": what in the look or the analysis put this line here, copied from the estimate line. Never invented, never re-derived.",
+          "type": "string"
+        },
+        "reviewStatus": {
+          "$ref": "#/definitions/ConsultProposalReviewLineStatusDTO"
+        },
+        "serviceId": {
+          "type": "string"
+        },
+        "serviceName": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/ConsultServiceEstimateLineSource"
+        }
+      },
+      "required": [
+        "estimateLineId",
+        "serviceId",
+        "serviceName",
+        "source",
+        "rationale",
+        "proposedPrice",
+        "proposedDurationMinutes",
+        "proFinalPrice",
+        "proFinalDurationMinutes",
+        "proFinalNote",
+        "proFinalAt",
+        "reviewStatus"
+      ],
+      "type": "object"
+    },
+    "ConsultProposalReviewLineRequestDTO": {
+      "description": "One line of a submitted review. Money crosses as a decimal string.",
+      "properties": {
+        "durationMinutes": {
+          "type": "number"
+        },
+        "estimateLineId": {
+          "type": "string"
+        },
+        "note": {
+          "description": "Her written concern about this line, or null/absent to clear it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "price": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "estimateLineId",
+        "price",
+        "durationMinutes"
+      ],
+      "type": "object"
+    },
+    "ConsultProposalReviewLineStatusDTO": {
+      "description": "What the pro's review says about one line, derived on the SERVER by comparing her recorded final against the proposal's own numbers. Never re-derived in a component: a status computed twice is a status that disagrees with itself.",
+      "enum": [
+        "NOT_REVIEWED",
+        "CONFIRMED",
+        "ADJUSTED",
+        "FLAGGED"
+      ],
+      "type": "string"
+    },
+    "ConsultProposalReviewRequestDTO": {
+      "properties": {
+        "lines": {
+          "items": {
+            "$ref": "#/definitions/ConsultProposalReviewLineRequestDTO"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "lines"
+      ],
+      "type": "object"
+    },
+    "ConsultProposalReviewResponseDTO": {
+      "properties": {
+        "review": {
+          "$ref": "#/definitions/ConsultProposalReviewDTO"
+        }
+      },
+      "required": [
+        "review"
+      ],
+      "type": "object"
+    },
     "ConsultServiceEstimateDTO": {
       "properties": {
         "bufferMinutes": {

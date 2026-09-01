@@ -1010,6 +1010,137 @@ export type ConsultBookingProposalResponseDTO = {
   proposal: ConsultBookingProposalAvailabilityDTO
 }
 
+// Book the Look, B5 — the PRO's review of a booking proposal
+// (docs/product/BOOK-THE-LOOK-DIRECTION.md, decisions 4, 6 and 7).
+//
+// PRO-FACING ONLY, and deliberately a third type rather than a reuse of either
+// neighbour above. The estimate is her salon-column derivation with its
+// reasons; the proposal DTO is what the CLIENT was shown. This is the join of
+// the two, from her side: the reason each line exists (decision 6, off the
+// estimate line) beside the number this client actually agreed to (the
+// mode-reconciled proposal line), with a place for her correction.
+//
+// 🔴 `proposedPrice` / `proposedDurationMinutes` are the PROPOSAL's numbers,
+// never the estimate's. The estimate prices the SALON column because a
+// look-anchored consult had chosen no mode yet; showing a pro a salon figure
+// as "what she agreed to" for a mobile booking would be a lie, and correcting
+// against it would poison decision 7's pair. The chain
+// (salon estimate → mode-reconciled proposal → pro final) stays walkable
+// through `estimateLineId`.
+
+/**
+ * What the pro's review says about one line, derived on the SERVER by comparing
+ * her recorded final against the proposal's own numbers. Never re-derived in a
+ * component: a status computed twice is a status that disagrees with itself.
+ */
+export type ConsultProposalReviewLineStatusDTO =
+  /** She has not recorded anything for this line yet. */
+  | 'NOT_REVIEWED'
+  /** Recorded, and her numbers match what the client was sold. */
+  | 'CONFIRMED'
+  /** Recorded, and her price or duration differs from what the client was sold. */
+  | 'ADJUSTED'
+  /** Recorded with a written concern and no change to the numbers. */
+  | 'FLAGGED'
+
+export type ConsultProposalReviewLineDTO = {
+  /**
+   * The ESTIMATE line this correction is stored against — the row that carries
+   * the frozen AI half and the writable pro-final half (B3). It is also this
+   * line's identity in a review submission.
+   */
+  estimateLineId: string
+  serviceId: string
+  serviceName: string
+  source: ConsultServiceEstimateLineSource
+  /**
+   * Decision 6's "why": what in the look or the analysis put this line here,
+   * copied from the estimate line. Never invented, never re-derived.
+   */
+  rationale: string
+  /** What the client was sold, under HER chosen mode. Decimal string. */
+  proposedPrice: string
+  /** The width this line reserved in the pro's day, rounded up to her step. */
+  proposedDurationMinutes: number
+  /** The pro's correction, once recorded. Null until she reviews the line. */
+  proFinalPrice: string | null
+  proFinalDurationMinutes: number | null
+  proFinalNote: string | null
+  proFinalAt: string | null
+  reviewStatus: ConsultProposalReviewLineStatusDTO
+}
+
+export type ConsultProposalReviewDTO = {
+  bookingId: string
+  consultId: string
+  /**
+   * Decision 4's pro half: ONE review surface, and the booking's own status
+   * decides only WHERE the page puts it. A booking still waiting on her is
+   * reviewed BEFORE the accept/decline she already has; one her auto-accept
+   * toggle already accepted is reviewed AFTER it.
+   *
+   * Answered by the server so the placement and the sentence that explains it
+   * cannot be decided twice.
+   */
+  placement: 'BEFORE_DECISION' | 'AFTER_ACCEPTANCE'
+  /**
+   * Whether corrections may still be recorded. False once the booking has
+   * reached a terminal state — there is no longer a day to protect or a price
+   * to settle, and a correction recorded then would be a pair about nothing.
+   */
+  editable: boolean
+  /** The mode the client chose; every proposed number below is read from it. */
+  locationType: ServiceLocationType
+  stepMinutes: number
+  bufferMinutes: number
+  /** The width this booking reserved: the sum of the proposed line durations. */
+  totalDurationMinutes: number
+  /** What the client agreed to. Echoed from the stored proposal, never re-derived. */
+  startingAtPrice: string
+  /** The composed "Starting at $X" label, or null when the total is not positive. */
+  startingAtLabel: string | null
+  /**
+   * The pro's totals, summed on the server from her recorded finals with the
+   * proposed number standing in for any line she has not reviewed. Null when she
+   * has reviewed nothing at all, so the surface shows no second total rather
+   * than one identical to the client's.
+   */
+  proFinalTotalPrice: string | null
+  proFinalTotalDurationMinutes: number | null
+  /** The most recent correction on any line, or null when there is none. */
+  reviewedAt: string | null
+  lines: ConsultProposalReviewLineDTO[]
+}
+
+export type ConsultProposalReviewResponseDTO = {
+  review: ConsultProposalReviewDTO
+}
+
+/** One line of a submitted review. Money crosses as a decimal string. */
+export type ConsultProposalReviewLineRequestDTO = {
+  estimateLineId: string
+  price: string
+  durationMinutes: number
+  /** Her written concern about this line, or null/absent to clear it. */
+  note?: string | null
+}
+
+export type ConsultProposalReviewRequestDTO = {
+  lines: ConsultProposalReviewLineRequestDTO[]
+}
+
+export type ConsultProposalReviewErrorCode =
+  | 'CONSULT_PROPOSAL_REVIEW_NOT_FOUND'
+  | 'CONSULT_PROPOSAL_REVIEW_INVALID_REQUEST'
+  | 'CONSULT_PROPOSAL_REVIEW_NOT_EDITABLE'
+  | 'CONSULT_PROPOSAL_REVIEW_UNAVAILABLE'
+
+export type ConsultProposalReviewErrorDTO = {
+  ok: false
+  error: string
+  code: ConsultProposalReviewErrorCode
+}
+
 export type ConsultProBriefDTO = {
   consultId: string
   // See ConsultClientResultsDTO: exactly one anchor is set, and `lookPostId`

@@ -86,7 +86,7 @@ export function TrustRow({ trust }: { trust: AvailabilityTrust }) {
 export default function SheetCover({
   cover,
   trust,
-  serviceName,
+  title,
   proName,
   proAvatarUrl,
   proHref,
@@ -97,7 +97,13 @@ export default function SheetCover({
 }: {
   cover: AvailabilityCover | null
   trust: AvailabilityTrust
-  serviceName: string | null
+  /**
+   * The fallback title when the look has no name of its own. Composed by the
+   * DRAWER, not here: on the consult path it is the brand copy table's
+   * "book this look" wording, and on the named-service path it is the service
+   * name the client picked. This component renders whichever it was handed.
+   */
+  title: string | null
   proName: string
   proAvatarUrl: string | null
   proHref: string
@@ -180,7 +186,7 @@ export default function SheetCover({
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="truncate text-[19px] font-black leading-tight tracking-[-0.02em] text-textPrimary">
-              {cover?.lookName ?? serviceName ?? 'Book an appointment'}
+              {cover?.lookName ?? title ?? 'Book an appointment'}
             </div>
 
             <div className="mt-[5px] flex items-center gap-[7px]">

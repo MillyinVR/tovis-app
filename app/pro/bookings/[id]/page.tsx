@@ -38,10 +38,15 @@ import { mapsHrefFromLocation } from '@/lib/maps'
 import { paymentMethodLabel } from '@/lib/payments/acceptedMethods'
 import { resolveChargeCurrency } from '@/lib/payments/resolveChargeCurrency'
 import ProConsultBrief from '@/app/pro/_components/consult/ProConsultBrief'
+import ProConsultProposalReview from '@/app/pro/_components/consult/ProConsultProposalReview'
 import {
   loadAuthorizedProConsultBriefs,
   ProConsultBriefError,
 } from '@/lib/consult/proBrief'
+import {
+  loadAuthorizedProProposalReview,
+  ProProposalReviewError,
+} from '@/lib/consult/proProposalReview'
 
 export const dynamic = 'force-dynamic'
 
@@ -273,6 +278,23 @@ export default async function ProBookingDetailPage(props: {
     throw error
   })
 
+  // Book the Look, B5 — the pro's review of what this client committed to.
+  // Null for the overwhelming majority of bookings, which carry no proposal;
+  // the section then renders nothing rather than an empty shell. HIDDEN (the
+  // founder gate) and NOT_FOUND answer alike, exactly as the brief above does.
+  const proposalReview = await loadAuthorizedProProposalReview({
+    professionalId: proId,
+    bookingId: booking.id,
+  }).catch((error: unknown) => {
+    if (
+      error instanceof ProProposalReviewError &&
+      (error.code === 'HIDDEN' || error.code === 'NOT_FOUND')
+    ) {
+      return null
+    }
+    throw error
+  })
+
   const serviceName = booking.service?.name ?? 'Booking'
   const paymentBadge = derivePaymentBadge(booking)
   const clientConfirmation = deriveClientConfirmationBadge(booking)
@@ -418,6 +440,24 @@ export default async function ProBookingDetailPage(props: {
   const sessionHref = `/pro/bookings/${encodeURIComponent(booking.id)}/session`
   const aftercareHref = `/pro/bookings/${encodeURIComponent(booking.id)}/aftercare`
 
+  // Book the Look, B5 — decision 4's pro half. ONE review element, rendered in
+  // one of the TWO slots below: above the card that carries accept/decline
+  // while the booking is still waiting on her, and below it once her
+  // auto-accept toggle has already booked it. The toggle decides WHERE this
+  // renders, never what it says — which is why it is a single element assigned
+  // once and not two branches that could grow apart.
+  //
+  // ⚠️ The BRIEF deliberately does not move with it, and this is not a detail.
+  // Hoisting both was tried and driven in a browser: the brief is several
+  // thousand pixels tall, and it put the Accept button 5,600px below the fold
+  // on the one screen whose whole job is answering a request. The review is the
+  // compact, actionable half; the brief stays where it has always been.
+  const proposalReviewSection = proposalReview ? (
+    <ProConsultProposalReview review={proposalReview} timeZone={apptTz} />
+  ) : null
+
+  const reviewBeforeDecision = proposalReview?.placement === 'BEFORE_DECISION'
+
   return (
     <main className="mx-auto w-full max-w-240 px-4 pb-24 pt-8 text-textPrimary">
       {/* back + status */}
@@ -454,6 +494,8 @@ export default async function ProBookingDetailPage(props: {
           ) : null}
         </div>
       </div>
+
+      {reviewBeforeDecision ? proposalReviewSection : null}
 
       {/* header card */}
       <section className="tovis-glass mb-3.5 rounded-card border border-surfaceGlass/10 bg-bgSecondary p-5">
@@ -583,6 +625,8 @@ export default async function ProBookingDetailPage(props: {
           />
         </div>
       </section>
+
+      {reviewBeforeDecision ? null : proposalReviewSection}
 
       {consultBriefs.length ? (
         <section className="tovis-glass mb-3.5 rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4">
