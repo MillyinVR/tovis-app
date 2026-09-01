@@ -37,6 +37,13 @@ type DaySlotRequest = {
    * starts on screen are the ones the reschedule will actually accept (B3-A).
    */
   rescheduleBookingId: string | null
+  /**
+   * Set when this drawer is picking a time for a consult's booking proposal
+   * (B4b). The server then sizes the grid from the WHOLE estimate instead of the
+   * offering's base, so the starts on screen are the ones the consult-sized hold
+   * will actually accept.
+   */
+  consultId: string | null
   debug: boolean
 }
 
@@ -77,7 +84,7 @@ function getActiveClientAddressId(
  * added to the builder without changing this number silently turns every
  * invalidation into a no-op — stale slots, no error, nothing red.
  */
-const DAY_SLOT_CACHE_KEY_PART_COUNT = 7
+const DAY_SLOT_CACHE_KEY_PART_COUNT = 8
 
 function buildDaySlotCacheKey(args: {
   proId: string
@@ -87,6 +94,7 @@ function buildDaySlotCacheKey(args: {
   serviceId: string
   clientAddressId: string | null
   rescheduleBookingId: string | null
+  consultId: string | null
 }): string {
   return [
     args.proId,
@@ -100,6 +108,11 @@ function buildDaySlotCacheKey(args: {
     // ever outlives a context change. The server key already separates them by
     // width; this keeps the client's copy honest too.
     args.rescheduleBookingId ?? 'none',
+    // Same rule, third width: a proposal-sized day is a DIFFERENT answer to the
+    // same date than a base-sized one. ⚠️ This segment is why
+    // DAY_SLOT_CACHE_KEY_PART_COUNT is 8 — the invalidator parses positionally
+    // and skips keys of another length.
+    args.consultId ?? 'none',
   ].join('|')
 }
 
@@ -111,6 +124,7 @@ function buildDaySlotRequest(args: {
   selectedClientAddressId: string | null
   serviceId: string | null
   rescheduleBookingId: string | null
+  consultId: string | null
   debug: boolean
 }): DaySlotRequest | null {
   if (!args.proId || !args.ymd || !args.locationId || !args.serviceId) {
@@ -128,6 +142,7 @@ function buildDaySlotRequest(args: {
     ),
     serviceId: args.serviceId,
     rescheduleBookingId: args.rescheduleBookingId,
+    consultId: args.consultId,
     debug: args.debug,
   }
 }
@@ -263,6 +278,7 @@ async function fetchDaySlotsDetailed(
     clientAddressId:
       params.locationType === 'MOBILE' ? params.clientAddressId : null,
     rescheduleBookingId: params.rescheduleBookingId,
+    consultId: params.consultId,
   })
 
   const allowCacheRead = params.useCacheForRead !== false && !params.forceRefresh
@@ -292,6 +308,10 @@ async function fetchDaySlotsDetailed(
 
   if (params.rescheduleBookingId) {
     qs.set('rescheduleBookingId', params.rescheduleBookingId)
+  }
+
+  if (params.consultId) {
+    qs.set('consultId', params.consultId)
   }
 
   if (params.debug) {
@@ -358,6 +378,7 @@ export function useDaySlots(args: {
   effectiveServiceId: string | null
   selectedClientAddressId: string | null
   rescheduleBookingId: string | null
+  consultId: string | null
   debug: boolean
   holding: boolean
   retryKey: number
@@ -371,6 +392,7 @@ export function useDaySlots(args: {
     effectiveServiceId,
     selectedClientAddressId,
     rescheduleBookingId,
+    consultId,
     debug,
     holding,
     retryKey,
@@ -399,6 +421,7 @@ export function useDaySlots(args: {
         selectedClientAddressId,
         serviceId: effectiveServiceId,
         rescheduleBookingId,
+        consultId,
         debug,
       }),
     [
@@ -409,6 +432,7 @@ export function useDaySlots(args: {
       selectedClientAddressId,
       effectiveServiceId,
       rescheduleBookingId,
+      consultId,
       debug,
     ],
   )
@@ -576,6 +600,7 @@ export function useDaySlots(args: {
       serviceId: nextDayRequest.serviceId,
       clientAddressId: nextDayRequest.clientAddressId,
       rescheduleBookingId: nextDayRequest.rescheduleBookingId,
+      consultId: nextDayRequest.consultId,
     })
 
     if (getFreshDaySlotCacheValue(daySlotCacheRef.current, cacheKey)) {

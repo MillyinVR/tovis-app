@@ -647,7 +647,22 @@ export default function AvailabilityDrawer(props: {
   const forcedMobileOnlyGate =
     !summary && (mobileAddressRequiredError || mobileOnlyLock)
 
+  // Pins the sheet to the mode the consult's proposal was derived for. Read
+  // here rather than beside `consultId` below because `allowed` — the first
+  // thing that needs it — is computed above that point.
+  const lockedLocationType = context.lockedLocationType ?? null
+
   const allowed = useMemo(() => {
+    // Book the Look, B4b — one mode, decided before this sheet opened. Applied
+    // BEFORE the offering's own flags so it also drives `fallbackAllowedMode`,
+    // which is what picks the drawer's opening mode when no state is set yet.
+    if (lockedLocationType) {
+      return {
+        salon: lockedLocationType === 'SALON',
+        mobile: lockedLocationType === 'MOBILE',
+      }
+    }
+
     if (summary?.offering) {
       return {
         salon: Boolean(summary.offering.offersInSalon),
@@ -666,7 +681,7 @@ export default function AvailabilityDrawer(props: {
       salon: Boolean(FALLBACK_OFFERING.offersInSalon),
       mobile: Boolean(FALLBACK_OFFERING.offersMobile),
     }
-  }, [summary?.offering, forcedMobileOnlyGate])
+  }, [summary?.offering, forcedMobileOnlyGate, lockedLocationType])
 
   const resetContextKey = useMemo(() => {
     return [
@@ -676,6 +691,14 @@ export default function AvailabilityDrawer(props: {
       context.serviceId ?? '',
       context.offeringId ?? '',
       context.source ?? '',
+      // Book the Look, B4b. The consult and the mode it was derived for are
+      // part of WHICH booking this sheet is for: a client who backs out, picks
+      // the other mode on the proposal page and re-opens is looking at a
+      // different width, a different price and a different proposal. Without
+      // these the ids above are all identical across that switch, so the sheet
+      // would keep the previous mode's day selection and hold.
+      context.consultId ?? '',
+      context.lockedLocationType ?? '',
     ].join('|')
   }, [
     discoveryIds.lookPostId,
@@ -684,6 +707,8 @@ export default function AvailabilityDrawer(props: {
     context.serviceId,
     context.offeringId,
     context.source,
+    context.consultId,
+    context.lockedLocationType,
   ])
 
   const mobileAddressGateRequested =
@@ -714,6 +739,10 @@ export default function AvailabilityDrawer(props: {
   // Present only when this drawer is moving an existing booking; the hold it
   // places is then sized from that booking rather than the offering (B3).
   const rescheduleBookingId = asTrimmedString(context.rescheduleBookingId)
+  // Present only when this drawer is picking a time for a consult's booking
+  // proposal (B4b); the grid, the hold and the finalize are then all sized by
+  // the whole estimate rather than by the offering's base.
+  const consultId = asTrimmedString(context.consultId)
   const bookingSource = useMemo(() => resolveBookingSource(context), [context])
 
   const canWaitlist = Boolean(
@@ -726,6 +755,18 @@ export default function AvailabilityDrawer(props: {
    * prices are starting prices lives in one place rather than at each caller.
    */
   const headerPriceStartingAt = useMemo(() => {
+    // 🔴 A consult proposal shows NO price here. This figure is the FLOOR
+    // offering's own starting price, and the client has just been shown, and
+    // agreed to, the whole estimate's "Starting at $X" — which is larger by
+    // every beyond-floor line. Rendering the smaller number on the very next
+    // screen contradicts the proposal she is committing to.
+    //
+    // Suppressed rather than replaced: decision 5 requires the estimate framing
+    // to travel WITH that number, this header has no room for it, and the
+    // proposal's own word ("Starting at") is deliberately not the look card's
+    // ("From"). The review step re-states the price with its framing intact.
+    if (consultId) return null
+
     const raw =
       activeLocationType === 'MOBILE'
         ? offering.mobilePriceStartingAt
@@ -734,7 +775,7 @@ export default function AvailabilityDrawer(props: {
     if (!raw) return null
     const n = Number(raw)
     return Number.isFinite(n) && n > 0 ? raw : null
-  }, [offering, activeLocationType])
+  }, [offering, activeLocationType, consultId])
 
   const headerDurationMinutes = useMemo(() => {
     if (!summary) return null
@@ -748,7 +789,14 @@ export default function AvailabilityDrawer(props: {
     // Only on a reschedule: for a new booking the offering value is already
     // right AND it tracks the location toggle instantly, whereas `summary` is
     // one fetch behind a SALON↔MOBILE flip.
-    const serverDuration = rescheduleBookingId ? summary.durationMinutes : null
+    //
+    // A consult PROPOSAL is the same case for the same reason (B4b): the server
+    // sized the offer from the whole estimate, which is wider than the floor
+    // offering's base by every beyond-floor line. Labelling that grid with the
+    // offering's own duration would understate the appointment the client is
+    // being asked to commit to — decision 11's duration miss, printed.
+    const serverDuration =
+      rescheduleBookingId || consultId ? summary.durationMinutes : null
 
     const duration =
       serverDuration ??
@@ -757,7 +805,7 @@ export default function AvailabilityDrawer(props: {
         : offering.salonDurationMinutes)
 
     return typeof duration === 'number' && duration > 0 ? duration : null
-  }, [summary, offering, activeLocationType, rescheduleBookingId])
+  }, [summary, offering, activeLocationType, rescheduleBookingId, consultId])
 
   const resolvedOfferingId = useMemo(() => {
     if (summary?.offering?.id) return summary.offering.id
@@ -795,6 +843,7 @@ export default function AvailabilityDrawer(props: {
     effectiveServiceId,
     selectedClientAddressId,
     rescheduleBookingId,
+    consultId,
     debug,
     holding,
     retryKey: slotRetryKey,
@@ -1502,6 +1551,7 @@ export default function AvailabilityDrawer(props: {
                   ? (selectedClientAddressId ?? '')
                   : '',
                 rescheduleBookingId ?? '',
+                consultId ?? '',
               ].join('|'),
             }),
           ),
@@ -1514,6 +1564,10 @@ export default function AvailabilityDrawer(props: {
           // Reschedule: reserve the BOOKING's committed width, not the
           // offering's current base (B3). Omitted for an ordinary booking.
           ...(rescheduleBookingId ? { rescheduleBookingId } : {}),
+          // Consult proposal: reserve the width of the WHOLE estimate (B4b).
+          // The write boundary re-derives it under the session lock — this id is
+          // a claim, never a number the client got to choose.
+          ...(consultId ? { consultId } : {}),
           clientAddressId:
             activeLocationType === 'MOBILE' ? selectedClientAddressId : null,
         }),
@@ -1682,6 +1736,14 @@ export default function AvailabilityDrawer(props: {
       qs.set('mediaId', payload.mediaId)
     }
 
+    // Book the Look, B4b — the review step becomes the PROPOSAL's review rather
+    // than an add-on picker (add-ons on a proposal are B7, and both the hold and
+    // finalize refuse them today). The id travels as a claim; that page
+    // re-derives the proposal server-side before rendering a single number.
+    if (consultId) {
+      qs.set('consultId', consultId)
+    }
+
     if (activeLocationType === 'MOBILE' && selectedClientAddressId) {
       qs.set('clientAddressId', selectedClientAddressId)
     }
@@ -1697,7 +1759,13 @@ export default function AvailabilityDrawer(props: {
     ? fmtSelectedLine(selected.slotISO, appointmentTz)
     : null
 
-  const continueLabel = onConfirmHold ? 'Continue' : 'Continue to add-ons'
+  // A consult proposal has no add-on step to promise — the next screen reviews
+  // what the consultation put together and books it.
+  const continueLabel = onConfirmHold
+    ? 'Continue'
+    : consultId
+      ? 'Review & book'
+      : 'Continue to add-ons'
 
   if (!open) return null
 
@@ -1776,6 +1844,7 @@ export default function AvailabilityDrawer(props: {
                 disabled={holding || navigatingToAddOns}
                 allowed={allowed}
                 offering={offering}
+                hidePrice={Boolean(consultId)}
                 onChange={(nextType) => {
                   void resetForLocationModeChange(nextType)
                 }}
@@ -1808,6 +1877,7 @@ export default function AvailabilityDrawer(props: {
                 disabled={holding || navigatingToAddOns}
                 allowed={allowed}
                 offering={offering}
+                hidePrice={Boolean(consultId)}
                 onChange={(nextType) => {
                   void resetForLocationModeChange(nextType)
                 }}

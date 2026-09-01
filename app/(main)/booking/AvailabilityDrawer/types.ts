@@ -60,6 +60,31 @@ export type DrawerContext = {
    */
   rescheduleBookingId?: string | null
 
+  /**
+   * Set when the drawer is picking a time for a consult's BOOKING PROPOSAL
+   * (Book the Look, B4b). The grid, the hold and the finalize are then all sized
+   * by the WHOLE estimate — every line the client is committing to — instead of
+   * by this offering's base duration. Without it a 3 AM booking reserves the
+   * time the look's one linked service takes, which is a lie about the pro's day
+   * (decision 11).
+   *
+   * The id is only a CLAIM on the wire: every route that honours it
+   * re-authorizes the consult and re-derives the proposal under the session
+   * lock before sizing anything from it.
+   */
+  consultId?: string | null
+
+  /**
+   * Pins the drawer to ONE mode, hiding the salon/mobile toggle.
+   *
+   * Book the Look, B4b: a consult's proposal is derived FOR a mode — its price,
+   * its line durations and the width of the slot all change with it — and the
+   * client chose that mode on the booking page before she got here. Letting the
+   * sheet flip it would quietly show her times for a proposal she has not seen,
+   * and the estimate framing decision 5 requires would be nowhere near it.
+   */
+  lockedLocationType?: ServiceLocationType | null
+
   // optional viewer location (for "other pros near you")
   viewerLat?: number | null
   viewerLng?: number | null

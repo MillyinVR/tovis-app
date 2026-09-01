@@ -58,6 +58,13 @@ type RightActionRailProps = {
   right?: number
   bottom?: number
   onOpenAvailability: () => void
+  /**
+   * Book the Look, B4b — the Book tap asks the server whether this look opens a
+   * consultation before it decides where to go, so the button needs a moment.
+   * Absent/false renders EXACTLY today's button; only a tap in flight changes
+   * anything, and then only opacity + `aria-busy`.
+   */
+  bookPending?: boolean
   onToggleLike: () => void
   onOpenComments: () => void
   onShare: () => void
@@ -145,6 +152,7 @@ export default function RightActionRail({
   right = 10,
   bottom = 130,
   onOpenAvailability,
+  bookPending = false,
   onToggleLike,
   onOpenComments,
   onShare,
@@ -309,8 +317,11 @@ export default function RightActionRail({
             data-testid="open-availability-button"
             onClick={onOpenAvailability}
             aria-label="Book"
+            aria-busy={bookPending || undefined}
+            disabled={bookPending}
             className="book-glow active:scale-95 transition-transform"
             style={{
+              opacity: bookPending ? 0.6 : undefined,
               width: 52,
               height: 52,
               borderRadius: '50%',

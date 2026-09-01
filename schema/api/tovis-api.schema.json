@@ -546,7 +546,7 @@
     "AftercareRebookMode": {
       "$ref": "#/definitions/%24Enums.AftercareRebookMode"
     },
-    "ApiOk<(def-alias-1643606088-3524-3916-1643606088-0-125412041664248&structure-1643606088-10766-11378-1643606088-10740-11378-1643606088-10733-11380-1643606088-10608-11380-1643606088-0-12541)>": {
+    "ApiOk<(def-alias-1643606088-4709-5101-1643606088-0-137262041664248&structure-1643606088-11951-12563-1643606088-11925-12563-1643606088-11918-12565-1643606088-11793-12565-1643606088-0-13726)>": {
       "properties": {
         "adjacencyBufferMinutes": {
           "type": "number"
@@ -645,7 +645,7 @@
       ],
       "type": "object"
     },
-    "ApiOk<(def-alias-1643606088-3524-3916-1643606088-0-125412041664248&structure-1643606088-11911-12072-1643606088-11885-12072-1643606088-11878-12074-1643606088-11838-12074-1643606088-0-12541)>": {
+    "ApiOk<(def-alias-1643606088-4709-5101-1643606088-0-137262041664248&structure-1643606088-13096-13257-1643606088-13070-13257-1643606088-13063-13259-1643606088-13023-13259-1643606088-0-13726)>": {
       "properties": {
         "alternates": {
           "items": {
@@ -688,7 +688,7 @@
       ],
       "type": "object"
     },
-    "ApiOk<(def-alias-1643606088-3524-3916-1643606088-0-125412041664248&structure-1643606088-8357-10098-1643606088-8331-10098-1643606088-8324-10100-1643606088-8285-10100-1643606088-0-12541)>": {
+    "ApiOk<(def-alias-1643606088-4709-5101-1643606088-0-137262041664248&structure-1643606088-9542-11283-1643606088-9516-11283-1643606088-9509-11285-1643606088-9470-11285-1643606088-0-13726)>": {
       "properties": {
         "adjacencyBufferMinutes": {
           "type": "number"
@@ -1149,7 +1149,7 @@
       "type": "object"
     },
     "AvailabilityAlternatesOk": {
-      "$ref": "#/definitions/ApiOk%3C(def-alias-1643606088-3524-3916-1643606088-0-125412041664248%26structure-1643606088-11911-12072-1643606088-11885-12072-1643606088-11878-12074-1643606088-11838-12074-1643606088-0-12541)%3E"
+      "$ref": "#/definitions/ApiOk%3C(def-alias-1643606088-4709-5101-1643606088-0-137262041664248%26structure-1643606088-13096-13257-1643606088-13070-13257-1643606088-13063-13259-1643606088-13023-13259-1643606088-0-13726)%3E"
     },
     "AvailabilityAlternatesRequest": {
       "properties": {
@@ -1217,7 +1217,7 @@
       "type": "object"
     },
     "AvailabilityBootstrapOk": {
-      "$ref": "#/definitions/ApiOk%3C(def-alias-1643606088-3524-3916-1643606088-0-125412041664248%26structure-1643606088-8357-10098-1643606088-8331-10098-1643606088-8324-10100-1643606088-8285-10100-1643606088-0-12541)%3E"
+      "$ref": "#/definitions/ApiOk%3C(def-alias-1643606088-4709-5101-1643606088-0-137262041664248%26structure-1643606088-9542-11283-1643606088-9516-11283-1643606088-9509-11285-1643606088-9470-11285-1643606088-0-13726)%3E"
     },
     "AvailabilityCover": {
       "properties": {
@@ -1241,7 +1241,7 @@
       "type": "object"
     },
     "AvailabilityDayOk": {
-      "$ref": "#/definitions/ApiOk%3C(def-alias-1643606088-3524-3916-1643606088-0-125412041664248%26structure-1643606088-10766-11378-1643606088-10740-11378-1643606088-10733-11380-1643606088-10608-11380-1643606088-0-12541)%3E",
+      "$ref": "#/definitions/ApiOk%3C(def-alias-1643606088-4709-5101-1643606088-0-137262041664248%26structure-1643606088-11951-12563-1643606088-11925-12563-1643606088-11918-12565-1643606088-11793-12565-1643606088-0-13726)%3E",
       "description": "--------------------------- Availability: DAY mode\n--------------------------"
     },
     "AvailabilityDayRequest": {
@@ -8085,6 +8085,10 @@
           "description": "True exactly when `proposal` is non-null.",
           "type": "boolean"
         },
+        "professionalId": {
+          "description": "The consult's professional, present on REFUSALS as well as on answers.\n\nEvery refusal here is a rendered, explained state rather than a dead end, and the way out of all of them is the same: message the pro, who already has the consultation brief. That link needs an id, and a refusal answer that carried none would force the client to assemble one — so the authorized answer carries it. It leaks nothing: this endpoint has already established that the caller owns this consult with this pro.",
+          "type": "string"
+        },
         "proposal": {
           "anyOf": [
             {
@@ -8109,7 +8113,8 @@
       "required": [
         "available",
         "reason",
-        "proposal"
+        "proposal",
+        "professionalId"
       ],
       "type": "object"
     },
@@ -8140,11 +8145,21 @@
           "$ref": "#/definitions/ServiceLocationType",
           "description": "The mode this proposal was re-derived for. Echoed, never assumed."
         },
+        "lookPostId": {
+          "type": "string"
+        },
         "offeringId": {
           "description": "The offering a hold and a finalize must be placed against — the floor.",
           "type": "string"
         },
         "proDecidesNote": {
+          "type": "string"
+        },
+        "professionalId": {
+          "description": "The identity of what would be booked, so the client flow (B4b) never has to assemble it: the pro whose grid to read, the floor offering's SERVICE (what availability is keyed on) and the look this consult is anchored to (the discovery reference finalize attributes the booking to).\n\n🔴 `serviceId` is a routing key, not a label. A LOOK never names the service that produced it (B1) — nothing client-side may render this.",
+          "type": "string"
+        },
+        "serviceId": {
           "type": "string"
         },
         "startingAtLabel": {
@@ -8167,6 +8182,9 @@
         "consultId",
         "locationType",
         "offeringId",
+        "professionalId",
+        "serviceId",
+        "lookPostId",
         "totalDurationMinutes",
         "startingAtPrice",
         "startingAtLabel",

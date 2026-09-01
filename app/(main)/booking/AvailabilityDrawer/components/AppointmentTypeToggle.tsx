@@ -13,6 +13,13 @@ type Props = {
     mobile: boolean
   }
   offering?: AvailabilityOffering
+  /**
+   * Book the Look, B4b: suppress the OFFERING's starting price. On a consult
+   * proposal this figure is the floor service alone, which is smaller than the
+   * "Starting at" the client agreed to — and decision 5's estimate framing
+   * cannot travel with it in a pill this size. No price beats the wrong one.
+   */
+  hidePrice?: boolean
 }
 
 const MODE_META: Record<
@@ -70,6 +77,7 @@ export default function AppointmentTypeToggle({
   disabled = false,
   allowed,
   offering,
+  hidePrice = false,
 }: Props) {
   const modes = getAvailableModes({ allowed, offering })
   const firstMode = modes[0]
@@ -79,7 +87,7 @@ export default function AppointmentTypeToggle({
   const isSingleMode = modes.length === 1
   const effectiveValue = modes.includes(value) ? value : firstMode
   const activeMeta = MODE_META[effectiveValue]
-  const activePrice = getModePrice(offering, effectiveValue)
+  const activePrice = hidePrice ? null : getModePrice(offering, effectiveValue)
 
   if (isSingleMode) {
     return (
@@ -106,7 +114,7 @@ export default function AppointmentTypeToggle({
         {modes.map((mode) => {
           const selected = effectiveValue === mode
           const meta = MODE_META[mode]
-          const modePrice = getModePrice(offering, mode)
+          const modePrice = hidePrice ? null : getModePrice(offering, mode)
 
           return (
             <button
@@ -138,14 +146,19 @@ export default function AppointmentTypeToggle({
                 {meta.label}
               </span>
 
-              <span
-                className={[
-                  'text-[11px] font-semibold leading-none',
-                  selected ? 'text-bgPrimary/70' : 'text-textSecondary',
-                ].join(' ')}
-              >
-                {modePrice ? `From ${modePrice}` : 'No fee difference'}
-              </span>
+              {/* `hidePrice` means there is no price to state here at all —
+                  "No fee difference" would be a claim about money this toggle
+                  has deliberately stopped making. */}
+              {hidePrice ? null : (
+                <span
+                  className={[
+                    'text-[11px] font-semibold leading-none',
+                    selected ? 'text-bgPrimary/70' : 'text-textSecondary',
+                  ].join(' ')}
+                >
+                  {modePrice ? `From ${modePrice}` : 'No fee difference'}
+                </span>
+              )}
             </button>
           )
         })}

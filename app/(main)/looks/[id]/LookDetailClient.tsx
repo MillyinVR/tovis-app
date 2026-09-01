@@ -32,6 +32,8 @@ import {
   reportLookPost,
   type LookReportResult,
 } from '../_components/reportLookPost'
+import { resolveLookConsultEntry } from '@/lib/consult/lookBookEntry.client'
+
 import { useProFollow } from '../_components/useProFollow'
 import { trackLookView } from '../_lib/viewTracker'
 
@@ -95,6 +97,10 @@ export default function LookDetailClient({
   const [drawerCtx, setDrawerCtx] = useState<AvailabilityDrawerContext | null>(
     null,
   )
+  // Book the Look, B4b — a Book tap asks the server where it should go before
+  // it goes anywhere. See `handleBook`.
+  const [bookPending, setBookPending] = useState(false)
+  const bookInFlightRef = useRef(false)
 
   const redirectToLogin = useCallback(
     (reason: string) => {
@@ -142,13 +148,42 @@ export default function LookDetailClient({
     setAvailabilityOpen(true)
   }, [item, viewerLoc])
 
+  /**
+   * Book the Look, B4b — what "Book" does now.
+   *
+   * The look's own professional decides: while the founder pilot is open for
+   * her, and this look resolves to a pilot-vertical service the viewer can see,
+   * Book starts (or resumes) a look-anchored CONSULTATION and travels there. For
+   * every other pro, every guest, and every failure, it opens today's
+   * availability drawer, unchanged — the button itself is pixel-identical
+   * either way, and the decision is entirely the server's
+   * (`lib/consult/lookBookEntry.client.ts`).
+   */
+  const handleBook = useCallback(async () => {
+    if (bookInFlightRef.current) return
+    bookInFlightRef.current = true
+    setBookPending(true)
+
+    try {
+      const destination = await resolveLookConsultEntry(item.id)
+      if (destination) {
+        router.push(destination.href)
+        return
+      }
+      openAvailability()
+    } finally {
+      bookInFlightRef.current = false
+      setBookPending(false)
+    }
+  }, [item.id, openAvailability, router])
+
   // `?book=1` — arrive with the availability drawer already open. This is what
   // makes "Recreate this look" on a public creator profile a booking action
   // rather than a relabelled link to the same page the tile already opened.
   //
-  // Fires ONCE per mount: `openAvailability` is rebuilt whenever the viewer's
-  // location resolves, so an effect that simply depended on it would re-open the
-  // drawer after the visitor dismissed it.
+  // Fires ONCE per mount: `handleBook` is rebuilt whenever the viewer's
+  // location resolves (it closes over `openAvailability`), so an effect that
+  // simply depended on it would re-enter after the visitor dismissed it.
   //
   // It must be an EFFECT rather than a lazy `useState` initializer: the drawer
   // context embeds the viewer's stored location, which `useViewerLocation` reads
@@ -160,9 +195,9 @@ export default function LookDetailClient({
   useEffect(() => {
     if (!autoBookRequested || autoBookedRef.current) return
     autoBookedRef.current = true
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- mount-only drawer open; seeding it during render would hydrate-mismatch on the localStorage-backed viewer location
-    openAvailability()
-  }, [autoBookRequested, openAvailability])
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mount-only book entry; seeding it during render would hydrate-mismatch on the localStorage-backed viewer location
+    void handleBook()
+  }, [autoBookRequested, handleBook])
 
   const handleCommentCountChange = useCallback(
     (_lookPostId: string, commentsCount: number) => {
@@ -449,7 +484,8 @@ export default function LookDetailClient({
             commentCount={item._count.comments}
             bottom={16}
             right={12}
-            onOpenAvailability={openAvailability}
+            onOpenAvailability={() => void handleBook()}
+            bookPending={bookPending}
             onToggleLike={() => void toggleLike()}
             onOpenComments={() => setCommentsOpen(true)}
             onShare={() => void shareLook()}

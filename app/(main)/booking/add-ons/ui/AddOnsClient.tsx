@@ -22,6 +22,8 @@ import SaveCardStep from '@/app/_components/payments/SaveCardStep'
 // Shared wire DTO for GET /api/v1/offerings/add-ons — single source of truth for
 // the add-on shape (web + native). The `id` is the OfferingAddOn link id.
 import type { OfferingAddOnItemDTO as AddOnDTO } from '@/lib/dto'
+import type { BrandClientConsultBookingCopy } from '@/lib/brand/types'
+import type { ConsultBookingProposalDTO } from '@/lib/dto/consult'
 
 type Props = {
   /** Look / pro / time / hold carried over from the sheet. */
@@ -32,6 +34,19 @@ type Props = {
   source: ClientBookingSource
   mediaId: string | null
   lookPostId: string | null
+  /**
+   * Book the Look, B4b. Set when this screen is reviewing a CONSULTATION's
+   * booking proposal rather than picking add-ons. `consultProposal` is the
+   * server's own derivation, re-run for this mode by the page — never a number
+   * this component composes, and never one the drawer handed forward.
+   *
+   * Add-ons and a proposal are mutually exclusive today (B7 has not happened):
+   * `addOns` arrives empty on this branch, which also means the hold-resize
+   * effect below never fires.
+   */
+  consultId: string | null
+  consultProposal: ConsultBookingProposalDTO | null
+  consultCopy: BrandClientConsultBookingCopy
   addOns: AddOnDTO[]
   selectionPrompt?: string | null
   initialError?: string | null
@@ -236,6 +251,9 @@ export default function AddOnsClient({
   source,
   mediaId,
   lookPostId,
+  consultId,
+  consultProposal,
+  consultCopy,
   addOns,
   selectionPrompt,
   initialError,
@@ -545,6 +563,10 @@ export default function AddOnsClient({
           source,
           mediaId,
           lookPostId,
+          // Book the Look, B4b: the booking is stamped with the consult that
+          // produced it, and the write boundary re-derives the proposal under
+          // the session lock before it sizes or prices anything.
+          consultId,
           addOnIds: selectedIds,
           cancellationPolicyAccepted: policyAccepted,
         }),
@@ -709,12 +731,16 @@ export default function AddOnsClient({
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="text-[12px] font-black text-textSecondary">
-            Review & customize
+            {consultId ? consultCopy.reviewEyebrow : 'Review & customize'}
           </div>
-          <h1 className="mt-1 text-[26px] font-black">Add-ons</h1>
+          <h1 className="mt-1 text-[26px] font-black">
+            {consultId ? consultCopy.reviewTitle : 'Add-ons'}
+          </h1>
 
           <div className="mt-2 text-[12px] font-semibold text-textSecondary">
-            Optional upgrades that improve results + longevity.
+            {consultId
+              ? consultCopy.proposalBody
+              : 'Optional upgrades that improve results + longevity.'}
           </div>
         </div>
 
@@ -772,7 +798,54 @@ export default function AddOnsClient({
         </div>
       ) : null}
 
-      {!error && addOns.length === 0 ? (
+      {/* Book the Look, B4b — the proposal in place of the add-on list. Every
+          figure here is the SERVER's: the page re-derived it for this mode from
+          the same function the finalize will run, so this is a restatement of
+          the answer, never a second computation of it. Decision 5's framing
+          travels WITH the price, exactly as it does on the booking page. */}
+      {!error && consultProposal ? (
+        <div
+          data-testid="booking-consult-proposal"
+          className="tovis-glass mt-4 rounded-card border border-textPrimary/10 bg-bgSecondary p-4"
+        >
+          <div className="grid gap-2">
+            {consultProposal.lines.map((line, index) => (
+              <div
+                key={`${index}:${line.serviceName}`}
+                className="flex items-baseline justify-between gap-3 rounded-card border border-textPrimary/10 bg-bgPrimary/35 px-3 py-2.5"
+              >
+                <span className="min-w-0 text-[13px] font-black text-textPrimary">
+                  {line.serviceName}
+                </span>
+                <span className="shrink-0 text-[11px] font-semibold text-textSecondary">
+                  {formatMinutes(line.durationMinutes) ?? '—'} ·{' '}
+                  {formatMoneyLabel(line.price)}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-3 flex items-baseline justify-between gap-3 text-[12px]">
+            <span className="font-semibold text-textSecondary">
+              {consultCopy.durationLabel}
+            </span>
+            <span className="font-black text-textPrimary">
+              {formatMinutes(consultProposal.totalDurationMinutes) ?? '—'}
+            </span>
+          </div>
+
+          {consultProposal.startingAtLabel ? (
+            <div className="mt-3 text-[20px] font-black leading-none text-textPrimary">
+              {consultProposal.startingAtLabel}
+            </div>
+          ) : null}
+          <div className="mt-2 text-[11px] font-semibold leading-5 text-textSecondary">
+            {consultProposal.estimateNote} {consultProposal.proDecidesNote}
+          </div>
+        </div>
+      ) : null}
+
+      {!error && !consultId && addOns.length === 0 ? (
         <div className="tovis-glass-soft mt-4 rounded-card p-4 text-sm font-semibold text-textSecondary">
           No add-ons for this service right now. You’re good to go.
         </div>
@@ -899,7 +972,22 @@ export default function AddOnsClient({
         </div>
       ) : null}
 
-      <div className={`fixed bottom-0 left-0 right-0 ${zClass.sticky} border-t border-textPrimary/10 bg-bgPrimary/70 backdrop-blur`}>
+      {/* 🔴 `bottom-0` put this bar UNDER the app's fixed footer nav (z 999999,
+          80px tall), which for a signed-in client hid the Skip button and the
+          "no charge" line — and, once the consultation branch drops Skip, the
+          Complete-booking CTA itself: measured at y=870 in a 932px viewport
+          whose footer starts at 852, and `elementFromPoint` returned the
+          footer. A fixed element positions against the VIEWPORT, so the
+          layout's own `--app-footer-space` padding (app/layout.tsx) never
+          reached it. Same offset DrawerShell and the search map already use;
+          it resolves to 0px wherever no footer is mounted, so a signed-out
+          visitor's layout is unchanged. */}
+      <div
+        style={{
+          bottom: 'max(var(--app-footer-space, 0px), env(safe-area-inset-bottom))',
+        }}
+        className={`fixed left-0 right-0 ${zClass.sticky} border-t border-textPrimary/10 bg-bgPrimary/70 backdrop-blur`}
+      >
         <div className="mx-auto max-w-180 px-4 py-3">
           <div className="tovis-glass-soft rounded-card border border-textPrimary/10 px-4 py-3">
             {cancellationPolicy ? (
@@ -926,6 +1014,9 @@ export default function AddOnsClient({
                 syncingHold ||
                 !holdId ||
                 !offeringId ||
+                // A consultation review with no proposal has nothing to book:
+                // the page already explains why, and the finalize would refuse.
+                Boolean(consultId && !consultProposal) ||
                 (holdSecondsLeft != null && holdSecondsLeft <= 0) ||
                 (cancellationPolicy != null && !policyAccepted)
               }
@@ -938,18 +1029,34 @@ export default function AddOnsClient({
                   : 'Complete booking'}
             </button>
 
-            <button
-              data-testid="booking-add-ons-skip-button"
-              type="button"
-              onClick={() => router.back()}
-              disabled={submitting}
-              className="mt-2 flex h-12 w-full items-center justify-center rounded-full border border-textPrimary/10 bg-bgPrimary/35 text-[14px] font-black text-textPrimary hover:bg-textPrimary/10 disabled:opacity-70"
-            >
-              Skip
-            </button>
+            {/* "Skip" means "book without add-ons". There are none to skip on a
+                consultation booking, and the word would read as skipping the
+                consultation itself. */}
+            {consultId ? null : (
+              <button
+                data-testid="booking-add-ons-skip-button"
+                type="button"
+                onClick={() => router.back()}
+                disabled={submitting}
+                className="mt-2 flex h-12 w-full items-center justify-center rounded-full border border-textPrimary/10 bg-bgPrimary/35 text-[14px] font-black text-textPrimary hover:bg-textPrimary/10 disabled:opacity-70"
+              >
+                Skip
+              </button>
+            )}
 
-            <div className="mt-2 text-center text-[11px] font-semibold text-textSecondary">
-              No charge until the pro confirms.
+            {/* 🔴 On a consultation booking the honest sentence is the SERVER's
+                `commitNote`, routed through the same
+                `getClientSubmittedBookingStatus` fork the commit runs: "yours as
+                soon as you book" in auto-accept mode, "held for you" in request
+                mode. Printing "No charge until the pro confirms" over an
+                instantly-ACCEPTED booking would be the wrong promise. */}
+            <div
+              data-testid="booking-complete-note"
+              className="mt-2 text-center text-[11px] font-semibold text-textSecondary"
+            >
+              {consultProposal
+                ? consultProposal.commitNote
+                : 'No charge until the pro confirms.'}
             </div>
           </div>
         </div>

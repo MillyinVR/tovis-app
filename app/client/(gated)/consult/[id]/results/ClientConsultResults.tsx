@@ -1,3 +1,5 @@
+import Link from 'next/link'
+
 import ClientPage from '../../../_components/ClientPage'
 
 import type { BrandClientConsultResultsCopy } from '@/lib/brand/types'
@@ -303,6 +305,36 @@ export default function ClientConsultResults({
           ))}
         </ol>
       </section>
+
+      {/* Book the Look, B4b — the door from a finished consult to a booking.
+          Rendered only for a LOOK-anchored consult: a booking-anchored one
+          (#1016) already HAS its booking, and offering to book it again would
+          be nonsense. Whether a proposal can actually be made is the booking
+          page's own answer — every refusal there is explained rather than
+          hidden behind a missing button, so this never has to guess. */}
+      {results.lookPostId ? (
+        <section
+          data-testid="consult-results-book-look"
+          aria-labelledby={`${results.consultId}-book-look`}
+          className="rounded-2xl border border-surfaceGlass/10 bg-bgSurface p-5"
+        >
+          <h2
+            id={`${results.consultId}-book-look`}
+            className="text-base font-black text-textPrimary"
+          >
+            {copy.bookLookTitle}
+          </h2>
+          <p className="mt-1 text-sm leading-6 text-textSecondary">
+            {copy.bookLookBody}
+          </p>
+          <Link
+            href={`/client/consult/${encodeURIComponent(results.consultId)}/book`}
+            className="mt-4 flex h-12 w-full items-center justify-center rounded-full border border-surfaceGlass/10 bg-accentPrimary text-[14px] font-black text-bgPrimary hover:bg-accentPrimaryHover"
+          >
+            {copy.bookLookCta}
+          </Link>
+        </section>
+      ) : null}
 
       <LockedMeCardTeaser
         consultId={results.consultId}

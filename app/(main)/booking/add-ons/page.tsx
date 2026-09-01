@@ -11,7 +11,66 @@ import { cancellationPolicyDisclosure } from '@/lib/noShowProtection/policyDiscl
 // the add-on shape (web + native). The `id` is the OfferingAddOn link id.
 import type { OfferingAddOnItemDTO as AddOnDTO } from '@/lib/dto'
 import { loadAddOnsContext } from '@/lib/booking/addOnsContext'
+import { getBrandForTenantContext } from '@/lib/brand/forTenant'
+import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
+import {
+  ConsultProposalEntryError,
+  loadAuthorizedConsultBookingProposal,
+} from '@/lib/consult/proposalEntry'
+import { getCurrentUser } from '@/lib/currentUser'
+import type { ConsultBookingProposalDTO } from '@/lib/dto/consult'
 import type { BookingSource, ServiceLocationType } from '@prisma/client'
+
+/**
+ * Book the Look, B4b — when this step carries a `consultId` it is not an add-on
+ * picker at all. It is the REVIEW of a consultation's booking proposal: the same
+ * hold countdown, the same cancellation-policy gate, the same card-on-file step
+ * and the same finalize, with the proposal in place of the add-on list.
+ *
+ * It reuses this route rather than growing a second confirm screen because that
+ * screen would be a copy of `AddOnsClient`'s finalize path — and the copy is
+ * where the two would drift.
+ *
+ * Add-ons on top of a proposal are B7; the hold route and the write boundary
+ * both refuse the combination today, so this page never offers it.
+ */
+async function loadConsultProposalForReview(args: {
+  consultId: string
+  holdId: string | null
+}): Promise<ConsultBookingProposalDTO | null> {
+  const user = await getCurrentUser().catch(() => null)
+  if (!user || user.role !== 'CLIENT' || !user.clientProfile?.id) return null
+  if (!args.holdId) return null
+
+  // 🔴 The mode comes from the HOLD, never from the query string.
+  // `finalizeBookingFromHold` re-derives this proposal under
+  // `validatedHold.value.locationType`, so a `?locationType=` a client edits in
+  // the address bar would change only what this page SHOWS — a salon estimate
+  // printed over a mobile commit. Reading the reservation makes the preview and
+  // the commit read the same field. Scoped to a hold this client owns, so the
+  // lookup cannot be used to read anyone else's reservation.
+  const hold = await prisma.bookingHold.findFirst({
+    where: { id: args.holdId, clientId: user.clientProfile.id },
+    select: { locationType: true },
+  })
+  if (!hold) return null
+
+  try {
+    const answer = await loadAuthorizedConsultBookingProposal({
+      consultSessionId: args.consultId,
+      clientId: user.clientProfile.id,
+      actorUserId: user.id,
+      locationType: hold.locationType,
+    })
+    return answer.proposal
+  } catch (error: unknown) {
+    // Not yours, not found, or the pilot went dark between the hold and here.
+    // Answered as "no proposal", which the client sees as an explained refusal
+    // rather than as a page that throws.
+    if (error instanceof ConsultProposalEntryError) return null
+    throw error
+  }
+}
 
 export const dynamic = 'force-dynamic'
 
@@ -187,6 +246,7 @@ export default async function BookingAddOnsPage({
   const source = normalizeSource(cleanString(pickOne(sp.source) ?? null))
   const mediaId = cleanString(pickOne(sp.mediaId) ?? null)
   const lookPostId = cleanString(pickOne(sp.lookPostId) ?? null)
+  const consultId = cleanString(pickOne(sp.consultId) ?? null)
 
   // The look/pro/time/hold the sheet already knew — see lib/booking/addOnsContext.
   const addOnsContext = await loadAddOnsContext({ holdId, mediaId })
@@ -197,9 +257,36 @@ export default async function BookingAddOnsPage({
   let addOns: AddOnDTO[] = []
   let selectionPrompt: string | null = null
   let initialError: string | null = null
+  let consultProposal: ConsultBookingProposalDTO | null = null
 
   if (!offeringId) {
     initialError = 'Missing offering. Please go back and pick a time again.'
+  } else if (consultId) {
+    // A consultation booking reviews its PROPOSAL, never add-ons — so the
+    // add-on fetch is not merely hidden, it never happens.
+    consultProposal = await loadConsultProposalForReview({
+      consultId,
+      holdId,
+    })
+
+    if (!consultProposal) {
+      initialError =
+        'This look isn’t bookable right now. Message your professional and she can book it for you.'
+    } else if (consultProposal.locationType !== locationType) {
+      // The URL's mode and the reservation's disagree. The commit would follow
+      // the HOLD, so rather than render one mode's numbers over another mode's
+      // booking, send her back to pick a time.
+      consultProposal = null
+      initialError =
+        'That time was held for a different option. Please pick a time again.'
+    } else if (consultProposal.offeringId !== offeringId) {
+      // The floor moved between the hold and here. The finalize would refuse
+      // this pair anyway (CONSULT_PROPOSAL_OFFERING_MISMATCH); saying so now
+      // beats a refusal at the end of checkout.
+      consultProposal = null
+      initialError =
+        'This consultation no longer matches that time. Please pick a time again.'
+    }
   } else {
     const res = await fetchAddOns({ offeringId, locationType })
     if (!res.ok) initialError = res.error
@@ -241,6 +328,8 @@ export default async function BookingAddOnsPage({
     return preselected
   })()
 
+  const brand = getBrandForTenantContext(await resolveTenantContextForLayout())
+
   return (
     <AddOnsClient
       context={addOnsContext}
@@ -250,6 +339,9 @@ export default async function BookingAddOnsPage({
       source={source}
       mediaId={mediaId}
       lookPostId={lookPostId}
+      consultId={consultId}
+      consultProposal={consultProposal}
+      consultCopy={brand.clientConsultBooking}
       addOns={addOns}
       selectionPrompt={selectionPrompt}
       initialError={initialError}

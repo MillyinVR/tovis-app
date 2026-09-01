@@ -6,6 +6,8 @@ import { useRouter } from 'next/navigation'
 import { useBrand } from '@/lib/brand/BrandProvider'
 import { asTrimmedString, isRecord } from '@/lib/guards'
 import { UI_SIZES } from '../../ui/layoutConstants'
+import { resolveLookConsultEntry } from '@/lib/consult/lookBookEntry.client'
+
 import AvailabilityDrawer from '../../booking/AvailabilityDrawer'
 import LooksTopBar from './LooksTopBar'
 import LookSlide from './LookSlide'
@@ -203,6 +205,11 @@ export default function LooksFeed() {
     null,
   )
   const [activeIndex, setActiveIndex] = useState(0)
+  // Book the Look, B4b — the look whose Book tap is waiting on the server's
+  // "does this open a consultation?" answer. One at a time; a second tap while
+  // one is in flight is ignored rather than queued.
+  const [bookPendingLookId, setBookPendingLookId] = useState<string | null>(null)
+  const bookInFlightRef = useRef(false)
 
   const viewerLoc = useViewerLocation()
 
@@ -831,6 +838,38 @@ export default function LooksFeed() {
     [viewerLoc],
   )
 
+  /**
+   * Book the Look, B4b — what "Book" does now, shared with the look detail page
+   * through `resolveLookConsultEntry`.
+   *
+   * The look's own professional decides. While the founder pilot is open for
+   * her, Book starts (or resumes) a look-anchored CONSULTATION and travels
+   * there; for every other pro, every guest and every failure it opens today's
+   * drawer, unchanged. The question is asked on TAP rather than per slide —
+   * probing every look as it scrolls past would put two database reads in front
+   * of every scroll for every viewer, pilot or not.
+   */
+  const handleBook = useCallback(
+    async (item: FeedItem) => {
+      if (bookInFlightRef.current) return
+      bookInFlightRef.current = true
+      setBookPendingLookId(item.id)
+
+      try {
+        const destination = await resolveLookConsultEntry(item.id)
+        if (destination) {
+          router.push(destination.href)
+          return
+        }
+        openAvailabilityFor(item)
+      } finally {
+        bookInFlightRef.current = false
+        setBookPendingLookId(null)
+      }
+    },
+    [openAvailabilityFor, router],
+  )
+
   // Fire-and-forget share ping: counts the share server-side (S1.4). Never
   // block or fail the share UX over it.
   const recordShare = useCallback((lookPostId: string) => {
@@ -952,7 +991,8 @@ export default function LooksFeed() {
                 likeCount={item._count.likes}
                 commentCount={item._count.comments}
                 bottom={RIGHT_RAIL_BOTTOM}
-                onOpenAvailability={() => openAvailabilityFor(item)}
+                onOpenAvailability={() => void handleBook(item)}
+                bookPending={bookPendingLookId === item.id}
                 onToggleLike={() => void toggleLike(item.id)}
                 onOpenComments={() => setOpenCommentsFor(item.id)}
                 onShare={() => void shareLook(item)}
@@ -982,7 +1022,7 @@ export default function LooksFeed() {
                     onTouchEndLike={() => handleTouchEndLikeOnly(item.id)}
                     onToggleLike={() => void toggleLike(item.id)}
                     onOpenComments={() => setOpenCommentsFor(item.id)}
-                    onOpenAvailability={() => openAvailabilityFor(item)}
+                    onOpenAvailability={() => void handleBook(item)}
                     onToggleFollow={() =>
                       void toggleFollow(item.professional?.id ?? '')
                     }

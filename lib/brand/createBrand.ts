@@ -13,6 +13,7 @@ import {
   defaultEffects,
 } from './defaults'
 import { defaultProCalendarCopy } from './defaultProCalendarCopy'
+import { defaultClientConsultBookingCopy } from './defaultClientConsultBookingCopy'
 import { defaultClientConsultResultsCopy } from './defaultClientConsultResultsCopy'
 
 export type CreateBrandInput = {
@@ -51,6 +52,7 @@ export type CreateBrandInput = {
   proCalendar?: BrandConfig['proCalendar']
   /** Override the shared client AI-consult results copy. */
   clientConsultResults?: BrandConfig['clientConsultResults']
+  clientConsultBooking?: BrandConfig['clientConsultBooking']
 }
 
 export function createBrandConfig(input: CreateBrandInput): BrandConfig {
@@ -98,6 +100,8 @@ export function createBrandConfig(input: CreateBrandInput): BrandConfig {
       input.proCalendar ?? defaultProCalendarCopy(input.assets.wordmark.text),
     clientConsultResults:
       input.clientConsultResults ?? defaultClientConsultResultsCopy,
+    clientConsultBooking:
+      input.clientConsultBooking ?? defaultClientConsultBookingCopy,
     tokensByMode: {
       dark: buildTokens('dark'),
       light: buildTokens('light'),

@@ -945,6 +945,18 @@ export type ConsultBookingProposalDTO = {
   locationType: ServiceLocationType
   /** The offering a hold and a finalize must be placed against — the floor. */
   offeringId: string
+  /**
+   * The identity of what would be booked, so the client flow (B4b) never has to
+   * assemble it: the pro whose grid to read, the floor offering's SERVICE (what
+   * availability is keyed on) and the look this consult is anchored to (the
+   * discovery reference finalize attributes the booking to).
+   *
+   * 🔴 `serviceId` is a routing key, not a label. A LOOK never names the service
+   * that produced it (B1) — nothing client-side may render this.
+   */
+  professionalId: string
+  serviceId: string
+  lookPostId: string
   /** Sum of the line durations, excluding buffer (as every booking width is). */
   totalDurationMinutes: number
   /** Sum of the line prices, as a decimal string. */
@@ -981,6 +993,17 @@ export type ConsultBookingProposalAvailabilityDTO = {
   available: boolean
   reason: ConsultBookingProposalRefusalCodeDTO | null
   proposal: ConsultBookingProposalDTO | null
+  /**
+   * The consult's professional, present on REFUSALS as well as on answers.
+   *
+   * Every refusal here is a rendered, explained state rather than a dead end,
+   * and the way out of all of them is the same: message the pro, who already has
+   * the consultation brief. That link needs an id, and a refusal answer that
+   * carried none would force the client to assemble one — so the authorized
+   * answer carries it. It leaks nothing: this endpoint has already established
+   * that the caller owns this consult with this pro.
+   */
+  professionalId: string
 }
 
 export type ConsultBookingProposalResponseDTO = {

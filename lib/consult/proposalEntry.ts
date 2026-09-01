@@ -217,6 +217,9 @@ export function toProposalEstimateInput(
  */
 export function toConsultBookingProposalDTO(args: {
   consultId: string
+  professionalId: string
+  /** The consult's look anchor. Null on a booking-anchored consult. */
+  lookPostId: string | null
   draft: Extract<ConsultBookingProposalDraft, { status: 'PROPOSED' }>
   /** The pro's `autoAcceptBookings` toggle, read fresh. */
   autoAcceptBookings: boolean
@@ -229,10 +232,19 @@ export function toConsultBookingProposalDTO(args: {
   // no offering to book against is not a proposal.
   if (!floor) return null
 
+  // A proposal only ever exists for a LOOK-anchored consult (a booking-anchored
+  // one has no estimate to derive from), so the anchor is expected here. Refused
+  // rather than defaulted: the look id is the discovery reference the booking is
+  // attributed to, and inventing one is how attribution silently goes wrong.
+  if (!args.lookPostId) return null
+
   return {
     consultId: args.consultId,
     locationType: args.draft.locationType,
     offeringId: floor.offeringId,
+    professionalId: args.professionalId,
+    serviceId: floor.serviceId,
+    lookPostId: args.lookPostId,
     totalDurationMinutes: args.draft.totalDurationMinutes,
     // Decimal string, not a JSON number: money never round-trips through a float.
     startingAtPrice: moneyToFixed2String(args.draft.startingAtPrice) ?? '0.00',
@@ -289,18 +301,35 @@ export async function loadAuthorizedConsultBookingProposal(args: {
     })
 
     if (draft.status === 'REFUSED') {
-      return { available: false, reason: draft.refusalCode, proposal: null }
+      return {
+        available: false,
+        reason: draft.refusalCode,
+        proposal: null,
+        professionalId: scope.professionalId,
+      }
     }
 
     const proposal = toConsultBookingProposalDTO({
       consultId: scope.id,
+      professionalId: scope.professionalId,
+      lookPostId: scope.anchorLookPostId,
       draft,
       autoAcceptBookings: scope.professional.autoAcceptBookings,
     })
     if (!proposal) {
-      return { available: false, reason: 'ESTIMATE_REFUSED', proposal: null }
+      return {
+        available: false,
+        reason: 'ESTIMATE_REFUSED',
+        proposal: null,
+        professionalId: scope.professionalId,
+      }
     }
 
-    return { available: true, reason: null, proposal }
+    return {
+      available: true,
+      reason: null,
+      proposal,
+      professionalId: scope.professionalId,
+    }
   })
 }

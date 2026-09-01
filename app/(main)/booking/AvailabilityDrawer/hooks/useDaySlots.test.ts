@@ -32,6 +32,7 @@ type HookProps = {
   effectiveServiceId: string | null
   selectedClientAddressId: string | null
   rescheduleBookingId: string | null
+  consultId: string | null
   debug: boolean
   holding: boolean
   retryKey: number
@@ -149,6 +150,7 @@ function makeHookProps(overrides: Partial<HookProps> = {}): HookProps {
     effectiveServiceId: 'service_1',
     selectedClientAddressId: null,
     rescheduleBookingId: null,
+    consultId: null,
     debug: false,
     holding: false,
     retryKey: 0,
