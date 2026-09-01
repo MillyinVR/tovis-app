@@ -57,6 +57,7 @@ type ParsedHoldRequest = {
   entryPointSource: BookingEntryPointSource | null
   addOnIds: string[]
   rescheduleBookingId: string | null
+  consultId: string | null
 }
 
 type HeaderCarrier = {
@@ -137,6 +138,12 @@ function parseHoldCreateBody(rawBody: unknown): ParsedHoldRequest | Response {
   const entryPointSource = pickEntryPointSource(rawBody)
   const addOnIds = pickStringArray(rawBody.addOnIds, MAX_HOLD_ADD_ON_IDS)
   const rescheduleBookingId = pickString(rawBody.rescheduleBookingId)
+  // Book the Look, B4. Optional: an ordinary hold sends none. When present the
+  // reservation is sized by that consult's booking proposal instead of by this
+  // offering's default — see createHold. The id is only a CLAIM here; the write
+  // boundary re-checks ownership, the founder gate and the anchor under the
+  // session lock before it sizes anything from it.
+  const consultId = pickString(rawBody.consultId)
 
   if (!offeringId) {
     return bookingJsonFail('OFFERING_ID_REQUIRED')
@@ -144,6 +151,18 @@ function parseHoldCreateBody(rawBody: unknown): ParsedHoldRequest | Response {
 
   if (hasDuplicateStrings(addOnIds)) {
     return bookingJsonFail('ADDONS_INVALID')
+  }
+
+  // Add-ons on top of a consult proposal are B7 and have no shape yet. Refused
+  // here as well as at the boundary, for the same reason the reschedule pair
+  // below is: the contract should be visible on the wire, not only in the
+  // write path.
+  if (consultId && addOnIds.length > 0) {
+    return bookingJsonFail('ADDONS_INVALID', {
+      message: 'Add-ons cannot be combined with a consultation proposal.',
+      userMessage:
+        'Add-ons can’t be chosen for a consultation booking yet. Your pro will go through extras with you.',
+    })
   }
 
   // A reschedule reserves the booking's committed width, which already includes
@@ -192,6 +211,7 @@ function parseHoldCreateBody(rawBody: unknown): ParsedHoldRequest | Response {
     entryPointSource,
     addOnIds,
     rescheduleBookingId,
+    consultId,
   }
 }
 
@@ -300,6 +320,7 @@ export async function POST(req: NextRequest) {
           clientAddressId: parsed.clientAddressId,
           addOnIds: parsed.addOnIds,
           rescheduleBookingId: parsed.rescheduleBookingId,
+          consultId: parsed.consultId,
         },
       })
 
@@ -369,6 +390,7 @@ export async function POST(req: NextRequest) {
       bookingEntryPoint,
       addOnIds: parsed.addOnIds,
       rescheduleBookingId: parsed.rescheduleBookingId,
+      consultId: parsed.consultId,
       offering: toCreateHoldOffering(offering),
       requestedStart: parsed.requestedStart,
       requestedLocationId: parsed.requestedLocationId,

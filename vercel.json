@@ -30,6 +30,10 @@
       "schedule": "*/15 * * * *"
     },
     {
+      "path": "/api/internal/jobs/pending-proximity-expiry",
+      "schedule": "*/15 * * * *"
+    },
+    {
       "path": "/api/internal/jobs/notifications/process",
       "schedule": "* * * * *"
     },

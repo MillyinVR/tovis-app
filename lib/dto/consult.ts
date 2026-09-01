@@ -904,6 +904,89 @@ export type ConsultServiceEstimateDTO = {
   createdAt: string
 }
 
+// Book the Look, B4 — the CLIENT-facing booking proposal
+// (docs/product/BOOK-THE-LOOK-DIRECTION.md, decisions 3, 4, 5 and 11).
+//
+// The mirror image of the estimate above, and deliberately not the same type.
+// The estimate is the PRO's line-item derivation with its rationales, priced in
+// her salon column; this is what a client is shown when she has chosen a mode,
+// re-derived under that mode.
+//
+// 🔴 A line here carries NO rationale and NO source. The reasons are the pro's
+// half of decision 6 — "which look/photo attributes drove each line" — and a
+// LOOK still never names the service that produced it (B1). What the client
+// gets is the shape of her appointment: how long it takes, and one number.
+export type ConsultBookingProposalLineDTO = {
+  serviceName: string
+  /** Decimal string, like every other money field on this wire. */
+  price: string
+  /** Rounded UP to the pro's slot granularity — never understates her day. */
+  durationMinutes: number
+}
+
+// Why no proposal could be made. `SAFETY_REVIEW_REQUIRED` is the load-bearing
+// one: the analysis routed to safety prerequisites, so the estimate's floor is
+// a service it explicitly declined to recommend yet, and no amount of the pro's
+// menu being well-configured makes that bookable unattended.
+export type ConsultBookingProposalRefusalCodeDTO =
+  | 'ESTIMATE_MISSING'
+  | 'ESTIMATE_REFUSED'
+  | 'SAFETY_REVIEW_REQUIRED'
+  | 'OFFERING_OFF_MENU'
+  | 'MODE_NOT_OFFERED'
+  | 'MODE_PRICE_UNSET'
+  | 'MODE_DURATION_UNSET'
+  | 'PRO_SCHEDULING_NOT_READY'
+  | 'SLOT_TOO_LONG'
+
+export type ConsultBookingProposalDTO = {
+  consultId: string
+  /** The mode this proposal was re-derived for. Echoed, never assumed. */
+  locationType: ServiceLocationType
+  /** The offering a hold and a finalize must be placed against — the floor. */
+  offeringId: string
+  /** Sum of the line durations, excluding buffer (as every booking width is). */
+  totalDurationMinutes: number
+  /** Sum of the line prices, as a decimal string. */
+  startingAtPrice: string
+  /**
+   * The composed label, e.g. "Starting at $340" — rendered, never re-assembled
+   * client-side (lib/looks/startingPrice.ts). Null when the total is not
+   * positive, which every surface renders as no price rather than "$0".
+   */
+  startingAtLabel: string | null
+  /**
+   * Decision 5 travels WITH the price: this is an estimate from her photos and
+   * the pro makes the final call. Never render the number without these.
+   */
+  estimateNote: string
+  proDecidesNote: string
+  /**
+   * What committing will actually do, decided by the pro's `autoAcceptBookings`
+   * toggle (decision 4). `true` books instantly; `false` sends a request that
+   * ALREADY holds the slot.
+   */
+  autoAccepts: boolean
+  /**
+   * The rendered sentence for that outcome. Derived from the same
+   * `getClientSubmittedBookingStatus` fork the commit runs, so the promise made
+   * here cannot disagree with the booking that follows.
+   */
+  commitNote: string
+  lines: ConsultBookingProposalLineDTO[]
+}
+
+export type ConsultBookingProposalAvailabilityDTO = {
+  /** True exactly when `proposal` is non-null. */
+  available: boolean
+  reason: ConsultBookingProposalRefusalCodeDTO | null
+  proposal: ConsultBookingProposalDTO | null
+}
+
+export type ConsultBookingProposalResponseDTO = {
+  proposal: ConsultBookingProposalAvailabilityDTO
+}
+
 export type ConsultProBriefDTO = {
   consultId: string
   // See ConsultClientResultsDTO: exactly one anchor is set, and `lookPostId`

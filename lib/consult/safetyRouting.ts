@@ -100,3 +100,33 @@ export function determineHairColorSafetyRouting(args: {
     blocksChemicalRecommendations: requirements.length > 0,
   }
 }
+
+/**
+ * Did this analysis route to SAFETY PREREQUISITES — did it decline to recommend
+ * a chemical service until a test has been done and reviewed?
+ *
+ * Read from the STORED recommendations rather than re-derived from the intake:
+ * `resolveRecommendations` REPLACES the entire recommendation list with the
+ * required tests plus a professional color review whenever
+ * `blocksChemicalRecommendations` is true, so a PATCH_TEST or STRAND_TEST
+ * intent in a stored analysis is present if and only if that happened. Reading
+ * what was actually stored means a later intake edit cannot make a served
+ * analysis look safer than the one the pro was shown.
+ *
+ * 🔴 DO NOT ask this question of `safetyFlags` instead. Every hair-color
+ * analysis carries at least one — `addRequiredSafetyFlags` adds
+ * ALLERGY_HISTORY_UNKNOWN unconditionally, because the intake never asks about
+ * allergies, so it is a standing disclosure rather than a routing signal. A
+ * caller gating on "any safety flag" refuses 100% of consults and looks, from
+ * the outside, exactly like a feature that simply does not work.
+ *
+ * Book the Look, B4 is the first caller: an estimate for a safety-routed
+ * analysis is the honest PRO-facing answer — the test lines AND the chemical
+ * floor — and is precisely not a price a client may commit to unattended.
+ */
+export function analysisRoutedToSafetyPrerequisites(
+  recommendations: ReadonlyArray<{ serviceIntent: string }>,
+): boolean {
+  const prerequisites = new Set<string>(CONSULT_SAFETY_SERVICE_REQUIREMENTS)
+  return recommendations.some((item) => prerequisites.has(item.serviceIntent))
+}

@@ -11,6 +11,9 @@ export const HOLD_CREATE_OFFERING_SELECT = {
   id: true,
   isActive: true,
   professionalId: true,
+  // Book the Look, B4: the consult scope check compares the consult's category
+  // against the offering's, so a hold placed from a consult must carry it.
+  service: { select: { categoryId: true } },
   offersInSalon: true,
   offersMobile: true,
   salonDurationMinutes: true,
@@ -32,6 +35,7 @@ export type HoldCreateOfferingRecord =
 export type CreateHoldOfferingInput = {
   id: string
   professionalId: string
+  serviceCategoryId: string | null
   offersInSalon: boolean
   offersMobile: boolean
   salonDurationMinutes: number | null
@@ -47,6 +51,7 @@ export function toCreateHoldOffering(
   return {
     id: offering.id,
     professionalId: offering.professionalId,
+    serviceCategoryId: offering.service?.categoryId ?? null,
     offersInSalon: offering.offersInSalon,
     offersMobile: offering.offersMobile,
     salonDurationMinutes: offering.salonDurationMinutes,

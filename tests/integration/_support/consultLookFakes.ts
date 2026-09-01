@@ -1,0 +1,213 @@
+// tests/integration/_support/consultLookFakes.ts
+//
+// The fakes Book the Look's integration suites stand in for: private capture
+// storage, the capture quality vision call, and the analysis engine.
+//
+// ⚠️ A LEAF MODULE ON PURPOSE. It imports nothing from `@/` — not a route, not
+// a lib. Vitest hoists `vi.mock` factories above every import in a test file,
+// so a factory that reaches for a helper must `await import()` it, and if that
+// helper pulled in the very module being mocked the graph would cycle. Keeping
+// this module free of app imports is what lets both suites write:
+//
+//   vi.mock('@/lib/consult/captureStorage', async () => {
+//     const m = await import('./_support/consultLookFakes')
+//     return m.buildFakeCaptureStorageModule()
+//   })
+//
+// The scenario knobs below are mutable module state, reset by
+// `resetConsultLookFakes()` in each suite's `beforeEach`. That is how B4 flips
+// the analysis into its safety-routed shape without a second analysis mock.
+
+export type FakeStorageObject = {
+  contentType: string
+  sizeBytes: number
+  checksumSha256: string | null
+}
+
+/** The private objects a suite's uploads have "landed" in. */
+export const fakeStorageObjects = new Map<string, FakeStorageObject>()
+
+const state = {
+  pathSequence: 0,
+  runId: Math.floor(Math.random() * 0xffffffff)
+    .toString(16)
+    .padStart(8, '0'),
+  /**
+   * Safety flags the faked analysis reports. Empty is the ordinary path; B4
+   * sets one to prove that an estimate for a safety-routed analysis is NOT a
+   * proposal, however well the pro's menu prices.
+   */
+  safetyFlags: [] as Array<{
+    code: string
+    summary: string
+    discussWithProfessional: true
+  }>,
+}
+
+export function resetConsultLookFakes(): void {
+  fakeStorageObjects.clear()
+  state.safetyFlags = []
+}
+
+/** Route the faked analysis to safety prerequisites on its next run. */
+export function setFakeAnalysisSafetyFlag(code: string): void {
+  state.safetyFlags = [
+    {
+      code,
+      summary: 'A prior reaction was reported; test for sensitivity first.',
+      discussWithProfessional: true,
+    },
+  ]
+}
+
+export function buildFakeCaptureStorageModule() {
+  class FakeStorageError extends Error {
+    constructor(readonly kind: 'unavailable' | 'missing' | 'invalid') {
+      super('Private capture storage is unavailable.')
+      this.name = 'ConsultCaptureStorageError'
+    }
+  }
+
+  return {
+    CONSULT_CAPTURE_BUCKET: 'media-private',
+    CONSULT_CAPTURE_MAX_BYTES: 5_000_000,
+    ConsultCaptureStorageError: FakeStorageError,
+    consultCaptureObjectPath() {
+      state.pathSequence += 1
+      const tail = state.pathSequence.toString(16).padStart(12, '0')
+      return `consult-raw/v1/${state.runId}-0000-4000-8000-${tail}.jpg`
+    },
+    consultCaptureStorage: {
+      assertReady: async () => undefined,
+      async createSignedUpload() {
+        return { token: 'signed', signedUrl: 'https://storage.test/signed' }
+      },
+      async createSignedRead(_path: string, expiresInSeconds: number) {
+        return `https://storage.test/read/${expiresInSeconds}`
+      },
+      async inspectObject(args: { path: string }) {
+        const object = fakeStorageObjects.get(args.path)
+        if (!object) throw new FakeStorageError('missing')
+        return object
+      },
+      async readObject(args: { path: string }) {
+        const object = fakeStorageObjects.get(args.path)
+        if (!object) throw new FakeStorageError('missing')
+        return { base64: 'bm90LXJhdy1pbi1kYg==', mediaType: object.contentType }
+      },
+      async copyObject(args: { fromPath: string; toPath: string }) {
+        const object = fakeStorageObjects.get(args.fromPath)
+        if (!object) throw new FakeStorageError('missing')
+        fakeStorageObjects.set(args.toPath, object)
+      },
+      async purgeObject(path: string) {
+        fakeStorageObjects.delete(path)
+      },
+    },
+  }
+}
+
+export async function fakeCheckHairColorCapture() {
+  return {
+    accepted: true,
+    reasonCode: 'PASS',
+    retakeTip: null,
+    model: 'fake-quality-model',
+  }
+}
+
+const observed = (value: string, evidence: string[] = ['hair_back']) => ({
+  value,
+  confidence:
+    value === 'UNKNOWN' ? { min: 0, max: 0.25 } : { min: 0.4, max: 0.7 },
+  evidence,
+})
+
+/**
+ * The faked analysis payload.
+ *
+ * The two recommendations are chosen so the analysis resolves ONE of them to
+ * the look's own linked service (BALAYAGE) and the other to a second service on
+ * the pro's menu (TONER_GLOSS). That is exactly the shape B3 has to translate —
+ * a floor line that also carries an analysis reason, plus one line beyond it —
+ * and exactly the shape B4 has to size a slot from.
+ */
+export async function fakeRunHairColorAnalysis() {
+  return {
+    model: 'fake-analysis-model',
+    analysis: {
+      profile: {
+        skinUndertone: observed('NEUTRAL', ['face_front']),
+        contrastLevel: observed('MEDIUM', ['face_front']),
+        colorSeason: observed('UNKNOWN', []),
+        faceProportion: observed('BALANCED', ['face_front']),
+        jawline: observed('SOFTLY_ROUNDED', ['face_side']),
+        foreheadProportion: observed('BALANCED', ['face_side']),
+        featureBalance: observed('SOFT', ['face_front']),
+        eyeShape: observed('HOODED', ['eyes_closeup']),
+        eyeSpacing: observed('BALANCED', ['eyes_closeup']),
+        browDensity: observed('FULL', ['eyes_closeup']),
+        browShape: observed('SOFT_ARCH', ['eyes_closeup']),
+      },
+      styleDirections: [
+        'HAIR_COLOR_HARMONY',
+        'CUT_AND_SHAPE',
+        'BANGS',
+        'BROWS',
+        'LASHES',
+        'MAKEUP',
+        'COLOR_PALETTE',
+      ].map((domain) => ({
+        domain,
+        title: 'A soft, harmonizing direction',
+        direction: 'Discuss a soft, blended direction for this domain together.',
+        whyItFlatters:
+          'Low observed contrast and soft feature balance favor blended choices.',
+        confidence: { min: 0.4, max: 0.7 },
+        evidence: ['face_front'],
+        discussWithProfessional: true,
+      })),
+      core: {
+        currentLevel: {
+          min: 4,
+          max: 5,
+          confidence: { min: 0.5, max: 0.75 },
+          evidence: ['hair_back', 'hair_crown'],
+        },
+        currentTone: observed('MIXED'),
+        visibleCondition: observed('NO_VISIBLE_CONCERN'),
+        density: observed('UNKNOWN', []),
+        texture: observed('WAVY'),
+      },
+      hairColorLens: {
+        goal: 'A noticeable red direction grounded in the intake goal.',
+        history: 'Prior lightening and box-dye timing affect the range.',
+        constraints: 'Allergy history and other constraints are unknown.',
+        maintenance: 'Maintenance tolerance was not collected and is unknown.',
+        appointmentContext:
+          'Appointment context uses the intake timing and budget.',
+        achievability: 'REQUIRES_PRO_ASSESSMENT',
+        achievabilityReason:
+          'The professional should assess condition and history.',
+        discussWithProfessional: true,
+      },
+      safetyFlags: state.safetyFlags.map((flag) => ({ ...flag })),
+      recommendations: [
+        {
+          serviceIntent: 'BALAYAGE',
+          title: 'Hand-painted dimension',
+          rationale: 'A hand-painted approach suits the blended direction.',
+          achievability: 'The professional decides what is achievable today.',
+          discussWithProfessional: true,
+        },
+        {
+          serviceIntent: 'TONER_GLOSS',
+          title: 'A gloss to hold the tone',
+          rationale: 'The mid-lengths would otherwise read brassy in weeks.',
+          achievability: 'The professional confirms the toner in person.',
+          discussWithProfessional: true,
+        },
+      ],
+    },
+  }
+}

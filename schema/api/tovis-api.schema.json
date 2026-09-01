@@ -8079,6 +8079,151 @@
       ],
       "type": "object"
     },
+    "ConsultBookingProposalAvailabilityDTO": {
+      "properties": {
+        "available": {
+          "description": "True exactly when `proposal` is non-null.",
+          "type": "boolean"
+        },
+        "proposal": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultBookingProposalDTO"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultBookingProposalRefusalCodeDTO"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "available",
+        "reason",
+        "proposal"
+      ],
+      "type": "object"
+    },
+    "ConsultBookingProposalDTO": {
+      "properties": {
+        "autoAccepts": {
+          "description": "What committing will actually do, decided by the pro's `autoAcceptBookings` toggle (decision 4). `true` books instantly; `false` sends a request that ALREADY holds the slot.",
+          "type": "boolean"
+        },
+        "commitNote": {
+          "description": "The rendered sentence for that outcome. Derived from the same `getClientSubmittedBookingStatus` fork the commit runs, so the promise made here cannot disagree with the booking that follows.",
+          "type": "string"
+        },
+        "consultId": {
+          "type": "string"
+        },
+        "estimateNote": {
+          "description": "Decision 5 travels WITH the price: this is an estimate from her photos and the pro makes the final call. Never render the number without these.",
+          "type": "string"
+        },
+        "lines": {
+          "items": {
+            "$ref": "#/definitions/ConsultBookingProposalLineDTO"
+          },
+          "type": "array"
+        },
+        "locationType": {
+          "$ref": "#/definitions/ServiceLocationType",
+          "description": "The mode this proposal was re-derived for. Echoed, never assumed."
+        },
+        "offeringId": {
+          "description": "The offering a hold and a finalize must be placed against — the floor.",
+          "type": "string"
+        },
+        "proDecidesNote": {
+          "type": "string"
+        },
+        "startingAtLabel": {
+          "description": "The composed label, e.g. \"Starting at $340\" — rendered, never re-assembled client-side (lib/looks/startingPrice.ts). Null when the total is not positive, which every surface renders as no price rather than \"$0\".",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "startingAtPrice": {
+          "description": "Sum of the line prices, as a decimal string.",
+          "type": "string"
+        },
+        "totalDurationMinutes": {
+          "description": "Sum of the line durations, excluding buffer (as every booking width is).",
+          "type": "number"
+        }
+      },
+      "required": [
+        "consultId",
+        "locationType",
+        "offeringId",
+        "totalDurationMinutes",
+        "startingAtPrice",
+        "startingAtLabel",
+        "estimateNote",
+        "proDecidesNote",
+        "autoAccepts",
+        "commitNote",
+        "lines"
+      ],
+      "type": "object"
+    },
+    "ConsultBookingProposalLineDTO": {
+      "properties": {
+        "durationMinutes": {
+          "description": "Rounded UP to the pro's slot granularity — never understates her day.",
+          "type": "number"
+        },
+        "price": {
+          "description": "Decimal string, like every other money field on this wire.",
+          "type": "string"
+        },
+        "serviceName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "serviceName",
+        "price",
+        "durationMinutes"
+      ],
+      "type": "object"
+    },
+    "ConsultBookingProposalRefusalCodeDTO": {
+      "enum": [
+        "ESTIMATE_MISSING",
+        "ESTIMATE_REFUSED",
+        "SAFETY_REVIEW_REQUIRED",
+        "OFFERING_OFF_MENU",
+        "MODE_NOT_OFFERED",
+        "MODE_PRICE_UNSET",
+        "MODE_DURATION_UNSET",
+        "PRO_SCHEDULING_NOT_READY",
+        "SLOT_TOO_LONG"
+      ],
+      "type": "string"
+    },
+    "ConsultBookingProposalResponseDTO": {
+      "properties": {
+        "proposal": {
+          "$ref": "#/definitions/ConsultBookingProposalAvailabilityDTO"
+        }
+      },
+      "required": [
+        "proposal"
+      ],
+      "type": "object"
+    },
     "ConsultBriefAchievabilityDirectionDTO": {
       "properties": {
         "assessment": {

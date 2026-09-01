@@ -71,6 +71,29 @@ describe('isAutoCancelRefundEligible', () => {
     ).toBe(true)
   })
 
+  // Book the Look, B4: the pending-proximity expiry sweep. Not the client's
+  // doing and not a pro exercising discretion — the appointment simply never
+  // happened — so it refunds without reading the client cancellation window,
+  // including when the slot is minutes away.
+  it('always allows a system expiry, including inside the client window', () => {
+    const soon = new Date(NOW.getTime() + 60 * 1000)
+    expect(
+      isAutoCancelRefundEligible({ actorKind: 'system', scheduledFor: soon, now: NOW }),
+    ).toBe(true)
+    expect(
+      isAutoCancelRefundEligible({ actorKind: 'system', scheduledFor: null, now: NOW }),
+    ).toBe(true)
+    // A client's own late reschedule must not poison a refund she did not cause.
+    expect(
+      isAutoCancelRefundEligible({
+        actorKind: 'system',
+        scheduledFor: soon,
+        lateChangeAt: NOW,
+        now: NOW,
+      }),
+    ).toBe(true)
+  })
+
   // Policy change 2026-07-19: a pro cancel no longer auto-refunds the service
   // payment (the discovery deposit still refunds — see discoveryDepositPlan).
   it('never allows a pro cancellation, however far out it is', () => {

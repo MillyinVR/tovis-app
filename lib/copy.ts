@@ -60,6 +60,38 @@ export const COPY = {
     breakdownHeading: 'Service breakdown',
   },
 
+  /**
+   * Book the Look, slice B4 — the client-facing face of a consult's booking
+   * proposal (docs/product/BOOK-THE-LOOK-DIRECTION.md, decision 5).
+   *
+   * ⚠️ `startingAt` is composed as `${startingAt} ${amount}` by
+   * lib/looks/startingPrice.ts — never a bare figure, and never assembled by a
+   * component. It is a DIFFERENT word from `bookingConfirmation.priceFrom` on
+   * purpose: "From $250" is what a look's card promises before anyone has
+   * looked at this client, and this number was derived from her own photos
+   * against this pro's own menu. The two must stay separately retitleable.
+   *
+   * ⚠️ `proDecides` is not decoration. Decision 5 requires the estimate framing
+   * to travel WITH the price everywhere it is shown; a price rendered without
+   * it is the checkout surprise decision 8 exists to prevent.
+   */
+  consultProposal: {
+    /** Composed as `${startingAt} ${amount}` — see the ⚠️ above. */
+    startingAt: 'Starting at',
+    estimateNote: 'Estimated from your photos.',
+    proDecides: 'Your pro makes the final call.',
+    /**
+     * What happens the moment she taps, in each of the pro's two modes
+     * (decision 4). The REQUEST wording is the load-bearing one: a PENDING
+     * booking already owns the slot (`BOOKING_BLOCKING_STATUSES`, EXCLUDE-backed),
+     * so "held for you" is a fact and not a comfort — and saying anything vaguer
+     * would make the client believe she still has to race someone for it.
+     */
+    commitInstant: 'This time is yours as soon as you book.',
+    commitRequest:
+      'This time is held for you — your pro confirms in the morning.',
+  },
+
   bookings: {
     titleFallback: 'Booking',
     backToBookings: '← Back to bookings',
