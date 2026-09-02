@@ -11,9 +11,35 @@ import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('@/app/_components/media/RemoteImage', () => ({
-  default: ({ alt }: { alt: string }) => <div data-testid="image">{alt}</div>,
+/**
+ * The intrinsic size the stubbed image reports, or null for "never reports one".
+ *
+ * 🔴 It reports from an EFFECT, not from a load event, on purpose: the real
+ * `RemoteImage` fires `onNaturalSize` from its ref for an image that was already
+ * `complete` when React attached — which is the normal case for a cached photo,
+ * and the case where `onLoad` never fires at all. The editor was measuring every
+ * drag against a fallback 3:4 box because of it (found in Chromium, not here).
+ */
+const mockNaturalSize = vi.hoisted(() => ({
+  value: null as { width: number; height: number } | null,
 }))
+
+vi.mock('@/app/_components/media/RemoteImage', () => {
+  function RemoteImageStub({
+    alt,
+    onNaturalSize,
+  }: {
+    alt: string
+    onNaturalSize?: (width: number, height: number) => void
+  }) {
+    React.useEffect(() => {
+      const size = mockNaturalSize.value
+      if (size && onNaturalSize) onNaturalSize(size.width, size.height)
+    }, [onNaturalSize])
+    return <div data-testid="image">{alt}</div>
+  }
+  return { default: RemoteImageStub }
+})
 
 vi.mock('@/app/_components/ui', () => ({
   Button: ({
@@ -371,5 +397,32 @@ describe('CropEditor', () => {
 
     rerender(<Harness initial={{ crop: null, bound: BOUND, sourceAspect: 0.75 }} />)
     expect(screen.getByTestId('crop-bound')).toBeTruthy()
+  })
+})
+
+describe('CropEditor — the frame takes the PHOTO\'s shape', () => {
+  /**
+   * 🔴 Why this matters more than it looks: `normalize()` divides pointer pixels
+   * by the FRAME's measured box. If the frame is not the photo's shape, the
+   * photo sits letterboxed inside it and every drag is scaled by the wrong
+   * factor — so the rect that gets stored is not the rect the pro drew on their
+   * own photograph. Measured in Chromium on an 880×800 image: the frame stayed
+   * at the caller's fallback 3:4 because `onLoad` never fires for an image that
+   * was already decoded.
+   */
+  it('adopts the source aspect the image reports, with no load event', () => {
+    mockNaturalSize.value = { width: 880, height: 800 }
+    try {
+      render(<Harness initial={{ crop: null, bound: FULL_FRAME_CROP, sourceAspect: 3 / 4 }} />)
+      const frame = screen.getByTestId('crop-frame')
+      expect(frame.style.aspectRatio).toBe('1.1')
+    } finally {
+      mockNaturalSize.value = null
+    }
+  })
+
+  it('keeps the caller\'s fallback when the image never reports a size', () => {
+    render(<Harness initial={{ crop: null, bound: FULL_FRAME_CROP, sourceAspect: 3 / 4 }} />)
+    expect(screen.getByTestId('crop-frame').style.aspectRatio).toBe('0.75')
   })
 })

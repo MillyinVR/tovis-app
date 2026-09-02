@@ -1053,6 +1053,12 @@ describe('lib/looks/mappers.ts', () => {
         isEligibleForLooks: true,
         isFeaturedInPortfolio: true,
         mediaType: MediaType.VIDEO,
+        focalX: null,
+        focalY: null,
+        cropX: null,
+        cropY: null,
+        cropW: null,
+        cropH: null,
         storageBucket: 'media-public',
         storagePath: 'portfolio/shot.mp4',
         thumbBucket: 'media-public',
@@ -1084,6 +1090,12 @@ describe('lib/looks/mappers.ts', () => {
         serviceIds: ['service_1', 'service_2'],
         isVideo: true,
         mediaType: MediaType.VIDEO,
+        focalX: null,
+        focalY: null,
+        cropX: null,
+        cropY: null,
+        cropW: null,
+        cropH: null,
         before: null,
       })
     })
@@ -1096,6 +1108,12 @@ describe('lib/looks/mappers.ts', () => {
         isEligibleForLooks: false,
         isFeaturedInPortfolio: true,
         mediaType: MediaType.IMAGE,
+        focalX: null,
+        focalY: null,
+        cropX: null,
+        cropY: null,
+        cropW: null,
+        cropH: null,
         storageBucket: 'media-public',
         storagePath: 'portfolio/after.jpg',
         thumbBucket: null,
@@ -1135,6 +1153,12 @@ describe('lib/looks/mappers.ts', () => {
         isEligibleForLooks: false,
         isFeaturedInPortfolio: true,
         mediaType: MediaType.IMAGE,
+        focalX: null,
+        focalY: null,
+        cropX: null,
+        cropY: null,
+        cropW: null,
+        cropH: null,
         storageBucket: 'media-public',
         storagePath: 'portfolio/shot.jpg',
         thumbBucket: 'media-public',
@@ -1145,6 +1169,42 @@ describe('lib/looks/mappers.ts', () => {
       })
 
       expect(result).toBeNull()
+    })
+
+    it('carries the focal AND the publish crop onto the tile', async () => {
+      // The pro's own library grid renders these; a mapper that dropped them
+      // would leave the one surface a pro checks first showing the old frame,
+      // with nothing wrong-looking anywhere in the diff.
+      const result = await mapPortfolioTileToDto({
+        id: 'media_1',
+        caption: null,
+        visibility: MediaVisibility.PUBLIC,
+        isEligibleForLooks: true,
+        isFeaturedInPortfolio: false,
+        mediaType: MediaType.IMAGE,
+        focalX: 0.6,
+        focalY: 0.2,
+        cropX: 0.25,
+        cropY: 0.1,
+        cropW: 0.5,
+        cropH: 0.4,
+        storageBucket: 'media-public',
+        storagePath: 'portfolio/shot.jpg',
+        thumbBucket: 'media-public',
+        thumbPath: 'portfolio/shot-thumb.jpg',
+        url: null,
+        thumbUrl: null,
+        services: null,
+      })
+
+      expect(result).toMatchObject({
+        focalX: 0.6,
+        focalY: 0.2,
+        cropX: 0.25,
+        cropY: 0.1,
+        cropW: 0.5,
+        cropH: 0.4,
+      })
     })
   })
 
@@ -1520,6 +1580,10 @@ describe('lib/looks/mappers.ts', () => {
                 mediaType: MediaType.IMAGE,
                 focalX: null,
                 focalY: null,
+                cropX: null,
+                cropY: null,
+                cropW: null,
+                cropH: null,
               },
             },
           },
@@ -1565,6 +1629,10 @@ describe('lib/looks/mappers.ts', () => {
                 mediaType: MediaType.IMAGE,
                 focalX: null,
                 focalY: null,
+                cropX: null,
+                cropY: null,
+                cropW: null,
+                cropH: null,
               },
             },
           },
@@ -1586,6 +1654,10 @@ describe('lib/looks/mappers.ts', () => {
                 mediaType: MediaType.IMAGE,
                 focalX: null,
                 focalY: null,
+                cropX: null,
+                cropY: null,
+                cropW: null,
+                cropH: null,
               },
             },
           },

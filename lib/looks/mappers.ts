@@ -420,6 +420,10 @@ async function mapStoredMediaToPreviewDto(
     mediaType: item.mediaType,
     focalX: item.focalX ?? null,
     focalY: item.focalY ?? null,
+    cropX: item.cropX ?? null,
+    cropY: item.cropY ?? null,
+    cropW: item.cropW ?? null,
+    cropH: item.cropH ?? null,
   }
 }
 
@@ -589,6 +593,17 @@ export async function mapPortfolioTileToDto(input: {
   isEligibleForLooks: boolean
   isFeaturedInPortfolio: boolean
   mediaType: MediaType
+  // Focal + publish crop of the stored frame. REQUIRED, not optional: an
+  // optional field here would let a caller whose select forgot the columns
+  // compile happily and silently render every tile as if it had no rect —
+  // exactly the failure this whole track exists to stop. They come from
+  // `portfolioTileMediaSelect`.
+  focalX: number | null
+  focalY: number | null
+  cropX: number | null
+  cropY: number | null
+  cropW: number | null
+  cropH: number | null
   storageBucket: string | null
   storagePath: string | null
   thumbBucket: string | null
@@ -645,6 +660,12 @@ export async function mapPortfolioTileToDto(input: {
     serviceIds: pickMediaServiceTagIds(input.services),
     isVideo: input.mediaType === MediaType.VIDEO,
     mediaType: input.mediaType,
+    focalX: input.focalX,
+    focalY: input.focalY,
+    cropX: input.cropX,
+    cropY: input.cropY,
+    cropW: input.cropW,
+    cropH: input.cropH,
     before,
   }
 }

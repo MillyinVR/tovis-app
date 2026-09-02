@@ -8,7 +8,7 @@ import { notFound } from 'next/navigation'
 
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
-import { resolveFocalPoint } from '@/lib/media/focalPoint'
+import { resolveDisplayCrop } from '@/lib/media/cropRect'
 import { getOptionalUser } from '@/app/api/_utils/auth/getOptionalUser'
 import { loadLookTagPage } from '@/lib/looks/tagPage'
 import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
@@ -82,7 +82,11 @@ export default async function LookTagPage({
         </p>
       ) : (
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
-          {data.tiles.map((tile) => (
+          {data.tiles.map((tile) => {
+            // One crop per look — the same rect the feed and every other browse
+            // grid honour, so a look does not change shape on the tag page.
+            const display = resolveDisplayCrop(tile)
+            return (
             <Link
               key={tile.id}
               href={`/looks/${tile.id}`}
@@ -99,11 +103,13 @@ export default async function LookTagPage({
                   width={400}
                   height={500}
                   className="h-full w-full object-cover transition hover:opacity-90"
-                  focalPoint={resolveFocalPoint(tile.focalX, tile.focalY)}
+                  focalPoint={display.focalPoint}
+                  cropRect={display.cropRect}
                 />
               ) : null}
             </Link>
-          ))}
+            )
+          })}
         </div>
       )}
     </main>

@@ -4,6 +4,7 @@
 import React, { useState } from 'react'
 import MediaFill from '@/app/_components/media/MediaFill'
 import MediaFullscreenViewer from '@/app/_components/media/MediaFullscreenViewer'
+import type { CropRect } from '@/lib/media/cropRect'
 import { type FocalPoint } from '@/lib/media/focalPoint'
 import { cn } from '@/lib/utils'
 import type { MediaType } from '@prisma/client'
@@ -24,6 +25,18 @@ type Props = {
    * so the focal only affects the thumbnail.
    */
   focalPoint?: FocalPoint | null
+
+  /**
+   * The stored publish crop of the THUMBNAIL's source — the window of the photo
+   * the pro published (capture-chain item 2). Null (every legacy row) is the
+   * full stored frame and renders exactly as before. 🔴 With a rect, `focalPoint`
+   * must already be in crop space; `resolveDisplayCrop` does both together.
+   *
+   * The full-screen viewer is deliberately NOT cropped: it is `contain`, it is
+   * the pro's own "see it whole" affordance, and it is reached by a deliberate
+   * tap rather than shown on a browse surface.
+   */
+  cropRect?: CropRect | null
 
   /** How the thumbnail fills its box. Default `cover`. */
   fit?: 'cover' | 'contain'
@@ -51,6 +64,7 @@ export default function ClickableMedia({
   alt,
   caption,
   focalPoint,
+  cropRect = null,
   fit = 'cover',
   className,
   children,
@@ -110,6 +124,7 @@ export default function ClickableMedia({
           alt={alt || 'Media'}
           fit={fit}
           focalPoint={focalPoint}
+          cropRect={cropRect}
           className="absolute inset-0 h-full w-full"
           videoProps={{
             muted: true,

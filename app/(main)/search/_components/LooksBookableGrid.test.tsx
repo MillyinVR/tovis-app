@@ -24,8 +24,26 @@ vi.mock('../../booking/AvailabilityDrawer', () => ({
   default: () => <div data-testid="availability-drawer" />,
 }))
 
+// The real RemoteImage needs a laid-out box to render its crop path, and jsdom
+// lays nothing out. What this grid is responsible for is what it HANDS the
+// image — the published rect and a focal already remapped into it — so the stub
+// publishes both as data attributes and the cases assert on those.
 vi.mock('@/app/_components/media/RemoteImage', () => ({
-  default: ({ alt }: { alt: string }) => <img alt={alt} />,
+  default: ({
+    alt,
+    cropRect,
+    focalPoint,
+  }: {
+    alt: string
+    cropRect?: { x: number; y: number; w: number; h: number } | null
+    focalPoint?: { x: number; y: number } | null
+  }) => (
+    <img
+      alt={alt}
+      data-crop={cropRect ? `${cropRect.x},${cropRect.y},${cropRect.w},${cropRect.h}` : 'none'}
+      data-focal={focalPoint ? `${focalPoint.x},${focalPoint.y}` : 'none'}
+    />
+  ),
 }))
 
 vi.mock('@/app/_components/ProProfileLink', () => ({
@@ -169,5 +187,50 @@ describe('LooksBookableGrid — Book the Look (B1)', () => {
       expect(screen.getByText('TOVIS Studio')).toBeInTheDocument()
     })
     expect(screen.queryByText(/^From \$/)).not.toBeInTheDocument()
+  })
+})
+
+// ── One crop per look, applied EVERYWHERE (capture chain item 4) ────────────
+// The discover grid derived its own 3:4 window from the master, so a look the
+// pro had re-framed appeared here in a different shape from the feed.
+describe('LooksBookableGrid — the stored publish crop', () => {
+  /** The worked crop, shared with cropRect/cropWindow/MediaFill and iOS. */
+  const WORKED = { cropX: 0.25, cropY: 0.1, cropW: 0.5, cropH: 0.4 }
+
+  it('hands the tile the published rect and the focal remapped into it', async () => {
+    stubFeed([makeLook({ focalX: 0.6, focalY: 0.2, ...WORKED })])
+    render(<LooksBookableGrid categorySlug={null} />)
+
+    const img = await screen.findByAltText('Soft honey grow-out')
+    expect(img).toHaveAttribute('data-crop', '0.25,0.1,0.5,0.4')
+    // 🔴 The worked example: (0.60, 0.20) on the uncropped frame is
+    // (0.70, 0.25) inside this rect. Passing the stored 0.6/0.2 straight
+    // through would centre the window on somebody's shoulder, with nothing
+    // wrong-looking in the diff. Compared as numbers — the exact decimal
+    // carries float noise from the remap.
+    const [focalX, focalY] = (img.getAttribute('data-focal') ?? '')
+      .split(',')
+      .map(Number)
+    expect(focalX).toBeCloseTo(0.7, 10)
+    expect(focalY).toBeCloseTo(0.25, 10)
+  })
+
+  it('leaves an un-cropped look exactly as it was — no rect, focal untouched', async () => {
+    stubFeed([makeLook({ focalX: 0.6, focalY: 0.2 })])
+    render(<LooksBookableGrid categorySlug={null} />)
+
+    const img = await screen.findByAltText('Soft honey grow-out')
+    expect(img).toHaveAttribute('data-crop', 'none')
+    expect(img).toHaveAttribute('data-focal', '0.6,0.2')
+  })
+
+  it('🔴 a VIDEO look is left uncropped, the same exclusion iOS makes', async () => {
+    stubFeed([
+      makeLook({ mediaType: 'VIDEO', focalX: 0.6, focalY: 0.2, ...WORKED }),
+    ])
+    render(<LooksBookableGrid categorySlug={null} />)
+
+    const img = await screen.findByAltText('Soft honey grow-out')
+    expect(img).toHaveAttribute('data-crop', 'none')
   })
 })

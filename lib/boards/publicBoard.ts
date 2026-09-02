@@ -1,7 +1,7 @@
 // lib/boards/publicBoard.ts
 import 'server-only'
 
-import { BoardVisibility } from '@prisma/client'
+import { BoardVisibility, type MediaType } from '@prisma/client'
 
 import { getViewerClientFollowState } from '@/lib/follows'
 import { asTrimmedString } from '@/lib/guards'
@@ -16,9 +16,19 @@ export type PublicBoardLook = {
   name: string
   imageUrl: string | null
   href: string
+  // Carried only so the tile can make the VIDEO exclusion the crop rect needs
+  // (`resolveDisplayCrop`).
+  mediaType: MediaType
   // Normalized subject focal point (camera C6), [0,1] top-left. Null = center.
   focalX: number | null
   focalY: number | null
+  // Non-destructive publish crop (item 2), [0,1] top-left in the SAME space as
+  // the focal. Null = the full stored frame. 🔴 A surface honouring it must
+  // remap the focal into crop space — `resolveDisplayCrop` does both.
+  cropX: number | null
+  cropY: number | null
+  cropW: number | null
+  cropH: number | null
 }
 
 export type PublicBoardData = {
@@ -97,8 +107,13 @@ export async function loadPublicBoard(
                   thumbPath: true,
                   url: true,
                   thumbUrl: true,
+                  mediaType: true,
                   focalX: true,
                   focalY: true,
+                  cropX: true,
+                  cropY: true,
+                  cropW: true,
+                  cropH: true,
                 },
               },
             },
@@ -132,8 +147,13 @@ export async function loadPublicBoard(
         name: lookNameFromCaption(lookPost.caption),
         imageUrl: renderThumbUrl ?? renderUrl,
         href: `/looks/${encodeURIComponent(lookPost.id)}`,
+        mediaType: lookPost.primaryMediaAsset.mediaType,
         focalX: lookPost.primaryMediaAsset.focalX ?? null,
         focalY: lookPost.primaryMediaAsset.focalY ?? null,
+        cropX: lookPost.primaryMediaAsset.cropX ?? null,
+        cropY: lookPost.primaryMediaAsset.cropY ?? null,
+        cropW: lookPost.primaryMediaAsset.cropW ?? null,
+        cropH: lookPost.primaryMediaAsset.cropH ?? null,
       }
     }),
   )

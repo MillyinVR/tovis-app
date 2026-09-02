@@ -106,6 +106,20 @@ export type ProPortfolioTile = {
   isVideo: boolean
   mediaType: MediaType
   serviceIds: string[]
+  /**
+   * The subject focal point (camera C6) and the non-destructive publish CROP of
+   * `src`, both [0,1] from the top-left of the stored frame. The library grid is
+   * where a pro looks FIRST after re-framing a look, so it honours the same rect
+   * every public surface does — a re-frame that changed the feed and left the
+   * pro's own grid alone reads as broken, not partial. Null = the full stored
+   * frame. 🔴 Render them through `resolveDisplayCrop`, never separately.
+   */
+  focalX: number | null
+  focalY: number | null
+  cropX: number | null
+  cropY: number | null
+  cropW: number | null
+  cropH: number | null
   /** Opt-in before/after pairing → the tile renders a comparison slider. */
   before: PairedBeforeDto | null
   /**

@@ -1,19 +1,12 @@
 // app/_components/media/MediaFill.tsx
 'use client'
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import Image from 'next/image'
+import CropWindowFrame from '@/app/_components/media/CropWindowFrame'
 import MediaLoading from '@/app/_components/media/MediaLoading'
 import { focalObjectPosition, type FocalPoint } from '@/lib/media/focalPoint'
 import type { CropRect } from '@/lib/media/cropRect'
-import {
-  cropWindowSize,
-  fitWindowBox,
-  sourceBoxInWindow,
-  type Box,
-  type Size,
-} from '@/lib/media/cropWindow'
-import { useElementSize } from '@/lib/ui/useElementSize'
 import { cn } from '@/lib/utils'
 import type { MediaType } from '@prisma/client'
 
@@ -69,16 +62,6 @@ type Props = {
   priority?: boolean
 }
 
-function boxStyle(box: Box): React.CSSProperties {
-  return {
-    position: 'absolute',
-    left: `${box.left}px`,
-    top: `${box.top}px`,
-    width: `${box.width}px`,
-    height: `${box.height}px`,
-  }
-}
-
 function isHttpUrl(value: unknown): value is string {
   return (
     typeof value === 'string' &&
@@ -122,20 +105,6 @@ export default function MediaFill(props: Props) {
   const [resolvedMediaId, setResolvedMediaId] = useState<string | null>(null)
   const [resolvedMediaUrl, setResolvedMediaUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-
-  // Crop path only — the container it has to fit the window into, and the
-  // source's intrinsic size. Both null until measured; the hooks run
-  // unconditionally (rules of hooks) and cost nothing on the null-crop path,
-  // where the ref is never attached and the media never reports a size.
-  const cropContainerRef = useRef<HTMLDivElement | null>(null)
-  const cropContainerSize = useElementSize(cropContainerRef)
-  // Keyed by the URL it was measured from: a stale size belongs to the previous
-  // photo, and laying the previous photo's geometry over this one would show the
-  // wrong window of it. Derived rather than reset in an effect, so there is no
-  // frame where the two disagree.
-  const [measuredSource, setMeasuredSource] = useState<
-    { url: string; size: Size } | null
-  >(null)
 
   useEffect(() => {
     if (directUrl) return
@@ -200,25 +169,6 @@ export default function MediaFill(props: Props) {
 
   const isLoading = Boolean(!directUrl && requestedMediaId && resolvedMediaId !== requestedMediaId)
 
-  const naturalSize =
-    measuredSource && measuredSource.url === resolvedUrl ? measuredSource.size : null
-
-  const applyNaturalSize = useCallback(
-    (url: string, width: number, height: number) => {
-      if (!Number.isFinite(width) || !Number.isFinite(height)) return
-      if (width <= 0 || height <= 0) return
-      setMeasuredSource((previous) =>
-        previous &&
-        previous.url === url &&
-        previous.size.width === width &&
-        previous.size.height === height
-          ? previous
-          : { url, size: { width, height } },
-      )
-    },
-    [],
-  )
-
   if (!resolvedUrl) {
     if (!showPlaceholder) return null
 
@@ -271,7 +221,10 @@ export default function MediaFill(props: Props) {
    * while the crop path has already sized the box to the source's own aspect
    * ratio, so the media must simply `fill` it.
    */
-  function renderMedia(objectFitClass: string) {
+  function renderMedia(
+    objectFitClass: string,
+    onNaturalSize?: (width: number, height: number) => void,
+  ) {
     if (mediaType === 'VIDEO') {
       return (
         <video
@@ -284,10 +237,10 @@ export default function MediaFill(props: Props) {
           // without the intrinsic size, so this handler must not be overridable.
           // It forwards to the caller's own handler rather than replacing it.
           onLoadedMetadata={
-            cropRect
+            onNaturalSize
               ? (event) => {
                   const video = event.currentTarget
-                  applyNaturalSize(mediaUrl, video.videoWidth, video.videoHeight)
+                  onNaturalSize(video.videoWidth, video.videoHeight)
                   videoProps?.onLoadedMetadata?.(event)
                 }
               : videoProps?.onLoadedMetadata
@@ -309,10 +262,10 @@ export default function MediaFill(props: Props) {
         priority={priority}
         {...safeImgProps}
         onLoad={
-          cropRect
+          onNaturalSize
             ? (event) => {
                 const image = event.currentTarget
-                applyNaturalSize(mediaUrl, image.naturalWidth, image.naturalHeight)
+                onNaturalSize(image.naturalWidth, image.naturalHeight)
                 safeImgProps.onLoad?.(event)
               }
             : safeImgProps.onLoad
@@ -330,67 +283,20 @@ export default function MediaFill(props: Props) {
   }
 
   // ── A stored crop: the measured path ────────────────────────────────────
-  // A rect names a WINDOW of the source, and `object-fit` cannot express one —
-  // it fits the whole image and takes no zoom. So the window is positioned by
-  // hand: a clipping box the size of the window, with the whole source
-  // oversized and back-shifted inside it (lib/media/cropWindow.ts). Because the
-  // source box carries the source's own aspect ratio, `object-fill` into it is
-  // exact, not a stretch.
-  //
-  // 🔴 Nothing is painted until BOTH the container and the source's intrinsic
-  // size are known. That is not tidiness: the frame outside the rect is exactly
-  // the frame the client did not consent to publishing, so it must never reach
-  // a screen — not even for one frame, not even blurred. `opacity: 0` is the
-  // guarantee; the media still mounts and loads, which is how the intrinsic
-  // size arrives in the first place.
-  const measured =
-    naturalSize && cropContainerSize
-      ? measureCropBoxes({
-          crop: cropRect,
-          natural: naturalSize,
-          container: cropContainerSize,
-          fit,
-          focal: fit === 'cover' ? focalPoint : undefined,
-        })
-      : null
-
+  // A rect names a WINDOW of the source, and `object-fit` cannot express one, so
+  // the window is positioned by hand. All of that arithmetic, the measuring and
+  // the consent-safe "paint nothing until both sizes are known" rule live in
+  // `CropWindowFrame`, which `RemoteImage` shares — see that file.
   return (
-    <div ref={cropContainerRef} className="absolute inset-0 overflow-hidden">
-      <div
-        className="overflow-hidden"
-        style={
-          measured
-            ? boxStyle(measured.windowBox)
-            : { position: 'absolute', inset: 0, opacity: 0 }
-        }
-      >
-        <div
-          style={
-            measured
-              ? boxStyle(measured.sourceBox)
-              : { position: 'absolute', inset: 0 }
-          }
-        >
-          {renderMedia('object-fill')}
-        </div>
-      </div>
-    </div>
+    <CropWindowFrame
+      crop={cropRect}
+      fit={fit}
+      focal={focalPoint}
+      sourceKey={mediaUrl}
+    >
+      {({ objectFitClass, onNaturalSize }) =>
+        renderMedia(objectFitClass, onNaturalSize)
+      }
+    </CropWindowFrame>
   )
-}
-
-/** The two boxes the crop path lays out, in one place so they cannot drift. */
-function measureCropBoxes(args: {
-  crop: CropRect
-  natural: Size
-  container: Size
-  fit: Fit
-  focal?: FocalPoint | null
-}): { windowBox: Box; sourceBox: Box } {
-  const windowBox = fitWindowBox(
-    cropWindowSize(args.crop, args.natural),
-    args.container,
-    args.fit,
-    args.focal,
-  )
-  return { windowBox, sourceBox: sourceBoxInWindow(args.crop, windowBox) }
 }

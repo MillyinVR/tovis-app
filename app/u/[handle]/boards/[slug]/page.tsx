@@ -8,7 +8,7 @@ import RemoteImage from '@/app/_components/media/RemoteImage'
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 import { getCurrentUser } from '@/lib/currentUser'
-import { resolveFocalPoint } from '@/lib/media/focalPoint'
+import { resolveDisplayCrop } from '@/lib/media/cropRect'
 import { loadPublicBoard } from '@/lib/boards/publicBoard'
 
 export const dynamic = 'force-dynamic'
@@ -118,7 +118,11 @@ export default async function PublicBoardPage({
           </section>
         ) : (
           <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-            {data.looks.map((look) => (
+            {data.looks.map((look) => {
+              // One crop per look — the same rect the feed and every browse grid
+              // honour, so a saved look keeps the shape the pro published.
+              const display = resolveDisplayCrop(look)
+              return (
               <Link
                 key={look.id}
                 href={look.href}
@@ -136,7 +140,8 @@ export default async function PublicBoardPage({
                       width={300}
                       height={400}
                       className="absolute inset-0 h-full w-full object-cover"
-                      focalPoint={resolveFocalPoint(look.focalX, look.focalY)}
+                      focalPoint={display.focalPoint}
+                      cropRect={display.cropRect}
                     />
                   ) : (
                     <div className="absolute inset-0 bg-gradient-to-br from-bgSurface to-bgPrimary" />
@@ -151,7 +156,8 @@ export default async function PublicBoardPage({
                   </div>
                 </div>
               </Link>
-            ))}
+              )
+            })}
           </section>
         )}
       </div>

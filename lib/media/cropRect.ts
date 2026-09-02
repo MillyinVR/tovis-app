@@ -27,7 +27,8 @@
 //
 // Storage: MediaAsset.cropX / cropY / cropW / cropH.
 
-import type { FocalPoint } from '@/lib/media/focalPoint'
+import { resolveFocalPoint, type FocalPoint } from '@/lib/media/focalPoint'
+import type { MediaType } from '@prisma/client'
 
 /** A normalized crop rect: origin (x, y) + extent (w, h), all in [0,1]. */
 export type CropRect = { x: number; y: number; w: number; h: number }
@@ -154,4 +155,44 @@ export function focalInCropSpace(
 
   // Clamp the epsilon slack away so a caller never sees 1.0000000001.
   return { x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) }
+}
+
+/**
+ * Everything a cover-cropping surface needs from a media row: the rect to
+ * display, and the focal ALREADY remapped into that rect's space.
+ *
+ * One helper because every surface that honours the rect — the looks feed, every
+ * 3:4 browse tile, the 4:5 heroes — needs exactly the same three steps, and doing
+ * them by hand at each call site is precisely how one of them ends up handing a
+ * cropping box an uncropped focal (see {@link focalInCropSpace}: no crash, no
+ * error, just somebody's shoulder where their face should be).
+ *
+ * 🔴 VIDEO is excluded, and iOS makes the SAME exclusion. A clip's frame has to
+ * come from its poster and that is unbuilt on both platforms; honouring a rect
+ * here but not on the device would put one look in two shapes, which is the exact
+ * defect this whole track exists to fix.
+ */
+export function resolveDisplayCrop(source: {
+  mediaType: MediaType | 'IMAGE' | 'VIDEO'
+  focalX: number | null | undefined
+  focalY: number | null | undefined
+  cropX: number | null | undefined
+  cropY: number | null | undefined
+  cropW: number | null | undefined
+  cropH: number | null | undefined
+}): { cropRect: CropRect | null; focalPoint: FocalPoint | null } {
+  const cropRect =
+    source.mediaType === 'VIDEO'
+      ? null
+      : resolveCropRect(source.cropX, source.cropY, source.cropW, source.cropH)
+
+  // Null crop → crop space IS frame space, so this returns the focal unchanged
+  // and the surface renders byte-identically to before it honoured the rect.
+  return {
+    cropRect,
+    focalPoint: focalInCropSpace(
+      resolveFocalPoint(source.focalX, source.focalY),
+      cropRect,
+    ),
+  }
 }
