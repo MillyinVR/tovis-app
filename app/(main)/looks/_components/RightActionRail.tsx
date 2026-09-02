@@ -23,7 +23,29 @@ import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalD
 
 const TEXT_SHADOW =
   '0 2px 20px rgba(0,0,0,0.85), 0 1px 4px rgba(0,0,0,0.9)'
-const PAPER = 'rgb(var(--text-primary) / 1)'
+
+/**
+ * The icons are SVG, and `text-shadow` does not touch an SVG — so until now the
+ * marks over the photograph had the shadow only on their number labels. This is
+ * the same treatment expressed as a filter, which does.
+ */
+const ICON_SHADOW =
+  'drop-shadow(0 2px 8px rgb(var(--on-photo-shadow) / 0.85)) drop-shadow(0 1px 3px rgb(var(--on-photo-shadow) / 0.9))'
+
+/**
+ * The ink for every mark this rail draws ON the photograph.
+ *
+ * 🔴 It was `--text-primary`, which FLIPS with `[data-mode]` — and the thing
+ * underneath is a photograph, not a themed surface. The feed got away with it
+ * because `app/(main)/looks/page.tsx` pins `data-mode="dark"` for its subtree;
+ * the look DETAIL page pins nothing, so the same rail over the same photo
+ * rendered near-black there in light mode (measured on prod, 393px: the heart,
+ * comment, bookmark, share and flag all but disappeared into the hair).
+ *
+ * `--on-photo` is mode-constant and is the dark theme's own paper value, so the
+ * feed is byte-identical and only the surface that was flipping changes.
+ */
+const PAPER = 'rgb(var(--on-photo))'
 const EMBER = 'rgb(var(--color-ember))'
 const ACID = 'rgb(var(--color-acid))'
 
@@ -120,7 +142,7 @@ function RailButton({
       }}
       className="active:scale-95 transition-transform"
     >
-      <div style={{ textShadow: TEXT_SHADOW }}>{children}</div>
+      <div style={{ textShadow: TEXT_SHADOW, filter: ICON_SHADOW }}>{children}</div>
       {footerText ? (
         <div
           style={{
