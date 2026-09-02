@@ -283,5 +283,26 @@ describe('LookMedia — what it spends bandwidth on', () => {
     expect(backdrop?.getAttribute('loading')).toBe('lazy')
     expect(backdrop?.getAttribute('src')).toBe(photo?.getAttribute('src'))
   })
+
+  // 🔴 The derived thumb is a Supabase RENDER-ENDPOINT url, and Supabase
+  // documents image transformations as Pro-plan-and-above while this project is
+  // on Free. It serves today. If it ever stops, this is the difference between
+  // a slow feed and a blank one.
+  it('falls back to the stored original if the rendered thumb fails to load', async () => {
+    const { container } = render(<LookMedia item={item()} isActive />)
+
+    const photo = images(container).photo as HTMLImageElement
+    expect(photo.getAttribute('src')).toBe('https://cdn.example.com/look-thumb.jpg')
+
+    await act(async () => {
+      fireEvent.error(photo)
+    })
+
+    const after = images(container)
+    expect(after.photo?.getAttribute('src')).toBe('https://cdn.example.com/look.jpg')
+    // The blurred backdrop is the same photograph, so it falls back with it
+    // rather than being left pointing at a URL that just failed.
+    expect(after.backdrop?.getAttribute('src')).toBe('https://cdn.example.com/look.jpg')
+  })
 })
 
