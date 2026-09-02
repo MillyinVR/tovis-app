@@ -15,7 +15,7 @@
 // All are env-tunable without a deploy-time code change; the defaults below are
 // the shipped policy (Tori, 2026-07-22): 24h deadline, reminder 4h before.
 
-import { readOptionalEnv } from '@/lib/env'
+import { envKillSwitchArmed, readPositiveIntEnv } from '@/lib/env'
 
 export const DEPOSIT_UNPAID_DEADLINE_HOURS_DEFAULT = 24
 export const DEPOSIT_REMINDER_LEAD_HOURS_DEFAULT = 4
@@ -47,14 +47,6 @@ export const DEPOSIT_PRO_CREATED_REMINDER_LEAD_HOURS_DEFAULT = 24
 export const DEPOSIT_RECOVERY_MIN_AGE_MINUTES_DEFAULT = 30
 export const DEPOSIT_RECOVERY_MAX_AGE_DAYS_DEFAULT = 45
 export const DEPOSIT_RECOVERY_STALE_HOURS_DEFAULT = 72
-
-function readPositiveIntEnv(name: string, fallback: number): number {
-  const raw = readOptionalEnv(name)
-  if (!raw) return fallback
-  const parsed = Number(raw)
-  if (!Number.isFinite(parsed) || parsed <= 0) return fallback
-  return Math.trunc(parsed)
-}
 
 /** Hours after createdAt an unpaid-deposit hold is auto-released. */
 export function depositUnpaidDeadlineHours(): number {
@@ -131,20 +123,13 @@ export function computeProCreatedDepositDueAt(args: {
   return new Date(Math.max(anchoredOnAppointment, floor))
 }
 
-function readBooleanEnv(name: string, fallback: boolean): boolean {
-  const raw = readOptionalEnv(name)
-  if (raw == null) return fallback
-  const v = raw.trim().toLowerCase()
-  return v !== 'false' && v !== '0' && v !== 'no' && v !== 'off'
-}
-
 /**
  * Kill switch for the auto-release action. Default ON so the feature works once
  * deployed; set DEPOSIT_AUTO_RELEASE_ENABLED=false to stop all releases (the
  * sweep then only observes + logs candidate counts) without a code change.
  */
 export function depositAutoReleaseEnabled(): boolean {
-  return readBooleanEnv('DEPOSIT_AUTO_RELEASE_ENABLED', true)
+  return envKillSwitchArmed('DEPOSIT_AUTO_RELEASE_ENABLED')
 }
 
 /**
@@ -155,7 +140,7 @@ export function depositAutoReleaseEnabled(): boolean {
  * just a candidate count), but records nothing.
  */
 export function depositSuccessRecoveryEnabled(): boolean {
-  return readBooleanEnv('DEPOSIT_SUCCESS_RECOVERY_ENABLED', true)
+  return envKillSwitchArmed('DEPOSIT_SUCCESS_RECOVERY_ENABLED')
 }
 
 /** Minutes after createdAt before the recovery sweep first polls a PENDING deposit. */

@@ -109,6 +109,7 @@ const RETRY_CANDIDATE_BOOKING_SELECT = {
   depositDisputedAt: true,
   cancelledAt: true,
   cancelledByRole: true,
+  cancelledBySystem: true,
 } satisfies Prisma.BookingSelect
 
 type CandidateBooking = Prisma.BookingGetPayload<{
@@ -275,10 +276,21 @@ async function retryPair(pair: CandidatePair, now: Date): Promise<RefundRetryRes
       // The deposit re-drive needs the cancel's provenance to re-resolve the
       // deposit plan; without it nothing can decide the fee split — leave the
       // row to a human (the original failure was already Sentry-captured).
+      //
+      // A SYSTEM cancel counts as provenance. It carries no role by design, and
+      // this gate used to read that null as "unknown" and refuse — which meant
+      // an expiry sweep's refund could fail on a Stripe hiccup and NOTHING would
+      // ever re-drive it, stranding a deposit the client was promised back. The
+      // policy for a system cancel is not ambiguous: full deposit + fee
+      // (resolveDepositRefundPlan). A null role WITHOUT the system stamp is a
+      // pre-provenance cancel and is still refused.
+      const hasProvenance =
+        Boolean(pair.booking.cancelledByRole) || pair.booking.cancelledBySystem
+
       if (
         pair.booking.depositStatus !== BookingDepositStatus.PAID ||
         !pair.booking.cancelledAt ||
-        !pair.booking.cancelledByRole
+        !hasProvenance
       ) {
         return { ...base, flavor, outcome: 'not_retryable' }
       }

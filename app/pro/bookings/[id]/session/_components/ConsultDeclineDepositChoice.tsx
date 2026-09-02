@@ -11,15 +11,48 @@
 // anything is exactly what "recorded on the outcome" exists to prevent.
 //
 // Once answered it stops being a question and becomes the record, in place.
+//
+// 🔴 THE RECORD IS THE MONEY, NOT THE BUTTON. This component used to set its
+// settled state to the choice the pro pressed and print the booking's up-front
+// charge next to it — so a refund that moved nothing (already returned, or
+// frozen under a dispute) still read "Recorded: you refunded her deposit of
+// $X", on the click AND on every reload afterwards. Both paths now render from
+// cents that actually moved: the POST's `settlement`/`refundedCents` on the
+// click, and the booking's own `depositRefundedCents` on the reload.
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 import { COPY } from '@/lib/copy'
+import {
+  describeDeclineDepositSettlement,
+  settlementFromRecord,
+  type ConsultDeclineDepositChoice as Choice,
+  type ConsultDeclineDepositSettlement as Settlement,
+} from '@/lib/consult/declineDepositSettlement'
 import { errorFromResponse, safeJson } from '@/lib/http'
 import { formatCents } from '@/lib/money'
 
-type Choice = 'KEEP' | 'REFUND'
+type Settled = { settlement: Settlement; refundedCents: number }
+
+/** The POST's answer, narrowed off the wire rather than trusted. */
+function readSettled(data: unknown, choice: Choice): Settled {
+  const body = typeof data === 'object' && data !== null ? data : {}
+  const record = body as Record<string, unknown>
+  const refundedCents =
+    typeof record.refundedCents === 'number' && Number.isFinite(record.refundedCents)
+      ? record.refundedCents
+      : 0
+  const settlement = record.settlement
+
+  if (settlement === 'KEPT' || settlement === 'REFUNDED' || settlement === 'NOT_MOVED') {
+    return { settlement, refundedCents }
+  }
+
+  // An older/unknown body shape: fall back to what the money says, which is the
+  // same rule the reload path uses. Never assume the refund worked.
+  return { settlement: settlementFromRecord({ choice, refundedCents }), refundedCents }
+}
 
 const STATUS_COPY = {
   401: 'Please log in again.',
@@ -31,16 +64,26 @@ export default function ConsultDeclineDepositChoice({
   bookingId,
   depositChargeCents,
   decidedChoice,
+  refundedCents,
   disabled = false,
 }: {
   bookingId: string
   depositChargeCents: number
   decidedChoice: Choice | null
+  /** Cents actually back with the client — the booking's depositRefundedCents. */
+  refundedCents: number
   disabled?: boolean
 }) {
   const router = useRouter()
   const [pending, setPending] = useState<Choice | null>(null)
-  const [settled, setSettled] = useState<Choice | null>(decidedChoice)
+  const [settled, setSettled] = useState<Settled | null>(
+    decidedChoice
+      ? {
+          settlement: settlementFromRecord({ choice: decidedChoice, refundedCents }),
+          refundedCents,
+        }
+      : null,
+  )
   const [error, setError] = useState<string | null>(null)
 
   async function choose(choice: Choice) {
@@ -65,7 +108,7 @@ export default function ConsultDeclineDepositChoice({
         throw new Error(errorFromResponse(res, data, { byStatus: STATUS_COPY }))
       }
 
-      setSettled(choice)
+      setSettled(readSettled(data, choice))
       router.refresh()
     } catch (caught: unknown) {
       setError(caught instanceof Error ? caught.message : 'Something went wrong.')
@@ -84,9 +127,11 @@ export default function ConsultDeclineDepositChoice({
 
       <div className="brand-pro-session-card-body">
         {settled
-          ? settled === 'KEEP'
-            ? `${COPY.consultDeclineDeposit.keptRecorded} ${amount}.`
-            : `${COPY.consultDeclineDeposit.refundedRecorded} ${amount}.`
+          ? describeDeclineDepositSettlement({
+              settlement: settled.settlement,
+              refundedCents: settled.refundedCents,
+              chargeCents: depositChargeCents,
+            })
           : `${COPY.consultDeclineDeposit.body} ${amount}.`}
       </div>
 

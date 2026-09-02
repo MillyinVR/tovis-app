@@ -477,9 +477,26 @@ export async function refundBookingPayment(
   }
 }
 
+/**
+ * Why a deposit refund moved no money. NOT_ATTEMPTED used to be a bare outcome,
+ * and a caller could only read it as "fine, nothing happened" — which is how the
+ * in-chair decline came to tell a pro she had refunded a deposit that was still
+ * sitting under a dispute. The reason is what lets a surface say the true thing.
+ *
+ *   NOTHING_TO_REFUND  — the caller asked for zero (or less) cents.
+ *   NOT_CAPTURED       — the deposit never held funds, or was already REFUNDED.
+ *   DISPUTED           — frozen: Stripe is already clawing the money back.
+ *   ALREADY_RETURNED   — nothing remains, or the ask exceeds what is left.
+ */
+export type DiscoveryDepositRefundSkipReason =
+  | 'NOTHING_TO_REFUND'
+  | 'NOT_CAPTURED'
+  | 'DISPUTED'
+  | 'ALREADY_RETURNED'
+
 export type DiscoveryDepositRefundResult =
   | { outcome: 'REFUNDED'; refundAmountCents: number; feeRefunded: boolean }
-  | { outcome: 'NOT_ATTEMPTED' }
+  | { outcome: 'NOT_ATTEMPTED'; reason: DiscoveryDepositRefundSkipReason }
   | { outcome: 'FAILED'; message: string }
 
 /**
@@ -500,7 +517,9 @@ export async function refundDiscoveryDeposit(args: {
   reason?: string | null
   now?: Date
 }): Promise<DiscoveryDepositRefundResult> {
-  if (args.refundAmountCents <= 0) return { outcome: 'NOT_ATTEMPTED' }
+  if (args.refundAmountCents <= 0) {
+    return { outcome: 'NOT_ATTEMPTED', reason: 'NOTHING_TO_REFUND' }
+  }
 
   // Reserve the cents atomically under the per-booking refund lock. The deposit
   // rides one charge (deposit portion + the platform fee as the application
@@ -528,7 +547,7 @@ export async function refundDiscoveryDeposit(args: {
     // A captured (PAID) deposit is the only refundable state. NONE/PENDING/FAILED
     // never had funds; REFUNDED already returned the full deposit portion.
     if (!booking || booking.depositStatus !== BookingDepositStatus.PAID) {
-      return { ok: false as const }
+      return { ok: false as const, reason: 'NOT_CAPTURED' as const }
     }
 
     // A disputed deposit charge has had (or is having) its funds pulled by Stripe
@@ -539,7 +558,7 @@ export async function refundDiscoveryDeposit(args: {
     // refunds; a LOST dispute keeps it frozen forever (the money is already gone).
     // Mirrors reserveRefund's DISPUTED gate on the final-bill PI (M4).
     if (booking.depositDisputedAt) {
-      return { ok: false as const, disputed: true as const }
+      return { ok: false as const, reason: 'DISPUTED' as const }
     }
 
     const depositCents = booking.depositAmount
@@ -552,7 +571,7 @@ export async function refundDiscoveryDeposit(args: {
 
     // Nothing left to give back, or this refund would exceed the charge.
     if (remaining <= 0 || args.refundAmountCents > remaining) {
-      return { ok: false as const }
+      return { ok: false as const, reason: 'ALREADY_RETURNED' as const }
     }
 
     const nextRefunded = alreadyRefunded + args.refundAmountCents
@@ -576,7 +595,7 @@ export async function refundDiscoveryDeposit(args: {
   })
 
   if (!claim.ok) {
-    if (claim.disputed) {
+    if (claim.reason === 'DISPUTED') {
       // The freeze fired: a refund was requested against a deposit whose charge
       // is under (or lost) a Stripe dispute. Benign — the dispute already paged
       // (captureStripeDisputeAlert) — but log it with a distinct identity so the
@@ -593,7 +612,7 @@ export async function refundDiscoveryDeposit(args: {
         }),
       )
     }
-    return { outcome: 'NOT_ATTEMPTED' }
+    return { outcome: 'NOT_ATTEMPTED', reason: claim.reason }
   }
 
   try {

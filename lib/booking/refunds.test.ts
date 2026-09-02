@@ -937,7 +937,9 @@ describe('refundDiscoveryDeposit — dispute freeze (M4)', () => {
       trigger: BookingRefundTrigger.AUTO_CANCELLATION,
     })
 
-    expect(result).toEqual({ outcome: 'NOT_ATTEMPTED' })
+    // The reason is load-bearing: a caller that cannot tell DISPUTED from
+    // ALREADY_RETURNED cannot tell the pro anything true about her money.
+    expect(result).toEqual({ outcome: 'NOT_ATTEMPTED', reason: 'DISPUTED' })
     // Froze BEFORE reserving: no claim write, no Stripe refund, no refund row.
     expect(mocks.stripeRefundsCreate).not.toHaveBeenCalled()
     expect(mocks.bookingUpdates).toEqual([])

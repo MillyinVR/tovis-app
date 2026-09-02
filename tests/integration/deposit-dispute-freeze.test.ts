@@ -467,7 +467,7 @@ describe('the freeze stops both refund paths (and only the freeze does)', () => 
       trigger: BookingRefundTrigger.AUTO_CANCELLATION,
     })
 
-    expect(refused).toEqual({ outcome: 'NOT_ATTEMPTED' })
+    expect(refused).toEqual({ outcome: 'NOT_ATTEMPTED', reason: 'DISPUTED' })
     expect(stripe.refundsCreate).not.toHaveBeenCalled()
 
     const frozen = await readFreeze(bookingId)

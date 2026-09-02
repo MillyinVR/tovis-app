@@ -373,12 +373,14 @@ describe('applyLateCaptureCancelRefund', () => {
   function primeProvenance(args: {
     cancelledAt: Date | null
     cancelledByRole: Role | null
+    cancelledBySystem?: boolean
     status?: string
   }) {
     mocks.bookingFindUnique.mockResolvedValueOnce({
       status: args.status ?? 'CANCELLED',
       cancelledAt: args.cancelledAt,
       cancelledByRole: args.cancelledByRole,
+      cancelledBySystem: args.cancelledBySystem ?? false,
     })
   }
 
@@ -637,6 +639,61 @@ describe('applyLateCaptureCancelRefund', () => {
     })
     expect(events).toContain('auto_cancel_refund_retry')
     expect(events).not.toContain('late_capture_cancel_refund')
+  })
+
+  // 🔴 A SYSTEM cancel has no role and does not need one: the platform cancelled
+  // an appointment the client did everything right for, so the policy is the
+  // full make-whole the sweep already applied. Refusing it here is what left an
+  // expiry refund un-retryable after a Stripe hiccup.
+  it('DEPOSIT × system cancel → re-drives the full make-whole, no page', async () => {
+    primeProvenance({
+      cancelledAt: CANCELLED_LATE,
+      cancelledByRole: null,
+      cancelledBySystem: true,
+    })
+    mocks.bookingFindUnique.mockResolvedValueOnce({
+      scheduledFor: SCHEDULED_FOR,
+      depositStatus: BookingDepositStatus.PAID,
+      depositStripePaymentIntentId: 'pi_deposit_1',
+      depositAmount: 25,
+      discoveryFeeAmount: 500,
+    })
+    mocks.refundDiscoveryDeposit.mockResolvedValue({
+      outcome: 'REFUNDED',
+      refundAmountCents: 3000,
+      feeRefunded: true,
+    })
+
+    const result = await applyLateCaptureCancelRefund({
+      bookingId: 'booking_1',
+      flavor: 'DEPOSIT',
+      source: 'RETRY_SWEEP',
+    })
+
+    expect(result.outcome).toBe('REFUNDED')
+    expect(mocks.captureLateCaptureOnCancelledBooking).not.toHaveBeenCalled()
+    // Deposit AND fee: she keeps none of the cost of an appointment that is not
+    // happening through no fault of hers.
+    expect(mocks.refundDiscoveryDeposit).toHaveBeenCalledWith(
+      expect.objectContaining({ refundAmountCents: 3000, refundFee: true }),
+    )
+  })
+
+  it('a null role WITHOUT the system stamp is still unknown provenance', async () => {
+    primeProvenance({
+      cancelledAt: CANCELLED_LATE,
+      cancelledByRole: null,
+      cancelledBySystem: false,
+    })
+
+    const result = await applyLateCaptureCancelRefund({
+      bookingId: 'booking_1',
+      flavor: 'DEPOSIT',
+      source: 'RETRY_SWEEP',
+    })
+
+    expect(result.outcome).toBe('UNKNOWN_PROVENANCE')
+    expect(mocks.refundDiscoveryDeposit).not.toHaveBeenCalled()
   })
 
   it('unknown provenance still pages even from the RETRY_SWEEP source', async () => {

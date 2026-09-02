@@ -8,7 +8,7 @@ import {
   modelsWithStatus,
   retainedNeedingReview,
 } from '@/lib/privacy/deleteBoundary'
-import { handledModelNames } from '@/lib/privacy/deleteRules'
+import { DELETE_RULES, handledModelNames } from '@/lib/privacy/deleteRules'
 import { subjectLinkedModelNames } from '@/lib/privacy/exportBoundary'
 
 /**
@@ -126,6 +126,39 @@ describe('privacy deletion completeness boundary', () => {
     expect(DELETE_BOUNDARY.LookPost?.status).toBe('DELETE')
     // A live series would keep materializing future appointments.
     expect(DELETE_BOUNDARY.BookingSeries?.status).toBe('ANONYMIZE')
+  })
+
+  // 🔴 ORDER, not just presence. Every rule runs inside ONE transaction, so a
+  // single foreign-key violation rolls back the entire deletion and marks the
+  // request FAILED — which is deliberately never retried. ConsultBookingProposal
+  // references ConsultSession and ConsultServiceEstimate with onDelete: Restrict,
+  // so if it is ever moved below either of them, the first client who committed
+  // to a look can never delete her account. Presence alone would not catch that.
+  it('deletes ConsultBookingProposal before the rows it Restrict-references', () => {
+    const order = DELETE_RULES.map((rule) => rule.model)
+    const proposal = order.indexOf('ConsultBookingProposal')
+    const session = order.indexOf('ConsultSession')
+    const estimate = order.indexOf('ConsultServiceEstimate')
+
+    expect(proposal, 'ConsultBookingProposal has no delete rule').toBeGreaterThan(-1)
+    expect(proposal).toBeLessThan(session)
+    expect(proposal).toBeLessThan(estimate)
+  })
+
+  it('pins the Restrict edges this order exists to satisfy', () => {
+    // Read from the schema itself, so the guard above cannot outlive its reason:
+    // if these edges ever become Cascade, this test says so out loud.
+    const model = Prisma.dmmf.datamodel.models.find(
+      (m) => m.name === 'ConsultBookingProposal',
+    )
+    const edges = Object.fromEntries(
+      (model?.fields ?? [])
+        .filter((field) => field.relationName)
+        .map((field) => [field.type, field.relationOnDelete]),
+    )
+
+    expect(edges.ConsultSession).toBe('Restrict')
+    expect(edges.ConsultServiceEstimate).toBe('Restrict')
   })
 
   it('does not hard-delete models that other rows reference with Restrict', () => {

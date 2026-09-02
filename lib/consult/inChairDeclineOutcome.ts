@@ -42,6 +42,10 @@ import {
 } from '@prisma/client'
 
 import { createBookingCloseoutAuditLog } from '@/lib/booking/closeoutAudit'
+import type {
+  ConsultDeclineDepositChoice,
+  ConsultDeclineDepositSettlement,
+} from '@/lib/consult/declineDepositSettlement'
 import { refundDiscoveryDeposit } from '@/lib/booking/refunds'
 import { prisma } from '@/lib/prisma'
 import { safeError } from '@/lib/security/logging'
@@ -55,7 +59,10 @@ const ROUTE = 'lib/consult/inChairDeclineOutcome.ts'
  */
 const DECISION_IDEMPOTENCY_KEY = 'consult-decline-deposit'
 
-export type ConsultDeclineDepositChoice = 'KEEP' | 'REFUND'
+export type {
+  ConsultDeclineDepositChoice,
+  ConsultDeclineDepositSettlement,
+} from '@/lib/consult/declineDepositSettlement'
 
 export type ConsultDeclineDepositState = {
   /** Cents the client paid up front: the deposit portion plus her platform fee. */
@@ -63,10 +70,26 @@ export type ConsultDeclineDepositState = {
   /** The answer already on record, or null while it is still open. */
   decidedChoice: ConsultDeclineDepositChoice | null
   decidedAt: string | null
+  /**
+   * Cents of that charge ACTUALLY back with the client, read off the booking —
+   * `depositRefundedCents`, the counter Stripe's own refund webhook maintains.
+   *
+   * 🔴 Read from the money, never from the recorded choice. The decision row is
+   * written BEFORE the Stripe call and is never revised, so a REFUND whose
+   * refund then failed leaves a decision saying "refund" next to a deposit that
+   * never moved. Deriving the sentence from this counter is what stops the page
+   * repeating a refund that did not happen every time it reloads.
+   */
+  refundedCents: number
 }
 
 export type ConsultDeclineDepositResult =
-  | { ok: true; choice: ConsultDeclineDepositChoice; refundedCents: number }
+  | {
+      ok: true
+      choice: ConsultDeclineDepositChoice
+      settlement: ConsultDeclineDepositSettlement
+      refundedCents: number
+    }
   | { ok: false; code: 'NOT_FOUND' | 'NOT_APPLICABLE' | 'ALREADY_DECIDED' }
   | { ok: false; code: 'REFUND_FAILED'; message: string }
 
@@ -177,6 +200,7 @@ export async function loadConsultDeclineDepositState(args: {
       depositChargeCents: depositChargeCents(booking),
       decidedChoice: readRecordedChoice(decision.metadata).choice,
       decidedAt: decision.createdAt.toISOString(),
+      refundedCents: booking.depositRefundedCents,
     }
   }
 
@@ -186,6 +210,7 @@ export async function loadConsultDeclineDepositState(args: {
     depositChargeCents: depositChargeCents(booking),
     decidedChoice: null,
     decidedAt: null,
+    refundedCents: booking.depositRefundedCents,
   }
 }
 
@@ -248,7 +273,7 @@ export async function recordConsultDeclineDepositChoice(args: {
 
   if (args.choice === 'KEEP') {
     // No money moves — and that is the decision, now signed and dated.
-    return { ok: true, choice: 'KEEP', refundedCents: 0 }
+    return { ok: true, choice: 'KEEP', settlement: 'KEPT', refundedCents: 0 }
   }
 
   const paymentIntentId = booking.depositStripePaymentIntentId
@@ -282,6 +307,7 @@ export async function recordConsultDeclineDepositChoice(args: {
     return {
       ok: true,
       choice: 'REFUND',
+      settlement: 'REFUNDED',
       refundedCents: refund.refundAmountCents,
     }
   }
@@ -292,8 +318,23 @@ export async function recordConsultDeclineDepositChoice(args: {
 
   // NOT_ATTEMPTED — the deposit was already returned, or the charge is under
   // dispute and the refund is frozen (refundDiscoveryDeposit logs which). The
-  // decision is recorded either way; nothing is invented about the money.
-  return { ok: true, choice: 'REFUND', refundedCents: 0 }
+  // decision stands, and it is reported as what it is: a refund that moved no
+  // money. This is a SUCCESSFUL request — there is nothing for the pro to retry,
+  // because either the client already has her money or Stripe is taking it back
+  // — but it is NOT a refund, and the surface must not call it one.
+  console.warn(
+    JSON.stringify({
+      level: 'warn',
+      app: 'tovis',
+      namespace: 'payments',
+      event: 'consult_decline_deposit_refund_not_moved',
+      bookingId: booking.id,
+      reason: refund.reason,
+      requestedCents: remaining,
+    }),
+  )
+
+  return { ok: true, choice: 'REFUND', settlement: 'NOT_MOVED', refundedCents: 0 }
 }
 
 export { parseChoice as parseConsultDeclineDepositChoice }

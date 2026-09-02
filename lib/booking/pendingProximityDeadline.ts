@@ -33,25 +33,10 @@
 // is the pro's, not a sweep's, and cancelling a request the pro has had almost
 // no chance to see would be worse than leaving it.
 
-import { readOptionalEnv } from '@/lib/env'
+import { envKillSwitchArmed, readPositiveIntEnv } from '@/lib/env'
 
 export const PENDING_PROXIMITY_EXPIRY_HOURS_DEFAULT = 6
 export const PENDING_PROXIMITY_MIN_ANSWER_HOURS_DEFAULT = 2
-
-function readPositiveIntEnv(name: string, fallback: number): number {
-  const raw = readOptionalEnv(name)
-  if (!raw) return fallback
-  const parsed = Number(raw)
-  if (!Number.isFinite(parsed) || parsed <= 0) return fallback
-  return Math.trunc(parsed)
-}
-
-function readBooleanEnv(name: string, fallback: boolean): boolean {
-  const raw = readOptionalEnv(name)
-  if (raw == null) return fallback
-  const v = raw.trim().toLowerCase()
-  return v !== 'false' && v !== '0' && v !== 'no' && v !== 'off'
-}
 
 /** Hours before the appointment an unanswered request is released. */
 export function pendingProximityExpiryHours(): number {
@@ -75,7 +60,13 @@ export function pendingProximityMinAnswerHours(): number {
  * book-the-look with the sweep off would be shipping the unsafe half.
  * Set PENDING_PROXIMITY_EXPIRY_ENABLED=false to make the sweep observe-only
  * (it still logs how many requests it WOULD release) without a code change.
+ *
+ * Parsed by `envKillSwitchArmed`, so ANY set value that is not an explicit
+ * affirmative stops the sweep — `disabled`, `n` and a typo all read as off. The
+ * local parser this replaced read the other way round (anything outside a
+ * four-item deny-list kept it ON), which meant an operator reaching for the kill
+ * switch mid-incident could leave it fully armed.
  */
 export function pendingProximityExpiryEnabled(): boolean {
-  return readBooleanEnv('PENDING_PROXIMITY_EXPIRY_ENABLED', true)
+  return envKillSwitchArmed('PENDING_PROXIMITY_EXPIRY_ENABLED')
 }

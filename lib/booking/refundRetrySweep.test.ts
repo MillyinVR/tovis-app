@@ -60,6 +60,7 @@ function serviceBooking(overrides: Record<string, unknown> = {}) {
     depositStatus: BookingDepositStatus.NONE,
     cancelledAt: new Date('2026-07-21T12:00:00.000Z'),
     cancelledByRole: Role.CLIENT,
+    cancelledBySystem: false,
     ...overrides,
   }
 }
@@ -311,6 +312,57 @@ describe('retryFailedAutoCancelRefunds — staleness guards', () => {
     const run = await retryFailedAutoCancelRefunds({ now: NOW })
 
     expect(mocks.refundBookingPayment).not.toHaveBeenCalled()
+    expect(run.tally.not_retryable).toBe(1)
+  })
+
+  // 🔴 A system cancel (the pending-proximity expiry sweep) carries NO role by
+  // design. This gate used to read that null as "unknown provenance" and refuse,
+  // so a Stripe hiccup on an expiry refund stranded the client's deposit with
+  // nothing able to re-drive it — while the expiry sweep's own comments promised
+  // exactly this retry.
+  it('retries a deposit refund for a SYSTEM cancel, which has no role by design', async () => {
+    mocks.refundFindMany.mockResolvedValue([
+      failedRow({
+        stripePaymentIntentId: 'pi_deposit',
+        createdAt: new Date(NOW.getTime() - DEPOSIT_RETRY_BACKOFF_MS - 1000),
+        booking: serviceBooking({
+          depositStatus: BookingDepositStatus.PAID,
+          cancelledByRole: null,
+          cancelledBySystem: true,
+        }),
+      }),
+    ])
+    mocks.applyLateCaptureCancelRefund.mockResolvedValue({ outcome: 'REFUNDED' })
+
+    const run = await retryFailedAutoCancelRefunds({ now: NOW })
+
+    expect(mocks.applyLateCaptureCancelRefund).toHaveBeenCalledWith({
+      bookingId: 'booking_1',
+      flavor: 'DEPOSIT',
+      source: 'RETRY_SWEEP',
+    })
+    expect(run.tally.not_retryable).toBe(0)
+  })
+
+  // The other half of the same distinction: a null role with NO system stamp is
+  // a cancel from before the provenance columns existed. Its policy really is
+  // unknowable, and it must still be refused.
+  it('still refuses a null role that is NOT a system cancel', async () => {
+    mocks.refundFindMany.mockResolvedValue([
+      failedRow({
+        stripePaymentIntentId: 'pi_deposit',
+        createdAt: new Date(NOW.getTime() - DEPOSIT_RETRY_BACKOFF_MS - 1000),
+        booking: serviceBooking({
+          depositStatus: BookingDepositStatus.PAID,
+          cancelledByRole: null,
+          cancelledBySystem: false,
+        }),
+      }),
+    ])
+
+    const run = await retryFailedAutoCancelRefunds({ now: NOW })
+
+    expect(mocks.applyLateCaptureCancelRefund).not.toHaveBeenCalled()
     expect(run.tally.not_retryable).toBe(1)
   })
 

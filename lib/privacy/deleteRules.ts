@@ -652,6 +652,33 @@ export const DELETE_RULES: readonly DeleteRule[] = [
         ? { consultSession: { clientId: s.clientProfileId } }
         : null,
   }),
+  // 🔴 MUST stay ahead of ConsultSession and ConsultServiceEstimate below.
+  // ConsultBookingProposal references BOTH with onDelete: Restrict, so deleting
+  // either one out from under a surviving proposal raises a foreign-key
+  // violation — and the whole deletion runs in ONE transaction, so that single
+  // P2003 rolls back every rule and marks the request FAILED, which is never
+  // retried. One client who committed to a look would have stalled her own
+  // erasure permanently.
+  //
+  // Invisible to the completeness guard by construction: subject detection is
+  // direct-FK only, and this model reaches the client through
+  // `consultSessionId`, so nothing would have flagged it. It was found by
+  // reading the schema's Restrict edges against the rule order.
+  //
+  // DELETE, not retain: the same call already made for ConsultServiceEstimate
+  // just below. The client's consult and everything derived from it goes with
+  // her; the Booking is RETAIN and stays as the pro's own record of the
+  // appointment.
+  deleteRule({
+    model: 'ConsultBookingProposal',
+    notes:
+      "The client's commitment to a look-anchored proposal. Deleted with the consult it was derived from — it references ConsultSession and ConsultServiceEstimate with onDelete: Restrict, so it must go before either of them.",
+    delegate: (db) => db.consultBookingProposal,
+    where: (s) =>
+      s.clientProfileId
+        ? { consultSession: { clientId: s.clientProfileId } }
+        : null,
+  }),
   deleteRule({
     model: 'ConsultSession',
     notes:
