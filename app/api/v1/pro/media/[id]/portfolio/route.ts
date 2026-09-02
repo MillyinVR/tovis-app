@@ -3,7 +3,6 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
-import { MediaVisibility } from '@prisma/client'
 import { resolveStoragePointers, safeUrl } from '@/lib/media'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import {
@@ -11,14 +10,11 @@ import {
   resolveFeaturePairing,
 } from '@/lib/media/portfolioPairing'
 import { canProSharePublicly, UNPROMOTED_MEDIA_MESSAGE } from '@/lib/media/publicShareGuard'
+import { resolveMediaVisibility } from '@/lib/media/mediaVisibility'
 import { reconcilePortfolioLookForMediaAsset } from '@/lib/looks/publication/portfolioLookSync'
 import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
-
-function computeVisibility(isFeaturedInPortfolio: boolean, isEligibleForLooks: boolean): MediaVisibility {
-  return isFeaturedInPortfolio || isEligibleForLooks ? MediaVisibility.PUBLIC : MediaVisibility.PRO_CLIENT
-}
 
 async function loadOwnedMedia(mediaId: string, professionalId: string) {
   const media = await prisma.mediaAsset.findUnique({
@@ -85,6 +81,16 @@ export const CLIENT_AUTHORED_LOOK_MESSAGE =
  * attempt to backfill canonical pointers from the url(s).
  *
  * This keeps your app moving toward a single source of truth without a separate script.
+ *
+ * 🔴 This is the ONLY update in the codebase that writes `storageBucket`, which
+ * makes it the third way into the bucket/visibility defect — from the other
+ * direction. A legacy row with an empty bucket, a `media-public` url and
+ * `visibility = PRO_CLIENT` would have had its bucket resolved to the
+ * world-readable one while the column kept claiming private. Latent rather than
+ * live (0 of 96 production rows have an empty bucket, measured 2026-09-01), but
+ * free to close: the derived bucket is fed straight back through
+ * `resolveMediaVisibility` in the SAME statement, so the row cannot be observed
+ * in the broken state even for an instant.
  */
 async function backfillPointersIfMissing(mediaId: string, m: {
   storageBucket: string
@@ -93,12 +99,14 @@ async function backfillPointersIfMissing(mediaId: string, m: {
   thumbPath: string | null
   url: string | null
   thumbUrl: string | null
-}) {
+  isFeaturedInPortfolio: boolean
+  isEligibleForLooks: boolean
+}): Promise<string> {
   const hasPointers = Boolean(m.storageBucket && m.storagePath)
-  if (hasPointers) return
+  if (hasPointers) return m.storageBucket
 
   const url = safeUrl(m.url)
-  if (!url) return
+  if (!url) return m.storageBucket
 
   const ptrs = resolveStoragePointers({
     url,
@@ -108,7 +116,7 @@ async function backfillPointersIfMissing(mediaId: string, m: {
     thumbBucket: m.thumbBucket,
     thumbPath: m.thumbPath,
   })
-  if (!ptrs) return
+  if (!ptrs) return m.storageBucket
 
   await prisma.mediaAsset.update({
     where: { id: mediaId },
@@ -117,9 +125,22 @@ async function backfillPointersIfMissing(mediaId: string, m: {
       storagePath: ptrs.storagePath,
       thumbBucket: ptrs.thumbBucket,
       thumbPath: ptrs.thumbPath,
+      // Learning where the bytes actually live can change what visibility is
+      // legal for this row, so the two move together.
+      visibility: resolveMediaVisibility({
+        storageBucket: ptrs.storageBucket,
+        isFeaturedInPortfolio: m.isFeaturedInPortfolio,
+        isEligibleForLooks: m.isEligibleForLooks,
+      }),
     },
     select: { id: true },
   })
+
+  // 🔴 Returned, not discarded. The retract below has to resolve visibility
+  // against where the bytes turned out to be — reading the caller's stale,
+  // pre-backfill `storageBucket` would judge a legacy row on a value this
+  // function just replaced.
+  return ptrs.storageBucket
 }
 
 export async function POST(req: NextRequest, ctx: RouteContext) {
@@ -147,7 +168,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     }
 
     // Optional: move old rows toward canonical pointers
-    await backfillPointersIfMissing(mediaId, owned.media)
+    const storageBucket = await backfillPointersIfMissing(mediaId, owned.media)
 
     // Opt-in before/after pairing (default-on): an explicit body wins, otherwise
     // auto-pair with the booking's before so the portfolio tile can render the
@@ -165,7 +186,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       where: { id: mediaId },
       data: {
         isFeaturedInPortfolio: true,
-        visibility: computeVisibility(true, owned.media.isEligibleForLooks),
+        visibility: resolveMediaVisibility({
+          storageBucket,
+          isFeaturedInPortfolio: true,
+          isEligibleForLooks: owned.media.isEligibleForLooks,
+        }),
         beforeAssetId,
       },
       select: {
@@ -230,7 +255,7 @@ export async function DELETE(_req: NextRequest, ctx: RouteContext) {
     if (!owned.ok) return jsonFail(owned.status, owned.error)
 
     // Optional: move old rows toward canonical pointers
-    await backfillPointersIfMissing(mediaId, owned.media)
+    const storageBucket = await backfillPointersIfMissing(mediaId, owned.media)
 
     const updated = await prisma.mediaAsset.update({
       where: { id: mediaId },
@@ -240,7 +265,16 @@ export async function DELETE(_req: NextRequest, ctx: RouteContext) {
         // the reconcile below retract the live LookPost (fixes divergence b).
         isFeaturedInPortfolio: false,
         isEligibleForLooks: false,
-        visibility: computeVisibility(false, false),
+        // 🔴 Bucket-aware. This used to write PRO_CLIENT unconditionally, which
+        // stamped "private" on assets whose bytes sit in the world-readable
+        // media-public bucket — the pro's own Looks/portfolio uploads. The row
+        // still drops off every public surface, via the flags above and the
+        // LookPost the reconcile below retracts to DRAFT.
+        visibility: resolveMediaVisibility({
+          storageBucket,
+          isFeaturedInPortfolio: false,
+          isEligibleForLooks: false,
+        }),
         // Unpair on removal — a tile that's no longer featured shouldn't keep a
         // dangling before/after pairing.
         beforeAssetId: null,

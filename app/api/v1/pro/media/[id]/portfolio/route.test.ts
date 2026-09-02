@@ -498,6 +498,10 @@ describe('app/api/v1/pro/media/[id]/portfolio/route.ts', () => {
         thumbPath: null,
       })
 
+      // 🔴 `visibility` moves in the SAME statement as the bucket. Resolving a
+      // legacy row's pointers can land it in the world-readable bucket, so
+      // writing the pointer without re-judging the column would recreate the
+      // media-public + PRO_CLIENT defect from the other direction.
       expect(mocks.mediaAssetUpdate).toHaveBeenNthCalledWith(1, {
         where: { id: 'media_1' },
         data: {
@@ -505,6 +509,7 @@ describe('app/api/v1/pro/media/[id]/portfolio/route.ts', () => {
           storagePath: 'backfilled/media_1.jpg',
           thumbBucket: null,
           thumbPath: null,
+          visibility: MediaVisibility.PUBLIC,
         },
         select: { id: true },
       })
@@ -789,7 +794,11 @@ describe('app/api/v1/pro/media/[id]/portfolio/route.ts', () => {
       expect(mocks.mediaAssetUpdate).not.toHaveBeenCalled()
     })
 
-    it('removes media from portfolio and makes it pro-client when not eligible for Looks', async () => {
+    it('removes a PUBLIC-bucket asset from the portfolio and leaves it PUBLIC', async () => {
+      // 🔴 This asserted PRO_CLIENT until 2026-09-01, and that is exactly the
+      // production defect: the fixture's bucket is `media-public`, which is
+      // world-readable, so stamping "private" on the row was a lie the storage
+      // did not back. The retract is carried by the two flags below.
       mocks.mediaAssetFindUnique.mockResolvedValueOnce(
         makeOwnedMedia({
           isFeaturedInPortfolio: true,
@@ -801,7 +810,7 @@ describe('app/api/v1/pro/media/[id]/portfolio/route.ts', () => {
       const updated = makeUpdatedMedia({
         isFeaturedInPortfolio: false,
         isEligibleForLooks: false,
-        visibility: MediaVisibility.PRO_CLIENT,
+        visibility: MediaVisibility.PUBLIC,
       })
 
       mocks.mediaAssetUpdate.mockResolvedValueOnce(updated)
@@ -813,7 +822,7 @@ describe('app/api/v1/pro/media/[id]/portfolio/route.ts', () => {
         data: {
           isFeaturedInPortfolio: false,
           isEligibleForLooks: false,
-          visibility: MediaVisibility.PRO_CLIENT,
+          visibility: MediaVisibility.PUBLIC,
           beforeAssetId: null,
         },
         select: {
@@ -856,6 +865,44 @@ describe('app/api/v1/pro/media/[id]/portfolio/route.ts', () => {
       })
     })
 
+    it('🔴 still marks a PRIVATE-bucket asset PRO_CLIENT when retracted', async () => {
+      // The other half of the invariant. A client's session photo lives in
+      // media-private, so retracting it genuinely does make it private again —
+      // the fix must not have flattened everything to PUBLIC.
+      mocks.mediaAssetFindUnique.mockResolvedValueOnce(
+        makeOwnedMedia({
+          isFeaturedInPortfolio: true,
+          isEligibleForLooks: true,
+          visibility: MediaVisibility.PUBLIC,
+          storageBucket: 'media-private',
+          reviewId: 'review_1',
+        }),
+      )
+
+      mocks.mediaAssetUpdate.mockResolvedValueOnce(
+        makeUpdatedMedia({
+          isFeaturedInPortfolio: false,
+          isEligibleForLooks: false,
+          visibility: MediaVisibility.PRO_CLIENT,
+        }),
+      )
+
+      const res = await DELETE(makeRequest('DELETE'), makeCtx())
+
+      expect(mocks.mediaAssetUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: {
+            isFeaturedInPortfolio: false,
+            isEligibleForLooks: false,
+            visibility: MediaVisibility.PRO_CLIENT,
+            beforeAssetId: null,
+          },
+        }),
+      )
+
+      expect(res.status).toBe(200)
+    })
+
     it('fully retracts a Looks-eligible asset when removed from the portfolio (§19b unified state)', async () => {
       // Pre-§19b this stayed PUBLIC/Looks-eligible; the grid and the feed are one
       // surface now, so removing from the portfolio clears both flags and the
@@ -871,19 +918,21 @@ describe('app/api/v1/pro/media/[id]/portfolio/route.ts', () => {
       const updated = makeUpdatedMedia({
         isFeaturedInPortfolio: false,
         isEligibleForLooks: false,
-        visibility: MediaVisibility.PRO_CLIENT,
+        visibility: MediaVisibility.PUBLIC,
       })
 
       mocks.mediaAssetUpdate.mockResolvedValueOnce(updated)
 
       const res = await DELETE(makeRequest('DELETE'), makeCtx())
 
+      // Flags cleared, visibility left PUBLIC: the bytes are in media-public and
+      // saying otherwise is what shipped 3 mislabelled production rows.
       expect(mocks.mediaAssetUpdate).toHaveBeenCalledWith(
         expect.objectContaining({
           data: {
             isFeaturedInPortfolio: false,
             isEligibleForLooks: false,
-            visibility: MediaVisibility.PRO_CLIENT,
+            visibility: MediaVisibility.PUBLIC,
             beforeAssetId: null,
           },
         }),

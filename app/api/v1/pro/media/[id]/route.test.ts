@@ -497,10 +497,13 @@ describe('app/api/v1/pro/media/[id]/route.ts', () => {
     })
 
     it('updates without replacing services when serviceIds are omitted', async () => {
+      // The default fixture sits in `media-public`, so an unflagged asset
+      // resolves to PUBLIC — the column reports where the bytes are, and the
+      // flags report whether it is shown. See lib/media/mediaVisibility.ts.
       mocks.mediaAssetUpdate.mockResolvedValueOnce({
         id: 'media_1',
         caption: 'Caption only',
-        visibility: MediaVisibility.PRO_CLIENT,
+        visibility: MediaVisibility.PUBLIC,
         isEligibleForLooks: false,
         isFeaturedInPortfolio: false,
       })
@@ -518,7 +521,7 @@ describe('app/api/v1/pro/media/[id]/route.ts', () => {
         where: { id: 'media_1' },
         data: {
           caption: 'Caption only',
-          visibility: MediaVisibility.PRO_CLIENT,
+          visibility: MediaVisibility.PUBLIC,
         },
         select: {
           id: true,
@@ -535,7 +538,7 @@ describe('app/api/v1/pro/media/[id]/route.ts', () => {
         media: {
           id: 'media_1',
           caption: 'Caption only',
-          visibility: MediaVisibility.PRO_CLIENT,
+          visibility: MediaVisibility.PUBLIC,
           isEligibleForLooks: false,
           isFeaturedInPortfolio: false,
         },

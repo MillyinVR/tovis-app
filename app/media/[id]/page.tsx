@@ -17,6 +17,7 @@ import { loadServiceTagOptions } from '@/lib/media/serviceTagOptions'
 import { pickString } from '@/lib/pick'
 import { prisma } from '@/lib/prisma'
 import { pickServiceTagNames } from '@/lib/profiles/publicProfileMappers'
+import { isPubliclyViewableMediaAsset } from '@/lib/media/mediaVisibility'
 import { canViewerSeePublicMediaSurface } from '@/lib/proTrustState'
 import { cn } from '@/lib/utils'
 
@@ -30,6 +31,7 @@ const mediaPageSelect = {
   mediaType: true,
   visibility: true,
   professionalId: true,
+  reviewId: true,
   isEligibleForLooks: true,
   isFeaturedInPortfolio: true,
   beforeAssetId: true,
@@ -87,7 +89,22 @@ export default async function MediaDetailPage({ params }: PageProps) {
   if (!id) notFound()
 
   const media = await getMediaPageRecord(id)
-  if (!media || media.visibility !== MediaVisibility.PUBLIC) notFound()
+  // 🔴 Not `visibility === PUBLIC` alone. A pro's own upload in the public
+  // bucket stays PUBLIC after they retract it (the bytes are world-readable
+  // whatever the column says — see lib/media/mediaVisibility.ts); what takes it
+  // off this page is the flags. Review media is PUBLIC with both flags false,
+  // so `reviewId` is the third way in.
+  if (
+    !media ||
+    !isPubliclyViewableMediaAsset({
+      visibility: media.visibility,
+      isFeaturedInPortfolio: media.isFeaturedInPortfolio,
+      isEligibleForLooks: media.isEligibleForLooks,
+      reviewId: media.reviewId,
+    })
+  ) {
+    notFound()
+  }
 
   const viewer = await getCurrentUser().catch(() => null)
   const isOwner =

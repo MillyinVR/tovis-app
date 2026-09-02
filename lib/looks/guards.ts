@@ -2,7 +2,6 @@
 import {
   LookPostStatus,
   LookPostVisibility,
-  MediaVisibility,
   ModerationStatus,
   Role,
   VerificationStatus,
@@ -26,20 +25,6 @@ export type LookEditPolicyInput = {
 
 export type LookModerationPolicyInput = {
   viewerRole: Role | null | undefined
-}
-
-/**
- * Legacy compatibility helper for old MediaAsset-based call sites.
- * Keep this only until those routes are migrated to LookPost-based guards.
- */
-export function isPublicLooksEligibleMedia(args: {
-  visibility: MediaVisibility
-  isEligibleForLooks: boolean
-  isFeaturedInPortfolio: boolean
-}): boolean {
-  if (args.visibility !== MediaVisibility.PUBLIC) return false
-
-  return Boolean(args.isEligibleForLooks || args.isFeaturedInPortfolio)
 }
 
 function isPubliclyViewablePublishedLook(args: {
