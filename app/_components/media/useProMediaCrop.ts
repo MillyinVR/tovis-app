@@ -14,11 +14,11 @@
 // it and re-checks at execution; a 403 here is a real answer that must be shown,
 // never a state the UI assumes it has already prevented.
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useState } from 'react'
 
 import { clampCropRect, suggestCropRect, type CropHandle } from '@/lib/media/cropDrag'
 import { moveCropRect, resizeCropRect } from '@/lib/media/cropDrag'
-import { FULL_FRAME_CROP, type CropRect } from '@/lib/media/cropRect'
+import type { CropRect } from '@/lib/media/cropRect'
 import { safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
 
@@ -72,7 +72,7 @@ export type ProMediaCrop = {
 function initialRect(initial: ProMediaCropInitial): CropRect {
   // No stored rect means the whole photo — which is also the bound in that case,
   // so the editor opens showing everything the pro is allowed to keep.
-  return clampCropRect(initial.crop ?? initial.bound ?? FULL_FRAME_CROP, initial.bound)
+  return clampCropRect(initial.crop ?? initial.bound, initial.bound)
 }
 
 function sameRect(a: CropRect, b: CropRect): boolean {
@@ -89,7 +89,12 @@ export function useProMediaCrop(args: {
 }): ProMediaCrop {
   const { mediaId, initial, onSaved } = args
 
-  const stored = useMemo(() => initialRect(initial), [initial])
+  // Recomputed every render on purpose. `initial` is built inline by the
+  // caller, so it is a fresh object each time and a memo keyed on it would
+  // never hit — it would only READ as if this were memoised. It is a clamp of
+  // four numbers, and recomputing means a save followed by a `router.refresh()`
+  // re-baselines `dirty` against what is now stored.
+  const stored = initialRect(initial)
   const [rect, setRect] = useState<CropRect>(stored)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
