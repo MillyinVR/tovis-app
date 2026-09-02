@@ -145,6 +145,16 @@ export async function PUT(req: Request, ctx: RouteContext) {
     // rect, and the second could then land outside what the first narrowed to.
     // `updateMany` with the bound in the WHERE makes the read and the write one
     // statement — a zero count means someone narrowed underneath us.
+    //
+    // ⚠️ The undo window's own columns are deliberately NOT in this WHERE, and
+    // that is a stated grace rather than an oversight. The window closes by the
+    // CLOCK and by VIEWS — neither of which is a write to this row — so a request
+    // authorized microseconds before the expiry can land microseconds after it.
+    // Pinning the columns would not prevent that (they are unchanged by the
+    // passage of time), and the widest such a request can reach is still the
+    // frame that stood before the narrowing, which the client had already
+    // consented to. What must not race is two re-frames combining into a
+    // widening, and the rect in the WHERE is what stops that.
     const columns = cropRectColumns(next)
     const written = await prisma.mediaAsset.updateMany({
       where: {
