@@ -40,8 +40,11 @@ import {
 } from 'react'
 
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import CropFeedPreview from '@/app/_components/media/CropFeedPreview'
 import type { ProMediaCrop } from '@/app/_components/media/useProMediaCrop'
 import { Button } from '@/app/_components/ui'
+import { focalInCropSpace } from '@/lib/media/cropRect'
+import type { FocalPoint } from '@/lib/media/focalPoint'
 import type { CropHandle } from '@/lib/media/cropDrag'
 import { cn } from '@/lib/utils'
 
@@ -106,12 +109,26 @@ export default function CropEditor({
   alt,
   /** Copy for the undo window, when one is open. Null renders no notice. */
   undoNotice,
+  /**
+   * The asset's stored focal point, in FRAME space. Only the feed preview's
+   * blurred backdrop can spend it (a contain fit has no spare pixels to shift),
+   * and it is remapped into crop space here against the LIVE rect.
+   *
+   * Optional because no caller threads a focal yet: `OwnerMediaMenu` does not
+   * carry one. Null means the backdrop centres. That is a documented limitation
+   * rather than a hidden one — the backdrop is blurred at σ=24 and dimmed to
+   * 0.62, so an unanchored crop of it is not distinguishable, and the photo the
+   * pro is actually judging ignores focal by construction. Wire it through and
+   * the preview matches the slide exactly.
+   */
+  focal,
   onDone,
 }: {
   crop: ProMediaCrop
   src: string
   alt: string
   undoNotice?: string | null
+  focal?: FocalPoint | null
   onDone?: () => void
 }) {
   const frameRef = useRef<HTMLDivElement | null>(null)
@@ -165,8 +182,15 @@ export default function CropEditor({
 
   const { rect, bound } = crop
 
+  // Remapped against the LIVE rect, so the preview's backdrop follows the drag
+  // exactly as the slide's would.
+  const previewFocal = focalInCropSpace(focal ?? null, rect)
+
   return (
     <div className="grid gap-3">
+      {/* The crop frame takes the PHOTO's shape; the preview takes the SLIDE's.
+          Side by side is the point — the pro is choosing between them. */}
+      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
       <div
         ref={frameRef}
         data-testid="crop-frame"
@@ -266,6 +290,16 @@ export default function CropEditor({
               }}
             />
           ))}
+        </div>
+      </div>
+
+        {/* 🔴 A FIXED width in BOTH layouts, never `w-full`. The preview is a
+            9:19.5 box, so a full-width one on a phone renders 361×782 — taller
+            than the crop frame it is meant to annotate, pushing the presets and
+            Save below the fold of the sheet this lives in. Measured at 393px
+            before it shipped. 124px keeps it a glanceable panel either way. */}
+        <div className="w-[124px] shrink-0">
+          <CropFeedPreview src={src} cropRect={rect} focalPoint={previewFocal} />
         </div>
       </div>
 
