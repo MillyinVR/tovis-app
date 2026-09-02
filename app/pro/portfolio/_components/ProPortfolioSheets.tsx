@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 
 import ProMediaEditFields from '@/app/_components/media/ProMediaEditFields'
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import { resolveDisplayCrop } from '@/lib/media/cropRect'
 import { useProMediaEdit } from '@/app/_components/media/useProMediaEdit'
 import { formatCompactCount } from '@/lib/format/compactCount'
 import { readAnyErrorMessageOr, safeJson } from '@/lib/http'
@@ -137,7 +138,13 @@ function SheetHead({
           dimmed ? 'opacity-60 grayscale' : '',
         )}
       >
-        <RemoteImage src={tile.src} alt="" className="h-full w-full object-cover" intrinsic />
+        <RemoteImage
+          src={tile.src}
+          alt=""
+          className="h-full w-full object-cover"
+          {...resolveDisplayCrop(tile)}
+          intrinsic
+        />
       </span>
       <div className="min-w-0 flex-1">
         <div

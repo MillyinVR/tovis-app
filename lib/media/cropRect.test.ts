@@ -6,6 +6,7 @@ import {
   focalInCropSpace,
   FULL_FRAME_CROP,
   resolveCropRect,
+  resolveDisplayCrop,
   type CropRect,
 } from '@/lib/media/cropRect'
 import { resolveFocalPoint } from '@/lib/media/focalPoint'
@@ -183,5 +184,69 @@ describe('focalInCropSpace', () => {
       { x: 0.25, y: 0.1, w: 0.5, h: 0.4 },
     )
     expect(mapped).toEqual({ x: 1, y: 1 })
+  })
+})
+
+describe('resolveDisplayCrop — what a cover-cropping surface renders', () => {
+  /** The row every honouring surface reads: the worked crop + a raw focal. */
+  const ROW = {
+    mediaType: 'IMAGE' as const,
+    focalX: 0.6,
+    focalY: 0.2,
+    cropX: 0.25,
+    cropY: 0.1,
+    cropW: 0.5,
+    cropH: 0.4,
+  }
+
+  it('🔴 hands back the focal ALREADY in crop space, not the stored one', () => {
+    const { cropRect, focalPoint } = resolveDisplayCrop(ROW)
+
+    expect(cropRect).toEqual({ x: 0.25, y: 0.1, w: 0.5, h: 0.4 })
+    // The worked example, shared with cropWindow, MediaFill, RemoteImage and
+    // iOS: (0.60, 0.20) on the uncropped frame is (0.70, 0.25) inside this rect.
+    // Handing a cropping surface the stored 0.60/0.20 does not crash and does
+    // not look wrong in review — it just shows the wrong part of the photo.
+    expect(focalPoint?.x).toBeCloseTo(0.7, 10)
+    expect(focalPoint?.y).toBeCloseTo(0.25, 10)
+  })
+
+  it('🔴 excludes VIDEO, the same exclusion iOS makes', () => {
+    // A clip's rect has to come from a poster frame, which is unbuilt on both
+    // platforms. Honouring it on web alone would put one look in two shapes.
+    const { cropRect, focalPoint } = resolveDisplayCrop({
+      ...ROW,
+      mediaType: 'VIDEO',
+    })
+    expect(cropRect).toBeNull()
+    // …and with no crop the focal stays in frame space, uncorrected.
+    expect(focalPoint).toEqual({ x: 0.6, y: 0.2 })
+  })
+
+  it('a row with no rect is the full stored frame and an unchanged focal', () => {
+    const { cropRect, focalPoint } = resolveDisplayCrop({
+      mediaType: 'IMAGE',
+      focalX: 0.42,
+      focalY: 0.18,
+      cropX: null,
+      cropY: null,
+      cropW: null,
+      cropH: null,
+    })
+    expect(cropRect).toBeNull()
+    expect(focalPoint).toEqual({ x: 0.42, y: 0.18 })
+  })
+
+  it('an incomplete rect (three of four columns) degrades to no crop', () => {
+    const { cropRect } = resolveDisplayCrop({ ...ROW, cropH: null })
+    expect(cropRect).toBeNull()
+  })
+
+  it('centres when the subject was framed out of the crop', () => {
+    // Face at x 0.9, crop stops at 0.75 → there is nothing to anchor on, and
+    // centring is the honest answer rather than clamping to an edge.
+    const { cropRect, focalPoint } = resolveDisplayCrop({ ...ROW, focalX: 0.9 })
+    expect(cropRect).not.toBeNull()
+    expect(focalPoint).toBeNull()
   })
 })

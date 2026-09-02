@@ -82,11 +82,22 @@ function nudgeFor(
   }
 }
 
+/**
+ * The corner handles, INSET rather than straddling the window's corners.
+ *
+ * 🔴 Not a taste call — measured in a browser. Centred on the corner (a
+ * `-translate-1/2` on each axis) half of every handle falls outside the frame,
+ * and the frame is `overflow-hidden`: at the opening rect — the whole photo,
+ * which is what every look that has never been re-framed shows — all four
+ * handles rendered as quarter-circles pinched into the corners, and the clipped
+ * half is not clickable either, so the 24px target was really ~12px hanging off
+ * a 2px corner. Inset, the whole control is inside the clip at every position.
+ */
 const HANDLES: { handle: CropHandle; className: string; label: string }[] = [
-  { handle: 'nw', className: 'left-0 top-0 -translate-x-1/2 -translate-y-1/2 cursor-nwse-resize', label: 'top left' },
-  { handle: 'ne', className: 'right-0 top-0 translate-x-1/2 -translate-y-1/2 cursor-nesw-resize', label: 'top right' },
-  { handle: 'sw', className: 'bottom-0 left-0 -translate-x-1/2 translate-y-1/2 cursor-nesw-resize', label: 'bottom left' },
-  { handle: 'se', className: 'bottom-0 right-0 translate-x-1/2 translate-y-1/2 cursor-nwse-resize', label: 'bottom right' },
+  { handle: 'nw', className: 'left-0 top-0 cursor-nwse-resize', label: 'top left' },
+  { handle: 'ne', className: 'right-0 top-0 cursor-nesw-resize', label: 'top right' },
+  { handle: 'sw', className: 'bottom-0 left-0 cursor-nesw-resize', label: 'bottom left' },
+  { handle: 'se', className: 'bottom-0 right-0 cursor-nwse-resize', label: 'bottom right' },
 ]
 
 export default function CropEditor({
@@ -172,12 +183,14 @@ export default function CropEditor({
           intrinsic
           draggable={false}
           className="absolute inset-0 h-full w-full object-contain"
-          onLoad={(event) => {
-            const img = event.currentTarget
-            if (img.naturalHeight > 0) {
-              crop.setSourceAspect(img.naturalWidth / img.naturalHeight)
-            }
-          }}
+          // 🔴 `onNaturalSize`, NOT `onLoad`. React's load handler does not fire
+          // for an <img> that was already `complete` when it attached — a cached
+          // photo, or one the browser finished during HTML parse. Measured in a
+          // browser: on a cached image the frame kept the FALLBACK 3:4 aspect
+          // while the photo (880×800) sat letterboxed inside it, so `normalize`
+          // converted every drag against a box that was not the photo's — the
+          // pro would have saved a rect that is not the one they drew.
+          onNaturalSize={(width, height) => crop.setSourceAspect(width / height)}
         />
 
         {/* Everything outside the rect is dimmed rather than hidden, so the pro

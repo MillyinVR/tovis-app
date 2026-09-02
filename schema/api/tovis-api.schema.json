@@ -11861,6 +11861,30 @@
     },
     "LooksBoardPreviewPrimaryMediaDto": {
       "properties": {
+        "cropH": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cropW": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cropX": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cropY": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "focalX": {
           "type": [
             "number",
@@ -11898,7 +11922,11 @@
         "thumbUrl",
         "mediaType",
         "focalX",
-        "focalY"
+        "focalY",
+        "cropX",
+        "cropY",
+        "cropW",
+        "cropH"
       ],
       "type": "object"
     },
@@ -12910,6 +12938,43 @@
             "null"
           ]
         },
+        "cropH": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cropW": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cropX": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cropY": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "focalX": {
+          "description": "Subject focal point (camera C6) and the non-destructive publish CROP of `src`, both [0,1] from the top-left of the stored frame and in the same space. Null = center / the full stored frame. 🔴 Render them together through `lib/media/cropRect.ts` → `resolveDisplayCrop`, never separately: the focal is measured on the UNCROPPED frame.",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "focalY": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "id": {
           "type": "string"
         },
@@ -12948,6 +13013,12 @@
         "serviceIds",
         "isVideo",
         "mediaType",
+        "focalX",
+        "focalY",
+        "cropX",
+        "cropY",
+        "cropW",
+        "cropH",
         "before"
       ],
       "type": "object"
@@ -18231,6 +18302,30 @@
             "null"
           ]
         },
+        "cropH": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cropW": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cropX": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cropY": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "engagement": {
           "anyOf": [
             {
@@ -18241,6 +18336,19 @@
             }
           ],
           "description": "Set only on PUBLIC tiles."
+        },
+        "focalX": {
+          "description": "The subject focal point (camera C6) and the non-destructive publish CROP of `src`, both [0,1] from the top-left of the stored frame. The library grid is where a pro looks FIRST after re-framing a look, so it honours the same rect every public surface does — a re-frame that changed the feed and left the pro's own grid alone reads as broken, not partial. Null = the full stored frame. 🔴 Render them through `resolveDisplayCrop`, never separately.",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "focalY": {
+          "type": [
+            "number",
+            "null"
+          ]
         },
         "hold": {
           "anyOf": [
@@ -18297,6 +18405,12 @@
         "isVideo",
         "mediaType",
         "serviceIds",
+        "focalX",
+        "focalY",
+        "cropX",
+        "cropY",
+        "cropW",
+        "cropH",
         "before",
         "beforeAssetId",
         "mark",
@@ -19448,6 +19562,30 @@
     },
     "PublicBoardLook": {
       "properties": {
+        "cropH": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cropW": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cropX": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cropY": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "focalX": {
           "type": [
             "number",
@@ -19472,6 +19610,9 @@
             "null"
           ]
         },
+        "mediaType": {
+          "$ref": "#/definitions/MediaType"
+        },
         "name": {
           "type": "string"
         }
@@ -19481,8 +19622,13 @@
         "name",
         "imageUrl",
         "href",
+        "mediaType",
         "focalX",
-        "focalY"
+        "focalY",
+        "cropX",
+        "cropY",
+        "cropW",
+        "cropH"
       ],
       "type": "object"
     },

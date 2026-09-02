@@ -35,6 +35,16 @@ export const portfolioTileMediaSelect =
     thumbPath: true,
     url: true,
     thumbUrl: true,
+    // Subject focal point (camera C6) + the non-destructive publish crop
+    // (item 2). The pro's own library grid honours the same rect every public
+    // surface does — a re-frame that moved the feed and left this grid alone
+    // reads as broken. 🔴 Render them together via `resolveDisplayCrop`.
+    focalX: true,
+    focalY: true,
+    cropX: true,
+    cropY: true,
+    cropW: true,
+    cropH: true,
     // Opt-in before/after pairing → the comparison slider on surfaces that draw it.
     beforeAsset: { select: pairedBeforeAssetSelect },
     services: { select: { serviceId: true } },

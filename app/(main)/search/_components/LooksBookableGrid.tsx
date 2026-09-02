@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import ProProfileLink from '@/app/_components/ProProfileLink'
-import { resolveFocalPoint } from '@/lib/media/focalPoint'
+import { resolveDisplayCrop } from '@/lib/media/cropRect'
 import EmptyState from '@/app/_components/boundaries/EmptyState'
 import { asTrimmedString, isRecord } from '@/lib/guards'
 import { safeJson } from '@/lib/http'
@@ -200,6 +200,9 @@ export default function LooksBookableGrid({
               // price is the only figure it carries.
               const lookLabel = look.caption?.trim() || null
               const priceLabel = formatLookStartingPrice(look.priceStartingAt)
+              // The pro's published frame — the same rect the feed renders, so a
+              // look is one shape whether you meet it here or scroll onto it.
+              const { cropRect, focalPoint } = resolveDisplayCrop(look)
 
               return (
                 <article
@@ -213,7 +216,8 @@ export default function LooksBookableGrid({
                       width={300}
                       height={400}
                       className="h-full w-full object-cover"
-                      focalPoint={resolveFocalPoint(look.focalX, look.focalY)}
+                      focalPoint={focalPoint}
+                      cropRect={cropRect}
                       loading="lazy"
                     />
 

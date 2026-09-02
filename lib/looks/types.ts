@@ -384,6 +384,19 @@ export type LooksPortfolioTileDto = {
   serviceIds: string[]
   isVideo: boolean
   mediaType: MediaType
+  /**
+   * Subject focal point (camera C6) and the non-destructive publish CROP of
+   * `src`, both [0,1] from the top-left of the stored frame and in the same
+   * space. Null = center / the full stored frame. 🔴 Render them together
+   * through `lib/media/cropRect.ts` → `resolveDisplayCrop`, never separately:
+   * the focal is measured on the UNCROPPED frame.
+   */
+  focalX: number | null
+  focalY: number | null
+  cropX: number | null
+  cropY: number | null
+  cropW: number | null
+  cropH: number | null
   /** Opt-in before/after pairing → render the comparison slider when present. */
   before: PairedBeforeDto | null
 }
@@ -396,6 +409,14 @@ export type LooksBoardPreviewPrimaryMediaDto = {
   // Normalized subject focal point (camera C6), [0,1] top-left. Null = center.
   focalX: number | null
   focalY: number | null
+  // Non-destructive publish crop (item 2), [0,1] top-left in the SAME space as
+  // the focal. Null = the full stored frame. A board tile is a look tile, so it
+  // shows the frame the pro published like every other browse grid — see
+  // `resolveDisplayCrop`.
+  cropX: number | null
+  cropY: number | null
+  cropW: number | null
+  cropH: number | null
 }
 
 export type LooksBoardPreviewLookPostDto = {

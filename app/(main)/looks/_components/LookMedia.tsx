@@ -5,8 +5,8 @@ import { useState, type ReactNode } from 'react'
 import type { FeedItem } from './lookTypes'
 import MediaFill from '@/app/_components/media/MediaFill'
 import BeforeAfterReveal from '@/app/_components/media/BeforeAfterReveal'
-import { resolveFocalPoint, type FocalPoint } from '@/lib/media/focalPoint'
-import { focalInCropSpace, resolveCropRect, type CropRect } from '@/lib/media/cropRect'
+import type { FocalPoint } from '@/lib/media/focalPoint'
+import { resolveDisplayCrop, type CropRect } from '@/lib/media/cropRect'
 
 /**
  * How eagerly this slide's media should be fetched, by distance from the one
@@ -98,26 +98,10 @@ export default function LookMedia({
   }
 
   // The pro's published frame — the window of the stored image this look is
-  // meant to be seen through (capture-chain item 2). Null on every row written
-  // so far, which means the full stored frame.
-  //
-  // ⚠️ Images only, and iOS makes the SAME exclusion. A clip's frame has to come
-  // from its poster and that is unbuilt on both platforms (the capture chain's
-  // video note); honouring a rect here but not on the device would put one look
-  // in two shapes, which is the exact defect this whole track exists to fix.
-  const cropRect =
-    mediaType === 'IMAGE'
-      ? resolveCropRect(item.cropX, item.cropY, item.cropW, item.cropH)
-      : null
-
-  // 🔴 The focal is measured on the UNCROPPED frame, so it has to be re-expressed
-  // inside the crop before any cover fit uses it — otherwise the blurred
-  // backdrop below anchors on the wrong part of the photograph. `null` crop →
-  // crop space IS frame space and this returns the focal unchanged.
-  const focalPoint = focalInCropSpace(
-    resolveFocalPoint(item.focalX, item.focalY),
-    cropRect,
-  )
+  // meant to be seen through (capture-chain item 2), with the focal already
+  // remapped into that window's own space. Same helper every honouring surface
+  // uses, including the VIDEO exclusion; see `resolveDisplayCrop`.
+  const { cropRect, focalPoint } = resolveDisplayCrop({ ...item, mediaType })
 
   // For a video the backdrop is the poster, never a second decoding <video>:
   // one moving picture per slide, and a blurred still behind it reads the same.

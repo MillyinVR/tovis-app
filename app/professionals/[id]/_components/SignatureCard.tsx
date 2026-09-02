@@ -14,7 +14,7 @@ import Link from 'next/link'
 
 import BeforeAfterReveal from '@/app/_components/media/BeforeAfterReveal'
 import RemoteImage from '@/app/_components/media/RemoteImage'
-import { resolveFocalPoint } from '@/lib/media/focalPoint'
+import { resolveDisplayCrop } from '@/lib/media/cropRect'
 import { COPY } from '@/lib/copy'
 import type { PublicProfileSignatureDto } from '@/lib/profiles/publicProfileMappers'
 
@@ -25,6 +25,9 @@ export default function SignatureCard({
 }) {
   const { tile, priceLine, bookHref } = signature
   const { engagement } = tile
+  // The pro's published frame, same rect the feed and the grid honour, so the
+  // Signature card cannot show a different window of the same photograph.
+  const { cropRect, focalPoint } = resolveDisplayCrop(tile)
 
   return (
     <section className="brand-pp-signature" aria-label="Signature work">
@@ -42,7 +45,8 @@ export default function SignatureCard({
             src={tile.src}
             alt={tile.caption ?? 'Signature work'}
             className="brand-pp-signature-img"
-            focalPoint={resolveFocalPoint(tile.focalX, tile.focalY)}
+            focalPoint={focalPoint}
+            cropRect={cropRect}
             intrinsic
           />
         )}

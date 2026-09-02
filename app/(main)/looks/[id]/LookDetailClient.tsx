@@ -24,7 +24,7 @@ import RemoteImage from '@/app/_components/media/RemoteImage'
 import ClickableMedia from '@/app/_components/media/ClickableMedia'
 import BeforeAfterReveal from '@/app/_components/media/BeforeAfterReveal'
 import ClientMediaExportButton from '@/app/_components/media/ClientMediaExportButton'
-import { resolveFocalPoint } from '@/lib/media/focalPoint'
+import { resolveDisplayCrop } from '@/lib/media/cropRect'
 
 import CommentsDrawer from '../_components/CommentsDrawer'
 import RightActionRail from '../_components/RightActionRail'
@@ -369,6 +369,11 @@ export default function LookDetailClient({
     [item.assets, item.primaryMedia.id],
   )
 
+  // The pro's published frame for the hero, with the focal already remapped into
+  // it. Null on every row that has never been re-framed, which renders exactly
+  // as the 4:5 cover crop below always has.
+  const heroCrop = resolveDisplayCrop(item.primaryMedia)
+
   return (
     <>
       <main className="mx-auto max-w-[960px] px-4 pb-24 pt-6 text-textPrimary">
@@ -457,10 +462,10 @@ export default function LookDetailClient({
                 src={item.primaryMedia.url}
                 alt={item.caption || `Look by ${proDisplayName}`}
                 className="absolute inset-0 block h-full w-full object-cover"
-                focalPoint={resolveFocalPoint(
-                  item.primaryMedia.focalX,
-                  item.primaryMedia.focalY,
-                )}
+                focalPoint={heroCrop.focalPoint}
+                // One crop per look: the 4:5 hero shows the frame the pro
+                // published, not a window this surface derives on its own.
+                cropRect={heroCrop.cropRect}
                 intrinsic
               />
             )}
@@ -659,24 +664,27 @@ export default function LookDetailClient({
                 </div>
 
                 <div className="grid grid-cols-4 gap-2">
-                  {secondaryAssets.map((asset) => (
-                    <ClickableMedia
-                      key={asset.id}
-                      thumbSrc={asset.media.thumbUrl ?? asset.media.url}
-                      fullSrc={asset.media.url ?? asset.media.thumbUrl}
-                      mediaType={asset.media.mediaType === 'VIDEO' ? 'VIDEO' : 'IMAGE'}
-                      alt={asset.media.caption || 'Look asset'}
-                      caption={asset.media.caption}
-                      focalPoint={resolveFocalPoint(
-                        asset.media.focalX,
-                        asset.media.focalY,
-                      )}
-                      // 3:4 like every other browse tile, not a fixed 96px band —
-                      // a landscape strip over an upright capture was cropping ~60%
-                      // of each thumbnail away.
-                      className="aspect-3/4 w-full rounded-card border border-surfaceGlass/10 bg-bgPrimary"
-                    />
-                  ))}
+                  {secondaryAssets.map((asset) => {
+                    const display = resolveDisplayCrop(asset.media)
+                    return (
+                      <ClickableMedia
+                        key={asset.id}
+                        thumbSrc={asset.media.thumbUrl ?? asset.media.url}
+                        fullSrc={asset.media.url ?? asset.media.thumbUrl}
+                        mediaType={
+                          asset.media.mediaType === 'VIDEO' ? 'VIDEO' : 'IMAGE'
+                        }
+                        alt={asset.media.caption || 'Look asset'}
+                        caption={asset.media.caption}
+                        focalPoint={display.focalPoint}
+                        cropRect={display.cropRect}
+                        // 3:4 like every other browse tile, not a fixed 96px band —
+                        // a landscape strip over an upright capture was cropping ~60%
+                        // of each thumbnail away.
+                        className="aspect-3/4 w-full rounded-card border border-surfaceGlass/10 bg-bgPrimary"
+                      />
+                    )
+                  })}
                 </div>
               </div>
             ) : null}

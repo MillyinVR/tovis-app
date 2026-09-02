@@ -5,7 +5,7 @@
 // inherit the exact discovery/visibility/tenant gates the main feed uses) with a
 // tag filter; a banned or unknown tag resolves to null → 404.
 
-import { Prisma } from '@prisma/client'
+import { Prisma, type MediaType } from '@prisma/client'
 
 import { loadBlockedUserIds } from '@/lib/blocks/userBlocks'
 import { buildLooksFeedWhere } from '@/lib/looks/feed'
@@ -18,9 +18,21 @@ export type LookTagTile = {
   id: string
   caption: string | null
   thumbUrl: string | null
+  // Carried only so the tile can make the VIDEO exclusion the crop rect needs
+  // (`resolveDisplayCrop`); the tag grid renders images and clips the same way.
+  mediaType: MediaType
   // Normalized subject focal point (camera C6), [0,1] top-left. Null = center.
   focalX: number | null
   focalY: number | null
+  // Non-destructive publish CROP (capture chain item 2): the rect of the stored
+  // image this tile should display, [0,1] top-left, in the SAME space as the
+  // focal above. All four or all null; null = the full stored frame. 🔴 A
+  // surface honouring it must remap the focal into crop space — use
+  // `resolveDisplayCrop`, which does both.
+  cropX: number | null
+  cropY: number | null
+  cropW: number | null
+  cropH: number | null
 }
 
 export type LookTagPageData = {
@@ -39,8 +51,13 @@ const tileMediaSelect = Prisma.validator<Prisma.MediaAssetSelect>()({
   url: true,
   storageBucket: true,
   storagePath: true,
+  mediaType: true,
   focalX: true,
   focalY: true,
+  cropX: true,
+  cropY: true,
+  cropW: true,
+  cropH: true,
 })
 
 export async function loadLookTagPage(args: {
@@ -102,8 +119,13 @@ export async function loadLookTagPage(args: {
         id: row.id,
         caption: row.caption,
         thumbUrl: rendered.renderThumbUrl ?? rendered.renderUrl ?? null,
+        mediaType: media.mediaType,
         focalX: media.focalX ?? null,
         focalY: media.focalY ?? null,
+        cropX: media.cropX ?? null,
+        cropY: media.cropY ?? null,
+        cropW: media.cropW ?? null,
+        cropH: media.cropH ?? null,
       }
     }),
   )

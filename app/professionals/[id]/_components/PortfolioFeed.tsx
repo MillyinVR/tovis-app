@@ -5,7 +5,7 @@ import { useMemo, useState } from 'react'
 import Link from 'next/link'
 
 import RemoteImage from '@/app/_components/media/RemoteImage'
-import { resolveFocalPoint } from '@/lib/media/focalPoint'
+import { resolveDisplayCrop } from '@/lib/media/cropRect'
 import { COPY } from '@/lib/copy'
 import type { PublicPortfolioTileDto } from '@/lib/profiles/publicProfileMappers'
 
@@ -164,6 +164,10 @@ function tileHref(tile: PublicPortfolioTileDto): string {
 function PortfolioTile({ tile }: { tile: PublicPortfolioTileDto }) {
   const title = tile.caption ?? 'Open portfolio post'
   const { engagement } = tile
+  // One crop per look, honoured HERE too — not just in the feed. The rect is the
+  // frame the pro published; a tile that derives its own 3:4 window from the
+  // master would show a look one shape here and another in the feed.
+  const { cropRect, focalPoint } = resolveDisplayCrop(tile)
 
   return (
     <Link
@@ -176,7 +180,8 @@ function PortfolioTile({ tile }: { tile: PublicPortfolioTileDto }) {
         src={tile.src}
         alt={tile.caption ?? 'Portfolio'}
         className="brand-pp-tile-img transition duration-200 group-hover:scale-[1.02]"
-        focalPoint={resolveFocalPoint(tile.focalX, tile.focalY)}
+        focalPoint={focalPoint}
+        cropRect={cropRect}
         intrinsic
       />
 

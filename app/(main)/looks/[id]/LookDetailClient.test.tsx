@@ -485,6 +485,47 @@ describe('app/(main)/looks/[id]/LookDetailClient', () => {
     mockWriteText.mockReset()
   })
 
+  // ── One crop per look, applied EVERYWHERE (capture chain item 4) ────────
+  // The FEED honoured the stored rect from item 3; the 4:5 hero and the "more
+  // from this post" strip derived their own window from the master and ignored
+  // it, so a pro who re-framed saw it change in one place and nowhere else.
+  describe('the stored publish crop', () => {
+    /** The worked crop + focal, shared with cropRect/cropWindow and iOS. */
+    function itemWithCrop(): LooksDetailItemDto {
+      const item = makeDetailItem()
+      const crop = { cropX: 0.25, cropY: 0.1, cropW: 0.5, cropH: 0.4 }
+      return {
+        ...item,
+        primaryMedia: { ...item.primaryMedia, focalX: 0.6, focalY: 0.2, ...crop },
+        assets: item.assets.map((asset) => ({
+          ...asset,
+          media: { ...asset.media, focalX: 0.6, focalY: 0.2, ...crop },
+        })),
+      }
+    }
+
+    it('renders the 4:5 hero through the crop path, not a cover fit of the master', () => {
+      const { container } = render(<LookDetailClient initialItem={itemWithCrop()} />)
+
+      // `object-fill` is the crop path's signature: the source box already
+      // carries the source's aspect ratio, so anything else would re-fit it.
+      // `object-cover` here would mean the hero is still deriving its own window.
+      const images = Array.from(container.querySelectorAll('img'))
+      expect(images.length).toBeGreaterThan(0)
+      expect(images.every((img) => img.className.includes('object-fill'))).toBe(true)
+      // 🔴 And the focal must NOT also ride along as object-position: the frame
+      // spends it as geometry, so a second spend would move the window twice.
+      expect(images.every((img) => img.style.objectPosition === '')).toBe(true)
+    })
+
+    it('leaves an un-cropped look exactly as it was', () => {
+      const { container } = render(<LookDetailClient initialItem={makeDetailItem()} />)
+      const images = Array.from(container.querySelectorAll('img'))
+      expect(images.length).toBeGreaterThan(0)
+      expect(images.some((img) => img.className.includes('object-fill'))).toBe(false)
+    })
+  })
+
   it('passes canonical lookPostId into the like route and updates local like state', async () => {
     const { fetchMock } = installFetchMock({
       initialLiked: false,

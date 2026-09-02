@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import { resolveDisplayCrop } from '@/lib/media/cropRect'
 import { cn } from '@/lib/utils'
 import { formatCompactCount } from '@/lib/format/compactCount'
 
@@ -325,6 +326,7 @@ function LeadCard({
               src={shot.src}
               alt=""
               className="h-full w-full object-cover"
+              {...resolveDisplayCrop(shot)}
               intrinsic
             />
           </button>

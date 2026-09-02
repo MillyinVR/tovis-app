@@ -2,6 +2,7 @@
 'use client'
 
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import { resolveDisplayCrop } from '@/lib/media/cropRect'
 import { cn } from '@/lib/utils'
 import { formatCompactCount } from '@/lib/format/compactCount'
 
@@ -24,6 +25,9 @@ type Props = {
 export default function ProPortfolioTileCard({ tile, onOpen }: Props) {
   const held = tile.hold !== null
   const isPublic = tile.publishedAt !== null
+  // The frame the pro published — the same rect the feed, the grids and the
+  // heroes render, so a re-frame shows up here too.
+  const { cropRect, focalPoint } = resolveDisplayCrop(tile)
 
   return (
     <button
@@ -44,6 +48,8 @@ export default function ProPortfolioTileCard({ tile, onOpen }: Props) {
           // A held photo reads as not-yet-yours at a glance, before any copy.
           held ? 'opacity-55 grayscale' : '',
         )}
+        focalPoint={focalPoint}
+        cropRect={cropRect}
         intrinsic
       />
 
