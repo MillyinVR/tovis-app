@@ -136,6 +136,27 @@ describe('LookMedia — the feed frame', () => {
     expect(container.querySelectorAll('video')).toHaveLength(1)
   })
 
+  it('⚠️ a VIDEO ignores a stored crop, the same way iOS does', () => {
+    layOutContainersAs(SLIDE)
+    const { container } = render(
+      <LookMedia
+        item={item({ mediaType: 'VIDEO', cropX: 0.25, cropY: 0.1, cropW: 0.5, cropH: 0.4 })}
+        isActive
+      />,
+    )
+
+    // A clip's frame has to come from its poster and that is unbuilt on both
+    // platforms. Honouring the rect here alone would put one look in two shapes.
+    const video = container.querySelector('video') as HTMLElement
+    expect(video.className).toContain('object-contain')
+    expect(video.className).not.toContain('object-fill')
+
+    // …and the poster behind it is not cropped either.
+    const { backdrop } = images(container)
+    expect(backdrop?.className).toContain('object-cover')
+    expect(backdrop?.className).not.toContain('object-fill')
+  })
+
   it('a before/after pair still renders the reveal slider, unframed', () => {
     const { container } = render(
       <LookMedia

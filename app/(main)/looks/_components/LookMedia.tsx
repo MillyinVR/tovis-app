@@ -62,7 +62,15 @@ export default function LookMedia({ item, isActive }: { item: FeedItemWithRender
   // The pro's published frame — the window of the stored image this look is
   // meant to be seen through (capture-chain item 2). Null on every row written
   // so far, which means the full stored frame.
-  const cropRect = resolveCropRect(item.cropX, item.cropY, item.cropW, item.cropH)
+  //
+  // ⚠️ Images only, and iOS makes the SAME exclusion. A clip's frame has to come
+  // from its poster and that is unbuilt on both platforms (the capture chain's
+  // video note); honouring a rect here but not on the device would put one look
+  // in two shapes, which is the exact defect this whole track exists to fix.
+  const cropRect =
+    mediaType === 'IMAGE'
+      ? resolveCropRect(item.cropX, item.cropY, item.cropW, item.cropH)
+      : null
 
   // 🔴 The focal is measured on the UNCROPPED frame, so it has to be re-expressed
   // inside the crop before any cover fit uses it — otherwise the blurred
