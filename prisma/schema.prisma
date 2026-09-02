@@ -5174,7 +5174,7 @@ model Reminder {
 // =======================
 
 model MediaAsset {
-  id               String              @id @default(cuid())
+  id               String    @id @default(cuid())
   professionalId   String
   // Tenant of the owning pro (derived from professional.homeTenantId).
   // Expand phase: nullable + backfilled; a follow-up contract migration makes
@@ -5234,8 +5234,35 @@ model MediaAsset {
   cropY            Float?
   cropW            Float?
   cropH            Float?
-  createdAt        DateTime            @default(now())
-  intentEvents     ClientIntentEvent[]
+
+  // The UNDO WINDOW on a re-frame (capture chain item 4, Tori's decision
+  // 2026-09-01). The consent bound above is a one-way ratchet, which made a
+  // pro's own mis-drag permanent. For 24h after a crop — or until the look is
+  // viewed by anyone, whichever comes first — a re-frame is bounded by the frame
+  // that stood BEFORE the narrowing instead of by the narrowed rect, so the pro
+  // can put it back. After that the ratchet engages as before.
+  //
+  // 🔴 `cropUndoExpiresAt` is the flag; a null means no window. An OPEN window is
+  // never refreshed by a further crop write — if every save restarted the clock
+  // a pro could hold it open forever and the ratchet would never engage.
+  //
+  // ⚠️ `cropUndoViewBaseline` snapshots the asset's total LookPost.viewCount when
+  // the window opens; the window closes once the live total rises above it. That
+  // counter is SAMPLED and batch-applied (APPLY_LOOK_VIEWS), so it lags — the
+  // window can stay open a little too long, never too short. Safe in that
+  // direction: the widest it reaches is a frame already consented to, and the
+  // expiry caps it regardless.
+  //
+  // Rule: lib/media/cropUndoWindow.ts. Applied at the write by
+  // PUT /api/v1/pro/media/[id]/crop, never in the UI.
+  cropUndoBoundX       Float?
+  cropUndoBoundY       Float?
+  cropUndoBoundW       Float?
+  cropUndoBoundH       Float?
+  cropUndoExpiresAt    DateTime?
+  cropUndoViewBaseline Int?
+  createdAt            DateTime            @default(now())
+  intentEvents         ClientIntentEvent[]
 
   lookPostPrimaryFor LookPost[]      @relation("PrimaryLookMediaAsset")
   lookPostAssets     LookPostAsset[] @relation("LookPostAssetMedia")

@@ -19,12 +19,20 @@
 // with no rect yet is bounded by the full stored frame, so the FIRST re-frame
 // may go anywhere inside the photo the client already consented to.
 //
-// There is deliberately no "clear the crop" verb: clearing widens back to the
-// full frame, which is precisely the move this route refuses. Re-widening is a
-// re-consent flow, and it does not exist yet.
+// 🟢 THE UNDO WINDOW (item 4, Tori's decision 2026-09-01). The ratchet above
+// made a pro's own mis-drag permanent, so for 24h after a crop — or until the
+// look is viewed by anyone, whichever comes first — the bound is the frame that
+// stood BEFORE the narrowing rather than the narrowed rect. That lets a pro put
+// their own crop back without ever reaching past a frame already consented to.
+// The rule is lib/media/cropUndoWindow.ts; it is applied HERE, at the write.
 //
-// Nothing calls this route yet — item 2 ships dark. See
-// docs/design/media-crop-rect.md.
+// There is still deliberately no "clear the crop" verb. Clearing means "the
+// full frame" unconditionally, which outside the window is exactly the move
+// this route refuses — and inside it, sending the pre-narrowing rect back says
+// the same thing without needing a verb that means different things on
+// different days.
+//
+// See docs/design/media-crop-rect.md.
 import { MediaType } from '@prisma/client'
 
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
@@ -32,9 +40,12 @@ import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeCon
 import {
   cropContains,
   cropRectColumns,
-  FULL_FRAME_CROP,
   resolveCropRect,
 } from '@/lib/media/cropRect'
+import {
+  cropConsentBound,
+  cropUndoWindowColumnsForWrite,
+} from '@/lib/media/cropUndoWindow'
 import { prisma } from '@/lib/prisma'
 import { safeError } from '@/lib/security/logging'
 
@@ -51,6 +62,18 @@ const CROP_SELECT = {
   cropY: true,
   cropW: true,
   cropH: true,
+  cropUndoBoundX: true,
+  cropUndoBoundY: true,
+  cropUndoBoundW: true,
+  cropUndoBoundH: true,
+  cropUndoExpiresAt: true,
+  cropUndoViewBaseline: true,
+  // Every look this asset appears in, primary or not — "viewed by anyone" is a
+  // question about the asset, not about one post. The totals are summed rather
+  // than maxed: a second look picking up its first view has to close the window
+  // even while a busier one is unchanged.
+  lookPostPrimaryFor: { select: { viewCount: true } },
+  lookPostAssets: { select: { lookPost: { select: { viewCount: true } } } },
 } as const
 
 // PUT — replace the crop rect. The whole rect, always: a partial rect is not a
@@ -100,9 +123,22 @@ export async function PUT(req: Request, ctx: RouteContext) {
       return jsonFail(400, 'Only photos can be re-framed.')
     }
 
-    if (!cropContains(consentBoundOf(existing), next)) {
+    const now = new Date()
+    const viewCountTotal = totalViewCount(existing)
+    const bound = cropConsentBound(existing, existing, { now, viewCountTotal })
+
+    if (!cropContains(bound, next)) {
       return jsonFail(403, WIDENED_MESSAGE)
     }
+
+    // Opened around the bound we just enforced against, so the pro can return to
+    // exactly the frame they were allowed a moment ago. `null` means a window is
+    // already open and must be left alone — refreshing it would let a pro hold
+    // the bound open forever by re-cropping every 23 hours.
+    const undoColumns = cropUndoWindowColumnsForWrite(bound, existing, {
+      now,
+      viewCountTotal,
+    })
 
     // Re-check the bound at EXECUTION, not just at validation: two re-frames in
     // flight at once would both pass the check above against the same stored
@@ -121,7 +157,7 @@ export async function PUT(req: Request, ctx: RouteContext) {
         cropW: existing.cropW,
         cropH: existing.cropH,
       },
-      data: columns,
+      data: { ...columns, ...(undoColumns ?? {}) },
     })
 
     if (written.count === 0) {
@@ -141,18 +177,22 @@ export async function PUT(req: Request, ctx: RouteContext) {
 }
 
 /**
- * The frame this asset was published in — the bound a re-frame must stay
- * inside. A stored rect is that frame; no stored rect means the whole photo,
- * which is what the client consented to when it was published.
+ * Total views across every look this asset appears in — the signal the undo
+ * window closes on.
+ *
+ * ⚠️ `LookPost.viewCount` is sampled and batch-applied (APPLY_LOOK_VIEWS), never
+ * written on the view hot path, so this lags. It errs toward leaving the window
+ * open slightly too long, which is the safe direction: the widest the window can
+ * reach is a frame already consented to, and the 24h expiry caps it anyway.
  */
-function consentBoundOf(asset: {
-  cropX: number | null
-  cropY: number | null
-  cropW: number | null
-  cropH: number | null
-}) {
-  return (
-    resolveCropRect(asset.cropX, asset.cropY, asset.cropW, asset.cropH) ??
-    FULL_FRAME_CROP
+function totalViewCount(asset: {
+  lookPostPrimaryFor: { viewCount: number }[]
+  lookPostAssets: { lookPost: { viewCount: number } }[]
+}): number {
+  const primary = asset.lookPostPrimaryFor.reduce((n, p) => n + p.viewCount, 0)
+  const secondary = asset.lookPostAssets.reduce(
+    (n, a) => n + a.lookPost.viewCount,
+    0,
   )
+  return primary + secondary
 }
