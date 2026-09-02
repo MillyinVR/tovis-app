@@ -425,4 +425,32 @@ describe('CropEditor — the frame takes the PHOTO\'s shape', () => {
     render(<Harness initial={{ crop: null, bound: FULL_FRAME_CROP, sourceAspect: 3 / 4 }} />)
     expect(screen.getByTestId('crop-frame').style.aspectRatio).toBe('0.75')
   })
+
+  describe('the feed preview', () => {
+    it('previews the slide beside the crop, at the slide\'s own shape', () => {
+      render(<Harness initial={{ crop: null, bound: FULL_FRAME_CROP, sourceAspect: 3 / 4 }} />)
+
+      // The crop frame takes the PHOTO's shape; the preview takes the SLIDE's.
+      // Being different is the whole point — the pro is choosing between them.
+      expect(screen.getByTestId('crop-frame').style.aspectRatio).toBe('0.75')
+      expect(screen.getByTestId('crop-feed-preview').style.aspectRatio).toBe(
+        `${9 / 19.5}`,
+      )
+    })
+
+    it('🔴 never gives the preview a full-width box', () => {
+      // Regression guard for a defect found by RENDERING, not by a test: a
+      // `w-full` preview is a 9:19.5 box, so on a 393px phone it came out
+      // 361x782 — taller than the crop frame it annotates, pushing the presets
+      // and Save below the fold of the sheet this lives in. jsdom has no
+      // layout, so the class is what can be pinned; the measurement is in the
+      // PR. A fixed width is the invariant.
+      render(<Harness initial={{ crop: null, bound: FULL_FRAME_CROP, sourceAspect: 3 / 4 }} />)
+
+      const wrapper = screen.getByTestId('crop-feed-preview').parentElement
+        ?.parentElement
+      expect(wrapper?.className).toContain('w-[124px]')
+      expect(wrapper?.className).not.toContain('w-full')
+    })
+  })
 })
