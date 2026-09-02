@@ -117,6 +117,7 @@ async function main() {
 
     let retracted = 0
     const orphans: Array<{ mediaAssetId: string; bucket: string; path: string; reason: string }> = []
+    const purgeFailures: Array<{ mediaAssetId: string; bucket: string; path: string; reason: string }> = []
 
     for (const row of candidates) {
       process.stdout.write(`  retracting ${row.id} … `)
@@ -134,6 +135,10 @@ async function main() {
       for (const orphan of outcome.orphanedPublicObjects) {
         orphans.push({ mediaAssetId: row.id, ...orphan })
       }
+
+      for (const failure of outcome.cdnPurgeFailures) {
+        purgeFailures.push({ mediaAssetId: row.id, ...failure })
+      }
     }
 
     console.log('')
@@ -148,6 +153,20 @@ async function main() {
         console.log(`  ${orphan.bucket}/${orphan.path} — ${orphan.reason}`)
       }
       process.exitCode = 1
+    }
+
+    if (purgeFailures.length > 0) {
+      console.log('')
+      console.log(
+        '🟡 The bytes are gone, but the CDN copy of these objects was not purged.',
+      )
+      console.log(
+        '   The edge invalidates itself within about a minute, so this is a delay,',
+      )
+      console.log('   not a permanent exposure — but verify before reporting done:')
+      for (const failure of purgeFailures) {
+        console.log(`  ${failure.bucket}/${failure.path} — ${failure.reason}`)
+      }
     }
   } finally {
     await prisma.$disconnect()

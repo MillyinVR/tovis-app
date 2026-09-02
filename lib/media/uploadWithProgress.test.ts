@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { MEDIA_UPLOAD_CACHE_CONTROL } from '@/lib/media/cacheControl'
 import { uploadWithProgress } from '@/lib/media/uploadWithProgress'
 
 // A minimal fake XMLHttpRequest that records what the uploader sent and lets
@@ -102,6 +103,22 @@ describe('uploadWithProgress', () => {
     expect(xhr.headers['Authorization']).toBeUndefined()
 
     expect(xhr.headers['x-upsert']).toBe('false')
+
+    xhr.emitLoad(200)
+    await expect(promise).resolves.toEqual({ error: null })
+  })
+
+  it('states the stored object cache-control instead of inheriting a default', async () => {
+    const promise = uploadWithProgress(args())
+    const xhr = FakeXHR.instances[0]
+    if (!xhr) throw new Error('expected an XHR to be created')
+
+    // 🔴 Not decoration. This header is what gets STORED on the object.
+    // Omitting it hands the choice to storage-api's default, which in
+    // production stored a malformed `max-age=undefined` until June 2026 and
+    // `no-cache` after — neither of which this repo ever asked for.
+    // See lib/media/cacheControl.ts.
+    expect(xhr.headers['cache-control']).toBe(MEDIA_UPLOAD_CACHE_CONTROL)
 
     xhr.emitLoad(200)
     await expect(promise).resolves.toEqual({ error: null })

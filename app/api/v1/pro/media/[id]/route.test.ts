@@ -713,6 +713,7 @@ describe('app/api/v1/pro/media/[id]/route.ts', () => {
         thumbBucket: null,
         thumbPath: null,
         orphanedPublicObjects: [],
+        cdnPurgeFailures: [],
       })
 
       const res = await PATCH(

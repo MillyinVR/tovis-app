@@ -4,6 +4,23 @@
 // withdrawn from the world-readable bucket, not just the label. The public URL
 // stops resolving.
 //
+// ── The residency window, measured ──────────────────────────────────────────
+//
+// Deleting at the origin is not the end of it: `media-public` is served through
+// a CDN, and the edge keeps its copy until the change propagates. Measured
+// against production 2026-09-02 (twice, each run carrying a still-live control
+// object so a 400 could not be an artefact of the request):
+//
+//     origin delete alone    still 200 HIT at t+50s, gone by t+60s
+//     origin delete + purge  gone at t+3s
+//
+// So this path deletes AND purges, and the honest claim is: after a successful
+// retraction the URL stops resolving worldwide within seconds; if the purge
+// fails (reported in `cdnPurgeFailures`, never thrown) it falls back to the
+// automatic invalidation and the window is under a minute. A browser that
+// already holds the bytes is bounded separately, by the `cache-control` written
+// at upload — see lib/media/cacheControl.ts.
+//
 // 🔴 Why this exists. `media-public` is served by URL with no authorization, so
 // un-featuring a photo while its object stays there means anyone who ever saw
 // the URL keeps the full-resolution file forever. Clearing the flags takes the
@@ -48,7 +65,7 @@
 
 import { MediaVisibility, type Prisma } from '@prisma/client'
 
-import { extensionForContentType } from '@/lib/media/contentType'
+import { purgeCdnObject } from '@/lib/media/cdnCache'
 import { copyStorageObject, StorageCopyError } from '@/lib/media/copyToPublicBucket'
 import {
   isShownOnPublicSurfaces,
@@ -60,6 +77,18 @@ import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
 
 /** A public object that could not be deleted after its row was re-pointed. */
 export type OrphanedPublicObject = {
+  bucket: string
+  path: string
+  reason: string
+}
+
+/**
+ * A public object that WAS deleted at the origin but whose CDN copy could not be
+ * purged. Strictly less severe than an orphan — the bytes are gone and the edge
+ * invalidates itself within about a minute — but it is the difference between a
+ * three-second window and a sixty-second one, so it is reported, not swallowed.
+ */
+export type CdnPurgeFailure = {
   bucket: string
   path: string
   reason: string
@@ -79,6 +108,12 @@ export type RetractionOutcome =
        * surface this, never treat it as success.
        */
       orphanedPublicObjects: OrphanedPublicObject[]
+      /**
+       * Empty on a clean retraction. Non-empty means the bytes ARE gone but the
+       * edge was not purged, so the URL may keep resolving for up to a minute
+       * while the automatic invalidation propagates.
+       */
+      cdnPurgeFailures: CdnPurgeFailure[]
     }
   /** Nothing to do — the bytes were never in the public bucket. */
   | { status: 'ALREADY_PRIVATE' }
@@ -190,18 +225,40 @@ async function copyAndVerify(args: {
   return { storageBucket: copied.storageBucket, storagePath: copied.storagePath }
 }
 
-async function deletePublicObject(
+/**
+ * Removes a public object at the origin and then purges it from the CDN edge.
+ *
+ * The purge only runs after the delete has SUCCEEDED. Purging an object that is
+ * still at the origin would be worse than useless: the next request repopulates
+ * the edge straight from the bytes we failed to remove, and the result would
+ * read as a clean retraction.
+ */
+async function deleteAndPurgePublicObject(
   bucket: string,
   path: string,
-): Promise<OrphanedPublicObject | null> {
+): Promise<{
+  orphan: OrphanedPublicObject | null
+  purgeFailure: CdnPurgeFailure | null
+}> {
   const admin = getSupabaseAdmin()
 
   try {
     const { error } = await admin.storage.from(bucket).remove([path])
-    if (error) return { bucket, path, reason: error.message }
-    return null
+    if (error) {
+      return { orphan: { bucket, path, reason: error.message }, purgeFailure: null }
+    }
   } catch (e: unknown) {
-    return { bucket, path, reason: String(safeError(e)) }
+    return {
+      orphan: { bucket, path, reason: String(safeError(e)) },
+      purgeFailure: null,
+    }
+  }
+
+  const purge = await purgeCdnObject(bucket, path)
+
+  return {
+    orphan: null,
+    purgeFailure: purge.ok ? null : { bucket, path, reason: purge.reason },
   }
 }
 
@@ -280,25 +337,35 @@ export async function retractMediaAssetToPrivate(
   // is reported rather than thrown — throwing would suggest the retraction did
   // not happen, and a caller retrying the whole thing would copy again.
   const orphanedPublicObjects: OrphanedPublicObject[] = []
+  const cdnPurgeFailures: CdnPurgeFailure[] = []
 
-  const mainOrphan = await deletePublicObject(
+  const main = await deleteAndPurgePublicObject(
     media.storageBucket,
     media.storagePath,
   )
-  if (mainOrphan) orphanedPublicObjects.push(mainOrphan)
+  if (main.orphan) orphanedPublicObjects.push(main.orphan)
+  if (main.purgeFailure) cdnPurgeFailures.push(main.purgeFailure)
 
   if (thumbIsPublic) {
-    const thumbOrphan = await deletePublicObject(
+    const thumb = await deleteAndPurgePublicObject(
       media.thumbBucket as string,
       media.thumbPath as string,
     )
-    if (thumbOrphan) orphanedPublicObjects.push(thumbOrphan)
+    if (thumb.orphan) orphanedPublicObjects.push(thumb.orphan)
+    if (thumb.purgeFailure) cdnPurgeFailures.push(thumb.purgeFailure)
   }
 
   if (orphanedPublicObjects.length > 0) {
     console.error('retractMediaAssetToPrivate: public object still exposed', {
       mediaAssetId: media.id,
       orphanedPublicObjects,
+    })
+  }
+
+  if (cdnPurgeFailures.length > 0) {
+    console.error('retractMediaAssetToPrivate: CDN copy not purged', {
+      mediaAssetId: media.id,
+      cdnPurgeFailures,
     })
   }
 
@@ -309,6 +376,7 @@ export async function retractMediaAssetToPrivate(
     thumbBucket: movedThumb?.storageBucket ?? media.thumbBucket,
     thumbPath: movedThumb?.storagePath ?? media.thumbPath,
     orphanedPublicObjects,
+    cdnPurgeFailures,
   }
 }
 

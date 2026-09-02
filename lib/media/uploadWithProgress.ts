@@ -3,6 +3,13 @@
 // XHR-based upload to a Supabase signed URL with real progress events.
 // Replaces the Supabase client SDK's uploadToSignedUrl which uses fetch
 // (no progress support in browsers).
+//
+// 🔴 Replacing the SDK also dropped the `cache-control` header it sends, which
+// left the value STORED on the object up to whatever storage-api defaulted to
+// that month — see lib/media/cacheControl.ts for the three different values
+// that produced in production. Every upload from this file now states it.
+
+import { MEDIA_UPLOAD_CACHE_CONTROL } from '@/lib/media/cacheControl'
 
 export type UploadProgressArgs = {
   bucket: string
@@ -110,6 +117,9 @@ export function uploadWithProgress(
     xhr.open('PUT', url.toString())
     xhr.setRequestHeader('apikey', supabaseKey)
     xhr.setRequestHeader('Content-Type', args.contentType)
+    // Stored on the object and echoed on every later read. Without it the
+    // value is storage-api's default, which has already changed once.
+    xhr.setRequestHeader('cache-control', MEDIA_UPLOAD_CACHE_CONTROL)
     xhr.setRequestHeader('x-upsert', args.upsert ? 'true' : 'false')
     xhr.send(args.file)
   })

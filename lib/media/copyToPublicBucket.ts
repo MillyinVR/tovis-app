@@ -19,6 +19,7 @@
 // taken outside a session into a booking's private media or a public look) uses
 // the generic one — same download+upload, different namespace.
 
+import { MEDIA_UPLOAD_CACHE_CONTROL } from '@/lib/media/cacheControl'
 import { extensionForContentType } from '@/lib/media/contentType'
 import { BUCKETS } from '@/lib/storageBuckets'
 import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
@@ -73,7 +74,15 @@ export async function copyStorageObject(args: {
 
   const { error: uploadError } = await admin.storage
     .from(args.destBucket)
-    .upload(destPath, blob, { contentType, upsert: false })
+    // `cacheControl` is stated rather than left to the SDK default (3600),
+    // which would have given a copied object an hour of browser residency
+    // that a directly-uploaded one does not have — including copies made BY
+    // a retraction. See lib/media/cacheControl.ts.
+    .upload(destPath, blob, {
+      contentType,
+      upsert: false,
+      cacheControl: MEDIA_UPLOAD_CACHE_CONTROL,
+    })
 
   if (uploadError) {
     throw new StorageCopyError(
