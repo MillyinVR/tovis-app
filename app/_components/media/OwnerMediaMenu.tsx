@@ -7,9 +7,12 @@ import { useRouter } from 'next/navigation'
 import { UI_SIZES } from '@/app/(main)/ui/layoutConstants'
 import { zClass } from '@/lib/zIndex'
 import { MediaVisibility } from '@/lib/prismaEnums'
+import { FULL_FRAME_CROP, type CropRect } from '@/lib/media/cropRect'
 import { cn } from '@/lib/utils'
 
+import CropEditor from './CropEditor'
 import ProMediaEditFields, { Field } from './ProMediaEditFields'
+import { useProMediaCrop } from './useProMediaCrop'
 import {
   pickErrorMessage,
   safeJsonObject,
@@ -50,6 +53,24 @@ type Props = {
    * Photos only, like the cover.
    */
   isSignature?: boolean
+  /**
+   * The re-framing controls (capture chain item 4). Omitted for videos and for
+   * anything the caller cannot supply a render URL for, in which case the crop
+   * section is simply not offered — never rendered broken.
+   *
+   * `bound` is the frame a re-frame may not leave, computed SERVER-side from the
+   * row (including the undo window) so the handles stop where the save would be
+   * refused. It is a courtesy: PUT /api/v1/pro/media/[id]/crop re-reads and
+   * re-checks it, and a 403 is rendered rather than assumed impossible.
+   */
+  reframe?: {
+    src: string
+    crop: CropRect | null
+    bound: CropRect
+    subject?: { x: number; y: number; width: number; height: number } | null
+    /** Copy explaining the undo window while one is open, or null. */
+    undoNotice?: string | null
+  }
 }
 
 /**
@@ -82,6 +103,7 @@ export default function OwnerMediaMenu({
   isVideo = false,
   isCover = false,
   isSignature = false,
+  reframe,
 }: Props) {
   const router = useRouter()
 
@@ -115,6 +137,25 @@ export default function OwnerMediaMenu({
     serviceOptions,
     isVideo,
     active: openEdit,
+  })
+
+  // 🔴 A SEPARATE hook and a separate request from `edit`. The consent bound has
+  // to compare the incoming rect against the rect currently stored, so the crop
+  // write needs a read-then-write it can serialize; folding a re-frame into the
+  // caption PATCH would let the two interleave. Same reason the route is
+  // separate. Hooks cannot be conditional, so it is always created and the
+  // section is what is conditional.
+  const crop = useProMediaCrop({
+    mediaId,
+    initial: {
+      crop: reframe?.crop ?? null,
+      bound: reframe?.bound ?? FULL_FRAME_CROP,
+      // Replaced by the real measurement the moment the image loads —
+      // MediaAsset stores no pixel dimensions.
+      sourceAspect: 3 / 4,
+      subject: reframe?.subject ?? null,
+    },
+    onSaved: () => router.refresh(),
   })
 
   const wrapRef = useRef<HTMLDivElement | null>(null)
@@ -502,6 +543,25 @@ export default function OwnerMediaMenu({
                   </div>
 
                   <ProMediaEditFields edit={edit} />
+
+                  {reframe && !isVideo ? (
+                    <div className="grid gap-2">
+                      <div className="my-1 h-px bg-surfaceGlass/8" />
+                      <div className="text-[12px] font-black text-textPrimary">
+                        Framing
+                      </div>
+                      <p className="text-[11px] leading-snug text-textSecondary">
+                        Choose the part of the photo that gets shown. The original
+                        file is never changed.
+                      </p>
+                      <CropEditor
+                        crop={crop}
+                        src={reframe.src}
+                        alt={initial.caption ?? 'Your photo'}
+                        undoNotice={reframe.undoNotice ?? null}
+                      />
+                    </div>
+                  ) : null}
 
                   {actionError ? (
                     <div className="rounded-[14px] border border-toneDanger/30 bg-toneDanger/10 p-3 text-[12px] font-semibold text-toneDanger">

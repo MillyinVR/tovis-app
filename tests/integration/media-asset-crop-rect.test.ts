@@ -244,13 +244,20 @@ describe('MediaAsset crop rect columns', () => {
     expect(rls).toEqual([{ relrowsecurity: true }])
   })
 
-  it('created all four columns as nullable double precision', async () => {
+  // ⚠️ Named explicitly rather than `LIKE 'crop%'`. The undo window (item 4)
+  // added cropUndoBoundX/Y/W/H, cropUndoExpiresAt and cropUndoViewBaseline, which
+  // a prefix match swept in — turning a precise claim about the RECT into a list
+  // that has to be edited every time any crop-ish column is added, and failing
+  // for a reason that has nothing to do with what this test is about. Those
+  // columns have their own file.
+  it('created all four RECT columns as nullable double precision', async () => {
     const columns = await db.$queryRaw<
       Array<{ column_name: string; data_type: string; is_nullable: string }>
     >(Prisma.sql`
       SELECT column_name, data_type, is_nullable
       FROM information_schema.columns
-      WHERE table_name = 'MediaAsset' AND column_name LIKE 'crop%'
+      WHERE table_name = 'MediaAsset'
+        AND column_name IN ('cropX', 'cropY', 'cropW', 'cropH')
       ORDER BY column_name
     `)
 
