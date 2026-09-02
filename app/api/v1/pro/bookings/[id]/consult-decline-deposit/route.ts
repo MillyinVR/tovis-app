@@ -71,8 +71,12 @@ export async function POST(request: Request, context: RouteContext) {
     })
 
     if (result.ok) {
+      // `settlement` is the money's own answer and the client renders from it.
+      // `choice` alone cannot carry this: a REFUND that moved nothing (already
+      // returned, or frozen under a dispute) is still a successful request.
       return jsonOk({
         choice: result.choice,
+        settlement: result.settlement,
         refundedCents: result.refundedCents,
       })
     }

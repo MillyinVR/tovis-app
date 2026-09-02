@@ -243,6 +243,15 @@ export const COPY = {
     working: 'Saving…',
     keptRecorded: 'Recorded: you kept her deposit of',
     refundedRecorded: 'Recorded: you refunded her deposit of',
+    // A REFUND that moved no money. Says what is true without alarming a pro who
+    // did nothing wrong: the decision stands, and there is nothing for her to
+    // retry — the money is either already back with the client or on its way
+    // back through the dispute.
+    refundedNothingMoved:
+      'Recorded: you chose to refund her deposit. No money moved — it had already been returned, or the payment is under dispute and the bank is handling it. Nothing to do.',
+    // A refund that returned only part of the up-front charge.
+    refundedPartial: 'Recorded: you refunded',
+    refundedPartialOf: 'of her deposit of',
   },
 
   bookings: {

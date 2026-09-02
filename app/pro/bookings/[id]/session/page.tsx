@@ -822,6 +822,7 @@ function ConsultationView({
                     bookingId={bookingId}
                     depositChargeCents={declineDeposit.depositChargeCents}
                     decidedChoice={declineDeposit.decidedChoice}
+                    refundedCents={declineDeposit.refundedCents}
                   />
                 ) : null}
               </SessionCard>

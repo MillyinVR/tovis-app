@@ -39,7 +39,10 @@
 //   - The deposit refund runs AFTER the cancel transaction commits, because
 //     Stripe I/O cannot live inside it — the same two-phase shape every other
 //     cancel path uses. `applyDiscoveryDepositCancelRefund` is best-effort and
-//     never throws, and the refund-retry sweep picks up a failure.
+//     never throws, and the refund-retry sweep picks up a failure — which is
+//     true because the cancel stamps `cancelledBySystem`. Before that stamp
+//     existed the sweep read this cancel's null role as unknown provenance and
+//     refused it, so this comment described a retry that could never happen.
 //   - Kill switch PENDING_PROXIMITY_EXPIRY_ENABLED (default on). When off, the
 //     sweep only observes: it logs the candidate count and releases nothing.
 //   - Per-run cap MAX_EXPIRIES_PER_RUN, truncation logged.
@@ -199,7 +202,8 @@ export async function expireProximatePendingBookings(opts?: {
       // in full: the client did everything asked of her and did not get an
       // appointment, so she keeps nothing of the cost. Best-effort by
       // construction — this helper never throws, and a FAILED refund is picked
-      // up by the refund-retry sweep.
+      // up by the refund-retry sweep (the cancel above stamps
+      // `cancelledBySystem`, which is what makes that pickup possible).
       const refund = await applyDiscoveryDepositCancelRefund({
         bookingId: booking.id,
         actorKind: 'system',

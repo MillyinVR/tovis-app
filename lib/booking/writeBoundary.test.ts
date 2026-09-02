@@ -18,8 +18,10 @@ const mocks = vi.hoisted(() => ({
 
   txBookingFindUnique: vi.fn(),
   txBookingUpdate: vi.fn(),
+  txQueryRaw: vi.fn(),
 
   upsertClientNotification: vi.fn(),
+  cancelScheduledClientNotificationsForBooking: vi.fn(),
   cancelBookingAppointmentReminders: vi.fn(),
   syncBookingAppointmentReminders: vi.fn(),
 
@@ -55,6 +57,8 @@ vi.mock('@/lib/booking/scheduleLock', () => ({
 
 vi.mock('@/lib/notifications/clientNotifications', () => ({
   upsertClientNotification: mocks.upsertClientNotification,
+  cancelScheduledClientNotificationsForBooking:
+    mocks.cancelScheduledClientNotificationsForBooking,
 }))
 
 vi.mock('@/lib/notifications/appointmentReminders', () => ({
@@ -67,9 +71,14 @@ vi.mock('@/lib/notifications/proNotifications', () => ({
   createProNotification: mocks.createProNotification,
 }))
 
-import { cancelBooking, releaseHold } from './writeBoundary'
+import {
+  cancelBooking,
+  expirePendingBookingBySystem,
+  releaseHold,
+} from './writeBoundary'
 
 const tx = {
+  $queryRaw: mocks.txQueryRaw,
   booking: {
     findUnique: mocks.txBookingFindUnique,
     update: mocks.txBookingUpdate,
@@ -118,12 +127,67 @@ describe('lib/booking/writeBoundary', () => {
     )
 
     mocks.createProNotification.mockResolvedValue(undefined)
+    mocks.cancelScheduledClientNotificationsForBooking.mockResolvedValue(undefined)
     mocks.cancelBookingAppointmentReminders.mockResolvedValue(undefined)
     mocks.syncBookingAppointmentReminders.mockResolvedValue(undefined)
   })
 
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  // 🔴 The stamp the whole system-cancel retry path rests on. A sweep's cancel
+  // carries NO role by design, and `cancelledByRole = null` also means
+  // "cancelled before the provenance columns existed" — so without this boolean
+  // the refund-retry sweep cannot tell a re-drivable expiry from an unknowable
+  // historical cancel, and refuses both. If this write ever stops happening the
+  // fix is inert while still looking present.
+  it('stamps cancelledBySystem on a SYSTEM expiry cancel', async () => {
+    mocks.prismaBookingFindUnique.mockResolvedValueOnce({
+      professionalId: 'pro_1',
+    })
+    mocks.txQueryRaw.mockResolvedValueOnce([
+      { status: BookingStatus.PENDING, startedAt: null },
+    ])
+    mocks.txBookingFindUnique.mockResolvedValueOnce({
+      id: 'booking_1',
+      status: BookingStatus.PENDING,
+      clientId: 'client_1',
+      professionalId: 'pro_1',
+      startedAt: null,
+      finishedAt: null,
+      sessionStep: SessionStep.NONE,
+      scheduledFor: null,
+      locationTimeZone: null,
+      service: { name: 'Balayage' },
+      client: { firstName: 'Jordan', lastName: 'Lee' },
+      professional: {
+        timeZone: null,
+        businessName: 'Glow Studio',
+        firstName: null,
+        lastName: null,
+        handle: null,
+        nameDisplay: null,
+      },
+    })
+    mocks.txBookingUpdate.mockResolvedValueOnce({
+      id: 'booking_1',
+      status: BookingStatus.CANCELLED,
+      sessionStep: SessionStep.NONE,
+    })
+
+    await expirePendingBookingBySystem({ bookingId: 'booking_1' })
+
+    expect(mocks.txBookingUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: BookingStatus.CANCELLED,
+          // No human role — and that is exactly why the boolean is needed.
+          cancelledByRole: null,
+          cancelledBySystem: true,
+        }),
+      }),
+    )
   })
 
   it('cancels a client-owned booking through the locked client-owned booking transaction', async () => {
@@ -184,6 +248,10 @@ describe('lib/booking/writeBoundary', () => {
         // M1: cancel provenance for the late-capture refund path.
         cancelledAt: expect.any(Date),
         cancelledByRole: Role.CLIENT,
+        // A human cancelled this one, so the system stamp stays false — the
+        // retry paths use it to tell a sweep's roleless cancel apart from a
+        // pre-provenance one.
+        cancelledBySystem: false,
       },
       select: {
         id: true,

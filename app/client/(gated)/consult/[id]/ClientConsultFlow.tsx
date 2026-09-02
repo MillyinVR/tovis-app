@@ -201,7 +201,11 @@ export default function ClientConsultFlow({ consultId }: { consultId: string }) 
 
   const loadStage = useCallback(
     async (stage: ConsultSessionDTO['status']) => {
-      if (stage === 'CONSENT_REQUIRED') {
+      // CONSENT_REVOKED loads the agreements too: accepting one un-revokes the
+      // session server-side, so this is the screen that leads back in. Without
+      // it the revoked branch below renders its explanation next to no Accept
+      // button, which looks like a dead end for a second time.
+      if (stage === 'CONSENT_REQUIRED' || stage === 'CONSENT_REVOKED') {
         const state = await api<{ agreementState: ConsultAgreementStateDTO }>(
           `${base}/agreements`,
         )
@@ -559,7 +563,13 @@ export default function ClientConsultFlow({ consultId }: { consultId: string }) 
     )
   }
 
-  if (status === 'CANCELLED' || status === 'CONSENT_REVOKED') {
+  // CANCELLED is genuinely terminal — purged mid-analysis, with no transition
+  // back. CONSENT_REVOKED is NOT: accepting a fresh agreement moves it back to
+  // CONSENT_REQUIRED (lib/consult/writeBoundary.ts), so it falls through to the
+  // consent step below. Collapsing the two here is what made revoking consent a
+  // permanent dead end — the way back existed on the server and no screen ever
+  // offered it.
+  if (status === 'CANCELLED') {
     return (
       <div className={CARD}>
         <p className="text-sm text-textPrimary">
@@ -573,7 +583,17 @@ export default function ClientConsultFlow({ consultId }: { consultId: string }) 
     <div className="grid gap-6">
       <ErrorNote message={error} />
 
-      {status === 'CONSENT_REQUIRED' && agreements ? (
+      {status === 'CONSENT_REVOKED' ? (
+        <div className={CARD}>
+          <p className="text-sm text-textPrimary">
+            You revoked consent for this consult, so it stopped where it was.
+            Accepting below starts it again.
+          </p>
+        </div>
+      ) : null}
+
+      {(status === 'CONSENT_REQUIRED' || status === 'CONSENT_REVOKED') &&
+      agreements ? (
         <section className="grid gap-4">
           <StageHeading eyebrow="Step 1 of 4" title="Before we start" />
           {agreements.requirements.map((requirement) => {

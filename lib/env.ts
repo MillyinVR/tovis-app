@@ -58,3 +58,53 @@ export function isDeployedRuntime(): boolean {
   const vercelEnv = readOptionalEnv('VERCEL_ENV')
   return vercelEnv === 'production' || vercelEnv === 'preview'
 }
+
+/**
+ * True when a DEFAULT-ON kill switch is still armed.
+ *
+ * The mirror of `envFlagEnabled`, for the other kind of flag. An opt-IN feature
+ * flag is off until someone affirms it, and a typo there is harmless — it leaves
+ * a dormant feature dormant. A default-ON switch guards an action that is
+ * ALREADY running, and is reached for in an emergency to stop it, so the
+ * asymmetry runs the other way: over-disabling pauses a sweep until someone
+ * notices, under-disabling keeps cancelling bookings and moving money.
+ *
+ * So: unset or blank keeps the default (ON, the deployed behaviour), and any
+ * value that is SET must be an explicit affirmative to keep it on. Everything
+ * else turns it off — `false`, `0`, `no`, `off`, and equally `disabled`, `n`,
+ * `nope`, `stop`, or a fat-fingered `flase`. The switch fails toward safety in
+ * the direction an operator was reaching.
+ *
+ * ⚠️ This is why it cannot be `envFlagEnabled(name) || unset`: the affirmative
+ * list is deliberately narrow, so `=on` reads as "not an affirmative" and STOPS
+ * the sweep. That is the safe way to be wrong; do not widen the list to make a
+ * spelling work.
+ *
+ * Same reasoning as `claimMergeDisabled` (lib/clients/claimMergeFlag.ts), which
+ * is the DISABLE_-named form of the same idea; this is the ENABLED-named form.
+ * Single source of truth for the parse — `pendingProximityExpiryEnabled`,
+ * `depositAutoReleaseEnabled` and `depositSuccessRecoveryEnabled` all delegate
+ * here rather than keeping the local copies that read the other way round.
+ */
+export function envKillSwitchArmed(name: string): boolean {
+  if (readOptionalEnv(name) === null) return true
+  return envFlagEnabled(name)
+}
+
+/**
+ * A positive whole number from the environment, or the fallback.
+ *
+ * Rejects anything that is not already a positive integer — it does NOT round or
+ * truncate. A truncating read is worse than a rejecting one because the value it
+ * invents is `0`, and every caller here multiplies that into a duration: a
+ * `0.5` meant as "half an hour" became a zero-hour window that silently disarmed
+ * the guard it was configuring. Falling back to the documented default is the
+ * honest answer to a value nobody can act on.
+ */
+export function readPositiveIntEnv(name: string, fallback: number): number {
+  const raw = readOptionalEnv(name)
+  if (raw === null) return fallback
+  const parsed = Number(raw)
+  if (!Number.isInteger(parsed) || parsed <= 0) return fallback
+  return parsed
+}

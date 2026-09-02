@@ -3631,6 +3631,18 @@ model Booking {
   cancelledAt     DateTime?
   cancelledByRole Role?
 
+  /// TRUE when the canceller was the platform itself, not a person. Exists
+  /// because `cancelledByRole = null` is ambiguous: it means BOTH "cancelled
+  /// before these columns existed, policy unknowable" AND "cancelled by a
+  /// sweep, policy perfectly well known". The late-capture and refund-retry
+  /// paths refused both alike, so a Stripe hiccup on an expiry refund stranded
+  /// a client's deposit with nothing able to re-drive it.
+  ///
+  /// Only a system cancel sets this, and only forward: every row cancelled
+  /// before this column existed keeps `false` and stays refused, which is the
+  /// correct answer for a cancel whose actor really is unknown.
+  cancelledBySystem Boolean @default(false)
+
   // When the CLIENT moved this booking while it was already inside the
   // cancellation window. Stamped by the reschedule commit, never cleared.
   //

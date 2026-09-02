@@ -244,6 +244,11 @@ export const DELETE_BOUNDARY: Readonly<Record<string, DeleteDisposition>> = {
     status: 'DELETE',
     reason: "The client's own saved boards; cascades to their saved items.",
   },
+  ConsultBookingProposal: {
+    status: 'DELETE',
+    reason:
+      "The client's own commitment to a look-anchored proposal — the mode, price and duration she agreed to. Deleted with the consult it was derived from, the same call already made for ConsultServiceEstimate. It references ConsultSession and ConsultServiceEstimate with onDelete: Restrict, so the rule for it must run BEFORE either of them or the whole deletion transaction fails on a foreign key. The Booking it hangs off is RETAIN and survives as the professional's own record.",
+  },
   ConsultSession: {
     status: 'DELETE',
     reason:

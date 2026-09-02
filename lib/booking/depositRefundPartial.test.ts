@@ -263,7 +263,10 @@ describe('refundDiscoveryDeposit — partial deposit refunds (app-side)', () => 
       trigger: BookingRefundTrigger.DISCRETIONARY,
     })
 
-    expect(result.outcome).toBe('NOT_ATTEMPTED')
+    expect(result).toMatchObject({
+      outcome: 'NOT_ATTEMPTED',
+      reason: 'NOT_CAPTURED',
+    })
     expect(mocks.stripeRefundsCreate).not.toHaveBeenCalled()
   })
 
@@ -278,7 +281,10 @@ describe('refundDiscoveryDeposit — partial deposit refunds (app-side)', () => 
       trigger: BookingRefundTrigger.DISCRETIONARY,
     })
 
-    expect(result.outcome).toBe('NOT_ATTEMPTED')
+    expect(result).toMatchObject({
+      outcome: 'NOT_ATTEMPTED',
+      reason: 'ALREADY_RETURNED',
+    })
     expect(mocks.stripeRefundsCreate).not.toHaveBeenCalled()
   })
 

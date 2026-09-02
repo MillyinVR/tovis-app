@@ -508,25 +508,40 @@ export async function applyLateCaptureCancelRefund(args: {
   try {
     const booking = await prisma.booking.findUnique({
       where: { id: args.bookingId },
-      select: { status: true, cancelledAt: true, cancelledByRole: true },
+      select: {
+        status: true,
+        cancelledAt: true,
+        cancelledByRole: true,
+        cancelledBySystem: true,
+      },
     })
 
     if (!booking || booking.status !== BookingStatus.CANCELLED) {
       return { outcome: 'NOT_ATTEMPTED' }
     }
 
-    if (!booking.cancelledAt || !booking.cancelledByRole) {
+    // A SYSTEM cancel has no human role and does not need one: the platform
+    // cancelled an appointment the client did everything right for, so the
+    // policy is the same full make-whole the sweep applied the first time. It is
+    // read from `cancelledBySystem` rather than inferred from a null role,
+    // because a null role ALSO means "cancelled before the provenance columns
+    // existed", where the policy really is unknowable.
+    const systemCancel = booking.cancelledBySystem && !booking.cancelledByRole
+
+    if (!booking.cancelledAt || (!booking.cancelledByRole && !systemCancel)) {
       captureLateCaptureOnCancelledBooking({
         bookingId: args.bookingId,
         flavor: args.flavor,
         reason: 'UNKNOWN_CANCEL_PROVENANCE',
         detail:
-          'Booking is CANCELLED with no cancel provenance (pre-migration cancel or system cancel) — refund policy cannot be derived.',
+          'Booking is CANCELLED with no cancel provenance (pre-migration cancel) — refund policy cannot be derived.',
       })
       return { outcome: 'UNKNOWN_PROVENANCE' }
     }
 
-    const actorKind = cancelRoleToActorKind(booking.cancelledByRole)
+    const actorKind: CancelRefundActorKind = booking.cancelledByRole
+      ? cancelRoleToActorKind(booking.cancelledByRole)
+      : 'system'
 
     const result =
       args.flavor === 'DEPOSIT'

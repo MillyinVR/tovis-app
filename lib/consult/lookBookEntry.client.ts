@@ -40,8 +40,28 @@ function readConsult(value: unknown): ConsultShape | null {
  * still mid-flow resumes where it was. `/client/consult/[id]` itself forwards a
  * COMPLETED session to its results, so this is about landing on the RIGHT page
  * for a Book tap, not about guarding the flow.
+ *
+ * 🔴 CANCELLED returns null, and that is the whole point of this function
+ * returning an optional. The server hands back the existing session for a
+ * (client, pro, look) triple whatever its status — a unique index makes a second
+ * one impossible — so a terminal consult used to capture the Book button
+ * forever: every tap landed on a screen with no forward action, and the ordinary
+ * booking drawer below was never reached. A consult that cannot be revived must
+ * give the button BACK rather than hold it.
+ *
+ * CONSENT_REVOKED is NOT terminal and deliberately still resumes: accepting a
+ * fresh agreement transitions it CONSENT_REVOKED → CONSENT_REQUIRED
+ * (lib/consult/writeBoundary.ts), so the flow's own consent step is the way
+ * back in. The flow must render that step for a revoked session — see
+ * ClientConsultFlow.
  */
-function destinationForConsult(consult: ConsultShape): LookConsultEntryDestination {
+function destinationForConsult(
+  consult: ConsultShape,
+): LookConsultEntryDestination | null {
+  // Terminal with no recovery transition: purged mid-analysis. Nothing the
+  // client can do revives it, so the tap falls through to ordinary booking.
+  if (consult.status === 'CANCELLED') return null
+
   const id = encodeURIComponent(consult.id)
   return {
     href:

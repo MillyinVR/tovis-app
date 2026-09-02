@@ -6408,8 +6408,10 @@ function cancelActorRole(actor: CancelActor): Role | null {
   if (actor.kind === 'client') return Role.CLIENT
   if (actor.kind === 'pro') return Role.PRO
   if (actor.kind === 'admin') return Role.ADMIN
-  // system → null: no human role. M1's late-capture path treats a null role as
-  // UNKNOWN_CANCEL_PROVENANCE and pages rather than guessing a refund policy.
+  // system → null: no human role. The late-capture path reads
+  // `cancelledBySystem` alongside this, so a null role from a SYSTEM cancel is
+  // now re-drivable; a null role WITHOUT that stamp is still unknowable
+  // provenance and still pages rather than guessing a refund policy.
   return null
 }
 
@@ -6522,6 +6524,10 @@ async function performLockedCancel(args: {
       // WHO cancelled and WHEN (see applyLateCaptureCancelRefund).
       cancelledAt: new Date(),
       cancelledByRole: cancelActorRole(args.actor),
+      // Says WHICH null this is. A system cancel has no human role but a
+      // perfectly well-defined refund policy; without this stamp the retry
+      // paths could not tell it from a pre-provenance cancel and refused both.
+      cancelledBySystem: args.actor.kind === 'system',
     },
     select: {
       id: true,
