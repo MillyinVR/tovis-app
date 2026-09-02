@@ -94,6 +94,8 @@ if (!databaseUrl) throw new Error('Run with pnpm test:integration')
 const db = new PrismaClient({ datasources: { db: { url: databaseUrl } } })
 
 const DAY_MS = 24 * 60 * 60 * 1000
+/** How far ahead the committed appointment sits. */
+const APPOINTMENT_DAYS_AHEAD = 30
 
 function workingHours(): Prisma.InputJsonValue {
   return {
@@ -160,7 +162,7 @@ beforeAll(async () => {
   consultSessionId = await runConsultToCompletion(db, lookPostId, 'acctdel')
 
   // 10am local, well inside the fixture's working hours, comfortably ahead.
-  const start = new Date(Date.now() + 30 * DAY_MS)
+  const start = new Date(Date.now() + APPOINTMENT_DAYS_AHEAD * DAY_MS)
   start.setUTCHours(18, 0, 0, 0)
 
   const hold = await createHold({
@@ -238,11 +240,25 @@ describe('deleting a client who committed to a look', () => {
   // 🔴 The whole point. Before the fix this raised the foreign-key violation,
   // `failed` came back 1, `completed` 0, and every other rule rolled back too.
   it('completes against a real database instead of failing on a foreign key', async () => {
-    const requested = await requestAccountDeletion({ db, userId: fx.clientUserId })
-    expect(requested.ok).toBe(true)
+    // The appointment has to be BEHIND her before she may delete: eligibility
+    // blocks a client with a live booking still ahead of `now`, and the commit
+    // above necessarily booked a future slot. Wind the clock past it rather
+    // than rewriting the row, so the real eligibility rule is what runs.
+    const afterAppointment = new Date(Date.now() + 2 * APPOINTMENT_DAYS_AHEAD * DAY_MS)
+
+    const requested = await requestAccountDeletion({
+      db,
+      userId: fx.clientUserId,
+      now: afterAppointment,
+    })
+    expect(
+      requested.ok,
+      `deletion was refused: ${JSON.stringify(requested)}`,
+    ).toBe(true)
 
     const afterWindow = new Date(
-      Date.now() + (ACCOUNT_DELETION_GRACE_PERIOD_DAYS + 1) * DAY_MS,
+      afterAppointment.getTime() +
+        (ACCOUNT_DELETION_GRACE_PERIOD_DAYS + 1) * DAY_MS,
     )
     const swept = await executeDueAccountDeletions({ db, now: afterWindow })
 
