@@ -10,6 +10,7 @@ import {
   type PairedBeforeDto,
 } from '@/lib/media/pairedBefore'
 import { isNonNull } from '@/lib/guards'
+import type { ImageVariant } from '@/lib/media/imageTransform'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import {
   resolveLookPrimaryService,
@@ -327,6 +328,14 @@ function resolveCommentUserProfileHref(
   return null
 }
 
+/**
+ * Resolve one asset's URLs, downscaling the thumbnail for the surface asking.
+ *
+ * `variant` is REQUIRED here rather than optional: nothing in the database has
+ * a stored thumb, so a caller that forgets one silently ships the multi-megabyte
+ * stored original — the defect this whole pass exists to remove. Making it part
+ * of the signature turns that into a type error instead.
+ */
 async function renderAssetUrls(input: {
   storageBucket: string | null
   storagePath: string | null
@@ -334,6 +343,7 @@ async function renderAssetUrls(input: {
   thumbPath: string | null
   url: string | null
   thumbUrl: string | null
+  variant: ImageVariant
 }): Promise<{
   url: string | null
   thumbUrl: string | null
@@ -342,14 +352,17 @@ async function renderAssetUrls(input: {
   let renderThumbUrl = pickString(input.thumbUrl)
 
   if ((!renderUrl || !renderThumbUrl) && hasStoragePointers(input)) {
-    const rendered = await renderMediaUrls({
-      storageBucket: input.storageBucket,
-      storagePath: input.storagePath,
-      thumbBucket: input.thumbBucket ?? null,
-      thumbPath: input.thumbPath ?? null,
-      url: input.url ?? null,
-      thumbUrl: input.thumbUrl ?? null,
-    })
+    const rendered = await renderMediaUrls(
+      {
+        storageBucket: input.storageBucket,
+        storagePath: input.storagePath,
+        thumbBucket: input.thumbBucket ?? null,
+        thumbPath: input.thumbPath ?? null,
+        url: input.url ?? null,
+        thumbUrl: input.thumbUrl ?? null,
+      },
+      { variant: input.variant },
+    )
 
     renderUrl = pickString(rendered.renderUrl) ?? renderUrl
     renderThumbUrl = pickString(rendered.renderThumbUrl) ?? renderThumbUrl
@@ -364,6 +377,7 @@ async function renderAssetUrls(input: {
 async function mapStoredMediaToRenderable<T extends StoredMediaShape>(
   item: T,
 ): Promise<RenderableStoredMedia<T> | null> {
+  // Look DETAIL — the hero is a single full-bleed photo, same as a feed slide.
   const rendered = await renderAssetUrls({
     storageBucket: item.storageBucket,
     storagePath: item.storagePath,
@@ -371,6 +385,7 @@ async function mapStoredMediaToRenderable<T extends StoredMediaShape>(
     thumbPath: item.thumbPath,
     url: item.url,
     thumbUrl: item.thumbUrl,
+    variant: 'feed',
   })
 
   if (!rendered.url) return null
@@ -385,6 +400,7 @@ async function mapStoredMediaToRenderable<T extends StoredMediaShape>(
 async function mapStoredMediaToPreviewDto(
   item: StoredMediaShape,
 ): Promise<LooksBoardPreviewPrimaryMediaDto | null> {
+  // A board preview is a small cover cell in a list of boards.
   const rendered = await renderAssetUrls({
     storageBucket: item.storageBucket,
     storagePath: item.storagePath,
@@ -392,6 +408,7 @@ async function mapStoredMediaToPreviewDto(
     thumbPath: item.thumbPath,
     url: item.url,
     thumbUrl: item.thumbUrl,
+    variant: 'tile',
   })
 
   if (!rendered.url) return null
@@ -417,6 +434,7 @@ export async function mapLooksFeedMediaToDto(args: {
   const clientLinkViewer = args.clientLinkViewer ?? EMPTY_CLIENT_LINK_VIEWER
   const primaryMedia: FeedPrimaryMediaShape = item.primaryMediaAsset
 
+  // The looks feed itself: one full-screen slide at a time.
   const rendered = await renderAssetUrls({
     storageBucket: primaryMedia.storageBucket,
     storagePath: primaryMedia.storagePath,
@@ -424,6 +442,7 @@ export async function mapLooksFeedMediaToDto(args: {
     thumbPath: primaryMedia.thumbPath,
     url: primaryMedia.url,
     thumbUrl: primaryMedia.thumbUrl,
+    variant: 'feed',
   })
 
   if (!rendered.url) return null
@@ -438,7 +457,7 @@ export async function mapLooksFeedMediaToDto(args: {
   // mappers) — a video primary never renders the reveal slider.
   const before =
     primaryMedia.mediaType === MediaType.IMAGE
-      ? await mapPairedBeforeToDto(primaryMedia.beforeAsset ?? null)
+      ? await mapPairedBeforeToDto(primaryMedia.beforeAsset ?? null, 'feed')
       : null
 
   return {
@@ -541,6 +560,7 @@ export async function mapReviewMediaAssetToDto(input: {
   url: string | null
   thumbUrl: string | null
 }): Promise<LooksRenderedMediaDto | null> {
+  // A review's photo strip — thumbnails alongside the review body.
   const rendered = await renderAssetUrls({
     storageBucket: input.storageBucket,
     storagePath: input.storagePath,
@@ -548,6 +568,7 @@ export async function mapReviewMediaAssetToDto(input: {
     thumbPath: input.thumbPath,
     url: input.url,
     thumbUrl: input.thumbUrl,
+    variant: 'tile',
   })
 
   if (!rendered.url) return null
@@ -593,6 +614,8 @@ export async function mapPortfolioTileToDto(input: {
     thumbUrl: string | null
   } | null
 }): Promise<LooksPortfolioTileDto | null> {
+  // A portfolio/profile GRID cell. 🔴 Never `feed` here — 60 feed-sized tiles
+  // on one profile grid is 17 MB of photographs, the original defect all over.
   const rendered = await renderAssetUrls({
     storageBucket: input.storageBucket,
     storagePath: input.storagePath,
@@ -600,6 +623,7 @@ export async function mapPortfolioTileToDto(input: {
     thumbPath: input.thumbPath,
     url: input.url,
     thumbUrl: input.thumbUrl,
+    variant: 'tile',
   })
 
   const src = rendered.thumbUrl ?? rendered.url
@@ -608,7 +632,7 @@ export async function mapPortfolioTileToDto(input: {
   // Only an image "after" carries a pairing (parity with the public mapper).
   const before =
     input.mediaType === MediaType.IMAGE
-      ? await mapPairedBeforeToDto(input.beforeAsset ?? null)
+      ? await mapPairedBeforeToDto(input.beforeAsset ?? null, 'tile')
       : null
 
   return {
@@ -638,7 +662,7 @@ export async function mapLooksDetailMediaToRenderable(
   // only, parity with the feed/portfolio mappers) so the detail slider matches.
   const primaryBefore =
     item.primaryMediaAsset.mediaType === MediaType.IMAGE
-      ? await mapPairedBeforeToDto(item.primaryMediaAsset.beforeAsset ?? null)
+      ? await mapPairedBeforeToDto(item.primaryMediaAsset.beforeAsset ?? null, 'feed')
       : null
 
   const assets = await Promise.all(

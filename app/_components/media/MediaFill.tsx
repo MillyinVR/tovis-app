@@ -53,6 +53,20 @@ type Props = {
   // `object-fit` (it needs a zoom), so it takes a measured path instead; see
   // `lib/media/cropWindow.ts` and docs/design/media-crop-rect.md.
   cropRect?: CropRect | null
+  /**
+   * Load this image immediately instead of lazily — `next/image` renders it by
+   * omitting `loading="lazy"`, so the browser fetches on parse rather than
+   * waiting for its lazy-loading heuristic.
+   *
+   * `imgProps.loading` is deliberately stripped below, so callers have no other
+   * way to say "this one first". The looks feed needs it: ten full-screen
+   * slides otherwise compete for bandwidth with the one actually on screen,
+   * which is why slide 0 took 3.4 s to appear on a good 4G connection.
+   *
+   * Defaults to false → `next/image`'s own lazy default, byte-identical for
+   * every caller that doesn't pass it. Ignored for video.
+   */
+  priority?: boolean
 }
 
 function boxStyle(box: Box): React.CSSProperties {
@@ -95,6 +109,7 @@ export default function MediaFill(props: Props) {
     showPlaceholder = true,
     focalPoint,
     cropRect = null,
+    priority = false,
   } = props
 
   const objectClass = fit === 'contain' ? 'object-contain' : 'object-cover'
@@ -291,6 +306,7 @@ export default function MediaFill(props: Props) {
         className={cn(objectFitClass, className)}
         style={mergedStyle}
         unoptimized
+        priority={priority}
         {...safeImgProps}
         onLoad={
           cropRect

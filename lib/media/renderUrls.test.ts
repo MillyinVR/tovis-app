@@ -292,4 +292,160 @@ describe('lib/media/renderUrls', () => {
       },
     ])
   })
+
+  // ── the derived thumbnail (lib/media/imageTransform) ───────────────────
+  //
+  // Every MediaAsset in production has a null thumbUrl AND a null thumbPath —
+  // nothing has ever generated one — so without this the feed serves the 4.5 MB
+  // stored original for a phone-sized slide.
+  describe('variant', () => {
+    it('derives a render-endpoint thumb for a public object with no stored thumb', async () => {
+      const renderMediaUrls = await loadRenderMediaUrls()
+
+      const result = await renderMediaUrls(
+        {
+          storageBucket: BUCKETS.mediaPublic,
+          storagePath: 'pro/p1/looks_public/a.jpg',
+          thumbBucket: null,
+          thumbPath: null,
+          url: null,
+          thumbUrl: null,
+        },
+        { variant: 'feed' },
+      )
+
+      expect(result.renderUrl).toBe(
+        'https://project.supabase.co/storage/v1/object/public/media-public/pro/p1/looks_public/a.jpg',
+      )
+      expect(result.renderThumbUrl).toBe(
+        'https://project.supabase.co/storage/v1/render/image/public/media-public/pro/p1/looks_public/a.jpg?width=1080&resize=contain&quality=70',
+      )
+    })
+
+    it('a tile variant is smaller than a feed variant', async () => {
+      const renderMediaUrls = await loadRenderMediaUrls()
+
+      const result = await renderMediaUrls(
+        {
+          storageBucket: BUCKETS.mediaPublic,
+          storagePath: 'pro/p1/looks_public/a.jpg',
+          thumbBucket: null,
+          thumbPath: null,
+          url: null,
+          thumbUrl: null,
+        },
+        { variant: 'tile' },
+      )
+
+      expect(result.renderThumbUrl).toContain('width=512')
+      expect(result.renderThumbUrl).toContain('resize=contain')
+    })
+
+    it('omitting the variant leaves the pre-existing behaviour untouched', async () => {
+      const renderMediaUrls = await loadRenderMediaUrls()
+
+      const result = await renderMediaUrls({
+        storageBucket: BUCKETS.mediaPublic,
+        storagePath: 'pro/p1/looks_public/a.jpg',
+        thumbBucket: null,
+        thumbPath: null,
+        url: null,
+        thumbUrl: null,
+      })
+
+      expect(result.renderThumbUrl).toBeNull()
+    })
+
+    // A stored thumb is already small; deriving over it would throw away the
+    // pre-generated file and re-render it for nothing. This is also what makes
+    // pre-generating thumbs later a drop-in replacement.
+    it('a stored thumb pointer wins over the derived one', async () => {
+      const renderMediaUrls = await loadRenderMediaUrls()
+
+      const result = await renderMediaUrls(
+        {
+          storageBucket: BUCKETS.mediaPublic,
+          storagePath: 'pro/p1/looks_public/a.jpg',
+          thumbBucket: BUCKETS.mediaPublic,
+          thumbPath: 'pro/p1/looks_public/a_thumb.jpg',
+          url: null,
+          thumbUrl: null,
+        },
+        { variant: 'feed' },
+      )
+
+      expect(result.renderThumbUrl).toBe(
+        'https://project.supabase.co/storage/v1/object/public/media-public/pro/p1/looks_public/a_thumb.jpg',
+      )
+    })
+
+    it('a legacy stored thumbUrl also wins over the derived one', async () => {
+      const renderMediaUrls = await loadRenderMediaUrls()
+
+      const result = await renderMediaUrls(
+        {
+          storageBucket: BUCKETS.mediaPublic,
+          storagePath: 'pro/p1/looks_public/a.jpg',
+          thumbBucket: null,
+          thumbPath: null,
+          url: null,
+          thumbUrl: 'https://legacy.example/stored-thumb.jpg',
+        },
+        { variant: 'feed' },
+      )
+
+      expect(result.renderThumbUrl).toBe('https://legacy.example/stored-thumb.jpg')
+    })
+
+    // 🔴 Private media is signed per-object; the render endpoint cannot read it,
+    // and PRO_CLIENT media must never acquire a public URL by any route.
+    it('never derives a thumb for a private object', async () => {
+      const renderMediaUrls = await loadRenderMediaUrls()
+
+      const result = await renderMediaUrls(
+        {
+          storageBucket: BUCKETS.mediaPrivate,
+          storagePath: 'bookings/b1/after/main.jpg',
+          thumbBucket: null,
+          thumbPath: null,
+          url: null,
+          thumbUrl: null,
+        },
+        { variant: 'feed' },
+      )
+
+      expect(result.renderThumbUrl).toBeNull()
+    })
+
+    it('batch: derives per item, and never for a private object', async () => {
+      const mod = await import('./renderUrls')
+
+      const result = await mod.renderMediaUrlsBatch(
+        [
+          {
+            storageBucket: BUCKETS.mediaPublic,
+            storagePath: 'pro/p1/looks_public/a.jpg',
+            thumbBucket: null,
+            thumbPath: null,
+            url: null,
+            thumbUrl: null,
+          },
+          {
+            storageBucket: BUCKETS.mediaPrivate,
+            storagePath: 'bookings/b1/after/main.jpg',
+            thumbBucket: null,
+            thumbPath: null,
+            url: null,
+            thumbUrl: null,
+          },
+        ],
+        { variant: 'tile' },
+      )
+
+      expect(result[0]?.renderThumbUrl).toBe(
+        'https://project.supabase.co/storage/v1/render/image/public/media-public/pro/p1/looks_public/a.jpg?width=512&resize=contain&quality=68',
+      )
+      expect(result[1]?.renderThumbUrl).toBeNull()
+    })
+  })
 })

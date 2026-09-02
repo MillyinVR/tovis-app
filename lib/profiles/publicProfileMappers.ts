@@ -11,6 +11,7 @@ import {
   mapPairedBeforeToDto,
   type PairedBeforeDto,
 } from '@/lib/media/pairedBefore'
+import type { ImageVariant } from '@/lib/media/imageTransform'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { pickString } from '@/lib/pick'
 import {
@@ -415,21 +416,30 @@ export function pickServiceTagNames(
   return [...names]
 }
 
+/**
+ * `variant` is REQUIRED, not optional: no asset in the database has a stored
+ * thumb, so a caller that omits one silently serves the multi-megabyte stored
+ * original. See `lib/media/imageTransform.ts`.
+ */
 async function renderAssetUrls(
   input: RenderableMediaInput,
+  variant: ImageVariant,
 ): Promise<RenderedMediaUrls> {
   let url = pickString(input.url)
   let thumbUrl = pickString(input.thumbUrl)
 
   if ((!url || !thumbUrl) && hasStoragePointers(input)) {
-    const rendered = await renderMediaUrls({
-      storageBucket: input.storageBucket,
-      storagePath: input.storagePath,
-      thumbBucket: input.thumbBucket,
-      thumbPath: input.thumbPath,
-      url: input.url,
-      thumbUrl: input.thumbUrl,
-    })
+    const rendered = await renderMediaUrls(
+      {
+        storageBucket: input.storageBucket,
+        storagePath: input.storagePath,
+        thumbBucket: input.thumbBucket,
+        thumbPath: input.thumbPath,
+        url: input.url,
+        thumbUrl: input.thumbUrl,
+      },
+      { variant },
+    )
 
     url = pickString(rendered.renderUrl) ?? url
     thumbUrl = pickString(rendered.renderThumbUrl) ?? thumbUrl
@@ -453,14 +463,19 @@ export async function renderPublicProfileCoverUrl(
   const cover = profile.coverMediaAsset
   if (!cover) return null
 
-  const rendered = await renderAssetUrls({
-    storageBucket: cover.storageBucket,
-    storagePath: cover.storagePath,
-    thumbBucket: cover.thumbBucket,
-    thumbPath: cover.thumbPath,
-    url: cover.url,
-    thumbUrl: cover.thumbUrl,
-  })
+  const rendered = await renderAssetUrls(
+    {
+      storageBucket: cover.storageBucket,
+      storagePath: cover.storagePath,
+      thumbBucket: cover.thumbBucket,
+      thumbPath: cover.thumbPath,
+      url: cover.url,
+      thumbUrl: cover.thumbUrl,
+    },
+    // A full-width banner, not a cell. ⚠️ Only reached as a fallback: the
+    // return below prefers the full-size render.
+    'feed',
+  )
 
   // Prefer the full-size render for a banner; fall back to the thumb.
   return rendered.url ?? rendered.thumbUrl
@@ -594,14 +609,17 @@ export async function mapPublicPortfolioTileToDto(
   lookId: string | null = null,
   engagement: PublicPortfolioTileEngagement = EMPTY_TILE_ENGAGEMENT,
 ): Promise<PublicPortfolioTileDto | null> {
-  const rendered = await renderAssetUrls({
-    storageBucket: asset.storageBucket,
-    storagePath: asset.storagePath,
-    thumbBucket: asset.thumbBucket,
-    thumbPath: asset.thumbPath,
-    url: asset.url,
-    thumbUrl: asset.thumbUrl,
-  })
+  const rendered = await renderAssetUrls(
+    {
+      storageBucket: asset.storageBucket,
+      storagePath: asset.storagePath,
+      thumbBucket: asset.thumbBucket,
+      thumbPath: asset.thumbPath,
+      url: asset.url,
+      thumbUrl: asset.thumbUrl,
+    },
+    'tile',
+  )
 
   const src = rendered.thumbUrl ?? rendered.url
   if (!src) return null
@@ -610,7 +628,7 @@ export async function mapPublicPortfolioTileToDto(
   // pairing for non-image afters too.
   const before =
     asset.mediaType === MediaType.IMAGE
-      ? await mapPairedBeforeToDto(asset.beforeAsset)
+      ? await mapPairedBeforeToDto(asset.beforeAsset, 'tile')
       : null
 
   return {
@@ -693,21 +711,24 @@ export async function mapPublicProfileSignatureToDto(args: {
 export async function mapPublicReviewMediaAssetToDto(
   asset: PublicReviewMediaAssetRow,
 ): Promise<PublicReviewMediaDto | null> {
-  const rendered = await renderAssetUrls({
-    storageBucket: asset.storageBucket,
-    storagePath: asset.storagePath,
-    thumbBucket: asset.thumbBucket,
-    thumbPath: asset.thumbPath,
-    url: asset.url,
-    thumbUrl: asset.thumbUrl,
-  })
+  const rendered = await renderAssetUrls(
+    {
+      storageBucket: asset.storageBucket,
+      storagePath: asset.storagePath,
+      thumbBucket: asset.thumbBucket,
+      thumbPath: asset.thumbPath,
+      url: asset.url,
+      thumbUrl: asset.thumbUrl,
+    },
+    'tile',
+  )
 
   if (!rendered.url) return null
 
   // Only an image "after" carries a before/after pairing (parity with portfolio).
   const before =
     asset.mediaType === MediaType.IMAGE
-      ? await mapPairedBeforeToDto(asset.beforeAsset)
+      ? await mapPairedBeforeToDto(asset.beforeAsset, 'tile')
       : null
 
   return {

@@ -2,6 +2,7 @@ import 'server-only'
 
 import { MediaType } from '@prisma/client'
 
+import type { ImageVariant } from '@/lib/media/imageTransform'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { pickString } from '@/lib/pick'
 
@@ -33,9 +34,15 @@ export type PairedBeforeAssetInput = {
  * pairing (or the counterpart is a video / has no usable URL). Shared by the
  * portfolio and review mappers so the before/after slider gets the same data
  * shape everywhere.
+ *
+ * `variant` must match the surface the slider is being drawn on — the "before"
+ * is displayed at exactly the same size as the "after" it is paired with, so a
+ * mismatch would download a full-screen image for a grid cell. A before that
+ * lives in the private bucket simply gets no derived thumb, as ever.
  */
 export async function mapPairedBeforeToDto(
   beforeAsset: PairedBeforeAssetInput | null,
+  variant: ImageVariant,
 ): Promise<PairedBeforeDto | null> {
   if (!beforeAsset) return null
   if (beforeAsset.mediaType !== MediaType.IMAGE) return null
@@ -48,14 +55,17 @@ export async function mapPairedBeforeToDto(
     pickString(beforeAsset.storageBucket) &&
     pickString(beforeAsset.storagePath)
   ) {
-    const rendered = await renderMediaUrls({
-      storageBucket: beforeAsset.storageBucket,
-      storagePath: beforeAsset.storagePath,
-      thumbBucket: beforeAsset.thumbBucket,
-      thumbPath: beforeAsset.thumbPath,
-      url: beforeAsset.url,
-      thumbUrl: beforeAsset.thumbUrl,
-    })
+    const rendered = await renderMediaUrls(
+      {
+        storageBucket: beforeAsset.storageBucket,
+        storagePath: beforeAsset.storagePath,
+        thumbBucket: beforeAsset.thumbBucket,
+        thumbPath: beforeAsset.thumbPath,
+        url: beforeAsset.url,
+        thumbUrl: beforeAsset.thumbUrl,
+      },
+      { variant },
+    )
 
     url = pickString(rendered.renderUrl) ?? url
     thumbUrl = pickString(rendered.renderThumbUrl) ?? thumbUrl

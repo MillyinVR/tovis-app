@@ -311,14 +311,17 @@ export async function loadCreatorLooksAnalytics(args: {
   const candidates: CreatorLookCandidate[] = await Promise.all(
     candidateRows.map(async (row) => {
       const media = row.primaryMediaAsset
-      const rendered = await renderMediaUrls({
-        storageBucket: media.storageBucket,
-        storagePath: media.storagePath,
-        thumbBucket: media.thumbBucket,
-        thumbPath: media.thumbPath,
-        url: media.url,
-        thumbUrl: media.thumbUrl,
-      })
+      const rendered = await renderMediaUrls(
+        {
+          storageBucket: media.storageBucket,
+          storagePath: media.storagePath,
+          thumbBucket: media.thumbBucket,
+          thumbPath: media.thumbPath,
+          url: media.url,
+          thumbUrl: media.thumbUrl,
+        },
+        { variant: 'tile' },
+      )
 
       return {
         id: row.id,

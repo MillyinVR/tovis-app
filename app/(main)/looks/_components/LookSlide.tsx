@@ -2,7 +2,7 @@
 'use client'
 
 import type { ReactNode } from 'react'
-import LookMedia from './LookMedia'
+import LookMedia, { type SlidePreload } from './LookMedia'
 import LookOverlays from './LookOverlays'
 import type { FeedItem } from './lookTypes'
 
@@ -24,6 +24,7 @@ export default function LookSlide(props: {
   index: number
   item: FeedItem
   isActive: boolean
+  preload: SlidePreload
   rightRailBottom: number
 
   onDoubleClickLike: () => void
@@ -35,7 +36,7 @@ export default function LookSlide(props: {
 
   rightRail?: ReactNode
 }) {
-  const { index, item, isActive, rightRailBottom, onDoubleClickLike, onTouchEndLike, onToggleFollow, rightRail } = props
+  const { index, item, isActive, preload, rightRailBottom, onDoubleClickLike, onTouchEndLike, onToggleFollow, rightRail } = props
 
   const isReviewSpotlight = Boolean(item.reviewId)
 
@@ -64,7 +65,7 @@ export default function LookSlide(props: {
       <div className="relative h-full w-full">
         <div className="mx-auto h-full w-full max-w-[560px] md:max-w-[520px] lg:max-w-[560px] xl:max-w-[600px]">
           <div className="relative h-full w-full overflow-hidden md:rounded-[18px]">
-            <LookMedia item={item} isActive={isActive} />
+            <LookMedia item={item} isActive={isActive} preload={preload} />
 
             {/* Bottom fade — matches footer bg so media dissolves into the nav bar */}
             <div

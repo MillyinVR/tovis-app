@@ -664,14 +664,20 @@ describe('lib/looks/mappers.ts', () => {
         viewerFollows: false,
       })
 
-      expect(mocks.renderMediaUrls).toHaveBeenCalledWith({
-        storageBucket: 'media-public',
-        storagePath: 'looks/media_1.jpg',
-        thumbBucket: 'media-public',
-        thumbPath: 'looks/media_1-thumb.jpg',
-        url: null,
-        thumbUrl: null,
-      })
+      expect(mocks.renderMediaUrls).toHaveBeenCalledWith(
+        {
+          storageBucket: 'media-public',
+          storagePath: 'looks/media_1.jpg',
+          thumbBucket: 'media-public',
+          thumbPath: 'looks/media_1-thumb.jpg',
+          url: null,
+          thumbUrl: null,
+        },
+        // 🔴 The feed is the one surface that must NOT get a tile: it is a
+        // full-screen slide. (And it must not get nothing, which is what it
+        // used to get — the 4.5 MB stored original.)
+        { variant: 'feed' },
+      )
 
       expect(result?.url).toBe('https://rendered.example.com/media.jpg')
       expect(result?.thumbUrl).toBe(

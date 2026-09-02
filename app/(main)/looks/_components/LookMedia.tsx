@@ -8,27 +8,50 @@ import BeforeAfterReveal from '@/app/_components/media/BeforeAfterReveal'
 import { resolveFocalPoint, type FocalPoint } from '@/lib/media/focalPoint'
 import { focalInCropSpace, resolveCropRect, type CropRect } from '@/lib/media/cropRect'
 
-type FeedItemWithRender = FeedItem & {
-  renderUrl?: string | null
-  renderThumbUrl?: string | null
-}
+/**
+ * How eagerly this slide's media should be fetched, by distance from the one
+ * being looked at. `LooksFeed` assigns it; see `slidePreload`.
+ */
+export type SlidePreload = 'eager' | 'lazy' | 'defer'
 
 function pickNonEmpty(v: unknown): string | null {
   return typeof v === 'string' && v.trim() ? v.trim() : null
 }
 
-export default function LookMedia({ item, isActive }: { item: FeedItemWithRender; isActive: boolean }) {
+export default function LookMedia({
+  item,
+  isActive,
+  preload = 'eager',
+}: {
+  item: FeedItem
+  isActive: boolean
+  preload?: SlidePreload
+}) {
   const mediaType = item.mediaType === 'VIDEO' ? 'VIDEO' : 'IMAGE'
 
-  const renderUrl = pickNonEmpty(item.renderUrl)
-  const renderThumbUrl = pickNonEmpty(item.renderThumbUrl)
-  const legacyUrl = pickNonEmpty((item as FeedItem).url) // legacy fallback only
+  // 🔴 `thumbUrl` is the DOWNSCALED render (lib/media/imageTransform), and `url`
+  // is the stored original — for a phone capture, 3024×4032 and ~4.5 MB for a
+  // 393pt-wide slide. Prefer the thumb for an image.
+  //
+  // This used to read `item.renderThumbUrl`/`item.renderUrl`, which
+  // `LooksFeedItemDto` has never carried — the server maps its rendered URLs
+  // onto `url`/`thumbUrl` before they go over the wire. Both were always
+  // `undefined`, so every slide silently fell through to the original.
+  const fullUrl = pickNonEmpty(item.url)
+  const thumbUrl = pickNonEmpty(item.thumbUrl)
 
-  // Images should prefer thumb when available
-  const src =
-    mediaType === 'VIDEO'
-      ? (renderUrl ?? legacyUrl)
-      : (renderThumbUrl ?? renderUrl ?? legacyUrl)
+  const src = mediaType === 'VIDEO' ? fullUrl : (thumbUrl ?? fullUrl)
+
+  // Far from the active slide: keep the slide itself (its height is the
+  // scroller's, set by LookSlide, and the media is absolutely positioned inside
+  // it — so nothing here can move the snap geometry) but do not fetch anything.
+  // Ten full-screen photographs competing with the one on screen is what made
+  // slide 0 take 3.4 s.
+  if (preload === 'defer') {
+    return <div className="absolute inset-0 bg-bgPrimary" aria-hidden="true" />
+  }
+
+  const eager = preload === 'eager'
 
   if (!src) {
     return (
@@ -83,7 +106,7 @@ export default function LookMedia({ item, isActive }: { item: FeedItemWithRender
 
   // For a video the backdrop is the poster, never a second decoding <video>:
   // one moving picture per slide, and a blurred still behind it reads the same.
-  const backdropSrc = mediaType === 'VIDEO' ? (renderThumbUrl ?? pickNonEmpty(item.thumbUrl)) : src
+  const backdropSrc = mediaType === 'VIDEO' ? thumbUrl : src
 
   return (
     <LetterboxFrame
@@ -97,6 +120,8 @@ export default function LookMedia({ item, isActive }: { item: FeedItemWithRender
         alt={item.caption || 'Look'}
         fit="contain"
         cropRect={cropRect}
+        // The slide you are looking at, and its two neighbours, jump the queue.
+        priority={eager}
         videoProps={{
           muted: true,
           loop: true,
@@ -108,7 +133,11 @@ export default function LookMedia({ item, isActive }: { item: FeedItemWithRender
           'data-active': isActive ? '1' : '0',
         }}
         imgProps={{
-          loading: 'lazy',
+          // ⚠️ No `loading` here: MediaFill strips it from imgProps, because
+          // next/image owns that decision. `priority` above is the only lever —
+          // true omits loading="lazy" so the browser fetches immediately, false
+          // leaves next/image's lazy default, which is what a slide you are not
+          // looking at should get.
           decoding: 'async',
           draggable: false,
         }}
@@ -188,7 +217,11 @@ function LetterboxFrame({
             focalPoint={focalPoint}
             showPlaceholder={false}
             imgProps={{
-              loading: 'lazy',
+              // The backdrop is decoration behind the photograph and is never
+              // given `priority`, so it takes next/image's lazy default and
+              // cannot compete with the subject for bandwidth. It is the SAME
+              // URL as the foreground image, so on the active slide the browser
+              // serves it out of the one request the photo already made.
               decoding: 'async',
               draggable: false,
               'aria-hidden': true,

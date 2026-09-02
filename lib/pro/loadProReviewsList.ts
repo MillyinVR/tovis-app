@@ -126,7 +126,7 @@ export async function loadProReviewsList(args: {
             // Only an image "after" carries a pairing (parity with the other mappers).
             const before =
               m.mediaType === MediaType.IMAGE
-                ? await mapPairedBeforeToDto(m.beforeAsset)
+                ? await mapPairedBeforeToDto(m.beforeAsset, 'tile')
                 : null
 
             const tile: ProReviewMediaTile = {
