@@ -86,6 +86,29 @@
   --coin-3: 13 26 23;
   --coin-4: 5 13 11;
 
+  /* Ink for a mark drawn ON A PHOTOGRAPH — an action rail over a look, a badge
+     over a tile. Deliberately CONSTANT across light/dark, for the third time in
+     this file and for the same reason as --on-cta and --coin-* above: the thing
+     underneath is a photograph, not a themed surface, so an ink that flips with
+     [data-mode] is choosing its contrast against something it cannot see.
+
+     🔴 Measured on prod, 2026-09-02: the looks FEED pins data-mode="dark" for
+     its whole subtree (app/(main)/looks/page.tsx — "the feed stays dark, only
+     the chrome flips"), so its rail already resolves to this exact triplet. The
+     look DETAIL page pins nothing, so the SAME rail over the SAME photograph
+     rendered near-black (10 20 19) in light mode. Same component, two inks.
+
+     This is the dark theme's own --text-primary, not a new white: adopting it
+     leaves every already-dark surface byte-identical and only fixes the one
+     that was flipping. A white-label brand whose media chrome should read dark
+     would override it, exactly like --on-cta.
+
+     --on-photo-shadow is the dark this is guaranteed contrast against: a soft
+     drop shadow under the mark, so a pale photograph cannot swallow it. It is a
+     token rather than a literal rgba() so the shadow rebrands with the ink. */
+  --on-photo: 242 239 231;
+  --on-photo-shadow: 0 0 0;
+
   /* Status tones */
   --tone-danger: var(--color-ember);
   --tone-warn: var(--color-amber);
