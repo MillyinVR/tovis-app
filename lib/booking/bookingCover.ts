@@ -6,9 +6,10 @@
 //
 // Resolved from the `mediaId` the booking flow already threads through every
 // surface, so nothing new has to be plumbed from the look feed.
-import { MediaVisibility, type Prisma } from '@prisma/client'
+import { type Prisma } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
+import { isPubliclyViewableMediaAsset } from '@/lib/media/mediaVisibility'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { lookNameFromCaption } from '@/lib/looks/publication/clientLookService'
 
@@ -23,9 +24,15 @@ export type BookingCover = {
  * than from a look) — the sheet then renders its cover-less header rather than
  * an empty photo well.
  *
- * ⚠️ PUBLIC media only. A booking can be started from a look whose media has
- * since been made private, and a signed URL for private media has no business
- * being minted into a booking sheet — the cover is decoration, not an entitlement.
+ * ⚠️ Publicly-viewable media only. A booking can be started from a look whose
+ * media has since been retracted, and a signed URL for private media has no
+ * business being minted into a booking sheet — the cover is decoration, not an
+ * entitlement.
+ *
+ * 🔴 The test is `isPubliclyViewableMediaAsset`, not `visibility === PUBLIC`. A
+ * pro's own public-bucket upload keeps visibility PUBLIC once retracted (see
+ * lib/media/mediaVisibility.ts); the flags are what say it came down. Filtering
+ * on the column alone would start handing back covers for retracted looks.
  */
 export async function loadBookingCover(
   mediaId: string | null | undefined,
@@ -35,8 +42,12 @@ export async function loadBookingCover(
   if (!id) return null
 
   const media = await db.mediaAsset.findFirst({
-    where: { id, visibility: MediaVisibility.PUBLIC },
+    where: { id },
     select: {
+      visibility: true,
+      isFeaturedInPortfolio: true,
+      isEligibleForLooks: true,
+      reviewId: true,
       storageBucket: true,
       storagePath: true,
       thumbBucket: true,
@@ -54,6 +65,16 @@ export async function loadBookingCover(
     },
   })
   if (!media) return null
+  if (
+    !isPubliclyViewableMediaAsset({
+      visibility: media.visibility,
+      isFeaturedInPortfolio: media.isFeaturedInPortfolio,
+      isEligibleForLooks: media.isEligibleForLooks,
+      reviewId: media.reviewId,
+    })
+  ) {
+    return null
+  }
 
   // ⚠️ Imported HERE, not at module scope. `lib/media/renderUrls` builds a
   // Supabase admin client while it is being evaluated, so a static import puts

@@ -28,8 +28,8 @@
 // be passed straight to createMany() or spread into a create()'s data.
 
 import { MediaPhase, MediaType, MediaVisibility, Prisma, Role } from '@prisma/client'
-import { BUCKETS } from '@/lib/storageBuckets'
 import { cropRectColumns, resolveCropRect } from '@/lib/media/cropRect'
+import { isVisibilityAllowedForBucket } from '@/lib/media/mediaVisibility'
 import { canProSharePublicly, UNPROMOTED_MEDIA_MESSAGE } from '@/lib/media/publicShareGuard'
 
 /** Thrown when a MediaAsset write would violate a bucket/visibility invariant. */
@@ -124,7 +124,14 @@ export function assertMediaAssetInvariant(input: MediaAssetWriteInput): void {
 
   if (input.visibility === MediaVisibility.PRO_CLIENT) {
     // Private (pro↔client) media must never sit in the world-readable bucket.
-    if (input.storageBucket !== BUCKETS.mediaPrivate) {
+    // The rule itself lives in lib/media/mediaVisibility.ts so that the UPDATE
+    // paths enforce the same one — they used to have no bucket check at all.
+    if (
+      !isVisibilityAllowedForBucket({
+        storageBucket: input.storageBucket,
+        visibility: input.visibility,
+      })
+    ) {
       throw new MediaAssetInvariantError(
         'PRO_CLIENT media must live in the private bucket (media-public is world-readable).',
       )

@@ -3,7 +3,6 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
-import { MediaVisibility } from '@prisma/client'
 import { resolveStoragePointers, safeUrl } from '@/lib/media'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import {
@@ -11,14 +10,11 @@ import {
   resolveFeaturePairing,
 } from '@/lib/media/portfolioPairing'
 import { canProSharePublicly, UNPROMOTED_MEDIA_MESSAGE } from '@/lib/media/publicShareGuard'
+import { resolveMediaVisibility } from '@/lib/media/mediaVisibility'
 import { reconcilePortfolioLookForMediaAsset } from '@/lib/looks/publication/portfolioLookSync'
 import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
-
-function computeVisibility(isFeaturedInPortfolio: boolean, isEligibleForLooks: boolean): MediaVisibility {
-  return isFeaturedInPortfolio || isEligibleForLooks ? MediaVisibility.PUBLIC : MediaVisibility.PRO_CLIENT
-}
 
 async function loadOwnedMedia(mediaId: string, professionalId: string) {
   const media = await prisma.mediaAsset.findUnique({
@@ -165,7 +161,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       where: { id: mediaId },
       data: {
         isFeaturedInPortfolio: true,
-        visibility: computeVisibility(true, owned.media.isEligibleForLooks),
+        visibility: resolveMediaVisibility({
+          storageBucket: owned.media.storageBucket,
+          isFeaturedInPortfolio: true,
+          isEligibleForLooks: owned.media.isEligibleForLooks,
+        }),
         beforeAssetId,
       },
       select: {
@@ -240,7 +240,16 @@ export async function DELETE(_req: NextRequest, ctx: RouteContext) {
         // the reconcile below retract the live LookPost (fixes divergence b).
         isFeaturedInPortfolio: false,
         isEligibleForLooks: false,
-        visibility: computeVisibility(false, false),
+        // 🔴 Bucket-aware. This used to write PRO_CLIENT unconditionally, which
+        // stamped "private" on assets whose bytes sit in the world-readable
+        // media-public bucket — the pro's own Looks/portfolio uploads. The row
+        // still drops off every public surface, via the flags above and the
+        // LookPost the reconcile below retracts to DRAFT.
+        visibility: resolveMediaVisibility({
+          storageBucket: owned.media.storageBucket,
+          isFeaturedInPortfolio: false,
+          isEligibleForLooks: false,
+        }),
         // Unpair on removal — a tile that's no longer featured shouldn't keep a
         // dangling before/after pairing.
         beforeAssetId: null,

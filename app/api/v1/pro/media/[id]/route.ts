@@ -1,6 +1,5 @@
 // app/api/v1/pro/media/[id]/route.ts
 import { prisma } from '@/lib/prisma'
-import { MediaVisibility } from '@prisma/client'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import {
@@ -9,20 +8,12 @@ import {
   resolveFeaturePairing,
 } from '@/lib/media/portfolioPairing'
 import { canProSharePublicly, UNPROMOTED_MEDIA_MESSAGE } from '@/lib/media/publicShareGuard'
+import { resolveMediaVisibility } from '@/lib/media/mediaVisibility'
 import { reconcilePortfolioLookForMediaAsset } from '@/lib/looks/publication/portfolioLookSync'
 import { pickBool, pickString } from '@/lib/pick'
 import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
-
-function normalizeVisibilityFromFlags(flags: {
-  isEligibleForLooks: boolean
-  isFeaturedInPortfolio: boolean
-}): MediaVisibility {
-  return flags.isEligibleForLooks || flags.isFeaturedInPortfolio
-    ? MediaVisibility.PUBLIC
-    : MediaVisibility.PRO_CLIENT
-}
 
 function uniqueStrings(input: string[]): string[] {
   const out: string[] = []
@@ -104,13 +95,30 @@ export async function PATCH(req: Request, ctx: RouteContext) {
         portfolioPatch === null ? Boolean(existing.isFeaturedInPortfolio) : portfolioPatch,
     }
 
-    const nextVisibility = normalizeVisibilityFromFlags(nextFlags)
+    // 🔴 Bucket-aware. Un-ticking both flags used to resolve to PRO_CLIENT for
+    // every asset, including the pro's own uploads sitting in the world-readable
+    // media-public bucket — a "private" label over a public object. The row is
+    // taken off the public surfaces by the flags, not by the visibility column.
+    const nextVisibility = resolveMediaVisibility({
+      storageBucket: existing.storageBucket,
+      isFeaturedInPortfolio: nextFlags.isFeaturedInPortfolio,
+      isEligibleForLooks: nextFlags.isEligibleForLooks,
+    })
 
     // Consent gate: never let a pro flip a client's unpromoted private session
     // media to public. Only review-promoted (reviewId set) or public-bucket
     // media may go public.
+    //
+    // 🔴 Keyed on the pro asking to SHOW it, not on the computed visibility
+    // column. Now that a public-bucket asset correctly stays PUBLIC when both
+    // flags come off, a `=== PUBLIC` test here would also fire on a RETRACT and
+    // answer 403 "this session photo can only be shared publicly after…" to a
+    // pro who was trying to take the photo DOWN.
+    const wantsPubliclyShown =
+      nextFlags.isFeaturedInPortfolio || nextFlags.isEligibleForLooks
+
     if (
-      nextVisibility === MediaVisibility.PUBLIC &&
+      wantsPubliclyShown &&
       !canProSharePublicly({
         bookingId: existing.bookingId,
         storageBucket: existing.storageBucket,

@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest'
 import {
   LookPostStatus,
   LookPostVisibility,
-  MediaVisibility,
   ModerationStatus,
   Role,
   VerificationStatus,
@@ -15,52 +14,9 @@ import {
   canModerateLookPost,
   canSaveLookPost,
   canViewLookPost,
-  isPublicLooksEligibleMedia,
 } from './guards'
 
 describe('lib/looks/guards.ts', () => {
-  describe('isPublicLooksEligibleMedia', () => {
-    it('returns true for PUBLIC media that is eligible for looks', () => {
-      expect(
-        isPublicLooksEligibleMedia({
-          visibility: MediaVisibility.PUBLIC,
-          isEligibleForLooks: true,
-          isFeaturedInPortfolio: false,
-        }),
-      ).toBe(true)
-    })
-
-    it('returns true for PUBLIC media featured in portfolio', () => {
-      expect(
-        isPublicLooksEligibleMedia({
-          visibility: MediaVisibility.PUBLIC,
-          isEligibleForLooks: false,
-          isFeaturedInPortfolio: true,
-        }),
-      ).toBe(true)
-    })
-
-    it('returns false for non-PUBLIC media even if it is looks-eligible', () => {
-      expect(
-        isPublicLooksEligibleMedia({
-          visibility: MediaVisibility.PRO_CLIENT,
-          isEligibleForLooks: true,
-          isFeaturedInPortfolio: true,
-        }),
-      ).toBe(false)
-    })
-
-    it('returns false for PUBLIC media that is neither looks-eligible nor portfolio-featured', () => {
-      expect(
-        isPublicLooksEligibleMedia({
-          visibility: MediaVisibility.PUBLIC,
-          isEligibleForLooks: false,
-          isFeaturedInPortfolio: false,
-        }),
-      ).toBe(false)
-    })
-  })
-
   describe('canViewLookPost', () => {
     it('allows the owner to view regardless of look status or moderation state', () => {
       expect(
