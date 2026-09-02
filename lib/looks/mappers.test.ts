@@ -72,6 +72,10 @@ function makeFeedRow(overrides?: Partial<LooksFeedRow>): LooksFeedRow {
       storagePath: 'looks/media_1.jpg',
       focalX: null,
       focalY: null,
+      cropX: null,
+      cropY: null,
+      cropW: null,
+      cropH: null,
       thumbBucket: 'media-public',
       thumbPath: 'looks/media_1-thumb.jpg',
       mediaType: MediaType.IMAGE,
@@ -161,6 +165,10 @@ function makeDetailRow(overrides?: Partial<LooksDetailRow>): LooksDetailRow {
       storagePath: 'looks/detail.jpg',
       focalX: null,
       focalY: null,
+      cropX: null,
+      cropY: null,
+      cropW: null,
+      cropH: null,
       thumbBucket: 'media-public',
       thumbPath: 'looks/detail-thumb.jpg',
       mediaType: MediaType.IMAGE,
@@ -193,6 +201,10 @@ function makeDetailRow(overrides?: Partial<LooksDetailRow>): LooksDetailRow {
           storagePath: 'looks/detail.jpg',
           focalX: null,
           focalY: null,
+          cropX: null,
+          cropY: null,
+          cropW: null,
+          cropH: null,
           thumbBucket: 'media-public',
           thumbPath: 'looks/detail-thumb.jpg',
           mediaType: MediaType.IMAGE,
@@ -254,6 +266,10 @@ function makeBoardPreviewRow(
             storagePath: 'looks/look.jpg',
             focalX: null,
             focalY: null,
+            cropX: null,
+            cropY: null,
+            cropW: null,
+            cropH: null,
             thumbBucket: 'media-public',
             thumbPath: 'looks/look-thumb.jpg',
             mediaType: MediaType.IMAGE,
@@ -304,6 +320,10 @@ function makeBoardDetailRow(
             storagePath: 'looks/look-2.jpg',
             focalX: null,
             focalY: null,
+            cropX: null,
+            cropY: null,
+            cropW: null,
+            cropH: null,
             thumbBucket: 'media-public',
             thumbPath: 'looks/look-2-thumb.jpg',
             mediaType: MediaType.IMAGE,
@@ -331,6 +351,10 @@ function makeBoardDetailRow(
             storagePath: 'looks/look.jpg',
             focalX: null,
             focalY: null,
+            cropX: null,
+            cropY: null,
+            cropW: null,
+            cropH: null,
             thumbBucket: 'media-public',
             thumbPath: 'looks/look-thumb.jpg',
             mediaType: MediaType.IMAGE,
@@ -421,6 +445,10 @@ describe('lib/looks/mappers.ts', () => {
         serviceIds: ['service_1'],
         focalX: null,
         focalY: null,
+        cropX: null,
+        cropY: null,
+        cropW: null,
+        cropH: null,
         priceStartingAt: null,
         before: null,
         tags: [],
@@ -477,6 +505,10 @@ describe('lib/looks/mappers.ts', () => {
         serviceIds: ['service_1'],
         focalX: null,
         focalY: null,
+        cropX: null,
+        cropY: null,
+        cropW: null,
+        cropH: null,
         priceStartingAt: null,
         before: null,
         tags: [],
@@ -504,6 +536,26 @@ describe('lib/looks/mappers.ts', () => {
 
       expect(result?.focalX).toBe(0.42)
       expect(result?.focalY).toBe(0.18)
+    })
+
+    it('carries the primary asset crop rect onto the feed DTO (item 2)', async () => {
+      const row = makeFeedRow()
+      row.primaryMediaAsset.cropX = 0.25
+      row.primaryMediaAsset.cropY = 0.1
+      row.primaryMediaAsset.cropW = 0.5
+      row.primaryMediaAsset.cropH = 0.4
+
+      const result = await mapLooksFeedMediaToDto({
+        item: row,
+        viewerLiked: false,
+        viewerSaved: false,
+        viewerFollows: false,
+      })
+
+      expect(result?.cropX).toBe(0.25)
+      expect(result?.cropY).toBe(0.1)
+      expect(result?.cropW).toBe(0.5)
+      expect(result?.cropH).toBe(0.4)
     })
 
     it('converts a pro-set Decimal price into a finite number on the DTO', async () => {
@@ -592,6 +644,10 @@ describe('lib/looks/mappers.ts', () => {
           storagePath: 'looks/media_1.jpg',
           focalX: null,
           focalY: null,
+          cropX: null,
+          cropY: null,
+          cropW: null,
+          cropH: null,
           thumbBucket: 'media-public',
           thumbPath: 'looks/media_1-thumb.jpg',
           mediaType: MediaType.IMAGE,
@@ -633,6 +689,10 @@ describe('lib/looks/mappers.ts', () => {
           storagePath: 'looks/media_1.jpg',
           focalX: null,
           focalY: null,
+          cropX: null,
+          cropY: null,
+          cropW: null,
+          cropH: null,
           thumbBucket: 'media-public',
           thumbPath: 'looks/media_1-thumb.jpg',
           mediaType: MediaType.IMAGE,
@@ -1093,6 +1153,10 @@ describe('lib/looks/mappers.ts', () => {
           storagePath: 'looks/detail.jpg',
           focalX: null,
           focalY: null,
+          cropX: null,
+          cropY: null,
+          cropW: null,
+          cropH: null,
           thumbBucket: 'media-public',
           thumbPath: 'looks/detail-thumb.jpg',
           mediaType: MediaType.IMAGE,
@@ -1125,6 +1189,10 @@ describe('lib/looks/mappers.ts', () => {
               storagePath: 'looks/detail.jpg',
               focalX: null,
               focalY: null,
+              cropX: null,
+              cropY: null,
+              cropW: null,
+              cropH: null,
               thumbBucket: 'media-public',
               thumbPath: 'looks/detail-thumb.jpg',
               mediaType: MediaType.IMAGE,
@@ -1318,6 +1386,10 @@ describe('lib/looks/mappers.ts', () => {
           createdAt: '2026-04-18T10:30:00.000Z',
           focalX: null,
           focalY: null,
+          cropX: null,
+          cropY: null,
+          cropW: null,
+          cropH: null,
           review: {
             id: 'review_1',
             rating: 5,
@@ -1341,6 +1413,10 @@ describe('lib/looks/mappers.ts', () => {
               createdAt: '2026-04-18T10:30:00.000Z',
               focalX: null,
               focalY: null,
+              cropX: null,
+              cropY: null,
+              cropW: null,
+              cropH: null,
               review: {
                 id: 'review_1',
                 rating: 5,

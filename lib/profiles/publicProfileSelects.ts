@@ -146,6 +146,15 @@ export const publicPortfolioMediaAssetSelect =
     focalX: true,
     focalY: true,
 
+    // The non-destructive publish crop (item 2), in the same space as the focal
+    // above: the rect of the stored image these surfaces should display. Null =
+    // the full stored frame, which is every row today — it rides the wire so the
+    // editor and the native tiles can adopt it without another schema round.
+    cropX: true,
+    cropY: true,
+    cropW: true,
+    cropH: true,
+
     // Opt-in before/after pairing → render the comparison slider when present.
     beforeAsset: {
       select: pairedBeforeAssetSelect,

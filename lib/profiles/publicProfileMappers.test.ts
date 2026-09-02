@@ -79,6 +79,10 @@ function makePortfolioRow(
     services: ServiceTagRow[]
     focalX: number | null
     focalY: number | null
+    cropX: number | null
+    cropY: number | null
+    cropW: number | null
+    cropH: number | null
   }>,
 ) {
   return {
@@ -97,6 +101,10 @@ function makePortfolioRow(
     thumbUrl: 'https://cdn.example.com/after_1_thumb.jpg',
     focalX: null as number | null,
     focalY: null as number | null,
+    cropX: null as number | null,
+    cropY: null as number | null,
+    cropW: null as number | null,
+    cropH: null as number | null,
     beforeAsset: null as typeof beforeImage | null,
     services: [] as ServiceTagRow[],
     ...(overrides ?? {}),
@@ -219,6 +227,40 @@ describe('mapPublicPortfolioTileToDto focal point', () => {
     })
     expect(signature?.tile.focalX).toBe(0.5)
     expect(signature?.tile.focalY).toBe(0.2)
+  })
+})
+
+describe('mapPublicPortfolioTileToDto crop rect', () => {
+  // The non-destructive publish crop (item 2). It rides the tile so the future
+  // re-frame editor and the native grid can honor the pro's framing without
+  // another schema round; nothing renders it yet.
+  it('carries the stored rect through to the tile', async () => {
+    const tile = await mapPublicPortfolioTileToDto(
+      makePortfolioRow({ cropX: 0.25, cropY: 0.1, cropW: 0.5, cropH: 0.4 }),
+    )
+    expect(tile?.cropX).toBe(0.25)
+    expect(tile?.cropY).toBe(0.1)
+    expect(tile?.cropW).toBe(0.5)
+    expect(tile?.cropH).toBe(0.4)
+  })
+
+  it('is null when the asset was never re-framed — the full stored frame', async () => {
+    const tile = await mapPublicPortfolioTileToDto(makePortfolioRow())
+    expect(tile?.cropX).toBeNull()
+    expect(tile?.cropY).toBeNull()
+    expect(tile?.cropW).toBeNull()
+    expect(tile?.cropH).toBeNull()
+  })
+
+  it('reaches the Signature card, which crops hardest of all', async () => {
+    const signature = await mapPublicProfileSignatureToDto({
+      lookId: 'look_9',
+      asset: makePortfolioRow({ cropX: 0.2, cropY: 0, cropW: 0.4, cropH: 0.5 }),
+      engagement: { likeCount: 0, commentCount: 0, recreatedCount: 0 },
+      priceLine: null,
+    })
+    expect(signature?.tile.cropX).toBe(0.2)
+    expect(signature?.tile.cropH).toBe(0.5)
   })
 })
 

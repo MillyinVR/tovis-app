@@ -12419,6 +12419,30 @@
         "createdAt": {
           "type": "string"
         },
+        "cropH": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cropW": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cropX": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cropY": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "focalX": {
           "type": [
             "number",
@@ -12466,6 +12490,10 @@
         "createdAt",
         "focalX",
         "focalY",
+        "cropX",
+        "cropY",
+        "cropW",
+        "cropH",
         "review"
       ],
       "type": "object"
@@ -12614,6 +12642,30 @@
         "createdAt": {
           "type": "string"
         },
+        "cropH": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cropW": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cropX": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cropY": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "focalX": {
           "type": [
             "number",
@@ -12755,6 +12807,10 @@
         "serviceIds",
         "focalX",
         "focalY",
+        "cropX",
+        "cropY",
+        "cropW",
+        "cropH",
         "priceStartingAt",
         "uploadedByRole",
         "reviewId",
@@ -19774,6 +19830,31 @@
             "null"
           ]
         },
+        "cropH": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cropW": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cropX": {
+          "description": "The non-destructive publish CROP (capture chain item 2): the rect of `src` a surface should display, [0,1] from the top-left, in the SAME space as the focal above. All four or all null; null = the full stored frame, which is every tile today. It rides the wire so the future re-frame editor and the native tiles can adopt it without another schema round — nothing renders it yet. 🔴 A surface that DOES honor the rect must also remap the focal into crop space (`lib/media/cropRect.ts` → `focalInCropSpace`): the focal is measured on the UNCROPPED frame, so using it raw inside a crop silently mis-centers the window.",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cropY": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "engagement": {
           "$ref": "#/definitions/PublicPortfolioTileEngagement",
           "description": "Likes, comments and \"N recreated this\" for the backing look. Always present (zeroed when the tile has no look); a caller renders a zero as NOTHING, never as a literal \"0\" — an empty grid tile is quieter than one advertising no engagement."
@@ -19853,6 +19934,10 @@
         "serviceNames",
         "focalX",
         "focalY",
+        "cropX",
+        "cropY",
+        "cropW",
+        "cropH",
         "before",
         "engagement"
       ],

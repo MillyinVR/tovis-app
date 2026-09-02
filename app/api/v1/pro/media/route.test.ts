@@ -476,6 +476,10 @@ describe('app/api/v1/pro/media/route.ts', () => {
         thumbUrl: null,
         focalX: null,
         focalY: null,
+        cropX: null,
+        cropY: null,
+        cropW: null,
+        cropH: null,
         caption: 'Portfolio upload',
         mediaType: MediaType.IMAGE,
         visibility: MediaVisibility.PUBLIC,
@@ -780,6 +784,72 @@ describe('app/api/v1/pro/media/route.ts', () => {
       expect(mocks.mediaAssetCreate).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({ focalX: null, focalY: null }),
+        }),
+      )
+    },
+  )
+
+  it('persists a supplied publish crop rect (item 2)', async () => {
+    mocks.serviceFindMany.mockResolvedValue([{ id: 'service_1' }])
+    mocks.mediaAssetCreate.mockResolvedValue(makeCreatedMedia())
+
+    const res = await POST(
+      makeJsonRequest({
+        uploadSessionId: 'us_1',
+        serviceIds: ['service_1'],
+        isFeaturedInPortfolio: true,
+        cropX: 0.25,
+        cropY: 0.1,
+        cropW: 0.5,
+        cropH: 0.4,
+      }),
+    )
+
+    expect(res.status).toBe(201)
+    expect(mocks.mediaAssetCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          cropX: 0.25,
+          cropY: 0.1,
+          cropW: 0.5,
+          cropH: 0.4,
+        }),
+      }),
+    )
+  })
+
+  it.each([
+    ['a partial rect', { cropX: 0.25, cropY: 0.1, cropW: 0.5 }],
+    ['a rect off the edge of the image', { cropX: 0.7, cropY: 0.1, cropW: 0.5, cropH: 0.4 }],
+    ['a non-numeric coordinate', { cropX: '0.25', cropY: 0.1, cropW: 0.5, cropH: 0.4 }],
+  ])(
+    'degrades %s to the full frame instead of rejecting the post',
+    async (_label, crop) => {
+      mocks.serviceFindMany.mockResolvedValue([{ id: 'service_1' }])
+      mocks.mediaAssetCreate.mockResolvedValue(makeCreatedMedia())
+
+      const res = await POST(
+        makeJsonRequest({
+          uploadSessionId: 'us_1',
+          serviceIds: ['service_1'],
+          isFeaturedInPortfolio: true,
+          ...crop,
+        }),
+      )
+
+      // Same reasoning as the focal above: a framing hint is never load-bearing
+      // at CREATE, and the bytes are already in the bucket. (The re-frame route
+      // is the opposite — there, degrading to null would WIDEN a published
+      // frame, so it 400s instead.)
+      expect(res.status).toBe(201)
+      expect(mocks.mediaAssetCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            cropX: null,
+            cropY: null,
+            cropW: null,
+            cropH: null,
+          }),
         }),
       )
     },
