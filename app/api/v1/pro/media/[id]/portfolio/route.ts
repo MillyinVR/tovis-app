@@ -81,6 +81,16 @@ export const CLIENT_AUTHORED_LOOK_MESSAGE =
  * attempt to backfill canonical pointers from the url(s).
  *
  * This keeps your app moving toward a single source of truth without a separate script.
+ *
+ * 🔴 This is the ONLY update in the codebase that writes `storageBucket`, which
+ * makes it the third way into the bucket/visibility defect — from the other
+ * direction. A legacy row with an empty bucket, a `media-public` url and
+ * `visibility = PRO_CLIENT` would have had its bucket resolved to the
+ * world-readable one while the column kept claiming private. Latent rather than
+ * live (0 of 96 production rows have an empty bucket, measured 2026-09-01), but
+ * free to close: the derived bucket is fed straight back through
+ * `resolveMediaVisibility` in the SAME statement, so the row cannot be observed
+ * in the broken state even for an instant.
  */
 async function backfillPointersIfMissing(mediaId: string, m: {
   storageBucket: string
@@ -89,12 +99,14 @@ async function backfillPointersIfMissing(mediaId: string, m: {
   thumbPath: string | null
   url: string | null
   thumbUrl: string | null
-}) {
+  isFeaturedInPortfolio: boolean
+  isEligibleForLooks: boolean
+}): Promise<string> {
   const hasPointers = Boolean(m.storageBucket && m.storagePath)
-  if (hasPointers) return
+  if (hasPointers) return m.storageBucket
 
   const url = safeUrl(m.url)
-  if (!url) return
+  if (!url) return m.storageBucket
 
   const ptrs = resolveStoragePointers({
     url,
@@ -104,7 +116,7 @@ async function backfillPointersIfMissing(mediaId: string, m: {
     thumbBucket: m.thumbBucket,
     thumbPath: m.thumbPath,
   })
-  if (!ptrs) return
+  if (!ptrs) return m.storageBucket
 
   await prisma.mediaAsset.update({
     where: { id: mediaId },
@@ -113,9 +125,22 @@ async function backfillPointersIfMissing(mediaId: string, m: {
       storagePath: ptrs.storagePath,
       thumbBucket: ptrs.thumbBucket,
       thumbPath: ptrs.thumbPath,
+      // Learning where the bytes actually live can change what visibility is
+      // legal for this row, so the two move together.
+      visibility: resolveMediaVisibility({
+        storageBucket: ptrs.storageBucket,
+        isFeaturedInPortfolio: m.isFeaturedInPortfolio,
+        isEligibleForLooks: m.isEligibleForLooks,
+      }),
     },
     select: { id: true },
   })
+
+  // 🔴 Returned, not discarded. The retract below has to resolve visibility
+  // against where the bytes turned out to be — reading the caller's stale,
+  // pre-backfill `storageBucket` would judge a legacy row on a value this
+  // function just replaced.
+  return ptrs.storageBucket
 }
 
 export async function POST(req: NextRequest, ctx: RouteContext) {
@@ -143,7 +168,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     }
 
     // Optional: move old rows toward canonical pointers
-    await backfillPointersIfMissing(mediaId, owned.media)
+    const storageBucket = await backfillPointersIfMissing(mediaId, owned.media)
 
     // Opt-in before/after pairing (default-on): an explicit body wins, otherwise
     // auto-pair with the booking's before so the portfolio tile can render the
@@ -162,7 +187,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       data: {
         isFeaturedInPortfolio: true,
         visibility: resolveMediaVisibility({
-          storageBucket: owned.media.storageBucket,
+          storageBucket,
           isFeaturedInPortfolio: true,
           isEligibleForLooks: owned.media.isEligibleForLooks,
         }),
@@ -230,7 +255,7 @@ export async function DELETE(_req: NextRequest, ctx: RouteContext) {
     if (!owned.ok) return jsonFail(owned.status, owned.error)
 
     // Optional: move old rows toward canonical pointers
-    await backfillPointersIfMissing(mediaId, owned.media)
+    const storageBucket = await backfillPointersIfMissing(mediaId, owned.media)
 
     const updated = await prisma.mediaAsset.update({
       where: { id: mediaId },
@@ -246,7 +271,7 @@ export async function DELETE(_req: NextRequest, ctx: RouteContext) {
         // still drops off every public surface, via the flags above and the
         // LookPost the reconcile below retracts to DRAFT.
         visibility: resolveMediaVisibility({
-          storageBucket: owned.media.storageBucket,
+          storageBucket,
           isFeaturedInPortfolio: false,
           isEligibleForLooks: false,
         }),

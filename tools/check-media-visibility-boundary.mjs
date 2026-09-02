@@ -93,6 +93,21 @@ const WRITE_PATTERNS = [
 // deliberately over-matches `where: { visibility: X }`; a file that filters on
 // visibility AND writes MediaAssets is exactly a file worth a human look, and
 // the allowlist above records the ones reviewed.
+//
+// 🔴 `storageBucket:` is deliberately NOT matched here, and that is a limit
+// worth stating rather than papering over. Writing the bucket breaks the same
+// invariant (resolving a legacy row's pointers can move it into the
+// world-readable bucket), but the write is textually IDENTICAL to a read being
+// forwarded — `storageBucket: ptrs.storageBucket` writes, while
+// `storageBucket: media.storageBucket` in portfolioLookSync.ts only reads. An
+// earlier revision of this guard matched both and had to either allowlist a
+// legitimate reader (masking any real write added there later) or exclude the
+// `x.field` shape, which then missed the write. Neither is honest.
+//
+// The one update in the codebase that rewrites a bucket
+// (`backfillPointersIfMissing`) is covered BEHAVIOURALLY instead, by
+// tests/integration/media-visibility-bucket-invariant.test.ts — a real
+// assertion about the row it produces, which is stronger evidence than a regex.
 const VISIBILITY_WRITE_PATTERN = /\bvisibility\s*:\s*(?!true\b|false\b)\S/
 
 const BOUNDARY_IMPORT_PATTERN =
@@ -166,6 +181,18 @@ await prisma.mediaAsset.update({
 })
 `
 
+// A MediaAsset writer that only touches the flags, alongside a forwarded
+// storageBucket READ — the shape of lib/looks/publication/portfolioLookSync.ts.
+// Must stay quiet, or a legitimate reader lands in the allowlist.
+const READ_FORWARD_SAMPLE = `
+await tx.mediaAsset.update({ where: { id }, data: { isEligibleForLooks: true } })
+const consentOk = !isUnpromotedPrivateMedia({
+  bookingId: media.bookingId,
+  storageBucket: media.storageBucket,
+  reviewId: media.reviewId,
+})
+`
+
 function selfTest() {
   const failures = []
   if (!violates(PRE_FIX_SAMPLE)) {
@@ -173,6 +200,9 @@ function selfTest() {
   }
   if (violates(FIXED_SAMPLE)) {
     failures.push('matcher fired on the fixed sample (it fails closed)')
+  }
+  if (violates(READ_FORWARD_SAMPLE)) {
+    failures.push('matcher fired on a read-and-forward (false positive)')
   }
 
   if (failures.length > 0) {

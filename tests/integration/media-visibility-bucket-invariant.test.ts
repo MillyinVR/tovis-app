@@ -244,6 +244,92 @@ describe('retracting a public-bucket asset', () => {
   })
 })
 
+describe('the pointer backfill (the only update that rewrites a bucket)', () => {
+  // 🔴 The third door, found in the self-review sweep rather than the first
+  // pass. `backfillPointersIfMissing` resolves a legacy row's storage pointers
+  // out of its old `url`, and it is the ONLY update in the codebase that writes
+  // `storageBucket`. Learning that the bytes are in `media-public` changes what
+  // visibility is legal, so the two have to move together — otherwise the
+  // backfill itself recreates the defect from the other direction.
+  //
+  // Latent, not live: 0 of 96 production rows have an empty bucket (measured
+  // 2026-09-01). Guarded here behaviourally because the write is textually
+  // identical to a read being forwarded, so the static guard cannot see it.
+  // 🔴 THE DISCRIMINATING CASE. The public-bucket test below asserts the right
+  // outcome but cannot catch a regression on its own: an empty bucket resolves
+  // to PUBLIC whether or not the resolved value is threaded through, so it stays
+  // green even with the fix reverted (verified — that is why this test exists).
+  // A legacy row pointing at media-private is what separates them:
+  //   fixed  → effective bucket 'media-private' → PRO_CLIENT
+  //   broken → stale ''                          → PUBLIC, marking a client's
+  //            private session photo public.
+  it('🔴 resolving a PRIVATE-bucket pointer must not mark it PUBLIC', async () => {
+    const path = `bookings/${TAG}_legacypriv/after/x.jpg`
+
+    const asset = await db.mediaAsset.create({
+      data: {
+        professionalId,
+        primaryServiceId: serviceId,
+        storageBucket: '',
+        storagePath: '',
+        url: `https://example.supabase.co/storage/v1/object/sign/media-private/${path}`,
+        mediaType: MediaType.IMAGE,
+        visibility: MediaVisibility.PRO_CLIENT,
+        phase: MediaPhase.AFTER,
+        uploadedByRole: Role.PRO,
+        isFeaturedInPortfolio: true,
+        services: { create: [{ serviceId }] },
+      },
+      select: { id: true },
+    })
+
+    const res = await removeFromPortfolio(
+      new Request('http://t/x', { method: 'DELETE' }) as never,
+      routeCtx(asset.id) as never,
+    )
+    expect(res.status).toBe(200)
+
+    const row = await readBack(asset.id)
+    expect(row.storageBucket).toBe('media-private')
+    expect(row.visibility).toBe(MediaVisibility.PRO_CLIENT)
+  })
+
+  it('resolving a public-bucket pointer never leaves the row PRO_CLIENT', async () => {
+    const path = `pro/${professionalId}/looks_public/${TAG}_legacy.jpg`
+
+    const asset = await db.mediaAsset.create({
+      data: {
+        professionalId,
+        primaryServiceId: serviceId,
+        // The legacy shape: no canonical pointers, only the old url.
+        storageBucket: '',
+        storagePath: '',
+        url: `https://example.supabase.co/storage/v1/object/public/media-public/${path}`,
+        mediaType: MediaType.IMAGE,
+        visibility: MediaVisibility.PRO_CLIENT,
+        phase: MediaPhase.OTHER,
+        isFeaturedInPortfolio: true,
+        services: { create: [{ serviceId }] },
+      },
+      select: { id: true },
+    })
+
+    const res = await removeFromPortfolio(
+      new Request('http://t/x', { method: 'DELETE' }) as never,
+      routeCtx(asset.id) as never,
+    )
+    expect(res.status).toBe(200)
+
+    const row = await readBack(asset.id)
+
+    // The backfill learned the bucket…
+    expect(row.storageBucket).toBe('media-public')
+    // …and the visibility was judged against THAT, not the stale empty string
+    // the handler had loaded before the backfill ran.
+    expect(row.visibility).toBe(MediaVisibility.PUBLIC)
+  })
+})
+
 describe('private-bucket media is untouched by the change', () => {
   it('a retracted private session photo is still PRO_CLIENT', async () => {
     const id = await createPrivateSessionAsset('priv')

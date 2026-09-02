@@ -498,6 +498,10 @@ describe('app/api/v1/pro/media/[id]/portfolio/route.ts', () => {
         thumbPath: null,
       })
 
+      // 🔴 `visibility` moves in the SAME statement as the bucket. Resolving a
+      // legacy row's pointers can land it in the world-readable bucket, so
+      // writing the pointer without re-judging the column would recreate the
+      // media-public + PRO_CLIENT defect from the other direction.
       expect(mocks.mediaAssetUpdate).toHaveBeenNthCalledWith(1, {
         where: { id: 'media_1' },
         data: {
@@ -505,6 +509,7 @@ describe('app/api/v1/pro/media/[id]/portfolio/route.ts', () => {
           storagePath: 'backfilled/media_1.jpg',
           thumbBucket: null,
           thumbPath: null,
+          visibility: MediaVisibility.PUBLIC,
         },
         select: { id: true },
       })
