@@ -13,6 +13,12 @@ import OwnerMediaMenu from '@/app/_components/media/OwnerMediaMenu'
 import { UI_SIZES } from '@/app/(main)/ui/layoutConstants'
 import { getCurrentUser } from '@/lib/currentUser'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
+import { resolveCropRect } from '@/lib/media/cropRect'
+import {
+  cropConsentBound,
+  isCropUndoWindowOpen,
+} from '@/lib/media/cropUndoWindow'
+import { resolveFocalPoint } from '@/lib/media/focalPoint'
 import { loadServiceTagOptions } from '@/lib/media/serviceTagOptions'
 import { pickString } from '@/lib/pick'
 import { prisma } from '@/lib/prisma'
@@ -35,6 +41,23 @@ const mediaPageSelect = {
   isEligibleForLooks: true,
   isFeaturedInPortfolio: true,
   beforeAssetId: true,
+  // Re-framing (capture chain item 4). The rect as stored, plus everything
+  // `cropConsentBound` needs to say how far a re-frame may reach — the undo
+  // window's own columns and the view totals that close it.
+  cropX: true,
+  cropY: true,
+  cropW: true,
+  cropH: true,
+  cropUndoBoundX: true,
+  cropUndoBoundY: true,
+  cropUndoBoundW: true,
+  cropUndoBoundH: true,
+  cropUndoExpiresAt: true,
+  cropUndoViewBaseline: true,
+  focalX: true,
+  focalY: true,
+  lookPostPrimaryFor: { select: { viewCount: true } },
+  lookPostAssets: { select: { lookPost: { select: { viewCount: true } } } },
   storageBucket: true,
   storagePath: true,
   thumbBucket: true,
@@ -134,6 +157,39 @@ export default async function MediaDetailPage({ params }: PageProps) {
 
   const backHref = `/professionals/${media.professionalId}`
   const isVideo = media.mediaType === MediaType.VIDEO
+
+  // ── Re-framing (item 4) ────────────────────────────────────────────────────
+  //
+  // The bound is computed HERE, from the same helper the write uses, so the
+  // editor's handles stop exactly where PUT .../crop would refuse. It is still
+  // only a courtesy: the route re-reads the row and re-checks inside the write,
+  // and this page's answer can be stale by the time the pro presses save.
+  const cropNow = new Date()
+  const cropViewCountTotal =
+    media.lookPostPrimaryFor.reduce((n, p) => n + p.viewCount, 0) +
+    media.lookPostAssets.reduce((n, a) => n + a.lookPost.viewCount, 0)
+  const cropUndoOpen = isCropUndoWindowOpen(media, {
+    now: cropNow,
+    viewCountTotal: cropViewCountTotal,
+  })
+  const reframe =
+    isOwner && !isVideo
+      ? {
+          src: renderUrl,
+          crop: resolveCropRect(media.cropX, media.cropY, media.cropW, media.cropH),
+          bound: cropConsentBound(media, media, {
+            now: cropNow,
+            viewCountTotal: cropViewCountTotal,
+          }),
+          // The focal is a POINT; the planner anchors on a box, so it is widened
+          // to a zero-size one centred on it rather than inventing a subject size
+          // this row does not carry.
+          subject: subjectBoxFromFocal(media.focalX, media.focalY),
+          undoNotice: cropUndoOpen
+            ? 'You can still widen this back for a day, or until someone views it. After that you can only tighten it.'
+            : null,
+        }
+      : undefined
   const tagNames = pickServiceTagNames(media.services)
 
   const [serviceOptions, ownerProfile] = isOwner
@@ -179,6 +235,7 @@ export default async function MediaDetailPage({ params }: PageProps) {
             serviceOptions={serviceOptions}
             isVideo={isVideo}
             isCover={isCover}
+            reframe={reframe}
             initial={{
               caption: media.caption ?? null,
               visibility: media.visibility,
@@ -256,4 +313,19 @@ export default async function MediaDetailPage({ params }: PageProps) {
       }
     />
   )
+}
+
+/**
+ * The planner's `subject` is a normalized BOX; a MediaAsset carries a focal
+ * POINT. Widening it to a zero-size box centred on the point keeps the anchor
+ * maths identical (the planner only ever reads the box's centre) without
+ * inventing a subject size the row does not know.
+ */
+function subjectBoxFromFocal(
+  focalX: number | null,
+  focalY: number | null,
+): { x: number; y: number; width: number; height: number } | null {
+  const focal = resolveFocalPoint(focalX, focalY)
+  if (!focal) return null
+  return { x: focal.x, y: focal.y, width: 0, height: 0 }
 }

@@ -94,6 +94,7 @@ vi.mock('@/app/_components/media/OwnerMediaMenu', () => ({
     mediaId,
     serviceOptions,
     initial,
+    reframe,
   }: {
     mediaId: string
     serviceOptions: Array<{ id: string; name: string }>
@@ -103,6 +104,12 @@ vi.mock('@/app/_components/media/OwnerMediaMenu', () => ({
       isEligibleForLooks: boolean
       isFeaturedInPortfolio: boolean
       serviceIds: string[]
+    }
+    reframe?: {
+      src: string
+      crop: { x: number; y: number; w: number; h: number } | null
+      bound: { x: number; y: number; w: number; h: number }
+      undoNotice?: string | null
     }
   }) => (
     <div
@@ -114,6 +121,13 @@ vi.mock('@/app/_components/media/OwnerMediaMenu', () => ({
       data-eligible={String(initial.isEligibleForLooks)}
       data-featured={String(initial.isFeaturedInPortfolio)}
       data-service-ids={initial.serviceIds.join(',')}
+      data-reframe={reframe ? 'yes' : 'no'}
+      data-reframe-bound={
+        reframe
+          ? `${reframe.bound.x},${reframe.bound.y},${reframe.bound.w},${reframe.bound.h}`
+          : ''
+      }
+      data-reframe-undo={reframe?.undoNotice ? 'open' : 'shut'}
     >
       OwnerMediaMenu
     </div>
@@ -161,6 +175,24 @@ function makeMedia(args?: {
     professionalId: args?.professionalId ?? 'pro_1',
     isEligibleForLooks: true,
     isFeaturedInPortfolio: true,
+    // Re-framing (item 4). Present because the page SELECTS them: the page
+    // reduces the two look relations to a view total, and leaving them off the
+    // fixture would only prove the fixture is stale. Defaults are "never
+    // re-framed, no undo window, no views" — the state of every legacy row.
+    cropX: null,
+    cropY: null,
+    cropW: null,
+    cropH: null,
+    cropUndoBoundX: null,
+    cropUndoBoundY: null,
+    cropUndoBoundW: null,
+    cropUndoBoundH: null,
+    cropUndoExpiresAt: null,
+    cropUndoViewBaseline: null,
+    focalX: null,
+    focalY: null,
+    lookPostPrimaryFor: [],
+    lookPostAssets: [],
     storageBucket: 'media-bucket',
     storagePath: 'pros/pro_1/media_1.jpg',
     thumbBucket: 'thumb-bucket',
@@ -285,6 +317,110 @@ describe('app/media/[id]/page', () => {
     ).not.toBeInTheDocument()
 
     expect(mocks.prisma.service.findMany).not.toHaveBeenCalled()
+  })
+
+  // ── Re-framing (item 4) ────────────────────────────────────────────────────
+
+  it('offers the owner a re-frame bounded by the whole photo when nothing is cropped', async () => {
+    mockGetCurrentUser.mockResolvedValue(
+      makeOwnerViewer({ professionalProfileId: 'pro_1' }),
+    )
+    mocks.prisma.mediaAsset.findUnique.mockResolvedValue(
+      makeMedia({ professionalId: 'pro_1' }),
+    )
+    mocks.prisma.service.findMany.mockResolvedValue([])
+
+    await renderPage()
+
+    const menu = screen.getByTestId('owner-media-menu')
+    expect(menu).toHaveAttribute('data-reframe', 'yes')
+    // A row that has never been re-framed is bounded by the frame the client
+    // already consented to — the whole photo.
+    expect(menu).toHaveAttribute('data-reframe-bound', '0,0,1,1')
+    expect(menu).toHaveAttribute('data-reframe-undo', 'shut')
+  })
+
+  it('bounds the re-frame by the STORED rect once the undo window has shut', async () => {
+    mockGetCurrentUser.mockResolvedValue(
+      makeOwnerViewer({ professionalProfileId: 'pro_1' }),
+    )
+    mocks.prisma.mediaAsset.findUnique.mockResolvedValue({
+      ...makeMedia({ professionalId: 'pro_1' }),
+      cropX: 0.2,
+      cropY: 0.2,
+      cropW: 0.6,
+      cropH: 0.6,
+      cropUndoBoundX: 0,
+      cropUndoBoundY: 0,
+      cropUndoBoundW: 1,
+      cropUndoBoundH: 1,
+      cropUndoExpiresAt: new Date(Date.now() - 1000),
+      cropUndoViewBaseline: 0,
+    })
+    mocks.prisma.service.findMany.mockResolvedValue([])
+
+    await renderPage()
+
+    const menu = screen.getByTestId('owner-media-menu')
+    expect(menu).toHaveAttribute('data-reframe-bound', '0.2,0.2,0.6,0.6')
+    expect(menu).toHaveAttribute('data-reframe-undo', 'shut')
+  })
+
+  it('widens the bound back while the undo window is open, and says so', async () => {
+    mockGetCurrentUser.mockResolvedValue(
+      makeOwnerViewer({ professionalProfileId: 'pro_1' }),
+    )
+    mocks.prisma.mediaAsset.findUnique.mockResolvedValue({
+      ...makeMedia({ professionalId: 'pro_1' }),
+      cropX: 0.4,
+      cropY: 0.4,
+      cropW: 0.2,
+      cropH: 0.2,
+      cropUndoBoundX: 0.1,
+      cropUndoBoundY: 0.1,
+      cropUndoBoundW: 0.8,
+      cropUndoBoundH: 0.8,
+      cropUndoExpiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      cropUndoViewBaseline: 0,
+    })
+    mocks.prisma.service.findMany.mockResolvedValue([])
+
+    await renderPage()
+
+    const menu = screen.getByTestId('owner-media-menu')
+    expect(menu).toHaveAttribute('data-reframe-bound', '0.1,0.1,0.8,0.8')
+    expect(menu).toHaveAttribute('data-reframe-undo', 'open')
+  })
+
+  it('shuts the window when a look the asset merely appears in has been viewed', async () => {
+    // The view total sums BOTH relations — the asset's own looks and the ones it
+    // is only a member of. A page that reduced just one would leave the window
+    // open after the photo had been seen.
+    mockGetCurrentUser.mockResolvedValue(
+      makeOwnerViewer({ professionalProfileId: 'pro_1' }),
+    )
+    mocks.prisma.mediaAsset.findUnique.mockResolvedValue({
+      ...makeMedia({ professionalId: 'pro_1' }),
+      cropX: 0.4,
+      cropY: 0.4,
+      cropW: 0.2,
+      cropH: 0.2,
+      cropUndoBoundX: 0.1,
+      cropUndoBoundY: 0.1,
+      cropUndoBoundW: 0.8,
+      cropUndoBoundH: 0.8,
+      cropUndoExpiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      cropUndoViewBaseline: 2,
+      lookPostPrimaryFor: [{ viewCount: 2 }],
+      lookPostAssets: [{ lookPost: { viewCount: 1 } }],
+    })
+    mocks.prisma.service.findMany.mockResolvedValue([])
+
+    await renderPage()
+
+    const menu = screen.getByTestId('owner-media-menu')
+    expect(menu).toHaveAttribute('data-reframe-bound', '0.4,0.4,0.2,0.2')
+    expect(menu).toHaveAttribute('data-reframe-undo', 'shut')
   })
 
   it('allows the owner to preview their own pending public media', async () => {
