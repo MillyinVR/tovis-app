@@ -1,0 +1,13 @@
+-- True retraction: records that a MediaAsset's bytes were WITHDRAWN from the
+-- world-readable bucket (copied into media-private, public original deleted)
+-- because the pro took their own upload down.
+--
+-- lib/media/publicShareGuard.ts reads "lives in media-private" as one of its two
+-- client-linkage signals. Retraction deliberately breaks that correlation by
+-- moving a pro's own photograph there, so without this column a retracted asset
+-- would be indistinguishable from a client's session photo and could never be
+-- re-published by the pro who owns it.
+--
+-- Additive and nullable: NULL means "not retracted", which is the correct
+-- reading for every pre-existing row.
+ALTER TABLE "MediaAsset" ADD COLUMN "retractedFromPublicAt" TIMESTAMP(3);

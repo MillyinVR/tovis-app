@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => {
     mediaAssetUpdate: vi.fn(),
     loadPrimaryBeforeAssetId: vi.fn(),
     reconcilePortfolioLookForMediaAsset: vi.fn(),
+    attemptRetraction: vi.fn(),
 
     safeUrl: vi.fn((value: unknown) =>
       typeof value === 'string' && value.trim() ? value.trim() : null,
@@ -44,6 +45,14 @@ vi.mock('@/app/api/_utils', () => ({
     const trimmed = value.trim()
     return trimmed.length > 0 ? trimmed : null
   },
+}))
+
+// True retraction has its own suite (lib/media/retractToPrivateBucket.test.ts);
+// here we pin only that the route DELEGATES to it.
+vi.mock('@/lib/media/retractToPrivateBucket', () => ({
+  RETRACTED_VISIBILITY: 'PRO_CLIENT',
+  RETRACTION_SELECT: { id: true },
+  attemptRetraction: mocks.attemptRetraction,
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -185,6 +194,10 @@ function makeUpdatedMedia(
 describe('app/api/v1/pro/media/[id]/portfolio/route.ts', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+
+    mocks.attemptRetraction.mockResolvedValue({
+      status: 'STILL_SHOWN',
+    })
 
     mocks.requirePro.mockResolvedValue({
       ok: true,
@@ -946,6 +959,78 @@ describe('app/api/v1/pro/media/[id]/portfolio/route.ts', () => {
       })
 
       expect(res.status).toBe(200)
+    })
+
+
+    it('takes the BYTES down, not just the label', async () => {
+      // 🔴 The point of true retraction. Clearing the flags removes the photo
+      // from every product surface; only this removes it from the internet.
+      mocks.mediaAssetFindUnique.mockResolvedValueOnce(
+        makeOwnedMedia({
+          isFeaturedInPortfolio: true,
+          isEligibleForLooks: false,
+          visibility: MediaVisibility.PUBLIC,
+        }),
+      )
+      mocks.mediaAssetUpdate.mockResolvedValueOnce(
+        makeUpdatedMedia({
+          isFeaturedInPortfolio: false,
+          isEligibleForLooks: false,
+          visibility: MediaVisibility.PUBLIC,
+        }),
+      )
+      mocks.attemptRetraction.mockResolvedValueOnce({
+        status: 'RETRACTED',
+        storageBucket: 'media-private',
+        storagePath: 'pro/pro_1/retracted/2026-09/moved.jpg',
+        thumbBucket: null,
+        thumbPath: null,
+        orphanedPublicObjects: [],
+      })
+
+      const res = await DELETE(makeRequest('DELETE'), makeCtx())
+
+      // Called with the row the route RE-READ after writing the flags — the
+      // decision to delete bytes is made against committed state.
+      expect(mocks.mediaAssetFindUnique).toHaveBeenCalledWith({
+        where: { id: 'media_1' },
+        select: { id: true },
+      })
+      expect(mocks.attemptRetraction).toHaveBeenCalled()
+
+      // The response must describe where the bytes are NOW — rendering the old
+      // pointers would sign a path that no longer exists.
+      const rendered = mocks.renderMediaUrls.mock.calls.at(-1)?.[0]
+      expect(rendered).toMatchObject({
+        storageBucket: 'media-private',
+        storagePath: 'pro/pro_1/retracted/2026-09/moved.jpg',
+        visibility: 'PRO_CLIENT',
+        url: null,
+        thumbUrl: null,
+      })
+
+      expect(res.status).toBe(200)
+    })
+
+    it('retracts AFTER the look is reconciled, never before', async () => {
+      // Ordering: the LookPost is retracted to DRAFT first, and the bytes are
+      // withdrawn only once nothing shows the asset.
+      const order: string[] = []
+      mocks.reconcilePortfolioLookForMediaAsset.mockImplementationOnce(() => {
+        order.push('reconcile')
+        return Promise.resolve(undefined)
+      })
+      mocks.attemptRetraction.mockImplementationOnce(() => {
+        order.push('retract')
+        return Promise.resolve({ status: 'STILL_SHOWN' })
+      })
+
+      mocks.mediaAssetFindUnique.mockResolvedValueOnce(makeOwnedMedia({}))
+      mocks.mediaAssetUpdate.mockResolvedValueOnce(makeUpdatedMedia({}))
+
+      await DELETE(makeRequest('DELETE'), makeCtx())
+
+      expect(order).toEqual(['reconcile', 'retract'])
     })
 
     it('returns 500 and logs a safe error when update throws', async () => {

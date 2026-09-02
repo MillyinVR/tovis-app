@@ -5288,6 +5288,23 @@ model MediaAsset {
   thumbBucket   String?
   thumbPath     String?
 
+  // Set when the bytes were WITHDRAWN from the world-readable bucket by
+  // `retractMediaAssetToPrivate` (lib/media/retractToPrivateBucket.ts) — the pro
+  // took their own public upload down, so the object was copied into
+  // media-private and the public original deleted.
+  //
+  // 🔴 Why this column has to exist. `lib/media/publicShareGuard.ts` reads
+  // "lives in media-private" as one of its two CLIENT-LINKAGE signals. Without a
+  // way to tell the two apart, a pro's own retracted photograph would be
+  // indistinguishable from a client's session photo, and `canProSharePublicly()`
+  // would refuse it forever — un-featuring once would permanently brick the pro's
+  // ability to re-publish their own work. This records WHY the bytes are private,
+  // which is the fact the guard actually needs.
+  //
+  // It is never an authorization by itself: `bookingId` still holds back anything
+  // shot during someone's appointment, independently of this column.
+  retractedFromPublicAt DateTime?
+
   // One MediaAsset per stored object. Prevents duplicate/orphaned rows pointing
   // at the same upload (e.g. a retried attach). Upload pointers are minted
   // server-side with timestamped/random paths, so legitimate rows never collide.
