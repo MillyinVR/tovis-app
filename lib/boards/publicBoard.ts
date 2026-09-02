@@ -125,6 +125,7 @@ export async function loadPublicBoard(
       const lookPost = item.lookPost
       const { renderUrl, renderThumbUrl } = await renderMediaUrls(
         lookPost.primaryMediaAsset,
+        { variant: 'tile' },
       )
       return {
         id: lookPost.id,

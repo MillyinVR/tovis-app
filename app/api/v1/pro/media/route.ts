@@ -528,6 +528,9 @@ export async function GET() {
         url: m.url,
         thumbUrl: m.thumbUrl,
       })),
+      // 60 tiles in one grid. 🔴 `tile`, never `feed`: at feed width this one
+      // response is ~17 MB of photographs.
+      { variant: 'tile' },
     )
 
     const items = media.map(

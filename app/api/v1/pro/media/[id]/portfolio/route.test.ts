@@ -418,7 +418,10 @@ describe('app/api/v1/pro/media/[id]/portfolio/route.ts', () => {
         mediaAssetId: 'media_1',
       })
 
-      expect(mocks.renderMediaUrls).toHaveBeenCalledWith(updated)
+      // `tile` — this asset goes straight back into the pro's media GRID.
+      expect(mocks.renderMediaUrls).toHaveBeenCalledWith(updated, {
+        variant: 'tile',
+      })
 
       expect(res.status).toBe(200)
       await expect(res.json()).resolves.toEqual({
@@ -837,7 +840,10 @@ describe('app/api/v1/pro/media/[id]/portfolio/route.ts', () => {
         mediaAssetId: 'media_1',
       })
 
-      expect(mocks.renderMediaUrls).toHaveBeenCalledWith(updated)
+      // `tile` — this asset goes straight back into the pro's media GRID.
+      expect(mocks.renderMediaUrls).toHaveBeenCalledWith(updated, {
+        variant: 'tile',
+      })
 
       expect(res.status).toBe(200)
       await expect(res.json()).resolves.toEqual({

@@ -210,3 +210,99 @@ describe('LookMedia — the feed frame', () => {
     expect(px(windowBox, 'left')).not.toBeCloseTo(-354.45, 4)
   })
 })
+
+describe('LookMedia — what it spends bandwidth on', () => {
+  // 🔴 The regression this change exists to fix. LookMedia used to read
+  // `item.renderThumbUrl` / `item.renderUrl`, two fields `LooksFeedItemDto` has
+  // never carried — the server maps its rendered URLs onto `url`/`thumbUrl`
+  // before they go over the wire. Both were always undefined, so every slide
+  // fell through to `item.url`: the 3024×4032, ~4.5 MB stored original.
+  it('draws the downscaled thumb, never the stored original', () => {
+    const { container } = render(<LookMedia item={item()} isActive />)
+    const { all } = images(container)
+
+    expect(all.length).toBeGreaterThan(0)
+    for (const img of all) {
+      expect(img.getAttribute('src')).toBe('https://cdn.example.com/look-thumb.jpg')
+    }
+  })
+
+  it('falls back to the full URL when the asset has no thumb', () => {
+    const { container } = render(<LookMedia item={item({ thumbUrl: null })} isActive />)
+    const { photo } = images(container)
+
+    expect(photo?.getAttribute('src')).toBe('https://cdn.example.com/look.jpg')
+  })
+
+  // A slide two away from the one on screen must not be racing it for
+  // bandwidth. Ten full-screen photographs at once is why slide 0 took 3.4 s.
+  it('a deferred slide fetches nothing at all', () => {
+    const { container } = render(
+      <LookMedia item={item()} isActive={false} preload="defer" />,
+    )
+
+    expect(images(container).all).toHaveLength(0)
+    expect(container.querySelector('video')).toBeNull()
+  })
+
+  it('a deferred slide still fills its slot, so the snap geometry cannot move', () => {
+    const { container } = render(
+      <LookMedia item={item()} isActive={false} preload="defer" />,
+    )
+
+    const root = container.firstElementChild as HTMLElement
+    expect(root.className).toContain('absolute')
+    expect(root.className).toContain('inset-0')
+  })
+
+  it('a nearby slide still renders its media', () => {
+    const { container } = render(
+      <LookMedia item={item()} isActive={false} preload="lazy" />,
+    )
+
+    expect(images(container).all.length).toBeGreaterThan(0)
+  })
+
+  // next/image renders `priority` by OMITTING loading="lazy" — the img then
+  // takes the browser's eager default and is fetched straight away, instead of
+  // waiting for the lazy-loading heuristic to decide it is close enough.
+  it('drops lazy-loading on an eager slide and keeps it on a distant one', () => {
+    const eager = render(<LookMedia item={item()} isActive preload="eager" />)
+    expect(images(eager.container).photo?.getAttribute('loading')).toBeNull()
+
+    const lazy = render(<LookMedia item={item()} isActive={false} preload="lazy" />)
+    expect(images(lazy.container).photo?.getAttribute('loading')).toBe('lazy')
+  })
+
+  // The backdrop is decoration; it must never outrank the photograph. It is the
+  // same URL, so on the active slide it costs no second request.
+  it('never prioritises the blurred backdrop', () => {
+    const { container } = render(<LookMedia item={item()} isActive preload="eager" />)
+    const { backdrop, photo } = images(container)
+
+    expect(backdrop?.getAttribute('loading')).toBe('lazy')
+    expect(backdrop?.getAttribute('src')).toBe(photo?.getAttribute('src'))
+  })
+
+  // 🔴 The derived thumb is a Supabase RENDER-ENDPOINT url, and Supabase
+  // documents image transformations as Pro-plan-and-above while this project is
+  // on Free. It serves today. If it ever stops, this is the difference between
+  // a slow feed and a blank one.
+  it('falls back to the stored original if the rendered thumb fails to load', async () => {
+    const { container } = render(<LookMedia item={item()} isActive />)
+
+    const photo = images(container).photo as HTMLImageElement
+    expect(photo.getAttribute('src')).toBe('https://cdn.example.com/look-thumb.jpg')
+
+    await act(async () => {
+      fireEvent.error(photo)
+    })
+
+    const after = images(container)
+    expect(after.photo?.getAttribute('src')).toBe('https://cdn.example.com/look.jpg')
+    // The blurred backdrop is the same photograph, so it falls back with it
+    // rather than being left pointing at a URL that just failed.
+    expect(after.backdrop?.getAttribute('src')).toBe('https://cdn.example.com/look.jpg')
+  })
+})
+

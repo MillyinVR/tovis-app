@@ -11,6 +11,7 @@ import { resolveLookConsultEntry } from '@/lib/consult/lookBookEntry.client'
 import AvailabilityDrawer from '../../booking/AvailabilityDrawer'
 import LooksTopBar from './LooksTopBar'
 import LookSlide from './LookSlide'
+import type { SlidePreload } from './LookMedia'
 import CommentsDrawer from './CommentsDrawer'
 import RightActionRail from './RightActionRail'
 import { reportLookPost, type LookReportResult } from './reportLookPost'
@@ -37,6 +38,24 @@ const FIXED_TAB_SLUGS = new Set([
   FOLLOWING_TAB.slug,
   SPOTLIGHT_TAB.slug,
 ])
+
+/**
+ * How the feed spends bandwidth, by distance from the slide you are looking at.
+ *
+ * Measured on production over a throttled 4 Mbps connection, the feed spent
+ * 40 s waiting on photographs and two of five slides never arrived inside 15 s
+ * — because every mounted slide was fetching a full-screen image at once. The
+ * neighbours are eager because a swipe should land on a picture that is already
+ * there; everything past them waits until it is close.
+ */
+const EAGER_SLIDE_DISTANCE = 1
+const LOADED_SLIDE_DISTANCE = 2
+
+function slidePreload(distance: number): SlidePreload {
+  if (distance <= EAGER_SLIDE_DISTANCE) return 'eager'
+  if (distance <= LOADED_SLIDE_DISTANCE) return 'lazy'
+  return 'defer'
+}
 
 const FEED_LIMIT = 24
 const FEED_CACHE_TTL_MS = 15_000
@@ -969,6 +988,7 @@ export default function LooksFeed() {
             ) : (
               items.map((item, idx) => {
                 const isActive = idx === activeIndex
+                const preload = slidePreload(Math.abs(idx - activeIndex))
 
                 const rightRail = (
               <RightActionRail
@@ -1016,6 +1036,7 @@ export default function LooksFeed() {
                     index={idx}
                     item={item}
                     isActive={isActive}
+                    preload={preload}
                     rightRailBottom={OVERLAY_BOTTOM}
                     rightRail={rightRail}
                     onDoubleClickLike={() => handleDoubleClickLikeOnly(item.id)}

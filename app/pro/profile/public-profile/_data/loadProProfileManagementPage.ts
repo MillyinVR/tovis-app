@@ -334,14 +334,17 @@ async function mapReviewForUi(
 async function mapReviewMediaForUi(
   media: ReviewMediaRow,
 ): Promise<ProProfileManagementReviewMedia | null> {
-  const rendered = await renderMediaUrls({
-    storageBucket: media.storageBucket,
-    storagePath: media.storagePath,
-    thumbBucket: media.thumbBucket,
-    thumbPath: media.thumbPath,
-    url: media.url,
-    thumbUrl: media.thumbUrl,
-  })
+  const rendered = await renderMediaUrls(
+    {
+      storageBucket: media.storageBucket,
+      storagePath: media.storagePath,
+      thumbBucket: media.thumbBucket,
+      thumbPath: media.thumbPath,
+      url: media.url,
+      thumbUrl: media.thumbUrl,
+    },
+    { variant: 'tile' },
+  )
 
   const url = pickString(rendered.renderUrl)
   if (!url) return null
@@ -350,7 +353,7 @@ async function mapReviewMediaForUi(
   // public + portfolio mappers).
   const before =
     media.mediaType === MediaType.IMAGE
-      ? await mapPairedBeforeToDto(media.beforeAsset)
+      ? await mapPairedBeforeToDto(media.beforeAsset, 'tile')
       : null
 
   return {

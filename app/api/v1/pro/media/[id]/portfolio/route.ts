@@ -191,7 +191,12 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       mediaAssetId: mediaId,
     })
 
-    const { renderUrl, renderThumbUrl } = await renderMediaUrls(updated)
+    // `tile`, matching the grid this asset is being handed back to (the GET on
+    // /api/v1/pro/media). Without it, featuring a photo would swap its tile from
+    // a 512px render to the multi-megabyte stored original.
+    const { renderUrl, renderThumbUrl } = await renderMediaUrls(updated, {
+      variant: 'tile',
+    })
 
     return jsonOk(
       {
@@ -262,7 +267,12 @@ export async function DELETE(_req: NextRequest, ctx: RouteContext) {
       mediaAssetId: mediaId,
     })
 
-    const { renderUrl, renderThumbUrl } = await renderMediaUrls(updated)
+    // `tile`, matching the grid this asset is being handed back to (the GET on
+    // /api/v1/pro/media). Without it, featuring a photo would swap its tile from
+    // a 512px render to the multi-megabyte stored original.
+    const { renderUrl, renderThumbUrl } = await renderMediaUrls(updated, {
+      variant: 'tile',
+    })
 
     return jsonOk(
       {

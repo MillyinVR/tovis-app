@@ -277,10 +277,13 @@ async function loadPublicClientProfileWhere(
   const boardTileAssets = client.boards.flatMap((board) =>
     board.items.map((item) => item.lookPost.primaryMediaAsset),
   )
-  const rendered = await renderMediaUrlsBatch([
-    ...client.authoredLooks.map((row) => row.primaryMediaAsset),
-    ...boardTileAssets,
-  ])
+  const rendered = await renderMediaUrlsBatch(
+    [
+      ...client.authoredLooks.map((row) => row.primaryMediaAsset),
+      ...boardTileAssets,
+    ],
+    { variant: 'tile' },
+  )
   const lookUrls = rendered.slice(0, client.authoredLooks.length)
   const boardUrls = rendered.slice(client.authoredLooks.length)
 

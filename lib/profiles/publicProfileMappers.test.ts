@@ -149,7 +149,7 @@ describe('mapPublicProfileHeaderToDto clientExport', () => {
 
 describe('mapPairedBeforeToDto', () => {
   it('renders an image before to thumb + full URLs', async () => {
-    await expect(mapPairedBeforeToDto(beforeImage)).resolves.toEqual({
+    await expect(mapPairedBeforeToDto(beforeImage, 'tile')).resolves.toEqual({
       id: 'before_1',
       thumbUrl: 'https://cdn.example.com/before_1_thumb.jpg',
       fullUrl: 'https://cdn.example.com/before_1.jpg',
@@ -157,12 +157,12 @@ describe('mapPairedBeforeToDto', () => {
   })
 
   it('returns null for no pairing', async () => {
-    await expect(mapPairedBeforeToDto(null)).resolves.toBeNull()
+    await expect(mapPairedBeforeToDto(null, 'tile')).resolves.toBeNull()
   })
 
   it('returns null when the counterpart is a video', async () => {
     await expect(
-      mapPairedBeforeToDto({ ...beforeImage, mediaType: MediaType.VIDEO }),
+      mapPairedBeforeToDto({ ...beforeImage, mediaType: MediaType.VIDEO }, 'tile'),
     ).resolves.toBeNull()
   })
 })

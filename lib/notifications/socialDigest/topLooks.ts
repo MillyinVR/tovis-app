@@ -79,7 +79,9 @@ export async function loadSocialDigestTopLooks(
   const looks = await Promise.all(
     rows.map(async (row) => {
       const media = row.primaryMediaAsset
-      const rendered = media ? await renderMediaUrls(media) : null
+      const rendered = media
+        ? await renderMediaUrls(media, { variant: 'tile' })
+        : null
 
       const topLook: SocialDigestTopLook = {
         id: row.id,

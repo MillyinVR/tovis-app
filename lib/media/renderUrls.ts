@@ -1,6 +1,11 @@
 import 'server-only'
 
 import { safeUrl } from '@/lib/media'
+import {
+  publicObjectUrl,
+  transformedImageUrl,
+  type ImageVariant,
+} from '@/lib/media/imageTransform'
 import { BUCKETS } from '@/lib/storageBuckets'
 import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
 
@@ -22,21 +27,35 @@ function getSupabaseUrl(): string | null {
   return url ? url.replace(/\/+$/, '') : null
 }
 
-function encodeStoragePath(path: string): string {
-  return path
-    .split('/')
-    .map((segment) => encodeURIComponent(segment))
-    .join('/')
-}
-
 function publicUrl(bucket: string, path: string): string | null {
   if (!isPublicBucket(bucket)) return null
 
-  const baseUrl = getSupabaseUrl()
-  if (!baseUrl) return null
+  return safeUrl(publicObjectUrl(getSupabaseUrl() ?? '', bucket, path))
+}
+
+/**
+ * The derived thumbnail for a public object, or `null`.
+ *
+ * Only ever consulted when the asset has **no stored thumb** — a real
+ * `thumbBucket`/`thumbPath` (or a legacy `thumbUrl`) always wins, so
+ * pre-generating thumbs later is a pure upgrade that needs no change here.
+ * Today that branch is the only one that runs: `thumbUrl` and `thumbPath` are
+ * null on every row in the database.
+ */
+function derivedThumbUrl(
+  bucket: string,
+  path: string,
+  variant: ImageVariant | undefined,
+): string | null {
+  if (!variant) return null
 
   return safeUrl(
-    `${baseUrl}/storage/v1/object/public/${encodeURIComponent(bucket)}/${encodeStoragePath(path)}`,
+    transformedImageUrl({
+      baseUrl: getSupabaseUrl(),
+      bucket,
+      path,
+      variant,
+    }),
   )
 }
 
@@ -70,6 +89,19 @@ export type RenderedMediaUrls = {
   renderThumbUrl: string | null
 }
 
+export type RenderMediaUrlsOptions = {
+  /**
+   * Render a downscaled `renderThumbUrl` on the fly for public objects that
+   * have no stored thumb — which is every asset in the database today.
+   *
+   * ⚠️ Choose it for the surface being rendered (`feed` for a full-bleed slide,
+   * `tile` for a grid cell) rather than defaulting: a feed-sized tile on a
+   * 60-cell grid is 17 MB of photographs again. Omitting it entirely keeps the
+   * pre-existing behaviour — the caller gets the stored thumb or nothing.
+   */
+  variant?: ImageVariant
+}
+
 function normalizePointer(value: string | null | undefined): string {
   return typeof value === 'string' ? value.trim() : ''
 }
@@ -85,6 +117,7 @@ function normalizePointer(value: string | null | undefined): string {
  */
 export async function renderMediaUrlsBatch(
   items: readonly MediaPointers[],
+  options: RenderMediaUrlsOptions = {},
 ): Promise<RenderedMediaUrls[]> {
   // Collect every private (bucket, path) that needs signing, deduped per bucket.
   const privatePathsByBucket = new Map<string, Set<string>>()
@@ -137,21 +170,28 @@ export async function renderMediaUrlsBatch(
     return safeUrl(fallback)
   }
 
-  return items.map((m) => ({
-    renderUrl: resolve(
-      normalizePointer(m.storageBucket),
-      normalizePointer(m.storagePath),
-      m.url,
-    ),
-    renderThumbUrl: resolve(
+  return items.map((m) => {
+    const bucket = normalizePointer(m.storageBucket)
+    const path = normalizePointer(m.storagePath)
+
+    const storedThumb = resolve(
       normalizePointer(m.thumbBucket),
       normalizePointer(m.thumbPath),
       m.thumbUrl,
-    ),
-  }))
+    )
+
+    return {
+      renderUrl: resolve(bucket, path, m.url),
+      renderThumbUrl:
+        storedThumb ?? derivedThumbUrl(bucket, path, options.variant),
+    }
+  })
 }
 
-export async function renderMediaUrls(m: MediaPointers) {
+export async function renderMediaUrls(
+  m: MediaPointers,
+  options: RenderMediaUrlsOptions = {},
+) {
   const bucket =
     typeof m.storageBucket === 'string' ? m.storageBucket.trim() : ''
   const path = typeof m.storagePath === 'string' ? m.storagePath.trim() : ''
@@ -183,8 +223,11 @@ export async function renderMediaUrls(m: MediaPointers) {
       ? null
       : safeUrl(m.thumbUrl)
 
+  const storedThumb = thumb ?? fallbackThumb
+
   return {
     renderUrl: main ?? fallbackMain,
-    renderThumbUrl: thumb ?? fallbackThumb,
+    renderThumbUrl:
+      storedThumb ?? derivedThumbUrl(bucket, path, options.variant),
   }
 }

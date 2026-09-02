@@ -244,7 +244,13 @@ export async function listAdminLookModeration(args: {
 
   return Promise.all(
     looks.map(async (look) => {
-      const { renderThumbUrl } = await renderMediaUrls(look.primaryMediaAsset)
+      // 🔴 This surface reads ONLY renderThumbUrl, and no asset has a stored
+      // thumb — so before the variant existed every moderation row rendered
+      // with no image at all.
+      const { renderThumbUrl } = await renderMediaUrls(
+        look.primaryMediaAsset,
+        { variant: 'tile' },
+      )
       const clientName = joinName(
         look.clientAuthor?.firstName ?? null,
         look.clientAuthor?.lastName ?? null,
