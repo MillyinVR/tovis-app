@@ -197,6 +197,31 @@ describe('MediaFill — a stored crop', () => {
     expect(px(windowBox, 'top')).toBeCloseTo(0, 6)
   })
 
+  it('lays a VIDEO out the same way, from its own intrinsic size', async () => {
+    // No caller passes a rect with a video today — the Looks feed deliberately
+    // excludes clips, matching iOS — but MediaFill is shared, and a crop path
+    // that only works for one media type is a trap for the next caller.
+    layOutContainersAs({ width: 393, height: 787 })
+    const { container } = render(
+      <MediaFill src={SRC} mediaType="VIDEO" alt="Look" fit="contain" cropRect={WORKED_CROP} />,
+    )
+
+    const video = container.querySelector('video') as HTMLVideoElement
+    expect(video.className).toContain('object-fill')
+    expect(cropBoxes(container).windowBox.style.opacity).toBe('0')
+
+    Object.defineProperty(video, 'videoWidth', { value: 1000, configurable: true })
+    Object.defineProperty(video, 'videoHeight', { value: 1000, configurable: true })
+    await act(async () => {
+      fireEvent.loadedMetadata(video)
+    })
+
+    const { windowBox } = cropBoxes(container)
+    expect(windowBox.style.opacity).toBe('')
+    expect(px(windowBox, 'width')).toBeCloseTo(393, 6)
+    expect(px(windowBox, 'height')).toBeCloseTo(314.4, 6)
+  })
+
   it('re-hides when the source changes, so one photo never wears another’s geometry', async () => {
     layOutContainersAs({ width: 393, height: 787 })
     const { container, rerender } = render(
