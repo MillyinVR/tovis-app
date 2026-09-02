@@ -185,6 +185,9 @@ export default async function MediaDetailPage({ params }: PageProps) {
           // to a zero-size one centred on it rather than inventing a subject size
           // this row does not carry.
           subject: subjectBoxFromFocal(media.focalX, media.focalY),
+          // The same point, un-widened, for the editor's feed preview — it
+          // anchors the blurred backdrop exactly as the slide will.
+          focal: resolveFocalPoint(media.focalX, media.focalY),
           undoNotice: cropUndoOpen
             ? 'You can still widen this back for a day, or until someone views it. After that you can only tighten it.'
             : null,

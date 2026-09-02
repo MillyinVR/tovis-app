@@ -8,6 +8,7 @@ import { UI_SIZES } from '@/app/(main)/ui/layoutConstants'
 import { zClass } from '@/lib/zIndex'
 import { MediaVisibility } from '@/lib/prismaEnums'
 import { FULL_FRAME_CROP, type CropRect } from '@/lib/media/cropRect'
+import type { FocalPoint } from '@/lib/media/focalPoint'
 import { cn } from '@/lib/utils'
 
 import CropEditor from './CropEditor'
@@ -68,6 +69,8 @@ type Props = {
     crop: CropRect | null
     bound: CropRect
     subject?: { x: number; y: number; width: number; height: number } | null
+    /** The stored focal in FRAME space, for the editor's feed preview. */
+    focal?: FocalPoint | null
     /** Copy explaining the undo window while one is open, or null. */
     undoNotice?: string | null
   }
@@ -559,6 +562,7 @@ export default function OwnerMediaMenu({
                         src={reframe.src}
                         alt={initial.caption ?? 'Your photo'}
                         undoNotice={reframe.undoNotice ?? null}
+                        focal={reframe.focal ?? null}
                       />
                     </div>
                   ) : null}

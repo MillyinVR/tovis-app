@@ -8,6 +8,7 @@ import { endAvailabilityMetric } from '../../AvailabilityDrawer/perf/availabilit
 import { formatDurationLabel } from '@/lib/format/duration'
 import { formatRoundedDollars } from '@/lib/money'
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import { useImageSrcWithFallback } from '@/app/_components/media/useImageSrcWithFallback'
 import type { AddOnsContext } from '@/lib/booking/addOnsContext'
 import { zClass } from '@/lib/zIndex'
 import type {
@@ -288,6 +289,12 @@ export default function AddOnsClient({
 
   const [error, setError] = useState<string | null>(initialError ?? null)
   const [submitting, setSubmitting] = useState(false)
+  // The strip's thumbnail is the sheet's cover — a derived render, with the
+  // stored original behind it if the render ever stops serving. See the hook.
+  const { src: coverSrc, onError: onCoverError } = useImageSrcWithFallback(
+    context?.cover?.imageUrl ?? null,
+    context?.cover?.fallbackImageUrl ?? null,
+  )
   /** K16: finalize refused for a missing card on file; show the inline step. */
   const [needsCard, setNeedsCard] = useState(false)
   const [touched, setTouched] = useState(false)
@@ -765,13 +772,14 @@ export default function AddOnsClient({
           data-testid="add-ons-context-strip"
           className="mb-5 flex items-center gap-3 rounded-[14px] border border-textPrimary/10 bg-textPrimary/[0.03] px-[11px] py-[9px]"
         >
-          {context?.cover?.imageUrl ? (
+          {coverSrc ? (
             <RemoteImage
-              src={context.cover.imageUrl}
+              src={coverSrc}
               alt=""
               className="h-[38px] w-[38px] shrink-0 rounded-[10px] object-cover"
               width={76}
               height={76}
+              onError={onCoverError}
             />
           ) : null}
 

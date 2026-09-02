@@ -14,7 +14,19 @@ import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { lookNameFromCaption } from '@/lib/looks/publication/clientLookService'
 
 export type BookingCover = {
+  /**
+   * The downscaled `feed` render when the asset can be rendered on the fly,
+   * else the stored original. A phone capture is ~4.5 MB at 3024×4032; the
+   * sheet paints it into a 780×264 well.
+   */
   imageUrl: string | null
+  /**
+   * The stored original, ONLY when `imageUrl` is a derived render of it — so a
+   * client can fall back if the render endpoint stops serving (it is a
+   * documented Pro-plan feature; see `lib/media/imageTransform.ts`). Null when
+   * `imageUrl` already IS the original, so nothing retries the same URL.
+   */
+  fallbackImageUrl: string | null
   /** The look's display name, or null when this media is not a published look. */
   lookName: string | null
 }
@@ -83,11 +95,24 @@ export async function loadBookingCover(
   // which several integration tests import directly and which has no reason to
   // need storage credentials to answer "when is this pro free?". Reached only
   // once a cover is actually being resolved.
-  const rendered = await renderMediaUrls(media)
+  // `feed`, not `tile`: the same URL serves the sheet's full-width cover (780px
+  // wide on web, edge to edge on iOS) and the add-ons strip's 38px thumbnail,
+  // and the wider one has to look right.
+  const rendered = await renderMediaUrls(media, { variant: 'feed' })
   const caption = media.lookPostPrimaryFor[0]?.caption ?? null
 
+  // The render first. This used to be `renderUrl ?? renderThumbUrl`, which —
+  // with no stored thumb on any row — put the multi-megabyte original into a
+  // 264px-tall well on every booking sheet.
+  const imageUrl = rendered.renderThumbUrl ?? rendered.renderUrl ?? null
+  const fallbackImageUrl =
+    rendered.renderUrl && rendered.renderUrl !== imageUrl
+      ? rendered.renderUrl
+      : null
+
   return {
-    imageUrl: rendered.renderUrl ?? rendered.renderThumbUrl ?? null,
+    imageUrl,
+    fallbackImageUrl,
     lookName: caption ? lookNameFromCaption(caption) : null,
   }
 }

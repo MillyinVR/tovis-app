@@ -2,6 +2,7 @@
 'use client'
 
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import { useImageSrcWithFallback } from '@/app/_components/media/useImageSrcWithFallback'
 import { formatCompactCount } from '@/lib/format/compactCount'
 import { formatRoundedDollars } from '@/lib/money'
 import type { AvailabilityCover, AvailabilityTrust } from '../types'
@@ -113,7 +114,13 @@ export default function SheetCover({
   closeDisabled: boolean
 }) {
   const price = formatRoundedDollars(priceStartingAt)
-  const hasCover = Boolean(cover?.imageUrl)
+  // The cover is usually a derived render; if that ever fails to serve, show
+  // the stored original rather than a broken well. See the hook.
+  const { src: coverSrc, onError: onCoverError } = useImageSrcWithFallback(
+    cover?.imageUrl ?? null,
+    cover?.fallbackImageUrl ?? null,
+  )
+  const hasCover = Boolean(coverSrc)
 
   return (
     <div>
@@ -126,14 +133,15 @@ export default function SheetCover({
           hasCover ? 'h-[96px] sm:h-[132px]' : 'h-[48px]',
         ].join(' ')}
       >
-        {hasCover && cover?.imageUrl ? (
+        {coverSrc ? (
           <>
             <RemoteImage
-              src={cover.imageUrl}
-              alt={cover.lookName ?? ''}
+              src={coverSrc}
+              alt={cover?.lookName ?? ''}
               className="absolute inset-0 block h-full w-full object-cover"
               width={780}
               height={264}
+              onError={onCoverError}
             />
             {/* Scrim: the sheet body is bgPrimary, so fade INTO it at the bottom
                 rather than to a fixed colour that would band in one mode. */}

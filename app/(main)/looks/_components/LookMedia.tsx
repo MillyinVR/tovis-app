@@ -1,10 +1,10 @@
 // app/(main)/looks/_components/LookMedia.tsx
 'use client'
 
-import { useState, type ReactNode } from 'react'
 import type { FeedItem } from './lookTypes'
 import MediaFill from '@/app/_components/media/MediaFill'
 import FeedLetterboxFrame from '@/app/_components/media/FeedLetterboxFrame'
+import { useImageSrcWithFallback } from '@/app/_components/media/useImageSrcWithFallback'
 import BeforeAfterReveal from '@/app/_components/media/BeforeAfterReveal'
 import type { FocalPoint } from '@/lib/media/focalPoint'
 import { resolveDisplayCrop, type CropRect } from '@/lib/media/cropRect'
@@ -28,20 +28,6 @@ export default function LookMedia({
   isActive: boolean
   preload?: SlidePreload
 }) {
-  // Safety net for the derived thumbnail. `thumbUrl` is now usually a Supabase
-  // *render-endpoint* URL rather than a stored file, and Supabase documents
-  // image transformations as a Pro-plan feature while this project is on Free.
-  // It works today — the response carries
-  // `x-transformations: width:1080,resizing_type:fit,quality:70` — but if that
-  // ever stops being served, EVERY photograph in the feed would break at once.
-  // Falling back to the stored original turns a blank feed into a slow one,
-  // which is exactly where we were before this change.
-  //
-  // No reset needed: LookSlide keys on `item.id`, so a different look is a
-  // different component instance. Re-failing on the original sets the same
-  // value, so there is no loop.
-  const [thumbFailed, setThumbFailed] = useState(false)
-
   const mediaType = item.mediaType === 'VIDEO' ? 'VIDEO' : 'IMAGE'
 
   // 🔴 `thumbUrl` is the DOWNSCALED render (lib/media/imageTransform), and `url`
@@ -55,8 +41,15 @@ export default function LookMedia({
   const fullUrl = pickNonEmpty(item.url)
   const thumbUrl = pickNonEmpty(item.thumbUrl)
 
-  const usableThumb = thumbFailed ? null : thumbUrl
-  const src = mediaType === 'VIDEO' ? fullUrl : (usableThumb ?? fullUrl)
+  // Safety net for the derived thumbnail — the render endpoint is a Pro-plan
+  // feature and this project is on Free; see the hook. No reset needed:
+  // LookSlide keys on `item.id`, so a different look is a different instance.
+  const {
+    src: imageSrc,
+    preferredOrNull: usableThumb,
+    onError: onThumbError,
+  } = useImageSrcWithFallback(thumbUrl, fullUrl)
+  const src = mediaType === 'VIDEO' ? fullUrl : imageSrc
 
   // Far from the active slide: keep the slide itself (its height is the
   // scroller's, set by LookSlide, and the media is absolutely positioned inside
@@ -140,7 +133,7 @@ export default function LookMedia({
           // looking at should get.
           decoding: 'async',
           draggable: false,
-          onError: () => setThumbFailed(true),
+          onError: onThumbError,
         }}
       />
     </FeedLetterboxFrame>

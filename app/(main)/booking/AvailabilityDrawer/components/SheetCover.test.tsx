@@ -14,6 +14,7 @@
 // renders exactly what it was handed, in the right order of preference.
 
 import { renderToStaticMarkup } from 'react-dom/server'
+import { act, fireEvent, render as renderDom } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import SheetCover from './SheetCover'
@@ -36,6 +37,7 @@ function render(args: {
           ? null
           : {
               imageUrl: 'https://example.test/look.jpg',
+              fallbackImageUrl: null,
               lookName: args.lookName,
             }
       }
@@ -70,5 +72,58 @@ describe('SheetCover title', () => {
 
   it('falls back once more when there is no title at all', () => {
     expect(render({ title: null })).toContain('Book an appointment')
+  })
+})
+
+// 🔴 The cover is a Supabase RENDER-ENDPOINT url — a Pro-plan feature while this
+// project is on Free. It serves today; if it ever stops, this is the difference
+// between a slow cover and a broken well at the top of every booking sheet.
+describe('SheetCover image', () => {
+  function mount(cover: { imageUrl: string; fallbackImageUrl: string | null }) {
+    return renderDom(
+      <SheetCover
+        cover={{ ...cover, lookName: 'Autumn copper' }}
+        trust={trust}
+        title={null}
+        proName="Ada"
+        proAvatarUrl={null}
+        proHref="/professionals/pro_1"
+        priceStartingAt={null}
+        durationMinutes={null}
+        onClose={() => {}}
+        closeDisabled={false}
+      />,
+    )
+  }
+
+  it('paints the render, and falls back to the stored original if it fails to load', async () => {
+    const { container } = mount({
+      imageUrl: 'https://example.test/render/look.jpg?width=1080',
+      fallbackImageUrl: 'https://example.test/look.jpg',
+    })
+
+    const img = container.querySelector('img[alt="Autumn copper"]') as HTMLImageElement
+    expect(img.getAttribute('src')).toBe('https://example.test/render/look.jpg?width=1080')
+
+    await act(async () => {
+      fireEvent.error(img)
+    })
+
+    const after = container.querySelector('img[alt="Autumn copper"]') as HTMLImageElement
+    expect(after.getAttribute('src')).toBe('https://example.test/look.jpg')
+  })
+
+  it('collapses to the cover-less bar when the only URL fails and there is nothing behind it', async () => {
+    const { container } = mount({
+      imageUrl: 'https://example.test/look.jpg',
+      fallbackImageUrl: null,
+    })
+    const img = container.querySelector('img[alt="Autumn copper"]') as HTMLImageElement
+
+    await act(async () => {
+      fireEvent.error(img)
+    })
+
+    expect(container.querySelector('img[alt="Autumn copper"]')).toBeNull()
   })
 })

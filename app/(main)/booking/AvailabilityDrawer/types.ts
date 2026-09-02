@@ -223,8 +223,10 @@ export type ProCard = {
   slots?: string[]
 }
 
+/** Wire twin of `BookingCover` (lib/booking/bookingCover.ts) — see there for the fields. */
 export type AvailabilityCover = {
   imageUrl: string | null
+  fallbackImageUrl: string | null
   lookName: string | null
 }
 
