@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => {
     resolveAutoPairedBefore: vi.fn(),
 
     reconcilePortfolioLookForMediaAsset: vi.fn(),
+    attemptRetraction: vi.fn(),
 
     safeError: vi.fn((error: unknown) => ({
       name: error instanceof Error ? error.name : 'NonErrorThrown',
@@ -56,6 +57,14 @@ vi.mock('@/lib/pick', () => ({
 
     return null
   },
+}))
+
+// True retraction has its own suite (lib/media/retractToPrivateBucket.test.ts);
+// here we pin only that PATCH — the second retract door — DELEGATES to it.
+vi.mock('@/lib/media/retractToPrivateBucket', () => ({
+  RETRACTED_VISIBILITY: 'PRO_CLIENT',
+  RETRACTION_SELECT: { id: true },
+  attemptRetraction: mocks.attemptRetraction,
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -174,6 +183,9 @@ describe('app/api/v1/pro/media/[id]/route.ts', () => {
       },
     })
 
+    mocks.attemptRetraction.mockResolvedValue({
+      status: 'STILL_SHOWN',
+    })
     mocks.mediaAssetFindUnique.mockResolvedValue(makeExistingMedia())
 
     mocks.serviceFindMany.mockResolvedValue([{ id: 'service_1' }])
@@ -676,6 +688,53 @@ describe('app/api/v1/pro/media/[id]/route.ts', () => {
       )
 
       consoleErrorSpy.mockRestore()
+    })
+
+    it('withdraws the BYTES when the last flag comes off', async () => {
+      // 🔴 The second retract door. Un-ticking the last flag is an unpublish, so
+      // the object must leave the world-readable bucket — not just the label.
+      mocks.mediaAssetFindUnique.mockResolvedValue(
+        makeExistingMedia({
+          isFeaturedInPortfolio: true,
+          isEligibleForLooks: false,
+        }),
+      )
+      mocks.mediaAssetUpdate.mockResolvedValueOnce({
+        id: 'media_1',
+        caption: null,
+        visibility: 'PUBLIC',
+        isEligibleForLooks: false,
+        isFeaturedInPortfolio: false,
+      })
+      mocks.attemptRetraction.mockResolvedValueOnce({
+        status: 'RETRACTED',
+        storageBucket: 'media-private',
+        storagePath: 'pro/pro_1/retracted/2026-09/moved.jpg',
+        thumbBucket: null,
+        thumbPath: null,
+        orphanedPublicObjects: [],
+      })
+
+      const res = await PATCH(
+        makeJsonRequest({
+          isFeaturedInPortfolio: false,
+          serviceIds: ['service_1'],
+        }),
+        makeCtx(),
+      )
+
+      // Called with the row the route RE-READ after writing the flags — the
+      // decision to delete bytes is made against committed state.
+      expect(mocks.mediaAssetFindUnique).toHaveBeenCalledWith({
+        where: { id: 'media_1' },
+        select: { id: true },
+      })
+      expect(mocks.attemptRetraction).toHaveBeenCalled()
+
+      // The response tells the truth about where the bytes ended up.
+      await expect(res.json()).resolves.toMatchObject({
+        media: { visibility: 'PRO_CLIENT' },
+      })
     })
   })
 

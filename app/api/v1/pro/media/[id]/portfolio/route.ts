@@ -11,6 +11,11 @@ import {
 } from '@/lib/media/portfolioPairing'
 import { canProSharePublicly, UNPROMOTED_MEDIA_MESSAGE } from '@/lib/media/publicShareGuard'
 import { resolveMediaVisibility } from '@/lib/media/mediaVisibility'
+import {
+  attemptRetraction,
+  RETRACTED_VISIBILITY,
+  RETRACTION_SELECT,
+} from '@/lib/media/retractToPrivateBucket'
 import { reconcilePortfolioLookForMediaAsset } from '@/lib/looks/publication/portfolioLookSync'
 import { safeError } from '@/lib/security/logging'
 
@@ -301,17 +306,44 @@ export async function DELETE(_req: NextRequest, ctx: RouteContext) {
       mediaAssetId: mediaId,
     })
 
+    // 🔴 Take the BYTES down, not just the label. Until this existed, removing a
+    // photo from the portfolio left the object sitting in the world-readable
+    // bucket, so anyone holding the URL kept the full-resolution file forever.
+    // Runs last, against committed state, and only if nothing still shows the
+    // asset.
+    const retractionCandidate = await prisma.mediaAsset.findUnique({
+      where: { id: mediaId },
+      select: RETRACTION_SELECT,
+    })
+    const retraction = await attemptRetraction(prisma, retractionCandidate)
+
+    // The pointers moved, so the response must describe where the bytes are NOW
+    // — rendering `updated` would sign a path that no longer exists.
+    const responseMedia =
+      retraction.status === 'RETRACTED'
+        ? {
+            ...updated,
+            visibility: RETRACTED_VISIBILITY,
+            storageBucket: retraction.storageBucket,
+            storagePath: retraction.storagePath,
+            thumbBucket: retraction.thumbBucket,
+            thumbPath: retraction.thumbPath,
+            url: null,
+            thumbUrl: null,
+          }
+        : updated
+
     // `tile`, matching the grid this asset is being handed back to (the GET on
     // /api/v1/pro/media). Without it, featuring a photo would swap its tile from
     // a 512px render to the multi-megabyte stored original.
-    const { renderUrl, renderThumbUrl } = await renderMediaUrls(updated, {
+    const { renderUrl, renderThumbUrl } = await renderMediaUrls(responseMedia, {
       variant: 'tile',
     })
 
     return jsonOk(
       {
         media: {
-          ...updated,
+          ...responseMedia,
           url: renderUrl,
           thumbUrl: renderThumbUrl,
         },

@@ -9,6 +9,11 @@ import {
 } from '@/lib/media/portfolioPairing'
 import { canProSharePublicly, UNPROMOTED_MEDIA_MESSAGE } from '@/lib/media/publicShareGuard'
 import { resolveMediaVisibility } from '@/lib/media/mediaVisibility'
+import {
+  attemptRetraction,
+  RETRACTED_VISIBILITY,
+  RETRACTION_SELECT,
+} from '@/lib/media/retractToPrivateBucket'
 import { reconcilePortfolioLookForMediaAsset } from '@/lib/looks/publication/portfolioLookSync'
 import { pickBool, pickString } from '@/lib/pick'
 import { safeError } from '@/lib/security/logging'
@@ -214,7 +219,24 @@ export async function PATCH(req: Request, ctx: RouteContext) {
       mediaAssetId: mediaId,
     })
 
-    return jsonOk({ media: updated }, 200)
+    // 🔴 Un-ticking the last flag is an unpublish, so the BYTES come down too —
+    // otherwise the object stays world-readable at its old URL forever. No-ops
+    // when anything still shows the asset (review media in particular).
+    const retractionCandidate = await prisma.mediaAsset.findUnique({
+      where: { id: mediaId },
+      select: RETRACTION_SELECT,
+    })
+    const retraction = await attemptRetraction(prisma, retractionCandidate)
+
+    return jsonOk(
+      {
+        media:
+          retraction.status === 'RETRACTED'
+            ? { ...updated, visibility: RETRACTED_VISIBILITY }
+            : updated,
+      },
+      200,
+    )
   } catch (e: unknown) {
     console.error('PATCH /api/v1/pro/media/[id] error', {
       error: safeError(e),

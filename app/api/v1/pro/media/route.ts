@@ -14,6 +14,7 @@ import {
   MediaVisibility,
   UploadSurface,
 } from '@prisma/client'
+import { requestedVisibilityFromFlags } from '@/lib/media/visibilityFromFlags'
 import { BUCKETS } from '@/lib/storageBuckets'
 import { resolveCropRect } from '@/lib/media/cropRect'
 import { resolveFocalPoint } from '@/lib/media/focalPoint'
@@ -60,20 +61,6 @@ function isStorageBucket(v: unknown): v is StorageBucket {
 
 function isPublicBucket(bucket: StorageBucket): boolean {
   return bucket === BUCKETS.mediaPublic
-}
-
-/**
- * Visibility rule:
- * - If it's eligible for looks OR featured, it is PUBLIC.
- * - Otherwise PRO_CLIENT.
- */
-function computeVisibility(
-  isEligibleForLooks: boolean,
-  isFeaturedInPortfolio: boolean,
-): MediaVisibility {
-  return isEligibleForLooks || isFeaturedInPortfolio
-    ? MediaVisibility.PUBLIC
-    : MediaVisibility.PRO_CLIENT
 }
 
 function parseMediaType(v: unknown): MediaType {
@@ -166,10 +153,10 @@ export async function POST(req: Request) {
       false,
     )
 
-    const visibility = computeVisibility(
+    const visibility = requestedVisibilityFromFlags({
       isEligibleForLooks,
       isFeaturedInPortfolio,
-    )
+    })
 
     // The storage pointer is read back from the UploadSession the signing route
     // minted — never from the client. A LOOKS or PORTFOLIO session is accepted

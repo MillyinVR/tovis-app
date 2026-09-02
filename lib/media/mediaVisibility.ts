@@ -51,6 +51,7 @@
 
 import { MediaVisibility } from '@prisma/client'
 
+import { requestedVisibilityFromFlags } from '@/lib/media/visibilityFromFlags'
 import { BUCKETS } from '@/lib/storageBuckets'
 
 /**
@@ -92,7 +93,12 @@ export function resolveMediaVisibility(args: {
   isFeaturedInPortfolio: boolean
   isEligibleForLooks: boolean
 }): MediaVisibility {
-  if (args.isFeaturedInPortfolio || args.isEligibleForLooks) {
+  // The flags-only question is one rule, shared with the create path and the
+  // upload form — see `@/lib/media/visibilityFromFlags`. What this function adds,
+  // and what the three drifted copies all missed, is the bucket below.
+  if (
+    requestedVisibilityFromFlags(args) === MediaVisibility.PUBLIC
+  ) {
     return MediaVisibility.PUBLIC
   }
 
@@ -127,6 +133,28 @@ export function isPubliclyViewableMediaAsset(args: {
 }): boolean {
   if (args.visibility !== MediaVisibility.PUBLIC) return false
 
+  return isShownOnPublicSurfaces(args)
+}
+
+/**
+ * The three ways a row earns a public surface, independent of where its bytes
+ * currently live — the "whether it is shown" half of the model above.
+ *
+ * Split out from {@link isPubliclyViewableMediaAsset} because true retraction
+ * (`lib/media/retractToPrivateBucket.ts`) has to ask exactly this question
+ * BEFORE it moves the bytes, when the visibility column still describes the old
+ * bucket. Both must stay one rule: retracting something a surface still shows
+ * would 404 it.
+ *
+ * 🔴 `reviewId` is why this cannot be "both flags are false". Review media is
+ * written PUBLIC with BOTH flags false, so a flags-only test would treat every
+ * client-promoted review photo as unshown and withdraw it.
+ */
+export function isShownOnPublicSurfaces(args: {
+  isFeaturedInPortfolio: boolean
+  isEligibleForLooks: boolean
+  reviewId: string | null
+}): boolean {
   return Boolean(
     args.isFeaturedInPortfolio || args.isEligibleForLooks || args.reviewId,
   )

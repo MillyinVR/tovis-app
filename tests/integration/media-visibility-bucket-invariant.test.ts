@@ -63,6 +63,49 @@ vi.mock('@/lib/media/renderUrls', () => ({
     rows.map(() => ({ renderUrl: null, renderThumbUrl: null })),
 }))
 
+// True retraction moves the BYTES, so the storage layer has to be present for
+// the handler to complete a retract. This double records what was written and
+// removed, which is how the tests below prove the public original was actually
+// deleted rather than merely relabelled. `failEverything` drives the degraded
+// path, where storage is unhealthy and the unpublish must still succeed.
+const storage = vi.hoisted(() => ({
+  uploaded: [] as Array<{ bucket: string; path: string }>,
+  removed: [] as Array<{ bucket: string; path: string }>,
+  failEverything: false,
+}))
+
+vi.mock('@/lib/supabaseAdmin', () => ({
+  getSupabaseAdmin: () => ({
+    storage: {
+      from: (bucket: string) => ({
+        download: async () => {
+          if (storage.failEverything) {
+            return { data: null, error: { message: 'storage unavailable' } }
+          }
+          return {
+            data: new Blob([new Uint8Array([1, 2, 3, 4])], {
+              type: 'image/jpeg',
+            }),
+            error: null,
+          }
+        },
+        upload: async (path: string) => {
+          storage.uploaded.push({ bucket, path })
+          return { error: null }
+        },
+        list: async (_dir: string, opts: { search: string }) => ({
+          data: [{ name: opts.search, metadata: { size: 4 } }],
+          error: null,
+        }),
+        remove: async (paths: string[]) => {
+          for (const path of paths) storage.removed.push({ bucket, path })
+          return { error: null }
+        },
+      }),
+    },
+  }),
+}))
+
 const { DELETE: removeFromPortfolio } = await import(
   '@/app/api/v1/pro/media/[id]/portfolio/route'
 )
@@ -131,6 +174,12 @@ beforeAll(async () => {
 
 beforeEach(() => {
   mockRequirePro.mockReturnValue({ ok: true, professionalId })
+
+  // 🔴 File scope, deliberately: `failEverything` is sticky, and a leak into a
+  // later describe silently turns a real retraction assertion into a no-op.
+  storage.uploaded.length = 0
+  storage.removed.length = 0
+  storage.failEverything = false
 })
 
 afterAll(async () => {
@@ -191,16 +240,19 @@ function readBack(id: string) {
     where: { id },
     select: {
       storageBucket: true,
+      storagePath: true,
       visibility: true,
       isFeaturedInPortfolio: true,
       isEligibleForLooks: true,
+      retractedFromPublicAt: true,
     },
   })
 }
 
 describe('retracting a public-bucket asset', () => {
-  it('🔴 DELETE /portfolio leaves it PUBLIC, not PRO_CLIENT over world-readable bytes', async () => {
+  it('🔴 DELETE /portfolio WITHDRAWS the bytes, so the old URL stops resolving', async () => {
     const id = await createPublishedPublicAsset('del')
+    const before = await readBack(id)
 
     const res = await removeFromPortfolio(
       new Request('http://t/x', { method: 'DELETE' }) as never,
@@ -210,18 +262,28 @@ describe('retracting a public-bucket asset', () => {
 
     const row = await readBack(id)
 
-    // The bug: this was PRO_CLIENT while the object stayed in media-public.
-    expect(row.storageBucket).toBe('media-public')
-    expect(row.visibility).toBe(MediaVisibility.PUBLIC)
+    // 🔴 The point of true retraction: the object LEFT the world-readable
+    // bucket. Relabelling alone left it fetchable by anyone holding the URL.
+    expect(row.storageBucket).toBe('media-private')
+    expect(row.visibility).toBe(MediaVisibility.PRO_CLIENT)
+    expect(row.retractedFromPublicAt).toBeInstanceOf(Date)
 
-    // …and it is genuinely retracted — the flags are what take it off every
-    // public surface now, which is the half that must not regress.
+    // The public original was really deleted — not just re-pointed away from.
+    expect(storage.removed).toContainEqual({
+      bucket: 'media-public',
+      path: before.storagePath,
+    })
+    // …and the copy landed before that delete.
+    expect(storage.uploaded[0]?.bucket).toBe('media-private')
+
+    // The flags half must not regress.
     expect(row.isFeaturedInPortfolio).toBe(false)
     expect(row.isEligibleForLooks).toBe(false)
   })
 
   it('🔴 PATCH un-ticking both flags does the same', async () => {
     const id = await createPublishedPublicAsset('patch')
+    const before = await readBack(id)
 
     const res = await patchMedia(
       new Request('http://t/x', {
@@ -237,10 +299,46 @@ describe('retracting a public-bucket asset', () => {
     expect(res.status).toBe(200)
 
     const row = await readBack(id)
-    expect(row.storageBucket).toBe('media-public')
-    expect(row.visibility).toBe(MediaVisibility.PUBLIC)
+    expect(row.storageBucket).toBe('media-private')
+    expect(row.visibility).toBe(MediaVisibility.PRO_CLIENT)
+    expect(row.retractedFromPublicAt).toBeInstanceOf(Date)
+    expect(storage.removed).toContainEqual({
+      bucket: 'media-public',
+      path: before.storagePath,
+    })
     expect(row.isFeaturedInPortfolio).toBe(false)
     expect(row.isEligibleForLooks).toBe(false)
+  })
+
+  it('still unpublishes when storage is unhealthy, and leaves the row VALID', async () => {
+    // 🔴 The degraded path. The photo is already off every surface by the time
+    // the bytes are touched, so a storage outage must not turn the pro's
+    // unpublish into a 500 — it must leave a row that is still correct and
+    // still renderable, for the sweep script to finish later.
+    storage.failEverything = true
+
+    const id = await createPublishedPublicAsset('degraded')
+    const before = await readBack(id)
+
+    const res = await removeFromPortfolio(
+      new Request('http://t/x', { method: 'DELETE' }) as never,
+      routeCtx(id) as never,
+    )
+    expect(res.status).toBe(200)
+
+    const row = await readBack(id)
+
+    // Off every surface…
+    expect(row.isFeaturedInPortfolio).toBe(false)
+    expect(row.isEligibleForLooks).toBe(false)
+
+    // …and the row still truthfully describes bytes that really are still
+    // public. Nothing was deleted, and nothing is stranded.
+    expect(row.storageBucket).toBe('media-public')
+    expect(row.storagePath).toBe(before.storagePath)
+    expect(row.visibility).toBe(MediaVisibility.PUBLIC)
+    expect(row.retractedFromPublicAt).toBeNull()
+    expect(storage.removed).toEqual([])
   })
 })
 
@@ -322,11 +420,21 @@ describe('the pointer backfill (the only update that rewrites a bucket)', () => 
 
     const row = await readBack(asset.id)
 
-    // The backfill learned the bucket…
-    expect(row.storageBucket).toBe('media-public')
-    // …and the visibility was judged against THAT, not the stale empty string
-    // the handler had loaded before the backfill ran.
-    expect(row.visibility).toBe(MediaVisibility.PUBLIC)
+    // The backfill learned the bucket was media-public, and the visibility was
+    // judged against THAT rather than the stale empty string the handler had
+    // loaded before the backfill ran — which is what this test exists to pin.
+    //
+    // Because the row is now shown by nothing, true retraction then withdraws
+    // the bytes it just learned about, so the row lands private. The defect
+    // being guarded against would instead leave `PRO_CLIENT` over a
+    // `media-public` object; both halves of that pair are asserted here.
+    expect(row.storageBucket).toBe('media-private')
+    expect(row.visibility).toBe(MediaVisibility.PRO_CLIENT)
+    expect(row.retractedFromPublicAt).toBeInstanceOf(Date)
+    expect(storage.removed).toContainEqual({
+      bucket: 'media-public',
+      path,
+    })
   })
 })
 

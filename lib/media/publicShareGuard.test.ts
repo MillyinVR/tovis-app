@@ -88,4 +88,45 @@ describe('publicShareGuard', () => {
       expect(canProSharePublicly(media)).toBe(true)
     })
   })
+  // ── True retraction (lib/media/retractToPrivateBucket.ts) ──────────────────
+  //
+  // Retraction deliberately moves a pro's OWN photograph into the private
+  // bucket. That breaks the correlation this guard used to lean on, so the
+  // bucket signal is disarmed by the recorded reason the bytes moved — and by
+  // nothing else.
+  describe('retracted pro media', () => {
+    const retractedProUpload = {
+      bookingId: null,
+      storageBucket: 'media-private',
+      reviewId: null,
+      retractedFromPublicAt: new Date('2026-09-02T00:00:00.000Z'),
+    }
+
+    it('lets a pro re-publish their own retracted photograph', () => {
+      // 🔴 The bricking case. Without the retraction stamp this is refused
+      // forever: un-featuring once would permanently cost the pro their own work.
+      expect(canProSharePublicly(retractedProUpload)).toBe(true)
+    })
+
+    it('STILL blocks a client session photo that was retracted', () => {
+      // The bookingId clause is independent — a retraction stamp is not consent.
+      const sessionPhotoRetracted = {
+        ...retractedProUpload,
+        bookingId: 'bk_1',
+      }
+      expect(canProSharePublicly(sessionPhotoRetracted)).toBe(false)
+    })
+
+    it('still blocks private-bucket media with NO retraction recorded', () => {
+      // Unchanged behaviour for every pre-existing row: the column is null, so
+      // the bucket is judged exactly as before.
+      const media = { ...retractedProUpload, retractedFromPublicAt: null }
+      expect(canProSharePublicly(media)).toBe(false)
+    })
+
+    it('treats an absent field the same as null', () => {
+      const { retractedFromPublicAt: _omitted, ...withoutField } = retractedProUpload
+      expect(canProSharePublicly(withoutField)).toBe(false)
+    })
+  })
 })

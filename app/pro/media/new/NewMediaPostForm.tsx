@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { uploadWithProgress } from '@/lib/media/uploadWithProgress'
+import { requestedVisibilityFromFlags } from '@/lib/media/visibilityFromFlags'
 import {
   LookPostVisibility,
   MediaType,
@@ -35,15 +36,6 @@ type UploadInit = {
 
 const CAPTION_MAX = 300
 const PRICE_MAX_LENGTH = 20
-
-function computeVisibility(
-  isEligibleForLooks: boolean,
-  isFeaturedInPortfolio: boolean,
-): MediaVisibility {
-  return isEligibleForLooks || isFeaturedInPortfolio
-    ? MediaVisibility.PUBLIC
-    : MediaVisibility.PRO_CLIENT
-}
 
 function guessMediaType(file: File): MediaType {
   return (file.type || '').toLowerCase().startsWith('video/')
@@ -282,7 +274,10 @@ export default function NewMediaPostForm() {
 
   useEffect(() => {
     setVisibility(
-      computeVisibility(isEligibleForLooks, isFeaturedInPortfolio),
+      requestedVisibilityFromFlags({
+        isEligibleForLooks,
+        isFeaturedInPortfolio,
+      }),
     )
   }, [isEligibleForLooks, isFeaturedInPortfolio])
 
