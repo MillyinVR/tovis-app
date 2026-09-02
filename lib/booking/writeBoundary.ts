@@ -1331,6 +1331,12 @@ type UploadProBookingMediaArgs = {
   // Normalized subject focal point (camera C6), [0,1] top-left. Null → center.
   focalX?: number | null
   focalY?: number | null
+  // Non-destructive publish crop, [0,1] top-left, in the SAME space as the
+  // focal. All four or none; null → the full stored frame.
+  cropX?: number | null
+  cropY?: number | null
+  cropW?: number | null
+  cropH?: number | null
   requestId?: string | null
   idempotencyKey?: string | null
 }
@@ -8130,6 +8136,10 @@ async function performLockedUploadProBookingMedia(args: {
   mediaType: MediaType
   focalX?: number | null
   focalY?: number | null
+  cropX?: number | null
+  cropY?: number | null
+  cropW?: number | null
+  cropH?: number | null
   requestId?: string | null
   idempotencyKey?: string | null
 }): Promise<UploadProBookingMediaResult> {
@@ -8217,6 +8227,11 @@ async function performLockedUploadProBookingMedia(args: {
 
         focalX: args.focalX ?? null,
         focalY: args.focalY ?? null,
+
+        cropX: args.cropX ?? null,
+        cropY: args.cropY ?? null,
+        cropW: args.cropW ?? null,
+        cropH: args.cropH ?? null,
 
         visibility: MediaVisibility.PRO_CLIENT,
       }),
@@ -16366,6 +16381,10 @@ export async function uploadProBookingMedia(
         mediaType: args.mediaType,
         focalX: args.focalX ?? null,
         focalY: args.focalY ?? null,
+        cropX: args.cropX ?? null,
+        cropY: args.cropY ?? null,
+        cropW: args.cropW ?? null,
+        cropH: args.cropH ?? null,
         requestId: args.requestId ?? null,
         idempotencyKey: args.idempotencyKey ?? null,
       }),

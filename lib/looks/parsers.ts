@@ -290,6 +290,15 @@ export function parseLooksFeedResponse(raw: unknown): LooksFeedItemDto[] {
       focalX: pickNumber(item.focalX),
       focalY: pickNumber(item.focalY),
 
+      // Non-destructive publish crop (item 2). Same tolerance: an older payload
+      // has no keys → all null → the full stored frame. The rect is re-validated
+      // as a whole by resolveCropRect at the point of use, so a partial or
+      // out-of-frame quadruple here degrades to "no crop" rather than a bad one.
+      cropX: pickNumber(item.cropX),
+      cropY: pickNumber(item.cropY),
+      cropW: pickNumber(item.cropW),
+      cropH: pickNumber(item.cropH),
+
       priceStartingAt: pickNumber(item.priceStartingAt),
 
       before: parsePairedBefore(item.before),
@@ -467,6 +476,11 @@ function parseLooksDetailMedia(raw: unknown): LooksDetailMediaDto | null {
     // Smart cover-crop focal (camera C6). Tolerant of absence → null → center.
     focalX: pickNumber(raw.focalX),
     focalY: pickNumber(raw.focalY),
+    // Non-destructive publish crop (item 2). Absent → null → the full frame.
+    cropX: pickNumber(raw.cropX),
+    cropY: pickNumber(raw.cropY),
+    cropW: pickNumber(raw.cropW),
+    cropH: pickNumber(raw.cropH),
     review,
   }
 }

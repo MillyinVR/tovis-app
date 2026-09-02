@@ -120,6 +120,19 @@ export type LooksFeedItemDto = {
   focalX: number | null
   focalY: number | null
 
+  // Non-destructive publish CROP of the primary asset (capture chain item 2):
+  // the rect of the stored image a surface should display, [0,1] top-left, in
+  // the SAME space as the focal above. All four or all null; null = the full
+  // stored frame, which is every row today. Carried so the device and the
+  // future editor can adopt it without another wire round — nothing renders it
+  // yet. 🔴 A surface that DOES crop must remap the focal into crop space
+  // (lib/media/cropRect.ts → focalInCropSpace); the focal is measured on the
+  // UNCROPPED frame.
+  cropX: number | null
+  cropY: number | null
+  cropW: number | null
+  cropH: number | null
+
   // Pro-set starting price for the look, surfaced on bookable discover tiles as
   // "from $X". Null when the look has no price tag (tiles fall back to "Book").
   priceStartingAt: number | null
@@ -176,6 +189,12 @@ export type LooksDetailMediaDto = {
   // Normalized subject focal point (camera C6), [0,1] top-left. Null = center.
   focalX: number | null
   focalY: number | null
+  // Non-destructive publish crop (item 2), [0,1] top-left in the same space as
+  // the focal. Null = the full stored frame. See LooksFeedItemDto.cropX.
+  cropX: number | null
+  cropY: number | null
+  cropW: number | null
+  cropH: number | null
   review: LooksDetailReviewDto | null
 }
 

@@ -147,6 +147,12 @@ type StoredMediaShape = {
   // Normalized subject focal point (camera C6), [0,1] top-left. Null = center.
   focalX: number | null
   focalY: number | null
+  // Non-destructive publish crop (item 2), same space as the focal. All four or
+  // all null; null = the full stored frame.
+  cropX: number | null
+  cropY: number | null
+  cropW: number | null
+  cropH: number | null
 }
 
 type FeedPrimaryMediaShape = StoredMediaShape & {
@@ -479,6 +485,11 @@ export async function mapLooksFeedMediaToDto(args: {
     focalX: primaryMedia.focalX ?? null,
     focalY: primaryMedia.focalY ?? null,
 
+    cropX: primaryMedia.cropX ?? null,
+    cropY: primaryMedia.cropY ?? null,
+    cropW: primaryMedia.cropW ?? null,
+    cropH: primaryMedia.cropH ?? null,
+
     priceStartingAt: toFinitePrice(item.priceStartingAt),
 
     before,
@@ -677,6 +688,10 @@ function mapRenderableLooksDetailMediaToDto(input: {
   createdAt: Date
   focalX: number | null
   focalY: number | null
+  cropX: number | null
+  cropY: number | null
+  cropW: number | null
+  cropH: number | null
   review: {
     id: string
     rating: number
@@ -694,6 +709,10 @@ function mapRenderableLooksDetailMediaToDto(input: {
     createdAt: input.createdAt.toISOString(),
     focalX: input.focalX ?? null,
     focalY: input.focalY ?? null,
+    cropX: input.cropX ?? null,
+    cropY: input.cropY ?? null,
+    cropW: input.cropW ?? null,
+    cropH: input.cropH ?? null,
     review: mapLooksDetailReviewToDto(input.review),
   }
 }

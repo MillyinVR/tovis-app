@@ -194,6 +194,13 @@ const looksMediaPreviewSelect =
     // surfaces (feed, board tiles). Null = center.
     focalX: true,
     focalY: true,
+    // Non-destructive publish crop (item 2), [0,1] top-left in the same space as
+    // the focal. Null = the full stored frame. Carried on the wire; nothing
+    // renders it yet.
+    cropX: true,
+    cropY: true,
+    cropW: true,
+    cropH: true,
   })
 
 // The feed card's primary media additionally carries its opt-in before/after
@@ -222,6 +229,11 @@ const looksDetailMediaAssetSelect =
     // Smart cover-crop focal point (camera C6). Null = center.
     focalX: true,
     focalY: true,
+    // Non-destructive publish crop (item 2). Null = the full stored frame.
+    cropX: true,
+    cropY: true,
+    cropW: true,
+    cropH: true,
 
     visibility: true,
     isEligibleForLooks: true,

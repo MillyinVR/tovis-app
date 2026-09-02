@@ -72,6 +72,51 @@ describe('buildMediaAssetCreateData defaults', () => {
   })
 })
 
+describe('crop rect completeness (item 2)', () => {
+  it('writes a valid rect through unchanged', () => {
+    const data = buildMediaAssetCreateData(
+      base({ cropX: 0.25, cropY: 0.1, cropW: 0.5, cropH: 0.4 }),
+    )
+
+    expect(data).toMatchObject({
+      cropX: 0.25,
+      cropY: 0.1,
+      cropW: 0.5,
+      cropH: 0.4,
+    })
+  })
+
+  it('leaves all four null when no crop was supplied — the full stored frame', () => {
+    const data = buildMediaAssetCreateData(base())
+
+    expect(data).toMatchObject({
+      cropX: null,
+      cropY: null,
+      cropW: null,
+      cropH: null,
+    })
+  })
+
+  // 🔴 The invariant. Three columns set and one null is not a degraded crop, it
+  // is an unanswerable one — a renderer given it has no honest frame to draw.
+  // The choke point normalizes it away rather than letting it reach the row.
+  it.each([
+    ['no width', { cropX: 0.25, cropY: 0.1, cropH: 0.4 }],
+    ['no origin', { cropW: 0.5, cropH: 0.4 }],
+    ['off the edge of the image', { cropX: 0.7, cropY: 0.1, cropW: 0.5, cropH: 0.4 }],
+    ['zero extent', { cropX: 0.25, cropY: 0.1, cropW: 0, cropH: 0.4 }],
+  ])('normalizes an unusable rect (%s) to all-null', (_label, crop) => {
+    const data = buildMediaAssetCreateData(base(crop))
+
+    expect(data).toMatchObject({
+      cropX: null,
+      cropY: null,
+      cropW: null,
+      cropH: null,
+    })
+  })
+})
+
 describe('primaryServiceId invariant', () => {
   it('rejects a blank primaryServiceId', () => {
     expect(() =>

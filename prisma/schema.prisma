@@ -5212,6 +5212,28 @@ model MediaAsset {
   // Written at the media-confirm choke point (lib/media/recordMediaAsset.ts).
   focalX           Float?
   focalY           Float?
+  // Non-destructive publish CROP: the rect of the stored image a surface should
+  // display, normalized [0,1] from the TOP-LEFT origin — the same convention as
+  // focalX/focalY, in the same space (the original, EXIF-corrected upright
+  // image at storagePath). x/y are the origin, w/h the extent, so the rect is
+  // always contained in the unit square.
+  //
+  // All four are written together or not at all (enforced at the create choke
+  // point, lib/media/recordMediaAsset.ts) — a partial rect has no meaning. Null
+  // = the FULL stored frame, which is what every legacy row and every row
+  // written today holds, so every surface renders byte-identically until a crop
+  // is set. Nothing renders it yet (item 2 ships dark).
+  //
+  // 🔴 CONSENT BOUND. The rect is the frame the pro published and the client
+  // consented to seeing. A re-frame may move and narrow ANYWHERE inside the
+  // current rect, but may never reach outside it — that would reveal pixels the
+  // published frame had removed. Enforced at the write by
+  // PUT /api/v1/pro/media/[id]/crop, not merely in the UI.
+  // See docs/design/media-crop-rect.md.
+  cropX            Float?
+  cropY            Float?
+  cropW            Float?
+  cropH            Float?
   createdAt        DateTime            @default(now())
   intentEvents     ClientIntentEvent[]
 

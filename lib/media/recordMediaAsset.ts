@@ -18,6 +18,9 @@
 //          — i.e. the asset is in the public bucket, or a client has promoted
 //          it via a review (reviewId set). This mirrors the consent model in
 //          lib/media/publicShareGuard.ts.
+//   3. The crop-rect completeness invariant: cropX/cropY/cropW/cropH are all
+//      set or all null, never three of four. An incomplete or out-of-frame
+//      rect is normalized away here rather than reaching the column.
 //
 // It deliberately does NOT own the Prisma call: callers keep their own
 // select/include, transaction, audit logging, and proTenantId resolution. The
@@ -26,6 +29,7 @@
 
 import { MediaPhase, MediaType, MediaVisibility, Prisma, Role } from '@prisma/client'
 import { BUCKETS } from '@/lib/storageBuckets'
+import { cropRectColumns, resolveCropRect } from '@/lib/media/cropRect'
 import { canProSharePublicly, UNPROMOTED_MEDIA_MESSAGE } from '@/lib/media/publicShareGuard'
 
 /** Thrown when a MediaAsset write would violate a bucket/visibility invariant. */
@@ -66,6 +70,19 @@ export type MediaAssetWriteInput = {
   // cover-crop on the Looks feed. Omit / null → center (byte-identical to pre-C6).
   focalX?: number | null
   focalY?: number | null
+
+  // Non-destructive publish crop: the rect of the stored image a surface should
+  // display, normalized [0,1] top-left — the SAME space as the focal above.
+  // Omit / null → the full stored frame (byte-identical to pre-crop).
+  //
+  // Unlike the focal, this pair of pairs is NORMALIZED here rather than merely
+  // passed through: an incomplete or out-of-frame rect resolves to all-null, so
+  // the column quadruple is always all-set or all-null. Three of four columns
+  // set is not a degraded crop, it is an unanswerable one.
+  cropX?: number | null
+  cropY?: number | null
+  cropW?: number | null
+  cropH?: number | null
 
   // Optional, schema-defaulted fields.
   phase?: MediaPhase
@@ -156,6 +173,10 @@ export function buildMediaAssetCreateData(
 
     focalX: input.focalX ?? null,
     focalY: input.focalY ?? null,
+
+    ...cropRectColumns(
+      resolveCropRect(input.cropX, input.cropY, input.cropW, input.cropH),
+    ),
 
     mediaType: input.mediaType,
     caption: input.caption ?? null,

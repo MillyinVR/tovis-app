@@ -182,6 +182,21 @@ export type PublicPortfolioTileDto = {
    */
   focalX: number | null
   focalY: number | null
+  /**
+   * The non-destructive publish CROP (capture chain item 2): the rect of `src`
+   * a surface should display, [0,1] from the top-left, in the SAME space as the
+   * focal above. All four or all null; null = the full stored frame, which is
+   * every tile today. It rides the wire so the future re-frame editor and the
+   * native tiles can adopt it without another schema round — nothing renders it
+   * yet. 🔴 A surface that DOES honor the rect must also remap the focal into
+   * crop space (`lib/media/cropRect.ts` → `focalInCropSpace`): the focal is
+   * measured on the UNCROPPED frame, so using it raw inside a crop silently
+   * mis-centers the window.
+   */
+  cropX: number | null
+  cropY: number | null
+  cropW: number | null
+  cropH: number | null
   before: PairedBeforeDto | null
   /**
    * Likes, comments and "N recreated this" for the backing look. Always present
@@ -613,6 +628,10 @@ export async function mapPublicPortfolioTileToDto(
     serviceNames: pickServiceTagNames(asset.services),
     focalX: asset.focalX ?? null,
     focalY: asset.focalY ?? null,
+    cropX: asset.cropX ?? null,
+    cropY: asset.cropY ?? null,
+    cropW: asset.cropW ?? null,
+    cropH: asset.cropH ?? null,
     before,
     engagement: {
       likeCount: normalizeCount(engagement.likeCount),

@@ -37,6 +37,7 @@ import {
   type JsonObjectPayload,
 } from '@/app/api/_utils/jsonPayload'
 import { uploadProBookingMedia } from '@/lib/booking/writeBoundary'
+import { resolveCropRect } from '@/lib/media/cropRect'
 import { resolveFocalPoint } from '@/lib/media/focalPoint'
 import { parseCapturedAtClaimed, parseSha256Hex } from '@/lib/media/captureClaim'
 import { attestMediaCapture } from '@/lib/media/attestCapture'
@@ -281,6 +282,10 @@ export async function POST(req: Request, ctx: RouteContext) {
       mediaType?: unknown
       focalX?: unknown
       focalY?: unknown
+      cropX?: unknown
+      cropY?: unknown
+      cropW?: unknown
+      cropH?: unknown
       capturedAt?: unknown
       checksumSha256?: unknown
     }
@@ -322,6 +327,17 @@ export async function POST(req: Request, ctx: RouteContext) {
       typeof body.focalY === 'number' ? body.focalY : null,
     )
 
+    // Optional non-destructive publish crop (item 2): the rect of the captured
+    // image a surface should display, [0,1] top-left, in the SAME space as the
+    // focal above. Same leniency — an incomplete or out-of-frame rect degrades
+    // to null (the full frame), never a 400. Ships dark: nothing renders it.
+    const crop = resolveCropRect(
+      typeof body.cropX === 'number' ? body.cropX : null,
+      typeof body.cropY === 'number' ? body.cropY : null,
+      typeof body.cropW === 'number' ? body.cropW : null,
+      typeof body.cropH === 'number' ? body.cropH : null,
+    )
+
     // Optional capture-attestation claims from the device: when it captured
     // the photo, and the sha256 it computed locally. Both are lenient — see
     // lib/media/captureClaim.ts — and only claims; the server hashes the
@@ -354,6 +370,10 @@ export async function POST(req: Request, ctx: RouteContext) {
         mediaType,
         focalX: focal?.x ?? null,
         focalY: focal?.y ?? null,
+        cropX: crop?.x ?? null,
+        cropY: crop?.y ?? null,
+        cropW: crop?.w ?? null,
+        cropH: crop?.h ?? null,
         capturedAt: capturedAtClaimed?.toISOString() ?? null,
         checksumSha256: clientChecksumSha256,
       },
@@ -513,6 +533,10 @@ export async function POST(req: Request, ctx: RouteContext) {
       mediaType,
       focalX: focal?.x ?? null,
       focalY: focal?.y ?? null,
+      cropX: crop?.x ?? null,
+      cropY: crop?.y ?? null,
+      cropW: crop?.w ?? null,
+      cropH: crop?.h ?? null,
       requestId,
       idempotencyKey: req.headers.get('idempotency-key'),
     })
