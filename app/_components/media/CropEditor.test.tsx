@@ -178,6 +178,91 @@ describe('CropEditor', () => {
     expect(rect.y + rect.h).toBeLessThanOrEqual(BOUND.y + BOUND.h + 1e-6)
   })
 
+  // ── Keyboard ───────────────────────────────────────────────────────────────
+  //
+  // 🔴 The handles are real <button>s, so a keyboard user can Tab straight onto
+  // them. A focusable control that only answers `pointerdown` is worse than no
+  // control — nothing happens and there is no way to tell that from a broken
+  // page. Every gesture has a key equivalent, and these are what say so.
+
+  it('moves the window with the arrow keys', async () => {
+    render(
+      <Harness
+        initial={{
+          crop: { x: 0.3, y: 0.3, w: 0.2, h: 0.2 },
+          bound: FULL_FRAME_CROP,
+          sourceAspect: 0.75,
+        }}
+      />,
+    )
+
+    screen.getByTestId('crop-window').focus()
+    await userEvent.keyboard('{ArrowRight}{ArrowDown}')
+
+    const rect = readRect()
+    expect(rect.x).toBeCloseTo(0.31, 4)
+    expect(rect.y).toBeCloseTo(0.31, 4)
+    expect(rect.w).toBeCloseTo(0.2, 4)
+  })
+
+  it('takes a bigger step with shift held', async () => {
+    render(
+      <Harness
+        initial={{
+          crop: { x: 0.3, y: 0.3, w: 0.2, h: 0.2 },
+          bound: FULL_FRAME_CROP,
+          sourceAspect: 0.75,
+        }}
+      />,
+    )
+
+    screen.getByTestId('crop-window').focus()
+    await userEvent.keyboard('{Shift>}{ArrowRight}{/Shift}')
+
+    expect(readRect().x).toBeCloseTo(0.35, 4)
+  })
+
+  it('resizes from a focused handle WITHOUT also moving the window', async () => {
+    // The handle sits inside the draggable window, so without stopPropagation
+    // one arrow press would resize AND slide the rect — the origin would drift
+    // by a step while the far edge moved by one.
+    render(
+      <Harness
+        initial={{
+          crop: { x: 0.3, y: 0.3, w: 0.2, h: 0.2 },
+          bound: FULL_FRAME_CROP,
+          sourceAspect: 0.75,
+        }}
+      />,
+    )
+
+    screen.getByTestId('crop-handle-se').focus()
+    await userEvent.keyboard('{ArrowRight}')
+
+    const rect = readRect()
+    expect(rect.x).toBeCloseTo(0.3, 4)
+    expect(rect.w).toBeCloseTo(0.21, 4)
+  })
+
+  it('leaves keys it does not handle alone', async () => {
+    render(
+      <Harness
+        initial={{
+          crop: { x: 0.3, y: 0.3, w: 0.2, h: 0.2 },
+          bound: FULL_FRAME_CROP,
+          sourceAspect: 0.75,
+        }}
+      />,
+    )
+
+    screen.getByTestId('crop-window').focus()
+    await userEvent.keyboard('{PageDown}a')
+
+    // Unchanged — and, more to the point, not swallowed: the sheet this lives
+    // in still has to be able to scroll.
+    expect(readRect()).toEqual({ x: 0.3, y: 0.3, w: 0.2, h: 0.2 })
+  })
+
   it('keeps Save disabled until something actually changes', async () => {
     render(
       <Harness

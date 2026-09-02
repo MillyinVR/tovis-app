@@ -32,7 +32,12 @@
 // are converted to normalized units against the RENDERED box, which is measured
 // per gesture rather than cached — the sheet this lives in can resize under it.
 
-import { useCallback, useRef, type PointerEvent as ReactPointerEvent } from 'react'
+import {
+  useCallback,
+  useRef,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react'
 
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import type { ProMediaCrop } from '@/app/_components/media/useProMediaCrop'
@@ -46,6 +51,36 @@ const PRESETS: { label: string; aspect: number }[] = [
   { label: 'Portrait', aspect: 4 / 5 },
   { label: 'Square', aspect: 1 },
 ]
+
+/**
+ * Arrow-key step, as a fraction of the frame — and the reason the handles are
+ * real `<button>`s rather than styled divs.
+ *
+ * 🔴 A focusable control that only answers `pointerdown` is worse than no
+ * control: a keyboard user can Tab straight onto it and nothing happens, with no
+ * way to tell that from a broken page. Every gesture here has a key equivalent.
+ */
+const NUDGE = 0.01
+const NUDGE_COARSE = 0.05
+
+/** Arrow key → normalized delta, or null for a key that is not ours to eat. */
+function nudgeFor(
+  event: ReactKeyboardEvent<HTMLElement>,
+): { dx: number; dy: number } | null {
+  const step = event.shiftKey ? NUDGE_COARSE : NUDGE
+  switch (event.key) {
+    case 'ArrowLeft':
+      return { dx: -step, dy: 0 }
+    case 'ArrowRight':
+      return { dx: step, dy: 0 }
+    case 'ArrowUp':
+      return { dx: 0, dy: -step }
+    case 'ArrowDown':
+      return { dx: 0, dy: step }
+    default:
+      return null
+  }
+}
 
 const HANDLES: { handle: CropHandle; className: string; label: string }[] = [
   { handle: 'nw', className: 'left-0 top-0 -translate-x-1/2 -translate-y-1/2 cursor-nwse-resize', label: 'top left' },
@@ -172,25 +207,50 @@ export default function CropEditor({
 
         <div
           data-testid="crop-window"
-          role="application"
-          aria-label="Crop window — drag to move"
-          className="absolute cursor-move border-2 border-accentPrimary shadow-[0_0_0_1px_rgb(var(--scrim)/0.45)]"
+          role="group"
+          tabIndex={0}
+          aria-label="Crop window — drag or use the arrow keys to move it"
+          className={cn(
+            'absolute cursor-move border-2 border-accentPrimary',
+            'shadow-[0_0_0_1px_rgb(var(--scrim)/0.45)]',
+            'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2',
+            'focus-visible:outline-accentPrimary',
+          )}
           style={boxStyle(rect)}
           onPointerDown={(event) => startGesture(event, crop.move)}
+          onKeyDown={(event) => {
+            const delta = nudgeFor(event)
+            if (!delta) return
+            // Only once we know the key is ours: arrows we do not handle must
+            // still scroll the sheet this sits in.
+            event.preventDefault()
+            crop.move(delta)
+          }}
         >
           {HANDLES.map(({ handle, className, label }) => (
             <button
               key={handle}
               type="button"
               data-testid={`crop-handle-${handle}`}
-              aria-label={`Resize from the ${label} corner`}
+              aria-label={`Resize from the ${label} corner — arrow keys adjust`}
               className={cn(
                 'absolute h-6 w-6 rounded-full border-2 border-onAccent bg-accentPrimary',
+                'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2',
+                'focus-visible:outline-accentPrimary',
                 className,
               )}
               onPointerDown={(event) =>
                 startGesture(event, (delta) => crop.resize(handle, delta))
               }
+              onKeyDown={(event) => {
+                const delta = nudgeFor(event)
+                if (!delta) return
+                event.preventDefault()
+                // The button is inside the draggable window, so without this the
+                // same arrow press would ALSO slide the whole rect.
+                event.stopPropagation()
+                crop.resize(handle, delta)
+              }}
             />
           ))}
         </div>
