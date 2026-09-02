@@ -986,6 +986,7 @@ describe('app/api/v1/pro/media/[id]/portfolio/route.ts', () => {
         thumbBucket: null,
         thumbPath: null,
         orphanedPublicObjects: [],
+        cdnPurgeFailures: [],
       })
 
       const res = await DELETE(makeRequest('DELETE'), makeCtx())

@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   upload: vi.fn(),
   list: vi.fn(),
   remove: vi.fn(),
+  purge: vi.fn(),
 }))
 
 vi.mock('@/lib/supabaseAdmin', () => ({
@@ -29,6 +30,10 @@ vi.mock('@/lib/supabaseAdmin', () => ({
   }),
 }))
 
+vi.mock('@/lib/media/cdnCache', () => ({
+  purgeCdnObject: (bucket: string, path: string) => mocks.purge(bucket, path),
+}))
+
 vi.mock('@/lib/security/logging', () => ({
   safeError: (e: unknown) => (e instanceof Error ? e.message : String(e)),
 }))
@@ -38,9 +43,11 @@ import {
   retractMediaAssetToPrivate,
 } from './retractToPrivateBucket'
 import type { Prisma } from '@prisma/client'
+import { MEDIA_UPLOAD_CACHE_CONTROL } from '@/lib/media/cacheControl'
 import { BUCKETS } from '@/lib/storageBuckets'
 
 const PUBLIC_PATH = 'pro/pro_1/looks_public/2026-08/1788212846485_abc.jpg'
+const THUMB_PATH = 'pro/pro_1/looks_public/2026-08/thumb.jpg'
 const SIZE = 597_189
 
 const MEDIA = {
@@ -82,10 +89,11 @@ beforeEach(() => {
   mocks.upload.mockResolvedValue({ error: null })
   mocks.list.mockImplementation(listReturnsSize(SIZE))
   mocks.remove.mockResolvedValue({ error: null })
+  mocks.purge.mockResolvedValue({ ok: true })
 })
 
 describe('retractMediaAssetToPrivate', () => {
-  it('copies, re-points and deletes — in that order', async () => {
+  it('copies, re-points, deletes and purges — in that order', async () => {
     const order: string[] = []
     mocks.upload.mockImplementation(() => {
       order.push('upload')
@@ -94,6 +102,10 @@ describe('retractMediaAssetToPrivate', () => {
     mocks.remove.mockImplementation(() => {
       order.push('remove')
       return Promise.resolve({ error: null })
+    })
+    mocks.purge.mockImplementation(() => {
+      order.push('purge')
+      return Promise.resolve({ ok: true })
     })
 
     const { update, db } = makeDb()
@@ -105,8 +117,9 @@ describe('retractMediaAssetToPrivate', () => {
     const outcome = await retractMediaAssetToPrivate(db, MEDIA)
 
     expect(outcome.status).toBe('RETRACTED')
-    // 🔴 The whole safety argument in one assertion.
-    expect(order).toEqual(['upload', 'update', 'remove'])
+    // 🔴 The whole safety argument in one assertion. The purge is LAST: it is
+    // only meaningful once the origin bytes are actually gone.
+    expect(order).toEqual(['upload', 'update', 'remove', 'purge'])
   })
 
   it('re-points every pointer, including the cached public URLs', async () => {
@@ -190,6 +203,64 @@ describe('retractMediaAssetToPrivate', () => {
         reason: 'permission denied',
       },
     ])
+
+    // 🔴 And it must NOT purge an object that is still there. A purge would
+    // succeed, the next request would repopulate the edge from the bytes we
+    // failed to remove, and the result would read as a clean retraction.
+    expect(mocks.purge).not.toHaveBeenCalled()
+  })
+
+  it('writes an explicit cache-control onto the private copy', async () => {
+    const { db } = makeDb()
+
+    await retractMediaAssetToPrivate(db, MEDIA)
+
+    const call = mocks.upload.mock.calls[0]
+    if (!call) throw new Error('expected the bytes to be copied')
+    // Left unset on this path it is the storage-js default, `max-age=3600` —
+    // an hour of browser residency that no directly-uploaded object has. A
+    // retraction's own copy must not inherit a longer TTL than the original.
+    expect(call[3]).toMatchObject({ cacheControl: MEDIA_UPLOAD_CACHE_CONTROL })
+  })
+
+  it('purges the edge copy of every object it deletes', async () => {
+    const { db } = makeDb()
+
+    const outcome = await retractMediaAssetToPrivate(db, {
+      ...MEDIA,
+      thumbBucket: BUCKETS.mediaPublic,
+      thumbPath: THUMB_PATH,
+    })
+
+    expect(outcome.status).toBe('RETRACTED')
+    if (outcome.status !== 'RETRACTED') return
+    expect(outcome.cdnPurgeFailures).toEqual([])
+
+    // Deleting at the origin leaves the CDN serving the photo for the better
+    // part of a minute (measured). Both objects have to be invalidated.
+    expect(mocks.purge.mock.calls).toEqual([
+      [BUCKETS.mediaPublic, PUBLIC_PATH],
+      [BUCKETS.mediaPublic, THUMB_PATH],
+    ])
+  })
+
+  it('reports a failed purge without failing the retraction', async () => {
+    mocks.purge.mockResolvedValue({ ok: false, reason: 'CDN purge failed (403): nope' })
+
+    const { db } = makeDb()
+    const outcome = await retractMediaAssetToPrivate(db, MEDIA)
+
+    // The bytes ARE gone; only the edge lingers, and it self-invalidates.
+    expect(outcome.status).toBe('RETRACTED')
+    if (outcome.status !== 'RETRACTED') return
+    expect(outcome.orphanedPublicObjects).toEqual([])
+    expect(outcome.cdnPurgeFailures).toEqual([
+      {
+        bucket: BUCKETS.mediaPublic,
+        path: PUBLIC_PATH,
+        reason: 'CDN purge failed (403): nope',
+      },
+    ])
   })
 
   it('moves the thumbnail too when it is public', async () => {
@@ -198,7 +269,7 @@ describe('retractMediaAssetToPrivate', () => {
     await retractMediaAssetToPrivate(db, {
       ...MEDIA,
       thumbBucket: BUCKETS.mediaPublic,
-      thumbPath: 'pro/pro_1/looks_public/2026-08/thumb.jpg',
+      thumbPath: THUMB_PATH,
     })
 
     const call = update.mock.calls[0]
