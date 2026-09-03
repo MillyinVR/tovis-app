@@ -195,7 +195,6 @@ async function createBooking(args: {
 
 beforeAll(async () => {
   process.env.ENABLE_AI_CONSULT = '1'
-  process.env.AI_CONSULT_SERVICE_SCOPE = 'ALL_SERVICES'
 
   const tenant = await db.tenant.create({
     data: { slug: `${tag}-tenant`, name: 'Service-aware consult', isActive: true },
@@ -345,7 +344,7 @@ beforeAll(async () => {
 
 beforeEach(() => {
   process.env.ENABLE_AI_CONSULT = '1'
-  process.env.AI_CONSULT_SERVICE_SCOPE = 'ALL_SERVICES'
+  delete process.env.AI_CONSULT_SERVICE_SCOPE
   mockRequireClient.mockResolvedValue({
     ok: true,
     clientId,
@@ -638,8 +637,8 @@ describe('service-aware consult intake against PostgreSQL', () => {
     expect(JSON.stringify(nails.capture.shotPack)).not.toContain('Accept only')
   })
 
-  it('is unreachable under the default colour-only scope', async () => {
-    delete process.env.AI_CONSULT_SERVICE_SCOPE
+  it('goes dark, without leaking, when the kill switch narrows the scope to colour', async () => {
+    process.env.AI_CONSULT_SERVICE_SCOPE = 'HAIR_COLOR_ONLY'
     const hidden = await getIntake(
       new Request(intakeUrl(hairSessionId)),
       context(hairSessionId),

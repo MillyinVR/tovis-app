@@ -6,14 +6,13 @@
 //
 // Tori's 2026-09-03 decision: the consult runs for EVERY service, including
 // categories that do not exist yet (docs/product/CONSULT-SERVICE-AWARE-PLAN.md).
-// The build lands in slices, and the gate opens LAST — so the default scope
-// stays HAIR_COLOR_ONLY until the intake, analysis and capture layers are all
-// service-aware. Flipping the default is the final slice's one-line change.
+// The intake, analysis and capture layers became service-aware first
+// (tovis-app #1067, #1068, #1069); this default opened the gate last.
 //
-// `AI_CONSULT_SERVICE_SCOPE` overrides the default when it names a scope
-// exactly. Today that is how the wide path is exercised before the flip; once
-// the default is ALL_SERVICES it is the kill switch that narrows the consult
-// back to colour without a deploy. An unrecognised value is ignored, never
+// `AI_CONSULT_SERVICE_SCOPE` is the kill switch: set it to HAIR_COLOR_ONLY and
+// the consult narrows back to the colour category without a deploy — every
+// other category's Book button falls through to the ordinary booking drawer,
+// exactly as it did before the build. An unrecognised value is ignored, never
 // treated as "open".
 
 import { ConsultServiceFamily } from '@prisma/client'
@@ -22,9 +21,9 @@ export const CONSULT_SERVICE_SCOPES = ['HAIR_COLOR_ONLY', 'ALL_SERVICES'] as con
 
 export type ConsultServiceScope = (typeof CONSULT_SERVICE_SCOPES)[number]
 
-export const CONSULT_SERVICE_SCOPE_DEFAULT: ConsultServiceScope = 'HAIR_COLOR_ONLY'
+export const CONSULT_SERVICE_SCOPE_DEFAULT: ConsultServiceScope = 'ALL_SERVICES'
 
-/** The one category slug the narrow scope admits. Data, not a gate. */
+/** The one category slug the NARROWED (kill-switch) scope admits. */
 export const HAIR_COLOR_CATEGORY_SLUG = 'hair-color'
 
 export function consultServiceScope(): ConsultServiceScope {

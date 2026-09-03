@@ -388,6 +388,9 @@ describe('client consult agreement API against PostgreSQL', () => {
     expect(gated.status).toBe(404)
 
     process.env.ENABLE_AI_CONSULT = '1'
+    // Every category is consultable by default (2026-09-03); only the kill
+    // switch makes a non-colour category dark, and it must stay no-leak.
+    process.env.AI_CONSULT_SERVICE_SCOPE = 'HAIR_COLOR_ONLY'
     await db.serviceCategory.update({
       where: { id: categoryId },
       data: { slug: 'brows' },
@@ -399,6 +402,7 @@ describe('client consult agreement API against PostgreSQL', () => {
       )
       expect(brows.status).toBe(404)
     } finally {
+      delete process.env.AI_CONSULT_SERVICE_SCOPE
       await db.serviceCategory.update({
         where: { id: categoryId },
         data: { slug: 'hair-color' },

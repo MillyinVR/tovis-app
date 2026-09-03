@@ -176,24 +176,24 @@ describe('evaluateConsultAnchor — look arm', () => {
     ).toEqual({ eligible: false, reason: 'FEATURE_DISABLED', hidden: true })
   })
 
-  it('stays inside the pilot vertical', () => {
+  it('admits any category by default', () => {
     expect(
       evaluateConsultAnchor(
         lookAnchored({ serviceCategory: { slug: 'nails' } }),
         NOW,
       ),
-    ).toEqual({ eligible: false, reason: 'VERTICAL_NOT_ENABLED', hidden: true })
+    ).toEqual({ eligible: true, kind: 'LOOK' })
   })
 
-  it('admits any category once the scope is ALL_SERVICES', () => {
-    process.env.AI_CONSULT_SERVICE_SCOPE = 'ALL_SERVICES'
+  it('stays inside colour when the kill switch narrows the scope', () => {
+    process.env.AI_CONSULT_SERVICE_SCOPE = 'HAIR_COLOR_ONLY'
     try {
       expect(
         evaluateConsultAnchor(
           lookAnchored({ serviceCategory: { slug: 'nails' } }),
           NOW,
         ),
-      ).toEqual({ eligible: true, kind: 'LOOK' })
+      ).toEqual({ eligible: false, reason: 'VERTICAL_NOT_ENABLED', hidden: true })
     } finally {
       delete process.env.AI_CONSULT_SERVICE_SCOPE
     }

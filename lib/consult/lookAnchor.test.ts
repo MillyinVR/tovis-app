@@ -29,8 +29,7 @@ describe('resolveConsultLookAnchor', () => {
     delete process.env.AI_CONSULT_SERVICE_SCOPE
   })
 
-  it('anchors a look in ANY category once the scope is ALL_SERVICES', () => {
-    process.env.AI_CONSULT_SERVICE_SCOPE = 'ALL_SERVICES'
+  it('anchors a look in ANY category by default', () => {
     expect(
       resolveConsultLookAnchor(
         look({
@@ -67,7 +66,8 @@ describe('resolveConsultLookAnchor', () => {
     })
   })
 
-  it('refuses a look linked outside the founder pilot vertical', () => {
+  it('refuses a look outside colour when the kill switch narrows the scope', () => {
+    process.env.AI_CONSULT_SERVICE_SCOPE = 'HAIR_COLOR_ONLY'
     expect(
       resolveConsultLookAnchor(
         look({
