@@ -29,10 +29,16 @@ import { requireCurrentConsultAgreementAcceptances } from './agreementContract'
 import { CONSULT_ANCHOR_SELECT, evaluateConsultAnchor } from './anchor'
 import { ConsultWriteError } from './errors'
 import {
-  evaluateHairColorIntakeProgress,
-  HAIR_COLOR_INTAKE_PACK,
-  normalizeHairColorIntakePayload,
-} from './intakePack'
+  evaluateConsultIntakeProgress,
+  normalizeConsultIntakePayloadForPack,
+  toConsultIntakeQuestionPackDTO,
+} from './intake/registry'
+import { SERVICE_TIMING_QUESTION_KEYS } from './intake/sharedOptions'
+import type { ConsultIntakePackDefinition } from './intake/types'
+import {
+  CONSULT_SERVICE_PROFILE_CATEGORY_SELECT,
+  resolveConsultServiceProfile,
+} from './serviceProfile'
 
 const INTAKE_READABLE_STATES = new Set<ConsultSessionStatus>([
   ConsultSessionStatus.INTAKE_READY,
@@ -44,6 +50,9 @@ const INTAKE_SCOPE_SELECT = {
   id: true,
   status: true,
   ...CONSULT_ANCHOR_SELECT,
+  // The anchor rule reads the slug; the service profile reads the family and
+  // the name as well, so the wider select replaces the anchor's narrower one.
+  serviceCategory: { select: CONSULT_SERVICE_PROFILE_CATEGORY_SELECT },
 } satisfies Prisma.ConsultSessionSelect
 
 type IntakeScope = Prisma.ConsultSessionGetPayload<{
@@ -147,6 +156,7 @@ function signal(
 }
 
 function mapLatestRevision(
+  pack: ConsultIntakePackDefinition,
   revisions: Array<{
     id: string
     revision: number
@@ -155,7 +165,10 @@ function mapLatestRevision(
   }>,
 ): ConsultIntakeRevisionDTO | null {
   for (const revision of revisions) {
-    const payload = normalizeHairColorIntakePayload(revision.payload)
+    // Only revisions written under the pack this session SERVES count. A
+    // category whose family changed mid-consult starts its intake over rather
+    // than mixing two packs' answers.
+    const payload = normalizeConsultIntakePayloadForPack(pack, revision.payload)
     if (!payload) continue
     return {
       id: revision.id,
@@ -171,7 +184,7 @@ function mapLatestRevision(
  * Reads only owner-scoped, approved signals after both current legal versions
  * are proven. The transaction performs no writes to any source record.
  */
-export async function loadHairColorIntakeState(args: {
+export async function loadConsultIntakeState(args: {
   consultSessionId: string
   clientId: string
   now?: Date
@@ -188,6 +201,13 @@ export async function loadHairColorIntakeState(args: {
           'Consult lifecycle does not permit intake access.',
         )
       }
+      const pack = resolveConsultServiceProfile(session.serviceCategory).intakePack
+      const packAsks = (questionKey: string) =>
+        pack.questions.some((question) => question.key === questionKey)
+      // The one "when was your last service?" key THIS pack asks, if any —
+      // the booking-history prefill lands there (values are shared).
+      const serviceTimingKey =
+        SERVICE_TIMING_QUESTION_KEYS.find((key) => packAsks(key)) ?? null
 
       const [profile, boards, savedLooks, bookingHistory, latestRevision] =
         await Promise.all([
@@ -224,11 +244,13 @@ export async function loadHairColorIntakeState(args: {
             orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
             take: 20,
           }),
+          // The client's last COMPLETED booking in this consult's own category,
+          // whatever the category is.
           tx.booking.findFirst({
             where: {
               clientId: args.clientId,
               status: BookingStatus.COMPLETED,
-              service: { category: { slug: 'hair-color' } },
+              service: { categoryId: session.serviceCategoryId },
             },
             select: { id: true, scheduledFor: true },
             orderBy: [{ scheduledFor: 'desc' }, { id: 'desc' }],
@@ -317,17 +339,20 @@ export async function loadHairColorIntakeState(args: {
         }
       }
 
-      if (bookingHistory) {
+      if (bookingHistory && serviceTimingKey) {
         addSuggestion(
           suggestions,
-          'last_color_service_timing',
+          serviceTimingKey,
           bookingTimingValue(bookingHistory.scheduledFor, now),
           { source: 'BOOKING_HISTORY', sourceId: bookingHistory.id },
         )
       }
 
+      // Suggestions are kept only for questions THIS pack asks, with a value
+      // the question offers — so colour signals simply fall away on a pack
+      // that never asks about colour.
       const prefillSuggestions: ConsultIntakePrefillSuggestionDTO[] = []
-      for (const definition of HAIR_COLOR_INTAKE_PACK.questions) {
+      for (const definition of pack.questions) {
         const suggestion = suggestions.get(definition.key)
         if (!suggestion) continue
         if (
@@ -344,21 +369,34 @@ export async function loadHairColorIntakeState(args: {
         })
       }
 
-      const mappedLatestRevision = mapLatestRevision(latestRevision)
+      const mappedLatestRevision = mapLatestRevision(pack, latestRevision)
       return {
         consultId: session.id,
         status: session.status,
-        questionPack: HAIR_COLOR_INTAKE_PACK,
-        progress: evaluateHairColorIntakeProgress(
+        questionPack: toConsultIntakeQuestionPackDTO(pack),
+        progress: evaluateConsultIntakeProgress(
+          pack,
           mappedLatestRevision?.answers ?? {},
         ),
         prefillSuggestions,
+        // A signal family counts as "informed prefill" only when this pack
+        // asks the question it feeds.
         prefillSignals: [
-          signal('SELF_PROFILE', Boolean(selfProfile?.hair_color)),
-          signal('BOARD', boardSignalAvailable),
-          signal('SAVED_LOOK', savedLookSignalAvailable),
-          signal('TASTE_VECTOR', Boolean(tasteVector && tasteVector.signalCount > 0)),
-          signal('BOOKING_HISTORY', Boolean(bookingHistory)),
+          signal(
+            'SELF_PROFILE',
+            Boolean(selfProfile?.hair_color) && packAsks('current_color'),
+          ),
+          signal('BOARD', boardSignalAvailable && packAsks('desired_color')),
+          signal(
+            'SAVED_LOOK',
+            savedLookSignalAvailable && packAsks('desired_color'),
+          ),
+          signal(
+            'TASTE_VECTOR',
+            Boolean(tasteVector && tasteVector.signalCount > 0) &&
+              packAsks('desired_color'),
+          ),
+          signal('BOOKING_HISTORY', Boolean(bookingHistory && serviceTimingKey)),
         ],
         latestRevision: mappedLatestRevision,
       }

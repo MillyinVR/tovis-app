@@ -17,7 +17,7 @@ import {
   toLegacyBriefJsonPayload,
   type HairColorProBriefPayload,
 } from './briefContract'
-import { normalizeHairColorIntakePayload } from './intakePack'
+import { normalizeConsultIntakePayload } from './intake/registry'
 import {
   CONSULT_INSPIRATION_REFERENCE_NOTE,
   normalizeStoredInspirationPayload,
@@ -110,13 +110,14 @@ export async function loadLatestImmutableConsultResult(
   )
   if (!brief) throw new ImmutableConsultResultError()
 
-  const normalizedIntake = normalizeHairColorIntakePayload(intake.payload)
+  const normalizedIntake = normalizeConsultIntakePayload(intake.payload)
   if (!normalizedIntake?.complete) throw new ImmutableConsultResultError()
 
   let payload: HairColorProBriefPayload
   try {
     const buildArgs = {
       intakeRevisionId: intake.id,
+      intakePackId: normalizedIntake.packId,
       intakeAnswers: normalizedIntake.answers,
       analysisRevisionId: analysis.id,
       analysisRevision: analysis.revision,

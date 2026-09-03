@@ -30,12 +30,10 @@ import { CONSULT_ANCHOR_SELECT, evaluateConsultAnchor } from './anchor'
 import { HAIR_COLOR_CAPTURE_SHOT_KEYS } from './capturePack'
 import { ConsultWriteError } from './errors'
 import {
-  HAIR_COLOR_INTAKE_PACK_ID,
-  HAIR_COLOR_INTAKE_PACK_VERSION,
-  HAIR_COLOR_INTAKE_SCHEMA_VERSION,
-  validateHairColorIntakeAnswers,
-  normalizeHairColorIntakePayload,
-} from './intakePack'
+  normalizeConsultIntakePayload,
+  validateConsultIntakeAnswers,
+} from './intake/registry'
+import type { ConsultIntakePackDefinition } from './intake/types'
 import {
   CONSULT_INSPIRATION_REFERENCE_NOTE,
   normalizeStoredInspirationPayload,
@@ -47,6 +45,10 @@ import {
   buildConsultServiceEstimate,
   type ConsultServiceEstimateAnalysisInput,
 } from './serviceEstimate'
+import {
+  CONSULT_SERVICE_PROFILE_CATEGORY_SELECT,
+  resolveConsultServiceProfile,
+} from './serviceProfile'
 
 type ClientActor = {
   readonly type: typeof ConsultActorType.CLIENT
@@ -127,6 +129,7 @@ async function requireClientIntakeEligibility(
     select: {
       client: { select: { userId: true } },
       ...CONSULT_ANCHOR_SELECT,
+      serviceCategory: { select: CONSULT_SERVICE_PROFILE_CATEGORY_SELECT },
     },
   })
   if (!session || session.client.userId !== actor.id) {
@@ -417,7 +420,7 @@ export async function transitionConsultSession(args: {
 
 /**
  * Low-level immutable revision boundary retained for later analysis/brief
- * writers. Client intake uses appendHairColorIntakeRevision below for strict
+ * writers. Client intake uses appendConsultIntakeRevision below for strict
  * payload validation, idempotency, ownership, and lifecycle effects. Both
  * boundaries and the database fail closed on stale/missing prerequisites.
  */
@@ -643,7 +646,7 @@ export async function finalizeLockedHairColorAnalysis(
     orderBy: { revision: 'desc' },
   })
   const intake = intakeRevision
-    ? normalizeHairColorIntakePayload(intakeRevision.payload)
+    ? normalizeConsultIntakePayload(intakeRevision.payload)
     : null
   if (!intakeRevision || !intake || !intake.complete) {
     throw new ConsultWriteError(
@@ -692,6 +695,7 @@ export async function finalizeLockedHairColorAnalysis(
   const briefAnalysis = normalizeStoredHairColorAnalysisPayload(revision.payload)
   const briefPayload = buildHairColorProBriefPayload({
     intakeRevisionId: intakeRevision.id,
+    intakePackId: intake.packId,
     intakeAnswers: intake.answers,
     analysisRevisionId: revision.id,
     analysisRevision: revision.revision,
@@ -814,6 +818,7 @@ async function writeLookServiceEstimate(
 }
 
 function intakeRequestHash(args: {
+  packId: string
   packVersion: number
   schemaVersion: number
   complete: boolean
@@ -825,7 +830,7 @@ function intakeRequestHash(args: {
   return createHash('sha256')
     .update(
       JSON.stringify({
-        packId: HAIR_COLOR_INTAKE_PACK_ID,
+        packId: args.packId,
         packVersion: args.packVersion,
         schemaVersion: args.schemaVersion,
         complete: args.complete,
@@ -839,8 +844,12 @@ function intakeRequestHash(args: {
  * Canonical C2 intake write. Validation, legal-version checks, idempotency,
  * immutable revision/audit creation, and lifecycle changes share one locked
  * transaction so a retry cannot duplicate any effect.
+ *
+ * The pack is the one the session's service profile serves (colour, hair, or
+ * general); the client echoes its versions and the answers are validated
+ * against that pack's own questions.
  */
-export async function appendHairColorIntakeRevision(args: {
+export async function appendConsultIntakeRevision(args: {
   consultSessionId: string
   actor: ClientActor
   loadInput: () => Promise<{
@@ -858,6 +867,9 @@ export async function appendHairColorIntakeRevision(args: {
       args.consultSessionId,
       args.actor,
     )
+    const pack: ConsultIntakePackDefinition = resolveConsultServiceProfile(
+      scope.serviceCategory,
+    ).intakePack
     const session = await tx.consultSession.findUniqueOrThrow({
       where: { id: args.consultSessionId },
       select: { status: true },
@@ -880,13 +892,13 @@ export async function appendHairColorIntakeRevision(args: {
     // prerequisites. Revocation uses the same row lock, so the two operations
     // have one deterministic order.
     const input = await args.loadInput()
-    if (input.packVersion !== HAIR_COLOR_INTAKE_PACK_VERSION) {
+    if (input.packVersion !== pack.version) {
       throw new ConsultWriteError(
         'PACK_VERSION_MISMATCH',
         'The intake pack version is stale.',
       )
     }
-    if (input.schemaVersion !== HAIR_COLOR_INTAKE_SCHEMA_VERSION) {
+    if (input.schemaVersion !== pack.schemaVersion) {
       throw new ConsultWriteError(
         'SCHEMA_VERSION_MISMATCH',
         'The intake schema version is stale.',
@@ -899,7 +911,8 @@ export async function appendHairColorIntakeRevision(args: {
         'A valid idempotency key is required.',
       )
     }
-    const validated = validateHairColorIntakeAnswers(
+    const validated = validateConsultIntakeAnswers(
+      pack,
       input.answers,
       input.complete,
     )
@@ -912,6 +925,7 @@ export async function appendHairColorIntakeRevision(args: {
       throw new ConsultWriteError(code, validated.message)
     }
     const requestHash = intakeRequestHash({
+      packId: pack.id,
       packVersion: input.packVersion,
       schemaVersion: input.schemaVersion,
       complete: input.complete,
@@ -960,7 +974,7 @@ export async function appendHairColorIntakeRevision(args: {
         revision: sequenced.revisionSequence,
         kind: ConsultRevisionKind.INTAKE,
         payload: {
-          packId: HAIR_COLOR_INTAKE_PACK_ID,
+          packId: pack.id,
           packVersion: input.packVersion,
           schemaVersion: input.schemaVersion,
           complete: input.complete,

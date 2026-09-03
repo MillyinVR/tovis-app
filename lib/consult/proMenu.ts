@@ -1,7 +1,9 @@
 // lib/consult/proMenu.ts
 //
 // The pro's MENU, as a consult is allowed to see it: her active offerings for
-// active services in the consult's own category, inside the pilot vertical.
+// active services in the consult's own category. The category is the scope;
+// the consult's service family (lib/consult/serviceProfile.ts) decides how the
+// analysis reads the menu, never which rows it may see.
 //
 // One definition, deliberately. Two consult surfaces read this list and they
 // must read the SAME one:
@@ -62,7 +64,7 @@ export async function loadConsultProMenuOfferings(
       service: {
         isActive: true,
         categoryId: scope.serviceCategoryId,
-        category: { isActive: true, slug: 'hair-color' },
+        category: { isActive: true },
       },
     },
     select: CONSULT_PRO_MENU_SELECT,

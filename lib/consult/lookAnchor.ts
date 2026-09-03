@@ -24,7 +24,7 @@ import {
   toLookPrimaryServiceSummary,
 } from '@/lib/looks/serviceOwnership'
 
-import { AI_CONSULT_PILOT_CATEGORY_SLUGS } from './eligibility'
+import { isConsultCategoryInScope } from './serviceScope'
 
 export const CONSULT_LOOK_ANCHOR_SELECT = {
   id: true,
@@ -58,8 +58,6 @@ export type ConsultLookAnchorResolution =
     }
   | { ok: false; reason: ConsultLookAnchorRefusalCode }
 
-const PILOT_CATEGORY_SLUGS = new Set<string>(AI_CONSULT_PILOT_CATEGORY_SLUGS)
-
 /**
  * The pro is the Look's own `professionalId` — for a client-authored look that
  * is still the visited pro (schema comment on LookPost), which is exactly who
@@ -78,10 +76,7 @@ export function resolveConsultLookAnchor(
   if (!primary || !look.service?.category) {
     return { ok: false, reason: 'LOOK_SERVICE_UNLINKED' }
   }
-  if (
-    !primary.categorySlug ||
-    !PILOT_CATEGORY_SLUGS.has(primary.categorySlug)
-  ) {
+  if (!isConsultCategoryInScope({ slug: primary.categorySlug })) {
     return { ok: false, reason: 'LOOK_VERTICAL_NOT_ENABLED' }
   }
 

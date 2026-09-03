@@ -1,13 +1,14 @@
 // app/api/v1/admin/categories/route.ts
 
 import { NextRequest, NextResponse } from 'next/server'
-import { AdminPermissionRole, Role } from '@prisma/client'
+import { AdminPermissionRole, ConsultServiceFamily, Role } from '@prisma/client'
 
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { requireAdminPermission } from '@/app/api/_utils/auth/requireAdminPermission'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { pickString } from '@/app/api/_utils/pick'
 import { writeAdminAuditLog } from '@/lib/admin/auditLog'
+import { parseConsultServiceFamily } from '@/lib/consult/serviceScope'
 import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
@@ -87,6 +88,15 @@ export async function POST(req: NextRequest) {
     const name = (pickString(form.get('name')) ?? '').trim()
     const slugRaw = (pickString(form.get('slug')) ?? '').trim()
     const parentIdRaw = (pickString(form.get('parentId')) ?? '').trim()
+    // The consult keys its packs on the family (lib/consult/serviceProfile.ts).
+    // Absent means OTHER — the generic packs — never a refusal.
+    const consultFamilyRaw = pickString(form.get('consultFamily'))
+    const consultFamily = consultFamilyRaw
+      ? parseConsultServiceFamily(consultFamilyRaw)
+      : ConsultServiceFamily.OTHER
+    if (!consultFamily) {
+      return jsonFail(400, 'Invalid consultFamily')
+    }
 
     if (!name) {
       return jsonFail(400, 'Missing name')
@@ -117,12 +127,14 @@ export async function POST(req: NextRequest) {
         slug,
         parentId,
         isActive: true,
+        consultFamily,
       },
       select: {
         id: true,
         name: true,
         slug: true,
         parentId: true,
+        consultFamily: true,
       },
     })
 

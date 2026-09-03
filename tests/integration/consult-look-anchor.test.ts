@@ -262,7 +262,7 @@ import {
 import { loadAuthorizedClientConsultResults } from '@/lib/consult/clientResults'
 import {
   acceptConsultAgreement,
-  appendHairColorIntakeRevision,
+  appendConsultIntakeRevision,
 } from '@/lib/consult/writeBoundary'
 
 const databaseUrl = process.env.DATABASE_URL
@@ -427,7 +427,7 @@ async function consentAndCompleteIntake(sessionId: string, label: string) {
     expectedKind: ConsultAgreementKind.ADULT_18_PLUS_ATTESTATION,
     actor: { type: ConsultActorType.CLIENT, id: clientUserId },
   })
-  await appendHairColorIntakeRevision({
+  await appendConsultIntakeRevision({
     consultSessionId: sessionId,
     actor: { type: ConsultActorType.CLIENT, id: clientUserId },
     loadInput: async () => ({
@@ -867,7 +867,7 @@ describe('look-anchored consult entry', () => {
           serviceCategoryId: categoryId,
         },
       }),
-    ).rejects.toThrow(/look professional and hair-color category/)
+    ).rejects.toThrow(/look professional and name a service category/)
   })
 
   it('the database still refuses a consult with no anchor at all', async () => {

@@ -16,7 +16,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
   acceptConsultAgreement,
   appendConsultRevision,
-  appendHairColorIntakeRevision,
+  appendConsultIntakeRevision,
   revokeConsultAgreement,
   transitionConsultSession,
 } from '@/lib/consult/writeBoundary'
@@ -357,7 +357,7 @@ describe('AI consult lifecycle and legal foundation', () => {
 
     const previousConsultFlag = process.env.ENABLE_AI_CONSULT
     process.env.ENABLE_AI_CONSULT = '1'
-    const { revision } = await appendHairColorIntakeRevision({
+    const { revision } = await appendConsultIntakeRevision({
       consultSessionId: sessionId,
       actor: { type: ConsultActorType.CLIENT, id: userId },
       loadInput: async () => ({

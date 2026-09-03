@@ -273,7 +273,7 @@ import {
 import {
   acceptConsultAgreement,
   appendLockedConsultInspirationRevision,
-  appendHairColorIntakeRevision,
+  appendConsultIntakeRevision,
   revokeConsultAgreement,
   transitionLockedConsultSession,
 } from '@/lib/consult/writeBoundary'
@@ -446,7 +446,7 @@ async function createReadyConsult(
     expectedKind: ConsultAgreementKind.ADULT_18_PLUS_ATTESTATION,
     actor: { type: ConsultActorType.CLIENT, id: user.id },
   })
-  await appendHairColorIntakeRevision({
+  await appendConsultIntakeRevision({
     consultSessionId: session.id,
     actor: { type: ConsultActorType.CLIENT, id: user.id },
     loadInput: async () => ({
@@ -1204,7 +1204,7 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
     expect(
       await db.consultSession.findUniqueOrThrow({ where: { id: consult.sessionId }, select: { status: true } }),
     ).toEqual({ status: ConsultSessionStatus.INTAKE_READY })
-    await appendHairColorIntakeRevision({
+    await appendConsultIntakeRevision({
       consultSessionId: consult.sessionId,
       actor: { type: ConsultActorType.CLIENT, id: consult.userId },
       loadInput: async () => ({

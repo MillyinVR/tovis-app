@@ -1,5 +1,9 @@
 import type { ConsultIntakeAnswerMapDTO } from '@/lib/dto/consult'
 
+import { GENERAL_SERVICE_INTAKE_PACK_ID } from './intake/packs/generalService'
+import { HAIR_COLOR_INTAKE_PACK_ID } from './intake/packs/hairColor'
+import { HAIR_GENERAL_INTAKE_PACK_ID } from './intake/packs/hairGeneral'
+
 export const CONSULT_SAFETY_ROUTING_POLICY_VERSION =
   'hair-color-safety-routing-v1'
 
@@ -99,6 +103,64 @@ export function determineHairColorSafetyRouting(args: {
     requirements,
     blocksChemicalRecommendations: requirements.length > 0,
   }
+}
+
+type ConsultSafetyRouting = ReturnType<typeof determineHairColorSafetyRouting>
+
+/**
+ * The safety policy for the OTHER intake packs, keyed on the pack rather than
+ * the family because the questions a policy can read are the pack's.
+ *
+ *   * hair-general (extensions, cuts, any hair service that is not colour):
+ *     a reported reaction routes to a patch test. No strand test — that is a
+ *     chemical-service check, and these services are not chemical.
+ *   * general-service (every non-hair family): a reported reaction, a known
+ *     product allergy, or skin that reacts easily routes to a patch test.
+ *
+ * As with colour, a routed consult declines to recommend the service itself
+ * until the test has happened.
+ */
+function determinePackSafetyRouting(args: {
+  intakePackId: string
+  intake: Readonly<ConsultIntakeAnswerMapDTO>
+}): ConsultSafetyRouting {
+  const requirements: ConsultSafetyServiceRequirement[] = []
+  if (args.intakePackId === HAIR_GENERAL_INTAKE_PACK_ID) {
+    if (args.intake.prior_reaction === 'yes') requirements.push('PATCH_TEST')
+  } else if (args.intakePackId === GENERAL_SERVICE_INTAKE_PACK_ID) {
+    if (
+      args.intake.prior_reaction === 'yes' ||
+      args.intake.known_allergies === 'yes' ||
+      args.intake.skin_sensitivity === 'yes'
+    ) {
+      requirements.push('PATCH_TEST')
+    }
+  }
+  return {
+    requirements,
+    blocksChemicalRecommendations: requirements.length > 0,
+  }
+}
+
+/**
+ * The one entry point the analysis uses: the colour policy for the colour
+ * pack, the pack policy above for every other pack. An unregistered pack id
+ * routes to NOTHING rather than to the colour rules — the intake keys it
+ * would read do not exist on such a pack, so the colour rules would silently
+ * pass everyone.
+ */
+export function determineConsultSafetyRouting(args: {
+  intakePackId: string
+  intake: Readonly<ConsultIntakeAnswerMapDTO>
+  visibleCondition: 'NO_VISIBLE_CONCERN' | 'POSSIBLE_COMPROMISE' | 'UNKNOWN'
+}): ConsultSafetyRouting {
+  if (args.intakePackId === HAIR_COLOR_INTAKE_PACK_ID) {
+    return determineHairColorSafetyRouting({
+      intake: args.intake,
+      visibleCondition: args.visibleCondition,
+    })
+  }
+  return determinePackSafetyRouting(args)
 }
 
 /**

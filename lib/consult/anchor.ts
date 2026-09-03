@@ -27,10 +27,10 @@ import { Prisma } from '@prisma/client'
 import { isAiConsultEnabledForPro } from './access'
 import {
   AI_CONSULT_ELIGIBILITY_BOOKING_SELECT,
-  AI_CONSULT_PILOT_CATEGORY_SLUGS,
   evaluateAiConsultBookingEligibility,
   type AiConsultBookingIneligibleReason,
 } from './eligibility'
+import { isConsultCategoryInScope } from './serviceScope'
 
 /**
  * Everything the anchor rule reads. Callers spread this into their own select
@@ -76,8 +76,6 @@ export type ConsultAnchorEvaluation =
       hidden: boolean
     }
 
-const PILOT_CATEGORY_SLUGS = new Set<string>(AI_CONSULT_PILOT_CATEGORY_SLUGS)
-
 /**
  * Ownership, the founder gate, and the pilot vertical — no timing rule.
  *
@@ -104,7 +102,7 @@ export function evaluateConsultAnchorScope(
   if (!isAiConsultEnabledForPro(session.professionalId)) {
     return { eligible: false, reason: 'FEATURE_DISABLED', hidden: true }
   }
-  if (!PILOT_CATEGORY_SLUGS.has(session.serviceCategory.slug)) {
+  if (!isConsultCategoryInScope(session.serviceCategory)) {
     return { eligible: false, reason: 'VERTICAL_NOT_ENABLED', hidden: true }
   }
   return { eligible: true, kind: session.bookingId ? 'BOOKING' : 'LOOK' }

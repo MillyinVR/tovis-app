@@ -172,9 +172,13 @@ export type ConsultIntakeQuestionDTO = {
   options: ConsultIntakeQuestionOptionDTO[]
 }
 
+// `id` and `categorySlug` name WHICH pack was served (lib/consult/intake/
+// registry.ts): 'hair-color' for the colour category, 'hair-general' for
+// every other hair service, 'general-service' for everything else. Shipped
+// clients render the pack generically by key, so a new id is additive.
 export type ConsultIntakeQuestionPackDTO = {
-  id: 'hair-color'
-  categorySlug: 'hair-color'
+  id: string
+  categorySlug: string
   version: number
   schemaVersion: number
   questions: ConsultIntakeQuestionDTO[]
@@ -212,7 +216,7 @@ export type ConsultIntakePrefillSignalDTO = {
 export type ConsultIntakeRevisionDTO = {
   id: string
   revision: number
-  packId: 'hair-color'
+  packId: string
   packVersion: number
   schemaVersion: number
   complete: boolean

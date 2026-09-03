@@ -11,10 +11,8 @@ import type {
   ConsultStyleDirectionDTO,
 } from '@/lib/dto/consult'
 
-import {
-  HAIR_COLOR_INTAKE_PACK,
-  type HairColorIntakeQuestionKey,
-} from './intakePack'
+import { consultIntakeItems, findConsultIntakePack } from './intake/registry'
+import { HAIR_COLOR_INTAKE_PACK_ID } from './intake/packs/hairColor'
 
 export const CONSULT_PRO_BRIEF_SCHEMA_VERSION = 3
 export const CONSULT_PRO_BRIEF_PROMPT_VERSION = 'full-analysis-pro-brief-v3'
@@ -57,23 +55,12 @@ function structuredCloneProfile(
 }
 
 function intakeItems(
+  intakePackId: string,
   answers: Readonly<Record<string, string>>,
 ): ConsultBriefClientIntakeItemDTO[] {
-  const items: ConsultBriefClientIntakeItemDTO[] = []
-  for (const question of HAIR_COLOR_INTAKE_PACK.questions) {
-    const questionKey = question.key as HairColorIntakeQuestionKey
-    const answerCode = answers[questionKey]
-    if (!answerCode) continue
-    const option = question.options.find((candidate) => candidate.value === answerCode)
-    if (!option) continue
-    items.push({
-      questionKey,
-      question: question.label,
-      answerCode,
-      answer: option.label,
-    })
-  }
-  return items
+  const pack = findConsultIntakePack(intakePackId)
+  if (!pack) throw new Error('Consult brief intake pack is unknown.')
+  return consultIntakeItems(pack, answers)
 }
 
 /**
@@ -83,6 +70,12 @@ function intakeItems(
  */
 type HairColorProBriefBuildArgs = {
   intakeRevisionId: string
+  /**
+   * Which intake pack the answers were written under
+   * (lib/consult/intake/registry.ts). Defaults to the colour pack, the only
+   * pack any brief written before the service-aware consult could carry.
+   */
+  intakePackId?: string
   intakeAnswers: Readonly<Record<string, string>>
   analysisRevisionId: string
   analysisRevision: number
@@ -93,7 +86,10 @@ function buildHairColorProBriefCore(
   args: HairColorProBriefBuildArgs,
   schemaVersion: number,
 ): HairColorProBriefCore {
-  const clientIntake = intakeItems(args.intakeAnswers)
+  const clientIntake = intakeItems(
+    args.intakePackId ?? HAIR_COLOR_INTAKE_PACK_ID,
+    args.intakeAnswers,
+  )
   if (clientIntake.length === 0) {
     throw new Error('Consult brief intake is unavailable.')
   }
