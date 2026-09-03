@@ -21,7 +21,9 @@ import {
   mapPublicProfileSignatureToDto,
   mapPublicProfileStatsToDto,
   mapPublicReviewMediaAssetToDto,
+  renderPublicProfileCoverUrl,
 } from './publicProfileMappers'
+import { renderMediaUrls } from '@/lib/media/renderUrls'
 import type {
   PublicOfferingRow,
   PublicProfessionalProfileRow,
@@ -144,6 +146,51 @@ describe('mapPublicProfileHeaderToDto clientExport', () => {
     const omitted = mapPublicProfileHeaderToDto(makeProfileRow(), null)
 
     expect(omitted.clientExport.dropsPlatformMark).toBeUndefined()
+  })
+})
+
+describe('renderPublicProfileCoverUrl', () => {
+  const cover = {
+    storageBucket: 'media-public',
+    storagePath: 'p/cover.jpg',
+    thumbBucket: null,
+    thumbPath: null,
+    url: null,
+    thumbUrl: null,
+  }
+
+  it('is null when the pro has set no cover', async () => {
+    expect(await renderPublicProfileCoverUrl(makeProfileRow())).toBeNull()
+  })
+
+  it('asks for the feed variant and prefers the render over the stored original', async () => {
+    vi.mocked(renderMediaUrls).mockResolvedValueOnce({
+      renderUrl: 'https://cdn.example.com/cover.jpg',
+      renderThumbUrl: 'https://cdn.example.com/render/cover.jpg?width=1080',
+    })
+
+    const url = await renderPublicProfileCoverUrl(
+      makeProfileRow({ coverMediaAsset: cover }),
+    )
+
+    // A banner is full-width, so `feed` (1080px), never `tile`.
+    expect(renderMediaUrls).toHaveBeenLastCalledWith(expect.anything(), {
+      variant: 'feed',
+    })
+    // This used to return the original — the multi-megabyte upload — and only
+    // reach the render as a fallback.
+    expect(url).toBe('https://cdn.example.com/render/cover.jpg?width=1080')
+  })
+
+  it('falls back to the stored original when nothing can be derived', async () => {
+    vi.mocked(renderMediaUrls).mockResolvedValueOnce({
+      renderUrl: 'https://cdn.example.com/cover.jpg',
+      renderThumbUrl: null,
+    })
+
+    expect(
+      await renderPublicProfileCoverUrl(makeProfileRow({ coverMediaAsset: cover })),
+    ).toBe('https://cdn.example.com/cover.jpg')
   })
 })
 

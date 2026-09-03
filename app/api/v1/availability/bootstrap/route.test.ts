@@ -63,6 +63,7 @@ vi.mock('@/lib/booking/trustSignals', () => ({
 vi.mock('@/lib/booking/bookingCover', () => ({
   loadBookingCover: vi.fn(async () => ({
     imageUrl: 'https://cdn.example.com/look.jpg',
+    fallbackImageUrl: null,
     lookName: 'Lived-in blonde',
   })),
 }))

@@ -109,6 +109,7 @@ vi.mock('@/app/_components/media/OwnerMediaMenu', () => ({
       src: string
       crop: { x: number; y: number; w: number; h: number } | null
       bound: { x: number; y: number; w: number; h: number }
+      focal?: { x: number; y: number } | null
       undoNotice?: string | null
     }
   }) => (
@@ -128,6 +129,9 @@ vi.mock('@/app/_components/media/OwnerMediaMenu', () => ({
           : ''
       }
       data-reframe-undo={reframe?.undoNotice ? 'open' : 'shut'}
+      data-reframe-focal={
+        reframe?.focal ? `${reframe.focal.x},${reframe.focal.y}` : 'none'
+      }
     >
       OwnerMediaMenu
     </div>
@@ -166,6 +170,8 @@ function makeMedia(args?: {
   professionalId?: string
   professionalVerificationStatus?: VerificationStatus
   mediaType?: MediaType
+  focalX?: number | null
+  focalY?: number | null
 }) {
   return {
     id: args?.id ?? 'media_1',
@@ -189,8 +195,8 @@ function makeMedia(args?: {
     cropUndoBoundH: null,
     cropUndoExpiresAt: null,
     cropUndoViewBaseline: null,
-    focalX: null,
-    focalY: null,
+    focalX: args?.focalX ?? null,
+    focalY: args?.focalY ?? null,
     lookPostPrimaryFor: [],
     lookPostAssets: [],
     storageBucket: 'media-bucket',
@@ -338,6 +344,28 @@ describe('app/media/[id]/page', () => {
     // already consented to — the whole photo.
     expect(menu).toHaveAttribute('data-reframe-bound', '0,0,1,1')
     expect(menu).toHaveAttribute('data-reframe-undo', 'shut')
+    // No focal stored → the editor's feed preview centres its backdrop, exactly
+    // as the slide does for this row.
+    expect(menu).toHaveAttribute('data-reframe-focal', 'none')
+  })
+
+  it("threads the row's stored focal to the re-frame editor, so its feed preview anchors like the slide", async () => {
+    mockGetCurrentUser.mockResolvedValue(
+      makeOwnerViewer({ professionalProfileId: 'pro_1' }),
+    )
+    mocks.prisma.mediaAsset.findUnique.mockResolvedValue(
+      makeMedia({ professionalId: 'pro_1', focalX: 0.3, focalY: 0.65 }),
+    )
+    mocks.prisma.service.findMany.mockResolvedValue([])
+
+    await renderPage()
+
+    // FRAME space, un-widened: the editor remaps it into crop space itself
+    // against the LIVE rect (CropEditor → focalInCropSpace).
+    expect(screen.getByTestId('owner-media-menu')).toHaveAttribute(
+      'data-reframe-focal',
+      '0.3,0.65',
+    )
   })
 
   it('bounds the re-frame by the STORED rect once the undo window has shut', async () => {

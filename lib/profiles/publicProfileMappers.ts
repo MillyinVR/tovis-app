@@ -472,13 +472,15 @@ export async function renderPublicProfileCoverUrl(
       url: cover.url,
       thumbUrl: cover.thumbUrl,
     },
-    // A full-width banner, not a cell. ⚠️ Only reached as a fallback: the
-    // return below prefers the full-size render.
+    // A full-width banner, not a cell.
     'feed',
   )
 
-  // Prefer the full-size render for a banner; fall back to the thumb.
-  return rendered.url ?? rendered.thumbUrl
+  // The 1080px render first; the stored original only when there is none to
+  // derive (a private bucket, or no pointers). This used to prefer `url`, which
+  // is the multi-megabyte original on every row — the variant above was only
+  // ever reached as a fallback.
+  return rendered.thumbUrl ?? rendered.url
 }
 
 /**

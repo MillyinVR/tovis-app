@@ -57,6 +57,7 @@ function pickAvailabilityCover(x: unknown): AvailabilityCover | null {
   if (!isRecord(x)) return null
   return {
     imageUrl: pickString(x.imageUrl),
+    fallbackImageUrl: pickString(x.fallbackImageUrl),
     lookName: pickString(x.lookName),
   }
 }

@@ -114,12 +114,11 @@ export default function CropEditor({
    * blurred backdrop can spend it (a contain fit has no spare pixels to shift),
    * and it is remapped into crop space here against the LIVE rect.
    *
-   * Optional because no caller threads a focal yet: `OwnerMediaMenu` does not
-   * carry one. Null means the backdrop centres. That is a documented limitation
-   * rather than a hidden one — the backdrop is blurred at σ=24 and dimmed to
-   * 0.62, so an unanchored crop of it is not distinguishable, and the photo the
-   * pro is actually judging ignores focal by construction. Wire it through and
-   * the preview matches the slide exactly.
+   * `/media/[id]` threads the row's stored focal through `OwnerMediaMenu`.
+   * Null (no focal stored, or a caller that has none) means the backdrop
+   * centres — which is also what the slide does for that row, so the preview
+   * still matches. The photo the pro is actually judging ignores focal by
+   * construction: a contain fit has no spare pixels to shift.
    */
   focal,
   onDone,
