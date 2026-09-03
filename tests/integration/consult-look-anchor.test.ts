@@ -842,13 +842,27 @@ describe('look-anchored consult entry', () => {
     ).toBe(0)
   })
 
-  it('refuses a look linked outside the pilot vertical', async () => {
-    const available = await availability(nailLookId)
-    expect((await body(available)).availability).toMatchObject({
-      available: false,
-      reason: 'LOOK_VERTICAL_NOT_ENABLED',
+  it('admits a look in ANY category by default, and refuses it only under the kill switch', async () => {
+    const open = await availability(nailLookId)
+    expect((await body(open)).availability).toMatchObject({
+      available: true,
+      reason: null,
     })
-    expect((await startLook(nailLookId)).status).toBe(409)
+
+    process.env.AI_CONSULT_SERVICE_SCOPE = 'HAIR_COLOR_ONLY'
+    try {
+      const narrowed = await availability(nailLookId)
+      expect((await body(narrowed)).availability).toMatchObject({
+        available: false,
+        reason: 'LOOK_VERTICAL_NOT_ENABLED',
+      })
+      expect((await startLook(nailLookId)).status).toBe(409)
+    } finally {
+      delete process.env.AI_CONSULT_SERVICE_SCOPE
+    }
+    expect(
+      await db.consultSession.count({ where: { anchorLookPostId: nailLookId } }),
+    ).toBe(0)
   })
 
   it('leaks nothing about a look the client cannot see', async () => {

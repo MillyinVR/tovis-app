@@ -15,8 +15,16 @@ describe('consult service scope', () => {
     delete process.env.AI_CONSULT_SERVICE_SCOPE
   })
 
-  it('defaults to colour only until the final slice flips it', () => {
-    expect(CONSULT_SERVICE_SCOPE_DEFAULT).toBe('HAIR_COLOR_ONLY')
+  it('is open to every service by default (Tori, 2026-09-03)', () => {
+    expect(CONSULT_SERVICE_SCOPE_DEFAULT).toBe('ALL_SERVICES')
+    expect(consultServiceScope()).toBe('ALL_SERVICES')
+    for (const slug of ['hair-color', 'hair-extensions', 'cuts', 'nails', 'a-category-from-tomorrow']) {
+      expect(isConsultCategoryInScope({ slug })).toBe(true)
+    }
+  })
+
+  it('narrows back to colour only through the kill switch', () => {
+    process.env.AI_CONSULT_SERVICE_SCOPE = 'HAIR_COLOR_ONLY'
     expect(consultServiceScope()).toBe('HAIR_COLOR_ONLY')
     expect(isConsultCategoryInScope({ slug: 'hair-color' })).toBe(true)
     expect(isConsultCategoryInScope({ slug: 'hair-extensions' })).toBe(false)
@@ -37,8 +45,8 @@ describe('consult service scope', () => {
   it('ignores an unrecognised override rather than treating it as open', () => {
     process.env.AI_CONSULT_SERVICE_SCOPE = 'EVERYTHING'
     expect(consultServiceScope()).toBe(CONSULT_SERVICE_SCOPE_DEFAULT)
-    process.env.AI_CONSULT_SERVICE_SCOPE = ' HAIR_COLOR_ONLY '
-    expect(consultServiceScope()).toBe('HAIR_COLOR_ONLY')
+    process.env.AI_CONSULT_SERVICE_SCOPE = ' ALL_SERVICES '
+    expect(consultServiceScope()).toBe('ALL_SERVICES')
   })
 
   it('lists every schema family exactly once, each with a label', () => {

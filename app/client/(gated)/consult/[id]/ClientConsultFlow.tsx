@@ -2,7 +2,7 @@
 
 // Web client consult wizard (2026-08-26 full-analysis launch). Drives the
 // existing consult API contracts end to end: consent → intake (one question at
-// a time) → inspiration → seven-shot capture with the chart-copy choice →
+// a time) → inspiration → the service family's shot pack with the chart-copy choice →
 // analysis → results. All legal wording, questions, and shot instructions are
 // server-served; this component only renders them.
 

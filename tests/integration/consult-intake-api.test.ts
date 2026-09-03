@@ -348,6 +348,9 @@ describe('client hair-color consult intake API against PostgreSQL', () => {
     )
 
     process.env.ENABLE_AI_CONSULT = '1'
+    // Every category is consultable by default (2026-09-03); the kill switch
+    // is what makes a non-colour category dark, and it must stay no-leak.
+    process.env.AI_CONSULT_SERVICE_SCOPE = 'HAIR_COLOR_ONLY'
     await db.serviceCategory.update({
       where: { id: categoryId },
       data: { slug: 'brows' },
@@ -356,6 +359,7 @@ describe('client hair-color consult intake API against PostgreSQL', () => {
       new Request(`http://test/api/v1/client/consult/${sessionId}/intake`),
       context(),
     )
+    delete process.env.AI_CONSULT_SERVICE_SCOPE
     await db.serviceCategory.update({
       where: { id: categoryId },
       data: { slug: 'hair-color' },

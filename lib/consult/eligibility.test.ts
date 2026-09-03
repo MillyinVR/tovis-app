@@ -52,9 +52,8 @@ describe('evaluateAiConsultBookingEligibility', () => {
     })
   })
 
-  it('admits every category once the scope is ALL_SERVICES', () => {
+  it('admits every category by default', () => {
     process.env.ENABLE_AI_CONSULT = '1'
-    process.env.AI_CONSULT_SERVICE_SCOPE = 'ALL_SERVICES'
     expect(
       evaluateAiConsultBookingEligibility(
         booking({
@@ -68,8 +67,9 @@ describe('evaluateAiConsultBookingEligibility', () => {
     ).toEqual({ eligible: true })
   })
 
-  it('keeps non-pilot verticals dark', () => {
+  it('keeps other categories dark when the kill switch narrows the scope', () => {
     process.env.ENABLE_AI_CONSULT = '1'
+    process.env.AI_CONSULT_SERVICE_SCOPE = 'HAIR_COLOR_ONLY'
     expect(
       evaluateAiConsultBookingEligibility(
         booking({

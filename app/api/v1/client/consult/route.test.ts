@@ -96,6 +96,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  delete process.env.AI_CONSULT_SERVICE_SCOPE
   vi.useRealTimers()
   delete process.env.ENABLE_AI_CONSULT
 })
@@ -195,7 +196,8 @@ describe('POST /api/v1/client/consult', () => {
     expect(mocks.upsertConsultSession).not.toHaveBeenCalled()
   })
 
-  it('keeps non-pilot service categories dark', async () => {
+  it('keeps other service categories dark, without leaking, when the kill switch narrows the scope', async () => {
+    process.env.AI_CONSULT_SERVICE_SCOPE = 'HAIR_COLOR_ONLY'
     mocks.findUniqueBooking.mockResolvedValue({
       status: BookingStatus.ACCEPTED,
       scheduledFor: UPCOMING,
