@@ -432,6 +432,9 @@ export type ConsultInspirationSignedReadResponseDTO = {
   expiresInSeconds: number
 }
 
+// Every shot key any capture pack defines (lib/consult/capture/registry.ts):
+// the hair pack's seven, plus the two treatment-area views the area pack adds
+// for nails, body and any family nobody has modelled yet. Additive.
 export type ConsultCaptureShotKeyDTO =
   | 'hair_back'
   | 'hair_left'
@@ -440,6 +443,8 @@ export type ConsultCaptureShotKeyDTO =
   | 'face_front'
   | 'face_side'
   | 'eyes_closeup'
+  | 'area_wide'
+  | 'area_closeup'
 
 export type ConsultCaptureShotDTO = {
   key: ConsultCaptureShotKeyDTO
@@ -449,10 +454,12 @@ export type ConsultCaptureShotDTO = {
 }
 
 export type ConsultCaptureShotPackDTO = {
-  // Legacy-stable wire id (pinned by iOS contract fixtures); version 2 of this
-  // pack is the seven-shot full-analysis pack.
-  id: 'hair-color-daylight'
-  categorySlug: 'hair-color'
+  // Which pack was served: 'hair-color-daylight' (HAIR), 'face-daylight'
+  // (skin, brows & lashes, makeup) or 'area-daylight' (everything else).
+  // Shipped clients render the pack generically by shot, so a new id is
+  // additive; the hair pack keeps its legacy-stable id and version.
+  id: string
+  categorySlug: string
   version: number
   schemaVersion: number
   shots: readonly ConsultCaptureShotDTO[]
@@ -464,6 +471,7 @@ export type ConsultCaptureQualityReasonCodeDTO =
   | 'COLOR_CAST'
   | 'VIEW_MISMATCH'
   | 'HAIR_NOT_VISIBLE'
+  | 'SUBJECT_NOT_VISIBLE'
   | 'BLURRY'
   | 'TOO_DARK'
   | 'TOO_BRIGHT'
@@ -574,15 +582,7 @@ export type ConsultAnalysisConfidenceDTO = {
   max: number
 }
 
-export type ConsultAnalysisEvidenceDTO =
-  | 'hair_back'
-  | 'hair_left'
-  | 'hair_right'
-  | 'hair_crown'
-  | 'face_front'
-  | 'face_side'
-  | 'eyes_closeup'
-  | 'intake'
+export type ConsultAnalysisEvidenceDTO = ConsultCaptureShotKeyDTO | 'intake'
 
 export type ConsultAnalysisObservationDTO<T extends string> = {
   value: T

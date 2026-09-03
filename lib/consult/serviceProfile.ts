@@ -14,6 +14,8 @@
 
 import type { ConsultServiceFamily, Prisma } from '@prisma/client'
 
+import { resolveConsultCapturePack } from './capture/registry'
+import type { ConsultCapturePackDefinition } from './capture/types'
 import { resolveConsultIntakePack } from './intake/registry'
 import type { ConsultIntakePackDefinition } from './intake/types'
 
@@ -36,6 +38,7 @@ export type ConsultServiceProfile = {
   categorySlug: string
   categoryName: string
   intakePack: ConsultIntakePackDefinition
+  capturePack: ConsultCapturePackDefinition
 }
 
 export function resolveConsultServiceProfile(
@@ -47,6 +50,10 @@ export function resolveConsultServiceProfile(
     categorySlug: category.slug,
     categoryName: category.name,
     intakePack: resolveConsultIntakePack({
+      categorySlug: category.slug,
+      family: category.consultFamily,
+    }),
+    capturePack: resolveConsultCapturePack({
       categorySlug: category.slug,
       family: category.consultFamily,
     }),

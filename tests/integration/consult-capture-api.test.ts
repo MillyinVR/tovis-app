@@ -143,7 +143,7 @@ vi.mock('@/lib/consult/captureVision', async (importOriginal) => {
   const original = await importOriginal<typeof import('@/lib/consult/captureVision')>()
   return {
     ...original,
-    async checkHairColorCapture(input: { shotKey: string }) {
+    async checkConsultCapture(input: { shotKey: string }) {
       fake.modelCalls.push(input.shotKey)
       return (
         fake.qualityByShot.get(input.shotKey) ?? {
@@ -161,9 +161,7 @@ vi.mock('@/lib/consult/analysisEngine', async (importOriginal) => {
   const original = await importOriginal<typeof import('@/lib/consult/analysisEngine')>()
   return {
     ...original,
-    async runConsultAnalysis(input: {
-      service: { menuServiceNames: readonly string[] }
-    }) {
+    async runConsultAnalysis() {
       fake.analysisCalls += 1
       await new Promise((resolve) => setTimeout(resolve, 50))
       if (fake.analysisDuring) await fake.analysisDuring()

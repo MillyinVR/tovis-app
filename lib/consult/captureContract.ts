@@ -21,14 +21,8 @@ import type {
 import { prisma } from '@/lib/prisma'
 
 import { requireCurrentConsultAgreementAcceptances } from './agreementContract'
-import {
-  HAIR_COLOR_CAPTURE_PACK,
-  HAIR_COLOR_CAPTURE_PACK_VERSION,
-  HAIR_COLOR_CAPTURE_SCHEMA_VERSION,
-  HAIR_COLOR_CAPTURE_SHOT_KEYS,
-  isHairColorCaptureShotKey,
-  type HairColorCaptureShotKey,
-} from './capturePack'
+import { packHasShot } from './capture/registry'
+import type { ConsultCapturePackDefinition } from './capture/types'
 import { purgeConsultCaptureRawObject } from './capturePurge'
 import {
   CONSULT_CAPTURE_BUCKET,
@@ -39,7 +33,7 @@ import {
   type ConsultCaptureStorage,
 } from './captureStorage'
 import {
-  checkHairColorCapture,
+  checkConsultCapture,
   CONSULT_CAPTURE_MEDIA_TYPES,
   CONSULT_CAPTURE_QUALITY_PROMPT_VERSION,
   CONSULT_CAPTURE_QUALITY_SCHEMA_VERSION,
@@ -48,6 +42,10 @@ import {
   type ConsultCaptureQualityResult,
 } from './captureVision'
 import { CONSULT_ANCHOR_SELECT, evaluateConsultAnchor } from './anchor'
+import {
+  CONSULT_SERVICE_PROFILE_CATEGORY_SELECT,
+  resolveConsultServiceProfile,
+} from './serviceProfile'
 import { ConsultWriteError } from './errors'
 import {
   advanceLockedConsultToAnalysisIfReady,
@@ -67,6 +65,8 @@ export const CONSULT_CAPTURE_UPLOAD_TTL_MS = 60 * 60 * 1000
 // it holds when the redis-only route bucket fails open, because it is counted
 // in the same transaction that runs the check. Replays of an already-checked
 // capture return before this bound and stay free.
+export const CONSULT_CAPTURE_QUALITY_ATTEMPTS_PER_SLOT = 6
+/** The hair pack's ceiling (7 × 6); other packs scale by their own slot count. */
 export const CONSULT_CAPTURE_MAX_QUALITY_CHECKS_PER_SESSION = 42
 
 const CAPTURE_STATES = new Set<ConsultSessionStatus>([
@@ -98,11 +98,27 @@ const CAPTURE_SCOPE_SELECT = {
   chartCopyDecidedAt: true,
   client: { select: { userId: true } },
   ...CONSULT_ANCHOR_SELECT,
+  serviceCategory: { select: CONSULT_SERVICE_PROFILE_CATEGORY_SELECT },
 } satisfies Prisma.ConsultSessionSelect
 
 type CaptureScope = Prisma.ConsultSessionGetPayload<{
   select: typeof CAPTURE_SCOPE_SELECT
 }>
+
+/** The shot pack THIS session serves (lib/consult/capture/registry.ts). */
+function packFor(session: CaptureScope): ConsultCapturePackDefinition {
+  return resolveConsultServiceProfile(session.serviceCategory).capturePack
+}
+
+/**
+ * Structural ceiling on paid quality checks per consult session: six attempts
+ * per pack slot (see CONSULT_CAPTURE_QUALITY_ATTEMPTS_PER_SLOT). Sized by the
+ * pack the session serves, so a three-shot pack does not inherit the hair
+ * pack's headroom.
+ */
+function maxQualityChecksFor(pack: ConsultCapturePackDefinition): number {
+  return pack.shots.length * CONSULT_CAPTURE_QUALITY_ATTEMPTS_PER_SLOT
+}
 
 function hash(value: Readonly<Record<string, unknown>>): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex')
@@ -133,14 +149,18 @@ function validMediaType(value: unknown): ConsultCaptureMediaType {
   return mediaType
 }
 
-function requireVersions(packVersion: number, schemaVersion: number): void {
-  if (packVersion !== HAIR_COLOR_CAPTURE_PACK_VERSION) {
+function requireVersions(
+  pack: ConsultCapturePackDefinition,
+  packVersion: number,
+  schemaVersion: number,
+): void {
+  if (packVersion !== pack.version) {
     throw new ConsultWriteError(
       'CAPTURE_PACK_VERSION_MISMATCH',
       'Capture pack version is stale.',
     )
   }
-  if (schemaVersion !== HAIR_COLOR_CAPTURE_SCHEMA_VERSION) {
+  if (schemaVersion !== pack.schemaVersion) {
     throw new ConsultWriteError(
       'CAPTURE_SCHEMA_VERSION_MISMATCH',
       'Capture schema version is stale.',
@@ -202,18 +222,19 @@ function assertCaptureState(session: CaptureScope): void {
   }
 }
 
-function stateForCapture(capture: {
-  id: string
-  shotKey: string
-  status: ConsultCaptureStatus
-  qualityReasonCode: string | null
-  retakeTip: string | null
-  rawExpiresAt: Date
-  purgedAt: Date | null
-}): ConsultCaptureSlotStateDTO {
-  const shotKey = HAIR_COLOR_CAPTURE_SHOT_KEYS.find(
-    (candidate) => candidate === capture.shotKey,
-  )
+function stateForCapture(
+  pack: ConsultCapturePackDefinition,
+  capture: {
+    id: string
+    shotKey: string
+    status: ConsultCaptureStatus
+    qualityReasonCode: string | null
+    retakeTip: string | null
+    rawExpiresAt: Date
+    purgedAt: Date | null
+  },
+): ConsultCaptureSlotStateDTO {
+  const shotKey = pack.shots.find((shot) => shot.key === capture.shotKey)?.key
   if (!shotKey) {
     throw new ConsultWriteError('CAPTURE_INVALID_SLOT', 'Invalid capture slot.')
   }
@@ -248,10 +269,11 @@ async function buildState(
   session: CaptureScope,
   now: Date,
 ): Promise<ConsultCaptureStateDTO> {
+  const pack = packFor(session)
   // The durable audit trail may contain arbitrarily many rejected replacements,
   // but this read is intentionally fixed at one row per pack slot.
   const captures = await Promise.all(
-    HAIR_COLOR_CAPTURE_SHOT_KEYS.map((shotKey) =>
+    pack.shots.map(({ key: shotKey }) =>
       tx.consultCapture.findFirst({
         where: { consultSessionId: session.id, shotKey },
         select: {
@@ -269,7 +291,7 @@ async function buildState(
   )
   const latest = new Map(
     captures.flatMap((capture) =>
-      capture && isHairColorCaptureShotKey(capture.shotKey)
+      capture && packHasShot(pack, capture.shotKey)
         ? [[capture.shotKey, capture] as const]
         : [],
     ),
@@ -278,12 +300,24 @@ async function buildState(
   return {
     consultId: session.id,
     status: session.status,
-    shotPack: HAIR_COLOR_CAPTURE_PACK,
+    // The wire shape: the acceptance rules stay server-side.
+    shotPack: {
+      id: pack.id,
+      categorySlug: pack.categorySlug,
+      version: pack.version,
+      schemaVersion: pack.schemaVersion,
+      shots: pack.shots.map(({ key, title, instruction, requirement }) => ({
+        key,
+        title,
+        instruction,
+        requirement,
+      })),
+    },
     chartCopy: {
       optIn: session.chartCopyOptIn,
       decidedAt: session.chartCopyDecidedAt?.toISOString() ?? null,
     },
-    slots: HAIR_COLOR_CAPTURE_SHOT_KEYS.map((shotKey) => {
+    slots: pack.shots.map(({ key: shotKey }) => {
       const capture = latest.get(shotKey)
       if (!capture) {
         return {
@@ -298,12 +332,12 @@ async function buildState(
       }
       if (!capture.purgedAt && capture.rawExpiresAt.getTime() <= now.getTime()) {
         return {
-          ...stateForCapture(capture),
+          ...stateForCapture(pack, capture),
           state: 'EXPIRED',
           rawExpiresAt: null,
         }
       }
-      return stateForCapture(capture)
+      return stateForCapture(pack, capture)
     }),
   }
 }
@@ -359,9 +393,10 @@ export async function issueConsultCaptureUpload(args: {
         throw new ConsultWriteError('INVALID_STATE', 'Capture upload is unavailable.')
       }
 
+      const pack = packFor(session)
       const input = await args.loadInput()
-      requireVersions(input.shotPackVersion, input.schemaVersion)
-      if (!isHairColorCaptureShotKey(input.shotKey)) {
+      requireVersions(pack, input.shotPackVersion, input.schemaVersion)
+      if (!packHasShot(pack, input.shotKey)) {
         throw new ConsultWriteError('CAPTURE_INVALID_SLOT', 'Invalid capture slot.')
       }
       const idempotencyKey = validKey(input.idempotencyKey)
@@ -445,7 +480,7 @@ export async function issueConsultCaptureUpload(args: {
       await storage.assertReady()
       const signed = await storage.createSignedUpload(uploadSession.storagePath)
       if (
-        !isHairColorCaptureShotKey(uploadSession.consultShotKey) ||
+        !packHasShot(pack, uploadSession.consultShotKey) ||
         !uploadSession.rawExpiresAt
       ) {
         throw new ConsultWriteError(
@@ -507,9 +542,10 @@ export async function attachConsultCaptureUpload(args: {
         now,
       })
       await requireCurrentConsultAgreementAcceptances(tx, session.id)
+      const pack = packFor(session)
       const input = await args.loadInput()
-      requireVersions(input.shotPackVersion, input.schemaVersion)
-      if (!isHairColorCaptureShotKey(input.shotKey)) {
+      requireVersions(pack, input.shotPackVersion, input.schemaVersion)
+      if (!packHasShot(pack, input.shotKey)) {
         throw new ConsultWriteError('CAPTURE_INVALID_SLOT', 'Invalid capture slot.')
       }
       const idempotencyKey = validKey(input.idempotencyKey)
@@ -678,13 +714,13 @@ export async function checkConsultCaptureQuality(args: {
   }>
   storage?: ConsultCaptureStorage
   qualityCheck?: (input: {
-    shotKey: HairColorCaptureShotKey
+    shotKey: string
     image: { base64: string; mediaType: ConsultCaptureMediaType }
   }) => Promise<ConsultCaptureQualityResult>
 }): Promise<{ quality: ConsultCaptureQualityResultDTO; replayed: boolean }> {
   const now = args.now ?? new Date()
   const storage = args.storage ?? consultCaptureStorage
-  const qualityCheck = args.qualityCheck ?? checkHairColorCapture
+  const qualityCheck = args.qualityCheck ?? checkConsultCapture
   const result = await prisma.$transaction(
     async (tx) => {
       await lockSession(tx, args.consultSessionId, 'UPDATE')
@@ -695,8 +731,9 @@ export async function checkConsultCaptureQuality(args: {
         now,
       })
       await requireCurrentConsultAgreementAcceptances(tx, session.id)
+      const pack = packFor(session)
       const input = await args.loadInput()
-      requireVersions(input.shotPackVersion, input.schemaVersion)
+      requireVersions(pack, input.shotPackVersion, input.schemaVersion)
       const idempotencyKey = validKey(input.idempotencyKey)
       const requestHash = hash({
         captureId: args.captureId,
@@ -706,7 +743,7 @@ export async function checkConsultCaptureQuality(args: {
       const capture = await tx.consultCapture.findFirst({
         where: { id: args.captureId, consultSessionId: session.id },
       })
-      if (!capture || !isHairColorCaptureShotKey(capture.shotKey)) {
+      if (!capture || !packHasShot(pack, capture.shotKey)) {
         throw new ConsultWriteError('NOT_FOUND', 'Capture not found.')
       }
       if (capture.qualityIdempotencyKey === idempotencyKey) {
@@ -732,7 +769,7 @@ export async function checkConsultCaptureQuality(args: {
       const priorQualityChecks = await tx.consultCapture.count({
         where: { consultSessionId: session.id, qualityCheckedAt: { not: null } },
       })
-      if (priorQualityChecks >= CONSULT_CAPTURE_MAX_QUALITY_CHECKS_PER_SESSION) {
+      if (priorQualityChecks >= maxQualityChecksFor(pack)) {
         throw new ConsultWriteError(
           'CAPTURE_QUALITY_LIMIT_EXCEEDED',
           'This consult has reached its photo-check limit.',
@@ -846,13 +883,18 @@ export async function checkConsultCaptureQuality(args: {
       })
 
       if (quality.accepted) {
-        await advanceLockedConsultToAnalysisIfReady(tx, {
-          consultSessionId: session.id,
-          clientId: session.clientId,
-          professionalId: session.professionalId,
-          actor: args.actor,
-          now: finalizedAt,
-        })
+        await advanceLockedConsultToAnalysisIfReady(
+          tx,
+          {
+            consultSessionId: session.id,
+            clientId: session.clientId,
+            professionalId: session.professionalId,
+            actor: args.actor,
+            now: finalizedAt,
+          },
+          // A full pack is THIS pack's slot count, not the hair pack's seven.
+          { minimumAcceptedShots: pack.shots.length },
+        )
       }
       return {
         quality: qualityDto(updated),

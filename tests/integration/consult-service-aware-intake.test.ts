@@ -30,6 +30,7 @@ vi.mock('@/app/api/_utils/auth/requireClient', () => ({
   requireClient: mockRequireClient,
 }))
 
+import { GET as getCapture } from '@/app/api/v1/client/consult/[id]/capture/route'
 import {
   GET as getIntake,
   POST as postIntake,
@@ -581,6 +582,60 @@ describe('service-aware consult intake against PostgreSQL', () => {
         answers: { service_experience: 'regular' },
       }),
     ).rejects.toThrow(/invalid consult intake payload version or shape/)
+  })
+
+  it('serves each family its own shot pack once the intake is complete', async () => {
+    // Both sessions reached MEDIA_READY above.
+    const hair = await getCapture(
+      new Request(`http://test/api/v1/client/consult/${hairSessionId}/capture`),
+      context(hairSessionId),
+    )
+    expect(hair.status).toBe(200)
+    await expect(json(hair)).resolves.toMatchObject({
+      capture: {
+        shotPack: { id: 'hair-color-daylight', version: 2, schemaVersion: 1 },
+      },
+    })
+    const hairBody = (await json(
+      await getCapture(
+        new Request(`http://test/api/v1/client/consult/${hairSessionId}/capture`),
+        context(hairSessionId),
+      ),
+    )) as { capture: { slots: Array<{ shotKey: string; state: string }> } }
+    expect(hairBody.capture.slots.map((slot) => slot.shotKey)).toEqual([
+      'hair_back',
+      'hair_left',
+      'hair_right',
+      'hair_crown',
+      'face_front',
+      'face_side',
+      'eyes_closeup',
+    ])
+
+    const nails = (await json(
+      await getCapture(
+        new Request(`http://test/api/v1/client/consult/${nailsSessionId}/capture`),
+        context(nailsSessionId),
+      ),
+    )) as {
+      capture: {
+        shotPack: { id: string; version: number; shots: Array<{ key: string; title: string }> }
+        slots: Array<{ shotKey: string; state: string }>
+      }
+    }
+    expect(nails.capture.shotPack).toMatchObject({ id: 'area-daylight', version: 1 })
+    expect(nails.capture.shotPack.shots.map((shot) => shot.key)).toEqual([
+      'area_wide',
+      'area_closeup',
+      'face_front',
+    ])
+    expect(nails.capture.slots).toEqual([
+      expect.objectContaining({ shotKey: 'area_wide', state: 'EMPTY' }),
+      expect.objectContaining({ shotKey: 'area_closeup', state: 'EMPTY' }),
+      expect.objectContaining({ shotKey: 'face_front', state: 'EMPTY' }),
+    ])
+    // The wire pack carries no acceptance rules — those stay server-side.
+    expect(JSON.stringify(nails.capture.shotPack)).not.toContain('Accept only')
   })
 
   it('is unreachable under the default colour-only scope', async () => {

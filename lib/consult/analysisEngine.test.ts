@@ -43,6 +43,19 @@ const service: ConsultAnalysisInput['service'] = {
   menuServiceNames: [...MENU],
 }
 
+const capturePack: ConsultAnalysisInput['capturePack'] = {
+  id: 'hair-color-daylight',
+  shotKeys: [
+    'hair_back',
+    'hair_left',
+    'hair_right',
+    'hair_crown',
+    'face_front',
+    'face_side',
+    'eyes_closeup',
+  ],
+}
+
 const intakeItems: ConsultAnalysisInput['intakeItems'] = [
   {
     questionKey: 'desired_color',
@@ -233,6 +246,7 @@ describe('hair-color consult analysis provider', () => {
     await expect(
       runConsultAnalysis({
         service,
+        capturePack,
         intake: { desired_color: 'red', prior_reaction: 'no' },
         intakeItems,
         captures,
@@ -246,6 +260,7 @@ describe('hair-color consult analysis provider', () => {
     mocks.create.mockResolvedValue(message(validOutput()))
     const result = await runConsultAnalysis({
       service,
+      capturePack,
       intake: { desired_color: 'red', prior_reaction: 'no' },
       intakeItems,
       captures,
@@ -288,6 +303,7 @@ describe('hair-color consult analysis provider', () => {
     mocks.create.mockResolvedValue(message(validOutput()))
     await runConsultAnalysis({
       service,
+      capturePack,
       intake: { desired_color: 'red' },
       intakeItems,
       captures,
@@ -303,6 +319,7 @@ describe('hair-color consult analysis provider', () => {
     // A look with no linked service and a pro with no menu are said plainly.
     const [bare] = consultAnalysisContextBlocks({
       service: { family: 'NAILS', categoryName: 'Nails', serviceName: null, menuServiceNames: [] },
+      capturePack: { id: 'area-daylight', shotKeys: ['area_wide', 'area_closeup', 'face_front'] },
       intake: {},
       intakeItems: [],
     })
@@ -357,10 +374,10 @@ describe('hair-color consult analysis provider', () => {
   it('rejects duplicate and empty capture packs before provider work', async () => {
     const duplicatePack = captures.map(() => captures[0]!)
     await expect(
-      runConsultAnalysis({ service, intake: {}, intakeItems: [], captures: duplicatePack }),
+      runConsultAnalysis({ service, capturePack, intake: {}, intakeItems: [], captures: duplicatePack }),
     ).rejects.toThrowError(ConsultAnalysisProviderError)
     await expect(
-      runConsultAnalysis({ service, intake: {}, intakeItems: [], captures: [] }),
+      runConsultAnalysis({ service, capturePack, intake: {}, intakeItems: [], captures: [] }),
     ).rejects.toThrowError(ConsultAnalysisProviderError)
     expect(mocks.create).not.toHaveBeenCalled()
   })
@@ -373,6 +390,7 @@ describe('hair-color consult analysis provider', () => {
     )
     await runConsultAnalysis({
       service,
+      capturePack,
       intake: { desired_color: 'red' },
       intakeItems,
       captures: partial,
@@ -391,7 +409,7 @@ describe('hair-color consult analysis provider', () => {
 
   it('sends no missing-views line for a full pack', async () => {
     mocks.create.mockResolvedValue(message(validOutput()))
-    await runConsultAnalysis({ service, intake: {}, intakeItems: [], captures })
+    await runConsultAnalysis({ service, capturePack, intake: {}, intakeItems: [], captures })
     const [params] = mocks.create.mock.calls[0] ?? []
     expect(JSON.stringify(params.messages[0].content)).not.toContain(
       'Missing views',
@@ -412,7 +430,7 @@ describe('hair-color consult analysis provider', () => {
   it('returns typed content-free failures for provider errors and refusals', async () => {
     mocks.create.mockRejectedValueOnce(new Error('provider request secret'))
     await expect(
-      runConsultAnalysis({ service, intake: {}, intakeItems: [], captures }),
+      runConsultAnalysis({ service, capturePack, intake: {}, intakeItems: [], captures }),
     ).rejects.toMatchObject({
       kind: 'unavailable',
       message: 'Consult analysis is unavailable.',
@@ -420,7 +438,7 @@ describe('hair-color consult analysis provider', () => {
 
     mocks.create.mockResolvedValueOnce(message({}, 'refusal'))
     await expect(
-      runConsultAnalysis({ service, intake: {}, intakeItems: [], captures }),
+      runConsultAnalysis({ service, capturePack, intake: {}, intakeItems: [], captures }),
     ).rejects.toMatchObject({ kind: 'refused' } satisfies Partial<ConsultAnalysisProviderError>)
   })
 

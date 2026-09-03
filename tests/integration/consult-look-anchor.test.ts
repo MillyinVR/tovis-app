@@ -124,7 +124,7 @@ vi.mock('@/lib/consult/captureVision', async (importOriginal) => {
     await importOriginal<typeof import('@/lib/consult/captureVision')>()
   return {
     ...original,
-    async checkHairColorCapture() {
+    async checkConsultCapture() {
       return {
         accepted: true,
         reasonCode: 'PASS',
