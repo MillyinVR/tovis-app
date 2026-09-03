@@ -29,6 +29,19 @@ const mocks = vi.hoisted(() => {
   }
 })
 
+// The legacy path narrows each card's modes to what the pro can host (W6).
+// These cases pin the distance/category/price contract, so every pro can host
+// both and the raw offering flags pass through unchanged.
+vi.mock('@/lib/offerings/locationCapability', async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import('@/lib/offerings/locationCapability')>()
+  return {
+    ...original,
+    loadProLocationCapabilities: async (ids: readonly string[]) =>
+      new Map(ids.map((id) => [id, { salon: true, mobile: true }])),
+  }
+})
+
 vi.mock('@/lib/prisma', () => ({
   prisma: mocks.prisma,
 }))

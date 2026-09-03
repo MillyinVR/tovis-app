@@ -61,6 +61,18 @@ vi.mock('next/link', () => ({
   }) => React.createElement('a', { href, className }, children),
 }))
 
+// W6 read boundary: the page narrows the offering's modes to what the pro can
+// host. These cases are about the page's own mode logic, so the pro can host
+// both and the raw flags pass through unchanged.
+vi.mock('@/lib/offerings/locationCapability', async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import('@/lib/offerings/locationCapability')>()
+  return {
+    ...original,
+    loadProLocationCapability: async () => ({ salon: true, mobile: true }),
+  }
+})
+
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     booking: {
