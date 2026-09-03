@@ -14,6 +14,7 @@ import { resolveMediaVisibility } from '@/lib/media/mediaVisibility'
 import {
   attemptRetraction,
   RETRACTED_VISIBILITY,
+  retractionReport,
   RETRACTION_SELECT,
 } from '@/lib/media/retractToPrivateBucket'
 import { reconcilePortfolioLookForMediaAsset } from '@/lib/looks/publication/portfolioLookSync'
@@ -347,6 +348,9 @@ export async function DELETE(_req: NextRequest, ctx: RouteContext) {
           url: renderUrl,
           thumbUrl: renderThumbUrl,
         },
+        // See PATCH /api/v1/pro/media/[id]: a failed edge purge reaches the
+        // caller, not only the server log.
+        ...retractionReport(retraction),
       },
       200,
     )

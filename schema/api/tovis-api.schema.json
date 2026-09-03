@@ -9070,6 +9070,9 @@
         "createdAt": {
           "type": "string"
         },
+        "directionsTitle": {
+          "type": "string"
+        },
         "intakeRevisionId": {
           "type": "string"
         },

@@ -1327,6 +1327,12 @@ export type ConsultClientResultsDTO = {
   safetyFlags: ConsultAnalysisPayloadDTO['safetyFlags']
   achievabilityDirection: ConsultBriefAchievabilityDirectionDTO
   recommendationDirections: ConsultBriefRecommendationDirectionDTO[]
+  // The heading the client sees over `recommendationDirections`, resolved
+  // from the serving tenant's brand copy (lib/brand). OPTIONAL on the wire —
+  // a purely additive field, so shipped native builds (which hardcode the
+  // default heading) keep decoding; a build that reads it falls back to its
+  // own string when absent. #1068 planned it and dropped it.
+  directionsTitle?: string
   meCardTeaser: {
     locked: true
     tapped: boolean

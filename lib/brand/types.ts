@@ -651,6 +651,27 @@ export type BrandClientConsultResultsCopy = {
  * composes those onto ConsultBookingProposalDTO so the page cannot promise
  * something the booking will not do.
  */
+/**
+ * The client consult's capture step. The photo count and which views a pack
+ * asks for are SERVED (`capture.shotPack`), so this copy carries slots, not
+ * numbers: three packs exist today (hair 7, face 3, area 3) and a fourth must
+ * not need a copy change. `lib/consult/captureCopy.ts` fills the slots.
+ */
+export type BrandClientConsultCaptureCopy = {
+  eyebrow: string
+  title: string
+  /** `{count}` → the pack's slot count in words ("seven"). */
+  introCountLine: string
+  /** `{hair}`/`{face}` → counts in words; used when the pack has hair views. */
+  introHairAndFaceViews: string
+  /** `{face}` → count in words; used when the pack is face views only. */
+  introFaceViews: string
+  /** Used when the pack shows a treatment area (with or without a face view). */
+  introAreaViews: string
+  /** `{count}` → the pack's slot count in words. */
+  introPartialAllowed: string
+}
+
 export type BrandClientConsultBookingCopy = {
   backToResults: string
   eyebrow: string
@@ -733,5 +754,6 @@ export type BrandConfig = {
   contact: BrandContact
   proCalendar: BrandProCalendarCopy
   clientConsultResults: BrandClientConsultResultsCopy
+  clientConsultCapture: BrandClientConsultCaptureCopy
   clientConsultBooking: BrandClientConsultBookingCopy
 }

@@ -460,3 +460,26 @@ export async function attemptRetraction(
     return { status: 'FAILED' }
   }
 }
+
+/**
+ * The part of a retraction outcome an API caller must be told about: the
+ * failures that leave the bytes reachable after the row says they are not.
+ * Empty (spread to nothing) on a clean retraction, so the response shape only
+ * grows when there is something to report.
+ */
+export function retractionReport(
+  outcome: Awaited<ReturnType<typeof attemptRetraction>>,
+): {
+  cdnPurgeFailures?: CdnPurgeFailure[]
+  orphanedPublicObjects?: OrphanedPublicObject[]
+} {
+  if (outcome.status !== 'RETRACTED') return {}
+  return {
+    ...(outcome.cdnPurgeFailures.length > 0
+      ? { cdnPurgeFailures: outcome.cdnPurgeFailures }
+      : {}),
+    ...(outcome.orphanedPublicObjects.length > 0
+      ? { orphanedPublicObjects: outcome.orphanedPublicObjects }
+      : {}),
+  }
+}

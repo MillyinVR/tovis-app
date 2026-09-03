@@ -1,4 +1,6 @@
 import { jsonOk, requireClient } from '@/app/api/_utils'
+import { getBrandForTenantContext } from '@/lib/brand/forTenant'
+import { resolveTenantContextForRequest } from '@/lib/tenant'
 import {
   resolveRouteParams,
   type RouteContext,
@@ -12,7 +14,7 @@ import type { ConsultClientResultsResponseDTO } from '@/lib/dto/consult'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET(_request: Request, context: RouteContext) {
+export async function GET(request: Request, context: RouteContext) {
   const auth = await requireClient()
   if (!auth.ok) return auth.res
   const { id } = await resolveRouteParams(context)
@@ -28,7 +30,14 @@ export async function GET(_request: Request, context: RouteContext) {
       clientId: auth.clientId,
       actorUserId: auth.user.id,
     })
-    return jsonOk<ConsultClientResultsResponseDTO>({ results })
+    // The heading is brand copy, resolved for the tenant this request is
+    // served under — the same source the web results page reads it from.
+    const copy = getBrandForTenantContext(
+      await resolveTenantContextForRequest(request),
+    ).clientConsultResults
+    return jsonOk<ConsultClientResultsResponseDTO>({
+      results: { ...results, directionsTitle: copy.recommendationsTitle },
+    })
   } catch (error: unknown) {
     return clientConsultResultsErrorResponse(error)
   }

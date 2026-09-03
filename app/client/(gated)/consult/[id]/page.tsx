@@ -32,7 +32,7 @@ export default async function ClientConsultFlowPage({ params }: PageProps) {
       back={{ href: '/client/bookings', label: 'Bookings' }}
       width="wide"
     >
-      <ClientConsultFlow consultId={id} />
+      <ClientConsultFlow consultId={id} captureCopy={brand.clientConsultCapture} />
     </ClientPage>
   )
 }
