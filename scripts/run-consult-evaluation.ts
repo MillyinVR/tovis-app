@@ -3,7 +3,7 @@ import path from 'node:path'
 
 import {
   CONSULT_ANALYSIS_DEFAULT_MODEL,
-  runHairColorAnalysis,
+  runConsultAnalysis,
 } from '@/lib/consult/analysisEngine'
 import { HAIR_COLOR_CAPTURE_SHOT_KEYS } from '@/lib/consult/capturePack'
 import {
@@ -98,7 +98,19 @@ async function liveProvider(
       },
     })
   }
-  return runHairColorAnalysis({ intake: fixture.intake, captures })
+  // The corpus is the founder pilot's colour set with no professional menu:
+  // the provider sees the colour category and can name only the consultation.
+  return runConsultAnalysis({
+    service: {
+      family: 'HAIR',
+      categoryName: 'Color',
+      serviceName: null,
+      menuServiceNames: [],
+    },
+    intake: fixture.intake,
+    intakeItems: [],
+    captures,
+  })
 }
 
 async function main(): Promise<void> {

@@ -115,11 +115,11 @@ function buildHairColorProBriefCore(
       visibleCondition: args.analysis.core.visibleCondition,
       density: args.analysis.core.density,
       texture: args.analysis.core.texture,
-      goalSummary: args.analysis.hairColorLens.goal,
-      historySummary: args.analysis.hairColorLens.history,
-      constraintsSummary: args.analysis.hairColorLens.constraints,
-      maintenanceSummary: args.analysis.hairColorLens.maintenance,
-      appointmentContextSummary: args.analysis.hairColorLens.appointmentContext,
+      goalSummary: args.analysis.serviceLens.goal,
+      historySummary: args.analysis.serviceLens.history,
+      constraintsSummary: args.analysis.serviceLens.constraints,
+      maintenanceSummary: args.analysis.serviceLens.maintenance,
+      appointmentContextSummary: args.analysis.serviceLens.appointmentContext,
     },
     // Safety remains a top-level sibling, so no presentation tier can hide it
     // by trimming observations or recommendations.
@@ -127,8 +127,8 @@ function buildHairColorProBriefCore(
     achievabilityDirection: {
       direction:
         'Discuss this assessment with the professional; they will decide what is achievable in person.',
-      assessment: args.analysis.hairColorLens.achievability,
-      context: args.analysis.hairColorLens.achievabilityReason,
+      assessment: args.analysis.serviceLens.achievability,
+      context: args.analysis.serviceLens.achievabilityReason,
       discussWithProfessional: true,
     },
     recommendationDirections: args.analysis.recommendations.map(

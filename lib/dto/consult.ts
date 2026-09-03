@@ -590,25 +590,29 @@ export type ConsultAnalysisObservationDTO<T extends string> = {
   evidence: ConsultAnalysisEvidenceDTO[]
 }
 
+// Analysis schema v3 (service-aware consult, 2026-09-03): the safety codes any
+// intake pack's policy can raise (lib/consult/safetyFlags.ts). Additive over
+// the colour-only set.
 export type ConsultAnalysisSafetyCodeDTO =
   | 'PRIOR_REACTION'
   | 'REACTION_HISTORY_UNKNOWN'
   | 'RECENT_BOX_DYE'
   | 'RECENT_LIGHTENING'
+  | 'RECENT_CHEMICAL_SERVICE'
   | 'CHEMICAL_HISTORY_UNKNOWN'
   | 'ALLERGY_HISTORY_UNKNOWN'
+  | 'KNOWN_ALLERGY'
+  | 'SENSITIVITY_REPORTED'
   | 'VISIBLE_COMPROMISE'
 
+// What a recommendation IS: a service from the professional's menu (named in
+// `serviceName`), a consultation with the professional, or one of the two
+// deterministic safety tests the routing adds. The colour-only intent enum
+// (BALAYAGE, TONER_GLOSS, …) is gone: the analysis names the pro's actual
+// service instead of guessing a colour technique.
 export type ConsultAnalysisServiceIntentDTO =
-  | 'COLOR_CONSULTATION'
-  | 'ROOT_TOUCH_UP'
-  | 'ALL_OVER_COLOR'
-  | 'HIGHLIGHTS'
-  | 'BALAYAGE'
-  | 'COLOR_CORRECTION'
-  | 'TONER_GLOSS'
-  | 'VIVID_COLOR'
-  | 'OTHER_HAIR_COLOR'
+  | 'SERVICE'
+  | 'CONSULTATION'
   | 'STRAND_TEST'
   | 'PATCH_TEST'
 
@@ -762,7 +766,9 @@ export type ConsultAnalysisPayloadDTO = {
       'STRAIGHT' | 'WAVY' | 'CURLY' | 'COILY' | 'MIXED' | 'UNKNOWN'
     >
   }
-  hairColorLens: {
+  // Schema v3: the lens is about THE SERVICE this consult is for, whatever it
+  // is; the eight fields are the ones the colour lens carried.
+  serviceLens: {
     goal: string
     history: string
     constraints: string
@@ -783,6 +789,8 @@ export type ConsultAnalysisPayloadDTO = {
   }>
   recommendations: Array<{
     serviceIntent: ConsultAnalysisServiceIntentDTO
+    /** The menu service, exactly as the menu names it; null unless SERVICE. */
+    serviceName: string | null
     title: string
     rationale: string
     achievability: string
@@ -842,7 +850,7 @@ export type ConsultBriefAiObservationsDTO = {
 
 export type ConsultBriefAchievabilityDirectionDTO = {
   direction: string
-  assessment: ConsultAnalysisPayloadDTO['hairColorLens']['achievability']
+  assessment: ConsultAnalysisPayloadDTO['serviceLens']['achievability']
   context: string
   discussWithProfessional: true
 }

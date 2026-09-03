@@ -49,7 +49,7 @@ import {
   type ConsultBookingProposalEnhancementSelection,
   type ConsultBookingProposalEstimateInput,
 } from './bookingProposal'
-import { normalizeStoredHairColorAnalysisPayload } from './analysisRevision'
+import { normalizeStoredConsultAnalysisPayload } from './analysisRevision'
 
 export type ConsultProposalEntryErrorCode = 'HIDDEN' | 'NOT_FOUND' | 'UNAVAILABLE'
 
@@ -84,7 +84,7 @@ const PROPOSAL_ESTIMATE_SELECT = {
   status: true,
   // The ANALYSIS revision this estimate was derived from. The safety gate reads
   // its recommendations — the exact payload B3 translated, not a later one.
-  sourceAnalysisRevision: { select: { payload: true } },
+  sourceAnalysisRevision: { select: { payload: true, schemaVersion: true } },
   lines: {
     select: {
       id: true,
@@ -189,8 +189,9 @@ export async function loadProposalDerivationInputs(
 
   let analysisRecommendations: ConsultBookingProposalAnalysisInput
   try {
-    analysisRecommendations = normalizeStoredHairColorAnalysisPayload(
+    analysisRecommendations = normalizeStoredConsultAnalysisPayload(
       estimate.sourceAnalysisRevision.payload,
+      estimate.sourceAnalysisRevision.schemaVersion,
     ).recommendations
   } catch {
     // The pinned analysis will not project. Refuse rather than proceed: this is

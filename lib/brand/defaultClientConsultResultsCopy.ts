@@ -61,7 +61,7 @@ export const defaultClientConsultResultsCopy: BrandClientConsultResultsCopy = {
     COLOR_PALETTE: 'Color palette',
   },
   whyItFlattersLabel: 'Why this flatters you',
-  recommendationsTitle: 'Hair-color directions',
+  recommendationsTitle: 'Directions to discuss',
   recommendationDiscussionPrefix: 'A direction to discuss with your professional:',
   bookLookTitle: 'Ready to book this look?',
   bookLookBody:

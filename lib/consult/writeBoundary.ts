@@ -19,7 +19,7 @@ import {
   CONSULT_ANALYSIS_PROMPT_VERSION,
   CONSULT_ANALYSIS_SCHEMA_VERSION,
 } from './analysisEngine'
-import { normalizeStoredHairColorAnalysisPayload } from './analysisRevision'
+import { normalizeStoredConsultAnalysisPayload } from './analysisRevision'
 import {
   buildHairColorProBriefPayload,
   CONSULT_PRO_BRIEF_PROMPT_VERSION,
@@ -692,7 +692,10 @@ export async function finalizeLockedHairColorAnalysis(
   // Normalized once: the brief and B3's service estimate must read the SAME
   // recommendation references, or the estimate could price a service the brief
   // never showed.
-  const briefAnalysis = normalizeStoredHairColorAnalysisPayload(revision.payload)
+  const briefAnalysis = normalizeStoredConsultAnalysisPayload(
+    revision.payload,
+    revision.schemaVersion,
+  )
   const briefPayload = buildHairColorProBriefPayload({
     intakeRevisionId: intakeRevision.id,
     intakePackId: intake.packId,

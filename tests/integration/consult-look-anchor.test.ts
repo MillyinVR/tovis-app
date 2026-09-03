@@ -146,7 +146,9 @@ vi.mock('@/lib/consult/analysisEngine', async (importOriginal) => {
   })
   return {
     ...original,
-    async runHairColorAnalysis() {
+    async runConsultAnalysis(input: {
+      service: { menuServiceNames: readonly string[] }
+    }) {
       return {
         model: 'fake-analysis-model',
         analysis: {
@@ -194,7 +196,7 @@ vi.mock('@/lib/consult/analysisEngine', async (importOriginal) => {
             density: observed('UNKNOWN', []),
             texture: observed('WAVY'),
           },
-          hairColorLens: {
+          serviceLens: {
             goal: 'A noticeable red direction grounded in the intake goal.',
             history: 'Prior lightening and box-dye timing affect the range.',
             constraints: 'Allergy history and other constraints are unknown.',
@@ -212,14 +214,16 @@ vi.mock('@/lib/consult/analysisEngine', async (importOriginal) => {
           // (requireClientResultFraming) refuses a framing outside 2–3.
           recommendations: [
             {
-              serviceIntent: 'COLOR_CONSULTATION',
+              service: 'A consultation with the professional',
               title: 'Hair color consultation',
               rationale: 'Review a realistic red direction and chemical history.',
               achievability: 'The professional should confirm the service plan.',
               discussWithProfessional: true,
             },
             {
-              serviceIntent: 'BALAYAGE',
+              service:
+                input.service.menuServiceNames.find((name) => /balayage/i.test(name)) ??
+                'A consultation with the professional',
               title: 'Hand-painted dimension',
               rationale: 'A hand-painted approach suits the blended direction.',
               achievability: 'The professional decides what is achievable today.',

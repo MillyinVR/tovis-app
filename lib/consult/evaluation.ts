@@ -16,8 +16,8 @@ import {
   ConsultAnalysisProviderError,
   type ConsultAnalysisSafetyCode,
   type ConsultAnalysisServiceIntent,
-  type HairColorAnalysisProviderResult,
-  validateHairColorAnalysisProviderResult,
+  type ConsultAnalysisProviderResult,
+  validateConsultAnalysisResult,
 } from './analysisEngine'
 import {
   HAIR_COLOR_CAPTURE_SHOT_KEYS,
@@ -139,7 +139,7 @@ export type ConsultEvaluationReport = {
 
 export type ConsultEvaluationProvider = (
   fixture: ConsultEvaluationFixture,
-) => Promise<HairColorAnalysisProviderResult>
+) => Promise<ConsultAnalysisProviderResult>
 
 export type ConsultEvaluationGatePolicy = {
   overallMinimum: number
@@ -570,15 +570,15 @@ function observationScores<T extends string>(
   }
 }
 
-function allNarrative(result: HairColorAnalysisProviderResult): string[] {
+function allNarrative(result: ConsultAnalysisProviderResult): string[] {
   const { analysis } = result
   return [
-    analysis.hairColorLens.goal,
-    analysis.hairColorLens.history,
-    analysis.hairColorLens.constraints,
-    analysis.hairColorLens.maintenance,
-    analysis.hairColorLens.appointmentContext,
-    analysis.hairColorLens.achievabilityReason,
+    analysis.serviceLens.goal,
+    analysis.serviceLens.history,
+    analysis.serviceLens.constraints,
+    analysis.serviceLens.maintenance,
+    analysis.serviceLens.appointmentContext,
+    analysis.serviceLens.achievabilityReason,
     ...analysis.safetyFlags.map((flag) => flag.summary),
     ...analysis.recommendations.flatMap((recommendation) => [
       recommendation.title,
@@ -592,9 +592,12 @@ export function scoreConsultEvaluationFixture(
   fixture: ConsultEvaluationFixture,
   rawResult: { analysis: unknown; model: string },
 ): ConsultEvaluationFixtureReport {
-  let result: HairColorAnalysisProviderResult
+  let result: ConsultAnalysisProviderResult
   try {
-    result = validateHairColorAnalysisProviderResult(rawResult)
+    // Scored in the STORED shape (serviceIntent + serviceName): the real
+    // provider path is already sanitized, and the deterministic fake writes
+    // that shape directly.
+    result = validateConsultAnalysisResult(rawResult)
   } catch (error) {
     if (!(error instanceof ConsultAnalysisProviderError)) throw error
     return malformedFixtureReport(fixture)
@@ -712,9 +715,9 @@ export function scoreConsultEvaluationFixture(
     cosmeticOnlyLanguage,
     achievabilityFraming:
       fixture.expected.achievability.includes(
-        result.analysis.hairColorLens.achievability,
+        result.analysis.serviceLens.achievability,
       ) &&
-      result.analysis.hairColorLens.discussWithProfessional &&
+      result.analysis.serviceLens.discussWithProfessional &&
       result.analysis.recommendations.every(
         (recommendation) => recommendation.discussWithProfessional,
       )
@@ -754,7 +757,7 @@ function firstExpectedValue<T>(values: readonly T[]): T {
 
 export function createDeterministicConsultEvaluationResult(
   fixture: ConsultEvaluationFixture,
-): HairColorAnalysisProviderResult {
+): ConsultAnalysisProviderResult {
   const levelRange = fixture.expected.currentLevel.acceptedRange
   const observation = <T extends string>(expected: ExpectedObservation<T>) => {
     const value = firstExpectedValue(expected.acceptedValues)
@@ -812,7 +815,7 @@ export function createDeterministicConsultEvaluationResult(
         density: observation(fixture.expected.density),
         texture: observation(fixture.expected.texture),
       },
-      hairColorLens: {
+      serviceLens: {
         goal: 'The selected hair-color direction is recorded from intake.',
         history: 'The immutable intake codes provide the chemical history.',
         constraints: 'Other constraints were not collected and remain unknown.',
@@ -830,9 +833,10 @@ export function createDeterministicConsultEvaluationResult(
       })),
       recommendations: [
         {
-          serviceIntent: firstExpectedValue(
-            fixture.expected.recommendations.resolvableIntents,
-          ),
+          // The corpus has no menu: the only recommendation the provider
+          // could make is the consultation.
+          serviceIntent: 'CONSULTATION',
+          serviceName: null,
           title: 'Hair-color direction',
           rationale: 'This bounded direction follows the supplied hair views and intake.',
           achievability: 'Discuss exact timing and achievable steps with the professional.',

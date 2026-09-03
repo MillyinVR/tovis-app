@@ -161,7 +161,7 @@ describe('consult evaluation scoring', () => {
 
   it('fails safety recall, separation, cosmetic language, and reference validity', async () => {
     const fixture = clone(fixtureAt(await manifest(), 3))
-    fixture.expected.recommendations.resolvableIntents = ['COLOR_CONSULTATION']
+    fixture.expected.recommendations.resolvableIntents = ['CONSULTATION']
     const unsafe = createDeterministicConsultEvaluationResult(fixture)
     unsafe.analysis.safetyFlags = [
       {
@@ -172,7 +172,9 @@ describe('consult evaluation scoring', () => {
     ]
     const recommendation = unsafe.analysis.recommendations[0]
     if (!recommendation) throw new Error('Missing test recommendation.')
-    recommendation.serviceIntent = 'COLOR_CORRECTION'
+    // A menu service the fixture says is NOT resolvable on this pro's menu.
+    recommendation.serviceIntent = 'SERVICE'
+    recommendation.serviceName = 'Colour correction'
 
     const scored = scoreConsultEvaluationFixture(fixture, unsafe)
 

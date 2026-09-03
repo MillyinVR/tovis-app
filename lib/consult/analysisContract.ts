@@ -20,14 +20,12 @@ import { requireCurrentConsultAgreementAcceptances } from './agreementContract'
 import {
   CONSULT_ANALYSIS_PROMPT_VERSION,
   CONSULT_ANALYSIS_SCHEMA_VERSION,
-  CONSULT_ANALYSIS_SAFETY_CODES,
   ConsultAnalysisProviderError,
-  runHairColorAnalysis,
-  validateHairColorAnalysisProviderResult,
-  type ConsultAnalysisSafetyCode,
-  type ConsultAnalysisServiceIntent,
-  type HairColorAnalysisProvider,
-  type HairColorAnalysisProviderOutput,
+  runConsultAnalysis as runConsultAnalysisProvider,
+  validateConsultAnalysisProviderResult,
+  type ConsultAnalysisProvider,
+  type ConsultAnalysisProviderOutput,
+  type ConsultAnalysisServiceContext,
 } from './analysisEngine'
 import {
   HAIR_COLOR_CAPTURE_PACK_VERSION,
@@ -53,13 +51,26 @@ import { CONSULT_ANCHOR_SELECT, evaluateConsultAnchor } from './anchor'
 import { ConsultWriteError } from './errors'
 import {
   loadConsultProMenuOfferings,
+  loadConsultSafetyOfferings,
   type ConsultProMenuOffering,
 } from './proMenu'
-import { mapStoredHairColorAnalysisRevision } from './analysisRevision'
-import { normalizeConsultIntakePayloadForPack } from './intake/registry'
+import { mapStoredConsultAnalysisRevision } from './analysisRevision'
+import {
+  consultIntakeItems,
+  normalizeConsultIntakePayloadForPack,
+} from './intake/registry'
+import {
+  resolveLookPrimaryService,
+  toLookPrimaryServiceSummary,
+} from '@/lib/looks/serviceOwnership'
+import { normalizeServiceName } from '@/lib/migration/serviceMatch'
 import { requireCompletedConsultInspiration } from './inspirationContract'
 import { purgeConsultCaptureRawObject } from './capturePurge'
 import { copyConsultCapturesToChart } from './chartCopy'
+import {
+  applyConsultSafetyFlagPolicy,
+  deriveConsultSafetyFlagPolicy,
+} from './safetyFlags'
 import {
   CONSULT_SAFETY_SERVICE_BOOKING_RULES,
   determineConsultSafetyRouting,
@@ -94,6 +105,12 @@ const ANALYSIS_SCOPE_SELECT = {
       proTenantId: true,
       locationType: true,
       ...CONSULT_ANCHOR_SELECT.booking.select,
+      service: {
+        select: {
+          ...CONSULT_ANCHOR_SELECT.booking.select.service.select,
+          name: true,
+        },
+      },
     },
   },
 } satisfies Prisma.ConsultSessionSelect
@@ -101,6 +118,49 @@ const ANALYSIS_SCOPE_SELECT = {
 type AnalysisScope = Prisma.ConsultSessionGetPayload<{
   select: typeof ANALYSIS_SCOPE_SELECT
 }>
+
+/**
+ * What the analysis is told the consult is FOR. The family and category come
+ * off the session's service profile; the specific service is the booking's,
+ * or the look's linked primary service for a look anchor; the menu is the
+ * professional's active offerings in this category, by exact name — the enum
+ * the provider recommends from.
+ */
+async function loadServiceContext(
+  tx: Prisma.TransactionClient,
+  session: AnalysisScope,
+  menu: readonly RecommendationOffering[],
+): Promise<ConsultAnalysisServiceContext> {
+  const profile = resolveConsultServiceProfile(session.serviceCategory)
+  let serviceName: string | null = session.booking?.service.name ?? null
+  if (!serviceName && session.anchorLookPostId) {
+    const look = await tx.lookPost.findUnique({
+      where: { id: session.anchorLookPostId },
+      select: {
+        serviceId: true,
+        service: {
+          select: {
+            id: true,
+            name: true,
+            category: { select: { name: true, slug: true } },
+          },
+        },
+      },
+    })
+    const primary = look
+      ? toLookPrimaryServiceSummary(
+          resolveLookPrimaryService({ serviceId: look.serviceId, service: look.service }),
+        )
+      : null
+    serviceName = primary?.name ?? null
+  }
+  return {
+    family: profile.family,
+    categoryName: profile.categoryName,
+    serviceName,
+    menuServiceNames: menu.map((offering) => offering.service.name),
+  }
+}
 
 const CAPTURE_SELECT = {
   id: true,
@@ -403,18 +463,23 @@ async function readVerifiedImages(
   }
 }
 
-const INTENT_PATTERNS: Readonly<Record<ConsultAnalysisServiceIntent, RegExp>> = {
-  COLOR_CONSULTATION: /\b(color|colour).*\bconsult|\bconsult.*\b(color|colour)/i,
-  ROOT_TOUCH_UP: /\broot\b|touch[ -]?up/i,
-  ALL_OVER_COLOR: /all[ -]?over|single[ -]?process|full[ -]?color/i,
-  HIGHLIGHTS: /highlight|foil/i,
-  BALAYAGE: /balayage|hand[ -]?paint/i,
-  COLOR_CORRECTION: /corrective|correction/i,
-  TONER_GLOSS: /toner|gloss|glaze/i,
-  VIVID_COLOR: /vivid|fantasy|fashion color/i,
-  OTHER_HAIR_COLOR: /color|colour|blond|brunette|copper/i,
-  STRAND_TEST: /^strand test$/i,
-  PATCH_TEST: /^patch test$/i,
+/**
+ * A recommendation names a menu service EXACTLY (the provider chose it from an
+ * enum of the menu), so resolution is an exact, case-insensitive name match —
+ * the colour pipeline's regex table over names and descriptions is gone.
+ * A consultation resolves to the pro's consultation service when she offers
+ * one in this category, else to the category itself.
+ */
+const CONSULTATION_OFFERING_PATTERN = /\bconsult/i
+
+function offeringByName(
+  offerings: readonly RecommendationOffering[],
+  serviceName: string,
+): RecommendationOffering | undefined {
+  const wanted = normalizeServiceName(serviceName)
+  return offerings.find(
+    (offering) => normalizeServiceName(offering.service.name) === wanted,
+  )
 }
 
 // The menu read moved to lib/consult/proMenu.ts when B3's translation module
@@ -483,6 +548,25 @@ function safetyOffering(
   )
 }
 
+/**
+ * The safety tests are looked up across the professional's WHOLE menu
+ * (lib/consult/proMenu.ts `loadConsultSafetyOfferings`): a Patch Test is one
+ * service however the pro filed it, and a nails or brows consult routes to it
+ * as readily as a colour one.
+ */
+async function loadSafetyOfferings(
+  tx: Prisma.TransactionClient,
+  session: AnalysisScope,
+  requirements: readonly ConsultSafetyServiceRequirement[],
+): Promise<RecommendationOffering[]> {
+  return loadConsultSafetyOfferings(tx, {
+    professionalId: session.professionalId,
+    serviceNames: requirements.map(
+      (requirement) => CONSULT_SAFETY_SERVICE_BOOKING_RULES[requirement].name,
+    ),
+  })
+}
+
 function requireSafetyOfferings(
   offerings: readonly RecommendationOffering[],
   session: AnalysisScope,
@@ -529,12 +613,13 @@ function recommendationReference(
 function resolveRecommendations(
   session: AnalysisScope,
   offerings: readonly RecommendationOffering[],
-  recommendations: HairColorAnalysisProviderOutput['recommendations'],
+  safetyMenu: readonly RecommendationOffering[],
+  recommendations: ConsultAnalysisProviderOutput['recommendations'],
   routing: ReturnType<typeof determineConsultSafetyRouting>,
 ) {
   if (routing.blocksChemicalRecommendations) {
     const safetyOfferings = requireSafetyOfferings(
-      offerings,
+      safetyMenu,
       session,
       routing.requirements,
     )
@@ -549,19 +634,21 @@ function resolveRecommendations(
       return requirement === 'PATCH_TEST'
         ? {
             serviceIntent: requirement,
+            serviceName: null,
             title: 'Patch Test',
             rationale:
-              'Because a prior reaction was reported, test for sensitivity and review the result with the professional before any chemical color service.',
+              'Because a reaction, allergy or sensitivity was reported, test for sensitivity and review the result with the professional before any product or chemical service.',
             achievability:
-              'The professional must review the reaction history and test result before choosing a chemical service.',
+              'The professional must review the reaction history and test result before choosing a service.',
             discussWithProfessional: true as const,
             reference: recommendationReference(session, offering),
           }
         : {
             serviceIntent: requirement,
+            serviceName: null,
             title: 'Strand Test',
             rationale:
-              'A small section should be tested first so the professional can see how the hair responds before recommending a chemical color plan.',
+              'A small section should be tested first so the professional can see how the hair responds before recommending a chemical plan.',
             achievability:
               'The professional will use the strand result to recommend what is safely achievable.',
             discussWithProfessional: true as const,
@@ -569,17 +656,16 @@ function resolveRecommendations(
           }
     })
     const consultation = offerings.find((offering) =>
-      INTENT_PATTERNS.COLOR_CONSULTATION.test(
-        `${offering.service.name} ${offering.service.description ?? ''}`,
-      ),
+      CONSULTATION_OFFERING_PATTERN.test(offering.service.name),
     )
     return [
       ...directions,
       {
-        serviceIntent: 'COLOR_CONSULTATION' as const,
-        title: 'Professional color review',
+        serviceIntent: 'CONSULTATION' as const,
+        serviceName: null,
+        title: 'Professional review',
         rationale:
-          'Review the goal, full treatment history, and any test result with the professional before selecting a color service.',
+          'Review the goal, full history, and any test result with the professional before selecting a service.',
         achievability:
           'The professional will decide the next service after the required review.',
         discussWithProfessional: true as const,
@@ -589,89 +675,16 @@ function resolveRecommendations(
   }
 
   return recommendations.map((recommendation) => {
-    const pattern = INTENT_PATTERNS[recommendation.serviceIntent]
-    const match = offerings.find((offering) =>
-      pattern.test(`${offering.service.name} ${offering.service.description ?? ''}`),
-    )
+    const match =
+      recommendation.serviceIntent === 'SERVICE' && recommendation.serviceName
+        ? offeringByName(offerings, recommendation.serviceName)
+        : offerings.find((offering) =>
+            CONSULTATION_OFFERING_PATTERN.test(offering.service.name),
+          )
     return { ...recommendation, reference: recommendationReference(session, match) }
   })
 }
 
-const SAFETY_COPY: Readonly<Record<ConsultAnalysisSafetyCode, string>> = {
-  PRIOR_REACTION:
-    'The intake reports a prior color-service reaction. Discuss this history and appropriate precautions with your professional before any chemical service.',
-  REACTION_HISTORY_UNKNOWN:
-    'Reaction history is uncertain. Discuss prior sensitivities and appropriate precautions with your professional before any chemical service.',
-  RECENT_BOX_DYE:
-    'Recent box dye can affect color predictability and achievability. Discuss the exact product and timing with your professional.',
-  RECENT_LIGHTENING:
-    'Recent lightening can affect the next safe, achievable color direction. Discuss timing and strand-condition checks with your professional.',
-  CHEMICAL_HISTORY_UNKNOWN:
-    'Some chemical history is uncertain. Review prior color, lightening, and treatment details with your professional before choosing a service.',
-  ALLERGY_HISTORY_UNKNOWN:
-    'Allergy information was not collected in this intake. Discuss known allergies, sensitivities, and appropriate precautions with your professional.',
-  VISIBLE_COMPROMISE:
-    'The photos may show cosmetic signs of compromised hair. Have your professional assess condition before setting a chemical-service plan.',
-}
-
-function addRequiredSafetyFlags(
-  analysis: HairColorAnalysisProviderOutput,
-  intake: Readonly<Record<string, string>>,
-): HairColorAnalysisProviderOutput {
-  if (
-    !/\b(unknown|not collected|not provided)\b/i.test(
-      analysis.hairColorLens.constraints,
-    ) ||
-    !/\b(unknown|not collected|not provided)\b/i.test(
-      analysis.hairColorLens.maintenance,
-    )
-  ) {
-    throw new ConsultAnalysisProviderError('bad_output')
-  }
-  const supported = new Set<ConsultAnalysisSafetyCode>(['ALLERGY_HISTORY_UNKNOWN'])
-  if (intake.prior_reaction === 'yes') supported.add('PRIOR_REACTION')
-  if (intake.prior_reaction === 'not-sure') supported.add('REACTION_HISTORY_UNKNOWN')
-  if (intake.box_dye_history === 'within-6-months') supported.add('RECENT_BOX_DYE')
-  if (intake.box_dye_history === 'not-sure') supported.add('CHEMICAL_HISTORY_UNKNOWN')
-  if (
-    intake.prior_lightening === 'within-3-months' ||
-    intake.prior_lightening === '3-6-months'
-  ) {
-    supported.add('RECENT_LIGHTENING')
-  }
-  if (intake.prior_lightening === 'not-sure') supported.add('CHEMICAL_HISTORY_UNKNOWN')
-  if (analysis.core.visibleCondition.value === 'POSSIBLE_COMPROMISE') {
-    supported.add('VISIBLE_COMPROMISE')
-  }
-  if (analysis.safetyFlags.some((flag) => !supported.has(flag.code))) {
-    throw new ConsultAnalysisProviderError('bad_output')
-  }
-  const required = new Set<ConsultAnalysisSafetyCode>(['ALLERGY_HISTORY_UNKNOWN'])
-  if (intake.prior_reaction === 'yes') required.add('PRIOR_REACTION')
-  if (intake.prior_reaction === 'not-sure') required.add('REACTION_HISTORY_UNKNOWN')
-  if (intake.box_dye_history === 'within-6-months') required.add('RECENT_BOX_DYE')
-  if (intake.box_dye_history === 'not-sure') required.add('CHEMICAL_HISTORY_UNKNOWN')
-  if (
-    intake.prior_lightening === 'within-3-months' ||
-    intake.prior_lightening === '3-6-months'
-  ) {
-    required.add('RECENT_LIGHTENING')
-  }
-  if (intake.prior_lightening === 'not-sure') required.add('CHEMICAL_HISTORY_UNKNOWN')
-  if (analysis.core.visibleCondition.value === 'POSSIBLE_COMPROMISE') {
-    required.add('VISIBLE_COMPROMISE')
-  }
-  const flags = [...analysis.safetyFlags]
-  for (const code of required) {
-    if (!flags.some((flag) => flag.code === code)) {
-      flags.push({ code, summary: SAFETY_COPY[code], discussWithProfessional: true })
-    }
-  }
-  if (flags.length > CONSULT_ANALYSIS_SAFETY_CODES.length) {
-    throw new ConsultAnalysisProviderError('bad_output')
-  }
-  return { ...analysis, safetyFlags: flags }
-}
 
 async function stateInTransaction(
   tx: Prisma.TransactionClient,
@@ -679,7 +692,13 @@ async function stateInTransaction(
 ): Promise<ConsultAnalysisStateDTO> {
   const revision = await tx.consultRevision.findFirst({
     where: { consultSessionId: session.id, kind: ConsultRevisionKind.ANALYSIS },
-    select: { id: true, revision: true, payload: true, createdAt: true },
+    select: {
+      id: true,
+      revision: true,
+      payload: true,
+      schemaVersion: true,
+      createdAt: true,
+    },
     orderBy: { revision: 'desc' },
   })
   return {
@@ -687,7 +706,7 @@ async function stateInTransaction(
     status: session.status,
     schemaVersion: CONSULT_ANALYSIS_SCHEMA_VERSION,
     promptVersion: CONSULT_ANALYSIS_PROMPT_VERSION,
-    result: revision ? mapStoredHairColorAnalysisRevision(revision) : null,
+    result: revision ? mapStoredConsultAnalysisRevision(revision) : null,
   }
 }
 
@@ -723,11 +742,11 @@ export async function runConsultAnalysis(args: {
   now?: Date
   loadInput: () => Promise<AnalysisInput>
   storage?: ConsultCaptureStorage
-  provider?: HairColorAnalysisProvider
+  provider?: ConsultAnalysisProvider
 }): Promise<{ state: ConsultAnalysisStateDTO; replayed: boolean }> {
   const startedAt = args.now ?? new Date()
   const storage = args.storage ?? consultCaptureStorage
-  const provider = args.provider ?? runHairColorAnalysis
+  const provider = args.provider ?? runConsultAnalysisProvider
   let consumedCaptureIds: string[] = []
   const result = await prisma
     .$transaction(
@@ -755,7 +774,7 @@ export async function runConsultAnalysis(args: {
         })
         if (intakeRouting.requirements.length > 0) {
           requireSafetyOfferings(
-            await loadRecommendationOfferings(tx, session),
+            await loadSafetyOfferings(tx, session, intakeRouting.requirements),
             session,
             intakeRouting.requirements,
           )
@@ -766,6 +785,7 @@ export async function runConsultAnalysis(args: {
             id: true,
             revision: true,
             payload: true,
+            schemaVersion: true,
             createdAt: true,
             idempotencyKey: true,
             requestHash: true,
@@ -781,7 +801,7 @@ export async function runConsultAnalysis(args: {
               status: session.status,
               schemaVersion: CONSULT_ANALYSIS_SCHEMA_VERSION,
               promptVersion: CONSULT_ANALYSIS_PROMPT_VERSION,
-              result: mapStoredHairColorAnalysisRevision(existing),
+              result: mapStoredConsultAnalysisRevision(existing),
             },
             replayed: true,
           }
@@ -805,17 +825,32 @@ export async function runConsultAnalysis(args: {
           toStatus: ConsultSessionStatus.ANALYZING,
         })
         const images = await readVerifiedImages(captures, storage)
+        const menu = await loadRecommendationOfferings(tx, session)
+        const service = await loadServiceContext(tx, session, menu)
+        const pack = resolveConsultServiceProfile(session.serviceCategory).intakePack
         let providerResult
         try {
-          providerResult = validateHairColorAnalysisProviderResult(
-            await provider({ intake: intake.payload.answers, captures: images }),
-            images.map((image) => image.shotKey),
+          providerResult = validateConsultAnalysisProviderResult(
+            await provider({
+              service,
+              intake: intake.payload.answers,
+              intakeItems: consultIntakeItems(pack, intake.payload.answers),
+              captures: images,
+            }),
+            {
+              menuServiceNames: service.menuServiceNames,
+              suppliedShotKeys: images.map((image) => image.shotKey),
+            },
           )
           providerResult = {
             ...providerResult,
-            analysis: addRequiredSafetyFlags(
+            analysis: applyConsultSafetyFlagPolicy(
               providerResult.analysis,
-              intake.payload.answers,
+              deriveConsultSafetyFlagPolicy({
+                intakePackId: intake.payload.packId,
+                intake: intake.payload.answers,
+                visibleCondition: providerResult.analysis.core.visibleCondition.value,
+              }),
             ),
           }
         } catch (error) {
@@ -867,7 +902,10 @@ export async function runConsultAnalysis(args: {
         })
         const recommendations = resolveRecommendations(
           session,
-          await loadRecommendationOfferings(tx, session),
+          menu,
+          routing.requirements.length > 0
+            ? await loadSafetyOfferings(tx, session, routing.requirements)
+            : [],
           providerResult.analysis.recommendations,
           routing,
         )

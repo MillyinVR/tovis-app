@@ -6,20 +6,71 @@ import type {
 } from '@/lib/dto/consult'
 import { isRecord } from '@/lib/guards'
 
-import { validateHairColorAnalysisResult } from './analysisEngine'
+import {
+  CONSULT_ANALYSIS_SCHEMA_VERSION,
+  validateConsultAnalysisResult,
+} from './analysisEngine'
 import { ConsultWriteError } from './errors'
 
-export function normalizeStoredHairColorAnalysisPayload(
-  payload: Prisma.JsonValue,
-): ConsultAnalysisPayloadDTO {
-  if (!isRecord(payload) || !Array.isArray(payload.recommendations)) {
-    throw new ConsultWriteError('ANALYSIS_UNAVAILABLE', 'Analysis is unavailable.')
+/** The last schema whose rows carried `hairColorLens` and colour-only intents. */
+export const LEGACY_HAIR_COLOR_ANALYSIS_SCHEMA_VERSION = 2
+
+function unavailable(): never {
+  throw new ConsultWriteError('ANALYSIS_UNAVAILABLE', 'Analysis is unavailable.')
+}
+
+/**
+ * Schema 2 → 3, on read. A row written under the colour-only schema keeps
+ * loading: its lens moves under the service-neutral key, and its colour intent
+ * becomes the kind of recommendation it was — a menu service (the colour
+ * pipeline matched by name pattern, so no exact menu name survives), the
+ * professional review, or one of the two safety tests.
+ *
+ * No production row has ever been written under schema 2 (0 ANALYSIS
+ * revisions on 2026-09-03), so this is a reader for fixtures and for the
+ * guarantee, not a migration path anyone has walked.
+ */
+function upgradeLegacyPayload(payload: Record<string, unknown>): Record<string, unknown> {
+  if (!Array.isArray(payload.recommendations)) unavailable()
+  const { hairColorLens, ...rest } = payload
+  return {
+    ...rest,
+    serviceLens: hairColorLens,
+    recommendations: payload.recommendations.map((item) => {
+      if (!isRecord(item) || typeof item.serviceIntent !== 'string') unavailable()
+      const { serviceIntent, ...fields } = item
+      const kind =
+        serviceIntent === 'PATCH_TEST' || serviceIntent === 'STRAND_TEST'
+          ? serviceIntent
+          : serviceIntent === 'COLOR_CONSULTATION'
+            ? 'CONSULTATION'
+            : 'SERVICE'
+      return {
+        ...fields,
+        serviceIntent: kind,
+        // The colour pipeline matched a menu row by pattern, never by name;
+        // the stored REFERENCE (kept below) still says which service it was.
+        serviceName: kind === 'SERVICE' ? 'Service from the professional’s menu' : null,
+      }
+    }),
   }
+}
+
+export function normalizeStoredConsultAnalysisPayload(
+  payload: Prisma.JsonValue,
+  schemaVersion: number = CONSULT_ANALYSIS_SCHEMA_VERSION,
+): ConsultAnalysisPayloadDTO {
+  if (!isRecord(payload)) unavailable()
+  const current =
+    schemaVersion === LEGACY_HAIR_COLOR_ANALYSIS_SCHEMA_VERSION
+      ? upgradeLegacyPayload(payload)
+      : schemaVersion === CONSULT_ANALYSIS_SCHEMA_VERSION
+        ? payload
+        : unavailable()
+  if (!Array.isArray(current.recommendations)) unavailable()
   const references: ConsultAnalysisPayloadDTO['recommendations'][number]['reference'][] = []
-  const providerRecommendations = payload.recommendations.map((item) => {
-    if (!isRecord(item) || !isRecord(item.reference)) {
-      throw new ConsultWriteError('ANALYSIS_UNAVAILABLE', 'Analysis is unavailable.')
-    }
+  const storedRecommendations = current.recommendations.map((item) => {
+    if (!isRecord(item) || !isRecord(item.reference)) unavailable()
     const reference = item.reference
     const referenceKeys = Object.keys(reference).sort().join(',')
     if (
@@ -27,7 +78,7 @@ export function normalizeStoredHairColorAnalysisPayload(
       typeof reference.serviceCategoryId !== 'string' ||
       !reference.serviceCategoryId
     ) {
-      throw new ConsultWriteError('ANALYSIS_UNAVAILABLE', 'Analysis is unavailable.')
+      unavailable()
     }
     if (
       reference.type === 'SERVICE' &&
@@ -49,10 +100,11 @@ export function normalizeStoredHairColorAnalysisPayload(
         serviceCategoryId: reference.serviceCategoryId,
       })
     } else {
-      throw new ConsultWriteError('ANALYSIS_UNAVAILABLE', 'Analysis is unavailable.')
+      unavailable()
     }
     return {
       serviceIntent: item.serviceIntent,
+      serviceName: item.serviceName,
       title: item.title,
       rationale: item.rationale,
       achievability: item.achievability,
@@ -62,43 +114,45 @@ export function normalizeStoredHairColorAnalysisPayload(
 
   let sanitized
   try {
-    sanitized = validateHairColorAnalysisResult({
+    sanitized = validateConsultAnalysisResult({
       model: 'stored-analysis',
       analysis: {
-        profile: payload.profile,
-        styleDirections: payload.styleDirections,
-        core: payload.core,
-        hairColorLens: payload.hairColorLens,
-        safetyFlags: payload.safetyFlags,
-        recommendations: providerRecommendations,
+        profile: current.profile,
+        styleDirections: current.styleDirections,
+        core: current.core,
+        serviceLens: current.serviceLens,
+        safetyFlags: current.safetyFlags,
+        recommendations: storedRecommendations,
       },
     }).analysis
   } catch {
-    throw new ConsultWriteError('ANALYSIS_UNAVAILABLE', 'Analysis is unavailable.')
+    unavailable()
   }
 
   return {
     ...sanitized,
     recommendations: sanitized.recommendations.map((recommendation, index) => {
       const reference = references[index]
-      if (!reference) {
-        throw new ConsultWriteError('ANALYSIS_UNAVAILABLE', 'Analysis is unavailable.')
-      }
+      if (!reference) unavailable()
       return { ...recommendation, reference }
     }),
   }
 }
 
-export function mapStoredHairColorAnalysisRevision(revision: {
+export function mapStoredConsultAnalysisRevision(revision: {
   id: string
   revision: number
   payload: Prisma.JsonValue
+  schemaVersion: number
   createdAt: Date
 }): ConsultAnalysisResultDTO {
   return {
     revisionId: revision.id,
     revision: revision.revision,
-    analysis: normalizeStoredHairColorAnalysisPayload(revision.payload),
+    analysis: normalizeStoredConsultAnalysisPayload(
+      revision.payload,
+      revision.schemaVersion,
+    ),
     createdAt: revision.createdAt.toISOString(),
   }
 }

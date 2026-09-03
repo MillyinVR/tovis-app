@@ -127,12 +127,19 @@ const observed = (value: string, evidence: string[] = ['hair_back']) => ({
  * The faked analysis payload.
  *
  * The two recommendations are chosen so the analysis resolves ONE of them to
- * the look's own linked service (BALAYAGE) and the other to a second service on
- * the pro's menu (TONER_GLOSS). That is exactly the shape B3 has to translate —
- * a floor line that also carries an analysis reason, plus one line beyond it —
- * and exactly the shape B4 has to size a slot from.
+ * the look's own linked service (the fixture's "… Balayage") and the other to
+ * a second service on the pro's menu ("… Toner Gloss"). That is exactly the
+ * shape B3 has to translate — a floor line that also carries an analysis
+ * reason, plus one line beyond it — and exactly the shape B4 has to size a
+ * slot from. Schema v3: the provider names the services from the menu it was
+ * handed, so the fake reads them off its input rather than guessing.
  */
-export async function fakeRunHairColorAnalysis() {
+export async function fakeRunConsultAnalysis(input: {
+  service: { menuServiceNames: readonly string[] }
+}) {
+  const menu = input.service.menuServiceNames
+  const named = (pattern: RegExp) =>
+    menu.find((name) => pattern.test(name)) ?? 'A consultation with the professional'
   return {
     model: 'fake-analysis-model',
     analysis: {
@@ -179,7 +186,7 @@ export async function fakeRunHairColorAnalysis() {
         density: observed('UNKNOWN', []),
         texture: observed('WAVY'),
       },
-      hairColorLens: {
+      serviceLens: {
         goal: 'A noticeable red direction grounded in the intake goal.',
         history: 'Prior lightening and box-dye timing affect the range.',
         constraints: 'Allergy history and other constraints are unknown.',
@@ -194,14 +201,14 @@ export async function fakeRunHairColorAnalysis() {
       safetyFlags: state.safetyFlags.map((flag) => ({ ...flag })),
       recommendations: [
         {
-          serviceIntent: 'BALAYAGE',
+          service: named(/balayage/i),
           title: 'Hand-painted dimension',
           rationale: 'A hand-painted approach suits the blended direction.',
           achievability: 'The professional decides what is achievable today.',
           discussWithProfessional: true,
         },
         {
-          serviceIntent: 'TONER_GLOSS',
+          service: named(/toner gloss/i),
           title: 'A gloss to hold the tone',
           rationale: 'The mid-lengths would otherwise read brassy in weeks.',
           achievability: 'The professional confirms the toner in person.',
