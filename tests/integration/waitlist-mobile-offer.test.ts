@@ -561,7 +561,10 @@ describe('what the PRO can see while the offer is PENDING', () => {
     // front door just as well as an exact pair does.
     expect(raw).not.toContain(NEAR_LAT)
     expect(raw).not.toContain(NEAR_LNG)
-    expect(raw).not.toContain('32.68')
+    // Coordinate PREFIXES, not just the exact values — but anchored so a
+    // timestamp cannot match: the body carries ISO instants, and one that
+    // reads `…:32.68…Z` failed this line in CI at 18:28:32 (2026-09-03).
+    expect(raw).not.toMatch(/(?<![\d:])32\.68/)
     expect(raw).not.toContain('-117.18')
     // Nor the address's own id, which would be a handle onto it.
     expect(raw).not.toContain(fx.nearAddressId)
