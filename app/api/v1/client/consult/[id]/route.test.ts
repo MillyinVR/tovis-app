@@ -69,6 +69,46 @@ describe('GET /api/v1/client/consult/[id]', () => {
     })
   })
 
+  it('serves a LOOK-anchored consult (Book the Look) as the look DTO, not `consult: null`', async () => {
+    // The regression: this route ran only the booking mapper, so every consult
+    // started from a look answered `{ consult: null }` and the web flow page
+    // crashed reading `.status` straight after Book.
+    mocks.findUniqueConsultSession.mockResolvedValue({
+      ...CONSULT_ROW,
+      clientId: 'client_1',
+      bookingId: null,
+      anchorLookPostId: 'look_1',
+    })
+
+    const res = await get('consult_1')
+
+    expect(res.status).toBe(200)
+    expect(res.body).toEqual({
+      consult: {
+        id: 'consult_1',
+        status: 'CONSENT_REQUIRED',
+        lookPostId: 'look_1',
+        professionalId: 'pro_allowlisted',
+        serviceCategoryId: 'cat_hair_color',
+        createdAt: NOW.toISOString(),
+      },
+    })
+  })
+
+  it('404s rather than answering `consult: null` for a row with neither anchor', async () => {
+    mocks.findUniqueConsultSession.mockResolvedValue({
+      ...CONSULT_ROW,
+      clientId: 'client_1',
+      bookingId: null,
+      anchorLookPostId: null,
+    })
+
+    const res = await get('consult_1')
+
+    expect(res.status).toBe(404)
+    expect(mocks.jsonOk).not.toHaveBeenCalled()
+  })
+
   it('404s when the session does not exist', async () => {
     mocks.findUniqueConsultSession.mockResolvedValue(null)
     const res = await get('missing')

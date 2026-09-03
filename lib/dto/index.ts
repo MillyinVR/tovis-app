@@ -588,6 +588,8 @@ export type {
   ConsultLookAvailabilityResponseDTO,
   ConsultLookStartRequestDTO,
   ConsultLookStartResponseDTO,
+  ConsultSessionLookupDTO,
+  ConsultSessionLookupResponseDTO,
   ConsultAgreementVersionDTO,
   ConsultAgreementAcceptanceDTO,
   ConsultAgreementRevocationDTO,

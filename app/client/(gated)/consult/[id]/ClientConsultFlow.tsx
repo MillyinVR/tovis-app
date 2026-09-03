@@ -25,6 +25,7 @@ import type {
   ConsultInspirationStateDTO,
   ConsultIntakeStateDTO,
   ConsultSessionDTO,
+  ConsultSessionLookupDTO,
 } from '@/lib/dto/consult'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import {
@@ -194,7 +195,8 @@ export default function ClientConsultFlow({ consultId }: { consultId: string }) 
   )
 
   const refreshSession = useCallback(async () => {
-    const session = await api<{ consult: ConsultSessionDTO }>(base)
+    // Either anchor (booking or look) — only `status` is read here.
+    const session = await api<{ consult: ConsultSessionLookupDTO }>(base)
     setStatus(session.consult.status)
     return session.consult.status
   }, [base])

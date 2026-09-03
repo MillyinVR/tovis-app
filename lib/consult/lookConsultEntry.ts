@@ -19,6 +19,10 @@ import { prisma } from '@/lib/prisma'
 import { isAiConsultEnabledForPro } from './access'
 import { ConsultWriteError } from './errors'
 import {
+  CONSULT_LOOK_SESSION_SELECT,
+  toConsultLookSessionDTO,
+} from './mapConsultSession'
+import {
   CONSULT_LOOK_ANCHOR_SELECT,
   resolveConsultLookAnchor,
   type ConsultLookAnchorRefusalCode,
@@ -39,32 +43,9 @@ import {
  * with no service linkage, or one outside the pilot vertical) name themselves.
  */
 
-const CONSULT_LOOK_SESSION_SELECT = {
-  id: true,
-  status: true,
-  anchorLookPostId: true,
-  professionalId: true,
-  serviceCategoryId: true,
-  createdAt: true,
-} satisfies Prisma.ConsultSessionSelect
-
-type ConsultLookSessionRow = Prisma.ConsultSessionGetPayload<{
-  select: typeof CONSULT_LOOK_SESSION_SELECT
-}>
-
-export function toConsultLookSessionDTO(
-  row: ConsultLookSessionRow,
-): ConsultLookSessionDTO | null {
-  if (!row.anchorLookPostId) return null
-  return {
-    id: row.id,
-    status: row.status,
-    lookPostId: row.anchorLookPostId,
-    professionalId: row.professionalId,
-    serviceCategoryId: row.serviceCategoryId,
-    createdAt: row.createdAt.toISOString(),
-  }
-}
+// The select + mapper live beside the booking-anchored mapper
+// (lib/consult/mapConsultSession.ts) so the by-id GET can serve both anchors
+// from one choke point.
 
 type ResolvedEntry =
   | {
