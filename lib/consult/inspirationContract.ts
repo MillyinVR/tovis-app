@@ -57,6 +57,10 @@ import {
 import { CONSULT_CAPTURE_MEDIA_TYPES, type ConsultCaptureMediaType } from './captureVision'
 import { CONSULT_MAX_CAPTURE_SHOTS } from './capture/registry'
 import {
+  CONSULT_SERVICE_PROFILE_CATEGORY_SELECT,
+  resolveConsultServiceProfile,
+} from './serviceProfile'
+import {
   appendLockedConsultInspirationRevision,
   transitionLockedConsultSession,
 } from './writeBoundary'
@@ -284,6 +288,22 @@ export async function requireCompletedConsultInspiration(
  * Auto-advance (the default) still requires the full accepted pack; the
  * client-initiated partial submission (Tori, 2026-08-27) passes
  * minimumAcceptedShots: 1 through proceedConsultCaptureToAnalysis. */
+/** The slot count of the pack the session serves (lib/consult/capture/registry.ts). */
+async function requiredAcceptedShotsForSession(
+  tx: Prisma.TransactionClient,
+  consultSessionId: string,
+): Promise<number> {
+  const session = await tx.consultSession.findUnique({
+    where: { id: consultSessionId },
+    select: {
+      serviceCategory: { select: CONSULT_SERVICE_PROFILE_CATEGORY_SELECT },
+    },
+  })
+  if (!session) return CONSULT_MAX_CAPTURE_SHOTS
+  return resolveConsultServiceProfile(session.serviceCategory).capturePack.shots
+    .length
+}
+
 export async function advanceLockedConsultToAnalysisIfReady(
   tx: Prisma.TransactionClient,
   args: {
@@ -316,10 +336,16 @@ export async function advanceLockedConsultToAnalysisIfReady(
     select: { shotKey: true },
   })
   const accepted = new Set(captures.map(({ shotKey }) => shotKey))
-  // Callers pass the served pack's slot count; with no option the largest
-  // pack is required, which is the fail-safe direction.
+  // A full pack is THIS session's pack — the seven hair views, or the three of
+  // the face and area packs. The default used to be the LARGEST pack (seven),
+  // which is fail-safe for the hair pilot and wrong for every other family: a
+  // three-shot consult whose inspiration finished last could never reach seven
+  // and sat in MEDIA_READY forever. The capture and inspiration callers now
+  // share this one resolution; only the explicit partial-submit door passes
+  // its own (smaller) threshold.
   const minimumAcceptedShots =
-    options?.minimumAcceptedShots ?? CONSULT_MAX_CAPTURE_SHOTS
+    options?.minimumAcceptedShots ??
+    (await requiredAcceptedShotsForSession(tx, args.consultSessionId))
   if (accepted.size < minimumAcceptedShots) {
     return false
   }

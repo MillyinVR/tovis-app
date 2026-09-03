@@ -15,6 +15,7 @@ vi.mock('@/lib/prisma', () => ({
 }))
 
 import {
+  loadProLocationCapabilities,
   loadProLocationCapability,
   narrowOfferingModes,
 } from './locationCapability'
@@ -134,5 +135,36 @@ describe('the read boundary is actually wired up', () => {
     // the shape a bypass takes.
     expect(src).toMatch(/\bloadProLocationCapability\s*\(/)
     expect(src).toMatch(/\bnarrowOfferingModes\s*\(/)
+  })
+})
+
+describe('loadProLocationCapabilities', () => {
+  it('answers for every requested pro in ONE query, absent pros included', async () => {
+    findMany.mockResolvedValue([
+      { professionalId: 'pro_salon', type: ProfessionalLocationType.SALON },
+      { professionalId: 'pro_both', type: ProfessionalLocationType.SUITE },
+      { professionalId: 'pro_both', type: ProfessionalLocationType.MOBILE_BASE },
+    ])
+    const result = await loadProLocationCapabilities([
+      'pro_salon',
+      'pro_both',
+      'pro_nothing',
+    ])
+    expect(findMany).toHaveBeenCalledTimes(1)
+    expect(findMany.mock.calls[0]?.[0]?.where).toMatchObject({
+      professionalId: { in: ['pro_salon', 'pro_both', 'pro_nothing'] },
+      archivedAt: null,
+      isBookable: true,
+    })
+    expect(result.get('pro_salon')).toEqual({ salon: true, mobile: false })
+    expect(result.get('pro_both')).toEqual({ salon: true, mobile: true })
+    // A pro with no bookable location is PRESENT with nothing hostable, so a
+    // list surface can narrow every row without a fallback branch.
+    expect(result.get('pro_nothing')).toEqual({ salon: false, mobile: false })
+  })
+
+  it('skips the query for an empty list', async () => {
+    await expect(loadProLocationCapabilities([])).resolves.toEqual(new Map())
+    expect(findMany).not.toHaveBeenCalled()
   })
 })

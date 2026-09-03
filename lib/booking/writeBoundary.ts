@@ -18057,7 +18057,15 @@ export async function cancelImportedBookingIfPristine(args: {
     },
     // cancelledByRole stays null: this is a SYSTEM cancel with no acting role
     // (and an imported booking carries no payment for the late-capture path).
-    data: { status: BookingStatus.CANCELLED, cancelledAt: new Date() },
+    // `cancelledBySystem` is stamped so the null role reads as KNOWN system
+    // provenance, the same way `performLockedCancelBooking` stamps its own
+    // system cancels — a null role WITHOUT the stamp is the unknowable case
+    // the late-capture path still pages on (#1061).
+    data: {
+      status: BookingStatus.CANCELLED,
+      cancelledAt: new Date(),
+      cancelledBySystem: true,
+    },
   })
   if (result.count > 0) {
     // M8: record the bulk ACCEPTED → CANCELLED (SYSTEM) transition through the

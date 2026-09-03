@@ -48,8 +48,10 @@ import {
 import { CONSULT_ANCHOR_SELECT, evaluateConsultAnchor } from './anchor'
 import { ConsultWriteError } from './errors'
 import {
-  loadConsultProMenuOfferings,
+  consultLookLocationType,
+  loadConsultProMenu,
   loadConsultSafetyOfferings,
+  type ConsultProMenu,
   type ConsultProMenuOffering,
 } from './proMenu'
 import { mapStoredConsultAnalysisRevision } from './analysisRevision'
@@ -62,6 +64,10 @@ import {
   toLookPrimaryServiceSummary,
 } from '@/lib/looks/serviceOwnership'
 import { normalizeServiceName } from '@/lib/migration/serviceMatch'
+import {
+  loadProLocationCapability,
+  type ProLocationCapability,
+} from '@/lib/offerings/locationCapability'
 import { requireCompletedConsultInspiration } from './inspirationContract'
 import { purgeConsultCaptureRawObject } from './capturePurge'
 import { copyConsultCapturesToChart } from './chartCopy'
@@ -495,7 +501,7 @@ async function loadRecommendationOfferings(
   tx: Prisma.TransactionClient,
   session: AnalysisScope,
 ) {
-  return loadConsultProMenuOfferings(tx, {
+  return loadConsultProMenu(tx, {
     professionalId: session.professionalId,
     serviceCategoryId: session.serviceCategoryId,
   })
@@ -521,15 +527,19 @@ function offeringMode(offering: RecommendationOffering, locationType: ServiceLoc
  * Which of the pro's two price/duration columns a recommendation is read from.
  *
  * A booking already chose salon or mobile. A look-anchored consult has not — the
- * booking proposal is B4 — so it reads the salon column, which is where a pro's
- * primary prices live and where the safety services (patch and strand tests) are
- * performed. This is a READING choice for the reference lookup only; deriving a
- * real price for a look is the translation module's job (B3), not this one's.
+ * booking proposal is B4 — so it reads the column for the mode the pro can
+ * HOST (`consultLookLocationType`): salon when she has a bookable salon or
+ * suite, else mobile. Before this the look anchor always read the salon
+ * column, so a mobile-only pro's Patch Test — narrowed to mobile — was never
+ * found and every routed consult refused. This is a READING choice for the
+ * reference lookup only; deriving a real price for a look is the translation
+ * module's job (B3), not this one's.
  */
-const CONSULT_LOOK_ANCHOR_LOCATION_TYPE = ServiceLocationType.SALON
-
-function recommendationLocationType(session: AnalysisScope): ServiceLocationType {
-  return session.booking?.locationType ?? CONSULT_LOOK_ANCHOR_LOCATION_TYPE
+function recommendationLocationType(
+  session: AnalysisScope,
+  capability: ProLocationCapability,
+): ServiceLocationType {
+  return session.booking?.locationType ?? consultLookLocationType(capability)
 }
 
 function safetyOffering(
@@ -561,19 +571,25 @@ async function loadSafetyOfferings(
   tx: Prisma.TransactionClient,
   session: AnalysisScope,
   requirements: readonly ConsultSafetyServiceRequirement[],
+  capability: ProLocationCapability,
 ): Promise<RecommendationOffering[]> {
-  return loadConsultSafetyOfferings(tx, {
-    professionalId: session.professionalId,
-    serviceNames: requirements.map(
-      (requirement) => CONSULT_SAFETY_SERVICE_BOOKING_RULES[requirement].name,
-    ),
-  })
+  return loadConsultSafetyOfferings(
+    tx,
+    {
+      professionalId: session.professionalId,
+      serviceNames: requirements.map(
+        (requirement) => CONSULT_SAFETY_SERVICE_BOOKING_RULES[requirement].name,
+      ),
+    },
+    capability,
+  )
 }
 
 function requireSafetyOfferings(
   offerings: readonly RecommendationOffering[],
   session: AnalysisScope,
   requirements: readonly ConsultSafetyServiceRequirement[],
+  capability: ProLocationCapability,
 ): Map<ConsultSafetyServiceRequirement, RecommendationOffering> {
   const resolved = new Map<
     ConsultSafetyServiceRequirement,
@@ -582,7 +598,7 @@ function requireSafetyOfferings(
   for (const requirement of requirements) {
     const offering = safetyOffering(
       offerings,
-      recommendationLocationType(session),
+      recommendationLocationType(session, capability),
       requirement,
     )
     if (!offering) {
@@ -615,16 +631,18 @@ function recommendationReference(
 
 function resolveRecommendations(
   session: AnalysisScope,
-  offerings: readonly RecommendationOffering[],
+  menu: ConsultProMenu,
   safetyMenu: readonly RecommendationOffering[],
   recommendations: ConsultAnalysisProviderOutput['recommendations'],
   routing: ReturnType<typeof determineConsultSafetyRouting>,
 ) {
+  const offerings = menu.offerings
   if (routing.blocksChemicalRecommendations) {
     const safetyOfferings = requireSafetyOfferings(
       safetyMenu,
       session,
       routing.requirements,
+      menu.capability,
     )
     const directions = routing.requirements.map((requirement) => {
       const offering = safetyOfferings.get(requirement)
@@ -776,10 +794,20 @@ export async function runConsultAnalysis(args: {
           visibleCondition: 'UNKNOWN',
         })
         if (intakeRouting.requirements.length > 0) {
+          const capability = await loadProLocationCapability(
+            session.professionalId,
+            tx,
+          )
           requireSafetyOfferings(
-            await loadSafetyOfferings(tx, session, intakeRouting.requirements),
+            await loadSafetyOfferings(
+              tx,
+              session,
+              intakeRouting.requirements,
+              capability,
+            ),
             session,
             intakeRouting.requirements,
+            capability,
           )
         }
         const existing = await tx.consultRevision.findFirst({
@@ -829,7 +857,7 @@ export async function runConsultAnalysis(args: {
         })
         const images = await readVerifiedImages(captures, storage)
         const menu = await loadRecommendationOfferings(tx, session)
-        const service = await loadServiceContext(tx, session, menu)
+        const service = await loadServiceContext(tx, session, menu.offerings)
         const profile = resolveConsultServiceProfile(session.serviceCategory)
         const pack = profile.intakePack
         let providerResult
@@ -912,7 +940,12 @@ export async function runConsultAnalysis(args: {
           session,
           menu,
           routing.requirements.length > 0
-            ? await loadSafetyOfferings(tx, session, routing.requirements)
+            ? await loadSafetyOfferings(
+                tx,
+                session,
+                routing.requirements,
+                menu.capability,
+              )
             : [],
           providerResult.analysis.recommendations,
           routing,

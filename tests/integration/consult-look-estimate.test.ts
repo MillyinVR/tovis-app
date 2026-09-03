@@ -23,7 +23,7 @@
 // (consult-booking-proposal.test.ts) so the two cannot drift about how a
 // consult is driven.
 
-import { Prisma, PrismaClient } from '@prisma/client'
+import { Prisma, PrismaClient, ProfessionalLocationType } from '@prisma/client'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.hoisted(() => {
@@ -76,9 +76,11 @@ import {
 import { resetConsultLookFakes } from './_support/consultLookFakes'
 import {
   BALAYAGE_ESTIMATED_MINUTES,
+  BALAYAGE_MINUTES,
   BALAYAGE_PRICE,
   BUFFER_MINUTES,
   GLOSS_ESTIMATED_MINUTES,
+  GLOSS_MINUTES,
   GLOSS_PRICE,
   STEP_MINUTES,
   createLook,
@@ -334,6 +336,72 @@ describe('a pro with nothing bookable to size a duration against', () => {
       await db.professionalLocation.update({
         where: { id: fx.locationId },
         data: { isBookable: true },
+      })
+    }
+  })
+})
+
+describe('a pro who only travels (the founder’s shape in prod)', () => {
+  it('reads the MOBILE column, the mode she can host, instead of refusing', async () => {
+    // Her rows advertise salon (prod's shape — the flag was never a choice)
+    // but her one bookable location is a mobile base. The look anchor used to
+    // read the SALON column unconditionally, so the estimate was refused
+    // PRO_SCHEDULING_NOT_READY for a pro who is perfectly bookable; and had
+    // the salon location existed but been unhostable, it would have quoted a
+    // column the commit then refused (`MODE_NOT_SUPPORTED`).
+    await db.professionalLocation.update({
+      where: { id: fx.locationId },
+      data: { type: ProfessionalLocationType.MOBILE_BASE },
+    })
+    await db.professionalServiceOffering.updateMany({
+      where: { id: { in: [fx.balayageOfferingId, fx.glossOfferingId] } },
+      data: { offersMobile: true },
+    })
+    await db.professionalServiceOffering.update({
+      where: { id: fx.balayageOfferingId },
+      data: {
+        mobilePriceStartingAt: new Prisma.Decimal(BALAYAGE_PRICE),
+        mobileDurationMinutes: BALAYAGE_MINUTES,
+      },
+    })
+    await db.professionalServiceOffering.update({
+      where: { id: fx.glossOfferingId },
+      data: {
+        mobilePriceStartingAt: new Prisma.Decimal(GLOSS_PRICE),
+        mobileDurationMinutes: GLOSS_MINUTES,
+      },
+    })
+    try {
+      const lookPostId = await createLook(db, fx.balayageServiceId)
+      const sessionId = await runConsultToCompletion(db, lookPostId, 'mobile-only')
+
+      const estimate = await db.consultServiceEstimate.findUniqueOrThrow({
+        where: { consultSessionId: sessionId },
+        select: {
+          status: true,
+          refusalCode: true,
+          locationType: true,
+          lines: { select: { estimatedPrice: true }, orderBy: { sortOrder: 'asc' } },
+        },
+      })
+      expect(estimate).toMatchObject({
+        status: 'ESTIMATED',
+        refusalCode: null,
+        locationType: 'MOBILE',
+      })
+      expect(estimate.lines[0]?.estimatedPrice.toNumber()).toBe(Number(BALAYAGE_PRICE))
+    } finally {
+      await db.professionalLocation.update({
+        where: { id: fx.locationId },
+        data: { type: ProfessionalLocationType.SALON },
+      })
+      await db.professionalServiceOffering.updateMany({
+        where: { id: { in: [fx.balayageOfferingId, fx.glossOfferingId] } },
+        data: {
+          offersMobile: false,
+          mobilePriceStartingAt: null,
+          mobileDurationMinutes: null,
+        },
       })
     }
   })

@@ -17,6 +17,10 @@ import { isRuntimeFlagEnabled } from '@/lib/runtimeFlags'
 import { visibleReviewsWhere } from '@/lib/reviews/visibility'
 import { fetchProSearchCandidates } from '@/lib/search/pros'
 import { proDiscoveryVisibilityFilter, type TenantContext } from '@/lib/tenant'
+import {
+  loadProLocationCapabilities,
+  narrowOfferingModes,
+} from '@/lib/offerings/locationCapability'
 
 const LOCATION_SELECT = {
   id: true,
@@ -340,11 +344,23 @@ async function loadNearbyProsLegacy(
     return true
   })
 
+  // W6 read boundary: a card's "mobile" badge and its starting price must come
+  // from modes the pro can actually host, not the raw flags (the search-index
+  // path already narrows the same way when it builds the summary). The
+  // candidate rows above are PRIMARY locations only, so the capability is read
+  // for the whole set in one query rather than derived from them.
+  const capabilities = await loadProLocationCapabilities(professionalIds)
+
   const offerByPro = buildDiscoveryOfferSummaryMap(
     matchedOfferingRows.map((offering) => ({
       professionalId: offering.professionalId,
-      offersInSalon: offering.offersInSalon,
-      offersMobile: offering.offersMobile,
+      ...narrowOfferingModes(
+        {
+          offersInSalon: offering.offersInSalon,
+          offersMobile: offering.offersMobile,
+        },
+        capabilities.get(offering.professionalId) ?? { salon: false, mobile: false },
+      ),
       salonPriceStartingAt: offering.salonPriceStartingAt,
       mobilePriceStartingAt: offering.mobilePriceStartingAt,
       categoryId: offering.service.categoryId,

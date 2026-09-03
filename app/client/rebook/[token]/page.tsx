@@ -41,6 +41,10 @@ import { orderMediaByFeatured } from '@/lib/media/bookingBeforeAfter'
 import ClickableMedia from '@/app/_components/media/ClickableMedia'
 import AftercareBeforeAfter from '@/app/_components/aftercare/AftercareBeforeAfter'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
+import {
+  loadProLocationCapability,
+  narrowOfferingModes,
+} from '@/lib/offerings/locationCapability'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -399,11 +403,20 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
   // original mode is always offered; the other is offered only when the pro
   // supports it AND we can actually book it here — mobile needs the client's
   // saved address, which exists only when the original visit was mobile.
-  const offeringCaps = offeringId
+  // W6 read boundary: the raw flags can advertise a mode the pro cannot host
+  // (prod holds offerings whose `offersInSalon` was never a choice), so they
+  // are narrowed to her bookable locations before a mode is offered here.
+  const rawOfferingCaps = offeringId
     ? await prisma.professionalServiceOffering.findUnique({
         where: { id: offeringId },
         select: { offersInSalon: true, offersMobile: true },
       })
+    : null
+  const offeringCaps = rawOfferingCaps
+    ? narrowOfferingModes(
+        rawOfferingCaps,
+        await loadProLocationCapability(booking.professionalId),
+      )
     : null
 
   const rebookClientAddressId = bookingLocation?.clientAddressId ?? null

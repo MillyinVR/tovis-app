@@ -60,7 +60,8 @@ import {
   type ConsultLookAnchorSource,
 } from './lookAnchor'
 import {
-  loadConsultProMenuOfferings,
+  consultLookLocationType,
+  loadConsultProMenu,
   type ConsultProMenuOffering,
 } from './proMenu'
 
@@ -74,17 +75,6 @@ export const CONSULT_SERVICE_ESTIMATE_SCHEMA_VERSION = 1
  * produced it once those rules move on.
  */
 export const CONSULT_SERVICE_ESTIMATE_DERIVATION_VERSION = 'look-estimate-v1'
-
-/**
- * Which of the pro's two price/duration columns an estimate is read from.
- *
- * A look-anchored consult has not chosen salon or mobile — the booking proposal
- * is B4 — so it reads the SALON column, where a pro's primary prices live. The
- * same reading `analysisContract`'s recommendation lookup already makes, and
- * the chosen mode is stored on the estimate rather than assumed by any reader.
- */
-export const CONSULT_LOOK_ESTIMATE_LOCATION_TYPE = ServiceLocationType.SALON
-
 export type ConsultServiceEstimateLineDraft = {
   sortOrder: number
   serviceId: string
@@ -123,11 +113,12 @@ export type ConsultServiceEstimateAnalysisInput = Pick<
 function refused(
   refusalCode: ConsultServiceEstimateRefusalCode,
   scheduling: { stepMinutes: number; bufferMinutes: number } | null,
+  locationType: ServiceLocationType,
 ): ConsultServiceEstimateDraft {
   return {
     status: 'REFUSED',
     refusalCode,
-    locationType: CONSULT_LOOK_ESTIMATE_LOCATION_TYPE,
+    locationType,
     stepMinutes: scheduling?.stepMinutes ?? null,
     bufferMinutes: scheduling?.bufferMinutes ?? null,
     lines: [],
@@ -228,7 +219,7 @@ export function deriveConsultServiceEstimate(args: {
   }
 
   if (!args.floorServiceId) {
-    return refused('LOOK_SERVICE_UNLINKED', scheduling)
+    return refused('LOOK_SERVICE_UNLINKED', scheduling, args.locationType)
   }
 
   const byServiceId = new Map(
@@ -237,7 +228,7 @@ export function deriveConsultServiceEstimate(args: {
 
   const floorOffering = byServiceId.get(args.floorServiceId)
   if (!floorOffering) {
-    return refused('SERVICE_NOT_ON_MENU', scheduling)
+    return refused('SERVICE_NOT_ON_MENU', scheduling, args.locationType)
   }
 
   const floorPriced = priceLine(
@@ -246,7 +237,7 @@ export function deriveConsultServiceEstimate(args: {
     args.stepMinutes,
   )
   if (!floorPriced.ok) {
-    return refused(floorPriced.refusalCode, scheduling)
+    return refused(floorPriced.refusalCode, scheduling, args.locationType)
   }
 
   // Beyond the floor, in the analysis's own order. Only recommendations the
@@ -334,7 +325,18 @@ export async function buildConsultServiceEstimate(
     analysis: ConsultServiceEstimateAnalysisInput
   },
 ): Promise<ConsultServiceEstimateDraft> {
-  const locationType = CONSULT_LOOK_ESTIMATE_LOCATION_TYPE
+  // A look-anchored consult has not chosen salon or mobile — the booking
+  // proposal (B4) is where the client chooses — so the estimate reads the
+  // column for the mode the pro can HOST (`consultLookLocationType`): salon
+  // when she has a bookable salon or suite, else mobile. The same reading the
+  // analysis's safety lookup makes; the chosen mode is stored on the estimate
+  // rather than assumed by any reader. The menu itself comes back narrowed to
+  // those same modes.
+  const menu = await loadConsultProMenu(tx, {
+    professionalId: args.professionalId,
+    serviceCategoryId: args.serviceCategoryId,
+  })
+  const locationType = consultLookLocationType(menu.capability)
 
   // Slot granularity and buffer come from the pro's own bookable location —
   // the same ProfessionalLocation columns availability sizes its day against.
@@ -348,7 +350,7 @@ export async function buildConsultServiceEstimate(
     fallbackTimeZone: 'UTC',
   })
   if (!locationContext.ok) {
-    return refused('PRO_SCHEDULING_NOT_READY', null)
+    return refused('PRO_SCHEDULING_NOT_READY', null, locationType)
   }
   const { stepMinutes, bufferMinutes } = locationContext.context
 
@@ -367,16 +369,11 @@ export async function buildConsultServiceEstimate(
       }).primaryServiceId
     : null
 
-  const menu = await loadConsultProMenuOfferings(tx, {
-    professionalId: args.professionalId,
-    serviceCategoryId: args.serviceCategoryId,
-  })
-
   return deriveConsultServiceEstimate({
     locationType,
     stepMinutes,
     bufferMinutes,
-    menu,
+    menu: menu.offerings,
     floorServiceId,
     analysis: args.analysis,
   })

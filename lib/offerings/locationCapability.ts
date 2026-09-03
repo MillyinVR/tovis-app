@@ -51,6 +51,31 @@ export const MOBILE_CAPABLE_LOCATION_TYPES: readonly ProfessionalLocationType[] 
   ProfessionalLocationType.MOBILE_BASE,
 ]
 
+const CAPABLE_LOCATION_TYPES: readonly ProfessionalLocationType[] = [
+  ...SALON_CAPABLE_LOCATION_TYPES,
+  ...MOBILE_CAPABLE_LOCATION_TYPES,
+]
+
+/** The one predicate: bookable, not archived, of a type a booking can be placed at. */
+function bookableLocationWhere(): Prisma.ProfessionalLocationWhereInput {
+  return {
+    archivedAt: null,
+    isBookable: true,
+    type: { in: [...CAPABLE_LOCATION_TYPES] },
+  }
+}
+
+/** Fold the location types a pro really has into the two capabilities. */
+function capabilityFromLocationTypes(
+  types: Iterable<ProfessionalLocationType>,
+): ProLocationCapability {
+  const set = new Set(types)
+  return {
+    salon: SALON_CAPABLE_LOCATION_TYPES.some((type) => set.has(type)),
+    mobile: MOBILE_CAPABLE_LOCATION_TYPES.some((type) => set.has(type)),
+  }
+}
+
 /**
  * Which booking modes this pro can actually host, from their bookable locations.
  *
@@ -63,22 +88,40 @@ export async function loadProLocationCapability(
   client: DbClient = prisma,
 ): Promise<ProLocationCapability> {
   const rows = await client.professionalLocation.findMany({
-    where: {
-      professionalId,
-      archivedAt: null,
-      isBookable: true,
-      type: {
-        in: [...SALON_CAPABLE_LOCATION_TYPES, ...MOBILE_CAPABLE_LOCATION_TYPES],
-      },
-    },
+    where: { professionalId, ...bookableLocationWhere() },
     select: { type: true },
     take: 50,
   })
 
-  const types = new Set(rows.map((row) => row.type))
+  return capabilityFromLocationTypes(rows.map((row) => row.type))
+}
 
-  return {
-    salon: SALON_CAPABLE_LOCATION_TYPES.some((type) => types.has(type)),
-    mobile: MOBILE_CAPABLE_LOCATION_TYPES.some((type) => types.has(type)),
-  }
+/**
+ * The same answer for MANY pros in one query — for list surfaces (discovery)
+ * that would otherwise need a round trip per card. A pro with no bookable
+ * location at all is present in the map with both capabilities false, so a
+ * caller can narrow every row without a fallback branch.
+ */
+export async function loadProLocationCapabilities(
+  professionalIds: readonly string[],
+  client: DbClient = prisma,
+): Promise<Map<string, ProLocationCapability>> {
+  const byPro = new Map<string, ProfessionalLocationType[]>(
+    professionalIds.map((id) => [id, []]),
+  )
+  if (professionalIds.length === 0) return new Map()
+
+  const rows = await client.professionalLocation.findMany({
+    where: {
+      professionalId: { in: [...professionalIds] },
+      ...bookableLocationWhere(),
+    },
+    select: { professionalId: true, type: true },
+    take: 50 * professionalIds.length,
+  })
+  for (const row of rows) byPro.get(row.professionalId)?.push(row.type)
+
+  return new Map(
+    [...byPro].map(([id, types]) => [id, capabilityFromLocationTypes(types)]),
+  )
 }

@@ -12,6 +12,7 @@ import { resolveMediaVisibility } from '@/lib/media/mediaVisibility'
 import {
   attemptRetraction,
   RETRACTED_VISIBILITY,
+  retractionReport,
   RETRACTION_SELECT,
 } from '@/lib/media/retractToPrivateBucket'
 import { reconcilePortfolioLookForMediaAsset } from '@/lib/looks/publication/portfolioLookSync'
@@ -234,6 +235,11 @@ export async function PATCH(req: Request, ctx: RouteContext) {
           retraction.status === 'RETRACTED'
             ? { ...updated, visibility: RETRACTED_VISIBILITY }
             : updated,
+        // A retraction whose edge purge failed is a correct row with a URL
+        // that can keep resolving for up to a minute (#1059). The module
+        // logs it; the caller is told too, so the failure is never only in a
+        // server log nobody reads.
+        ...retractionReport(retraction),
       },
       200,
     )

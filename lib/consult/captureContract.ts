@@ -883,18 +883,15 @@ export async function checkConsultCaptureQuality(args: {
       })
 
       if (quality.accepted) {
-        await advanceLockedConsultToAnalysisIfReady(
-          tx,
-          {
-            consultSessionId: session.id,
-            clientId: session.clientId,
-            professionalId: session.professionalId,
-            actor: args.actor,
-            now: finalizedAt,
-          },
-          // A full pack is THIS pack's slot count, not the hair pack's seven.
-          { minimumAcceptedShots: pack.shots.length },
-        )
+        // A full pack is THIS session's pack — resolved inside the advance,
+        // so the inspiration step's two callers cannot disagree with this one.
+        await advanceLockedConsultToAnalysisIfReady(tx, {
+          consultSessionId: session.id,
+          clientId: session.clientId,
+          professionalId: session.professionalId,
+          actor: args.actor,
+          now: finalizedAt,
+        })
       }
       return {
         quality: qualityDto(updated),

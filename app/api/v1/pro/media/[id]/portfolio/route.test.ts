@@ -49,11 +49,18 @@ vi.mock('@/app/api/_utils', () => ({
 
 // True retraction has its own suite (lib/media/retractToPrivateBucket.test.ts);
 // here we pin only that the route DELEGATES to it.
-vi.mock('@/lib/media/retractToPrivateBucket', () => ({
-  RETRACTED_VISIBILITY: 'PRO_CLIENT',
-  RETRACTION_SELECT: { id: true },
-  attemptRetraction: mocks.attemptRetraction,
-}))
+vi.mock('@/lib/media/retractToPrivateBucket', async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import('@/lib/media/retractToPrivateBucket')>()
+  return {
+    RETRACTED_VISIBILITY: 'PRO_CLIENT',
+    RETRACTION_SELECT: { id: true },
+    attemptRetraction: mocks.attemptRetraction,
+    // The pure report over the outcome stays real: it is what puts a failed
+    // edge purge into the response, and a stub would hide that.
+    retractionReport: original.retractionReport,
+  }
+})
 
 vi.mock('@/lib/prisma', () => ({
   prisma: {

@@ -9,6 +9,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
+import type { BrandClientConsultCaptureCopy } from '@/lib/brand/types'
+import { formatConsultCaptureIntro } from '@/lib/consult/captureCopy'
 import { CONSULT_CAPTURE_MAX_BYTES } from '@/lib/consult/capturePack'
 import {
   CONSULT_INSPIRATION_TEXT_MAX_CHARS,
@@ -131,8 +133,8 @@ const QUALITY_REASON_COPY: Readonly<
 > = {
   PASS: 'Accepted.',
   WARM_INDOOR_LIGHT:
-    'Warm indoor lighting — hair color can’t be read accurately under it.',
-  COLOR_CAST: 'A color tint in the light is masking the true hair color.',
+    'Warm indoor lighting — true colors can’t be read accurately under it.',
+  COLOR_CAST: 'A color tint in the light is masking the true colors.',
   VIEW_MISMATCH: 'This doesn’t look like the view this photo asks for.',
   HAIR_NOT_VISIBLE: 'The hair isn’t clearly visible in this photo.',
   SUBJECT_NOT_VISIBLE: 'The area this photo asks for isn’t clearly visible.',
@@ -162,7 +164,13 @@ function ErrorNote({ message }: { message: string | null }) {
   )
 }
 
-export default function ClientConsultFlow({ consultId }: { consultId: string }) {
+export default function ClientConsultFlow({
+  consultId,
+  captureCopy,
+}: {
+  consultId: string
+  captureCopy: BrandClientConsultCaptureCopy
+}) {
   const router = useRouter()
   const base = `/api/v1/client/consult/${encodeURIComponent(consultId)}`
 
@@ -658,6 +666,7 @@ export default function ClientConsultFlow({ consultId }: { consultId: string }) 
       {(status === 'MEDIA_READY' || status === 'ANALYSIS_PENDING') && capture ? (
         <CaptureStage
           capture={capture}
+          copy={captureCopy}
           busy={busy}
           slotPreviews={slotPreviews}
           slotErrors={slotErrors}
@@ -1227,6 +1236,7 @@ function slotLabel(slot: ConsultCaptureSlotStateDTO | undefined): string {
 
 function CaptureStage({
   capture,
+  copy,
   busy,
   slotPreviews,
   slotErrors,
@@ -1236,6 +1246,7 @@ function CaptureStage({
   onProceed,
 }: {
   capture: ConsultCaptureStateDTO
+  copy: BrandClientConsultCaptureCopy
   busy: boolean
   slotPreviews: Record<string, string>
   slotErrors: Record<string, string>
@@ -1262,12 +1273,9 @@ function CaptureStage({
 
   return (
     <section className="grid gap-4">
-      <StageHeading eyebrow="Step 4 of 4" title="Your photos" />
+      <StageHeading eyebrow={copy.eyebrow} title={copy.title} />
       <p className="text-sm leading-6 text-textSecondary">
-        Seven daylight photos: four of your hair and three of your face. Each
-        one is checked right away, and if one can’t be used you’ll see why. You
-        can run the analysis without all seven — anything the missing photos
-        would have shown just comes back as unknown.
+        {formatConsultCaptureIntro(copy, capture.shotPack)}
       </p>
       <div className="grid gap-3 sm:grid-cols-2">
         {capture.shotPack.shots.map((shot) => {
