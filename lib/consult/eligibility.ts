@@ -1,9 +1,9 @@
 import { BookingStatus, Prisma } from '@prisma/client'
 
 import { isAiConsultEnabledForPro } from '@/lib/consult/access'
+import { isConsultCategoryInScope } from '@/lib/consult/serviceScope'
 import { addElapsedDays } from '@/lib/time'
 
-export const AI_CONSULT_PILOT_CATEGORY_SLUGS = Object.freeze(['hair-color'])
 export const AI_CONSULT_BOOKING_WINDOW_DAYS = 90
 
 export const AI_CONSULT_ELIGIBILITY_BOOKING_SELECT = {
@@ -42,10 +42,6 @@ const UPCOMING_BOOKING_STATUSES = new Set<BookingStatus>([
   BookingStatus.ACCEPTED,
 ])
 
-const PILOT_CATEGORY_SLUGS = new Set<string>(
-  AI_CONSULT_PILOT_CATEGORY_SLUGS,
-)
-
 /**
  * One authoritative eligibility rule for the booking-attached founder pilot.
  *
@@ -63,10 +59,7 @@ export function evaluateAiConsultBookingEligibility(
     return { eligible: false, reason: 'FEATURE_DISABLED', hidden: true }
   }
 
-  if (
-    !booking.service.category.slug ||
-    !PILOT_CATEGORY_SLUGS.has(booking.service.category.slug)
-  ) {
+  if (!isConsultCategoryInScope(booking.service.category)) {
     return { eligible: false, reason: 'VERTICAL_NOT_ENABLED', hidden: true }
   }
 

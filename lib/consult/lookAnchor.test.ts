@@ -1,5 +1,5 @@
 // lib/consult/lookAnchor.test.ts
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 
 import { resolveConsultLookAnchor } from './lookAnchor'
 
@@ -25,6 +25,32 @@ const HAIR_COLOR = {
 }
 
 describe('resolveConsultLookAnchor', () => {
+  afterEach(() => {
+    delete process.env.AI_CONSULT_SERVICE_SCOPE
+  })
+
+  it('anchors a look in ANY category once the scope is ALL_SERVICES', () => {
+    process.env.AI_CONSULT_SERVICE_SCOPE = 'ALL_SERVICES'
+    expect(
+      resolveConsultLookAnchor(
+        look({
+          ...HAIR_COLOR,
+          category: { id: 'cat_nails', name: 'Nails', slug: 'nails' },
+        }),
+      ),
+    ).toEqual({
+      ok: true,
+      lookPostId: 'look_1',
+      professionalId: 'pro_1',
+      serviceCategoryId: 'cat_nails',
+    })
+    // A look still has to be LINKED — a category is what a consult is about.
+    expect(resolveConsultLookAnchor(look(null))).toEqual({
+      ok: false,
+      reason: 'LOOK_SERVICE_UNLINKED',
+    })
+  })
+
   it('derives the pro and the category from the look linkage', () => {
     expect(resolveConsultLookAnchor(look(HAIR_COLOR))).toEqual({
       ok: true,

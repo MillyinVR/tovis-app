@@ -2802,6 +2802,13 @@ model ServiceCategory {
   parentId         String?
   adminPermissions AdminPermission[]
 
+  // Which consult FAMILY this category belongs to. The AI consult keys its
+  // intake pack, capture pack and safety policy on the family, not the slug,
+  // so a category created tomorrow is consultable the moment it exists:
+  // OTHER gets the generic packs (lib/consult/serviceProfile.ts). Set by the
+  // admin category form; backfilled HAIR for the live hair categories.
+  consultFamily ConsultServiceFamily @default(OTHER)
+
   parent   ServiceCategory?  @relation("CategoryChildren", fields: [parentId], references: [id])
   children ServiceCategory[] @relation("CategoryChildren")
 
@@ -7260,6 +7267,20 @@ enum AccountDeletionRequestStatus {
 /// Consent-first lifecycle for one booking-attached hair-color consult. The
 /// database permits only the transitions in consult_lifecycle_guard and blocks
 /// every sensitive state until BOTH legal prerequisites are active.
+// The consult's view of what kind of service a category is. Deliberately
+// coarse: a family shares one intake pack, one capture pack and one safety
+// policy. New families are rare and deliberate (code + a guard migration);
+// new CATEGORIES never need one.
+enum ConsultServiceFamily {
+  HAIR
+  SKIN
+  NAILS
+  BROWS_LASHES
+  MAKEUP
+  BODY
+  OTHER
+}
+
 enum ConsultSessionStatus {
   CONSENT_REQUIRED
   INTAKE_READY

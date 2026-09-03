@@ -27,6 +27,7 @@ function booking(
 describe('evaluateAiConsultBookingEligibility', () => {
   afterEach(() => {
     delete process.env.ENABLE_AI_CONSULT
+    delete process.env.AI_CONSULT_SERVICE_SCOPE
   })
 
   it('allows an enabled, upcoming hair-color booking', () => {
@@ -49,6 +50,22 @@ describe('evaluateAiConsultBookingEligibility', () => {
       reason: 'FEATURE_DISABLED',
       hidden: true,
     })
+  })
+
+  it('admits every category once the scope is ALL_SERVICES', () => {
+    process.env.ENABLE_AI_CONSULT = '1'
+    process.env.AI_CONSULT_SERVICE_SCOPE = 'ALL_SERVICES'
+    expect(
+      evaluateAiConsultBookingEligibility(
+        booking({
+          service: {
+            categoryId: 'cat_brows',
+            category: { slug: 'brows' },
+          },
+        }),
+        NOW,
+      ),
+    ).toEqual({ eligible: true })
   })
 
   it('keeps non-pilot verticals dark', () => {

@@ -9854,11 +9854,9 @@
     "ConsultIntakeQuestionPackDTO": {
       "properties": {
         "categorySlug": {
-          "const": "hair-color",
           "type": "string"
         },
         "id": {
-          "const": "hair-color",
           "type": "string"
         },
         "questions": {
@@ -9906,7 +9904,6 @@
           "type": "string"
         },
         "packId": {
-          "const": "hair-color",
           "type": "string"
         },
         "packVersion": {

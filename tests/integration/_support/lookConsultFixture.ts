@@ -56,7 +56,7 @@ import {
 } from '@/lib/consult/intakePack'
 import {
   acceptConsultAgreement,
-  appendHairColorIntakeRevision,
+  appendConsultIntakeRevision,
 } from '@/lib/consult/writeBoundary'
 
 import { fakeStorageObjects } from './consultLookFakes'
@@ -291,7 +291,7 @@ export async function runConsultToCompletion(
     expectedKind: ConsultAgreementKind.ADULT_18_PLUS_ATTESTATION,
     actor: { type: ConsultActorType.CLIENT, id: fx.clientUserId },
   })
-  await appendHairColorIntakeRevision({
+  await appendConsultIntakeRevision({
     consultSessionId: sessionId,
     actor: { type: ConsultActorType.CLIENT, id: fx.clientUserId },
     loadInput: async () => ({

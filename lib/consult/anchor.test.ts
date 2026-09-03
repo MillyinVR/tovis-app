@@ -184,6 +184,20 @@ describe('evaluateConsultAnchor — look arm', () => {
       ),
     ).toEqual({ eligible: false, reason: 'VERTICAL_NOT_ENABLED', hidden: true })
   })
+
+  it('admits any category once the scope is ALL_SERVICES', () => {
+    process.env.AI_CONSULT_SERVICE_SCOPE = 'ALL_SERVICES'
+    try {
+      expect(
+        evaluateConsultAnchor(
+          lookAnchored({ serviceCategory: { slug: 'nails' } }),
+          NOW,
+        ),
+      ).toEqual({ eligible: true, kind: 'LOOK' })
+    } finally {
+      delete process.env.AI_CONSULT_SERVICE_SCOPE
+    }
+  })
 })
 
 describe('evaluateConsultAnchor — no anchor', () => {

@@ -4,6 +4,10 @@ import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { Button, FieldLabel, Select, TextInput } from '@/app/_components/ui'
 import { getAdminUiPerms } from '@/lib/adminUiPermissions'
+import {
+  CONSULT_SERVICE_FAMILIES,
+  CONSULT_SERVICE_FAMILY_LABELS,
+} from '@/lib/consult/serviceScope'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,7 +18,14 @@ export default async function AdminCategoriesPage() {
 
   const categories = await prisma.serviceCategory.findMany({
     orderBy: [{ parentId: 'asc' }, { name: 'asc' }],
-    select: { id: true, name: true, slug: true, parentId: true, isActive: true },
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+      parentId: true,
+      isActive: true,
+      consultFamily: true,
+    },
     take: 2000,
   })
 
@@ -70,6 +81,14 @@ export default async function AdminCategoriesPage() {
             ))}
           </Select>
 
+          <Select name="consultFamily" defaultValue="OTHER">
+            {CONSULT_SERVICE_FAMILIES.map((family) => (
+              <option key={family} value={family}>
+                Consult family: {CONSULT_SERVICE_FAMILY_LABELS[family]}
+              </option>
+            ))}
+          </Select>
+
           <div className="flex justify-end">
             <Button type="submit" variant="accent" fill="soft" size="sm">Create</Button>
           </div>
@@ -91,13 +110,32 @@ export default async function AdminCategoriesPage() {
                     </div>
                   </div>
 
-                  <form action={`/api/v1/admin/categories/${encodeURIComponent(c.id)}`} method="post">
-                    <input type="hidden" name="_method" value="PATCH" />
-                    <input type="hidden" name="isActive" value={String(!c.isActive)} />
-                    <Button type="submit" variant="neutral" fill="soft" size="xs">
-                      {c.isActive ? 'Disable' : 'Enable'}
-                    </Button>
-                  </form>
+                  <div className="flex items-center gap-2">
+                    <form
+                      action={`/api/v1/admin/categories/${encodeURIComponent(c.id)}`}
+                      method="post"
+                      className="flex items-center gap-1"
+                    >
+                      <input type="hidden" name="_method" value="PATCH" />
+                      <Select name="consultFamily" defaultValue={c.consultFamily}>
+                        {CONSULT_SERVICE_FAMILIES.map((family) => (
+                          <option key={family} value={family}>
+                            {CONSULT_SERVICE_FAMILY_LABELS[family]}
+                          </option>
+                        ))}
+                      </Select>
+                      <Button type="submit" variant="neutral" fill="soft" size="xs">
+                        Set family
+                      </Button>
+                    </form>
+                    <form action={`/api/v1/admin/categories/${encodeURIComponent(c.id)}`} method="post">
+                      <input type="hidden" name="_method" value="PATCH" />
+                      <input type="hidden" name="isActive" value={String(!c.isActive)} />
+                      <Button type="submit" variant="neutral" fill="soft" size="xs">
+                        {c.isActive ? 'Disable' : 'Enable'}
+                      </Button>
+                    </form>
+                  </div>
                 </div>
 
                 {kids.length ? (
@@ -109,13 +147,32 @@ export default async function AdminCategoriesPage() {
                           <span className="text-xs font-black text-textSecondary">({k.slug})</span>
                         </div>
 
-                        <form action={`/api/v1/admin/categories/${encodeURIComponent(k.id)}`} method="post">
-                          <input type="hidden" name="_method" value="PATCH" />
-                          <input type="hidden" name="isActive" value={String(!k.isActive)} />
-                          <Button type="submit" variant="neutral" fill="soft" size="xs">
-                            {k.isActive ? 'Disable' : 'Enable'}
-                          </Button>
-                        </form>
+                        <div className="flex items-center gap-2">
+                          <form
+                            action={`/api/v1/admin/categories/${encodeURIComponent(k.id)}`}
+                            method="post"
+                            className="flex items-center gap-1"
+                          >
+                            <input type="hidden" name="_method" value="PATCH" />
+                            <Select name="consultFamily" defaultValue={k.consultFamily}>
+                              {CONSULT_SERVICE_FAMILIES.map((family) => (
+                                <option key={family} value={family}>
+                                  {CONSULT_SERVICE_FAMILY_LABELS[family]}
+                                </option>
+                              ))}
+                            </Select>
+                            <Button type="submit" variant="neutral" fill="soft" size="xs">
+                              Set family
+                            </Button>
+                          </form>
+                          <form action={`/api/v1/admin/categories/${encodeURIComponent(k.id)}`} method="post">
+                            <input type="hidden" name="_method" value="PATCH" />
+                            <input type="hidden" name="isActive" value={String(!k.isActive)} />
+                            <Button type="submit" variant="neutral" fill="soft" size="xs">
+                              {k.isActive ? 'Disable' : 'Enable'}
+                            </Button>
+                          </form>
+                        </div>
                       </div>
                     ))}
                   </div>

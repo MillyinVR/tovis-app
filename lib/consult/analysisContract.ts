@@ -56,19 +56,19 @@ import {
   type ConsultProMenuOffering,
 } from './proMenu'
 import { mapStoredHairColorAnalysisRevision } from './analysisRevision'
-import {
-  HAIR_COLOR_INTAKE_PACK_VERSION,
-  HAIR_COLOR_INTAKE_SCHEMA_VERSION,
-  normalizeHairColorIntakePayload,
-} from './intakePack'
+import { normalizeConsultIntakePayloadForPack } from './intake/registry'
 import { requireCompletedConsultInspiration } from './inspirationContract'
 import { purgeConsultCaptureRawObject } from './capturePurge'
 import { copyConsultCapturesToChart } from './chartCopy'
 import {
   CONSULT_SAFETY_SERVICE_BOOKING_RULES,
-  determineHairColorSafetyRouting,
+  determineConsultSafetyRouting,
   type ConsultSafetyServiceRequirement,
 } from './safetyRouting'
+import {
+  CONSULT_SERVICE_PROFILE_CATEGORY_SELECT,
+  resolveConsultServiceProfile,
+} from './serviceProfile'
 import {
   finalizeLockedHairColorAnalysis,
   transitionLockedConsultSession,
@@ -88,7 +88,7 @@ const ANALYSIS_SCOPE_SELECT = {
     select: { homeTenantId: true, homeTenant: { select: { isActive: true } } },
   },
   ...CONSULT_ANCHOR_SELECT,
-  serviceCategory: { select: { id: true, slug: true, isActive: true } },
+  serviceCategory: { select: CONSULT_SERVICE_PROFILE_CATEGORY_SELECT },
   booking: {
     select: {
       proTenantId: true,
@@ -233,11 +233,12 @@ async function requireScope(
     // anchor has no tenant of its own; the pro's home tenant is checked for
     // both arms just below.
     (session.booking &&
-      session.booking.proTenantId !== session.professional.homeTenantId) ||
-    session.serviceCategory.slug !== 'hair-color'
+      session.booking.proTenantId !== session.professional.homeTenantId)
   ) {
     throw new ConsultWriteError('NOT_FOUND', 'Consult session not found.')
   }
+  // Which categories are consultable is the anchor rule's question
+  // (lib/consult/serviceScope.ts), asked once, just below.
   const anchor = evaluateConsultAnchor(session, args.now)
   if (!anchor.eligible || !session.serviceCategory.isActive || !session.professional.homeTenant.isActive) {
     throw new ConsultWriteError(
@@ -248,23 +249,25 @@ async function requireScope(
   return session
 }
 
+/**
+ * The latest intake, normalized against the pack THIS session serves. The
+ * normalizer already refuses a stale pack version or schema, so a completed
+ * payload here is current by construction.
+ */
 async function currentCompletedIntake(
   tx: Prisma.TransactionClient,
-  consultSessionId: string,
+  session: AnalysisScope,
 ) {
+  const pack = resolveConsultServiceProfile(session.serviceCategory).intakePack
   const revision = await tx.consultRevision.findFirst({
-    where: { consultSessionId, kind: ConsultRevisionKind.INTAKE },
+    where: { consultSessionId: session.id, kind: ConsultRevisionKind.INTAKE },
     select: { id: true, revision: true, payload: true },
     orderBy: { revision: 'desc' },
   })
-  const payload = revision ? normalizeHairColorIntakePayload(revision.payload) : null
-  if (
-    !revision ||
-    !payload ||
-    !payload.complete ||
-    payload.packVersion !== HAIR_COLOR_INTAKE_PACK_VERSION ||
-    payload.schemaVersion !== HAIR_COLOR_INTAKE_SCHEMA_VERSION
-  ) {
+  const payload = revision
+    ? normalizeConsultIntakePayloadForPack(pack, revision.payload)
+    : null
+  if (!revision || !payload || !payload.complete) {
     throw new ConsultWriteError(
       'ANALYSIS_PREREQUISITES_REQUIRED',
       'A current completed intake is required.',
@@ -527,7 +530,7 @@ function resolveRecommendations(
   session: AnalysisScope,
   offerings: readonly RecommendationOffering[],
   recommendations: HairColorAnalysisProviderOutput['recommendations'],
-  routing: ReturnType<typeof determineHairColorSafetyRouting>,
+  routing: ReturnType<typeof determineConsultSafetyRouting>,
 ) {
   if (routing.blocksChemicalRecommendations) {
     const safetyOfferings = requireSafetyOfferings(
@@ -738,14 +741,15 @@ export async function runConsultAnalysis(args: {
         })
         await requireCurrentConsultAgreementAcceptances(tx, session.id)
         const input = validInput(await args.loadInput())
-        const intake = await currentCompletedIntake(tx, session.id)
+        const intake = await currentCompletedIntake(tx, session)
         const inspiration = await requireCompletedConsultInspiration(tx, {
           consultSessionId: session.id,
           clientId: session.clientId,
           professionalId: session.professionalId,
           now: startedAt,
         })
-        const intakeRouting = determineHairColorSafetyRouting({
+        const intakeRouting = determineConsultSafetyRouting({
+          intakePackId: intake.payload.packId,
           intake: intake.payload.answers,
           visibleCondition: 'UNKNOWN',
         })
@@ -832,7 +836,7 @@ export async function runConsultAnalysis(args: {
         if (session.status !== ConsultSessionStatus.ANALYZING) {
           throw new ConsultWriteError('INVALID_STATE', 'Analysis was cancelled.')
         }
-        const finalIntake = await currentCompletedIntake(tx, session.id)
+        const finalIntake = await currentCompletedIntake(tx, session)
         const finalInspiration = await requireCompletedConsultInspiration(tx, {
           consultSessionId: session.id,
           clientId: session.clientId,
@@ -856,7 +860,8 @@ export async function runConsultAnalysis(args: {
           )
         }
 
-        const routing = determineHairColorSafetyRouting({
+        const routing = determineConsultSafetyRouting({
+          intakePackId: intake.payload.packId,
           intake: intake.payload.answers,
           visibleCondition: providerResult.analysis.core.visibleCondition.value,
         })

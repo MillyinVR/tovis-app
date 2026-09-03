@@ -9,6 +9,7 @@ import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { pickMethod, pickString } from '@/app/api/_utils/pick'
 import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import { writeAdminAuditLog } from '@/lib/admin/auditLog'
+import { parseConsultServiceFamily } from '@/lib/consult/serviceScope'
 import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
@@ -58,6 +59,34 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
     if (method !== 'PATCH') {
       return jsonFail(400, 'Unsupported')
+    }
+
+    // One PATCH form sets ONE thing: the family (the consult's view of the
+    // category — lib/consult/serviceProfile.ts) or the active flag.
+    const consultFamilyRaw = pickString(form.get('consultFamily'))
+    if (consultFamilyRaw) {
+      const consultFamily = parseConsultServiceFamily(consultFamilyRaw)
+      if (!consultFamily) {
+        return jsonFail(400, 'Invalid consultFamily')
+      }
+      const updated = await prisma.serviceCategory.update({
+        where: { id: categoryId },
+        data: { consultFamily },
+        select: { id: true, consultFamily: true },
+      })
+      await writeAdminAuditLog({
+        adminUserId: user.id,
+        categoryId: updated.id,
+        action: 'CATEGORY_FAMILY_SET',
+        note: `consultFamily=${updated.consultFamily}`,
+        metadata: {
+          categoryId: updated.id,
+          consultFamily: updated.consultFamily,
+        },
+      }).catch(() => null)
+      return NextResponse.redirect(new URL('/admin/categories', req.url), {
+        status: 303,
+      })
     }
 
     const isActive = parseRequiredActiveFlag(form.get('isActive'))

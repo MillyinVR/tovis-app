@@ -16,9 +16,9 @@ import {
   consultNotFoundResponse,
   consultWriteErrorResponse,
 } from '@/lib/consult/apiErrors'
-import { loadHairColorIntakeState } from '@/lib/consult/intakeContract'
+import { loadConsultIntakeState } from '@/lib/consult/intakeContract'
 import {
-  appendHairColorIntakeRevision,
+  appendConsultIntakeRevision,
   ConsultWriteError,
 } from '@/lib/consult/writeBoundary'
 import type {
@@ -64,7 +64,7 @@ export async function GET(_req: Request, ctx: RouteContext) {
     const { id } = await resolveRouteParams(ctx)
     if (!id) return consultNotFoundResponse()
 
-    const intake = await loadHairColorIntakeState({
+    const intake = await loadConsultIntakeState({
       consultSessionId: id,
       clientId: auth.clientId,
     })
@@ -92,14 +92,14 @@ export async function POST(req: Request, ctx: RouteContext) {
     })
     if (limited) return limited
 
-    const result = await appendHairColorIntakeRevision({
+    const result = await appendConsultIntakeRevision({
       consultSessionId: id,
       actor: { type: ConsultActorType.CLIENT, id: auth.user.id },
       // The canonical boundary invokes this only after holding the same session
       // lock revocation uses and proving every prerequisite.
       loadInput: () => readSubmitInput(req),
     })
-    const intake = await loadHairColorIntakeState({
+    const intake = await loadConsultIntakeState({
       consultSessionId: id,
       clientId: auth.clientId,
     })
