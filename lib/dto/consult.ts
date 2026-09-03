@@ -78,6 +78,16 @@ export type ConsultLookStartRequestDTO = {
   lookPostId: string
 }
 
+// GET /api/v1/client/consult/[id] — a consult looked up by its OWN id, which
+// is the one route that legitimately serves both anchors. Web reads only
+// `status` off it; iOS never calls this route (its flows resolve by bookingId
+// or lookPostId), so the union costs no shipped decoder anything.
+export type ConsultSessionLookupDTO = ConsultSessionDTO | ConsultLookSessionDTO
+
+export type ConsultSessionLookupResponseDTO = {
+  consult: ConsultSessionLookupDTO
+}
+
 export type ConsultLookStartResponseDTO = {
   consult: ConsultLookSessionDTO
 }

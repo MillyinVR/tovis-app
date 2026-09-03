@@ -72,6 +72,11 @@ const mocks = vi.hoisted(() => ({
     professionalPaymentSettings: {
       findUnique: vi.fn(),
     },
+    // Location capability read — the base loader narrows offering modes to
+    // the ones the pro has a bookable location for.
+    professionalLocation: {
+      findMany: vi.fn(),
+    },
     mediaAsset: {
       findMany: vi.fn(),
     },
@@ -411,6 +416,10 @@ describe('app/professionals/[id] PublicProfileView', () => {
     mocks.prisma.lookPost.count.mockResolvedValue(0)
     mocks.prisma.professionalServiceOffering.findMany.mockResolvedValue([])
     mocks.prisma.professionalPaymentSettings.findUnique.mockResolvedValue(null)
+    mocks.prisma.professionalLocation.findMany.mockResolvedValue([
+      { type: 'SALON' },
+      { type: 'MOBILE_BASE' },
+    ])
     mocks.prisma.mediaAsset.findMany.mockResolvedValue([])
     mocks.prisma.review.findMany.mockResolvedValue([])
     mocks.prisma.reviewHelpful.findMany.mockResolvedValue([])

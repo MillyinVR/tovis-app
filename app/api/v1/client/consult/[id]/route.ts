@@ -13,7 +13,8 @@
 import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
 import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import { isAiConsultEnabledForPro } from '@/lib/consult/access'
-import { toConsultSessionDTO } from '@/lib/consult/mapConsultSession'
+import { toConsultSessionLookupDTO } from '@/lib/consult/mapConsultSession'
+import type { ConsultSessionLookupResponseDTO } from '@/lib/dto/consult'
 import { prisma } from '@/lib/prisma'
 import { safeError } from '@/lib/security/logging'
 
@@ -37,7 +38,14 @@ export async function GET(_req: Request, ctx: RouteContext) {
       return jsonFail(404, 'Not found.')
     }
 
-    return jsonOk({ consult: toConsultSessionDTO(session) })
+    // Keyed by the consult's OWN id, so this serves BOTH anchors — a
+    // look-anchored consult (Book the Look) used to come back as
+    // `consult: null` here and crash the web flow page on `.status`.
+    const consult = toConsultSessionLookupDTO(session)
+    if (!consult) return jsonFail(404, 'Not found.')
+
+    const body: ConsultSessionLookupResponseDTO = { consult }
+    return jsonOk(body)
   } catch (e: unknown) {
     console.error('GET /api/v1/client/consult/[id] error', { error: safeError(e) })
     return jsonFail(500, 'Internal server error')

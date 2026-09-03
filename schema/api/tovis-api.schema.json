@@ -10948,6 +10948,27 @@
       ],
       "type": "object"
     },
+    "ConsultSessionLookupDTO": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ConsultSessionDTO"
+        },
+        {
+          "$ref": "#/definitions/ConsultLookSessionDTO"
+        }
+      ]
+    },
+    "ConsultSessionLookupResponseDTO": {
+      "properties": {
+        "consult": {
+          "$ref": "#/definitions/ConsultSessionLookupDTO"
+        }
+      },
+      "required": [
+        "consult"
+      ],
+      "type": "object"
+    },
     "ConsultSessionStatus": {
       "$ref": "#/definitions/%24Enums.ConsultSessionStatus"
     },

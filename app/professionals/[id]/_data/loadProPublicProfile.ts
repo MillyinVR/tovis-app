@@ -22,6 +22,10 @@ import {
   publicPaymentMethodsSelect,
   type PublicAcceptedMethod,
 } from '@/lib/payments/publicAcceptedMethods'
+import {
+  loadProLocationCapability,
+  narrowOfferingModes,
+} from '@/lib/offerings/locationCapability'
 import { prisma } from '@/lib/prisma'
 import { exportsDropPlatformMark } from '@/lib/pro/socialExportMark'
 import { getProEntitlements } from '@/lib/pro/entitlements'
@@ -139,12 +143,13 @@ export async function loadProPublicProfileBase(args: {
     completedBookingCount,
     followerCount,
     publishedLooksCount,
-    offeringRows,
+    rawOfferingRows,
     favoriteRow,
     paymentSettingsRow,
     coverUrl,
     entitlements,
     signals,
+    locationCapability,
   ] = await Promise.all([
     prisma.review.aggregate({
       where: { professionalId: profileRow.id, ...visibleReviewsWhere },
@@ -218,7 +223,24 @@ export async function loadProPublicProfileBase(args: {
       userId: profileRow.userId,
       brandName: args.brandName,
     }),
+
+    // W6 read boundary, same as the booking context: which modes the pro has a
+    // BOOKABLE location for. Applied to the offering rows below.
+    loadProLocationCapability(profileRow.id),
   ])
+
+  // An offering may CLAIM a mode the pro cannot host (salon was `@default(true)`
+  // for a long time, so prod holds mobile-only pros whose offerings all say
+  // in-salon). The booking bootstrap narrows to hostable modes before it places
+  // anything, so a profile that ships the RAW flags tells a client "In salon
+  // from $300" for a service the pro can only bring to them — and a native
+  // client that opens the booking sheet in SALON off that flag is refused with
+  // MODE_NOT_SUPPORTED for a service that IS bookable. Narrow once, here, so
+  // the pricing lines, the price-from label, the stats and the mode flags all
+  // describe the same offering the booking path will accept.
+  const offeringRows = rawOfferingRows.map((row) =>
+    narrowOfferingModes(row, locationCapability),
+  )
 
   const reviewCount = reviewStats._count._all
   const averageRating = reviewStats._avg.rating ?? null
