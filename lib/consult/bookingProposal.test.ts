@@ -75,6 +75,7 @@ function recommendation(
 ): ConsultBookingProposalAnalysisInput[number] {
   return {
     serviceIntent: serviceIntent as ConsultBookingProposalAnalysisInput[number]['serviceIntent'],
+    serviceName: serviceIntent === 'SERVICE' ? 'Balayage' : null,
     title: `Title ${serviceIntent}`,
     rationale: options.rationale ?? `Because of ${serviceIntent}.`,
     achievability: 'LIKELY_SINGLE_APPOINTMENT',
@@ -110,8 +111,8 @@ function derive(args: {
     // is NOT "no safety flags" — every analysis carries ALLERGY_HISTORY_UNKNOWN,
     // which is why the gate reads service intents instead.
     analysisRecommendations: args.analysisRecommendations ?? [
-      recommendation('BALAYAGE', { serviceId: 'svc_balayage' }),
-      recommendation('TONER_GLOSS', { serviceId: 'svc_gloss' }),
+      recommendation('SERVICE', { serviceId: 'svc_balayage' }),
+      recommendation('SERVICE', { serviceId: 'svc_gloss' }),
     ],
     // 🔴 'ALL' is the DEFAULT HERE ON PURPOSE. It is what availability and the
     // hold pass — the widest thing the booking could become — and it is the
@@ -143,7 +144,7 @@ describe('an estimate is not automatically a proposal', () => {
       // the colour recommendations entirely.
       analysisRecommendations: [
         recommendation('PATCH_TEST'),
-        recommendation('COLOR_CONSULTATION'),
+        recommendation('CONSULTATION'),
       ],
     })
 
@@ -157,7 +158,7 @@ describe('an estimate is not automatically a proposal', () => {
       menu: [floor],
       analysisRecommendations: [
         recommendation('STRAND_TEST'),
-        recommendation('COLOR_CONSULTATION'),
+        recommendation('CONSULTATION'),
       ],
     })
     expect(result.refusalCode).toBe('SAFETY_REVIEW_REQUIRED')
@@ -172,7 +173,7 @@ describe('an estimate is not automatically a proposal', () => {
     const result = derive({
       menu: [floor],
       analysisRecommendations: [
-        recommendation('BALAYAGE', { serviceId: 'svc_balayage' }),
+        recommendation('SERVICE', { serviceId: 'svc_balayage' }),
       ],
     })
     expect(result.status).toBe('PROPOSED')
@@ -468,8 +469,8 @@ describe('the client chooses what is beyond the floor', () => {
       estimate: twoLines(),
       enhancementSelection: [],
       analysisRecommendations: [
-        recommendation('BALAYAGE', { serviceId: 'svc_balayage' }),
-        recommendation('TONER_GLOSS', {
+        recommendation('SERVICE', { serviceId: 'svc_balayage' }),
+        recommendation('SERVICE', {
           serviceId: 'svc_gloss',
           rationale: 'A gloss keeps this tone from going brassy.',
         }),
@@ -584,9 +585,9 @@ describe('the client chooses what is beyond the floor', () => {
       estimate: twoLines(),
       enhancementSelection: [],
       analysisRecommendations: [
-        recommendation('BALAYAGE', { serviceId: 'svc_balayage' }),
+        recommendation('SERVICE', { serviceId: 'svc_balayage' }),
         // Matched to no service on her menu — the SERVICE_CATEGORY form.
-        recommendation('TONER_GLOSS'),
+        recommendation('SERVICE'),
       ],
     })
     if (noReason.status !== 'PROPOSED') throw new Error('expected a proposal')
@@ -597,8 +598,8 @@ describe('the client chooses what is beyond the floor', () => {
       estimate: twoLines(),
       enhancementSelection: 'ALL',
       analysisRecommendations: [
-        recommendation('BALAYAGE', { serviceId: 'svc_balayage' }),
-        recommendation('TONER_GLOSS'),
+        recommendation('SERVICE', { serviceId: 'svc_balayage' }),
+        recommendation('SERVICE'),
       ],
     })
     if (widest.status !== 'PROPOSED') throw new Error('expected a proposal')

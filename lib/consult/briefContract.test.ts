@@ -64,7 +64,7 @@ function analysis(): ConsultAnalysisPayloadDTO {
       density: { value: 'UNKNOWN', confidence, evidence: [] },
       texture: { value: 'WAVY', confidence, evidence: ['hair_back'] },
     },
-    hairColorLens: {
+    serviceLens: {
       goal: 'A noticeable red direction.',
       history: 'Recent box dye was reported.',
       constraints: 'Review chemical history.',
@@ -83,7 +83,8 @@ function analysis(): ConsultAnalysisPayloadDTO {
     ],
     recommendations: [
       {
-        serviceIntent: 'COLOR_CONSULTATION',
+        serviceIntent: 'CONSULTATION',
+        serviceName: null,
         title: 'Color consultation',
         rationale: 'Review the direction and history together.',
         achievability: 'The professional should confirm the plan.',

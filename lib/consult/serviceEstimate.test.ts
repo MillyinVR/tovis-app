@@ -58,7 +58,8 @@ function analysis(
 ): ConsultServiceEstimateAnalysisInput {
   return {
     recommendations: recommendations.map((recommendation) => ({
-      serviceIntent: 'BALAYAGE' as const,
+      serviceIntent: 'SERVICE' as const,
+      serviceName: 'Balayage',
       achievability: 'Discuss in person.',
       discussWithProfessional: true as const,
       ...recommendation,

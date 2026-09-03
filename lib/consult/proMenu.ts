@@ -53,6 +53,33 @@ export type ConsultProMenuOffering =
  * matches an intent pattern, and a stable order is what keeps that answer the
  * same between the analysis run and any later read of it.
  */
+/**
+ * The professional's safety-test offerings — a Patch Test and a Strand Test
+ * are ONE service each, whichever category the pro filed them under. The
+ * analysis routes a nails or brows consult to a patch test as readily as a
+ * colour one, so the lookup is by exact name across her whole active menu,
+ * not inside the consult's category.
+ */
+export async function loadConsultSafetyOfferings(
+  tx: Prisma.TransactionClient,
+  scope: { professionalId: string; serviceNames: readonly string[] },
+): Promise<ConsultProMenuOffering[]> {
+  if (scope.serviceNames.length === 0) return []
+  return tx.professionalServiceOffering.findMany({
+    where: {
+      professionalId: scope.professionalId,
+      isActive: true,
+      service: {
+        isActive: true,
+        name: { in: [...scope.serviceNames], mode: 'insensitive' },
+        category: { isActive: true },
+      },
+    },
+    select: CONSULT_PRO_MENU_SELECT,
+    orderBy: { serviceId: 'asc' },
+  })
+}
+
 export async function loadConsultProMenuOfferings(
   tx: Prisma.TransactionClient,
   scope: { professionalId: string; serviceCategoryId: string },

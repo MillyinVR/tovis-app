@@ -7756,7 +7756,76 @@
           ],
           "type": "object"
         },
-        "hairColorLens": {
+        "profile": {
+          "$ref": "#/definitions/ConsultAnalysisFeatureProfileDTO"
+        },
+        "recommendations": {
+          "items": {
+            "properties": {
+              "achievability": {
+                "type": "string"
+              },
+              "discussWithProfessional": {
+                "const": true,
+                "type": "boolean"
+              },
+              "rationale": {
+                "type": "string"
+              },
+              "reference": {
+                "$ref": "#/definitions/ConsultAnalysisReferenceDTO"
+              },
+              "serviceIntent": {
+                "$ref": "#/definitions/ConsultAnalysisServiceIntentDTO"
+              },
+              "serviceName": {
+                "description": "The menu service, exactly as the menu names it; null unless SERVICE.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "serviceIntent",
+              "serviceName",
+              "title",
+              "rationale",
+              "achievability",
+              "discussWithProfessional",
+              "reference"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "safetyFlags": {
+          "items": {
+            "properties": {
+              "code": {
+                "$ref": "#/definitions/ConsultAnalysisSafetyCodeDTO"
+              },
+              "discussWithProfessional": {
+                "const": true,
+                "type": "boolean"
+              },
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "summary",
+              "discussWithProfessional"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "serviceLens": {
           "properties": {
             "achievability": {
               "enum": [
@@ -7802,67 +7871,6 @@
           ],
           "type": "object"
         },
-        "profile": {
-          "$ref": "#/definitions/ConsultAnalysisFeatureProfileDTO"
-        },
-        "recommendations": {
-          "items": {
-            "properties": {
-              "achievability": {
-                "type": "string"
-              },
-              "discussWithProfessional": {
-                "const": true,
-                "type": "boolean"
-              },
-              "rationale": {
-                "type": "string"
-              },
-              "reference": {
-                "$ref": "#/definitions/ConsultAnalysisReferenceDTO"
-              },
-              "serviceIntent": {
-                "$ref": "#/definitions/ConsultAnalysisServiceIntentDTO"
-              },
-              "title": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "serviceIntent",
-              "title",
-              "rationale",
-              "achievability",
-              "discussWithProfessional",
-              "reference"
-            ],
-            "type": "object"
-          },
-          "type": "array"
-        },
-        "safetyFlags": {
-          "items": {
-            "properties": {
-              "code": {
-                "$ref": "#/definitions/ConsultAnalysisSafetyCodeDTO"
-              },
-              "discussWithProfessional": {
-                "const": true,
-                "type": "boolean"
-              },
-              "summary": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "code",
-              "summary",
-              "discussWithProfessional"
-            ],
-            "type": "object"
-          },
-          "type": "array"
-        },
         "styleDirections": {
           "items": {
             "$ref": "#/definitions/ConsultStyleDirectionDTO"
@@ -7874,7 +7882,7 @@
         "profile",
         "styleDirections",
         "core",
-        "hairColorLens",
+        "serviceLens",
         "safetyFlags",
         "recommendations"
       ],
@@ -7953,23 +7961,19 @@
         "REACTION_HISTORY_UNKNOWN",
         "RECENT_BOX_DYE",
         "RECENT_LIGHTENING",
+        "RECENT_CHEMICAL_SERVICE",
         "CHEMICAL_HISTORY_UNKNOWN",
         "ALLERGY_HISTORY_UNKNOWN",
+        "KNOWN_ALLERGY",
+        "SENSITIVITY_REPORTED",
         "VISIBLE_COMPROMISE"
       ],
       "type": "string"
     },
     "ConsultAnalysisServiceIntentDTO": {
       "enum": [
-        "COLOR_CONSULTATION",
-        "ROOT_TOUCH_UP",
-        "ALL_OVER_COLOR",
-        "HIGHLIGHTS",
-        "BALAYAGE",
-        "COLOR_CORRECTION",
-        "TONER_GLOSS",
-        "VIVID_COLOR",
-        "OTHER_HAIR_COLOR",
+        "SERVICE",
+        "CONSULTATION",
         "STRAND_TEST",
         "PATCH_TEST"
       ],

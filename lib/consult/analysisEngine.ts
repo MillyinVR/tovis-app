@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
+import type { ConsultServiceFamily } from '@prisma/client'
 
 import { readOptionalEnv, requireEnv } from '@/lib/env'
 import { isRecord } from '@/lib/guards'
@@ -9,24 +10,31 @@ import {
 } from './capturePack'
 import type { ConsultCaptureImage } from './captureStorage'
 import { isAllowedConsultProviderModel } from './providerModel'
+import { CONSULT_SERVICE_FAMILY_LABELS } from './serviceScope'
 
-export const CONSULT_ANALYSIS_SCHEMA_VERSION = 2
+export const CONSULT_ANALYSIS_SCHEMA_VERSION = 3
 // v2 (2026-08-27): the capture pack may be partial — the prompt lists missing
-// views and pins their observations to UNKNOWN. Output schema is unchanged.
-export const CONSULT_ANALYSIS_PROMPT_VERSION = 'full-analysis-v2'
+// views and pins their observations to UNKNOWN.
+// v3 (2026-09-03, service-aware consult): the analysis is told WHICH service
+// it is for — family, category, the service the look or booking names, and
+// the professional's menu in that category — and the intake as the labels the
+// client actually saw. `hairColorLens` becomes `serviceLens` (same eight
+// fields, service-neutral wording); recommendations name a service from the
+// menu (or a consultation) instead of choosing from a colour-only intent enum;
+// safety codes gain service-neutral members. Prompt and schema move together.
+export const CONSULT_ANALYSIS_PROMPT_VERSION = 'service-analysis-v3'
 export const CONSULT_ANALYSIS_DEFAULT_MODEL = 'claude-sonnet-5'
 export const CONSULT_ANALYSIS_REQUEST_TIMEOUT_MS = 90_000
 
+/**
+ * What a recommendation IS. The provider may only recommend a service from the
+ * professional's menu in this consult's category, or a consultation with the
+ * professional; the deterministic safety routing adds the two tests after the
+ * provider boundary (lib/consult/safetyRouting.ts).
+ */
 export const CONSULT_ANALYSIS_PROVIDER_SERVICE_INTENTS = [
-  'COLOR_CONSULTATION',
-  'ROOT_TOUCH_UP',
-  'ALL_OVER_COLOR',
-  'HIGHLIGHTS',
-  'BALAYAGE',
-  'COLOR_CORRECTION',
-  'TONER_GLOSS',
-  'VIVID_COLOR',
-  'OTHER_HAIR_COLOR',
+  'SERVICE',
+  'CONSULTATION',
 ] as const
 
 export const CONSULT_ANALYSIS_SERVICE_INTENTS = [
@@ -38,13 +46,25 @@ export const CONSULT_ANALYSIS_SERVICE_INTENTS = [
 export type ConsultAnalysisServiceIntent =
   (typeof CONSULT_ANALYSIS_SERVICE_INTENTS)[number]
 
+/**
+ * The one non-menu option the provider can name in a recommendation. It is
+ * a fixed string in the per-run enum beside the menu names, so structured
+ * output cannot invent a service the professional does not offer.
+ */
+export const CONSULT_ANALYSIS_CONSULTATION_OPTION =
+  'A consultation with the professional'
+
+/** Every safety code any pack's policy can raise (lib/consult/safetyFlags.ts). */
 export const CONSULT_ANALYSIS_SAFETY_CODES = [
   'PRIOR_REACTION',
   'REACTION_HISTORY_UNKNOWN',
   'RECENT_BOX_DYE',
   'RECENT_LIGHTENING',
+  'RECENT_CHEMICAL_SERVICE',
   'CHEMICAL_HISTORY_UNKNOWN',
   'ALLERGY_HISTORY_UNKNOWN',
+  'KNOWN_ALLERGY',
+  'SENSITIVITY_REPORTED',
   'VISIBLE_COMPROMISE',
 ] as const
 
@@ -258,7 +278,7 @@ export type ConsultStyleDirection = {
   discussWithProfessional: true
 }
 
-export type HairColorAnalysisProviderOutput = {
+export type ConsultAnalysisProviderOutput = {
   profile: ConsultAnalysisFeatureProfile
   styleDirections: ConsultStyleDirection[]
   core: {
@@ -289,7 +309,7 @@ export type HairColorAnalysisProviderOutput = {
       evidence: Evidence
     }
   }
-  hairColorLens: {
+  serviceLens: {
     goal: string
     history: string
     constraints: string
@@ -306,6 +326,8 @@ export type HairColorAnalysisProviderOutput = {
   }>
   recommendations: Array<{
     serviceIntent: ConsultAnalysisServiceIntent
+    /** The menu service named, exactly as the menu names it; null unless SERVICE. */
+    serviceName: string | null
     title: string
     rationale: string
     achievability: string
@@ -313,22 +335,47 @@ export type HairColorAnalysisProviderOutput = {
   }>
 }
 
-export type HairColorAnalysisInput = {
+/**
+ * What the consult is FOR — read off the session's service profile
+ * (lib/consult/serviceProfile.ts) and the professional's menu. Sent to the
+ * provider in words and used to build the per-run recommendation enum.
+ */
+export type ConsultAnalysisServiceContext = {
+  family: ConsultServiceFamily
+  categoryName: string
+  /** The service the look or booking names, when it has one. */
+  serviceName: string | null
+  /** The professional's active menu in this category, by exact name. */
+  menuServiceNames: readonly string[]
+}
+
+export type ConsultAnalysisIntakeItem = {
+  questionKey: string
+  question: string
+  answerCode: string
+  answer: string
+}
+
+export type ConsultAnalysisInput = {
+  service: ConsultAnalysisServiceContext
+  /** Answer codes by question key — the immutable stored form. */
   intake: Readonly<Record<string, string>>
+  /** The same answers as the labels the client saw, in pack order. */
+  intakeItems: readonly ConsultAnalysisIntakeItem[]
   captures: ReadonlyArray<{
     shotKey: HairColorCaptureShotKey
     image: ConsultCaptureImage
   }>
 }
 
-export type HairColorAnalysisProviderResult = {
-  analysis: HairColorAnalysisProviderOutput
+export type ConsultAnalysisProviderResult = {
+  analysis: ConsultAnalysisProviderOutput
   model: string
 }
 
-export type HairColorAnalysisProvider = (
-  input: HairColorAnalysisInput,
-) => Promise<HairColorAnalysisProviderResult>
+export type ConsultAnalysisProvider = (
+  input: ConsultAnalysisInput,
+) => Promise<ConsultAnalysisProviderResult>
 
 export class ConsultAnalysisProviderError extends Error {
   constructor(readonly kind: 'unavailable' | 'refused' | 'bad_output') {
@@ -365,14 +412,35 @@ function observationSchema(values: readonly string[]) {
   }
 }
 
-export const CONSULT_ANALYSIS_OUTPUT_SCHEMA: Record<string, unknown> = {
+/**
+ * The recommendation enum the provider chooses from on THIS run: the
+ * professional's menu in the consult's category, by exact name, plus the one
+ * fixed consultation option. Built per run because the menu is per pro; the
+ * default export below (no menu) is the shape the tests and the schema check
+ * pin.
+ */
+export function recommendationServiceOptions(
+  menuServiceNames: readonly string[],
+): string[] {
+  const names = new Set<string>()
+  for (const name of menuServiceNames) {
+    const trimmed = name.trim()
+    if (trimmed && trimmed !== CONSULT_ANALYSIS_CONSULTATION_OPTION) names.add(trimmed)
+  }
+  return [...names, CONSULT_ANALYSIS_CONSULTATION_OPTION]
+}
+
+export function buildConsultAnalysisOutputSchema(args: {
+  menuServiceNames: readonly string[]
+}): Record<string, unknown> {
+  return {
   type: 'object',
   additionalProperties: false,
   required: [
     'profile',
     'styleDirections',
     'core',
-    'hairColorLens',
+    'serviceLens',
     'safetyFlags',
     'recommendations',
   ],
@@ -451,7 +519,7 @@ export const CONSULT_ANALYSIS_OUTPUT_SCHEMA: Record<string, unknown> = {
         texture: observationSchema(CONSULT_ANALYSIS_TEXTURES),
       },
     },
-    hairColorLens: {
+    serviceLens: {
       type: 'object',
       additionalProperties: false,
       required: [
@@ -500,16 +568,16 @@ export const CONSULT_ANALYSIS_OUTPUT_SCHEMA: Record<string, unknown> = {
         type: 'object',
         additionalProperties: false,
         required: [
-          'serviceIntent',
+          'service',
           'title',
           'rationale',
           'achievability',
           'discussWithProfessional',
         ],
         properties: {
-          serviceIntent: {
+          service: {
             type: 'string',
-            enum: [...CONSULT_ANALYSIS_PROVIDER_SERVICE_INTENTS],
+            enum: recommendationServiceOptions(args.menuServiceNames),
           },
           title: { type: 'string', maxLength: 120 },
           rationale: { type: 'string', maxLength: 320 },
@@ -519,12 +587,18 @@ export const CONSULT_ANALYSIS_OUTPUT_SCHEMA: Record<string, unknown> = {
       },
     },
   },
+  }
 }
+
+/** The schema with no menu: only the consultation option is recommendable. */
+export const CONSULT_ANALYSIS_OUTPUT_SCHEMA: Record<string, unknown> =
+  buildConsultAnalysisOutputSchema({ menuServiceNames: [] })
 
 export const CONSULT_ANALYSIS_SYSTEM_PROMPT = [
   'You are a cosmetic-only full styling consultation analysis engine for a professional beauty platform.',
-  'Inputs: immutable intake option codes and one to seven labeled daylight photos from the full pack — hair views (hair_back, hair_left, hair_right, hair_crown) and face views (face_front, face_side, eyes_closeup). The client may submit a partial pack; when views are missing, a text line names them.',
-  'You produce: hair core observations, a feature profile, a hair-color lens, safety flags, hair-color service recommendations, and exactly one style direction per domain (HAIR_COLOR_HARMONY, CUT_AND_SHAPE, BANGS, BROWS, LASHES, MAKEUP, COLOR_PALETTE).',
+  'Inputs: a consultation context naming the service family, the service category, the specific service the client is considering when one is known, and the professional’s menu in that category; the client’s intake as the questions and answers she saw (with their immutable option codes); and one to seven labeled daylight photos from the full pack — hair views (hair_back, hair_left, hair_right, hair_crown) and face views (face_front, face_side, eyes_closeup). The client may submit a partial pack; when views are missing, a text line names them.',
+  'You produce: hair core observations, a feature profile, a service lens, safety flags, service recommendations, and exactly one style direction per domain (HAIR_COLOR_HARMONY, CUT_AND_SHAPE, BANGS, BROWS, LASHES, MAKEUP, COLOR_PALETTE).',
+  'Everything you write is FOR the named service. The service lens describes the client’s goal, history, constraints, maintenance and appointment context as they bear on THAT service; recommendations are services from the professional’s menu (named exactly as the menu names them) or a consultation with the professional; the hair core observations are filled from the hair views when hair is the subject and set to UNKNOWN or null when it is not.',
   'Never infer or mention identity, ethnicity, race, nationality, religion, gender, age, health conditions, or diagnoses. Profile observations are cosmetic styling descriptors only.',
   'Unknown or unsupported observations must use UNKNOWN or null with empty evidence and a low confidence range. Every non-unknown observation must cite one or more supplied evidence labels and use a confidence range rather than certainty. If a face view is occluded, filtered, or poorly lit, prefer UNKNOWN over a guess.',
   'Cite only evidence labels that were actually supplied in this request; never cite a missing view. Any observation that depends mainly on a missing view must be UNKNOWN or null with a low confidence range, and every style direction must lean only on what the supplied views and the intake actually show — with fewer views, widen confidence ranges and say less, never more.',
@@ -538,10 +612,10 @@ export const CONSULT_ANALYSIS_SYSTEM_PROMPT = [
   'BROWS work with the natural density and existing shape, anchored to the face’s own proportions; never direct chemical brow or lash treatments.',
   'Hair texture, density, and current level bound which cuts and colors will actually behave well; honor them in CUT_AND_SHAPE and HAIR_COLOR_HARMONY.',
   'Every style direction’s whyItFlatters must name the specific observed feature or features it builds on. Style directions are directions to discuss with the professional, never promises and never treatment prescriptions.',
-  'For the hair-color lens: combine visible evidence with goal, box dye, prior lightening, last color service, prior reaction, budget, and event context. If maintenance tolerance, allergies, or other constraints were not asked in the intake, say they are unknown; never invent them.',
+  'For the service lens: combine visible evidence with the client’s stated goal, treatment and chemical history, prior reactions, sensitivities, budget and event context. If maintenance tolerance, allergies, or other constraints were not asked in the intake, say they are unknown; never invent them. When the service is hair colour, the history covers box dye, prior lightening and the last colour service.',
   'Visible condition is a cosmetic visual observation only. Never diagnose hair, scalp, skin, or medical conditions.',
-  'All chemical, reaction, allergy, unknown-history, or visibly compromised-hair concerns must be structurally represented in safetyFlags and framed for discussion with the professional.',
-  'Recommendations are bounded directions to discuss with the professional, never promises. Choose only a serviceIntent enum; never output database identifiers, paths, credentials, hidden reasoning, or provider metadata.',
+  'All chemical, reaction, allergy, sensitivity, unknown-history, or visibly compromised-hair concerns must be structurally represented in safetyFlags and framed for discussion with the professional.',
+  'Recommendations are bounded directions to discuss with the professional, never promises. Name each recommended service exactly as the menu lists it, or choose the consultation option; never output database identifiers, paths, credentials, hidden reasoning, or provider metadata.',
 ].join(' ')
 
 // Schema v2 deliberately removed skin-tone/undertone/face-shape/eye-shape from
@@ -690,17 +764,84 @@ function sanitizeStyleDirections(raw: unknown): ConsultStyleDirection[] {
   })
 }
 
+/**
+ * A recommendation as the PROVIDER writes it (`service`, from the per-run
+ * enum) or as it is STORED (`serviceIntent` + `serviceName`, after the
+ * safety routing may have replaced the list). `sanitizeAnalysis` accepts the
+ * form its caller names and always returns the stored form.
+ */
+type RecommendationShape = 'provider' | 'stored'
+
+function sanitizeRecommendation(
+  item: unknown,
+  args: {
+    shape: RecommendationShape
+    serviceIntents: readonly ConsultAnalysisServiceIntent[]
+    menuServiceNames: readonly string[]
+  },
+): ConsultAnalysisProviderOutput['recommendations'][number] {
+  if (!isRecord(item) || item.discussWithProfessional !== true) {
+    throw new ConsultAnalysisProviderError('bad_output')
+  }
+  let serviceIntent: ConsultAnalysisServiceIntent
+  let serviceName: string | null
+  if (args.shape === 'provider') {
+    if (
+      !exactKeys(item, ['service', 'title', 'rationale', 'achievability', 'discussWithProfessional'])
+    ) {
+      throw new ConsultAnalysisProviderError('bad_output')
+    }
+    const option = enumValue(
+      item.service,
+      recommendationServiceOptions(args.menuServiceNames),
+    )
+    serviceIntent = option === CONSULT_ANALYSIS_CONSULTATION_OPTION ? 'CONSULTATION' : 'SERVICE'
+    serviceName = serviceIntent === 'SERVICE' ? option : null
+  } else {
+    if (
+      !exactKeys(item, [
+        'serviceIntent', 'serviceName', 'title', 'rationale', 'achievability',
+        'discussWithProfessional',
+      ])
+    ) {
+      throw new ConsultAnalysisProviderError('bad_output')
+    }
+    serviceIntent = enumValue(item.serviceIntent, args.serviceIntents)
+    if (serviceIntent === 'SERVICE') {
+      if (typeof item.serviceName !== 'string' || !item.serviceName.trim()) {
+        throw new ConsultAnalysisProviderError('bad_output')
+      }
+      serviceName = cleanText(item.serviceName, 120)
+    } else {
+      if (item.serviceName !== null) throw new ConsultAnalysisProviderError('bad_output')
+      serviceName = null
+    }
+  }
+  return {
+    serviceIntent,
+    serviceName,
+    title: cleanText(item.title, 120),
+    rationale: cleanText(item.rationale, 320),
+    achievability: cleanText(item.achievability, 240),
+    discussWithProfessional: true as const,
+  }
+}
+
 function sanitizeAnalysis(
   raw: unknown,
-  serviceIntents: readonly ConsultAnalysisServiceIntent[],
-): HairColorAnalysisProviderOutput {
+  args: {
+    shape: RecommendationShape
+    serviceIntents: readonly ConsultAnalysisServiceIntent[]
+    menuServiceNames: readonly string[]
+  },
+): ConsultAnalysisProviderOutput {
   if (
     !isRecord(raw) ||
     !exactKeys(raw, [
       'profile',
       'styleDirections',
       'core',
-      'hairColorLens',
+      'serviceLens',
       'safetyFlags',
       'recommendations',
     ]) ||
@@ -733,7 +874,7 @@ function sanitizeAnalysis(
     throw new ConsultAnalysisProviderError('bad_output')
   }
 
-  const lens = raw.hairColorLens
+  const lens = raw.serviceLens
   if (
     !isRecord(lens) ||
     !exactKeys(lens, [
@@ -776,25 +917,17 @@ function sanitizeAnalysis(
   ) {
     throw new ConsultAnalysisProviderError('bad_output')
   }
-  const recommendations = raw.recommendations.map((item) => {
-    if (
-      !isRecord(item) ||
-      !exactKeys(item, ['serviceIntent', 'title', 'rationale', 'achievability', 'discussWithProfessional']) ||
-      item.discussWithProfessional !== true
-    ) {
-      throw new ConsultAnalysisProviderError('bad_output')
-    }
-    return {
-      serviceIntent: enumValue(item.serviceIntent, serviceIntents),
-      title: cleanText(item.title, 120),
-      rationale: cleanText(item.rationale, 320),
-      achievability: cleanText(item.achievability, 240),
-      discussWithProfessional: true as const,
-    }
-  })
+  const recommendations = raw.recommendations.map((item) =>
+    sanitizeRecommendation(item, args),
+  )
+  // One recommendation per service (or per test / consultation).
   if (
-    new Set(recommendations.map((recommendation) => recommendation.serviceIntent)).size !==
-    recommendations.length
+    new Set(
+      recommendations.map(
+        (recommendation) =>
+          `${recommendation.serviceIntent}:${recommendation.serviceName ?? ''}`,
+      ),
+    ).size !== recommendations.length
   ) {
     throw new ConsultAnalysisProviderError('bad_output')
   }
@@ -818,7 +951,7 @@ function sanitizeAnalysis(
       density: observed(raw.core.density, CONSULT_ANALYSIS_DENSITIES, 'UNKNOWN'),
       texture: observed(raw.core.texture, CONSULT_ANALYSIS_TEXTURES, 'UNKNOWN'),
     },
-    hairColorLens: {
+    serviceLens: {
       goal: cleanText(lens.goal, 240),
       history: cleanText(lens.history, 320),
       constraints: cleanText(lens.constraints, 240),
@@ -860,7 +993,43 @@ export function resetConsultAnalysisClientForTests(): void {
   cachedClient = null
 }
 
-export const runHairColorAnalysis: HairColorAnalysisProvider = async (input) => {
+/**
+ * The consultation context and the intake, as text blocks for the provider.
+ * Exported so a test can pin exactly what the model is told about the service.
+ */
+export function consultAnalysisContextBlocks(
+  input: Pick<ConsultAnalysisInput, 'service' | 'intake' | 'intakeItems'>,
+): string[] {
+  const menu = input.service.menuServiceNames.map((name) => name.trim()).filter(Boolean)
+  const context = [
+    `Consultation context:`,
+    `Service family: ${CONSULT_SERVICE_FAMILY_LABELS[input.service.family]}`,
+    `Service category: ${input.service.categoryName}`,
+    input.service.serviceName
+      ? `Service the client is considering: ${input.service.serviceName}`
+      : 'Service the client is considering: not named yet — recommend from the menu below.',
+    menu.length > 0
+      ? `Professional's menu in this category (recommend only these, named exactly): ${menu.join('; ')}`
+      : "Professional's menu in this category: none listed — only the consultation option can be recommended.",
+  ].join('\n')
+  const intakeLines = input.intakeItems.map(
+    (item) => `${item.question} → ${item.answer} [${item.questionKey}=${item.answerCode}]`,
+  )
+  const intake =
+    intakeLines.length > 0
+      ? `Client intake (question → answer [code]):\n${intakeLines.join('\n')}`
+      : 'Client intake: no answers.'
+  const codes = `Immutable intake option codes:\n${JSON.stringify(
+    Object.fromEntries(
+      Object.entries(input.intake).sort(([left], [right]) =>
+        left < right ? -1 : left > right ? 1 : 0,
+      ),
+    ),
+  )}`
+  return [context, intake, codes]
+}
+
+export const runConsultAnalysis: ConsultAnalysisProvider = async (input) => {
   const capturesByShot = new Map(
     input.captures.map((capture) => [capture.shotKey, capture] as const),
   )
@@ -900,16 +1069,9 @@ export const runHairColorAnalysis: HairColorAnalysisProvider = async (input) => 
       text: `Missing views (not supplied): ${missingShotKeys.join(', ')}. Treat everything they would have shown as unobserved.`,
     })
   }
-  content.push({
-    type: 'text',
-    text: `Immutable intake option codes:\n${JSON.stringify(
-      Object.fromEntries(
-        Object.entries(input.intake).sort(([left], [right]) =>
-          left < right ? -1 : left > right ? 1 : 0,
-        ),
-      ),
-    )}`,
-  })
+  for (const text of consultAnalysisContextBlocks(input)) {
+    content.push({ type: 'text', text })
+  }
 
   let message: Anthropic.Message
   try {
@@ -920,7 +1082,12 @@ export const runHairColorAnalysis: HairColorAnalysisProvider = async (input) => 
         system: CONSULT_ANALYSIS_SYSTEM_PROMPT,
         messages: [{ role: 'user', content }],
         output_config: {
-          format: { type: 'json_schema', schema: CONSULT_ANALYSIS_OUTPUT_SCHEMA },
+          format: {
+            type: 'json_schema',
+            schema: buildConsultAnalysisOutputSchema({
+              menuServiceNames: input.service.menuServiceNames,
+            }),
+          },
         },
       },
       { timeout: CONSULT_ANALYSIS_REQUEST_TIMEOUT_MS },
@@ -936,10 +1103,11 @@ export const runHairColorAnalysis: HairColorAnalysisProvider = async (input) => 
   if (!text) throw new ConsultAnalysisProviderError('bad_output')
   try {
     return {
-      analysis: sanitizeAnalysis(
-        JSON.parse(text),
-        CONSULT_ANALYSIS_PROVIDER_SERVICE_INTENTS,
-      ),
+      analysis: sanitizeAnalysis(JSON.parse(text), {
+        shape: 'provider',
+        serviceIntents: CONSULT_ANALYSIS_PROVIDER_SERVICE_INTENTS,
+        menuServiceNames: input.service.menuServiceNames,
+      }),
       model,
     }
   } catch (error) {
@@ -954,7 +1122,7 @@ export const runHairColorAnalysis: HairColorAnalysisProvider = async (input) => 
  * observation, so it fails the whole result rather than shipping.
  */
 function assertEvidenceSupplied(
-  analysis: HairColorAnalysisProviderOutput,
+  analysis: ConsultAnalysisProviderOutput,
   suppliedShotKeys: ReadonlySet<string>,
 ): void {
   const assertSupplied = (cited: Evidence): void => {
@@ -977,34 +1145,46 @@ function assertEvidenceSupplied(
   assertSupplied(analysis.core.texture.evidence)
 }
 
-export function validateHairColorAnalysisProviderResult(
+/**
+ * Validates what the PROVIDER returned: recommendations name a `service`
+ * from this run's menu enum; only the two provider intents result.
+ */
+export function validateConsultAnalysisProviderResult(
   result: { analysis: unknown; model: string },
-  suppliedShotKeys?: readonly HairColorCaptureShotKey[],
-): HairColorAnalysisProviderResult {
+  args: {
+    menuServiceNames: readonly string[]
+    suppliedShotKeys?: readonly HairColorCaptureShotKey[]
+  },
+): ConsultAnalysisProviderResult {
   const model = result.model.trim()
   if (!model || model !== result.model || model.length > 128) {
     throw new ConsultAnalysisProviderError('bad_output')
   }
-  const analysis = sanitizeAnalysis(
-    result.analysis,
-    CONSULT_ANALYSIS_PROVIDER_SERVICE_INTENTS,
-  )
-  if (suppliedShotKeys) {
-    assertEvidenceSupplied(analysis, new Set<string>(suppliedShotKeys))
+  const analysis = sanitizeAnalysis(result.analysis, {
+    shape: 'provider',
+    serviceIntents: CONSULT_ANALYSIS_PROVIDER_SERVICE_INTENTS,
+    menuServiceNames: args.menuServiceNames,
+  })
+  if (args.suppliedShotKeys) {
+    assertEvidenceSupplied(analysis, new Set<string>(args.suppliedShotKeys))
   }
   return { analysis, model }
 }
 
-/** Validates the post-routing stored shape, including deterministic test intents. */
-export function validateHairColorAnalysisResult(
+/** Validates the post-routing STORED shape, including the deterministic tests. */
+export function validateConsultAnalysisResult(
   result: { analysis: unknown; model: string },
-): HairColorAnalysisProviderResult {
+): ConsultAnalysisProviderResult {
   const model = result.model.trim()
   if (!model || model !== result.model || model.length > 128) {
     throw new ConsultAnalysisProviderError('bad_output')
   }
   return {
-    analysis: sanitizeAnalysis(result.analysis, CONSULT_ANALYSIS_SERVICE_INTENTS),
+    analysis: sanitizeAnalysis(result.analysis, {
+      shape: 'stored',
+      serviceIntents: CONSULT_ANALYSIS_SERVICE_INTENTS,
+      menuServiceNames: [],
+    }),
     model,
   }
 }

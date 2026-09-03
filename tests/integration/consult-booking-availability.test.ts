@@ -75,7 +75,7 @@ vi.mock('@/lib/consult/analysisEngine', async (importOriginal) => {
   const original =
     await importOriginal<typeof import('@/lib/consult/analysisEngine')>()
   const fakes = await import('./_support/consultLookFakes')
-  return { ...original, runHairColorAnalysis: fakes.fakeRunHairColorAnalysis }
+  return { ...original, runConsultAnalysis: fakes.fakeRunConsultAnalysis }
 })
 
 import { GET as getBootstrap } from '@/app/api/v1/availability/bootstrap/route'

@@ -161,7 +161,9 @@ vi.mock('@/lib/consult/analysisEngine', async (importOriginal) => {
   const original = await importOriginal<typeof import('@/lib/consult/analysisEngine')>()
   return {
     ...original,
-    async runHairColorAnalysis() {
+    async runConsultAnalysis(input: {
+      service: { menuServiceNames: readonly string[] }
+    }) {
       fake.analysisCalls += 1
       await new Promise((resolve) => setTimeout(resolve, 50))
       if (fake.analysisDuring) await fake.analysisDuring()
@@ -220,7 +222,7 @@ vi.mock('@/lib/consult/analysisEngine', async (importOriginal) => {
             density: observed('UNKNOWN', []),
             texture: observed('WAVY'),
           },
-          hairColorLens: {
+          serviceLens: {
             goal: 'A noticeable red direction grounded in the intake goal.',
             history: 'Prior lightening and box-dye timing affect the range.',
             constraints: 'Allergy history and other constraints are unknown.',
@@ -233,7 +235,7 @@ vi.mock('@/lib/consult/analysisEngine', async (importOriginal) => {
           safetyFlags: [],
           recommendations: [
             {
-              serviceIntent: 'COLOR_CONSULTATION',
+              service: 'A consultation with the professional',
               title: 'Hair color consultation',
               rationale: 'Review a realistic red direction and chemical history.',
               achievability: 'The professional should confirm the service plan.',
@@ -1461,8 +1463,8 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
     })
     expect(revisions).toHaveLength(1)
     expect(revisions[0]).toMatchObject({
-      schemaVersion: 2,
-      promptVersion: 'full-analysis-v2',
+      schemaVersion: CONSULT_ANALYSIS_SCHEMA_VERSION,
+      promptVersion: CONSULT_ANALYSIS_PROMPT_VERSION,
       model: 'fake-analysis-model',
       idempotencyKey: 'canonical-analysis',
     })
@@ -1612,8 +1614,8 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
     expect(await body(read)).toMatchObject({
       analysis: {
         status: ConsultSessionStatus.COMPLETED,
-        schemaVersion: 2,
-        promptVersion: 'full-analysis-v2',
+        schemaVersion: CONSULT_ANALYSIS_SCHEMA_VERSION,
+        promptVersion: CONSULT_ANALYSIS_PROMPT_VERSION,
         result: { revisionId: revisions[0]?.id },
       },
     })
@@ -1677,7 +1679,7 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
             serviceCategoryId: categoryId,
           },
         }),
-        expect.objectContaining({ serviceIntent: 'COLOR_CONSULTATION' }),
+        expect.objectContaining({ serviceIntent: 'CONSULTATION' }),
       ],
     })
     expect(JSON.stringify(analysis.payload)).not.toContain(
@@ -1833,8 +1835,8 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
     delete process.env.ENABLE_AI_CONSULT
     const darkRequest = jsonRequest(`/api/v1/client/consult/${owner.sessionId}/analysis`, {
       idempotencyKey: 'dark-analysis',
-      schemaVersion: 2,
-      promptVersion: 'full-analysis-v2',
+      schemaVersion: CONSULT_ANALYSIS_SCHEMA_VERSION,
+      promptVersion: CONSULT_ANALYSIS_PROMPT_VERSION,
     })
     const darkJson = vi.spyOn(darkRequest, 'json')
     const dark = await startAnalysis(darkRequest, context(owner.sessionId))
@@ -1956,7 +1958,7 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
                 evidence: ['hair_back'],
               },
             },
-            hairColorLens: {
+            serviceLens: {
               // Intentionally missing required `goal`.
               history: 'Chemical history comes from the intake.',
               constraints: 'Allergy history and constraints are unknown.',
@@ -1975,7 +1977,7 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
             ],
             recommendations: [
               {
-                serviceIntent: 'COLOR_CONSULTATION',
+                service: 'A consultation with the professional',
                 title: 'Hair color consultation',
                 rationale: 'Confirm a bounded color direction together.',
                 achievability: 'The professional should confirm the appointment plan.',
@@ -1995,7 +1997,7 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
           requestHash: 'd'.repeat(64),
         },
       }),
-    ).rejects.toThrow('invalid versioned full-analysis payload')
+    ).rejects.toThrow('invalid versioned service-analysis payload')
   })
 
   it('keeps inspiration optional but requires an explicit fresh decision before analysis', async () => {

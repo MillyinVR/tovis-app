@@ -5,7 +5,7 @@ import { ConsultRevisionKind, type Prisma } from '@prisma/client'
 
 import { isRecord } from '@/lib/guards'
 
-import { normalizeStoredHairColorAnalysisPayload } from './analysisRevision'
+import { normalizeStoredConsultAnalysisPayload } from './analysisRevision'
 import {
   buildHairColorProBriefPayload,
   buildLegacyHairColorProBriefPayload,
@@ -121,7 +121,10 @@ export async function loadLatestImmutableConsultResult(
       intakeAnswers: normalizedIntake.answers,
       analysisRevisionId: analysis.id,
       analysisRevision: analysis.revision,
-      analysis: normalizeStoredHairColorAnalysisPayload(analysis.payload),
+      analysis: normalizeStoredConsultAnalysisPayload(
+        analysis.payload,
+        analysis.schemaVersion,
+      ),
     }
     if (brief.schemaVersion === LEGACY_CONSULT_PRO_BRIEF_SCHEMA_VERSION) {
       const legacy = buildLegacyHairColorProBriefPayload(buildArgs)
