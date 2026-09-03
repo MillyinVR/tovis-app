@@ -75,20 +75,6 @@ export const CONSULT_SERVICE_ESTIMATE_SCHEMA_VERSION = 1
  * produced it once those rules move on.
  */
 export const CONSULT_SERVICE_ESTIMATE_DERIVATION_VERSION = 'look-estimate-v1'
-
-/**
- * Which of the pro's two price/duration columns an estimate is read from.
- *
- * A look-anchored consult has not chosen salon or mobile — the booking proposal
- * is B4 — so it reads the column for the mode the pro can HOST
- * (`consultLookLocationType`, lib/consult/proMenu.ts): salon when she has a
- * bookable salon or suite, else mobile. The same reading `analysisContract`'s
- * safety lookup makes, and the chosen mode is stored on the estimate rather
- * than assumed by any reader. This constant is the fallback for a pro with
- * nothing bookable, whose estimate is refused before any column is read.
- */
-export const CONSULT_LOOK_ESTIMATE_LOCATION_TYPE = ServiceLocationType.SALON
-
 export type ConsultServiceEstimateLineDraft = {
   sortOrder: number
   serviceId: string
@@ -339,9 +325,13 @@ export async function buildConsultServiceEstimate(
     analysis: ConsultServiceEstimateAnalysisInput
   },
 ): Promise<ConsultServiceEstimateDraft> {
-  // The menu comes back narrowed to the modes the pro can host, and the mode
-  // the estimate reads is chosen from that same capability — never the salon
-  // column of a pro who only travels.
+  // A look-anchored consult has not chosen salon or mobile — the booking
+  // proposal (B4) is where the client chooses — so the estimate reads the
+  // column for the mode the pro can HOST (`consultLookLocationType`): salon
+  // when she has a bookable salon or suite, else mobile. The same reading the
+  // analysis's safety lookup makes; the chosen mode is stored on the estimate
+  // rather than assumed by any reader. The menu itself comes back narrowed to
+  // those same modes.
   const menu = await loadConsultProMenu(tx, {
     professionalId: args.professionalId,
     serviceCategoryId: args.serviceCategoryId,

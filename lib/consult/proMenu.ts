@@ -22,10 +22,13 @@
 // ⚠️ Read boundary (W6, `narrowOfferingModes`). The rows come back with their
 // mode flags NARROWED to what the pro can actually host — prod holds offerings
 // whose `offersInSalon` was never a choice, and the founder's own pro has only
-// a MOBILE_BASE that is bookable. Before this narrowing the estimate quoted her
-// in-salon column and the commit refused `MODE_NOT_SUPPORTED`; #1066 fixed the
-// same class on the public profile one step earlier. Nothing downstream of
-// this module re-reads the raw flags.
+// a MOBILE_BASE that is bookable. Before this, a look anchor read the SALON
+// column unconditionally: a pro who only travels had her look estimate refused
+// (`PRO_SCHEDULING_NOT_READY`) and her Patch Test never found, and a raw salon
+// flag on a pro with an unhostable salon could price a column the commit then
+// refused (`MODE_NOT_SUPPORTED`). #1066 fixed the same class on the public
+// profile one step earlier. Nothing downstream of this module re-reads the
+// raw flags.
 
 import { ServiceLocationType, type Prisma } from '@prisma/client'
 

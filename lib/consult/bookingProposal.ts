@@ -20,7 +20,7 @@
 //
 // 2. THE MODE IS RE-DERIVED, NEVER TRANSLATED. B3 prices the SALON column,
 //    because a look-anchored consult has not chosen a mode yet
-//    (`CONSULT_LOOK_ESTIMATE_LOCATION_TYPE`). B4 is where the client chooses. A
+//    (`consultLookLocationType`). B4 is where the client chooses. A
 //    CSV-imported pro's single price rides both modes, but a hand-configured
 //    pro's mobile column can differ in price AND duration — so every line is
 //    read again from the offering columns for the CHOSEN mode. A mode the pro
