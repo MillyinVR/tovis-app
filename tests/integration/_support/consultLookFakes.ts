@@ -107,7 +107,7 @@ export function buildFakeCaptureStorageModule() {
   }
 }
 
-export async function fakeCheckHairColorCapture() {
+export async function fakeCheckConsultCapture() {
   return {
     accepted: true,
     reasonCode: 'PASS',

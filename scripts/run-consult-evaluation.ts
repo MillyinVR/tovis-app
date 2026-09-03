@@ -5,7 +5,10 @@ import {
   CONSULT_ANALYSIS_DEFAULT_MODEL,
   runConsultAnalysis,
 } from '@/lib/consult/analysisEngine'
-import { HAIR_COLOR_CAPTURE_SHOT_KEYS } from '@/lib/consult/capturePack'
+import {
+  HAIR_COLOR_CAPTURE_PACK_ID,
+  HAIR_COLOR_CAPTURE_SHOT_KEYS,
+} from '@/lib/consult/capturePack'
 import {
   ConsultEvaluationError,
   assertLiveConsultEvaluationAuthorized,
@@ -106,6 +109,10 @@ async function liveProvider(
       categoryName: 'Color',
       serviceName: null,
       menuServiceNames: [],
+    },
+    capturePack: {
+      id: HAIR_COLOR_CAPTURE_PACK_ID,
+      shotKeys: [...HAIR_COLOR_CAPTURE_SHOT_KEYS],
     },
     intake: fixture.intake,
     intakeItems: [],

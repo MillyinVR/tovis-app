@@ -1,13 +1,17 @@
 import Anthropic from '@anthropic-ai/sdk'
 import type { ConsultServiceFamily } from '@prisma/client'
 
+import type {
+  ConsultAnalysisEvidenceDTO,
+  ConsultCaptureShotKeyDTO,
+} from '@/lib/dto/consult'
 import { readOptionalEnv, requireEnv } from '@/lib/env'
 import { isRecord } from '@/lib/guards'
 
 import {
-  HAIR_COLOR_CAPTURE_SHOT_KEYS,
-  type HairColorCaptureShotKey,
-} from './capturePack'
+  CONSULT_ALL_CAPTURE_SHOT_KEYS,
+  CONSULT_MAX_CAPTURE_SHOTS,
+} from './capture/registry'
 import type { ConsultCaptureImage } from './captureStorage'
 import { isAllowedConsultProviderModel } from './providerModel'
 import { CONSULT_SERVICE_FAMILY_LABELS } from './serviceScope'
@@ -79,11 +83,16 @@ export const CONSULT_ANALYSIS_HAIR_EVIDENCE_KEYS = [
   'hair_crown',
 ] as const
 
-export const CONSULT_ANALYSIS_EVIDENCE_KEYS = [
-  ...HAIR_COLOR_CAPTURE_SHOT_KEYS,
+/**
+ * Every evidence label a result may cite: every shot key any capture pack
+ * defines (lib/consult/capture/registry.ts) plus the intake. A run is told
+ * which of these views were actually supplied and may cite only those.
+ */
+export const CONSULT_ANALYSIS_EVIDENCE_KEYS: readonly ConsultAnalysisEvidenceDTO[] = [
+  ...CONSULT_ALL_CAPTURE_SHOT_KEYS,
   'intake',
-] as const
-type EvidenceKey = (typeof CONSULT_ANALYSIS_EVIDENCE_KEYS)[number]
+]
+type EvidenceKey = ConsultAnalysisEvidenceDTO
 
 export const CONSULT_ANALYSIS_TONES = [
   'ASHY',
@@ -362,8 +371,10 @@ export type ConsultAnalysisInput = {
   intake: Readonly<Record<string, string>>
   /** The same answers as the labels the client saw, in pack order. */
   intakeItems: readonly ConsultAnalysisIntakeItem[]
+  /** The shot pack this session served: which views can exist at all. */
+  capturePack: { id: string; shotKeys: readonly ConsultCaptureShotKeyDTO[] }
   captures: ReadonlyArray<{
-    shotKey: HairColorCaptureShotKey
+    shotKey: ConsultCaptureShotKeyDTO
     image: ConsultCaptureImage
   }>
 }
@@ -596,7 +607,7 @@ export const CONSULT_ANALYSIS_OUTPUT_SCHEMA: Record<string, unknown> =
 
 export const CONSULT_ANALYSIS_SYSTEM_PROMPT = [
   'You are a cosmetic-only full styling consultation analysis engine for a professional beauty platform.',
-  'Inputs: a consultation context naming the service family, the service category, the specific service the client is considering when one is known, and the professional’s menu in that category; the client’s intake as the questions and answers she saw (with their immutable option codes); and one to seven labeled daylight photos from the full pack — hair views (hair_back, hair_left, hair_right, hair_crown) and face views (face_front, face_side, eyes_closeup). The client may submit a partial pack; when views are missing, a text line names them.',
+  'Inputs: a consultation context naming the service family, the service category, the specific service the client is considering when one is known, the professional’s menu in that category, and the capture pack this consult uses; the client’s intake as the questions and answers she saw (with their immutable option codes); and one or more labeled daylight photos from that pack — hair views (hair_back, hair_left, hair_right, hair_crown), face views (face_front, face_side, eyes_closeup), or treatment-area views (area_wide, area_closeup). The client may submit a partial pack; when views are missing, a text line names them.',
   'You produce: hair core observations, a feature profile, a service lens, safety flags, service recommendations, and exactly one style direction per domain (HAIR_COLOR_HARMONY, CUT_AND_SHAPE, BANGS, BROWS, LASHES, MAKEUP, COLOR_PALETTE).',
   'Everything you write is FOR the named service. The service lens describes the client’s goal, history, constraints, maintenance and appointment context as they bear on THAT service; recommendations are services from the professional’s menu (named exactly as the menu names them) or a consultation with the professional; the hair core observations are filled from the hair views when hair is the subject and set to UNKNOWN or null when it is not.',
   'Never infer or mention identity, ethnicity, race, nationality, religion, gender, age, health conditions, or diagnoses. Profile observations are cosmetic styling descriptors only.',
@@ -668,7 +679,7 @@ function evidence(
     ? CONSULT_ANALYSIS_HAIR_EVIDENCE_KEYS
     : options.allowIntake
       ? CONSULT_ANALYSIS_EVIDENCE_KEYS
-      : HAIR_COLOR_CAPTURE_SHOT_KEYS
+      : CONSULT_ALL_CAPTURE_SHOT_KEYS
   const result: EvidenceKey[] = []
   for (const item of value) {
     const key = allowed.find((candidate) => candidate === item)
@@ -998,11 +1009,12 @@ export function resetConsultAnalysisClientForTests(): void {
  * Exported so a test can pin exactly what the model is told about the service.
  */
 export function consultAnalysisContextBlocks(
-  input: Pick<ConsultAnalysisInput, 'service' | 'intake' | 'intakeItems'>,
+  input: Pick<ConsultAnalysisInput, 'service' | 'intake' | 'intakeItems' | 'capturePack'>,
 ): string[] {
   const menu = input.service.menuServiceNames.map((name) => name.trim()).filter(Boolean)
   const context = [
     `Consultation context:`,
+    `Capture pack: ${input.capturePack.id} (views: ${input.capturePack.shotKeys.join(', ')})`,
     `Service family: ${CONSULT_SERVICE_FAMILY_LABELS[input.service.family]}`,
     `Service category: ${input.service.categoryName}`,
     input.service.serviceName
@@ -1033,21 +1045,20 @@ export const runConsultAnalysis: ConsultAnalysisProvider = async (input) => {
   const capturesByShot = new Map(
     input.captures.map((capture) => [capture.shotKey, capture] as const),
   )
+  const packKeys = input.capturePack.shotKeys
   if (
     input.captures.length < 1 ||
-    input.captures.length > HAIR_COLOR_CAPTURE_SHOT_KEYS.length ||
+    input.captures.length > CONSULT_MAX_CAPTURE_SHOTS ||
+    packKeys.length < 1 ||
     capturesByShot.size !== input.captures.length ||
-    input.captures.some(
-      (capture) =>
-        !HAIR_COLOR_CAPTURE_SHOT_KEYS.some((key) => key === capture.shotKey),
-    )
+    input.captures.some((capture) => !packKeys.includes(capture.shotKey))
   ) {
     throw new ConsultAnalysisProviderError('bad_output')
   }
   const model = analysisModel()
   const content: Anthropic.ContentBlockParam[] = []
-  const missingShotKeys: HairColorCaptureShotKey[] = []
-  for (const shotKey of HAIR_COLOR_CAPTURE_SHOT_KEYS) {
+  const missingShotKeys: ConsultCaptureShotKeyDTO[] = []
+  for (const shotKey of packKeys) {
     const capture = capturesByShot.get(shotKey)
     if (!capture) {
       missingShotKeys.push(shotKey)
@@ -1153,7 +1164,7 @@ export function validateConsultAnalysisProviderResult(
   result: { analysis: unknown; model: string },
   args: {
     menuServiceNames: readonly string[]
-    suppliedShotKeys?: readonly HairColorCaptureShotKey[]
+    suppliedShotKeys?: readonly ConsultCaptureShotKeyDTO[]
   },
 ): ConsultAnalysisProviderResult {
   const model = result.model.trim()

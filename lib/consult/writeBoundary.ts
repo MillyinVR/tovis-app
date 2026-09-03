@@ -27,7 +27,7 @@ import {
   toBriefJsonPayload,
 } from './briefContract'
 import { CONSULT_ANCHOR_SELECT, evaluateConsultAnchor } from './anchor'
-import { HAIR_COLOR_CAPTURE_SHOT_KEYS } from './capturePack'
+import { CONSULT_MAX_CAPTURE_SHOTS } from './capture/registry'
 import { ConsultWriteError } from './errors'
 import {
   normalizeConsultIntakePayload,
@@ -575,7 +575,7 @@ export async function finalizeLockedHairColorAnalysis(
   // purge-marked below — the count equality keeps that exact.
   if (
     args.captureIds.length < 1 ||
-    args.captureIds.length > HAIR_COLOR_CAPTURE_SHOT_KEYS.length ||
+    args.captureIds.length > CONSULT_MAX_CAPTURE_SHOTS ||
     new Set(args.captureIds).size !== args.captureIds.length
   ) {
     throw new ConsultWriteError(

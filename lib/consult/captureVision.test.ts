@@ -16,7 +16,7 @@ vi.mock('@anthropic-ai/sdk', () => ({
 }))
 
 import {
-  checkHairColorCapture,
+  checkConsultCapture,
   ConsultCaptureVisionError,
   resetConsultCaptureVisionClientForTests,
 } from './captureVision'
@@ -42,12 +42,12 @@ afterEach(() => {
   delete process.env.AI_CONSULT_CAPTURE_MODEL
 })
 
-describe('checkHairColorCapture', () => {
+describe('checkConsultCapture', () => {
   it('fails closed before sending the photo when the model override is not allowlisted', async () => {
     process.env.AI_CONSULT_CAPTURE_MODEL = 'claude-sonnet-5-typo'
 
     await expect(
-      checkHairColorCapture({ shotKey: 'hair_back', image: IMAGE }),
+      checkConsultCapture({ shotKey: 'hair_back', image: IMAGE }),
     ).rejects.toBeInstanceOf(ConsultCaptureVisionError)
     // The assertion that matters: the image never reached the provider.
     expect(mocks.create).not.toHaveBeenCalled()
@@ -62,7 +62,7 @@ describe('checkHairColorCapture', () => {
       }),
     )
 
-    const result = await checkHairColorCapture({
+    const result = await checkConsultCapture({
       shotKey: 'hair_crown',
       image: IMAGE,
     })
@@ -85,7 +85,7 @@ describe('checkHairColorCapture', () => {
       message({ accepted: true, reasonCode: 'PASS', retakeTip: 'ignore me' }),
     )
     await expect(
-      checkHairColorCapture({ shotKey: 'hair_back', image: IMAGE }),
+      checkConsultCapture({ shotKey: 'hair_back', image: IMAGE }),
     ).resolves.toMatchObject({
       accepted: true,
       reasonCode: 'PASS',
@@ -100,7 +100,7 @@ describe('checkHairColorCapture', () => {
         message({ accepted: true, reasonCode, retakeTip: null }),
       )
       await expect(
-        checkHairColorCapture({ shotKey: 'hair_left', image: IMAGE }),
+        checkConsultCapture({ shotKey: 'hair_left', image: IMAGE }),
       ).rejects.toMatchObject({ kind: 'bad_output' } satisfies Partial<ConsultCaptureVisionError>)
     },
   )
@@ -108,7 +108,7 @@ describe('checkHairColorCapture', () => {
   it('maps provider errors and refusals to typed content-free failures', async () => {
     mocks.create.mockRejectedValueOnce(new Error('provider secret detail'))
     await expect(
-      checkHairColorCapture({ shotKey: 'hair_right', image: IMAGE }),
+      checkConsultCapture({ shotKey: 'hair_right', image: IMAGE }),
     ).rejects.toMatchObject({
       kind: 'unavailable',
       message: 'Capture quality checking is unavailable.',
@@ -116,7 +116,7 @@ describe('checkHairColorCapture', () => {
 
     mocks.create.mockResolvedValueOnce(message({}, 'refusal'))
     await expect(
-      checkHairColorCapture({ shotKey: 'hair_right', image: IMAGE }),
+      checkConsultCapture({ shotKey: 'hair_right', image: IMAGE }),
     ).rejects.toMatchObject({ kind: 'refused' } satisfies Partial<ConsultCaptureVisionError>)
   })
 })

@@ -21,7 +21,7 @@ import {
 import { buildMediaAssetCreateData } from '@/lib/media/recordMediaAsset'
 import { prisma } from '@/lib/prisma'
 
-import { HAIR_COLOR_CAPTURE_PACK } from './capturePack'
+import { findConsultCaptureShot } from './capture/registry'
 import {
   CONSULT_CAPTURE_BUCKET,
   consultCaptureStorage,
@@ -49,10 +49,7 @@ function chartCopyObjectPath(args: {
 }
 
 function shotTitle(shotKey: string): string {
-  return (
-    HAIR_COLOR_CAPTURE_PACK.shots.find((shot) => shot.key === shotKey)?.title ??
-    shotKey
-  )
+  return findConsultCaptureShot(shotKey)?.title ?? shotKey
 }
 
 /**

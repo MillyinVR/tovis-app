@@ -57,7 +57,7 @@ vi.mock('@/lib/consult/captureVision', async (importOriginal) => {
   const original =
     await importOriginal<typeof import('@/lib/consult/captureVision')>()
   const fakes = await import('./_support/consultLookFakes')
-  return { ...original, checkHairColorCapture: fakes.fakeCheckHairColorCapture }
+  return { ...original, checkConsultCapture: fakes.fakeCheckConsultCapture }
 })
 
 vi.mock('@/lib/consult/analysisEngine', async (importOriginal) => {

@@ -4,7 +4,7 @@ import { readOptionalEnv, requireEnv } from '@/lib/env'
 import { isRecord } from '@/lib/guards'
 import type { ConsultCaptureQualityReasonCodeDTO } from '@/lib/dto/consult'
 
-import type { HairColorCaptureShotKey } from './capturePack'
+import { findConsultCaptureShot } from './capture/registry'
 import { isAllowedConsultProviderModel } from './providerModel'
 
 export const CONSULT_CAPTURE_MEDIA_TYPES = [
@@ -24,6 +24,7 @@ export const CONSULT_CAPTURE_QUALITY_REASON_CODES = [
   'COLOR_CAST',
   'VIEW_MISMATCH',
   'HAIR_NOT_VISIBLE',
+  'SUBJECT_NOT_VISIBLE',
   'BLURRY',
   'TOO_DARK',
   'TOO_BRIGHT',
@@ -99,27 +100,17 @@ const SYSTEM =
   'even if the requested view is otherwise visible. Return exactly one ' +
   'stable reason code and at most one short retake tip.'
 
-const SHOT_ACCEPTANCE: Readonly<Record<HairColorCaptureShotKey, string>> = {
-  hair_back:
-    'Accept only when the full back of the hair is clearly represented, the relevant hair and roots are sufficiently visible, focus and exposure are usable, and indirect daylight preserves color.',
-  hair_left:
-    'Accept only when the left side of the hair is clearly represented, the relevant hair and roots are sufficiently visible, focus and exposure are usable, and indirect daylight preserves color.',
-  hair_right:
-    'Accept only when the right side of the hair is clearly represented, the relevant hair and roots are sufficiently visible, focus and exposure are usable, and indirect daylight preserves color.',
-  hair_crown:
-    'Accept only when the crown, part, and surrounding roots are clearly represented, focus and exposure are usable, and indirect daylight preserves color.',
-  face_front:
-    'Accept only when one full front-facing face is clearly represented with hairline, brows, both eyes, and jawline visible and unobstructed, focus and exposure are usable, no beauty filter is apparent, and indirect daylight preserves color. Use VIEW_MISMATCH when the face is missing, obstructed, or not front-facing.',
-  face_side:
-    'Accept only when a full side profile is clearly represented with forehead, nose, lips, chin, and jawline visible in silhouette, focus and exposure are usable, no beauty filter is apparent, and indirect daylight preserves color. Use VIEW_MISMATCH when the profile is missing or partial.',
-  eyes_closeup:
-    'Accept only when both open eyes and both full brows fill most of the frame in sharp focus, exposure is usable, no beauty filter is apparent, and indirect daylight preserves color. Use VIEW_MISMATCH when eyes or brows are cropped, closed, or obstructed.',
-}
-
-function instructions(shotKey: HairColorCaptureShotKey): string {
+/**
+ * The acceptance sentence for a view comes from the shot's definition in the
+ * capture registry (lib/consult/capture/), so a new pack brings its own rules
+ * and this gate never has to know which family it is judging.
+ */
+function instructions(shotKey: string): string {
+  const shot = findConsultCaptureShot(shotKey)
+  if (!shot) throw new ConsultCaptureVisionError('bad_output')
   return [
     `Requested view: ${shotKey}.`,
-    SHOT_ACCEPTANCE[shotKey],
+    shot.acceptance,
     'WARM_INDOOR_LIGHT and COLOR_CAST are always rejected.',
     'Use PASS only with accepted=true. Every other reason requires accepted=false.',
     'retakeTip must be null on acceptance; on rejection provide zero or one concrete sentence, max 160 characters.',
@@ -163,8 +154,8 @@ function sanitize(
   }
 }
 
-export async function checkHairColorCapture(input: {
-  shotKey: HairColorCaptureShotKey
+export async function checkConsultCapture(input: {
+  shotKey: string
   image: { base64: string; mediaType: ConsultCaptureMediaType }
 }): Promise<ConsultCaptureQualityResult> {
   const model = modelName()

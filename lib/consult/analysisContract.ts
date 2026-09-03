@@ -12,7 +12,10 @@ import {
   UploadSurface,
 } from '@prisma/client'
 
-import type { ConsultAnalysisStateDTO } from '@/lib/dto/consult'
+import type {
+  ConsultAnalysisStateDTO,
+  ConsultCaptureShotKeyDTO,
+} from '@/lib/dto/consult'
 import { decimalToCents } from '@/lib/money'
 import { prisma } from '@/lib/prisma'
 
@@ -27,13 +30,8 @@ import {
   type ConsultAnalysisProviderOutput,
   type ConsultAnalysisServiceContext,
 } from './analysisEngine'
-import {
-  HAIR_COLOR_CAPTURE_PACK_VERSION,
-  HAIR_COLOR_CAPTURE_SCHEMA_VERSION,
-  HAIR_COLOR_CAPTURE_SHOT_KEYS,
-  isHairColorCaptureShotKey,
-  type HairColorCaptureShotKey,
-} from './capturePack'
+import { isConsultCaptureShotKey, packHasShot } from './capture/registry'
+import type { ConsultCapturePackDefinition } from './capture/types'
 import {
   CONSULT_CAPTURE_BUCKET,
   ConsultCaptureStorageError,
@@ -349,6 +347,9 @@ async function currentCaptures(
   session: AnalysisScope,
   now: Date,
 ): Promise<AnalysisCapture[]> {
+  const pack: ConsultCapturePackDefinition = resolveConsultServiceProfile(
+    session.serviceCategory,
+  ).capturePack
   const captures = await tx.consultCapture.findMany({
     where: {
       consultSessionId: session.id,
@@ -359,9 +360,9 @@ async function currentCaptures(
     select: CAPTURE_SELECT,
     orderBy: [{ shotKey: 'asc' }, { id: 'asc' }],
   })
-  const byShot = new Map<HairColorCaptureShotKey, AnalysisCapture>()
+  const byShot = new Map<string, AnalysisCapture>()
   for (const capture of captures) {
-    if (!isHairColorCaptureShotKey(capture.shotKey) || byShot.has(capture.shotKey)) {
+    if (!packHasShot(pack, capture.shotKey) || byShot.has(capture.shotKey)) {
       throw new ConsultWriteError(
         'ANALYSIS_PREREQUISITES_REQUIRED',
         'The current capture pack is incomplete.',
@@ -369,8 +370,8 @@ async function currentCaptures(
     }
     const upload = capture.uploadSession
     if (
-      capture.shotPackVersion !== HAIR_COLOR_CAPTURE_PACK_VERSION ||
-      capture.schemaVersion !== HAIR_COLOR_CAPTURE_SCHEMA_VERSION ||
+      capture.shotPackVersion !== pack.version ||
+      capture.schemaVersion !== pack.schemaVersion ||
       capture.storageBucket !== CONSULT_CAPTURE_BUCKET ||
       !capture.storagePath ||
       capture.qualityReasonCode !== 'PASS' ||
@@ -411,8 +412,9 @@ async function currentCaptures(
       'At least one accepted, unexpired capture is required.',
     )
   }
-  return HAIR_COLOR_CAPTURE_SHOT_KEYS.flatMap((shotKey) => {
-    const capture = byShot.get(shotKey)
+  // Pack order is the fixed evidence order the provider is sent.
+  return pack.shots.flatMap(({ key }) => {
+    const capture = byShot.get(key)
     return capture ? [capture] : []
   })
 }
@@ -420,12 +422,13 @@ async function currentCaptures(
 async function readVerifiedImages(
   captures: readonly AnalysisCapture[],
   storage: ConsultCaptureStorage,
-): Promise<Array<{ shotKey: HairColorCaptureShotKey; image: ConsultCaptureImage }>> {
+): Promise<Array<{ shotKey: ConsultCaptureShotKeyDTO; image: ConsultCaptureImage }>> {
   try {
     await storage.assertReady()
     const images = []
     for (const capture of captures) {
-      if (!isHairColorCaptureShotKey(capture.shotKey) || !capture.storagePath) {
+      if (
+        !isConsultCaptureShotKey(capture.shotKey) ||!capture.storagePath) {
         throw new ConsultCaptureStorageError('invalid')
       }
       const mediaType = captureMediaType(capture.contentType)
@@ -827,7 +830,8 @@ export async function runConsultAnalysis(args: {
         const images = await readVerifiedImages(captures, storage)
         const menu = await loadRecommendationOfferings(tx, session)
         const service = await loadServiceContext(tx, session, menu)
-        const pack = resolveConsultServiceProfile(session.serviceCategory).intakePack
+        const profile = resolveConsultServiceProfile(session.serviceCategory)
+        const pack = profile.intakePack
         let providerResult
         try {
           providerResult = validateConsultAnalysisProviderResult(
@@ -835,6 +839,10 @@ export async function runConsultAnalysis(args: {
               service,
               intake: intake.payload.answers,
               intakeItems: consultIntakeItems(pack, intake.payload.answers),
+              capturePack: {
+                id: profile.capturePack.id,
+                shotKeys: profile.capturePack.shots.map((shot) => shot.key),
+              },
               captures: images,
             }),
             {

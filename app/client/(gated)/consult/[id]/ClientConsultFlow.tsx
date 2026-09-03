@@ -135,6 +135,7 @@ const QUALITY_REASON_COPY: Readonly<
   COLOR_CAST: 'A color tint in the light is masking the true hair color.',
   VIEW_MISMATCH: 'This doesn’t look like the view this photo asks for.',
   HAIR_NOT_VISIBLE: 'The hair isn’t clearly visible in this photo.',
+  SUBJECT_NOT_VISIBLE: 'The area this photo asks for isn’t clearly visible.',
   BLURRY: 'The photo is too blurry to use.',
   TOO_DARK: 'The photo is too dark to read.',
   TOO_BRIGHT: 'The photo is too bright or washed out.',

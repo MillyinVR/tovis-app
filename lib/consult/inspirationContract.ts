@@ -55,7 +55,7 @@ import {
   type ConsultInspirationStorage,
 } from './inspirationStorage'
 import { CONSULT_CAPTURE_MEDIA_TYPES, type ConsultCaptureMediaType } from './captureVision'
-import { HAIR_COLOR_CAPTURE_SHOT_KEYS } from './capturePack'
+import { CONSULT_MAX_CAPTURE_SHOTS } from './capture/registry'
 import {
   appendLockedConsultInspirationRevision,
   transitionLockedConsultSession,
@@ -316,8 +316,10 @@ export async function advanceLockedConsultToAnalysisIfReady(
     select: { shotKey: true },
   })
   const accepted = new Set(captures.map(({ shotKey }) => shotKey))
+  // Callers pass the served pack's slot count; with no option the largest
+  // pack is required, which is the fail-safe direction.
   const minimumAcceptedShots =
-    options?.minimumAcceptedShots ?? HAIR_COLOR_CAPTURE_SHOT_KEYS.length
+    options?.minimumAcceptedShots ?? CONSULT_MAX_CAPTURE_SHOTS
   if (accepted.size < minimumAcceptedShots) {
     return false
   }

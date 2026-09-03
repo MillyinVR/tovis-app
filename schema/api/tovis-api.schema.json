@@ -7277,17 +7277,15 @@
       "type": "object"
     },
     "ConsultAnalysisEvidenceDTO": {
-      "enum": [
-        "hair_back",
-        "hair_left",
-        "hair_right",
-        "hair_crown",
-        "face_front",
-        "face_side",
-        "eyes_closeup",
-        "intake"
-      ],
-      "type": "string"
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ConsultCaptureShotKeyDTO"
+        },
+        {
+          "const": "intake",
+          "type": "string"
+        }
+      ]
     },
     "ConsultAnalysisFeatureProfileDTO": {
       "properties": {
@@ -8714,6 +8712,7 @@
         "COLOR_CAST",
         "VIEW_MISMATCH",
         "HAIR_NOT_VISIBLE",
+        "SUBJECT_NOT_VISIBLE",
         "BLURRY",
         "TOO_DARK",
         "TOO_BRIGHT",
@@ -8821,18 +8820,18 @@
         "hair_crown",
         "face_front",
         "face_side",
-        "eyes_closeup"
+        "eyes_closeup",
+        "area_wide",
+        "area_closeup"
       ],
       "type": "string"
     },
     "ConsultCaptureShotPackDTO": {
       "properties": {
         "categorySlug": {
-          "const": "hair-color",
           "type": "string"
         },
         "id": {
-          "const": "hair-color-daylight",
           "type": "string"
         },
         "schemaVersion": {
