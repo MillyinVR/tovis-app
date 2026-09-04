@@ -38,30 +38,43 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
 
-      # npm retired the classic audit endpoints (HTTP 410, July 2026) and no
-      # released pnpm — 10.x through 11.13 — speaks the bulk-advisory
-      # replacement yet, so `pnpm audit` cannot currently produce results at
-      # all. Tolerate exactly that failure mode (with a loud warning) and fail
-      # on anything else, so the gate self-heals the moment pnpm ships the
-      # migration and real advisories block again.
+      # `pnpm audit` speaks npm's bulk advisories endpoint from pnpm 11.0.0
+      # onward; the legacy `/-/npm/v1/security/audits{,/quick}` pair it used
+      # before that was retired by the registry, which is why this repo pins
+      # pnpm 11 (see pnpm-workspace.yaml for what that move dragged with it).
+      #
+      # It is still a call to a service we do not run. On 2026-09-04 npm's
+      # advisory endpoints stopped answering at all — verified from a laptop
+      # whose plain `GET registry.npmjs.org/lodash` returned 200 in 0.1s, while
+      # BOTH the legacy and the bulk POST hung with no response — and each hung
+      # call burns ~4 minutes of pnpm's own retries. One outage therefore ate
+      # this job's whole 10-minute budget and reddened every open PR.
+      #
+      # So the npm-backed audit is bounded and best-effort, and the floor under it is the
+      # dependency-review step below, which reads GitHub's own data and never
+      # touches npm. Tolerating an unreachable service here is not a hole in
+      # what a PR can introduce: an outage means this step has no opinion, and
+      # dependency review still has one about what the PR ADDS. It does mean
+      # the pre-existing tree goes unchecked for that run, which is why the
+      # warning says so rather than passing quietly.
       - name: Audit production dependencies (moderate+)
         run: |
           set +e
-          output=$(pnpm audit --prod --audit-level=moderate 2>&1)
+          output=$(timeout 150 pnpm audit --prod --audit-level=moderate 2>&1)
           rc=$?
           echo "$output"
-          if [ $rc -ne 0 ] && echo "$output" | grep -q "ERR_PNPM_AUDIT_BAD_RESPONSE"; then
-            echo "::warning::pnpm audit skipped: npm retired the classic audit endpoints and pnpm has no bulk-advisory support yet."
+          if [ "$rc" -ne 0 ] && { [ "$rc" -eq 124 ] || echo "$output" | grep -qE 'ERR_SOCKET_TIMEOUT|ERR_PNPM_AUDIT_BAD_RESPONSE|ECONNRESET|ETIMEDOUT|EAI_AGAIN'; }; then
+            echo "::warning::pnpm audit (prod) skipped: npm's advisory service did not answer. The dependency-review step still gates what this PR adds; the pre-existing tree is unchecked on this run."
             exit 0
           fi
           exit $rc
 
-      # One advisory is ignored via `pnpm.auditConfig.ignoreGhsas` in
-      # package.json — GHSA-mh99-v99m-4gvg (brace-expansion DoS, "<=5.0.7").
-      # That range covers the whole 1.x line, and the only path to it is
-      # dev-only tooling: eslint 9 and its plugins still depend on
-      # minimatch@3, which pins brace-expansion@^1.1.x. It cannot be fixed
-      # with an override: brace-expansion 5.x's CJS entry exports an OBJECT
+      # One advisory is ignored via `auditConfig.ignoreGhsas` in
+      # pnpm-workspace.yaml — GHSA-mh99-v99m-4gvg (brace-expansion DoS,
+      # "<=5.0.7"). That range covers the whole 1.x line, and the only path to
+      # it is dev-only tooling: eslint 9 and its plugins still depend on
+      # minimatch@3, which pins brace-expansion@^1.1.x. It cannot be fixed with
+      # an override: brace-expansion 5.x's CJS entry exports an OBJECT
       # ({ expand, EXPANSION_MAX, ... }), while minimatch@3 does
       # `require('brace-expansion')(pattern)` — forcing the bump makes eslint
       # throw "expand is not a function". Nothing here ships to production
@@ -70,14 +83,40 @@ jobs:
       - name: Audit all dependencies (high+)
         run: |
           set +e
-          output=$(pnpm audit --audit-level=high 2>&1)
+          output=$(timeout 150 pnpm audit --audit-level=high 2>&1)
           rc=$?
           echo "$output"
-          if [ $rc -ne 0 ] && echo "$output" | grep -q "ERR_PNPM_AUDIT_BAD_RESPONSE"; then
-            echo "::warning::pnpm audit skipped: npm retired the classic audit endpoints and pnpm has no bulk-advisory support yet."
+          if [ "$rc" -ne 0 ] && { [ "$rc" -eq 124 ] || echo "$output" | grep -qE 'ERR_SOCKET_TIMEOUT|ERR_PNPM_AUDIT_BAD_RESPONSE|ECONNRESET|ETIMEDOUT|EAI_AGAIN'; }; then
+            echo "::warning::pnpm audit (all) skipped: npm's advisory service did not answer. The dependency-review step still gates what this PR adds; the pre-existing tree is unchecked on this run."
             exit 0
           fi
           exit $rc
+
+      # The floor for when npm is down. GITHUB_TOKEN CANNOT read the Dependabot
+      # alerts API — proven, not assumed: a step that called it here got
+      # "403 Resource not accessible by integration", and no `permissions:` key
+      # grants it (the Actions token has no Dependabot-alerts scope; a PAT with
+      # `security_events` would be needed). So this reads the Dependency Review
+      # API instead, which the Actions token CAN use on a public repo.
+      #
+      # What it covers: dependencies this PR ADDS or CHANGES, computed by GitHub
+      # from the lockfile, with no call to npm. So an npm outage can no longer
+      # leave a PR with no dependency gate at all.
+      #
+      # What it does NOT cover: the pre-existing tree. That is the `pnpm audit`
+      # steps above (whole tree, via npm) plus Dependabot alerts themselves,
+      # which are enabled on this repo and notify out of band. Enforcing the
+      # whole tree in CI needs a PAT secret with `security_events` — a decision
+      # about a long-lived token, deliberately not taken here.
+      - name: Dependency review (blocks a PR that adds a high+ vulnerability)
+        if: github.event_name == 'pull_request'
+        uses: actions/dependency-review-action@v5
+        with:
+          fail-on-severity: high
+          # Matches auditConfig.ignoreGhsas in pnpm-workspace.yaml. Kept in step
+          # with that list: a GHSA waived for `pnpm audit` and blocked here would
+          # be two gates disagreeing about the same advisory.
+          allow-ghsas: GHSA-mh99-v99m-4gvg
 
   secret-scan:
     name: Secret scan (gitleaks)
