@@ -330,6 +330,7 @@ import {
   HAIR_COLOR_INTAKE_SCHEMA_VERSION,
 } from '@/lib/consult/intakePack'
 import { loadAuthorizedClientConsultResults } from '@/lib/consult/clientResults'
+import { analyzeConsultInspiration } from '@/lib/consult/inspirationAnalysisContract'
 import { loadAuthorizedProConsultBriefs } from '@/lib/consult/proBrief'
 import {
   acceptConsultAgreement,
@@ -1374,6 +1375,104 @@ describe('P4 — the inspiration reference is read, stored, and reaches both aud
       model: 'fake-inspiration-model',
     })
     expect(brief?.inspirationAnalysis?.attributes.technique.value).toBe('BALAYAGE')
+  })
+
+  it('the standalone entry point refuses an unknown id, and cannot write outside ANALYZING', async () => {
+    // `analyzeConsultInspiration(inspirationId)` is the narrow re-read path:
+    // the shipped flow calls the locked core directly because it already holds
+    // the session lock. Its guard surface is what matters here.
+    await expect(
+      analyzeConsultInspiration('no-such-inspiration', {
+        idempotencyKey: 'standalone-unknown',
+      }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' })
+
+    // Re-reading a reference whose artefact already exists returns THAT
+    // artefact and spends nothing: the request hash is over the inspiration
+    // revision, the prompt version and the schema version, so the same
+    // reference under the same prompt is the same read. This is the property
+    // that keeps a retry from paying for a second vision call.
+    const finished = await db.consultSession.findFirstOrThrow({
+      where: { id: { in: sessionIds }, status: ConsultSessionStatus.COMPLETED },
+      select: { id: true },
+    })
+    const source = await db.consultInspiration.findFirstOrThrow({
+      where: {
+        consultSessionId: finished.id,
+        status: ConsultInspirationStatus.ATTACHED,
+      },
+      select: { id: true },
+    })
+    const stored = await db.consultRevision.findFirstOrThrow({
+      where: {
+        consultSessionId: finished.id,
+        kind: ConsultRevisionKind.INSPIRATION_ANALYSIS,
+      },
+      orderBy: { revision: 'desc' },
+      select: { id: true },
+    })
+    const before = await db.consultRevision.count({
+      where: {
+        consultSessionId: finished.id,
+        kind: ConsultRevisionKind.INSPIRATION_ANALYSIS,
+      },
+    })
+    const reread = await analyzeConsultInspiration(source.id, {
+      idempotencyKey: 'standalone-completed',
+    })
+    expect(reread.revisionId).toBe(stored.id)
+    expect(
+      await db.consultRevision.count({
+        where: {
+          consultSessionId: finished.id,
+          kind: ConsultRevisionKind.INSPIRATION_ANALYSIS,
+        },
+      }),
+    ).toBe(before)
+  })
+
+  it('the lifecycle pin refuses an artefact written outside ANALYZING', async () => {
+    // Sabotage the state, not the payload: a structurally perfect artefact on
+    // a COMPLETED session must still be refused, or the pin added with the
+    // kind is decorative.
+    const finished = await db.consultSession.findFirstOrThrow({
+      where: { id: { in: sessionIds }, status: ConsultSessionStatus.COMPLETED },
+      select: { id: true, revisionSequence: true },
+    })
+    const inspirationRevision = await db.consultRevision.findFirstOrThrow({
+      where: {
+        consultSessionId: finished.id,
+        kind: ConsultRevisionKind.INSPIRATION,
+      },
+      orderBy: { revision: 'desc' },
+      select: { id: true },
+    })
+    const valid = await db.consultRevision.findFirstOrThrow({
+      where: {
+        consultSessionId: finished.id,
+        kind: ConsultRevisionKind.INSPIRATION_ANALYSIS,
+      },
+      orderBy: { revision: 'desc' },
+      select: { payload: true },
+    })
+    expect(
+      (valid.payload as { inspirationRevisionId: string }).inspirationRevisionId,
+    ).toBe(inspirationRevision.id)
+    await expect(
+      db.consultRevision.create({
+        data: {
+          consultSessionId: finished.id,
+          revision: finished.revisionSequence + 1,
+          kind: ConsultRevisionKind.INSPIRATION_ANALYSIS,
+          schemaVersion: 1,
+          promptVersion: 'inspiration-hair-color-v1',
+          model: 'fake-inspiration-model',
+          idempotencyKey: 'outside-analyzing',
+          requestHash: 'b'.repeat(64),
+          payload: valid.payload as Prisma.InputJsonObject,
+        },
+      }),
+    ).rejects.toThrow()
   })
 
   it('the database refuses an artefact pinned to a stale inspiration revision', async () => {

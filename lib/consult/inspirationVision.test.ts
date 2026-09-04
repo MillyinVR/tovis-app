@@ -173,7 +173,8 @@ describe('sanitizeConsultInspirationAnalysis', () => {
     expect(() =>
       sanitizeConsultInspirationAnalysis({ ...output(), porosity: known('HIGH') }),
     ).toThrowError(ConsultInspirationVisionError)
-    const { dimension: _dropped, ...missing } = output()
+    const missing = { ...output() }
+    delete (missing as Partial<typeof missing>).dimension
     expect(() => sanitizeConsultInspirationAnalysis(missing)).toThrowError(
       ConsultInspirationVisionError,
     )
