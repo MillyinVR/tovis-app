@@ -38,7 +38,7 @@ export const runtime = 'nodejs'
  * would have surfaced as an intermittent gateway timeout AFTER the client had
  * been billed for the model calls.
  *
- * That 230s holds only because both of those clients run with `maxRetries: 0`.
+ * That 245s holds only because both of those clients run with `maxRetries: 0`.
  * The SDK retries a timeout by default, which doubled a single slow direction
  * call to 180s in a measured run — more than this whole budget, for one call.
  *

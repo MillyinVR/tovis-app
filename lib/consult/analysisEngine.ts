@@ -66,6 +66,20 @@ export const CONSULT_ANALYSIS_SCHEMA_VERSION = 4
 // v5 also means THESE PROMPTS AT THIS EFFORT: `CONSULT_ANALYSIS_EFFORT` changes
 // what comes back as much as a reworded sentence does (at the default the
 // direction call truncated), so moving it is a prompt-version change.
+//
+// ⚠️ This constant and `consult_analysis_payload_guard` are a HARD CUTOVER, and
+// the deploy cannot make them simultaneous. `vercel.json` runs
+// `prisma migrate deploy` inside the PRODUCTION BUILD, which completes while
+// the PREVIOUS deployment is still serving — so for the length of that build
+// the old code writes `service-analysis-v4` into a database that already
+// demands v5, and the guard refuses it with 23514 at the very end of the paid
+// provider calls. Shipping the code first fails identically with the versions
+// swapped; a single-value pin has no safe ordering by construction.
+// Accepted, not overlooked: the analysis is founder-gated, so the blast radius
+// is one account for one build. If it ever opens to real clients, the fix is a
+// two-deploy migration (widen the guard to accept BOTH versions, ship, then
+// narrow it again) — never a permanently looser guard, because the pin is what
+// makes a stored revision provably the product of a known prompt.
 export const CONSULT_ANALYSIS_PROMPT_VERSION = 'service-analysis-v5'
 export const CONSULT_ANALYSIS_DEFAULT_MODEL = 'claude-sonnet-5'
 /**
