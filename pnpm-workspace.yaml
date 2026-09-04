@@ -1,0 +1,80 @@
+# pnpm-workspace.yaml — pnpm's settings file.
+#
+# This is NOT about workspaces (Tovis is a single package). pnpm 11.0.0 stopped
+# reading settings from the `pnpm` field of package.json (pnpm/pnpm#10086) and
+# stopped reading non-auth settings from .npmrc (pnpm/pnpm#11189). Settings left
+# behind in those places are IGNORED, not migrated — pnpm 10 honoured the
+# overrides below, pnpm 11 would have silently dropped all of them. pnpm 11.1.3
+# added the warning that catches this; do not remove this file's settings back
+# into package.json to "tidy up".
+
+# Security pins. Every entry is a CVE/GHSA remediation forcing a transitive
+# dependency past its vulnerable range. Losing these silently reverts the tree to
+# vulnerable versions, which is exactly what the package.json location would have
+# done on the pnpm 11 bump. Keep them sorted as they were.
+overrides:
+  "axios@>=1.0.0 <1.18.0": "^1.18.0"
+  "brace-expansion@<1.1.18": "^1.1.18"
+  "brace-expansion@>=2.0.0 <2.1.2": "^2.1.2"
+  "brace-expansion@>=3.0.0 <5.0.9": "^5.0.9"
+  "js-yaml@>=3.0.0 <3.15.0": "^3.15.0"
+  "js-yaml@>=4.0.0 <4.3.1": "^4.3.1"
+  "deepmerge-ts@<8.0.0": "^8.0.1"
+  "defu@<=6.1.4": "^6.1.5"
+  "esbuild@>=0.17.0 <0.28.1": "^0.28.1"
+  "flatted@<3.4.2": "^3.4.2"
+  "form-data@>=4.0.0 <4.0.6": "^4.0.6"
+  "lodash@<=4.17.23": "^4.18.0"
+  "nanoid@<3.3.17": "^3.3.17"
+  "effect@<3.20.0": "^3.20.0"
+  "fast-uri@<3.1.6": "^3.1.6"
+  "follow-redirects@<=1.15.11": "^1.16.0"
+  "picomatch@<2.3.2": "^2.3.2"
+  "picomatch@>=4.0.0 <4.0.4": "^4.0.4"
+  "postcss@<8.5.18": "^8.5.18"
+  "qs@>=2.2.5 <6.16.0": "^6.16.0"
+  "vite@>=7.0.0 <7.3.2": "^7.3.2"
+  "ws@>=8.0.0 <8.20.1": "^8.20.1"
+  "yaml@>=1.0.0 <1.10.3": "^1.10.3"
+  "@opentelemetry/core@<2.8.0": "^2.8.0"
+  "sharp@<0.35.0": "^0.35.0"
+  "@babel/core@<=7.29.0": "^7.29.6"
+  "browserslist@<=4.28.6": "^4.28.7"
+  "undici@>=7.0.0 <7.29.0": "^7.29.0"
+
+# Was `pnpm.auditConfig` in package.json. pnpm 12 renames this pair to
+# `audit.ignore`; `auditConfig` keeps working until then, so it stays spelled the
+# way the running pnpm (11.x) expects.
+auditConfig:
+  ignoreGhsas:
+    - GHSA-mh99-v99m-4gvg
+
+# Mirrors `engine-strict=true` in .npmrc. That file is still read by npm — which
+# runs this repo's scripts — so it keeps its copy; this is pnpm's, because pnpm 11
+# no longer reads it from there. Both must say the same thing.
+engineStrict: true
+
+# Dependency build scripts. `false` means "deliberately NOT built" — pnpm 11
+# replaced the pnpm 10 spellings (`onlyBuiltDependencies`,
+# `ignoredBuiltDependencies`, `neverBuiltDependencies`) with this map and
+# silently ignores the old ones, so a migrated workspace looks configured while
+# saying nothing.
+#
+# Declaring them is not optional under pnpm 11: an undeclared blocked build is
+# ERR_PNPM_IGNORED_BUILDS and `pnpm install` EXITS 1 on it, where pnpm 10 only
+# warned. That is what took out the integration and E2E jobs on the first
+# attempt at this upgrade.
+#
+# Every entry is `false`, which is exactly what pnpm 10 did here — none of these
+# has ever run a build script in this repo, and the Next build, vitest and
+# prisma generate all work on their prebuilt platform binaries. So this upgrade
+# changes nothing about what lands in node_modules. Flipping one to `true` is a
+# real decision: a build script is arbitrary code execution at install time.
+allowBuilds:
+  "@parcel/watcher": false
+  "@prisma/client": false
+  "@prisma/engines": false
+  "@sentry/cli": false
+  esbuild: false
+  prisma: false
+  unrs-resolver: false
