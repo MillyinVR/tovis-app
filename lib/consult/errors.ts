@@ -41,6 +41,12 @@ export type ConsultWriteErrorCode =
   | 'INSPIRATION_STORAGE_UNAVAILABLE'
   | 'INSPIRATION_INVALID_ANSWER'
   | 'INSPIRATION_QUESTION_OUT_OF_ORDER'
+  // P4, Stage 1. Two distinct failures, never one: UNAVAILABLE is the
+  // provider (retry the same photo); UNREADABLE is this photograph (the
+  // model named nothing at all, so ask for a clearer one). Part 0 rule 4
+  // forbids either becoming a silent fall-back to the old question list.
+  | 'INSPIRATION_ANALYSIS_UNAVAILABLE'
+  | 'INSPIRATION_ANALYSIS_UNREADABLE'
   // Book the Look (B2): a look that cannot anchor a consult — no service
   // linkage, or a linkage outside the pilot vertical. `detail` names which.
   | 'LOOK_NOT_CONSULTABLE'

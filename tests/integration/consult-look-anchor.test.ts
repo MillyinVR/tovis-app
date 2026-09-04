@@ -18,6 +18,7 @@ import {
   ConsultAuditAction,
   ConsultInspirationSource,
   ConsultInspirationStatus,
+  ConsultRevisionKind,
   ConsultSessionStatus,
   LookPostStatus,
   LookPostVisibility,
@@ -143,6 +144,57 @@ vi.mock('@/lib/consult/captureVision', async (importOriginal) => {
   }
 })
 
+// P4: the inspiration read is a paid provider call and a network fetch. Both
+// are faked here so the DB pipeline — artefact, pins, triggers, brief — is
+// what the test exercises.
+vi.mock('@/lib/consult/inspirationImage', () => ({
+  async fetchConsultInspirationImage() {
+    return { base64: 'aW5zcGlyYXRpb24=', mediaType: 'image/jpeg' as const }
+  },
+}))
+
+vi.mock('@/lib/consult/inspirationVision', async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import('@/lib/consult/inspirationVision')>()
+  const known = (value: string) => ({
+    value,
+    confidence: { min: 0.4, max: 0.65 },
+    evidence: ['inspiration'] as const,
+    region: { x: 0.15, y: 0.2, w: 0.6, h: 0.5 },
+  })
+  return {
+    ...original,
+    async runConsultInspirationVision() {
+      return {
+        model: 'fake-inspiration-model',
+        analysis: {
+          level: known('LEVEL_9'),
+          tone: known('COOL'),
+          technique: known('BALAYAGE'),
+          placement: known('MIDS_TO_ENDS'),
+          rootBlend: known('SHADOW_ROOT'),
+          finish: known('HIGH_SHINE'),
+          dimension: {
+            value: 'UNKNOWN' as const,
+            confidence: { min: 0.05, max: 0.3 },
+            evidence: [] as const,
+            region: null,
+          },
+        },
+      }
+    },
+  }
+})
+
+/**
+ * What `runConsultAnalysis` was handed, per call — read by the P4 assertions.
+ * `vi.hoisted` because the mock factory below is hoisted above this file's
+ * module body and would otherwise touch it before initialization.
+ */
+const captured = vi.hoisted(() => ({
+  analysisInputs: [] as Array<{ inspiration?: unknown }>,
+}))
+
 vi.mock('@/lib/consult/analysisEngine', async (importOriginal) => {
   const original =
     await importOriginal<typeof import('@/lib/consult/analysisEngine')>()
@@ -156,7 +208,9 @@ vi.mock('@/lib/consult/analysisEngine', async (importOriginal) => {
     ...original,
     async runConsultAnalysis(input: {
       service: { menuServiceNames: readonly string[] }
+      inspiration?: unknown
     }) {
+      captured.analysisInputs.push(input)
       return {
         model: 'fake-analysis-model',
         analysis: {
@@ -276,6 +330,8 @@ import {
   HAIR_COLOR_INTAKE_SCHEMA_VERSION,
 } from '@/lib/consult/intakePack'
 import { loadAuthorizedClientConsultResults } from '@/lib/consult/clientResults'
+import { analyzeConsultInspiration } from '@/lib/consult/inspirationAnalysisContract'
+import { loadAuthorizedProConsultBriefs } from '@/lib/consult/proBrief'
 import {
   acceptConsultAgreement,
   appendConsultIntakeRevision,
@@ -1218,5 +1274,235 @@ describe('purge lifecycles stay separate', () => {
     expect(
       await db.mediaAsset.count({ where: { id: look?.primaryMediaAssetId } }),
     ).toBe(1)
+  })
+})
+
+describe('P4 — the inspiration reference is read, stored, and reaches both audiences', () => {
+  it('writes the artefact pinned to the inspiration revision, feeds it to the analysis, and shows it to the pro', async () => {
+    captured.analysisInputs.length = 0
+    const lookPostId = await freshHairLook()
+    const created = await startLook(lookPostId)
+    const sessionId = ((await body(created)).consult as { id: string }).id
+    if (!sessionIds.includes(sessionId)) sessionIds.push(sessionId)
+
+    await consentAndCompleteIntake(sessionId, 'p4')
+    await answerInspiration(sessionId, 'p4')
+    for (const shotKey of [
+      'hair_back',
+      'hair_left',
+      'hair_right',
+      'hair_crown',
+      'face_front',
+      'face_side',
+      'eyes_closeup',
+    ] as const) {
+      await attachAcceptedCapture(sessionId, shotKey, 'p4')
+    }
+
+    const analysis = await startAnalysis(
+      jsonRequest(`/api/v1/client/consult/${sessionId}/analysis`, {
+        idempotencyKey: 'p4-analysis',
+        schemaVersion: CONSULT_ANALYSIS_SCHEMA_VERSION,
+        promptVersion: CONSULT_ANALYSIS_PROMPT_VERSION,
+      }),
+      context(sessionId),
+    )
+    expect(analysis.status).toBe(200)
+
+    // 1. The artefact exists, as its own revision, under its own versions.
+    const inspirationRevision = await db.consultRevision.findFirstOrThrow({
+      where: { consultSessionId: sessionId, kind: ConsultRevisionKind.INSPIRATION },
+      orderBy: { revision: 'desc' },
+    })
+    const artefact = await db.consultRevision.findFirstOrThrow({
+      where: {
+        consultSessionId: sessionId,
+        kind: ConsultRevisionKind.INSPIRATION_ANALYSIS,
+      },
+      orderBy: { revision: 'desc' },
+    })
+    expect(artefact.schemaVersion).toBe(1)
+    expect(artefact.promptVersion).toBe('inspiration-hair-color-v1')
+    expect(artefact.model).toBe('fake-inspiration-model')
+    // Keyed to the inspiration revision — the whole point of the artefact.
+    expect(
+      (artefact.payload as { inspirationRevisionId: string }).inspirationRevisionId,
+    ).toBe(inspirationRevision.id)
+    // The anchoring look is this professional's own, so the seeded source is
+    // BOOKED_PRO_LOOK — the artefact records which of the two look kinds it
+    // read, not a generic "a look".
+    expect((artefact.payload as { source: string }).source).toBe('BOOKED_PRO_LOOK')
+    const attributes = (
+      artefact.payload as {
+        attributes: Record<string, { value: string; region: unknown } | undefined>
+      }
+    ).attributes
+    expect(attributes.level?.value).toBe('LEVEL_9')
+    // The region rides along even though nothing consumes it yet (P5 will).
+    expect(attributes.tone?.region).toEqual({ x: 0.15, y: 0.2, w: 0.6, h: 0.5 })
+    // An UNKNOWN stores no region at all.
+    expect(attributes.dimension?.region).toBeNull()
+
+    // 2. Content-free audit evidence, like every other revision kind.
+    expect(
+      await db.consultAuditEvent.count({
+        where: { consultSessionId: sessionId, revisionId: artefact.id },
+      }),
+    ).toBe(1)
+
+    // 3. The structured read — not the image — reached the analysis provider,
+    //    with the client's own v1 answers beside it.
+    const [analysisInput] = captured.analysisInputs
+    const inspirationInput = analysisInput?.inspiration as {
+      source: string
+      analysis: { level: { value: string } } | null
+      answers: { question: string; answer: string }[]
+    }
+    expect(inspirationInput.source).toBe('BOOKED_PRO_LOOK')
+    expect(inspirationInput.analysis?.level.value).toBe('LEVEL_9')
+    expect(inspirationInput.answers.length).toBeGreaterThan(0)
+    expect(JSON.stringify(inspirationInput)).not.toContain('base64')
+
+    // 4. The pro sees it on the brief, pinned to the same inspiration revision.
+    const [brief] = await loadAuthorizedProConsultBriefs({
+      professionalId,
+      clientId,
+    })
+    expect(brief?.inspirationAnalysis).toMatchObject({
+      inspirationRevisionId: inspirationRevision.id,
+      source: 'BOOKED_PRO_LOOK',
+      promptVersion: 'inspiration-hair-color-v1',
+      model: 'fake-inspiration-model',
+    })
+    expect(brief?.inspirationAnalysis?.attributes.technique.value).toBe('BALAYAGE')
+  })
+
+  it('the standalone entry point refuses an unknown id, and cannot write outside ANALYZING', async () => {
+    // `analyzeConsultInspiration(inspirationId)` is the narrow re-read path:
+    // the shipped flow calls the locked core directly because it already holds
+    // the session lock. Its guard surface is what matters here.
+    await expect(
+      analyzeConsultInspiration('no-such-inspiration', {
+        idempotencyKey: 'standalone-unknown',
+      }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' })
+
+    // Re-reading a reference whose artefact already exists returns THAT
+    // artefact and spends nothing: the request hash is over the inspiration
+    // revision, the prompt version and the schema version, so the same
+    // reference under the same prompt is the same read. This is the property
+    // that keeps a retry from paying for a second vision call.
+    const finished = await db.consultSession.findFirstOrThrow({
+      where: { id: { in: sessionIds }, status: ConsultSessionStatus.COMPLETED },
+      select: { id: true },
+    })
+    const source = await db.consultInspiration.findFirstOrThrow({
+      where: {
+        consultSessionId: finished.id,
+        status: ConsultInspirationStatus.ATTACHED,
+      },
+      select: { id: true },
+    })
+    const stored = await db.consultRevision.findFirstOrThrow({
+      where: {
+        consultSessionId: finished.id,
+        kind: ConsultRevisionKind.INSPIRATION_ANALYSIS,
+      },
+      orderBy: { revision: 'desc' },
+      select: { id: true },
+    })
+    const before = await db.consultRevision.count({
+      where: {
+        consultSessionId: finished.id,
+        kind: ConsultRevisionKind.INSPIRATION_ANALYSIS,
+      },
+    })
+    const reread = await analyzeConsultInspiration(source.id, {
+      idempotencyKey: 'standalone-completed',
+    })
+    expect(reread.revisionId).toBe(stored.id)
+    expect(
+      await db.consultRevision.count({
+        where: {
+          consultSessionId: finished.id,
+          kind: ConsultRevisionKind.INSPIRATION_ANALYSIS,
+        },
+      }),
+    ).toBe(before)
+  })
+
+  it('the lifecycle pin refuses an artefact written outside ANALYZING', async () => {
+    // Sabotage the state, not the payload: a structurally perfect artefact on
+    // a COMPLETED session must still be refused, or the pin added with the
+    // kind is decorative.
+    const finished = await db.consultSession.findFirstOrThrow({
+      where: { id: { in: sessionIds }, status: ConsultSessionStatus.COMPLETED },
+      select: { id: true, revisionSequence: true },
+    })
+    const inspirationRevision = await db.consultRevision.findFirstOrThrow({
+      where: {
+        consultSessionId: finished.id,
+        kind: ConsultRevisionKind.INSPIRATION,
+      },
+      orderBy: { revision: 'desc' },
+      select: { id: true },
+    })
+    const valid = await db.consultRevision.findFirstOrThrow({
+      where: {
+        consultSessionId: finished.id,
+        kind: ConsultRevisionKind.INSPIRATION_ANALYSIS,
+      },
+      orderBy: { revision: 'desc' },
+      select: { payload: true },
+    })
+    expect(
+      (valid.payload as { inspirationRevisionId: string }).inspirationRevisionId,
+    ).toBe(inspirationRevision.id)
+    await expect(
+      db.consultRevision.create({
+        data: {
+          consultSessionId: finished.id,
+          revision: finished.revisionSequence + 1,
+          kind: ConsultRevisionKind.INSPIRATION_ANALYSIS,
+          schemaVersion: 1,
+          promptVersion: 'inspiration-hair-color-v1',
+          model: 'fake-inspiration-model',
+          idempotencyKey: 'outside-analyzing',
+          requestHash: 'b'.repeat(64),
+          payload: valid.payload as Prisma.InputJsonObject,
+        },
+      }),
+    ).rejects.toThrow()
+  })
+
+  it('the database refuses an artefact pinned to a stale inspiration revision', async () => {
+    // The pin is not a display convenience: a stale one is the WRONG
+    // photograph's colour attached to this consult. Sabotage it and the guard
+    // must refuse, or the pin proves nothing.
+    const session = await db.consultSession.findFirstOrThrow({
+      where: { id: { in: sessionIds }, status: ConsultSessionStatus.COMPLETED },
+      select: { id: true, revisionSequence: true },
+    })
+    await expect(
+      db.consultRevision.create({
+        data: {
+          consultSessionId: session.id,
+          revision: session.revisionSequence + 1,
+          kind: ConsultRevisionKind.INSPIRATION_ANALYSIS,
+          schemaVersion: 1,
+          promptVersion: 'inspiration-hair-color-v1',
+          model: 'fake-inspiration-model',
+          idempotencyKey: 'stale-pin',
+          requestHash: 'a'.repeat(64),
+          payload: {
+            schemaVersion: 1,
+            inspirationRevisionId: 'not-the-current-revision',
+            inspirationId: 'whatever',
+            source: 'PLATFORM_LOOK',
+            attributes: {},
+          },
+        },
+      }),
+    ).rejects.toThrow()
   })
 })

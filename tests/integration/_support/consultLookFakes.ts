@@ -25,6 +25,23 @@ export type FakeStorageObject = {
 }
 
 /** The private objects a suite's uploads have "landed" in. */
+/**
+ * P4 made the analysis resolve the ANCHORING LOOK's media URL — the reference
+ * has to be fetched before it can be read — so every suite that drives a
+ * look-anchored consult to COMPLETED now needs a Supabase URL to build a
+ * public object URL from. The integration workflow sets none (unlike e2e.yml
+ * and perf-availability.yml), so without this the read fails
+ * INSPIRATION_LOOK_UNAVAILABLE and the consult 404s three steps later, which
+ * is exactly how it showed up in CI while passing on a laptop that happens to
+ * have real Supabase env.
+ *
+ * `||=` so a developer's real value still wins. Same self-contained default
+ * `consult-look-anchor.test.ts` already sets for itself; this is that line,
+ * shared by the suites that were missing it. It builds a URL string and makes
+ * no network call — a public bucket needs no credential.
+ */
+process.env.NEXT_PUBLIC_SUPABASE_URL ||= 'https://storage.test'
+
 export const fakeStorageObjects = new Map<string, FakeStorageObject>()
 
 const state = {
@@ -216,6 +233,47 @@ export async function fakeRunConsultAnalysis(input: {
           discussWithProfessional: true,
         },
       ],
+    },
+  }
+}
+
+/**
+ * P4 — the inspiration read, faked for every suite that drives a consult to
+ * COMPLETED. Two seams, because the read is two steps: fetching the reference
+ * bytes through the signed-read path, and the paid vision call over them.
+ *
+ * `fetchConsultInspirationImage` MUST be faked in these suites: the fake
+ * storage mints `https://storage.test/...`, and the real fetch correctly
+ * refuses that host (it is not this project's Supabase origin), which would
+ * otherwise surface as a 422 on every analysis.
+ */
+export async function fakeFetchConsultInspirationImage(): Promise<{
+  base64: string
+  mediaType: 'image/jpeg'
+}> {
+  return { base64: 'aW5zcGlyYXRpb24=', mediaType: 'image/jpeg' }
+}
+
+export async function fakeRunConsultInspirationVision(): Promise<{
+  model: string
+  analysis: Record<string, unknown>
+}> {
+  const known = (value: string) => ({
+    value,
+    confidence: { min: 0.4, max: 0.65 },
+    evidence: ['inspiration'] as const,
+    region: { x: 0.15, y: 0.2, w: 0.6, h: 0.5 },
+  })
+  return {
+    model: 'fake-inspiration-model',
+    analysis: {
+      level: known('LEVEL_8'),
+      tone: known('COOL'),
+      technique: known('BALAYAGE'),
+      placement: known('MIDS_TO_ENDS'),
+      rootBlend: known('SHADOW_ROOT'),
+      finish: known('HIGH_SHINE'),
+      dimension: known('MEDIUM'),
     },
   }
 }

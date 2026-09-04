@@ -99,6 +99,8 @@ async function liveProvider(
         mediaType: fixture.captureMediaType,
         base64: (await readFile(resolved)).toString('base64'),
       },
+      // The corpus is daylight fixtures: no frame carries a colour warning.
+      qualityWarningCode: null,
     })
   }
   // The corpus is the founder pilot's colour set with no professional menu:
@@ -117,6 +119,10 @@ async function liveProvider(
     intake: fixture.intake,
     intakeItems: [],
     captures,
+    // The evaluation corpus measures the CLIENT read, so no reference is
+    // supplied — the same shape a client who skipped the inspiration step
+    // produces, not a stub for one that failed.
+    inspiration: { source: 'NONE', analysis: null, answers: [] },
   })
 }
 

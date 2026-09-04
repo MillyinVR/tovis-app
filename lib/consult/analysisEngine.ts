@@ -3,7 +3,9 @@ import type { ConsultServiceFamily } from '@prisma/client'
 
 import type {
   ConsultAnalysisEvidenceDTO,
+  ConsultCaptureQualityWarningCodeDTO,
   ConsultCaptureShotKeyDTO,
+  ConsultInspirationSourceDTO,
 } from '@/lib/dto/consult'
 import { readOptionalEnv, requireEnv } from '@/lib/env'
 import { isRecord } from '@/lib/guards'
@@ -14,6 +16,11 @@ import {
 } from './capture/registry'
 import type { ConsultCaptureImage } from './captureStorage'
 import { isAllowedConsultProviderModel } from './providerModel'
+import {
+  CONSULT_INSPIRATION_ANALYSIS_FIELDS,
+  type ConsultInspirationAnalysis,
+} from './inspirationVision'
+import { toProviderOutputSchema } from './providerSchema'
 import { CONSULT_SERVICE_FAMILY_LABELS } from './serviceScope'
 
 export const CONSULT_ANALYSIS_SCHEMA_VERSION = 3
@@ -26,7 +33,14 @@ export const CONSULT_ANALYSIS_SCHEMA_VERSION = 3
 // fields, service-neutral wording); recommendations name a service from the
 // menu (or a consultation) instead of choosing from a colour-only intent enum;
 // safety codes gain service-neutral members. Prompt and schema move together.
-export const CONSULT_ANALYSIS_PROMPT_VERSION = 'service-analysis-v3'
+// v4 (2026-09-04, P4): the client's INSPIRATION reference is finally part of
+// the reasoning. The prompt gains a block naming what the vision model read
+// off that photograph (level, tone, technique, placement, root blend, finish,
+// dimension, each with its confidence range) alongside the client's own
+// answers about it, and each supplied capture is labelled with any colour
+// WARNING its quality check recorded. The output schema is unchanged — this
+// is new INPUT, so the prompt version moves and the schema version does not.
+export const CONSULT_ANALYSIS_PROMPT_VERSION = 'service-analysis-v4'
 export const CONSULT_ANALYSIS_DEFAULT_MODEL = 'claude-sonnet-5'
 export const CONSULT_ANALYSIS_REQUEST_TIMEOUT_MS = 90_000
 
@@ -376,7 +390,40 @@ export type ConsultAnalysisInput = {
   captures: ReadonlyArray<{
     shotKey: ConsultCaptureShotKeyDTO
     image: ConsultCaptureImage
+    /**
+     * The colour finding the capture gate recorded on this frame without
+     * blocking it (lib/consult/captureVision.ts). Present means the light on
+     * this view is not fully trustworthy — the prompt says so, so a warm
+     * reading from a warm room does not become a confident tone observation.
+     */
+    qualityWarningCode: ConsultCaptureQualityWarningCodeDTO | null
   }>
+  /** P4: the client's inspiration reference, as READ, not as an image. */
+  inspiration: ConsultAnalysisInspirationInput
+}
+
+/**
+ * What the analysis is told about the picture the client brought.
+ *
+ * `analysis` is the structured Stage 1 read (lib/consult/inspirationVision.ts)
+ * — deliberately NOT the image itself. The reference photograph is a picture
+ * of somebody else; sending it beside the client's own capture pack invites
+ * the model to describe or compare two people, and every feature observation
+ * in the output schema is about the CLIENT. The attribute set carries
+ * everything the recommendation needs and none of that risk.
+ *
+ * `answers` are the client's existing v1 guided-inspiration answers — what she
+ * said she liked about it — which ride alongside so the model sees the picture
+ * and her words about it together.
+ *
+ * `analysis` is null only when the client chose to bring no reference at all
+ * (source NONE). That is an absence, not a failure: a failed read never
+ * reaches here, it surfaces (Part 0 rule 4).
+ */
+export type ConsultAnalysisInspirationInput = {
+  source: ConsultInspirationSourceDTO
+  analysis: ConsultInspirationAnalysis | null
+  answers: readonly { question: string; answer: string }[]
 }
 
 export type ConsultAnalysisProviderResult = {
@@ -608,6 +655,7 @@ export const CONSULT_ANALYSIS_OUTPUT_SCHEMA: Record<string, unknown> =
 export const CONSULT_ANALYSIS_SYSTEM_PROMPT = [
   'You are a cosmetic-only full styling consultation analysis engine for a professional beauty platform.',
   'Inputs: a consultation context naming the service family, the service category, the specific service the client is considering when one is known, the professional’s menu in that category, and the capture pack this consult uses; the client’s intake as the questions and answers she saw (with their immutable option codes); and one or more labeled daylight photos from that pack — hair views (hair_back, hair_left, hair_right, hair_crown), face views (face_front, face_side, eyes_closeup), or treatment-area views (area_wide, area_closeup). The client may submit a partial pack; when views are missing, a text line names them.',
+  'You are also given what the client brought as INSPIRATION: a structured reading of her reference photograph (level, tone, technique, placement, root blend, finish and dimension, each with a confidence range) and, in her own words, what she said she liked about it. You are NOT given the reference image; the reading is what you have of it.',
   'You produce: hair core observations, a feature profile, a service lens, safety flags, service recommendations, and exactly one style direction per domain (HAIR_COLOR_HARMONY, CUT_AND_SHAPE, BANGS, BROWS, LASHES, MAKEUP, COLOR_PALETTE).',
   'Everything you write is FOR the named service. The service lens describes the client’s goal, history, constraints, maintenance and appointment context as they bear on THAT service; recommendations are services from the professional’s menu (named exactly as the menu names them) or a consultation with the professional; the hair core observations are filled from the hair views when hair is the subject and set to UNKNOWN or null when it is not.',
   'Never infer or mention identity, ethnicity, race, nationality, religion, gender, age, health conditions, or diagnoses. Profile observations are cosmetic styling descriptors only.',
@@ -623,6 +671,9 @@ export const CONSULT_ANALYSIS_SYSTEM_PROMPT = [
   'BROWS work with the natural density and existing shape, anchored to the face’s own proportions; never direct chemical brow or lash treatments.',
   'Hair texture, density, and current level bound which cuts and colors will actually behave well; honor them in CUT_AND_SHAPE and HAIR_COLOR_HARMONY.',
   'Every style direction’s whyItFlatters must name the specific observed feature or features it builds on. Style directions are directions to discuss with the professional, never promises and never treatment prescriptions.',
+  'The inspiration reading describes SOMEONE ELSE’S hair — it is the destination, never an observation about this client. Never let it colour the feature profile or the hair core observations, which are about the client and come only from her own photos. Where an attribute of the reference was read as UNKNOWN, or with a low confidence range, treat it as not established and say so rather than filling the gap.',
+  'The reference and the client’s words about it are the goal the service lens and the recommendations are FOR. Where her words and the reading disagree — she asked for the length but the reading is mostly about colour — her words win, and the gap is worth naming for the professional.',
+  'A capture may be labelled with a colour warning. That view passed the quality gate but its light is not trustworthy for colour: widen the confidence range on any tone or level observation that leans on it, and prefer a view without a warning when one is supplied.',
   'For the service lens: combine visible evidence with the client’s stated goal, treatment and chemical history, prior reactions, sensitivities, budget and event context. If maintenance tolerance, allergies, or other constraints were not asked in the intake, say they are unknown; never invent them. When the service is hair colour, the history covers box dye, prior lightening and the last colour service.',
   'Visible condition is a cosmetic visual observation only. Never diagnose hair, scalp, skin, or medical conditions.',
   'All chemical, reaction, allergy, sensitivity, unknown-history, or visibly compromised-hair concerns must be structurally represented in safetyFlags and framed for discussion with the professional.',
@@ -1009,7 +1060,10 @@ export function resetConsultAnalysisClientForTests(): void {
  * Exported so a test can pin exactly what the model is told about the service.
  */
 export function consultAnalysisContextBlocks(
-  input: Pick<ConsultAnalysisInput, 'service' | 'intake' | 'intakeItems' | 'capturePack'>,
+  input: Pick<
+    ConsultAnalysisInput,
+    'service' | 'intake' | 'intakeItems' | 'capturePack' | 'inspiration'
+  >,
 ): string[] {
   const menu = input.service.menuServiceNames.map((name) => name.trim()).filter(Boolean)
   const context = [
@@ -1038,7 +1092,45 @@ export function consultAnalysisContextBlocks(
       ),
     ),
   )}`
-  return [context, intake, codes]
+  return [context, intake, codes, consultInspirationBlock(input.inspiration)]
+}
+
+/**
+ * The inspiration block — the picture, as read, plus the client's words about
+ * it. Its own function so a test can pin exactly what the model is told about
+ * the reference, the same reason `consultAnalysisContextBlocks` is exported.
+ */
+export function consultInspirationBlock(
+  inspiration: ConsultAnalysisInspirationInput,
+): string {
+  if (inspiration.source === 'NONE') {
+    return 'Client inspiration: the client brought no reference photograph. Work from her intake answers alone and do not invent a reference.'
+  }
+  const lines = [
+    `Client inspiration reference (source: ${inspiration.source}).`,
+    inspiration.analysis
+      ? 'What the reference photograph was read as — this describes the DESIRED result, not the client:'
+      : 'The reference photograph could not be read into attributes.',
+  ]
+  if (inspiration.analysis) {
+    for (const field of CONSULT_INSPIRATION_ANALYSIS_FIELDS) {
+      const observed = inspiration.analysis[field]
+      lines.push(
+        observed.value === 'UNKNOWN'
+          ? `- ${field}: UNKNOWN (the photograph does not show it)`
+          : `- ${field}: ${observed.value} (confidence ${observed.confidence.min}–${observed.confidence.max})`,
+      )
+    }
+  }
+  lines.push(
+    inspiration.answers.length > 0
+      ? 'What the client said she liked about it (her own words, from the guided inspiration step):'
+      : 'The client did not record what she liked about it.',
+  )
+  for (const answer of inspiration.answers) {
+    lines.push(`- ${answer.question} → ${answer.answer}`)
+  }
+  return lines.join('\n')
 }
 
 export const runConsultAnalysis: ConsultAnalysisProvider = async (input) => {
@@ -1064,7 +1156,12 @@ export const runConsultAnalysis: ConsultAnalysisProvider = async (input) => {
       missingShotKeys.push(shotKey)
       continue
     }
-    content.push({ type: 'text', text: `Evidence label: ${shotKey}` })
+    content.push({
+      type: 'text',
+      text: capture.qualityWarningCode
+        ? `Evidence label: ${shotKey} (colour warning: ${capture.qualityWarningCode} — this frame passed the quality gate but its light is not reliable for colour)`
+        : `Evidence label: ${shotKey}`,
+    })
     content.push({
       type: 'image',
       source: {
@@ -1095,9 +1192,17 @@ export const runConsultAnalysis: ConsultAnalysisProvider = async (input) => {
         output_config: {
           format: {
             type: 'json_schema',
-            schema: buildConsultAnalysisOutputSchema({
-              menuServiceNames: input.service.menuServiceNames,
-            }),
+            // 🔴 Not the schema constant directly. The API refuses
+            // `minimum`/`maximum` on a number and `maxItems`/`uniqueItems` on
+            // an array, and this schema states all four — which is why every
+            // analysis call 400'd on the first request and surfaced as
+            // CONSULT_ANALYSIS_UNAVAILABLE. See lib/consult/providerSchema.ts.
+            // `sanitizeAnalysis` re-checks every one of those bounds below.
+            schema: toProviderOutputSchema(
+              buildConsultAnalysisOutputSchema({
+                menuServiceNames: input.service.menuServiceNames,
+              }),
+            ),
           },
         },
       },

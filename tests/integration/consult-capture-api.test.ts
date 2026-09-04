@@ -55,6 +55,9 @@ const fake = vi.hoisted(() => ({
   modelCalls: [] as string[],
   analysisCalls: 0,
   analysisFails: false,
+  inspirationVisionCalls: 0,
+  inspirationUnreadable: false,
+  inspirationImageUrls: [] as string[],
   analysisDuring: null as null | (() => Promise<void>),
   pathSequence: 0,
 }))
@@ -160,6 +163,51 @@ vi.mock('@/lib/consult/captureVision', async (importOriginal) => {
         entry.model,
         input.shotKey,
       )
+    },
+  }
+})
+
+// P4: the EXTERNAL_UPLOAD arm of the inspiration read. The signed read itself
+// is the fake storage's (so the upload branch of the read path is genuinely
+// exercised); only the network fetch of those bytes and the paid provider call
+// are faked. Without the fetch fake this suite fails 422 — the origin guard in
+// inspirationImage.ts correctly refuses `https://storage.test/...`, which is
+// not this project's Supabase origin.
+vi.mock('@/lib/consult/inspirationImage', () => ({
+  async fetchConsultInspirationImage(url: string) {
+    fake.inspirationImageUrls.push(url)
+    return { base64: 'aW5zcGlyYXRpb24=', mediaType: 'image/jpeg' as const }
+  },
+}))
+
+vi.mock('@/lib/consult/inspirationVision', async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import('@/lib/consult/inspirationVision')>()
+  const known = (value: string) => ({
+    value,
+    confidence: { min: 0.4, max: 0.65 },
+    evidence: ['inspiration'] as const,
+    region: { x: 0.1, y: 0.15, w: 0.7, h: 0.6 },
+  })
+  return {
+    ...original,
+    async runConsultInspirationVision() {
+      fake.inspirationVisionCalls += 1
+      if (fake.inspirationUnreadable) {
+        throw new original.ConsultInspirationVisionError('unreadable')
+      }
+      return {
+        model: 'fake-inspiration-model',
+        analysis: {
+          level: known('LEVEL_7'),
+          tone: known('WARM'),
+          technique: known('SINGLE_PROCESS'),
+          placement: known('ALL_OVER'),
+          rootBlend: known('SOLID_TO_ROOT'),
+          finish: known('SATIN'),
+          dimension: known('SUBTLE'),
+        },
+      }
     },
   }
 })
@@ -754,6 +802,9 @@ beforeEach(() => {
   fake.modelCalls.length = 0
   fake.analysisCalls = 0
   fake.analysisFails = false
+  fake.inspirationVisionCalls = 0
+  fake.inspirationUnreadable = false
+  fake.inspirationImageUrls.length = 0
   fake.analysisDuring = null
 })
 
@@ -2464,7 +2515,42 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
     expect(await db.mediaAsset.count({ where: { storagePath: row.storagePath! } })).toBe(0)
     authenticate(consult)
     await completeCapturePack(consult, 'external-brief')
+
+    // P4 — the failure path first, on the SAME consult, so the refusal is
+    // proven against a session that is otherwise ready to analyze.
+    //
+    // An unreadable reference surfaces its own 422 and rolls the whole run
+    // back: no analysis revision, no artefact, and the session is left where a
+    // retry can pick it up. Part 0 rule 4 — no silent fall-back to a
+    // picture-blind analysis, and none to the old static question list.
+    fake.inspirationUnreadable = true
+    const refused = await analysisRequest(consult, 'external-unreadable')
+    expect(refused.status).toBe(422)
+    expect(await refused.json()).toMatchObject({
+      code: 'CONSULT_INSPIRATION_ANALYSIS_UNREADABLE',
+    })
+    expect(fake.analysisCalls).toBe(0)
+    expect(
+      await db.consultRevision.count({
+        where: {
+          consultSessionId: consult.sessionId,
+          kind: { in: ['ANALYSIS', 'INSPIRATION_ANALYSIS'] },
+        },
+      }),
+    ).toBe(0)
+    expect(
+      await db.consultSession.findUniqueOrThrow({
+        where: { id: consult.sessionId },
+        select: { status: true },
+      }),
+    ).toEqual({ status: 'ANALYSIS_PENDING' })
+
+    fake.inspirationUnreadable = false
     expect((await analysisRequest(consult, 'external-brief-analysis')).status).toBe(200)
+    // The upload arm really went through the signed-read path, not a bucket
+    // read of its own: the URL fetched is the one the fake storage minted.
+    expect(fake.inspirationImageUrls).toContain('https://storage.test/read/600')
+    expect(fake.inspirationVisionCalls).toBeGreaterThan(0)
     const brief = await db.consultRevision.findFirstOrThrow({
       where: { consultSessionId: consult.sessionId, kind: 'BRIEF' },
       orderBy: [{ revision: 'desc' }, { id: 'desc' }],

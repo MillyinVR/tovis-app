@@ -214,6 +214,11 @@ export function consultWriteErrorResponse(error: unknown): Response | null {
       return consultAgreementFail(409, 'Choose an inspiration source before continuing.', 'CONSULT_INSPIRATION_SOURCE_REQUIRED')
     case 'INSPIRATION_SOURCE_UNAVAILABLE':
       return consultAgreementFail(409, 'The inspiration source is no longer available.', 'CONSULT_INSPIRATION_SOURCE_UNAVAILABLE')
+    case 'INSPIRATION_ANALYSIS_UNAVAILABLE':
+      return consultAgreementFail(503, 'We could not read your inspiration photo just now. Try again in a moment.', 'CONSULT_INSPIRATION_ANALYSIS_UNAVAILABLE')
+    case 'INSPIRATION_ANALYSIS_UNREADABLE':
+      // Stage 1's failure copy, verbatim: this is about the PHOTO.
+      return consultAgreementFail(422, 'We couldn’t read this one — try another photo or a clearer shot.', 'CONSULT_INSPIRATION_ANALYSIS_UNREADABLE')
     case 'INSPIRATION_UPLOAD_EXPIRED':
       return consultAgreementFail(410, 'The inspiration upload has expired.', 'CONSULT_INSPIRATION_UPLOAD_EXPIRED')
     case 'INSPIRATION_UPLOAD_MISMATCH':

@@ -38,6 +38,10 @@ import {
   CONSULT_INSPIRATION_REFERENCE_NOTE,
   normalizeStoredInspirationPayload,
 } from './inspirationPack'
+import {
+  CONSULT_INSPIRATION_ANALYSIS_PROMPT_VERSION,
+  CONSULT_INSPIRATION_ANALYSIS_SCHEMA_VERSION,
+} from './inspirationVision'
 import { seedLockedConsultAnchorInspiration } from './inspirationSeed'
 import {
   CONSULT_SERVICE_ESTIMATE_DERIVATION_VERSION,
@@ -549,6 +553,58 @@ export async function appendLockedConsultInspirationRevision(
     },
   })
   return { revision, replayed: false }
+}
+
+/**
+ * P4: the inspiration-analysis artefact. Same locked-append shape as the
+ * inspiration revision above — sequence, row, audit event — because the
+ * database requires all three for every consult revision kind
+ * (`ConsultRevision_inspiration_analysis_requires_audit`, added with the kind).
+ *
+ * Written in ANALYZING, which is what
+ * `consult_revision_requires_agreements` pins the kind to, and pinned in its
+ * payload to the current INSPIRATION revision, which the payload guard
+ * re-checks against the table. A stale pin cannot reach the row.
+ */
+export async function appendLockedConsultInspirationAnalysisRevision(
+  tx: Prisma.TransactionClient,
+  args: {
+    consultSessionId: string
+    payload: Prisma.InputJsonValue
+    model: string
+    idempotencyKey: string
+    requestHash: string
+    actor: ClientActor
+  },
+) {
+  const sequenced = await tx.consultSession.update({
+    where: { id: args.consultSessionId },
+    data: { revisionSequence: { increment: 1 } },
+    select: { revisionSequence: true },
+  })
+  const revision = await tx.consultRevision.create({
+    data: {
+      consultSessionId: args.consultSessionId,
+      revision: sequenced.revisionSequence,
+      kind: ConsultRevisionKind.INSPIRATION_ANALYSIS,
+      payload: args.payload,
+      schemaVersion: CONSULT_INSPIRATION_ANALYSIS_SCHEMA_VERSION,
+      promptVersion: CONSULT_INSPIRATION_ANALYSIS_PROMPT_VERSION,
+      model: args.model,
+      idempotencyKey: args.idempotencyKey,
+      requestHash: args.requestHash,
+    },
+  })
+  await tx.consultAuditEvent.create({
+    data: {
+      consultSessionId: args.consultSessionId,
+      action: ConsultAuditAction.REVISION_CREATED,
+      actorType: args.actor.type,
+      actorId: args.actor.id,
+      revisionId: revision.id,
+    },
+  })
+  return revision
 }
 
 /**

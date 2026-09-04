@@ -27,12 +27,17 @@ import {
   CONSULT_ANALYSIS_CONSULTATION_OPTION,
   buildConsultAnalysisOutputSchema,
   consultAnalysisContextBlocks,
+  consultInspirationBlock,
   runConsultAnalysis,
   validateConsultAnalysisProviderResult,
   validateConsultAnalysisResult,
   type ConsultAnalysisInput,
   type ConsultAnalysisProviderOutput,
 } from './analysisEngine'
+import {
+  findUnsupportedProviderSchemaKeywords,
+  toProviderOutputSchema,
+} from './providerSchema'
 
 const MENU = ['Balayage', 'Toner Gloss'] as const
 
@@ -76,6 +81,13 @@ type ProviderOutput = Omit<ConsultAnalysisProviderOutput, 'recommendations'> & {
   }>
 }
 
+/** The default for the existing cases: a client who brought no reference. */
+const noInspiration: ConsultAnalysisInput['inspiration'] = {
+  source: 'NONE',
+  analysis: null,
+  answers: [],
+}
+
 const captures = [
   'hair_back',
   'hair_left',
@@ -85,6 +97,7 @@ const captures = [
   'face_side',
   'eyes_closeup',
 ].map((shotKey) => ({
+  qualityWarningCode: null,
   shotKey: shotKey as
     | 'hair_back'
     | 'hair_left'
@@ -250,6 +263,7 @@ describe('hair-color consult analysis provider', () => {
         intake: { desired_color: 'red', prior_reaction: 'no' },
         intakeItems,
         captures,
+        inspiration: noInspiration,
       }),
     ).rejects.toBeInstanceOf(ConsultAnalysisProviderError)
     // The assertion that matters: no image ever reached the provider.
@@ -264,9 +278,10 @@ describe('hair-color consult analysis provider', () => {
       intake: { desired_color: 'red', prior_reaction: 'no' },
       intakeItems,
       captures,
+      inspiration: noInspiration,
     })
     expect(CONSULT_ANALYSIS_SCHEMA_VERSION).toBe(3)
-    expect(CONSULT_ANALYSIS_PROMPT_VERSION).toBe('service-analysis-v3')
+    expect(CONSULT_ANALYSIS_PROMPT_VERSION).toBe('service-analysis-v4')
     expect(result.model).toBe(CONSULT_ANALYSIS_DEFAULT_MODEL)
 
     const [params, options] = mocks.create.mock.calls[0] ?? []
@@ -274,12 +289,22 @@ describe('hair-color consult analysis provider', () => {
     expect(params.system).toBe(CONSULT_ANALYSIS_SYSTEM_PROMPT)
     // The schema is built PER RUN: the recommendation enum is this pro's menu
     // plus the fixed consultation option, so the model cannot invent a service.
+    //
+    // 🔴 It is the SANITIZED schema on the wire, not the constant. This
+    // assertion used to pin the constant itself — which is the shape the API
+    // rejects with a 400, so the test was asserting the bug. See
+    // lib/consult/providerSchema.ts.
     expect(params.output_config).toEqual({
       format: {
         type: 'json_schema',
-        schema: buildConsultAnalysisOutputSchema({ menuServiceNames: [...MENU] }),
+        schema: toProviderOutputSchema(
+          buildConsultAnalysisOutputSchema({ menuServiceNames: [...MENU] }),
+        ),
       },
     })
+    expect(
+      findUnsupportedProviderSchemaKeywords(params.output_config.format.schema),
+    ).toEqual([])
     expect(JSON.stringify(params.output_config)).toContain(
       JSON.stringify(['Balayage', 'Toner Gloss', CONSULT_ANALYSIS_CONSULTATION_OPTION]),
     )
@@ -307,6 +332,7 @@ describe('hair-color consult analysis provider', () => {
       intake: { desired_color: 'red' },
       intakeItems,
       captures,
+      inspiration: noInspiration,
     })
     const [params] = mocks.create.mock.calls[0] ?? []
     const serialized = JSON.stringify(params.messages[0].content)
@@ -322,6 +348,7 @@ describe('hair-color consult analysis provider', () => {
       capturePack: { id: 'area-daylight', shotKeys: ['area_wide', 'area_closeup', 'face_front'] },
       intake: {},
       intakeItems: [],
+      inspiration: noInspiration,
     })
     expect(bare).toContain('not named yet')
     expect(bare).toContain('none listed')
@@ -374,10 +401,24 @@ describe('hair-color consult analysis provider', () => {
   it('rejects duplicate and empty capture packs before provider work', async () => {
     const duplicatePack = captures.map(() => captures[0]!)
     await expect(
-      runConsultAnalysis({ service, capturePack, intake: {}, intakeItems: [], captures: duplicatePack }),
+      runConsultAnalysis({
+        service,
+        capturePack,
+        intake: {},
+        intakeItems: [],
+        captures: duplicatePack,
+        inspiration: noInspiration,
+      }),
     ).rejects.toThrowError(ConsultAnalysisProviderError)
     await expect(
-      runConsultAnalysis({ service, capturePack, intake: {}, intakeItems: [], captures: [] }),
+      runConsultAnalysis({
+        service,
+        capturePack,
+        intake: {},
+        intakeItems: [],
+        captures: [],
+        inspiration: noInspiration,
+      }),
     ).rejects.toThrowError(ConsultAnalysisProviderError)
     expect(mocks.create).not.toHaveBeenCalled()
   })
@@ -394,6 +435,7 @@ describe('hair-color consult analysis provider', () => {
       intake: { desired_color: 'red' },
       intakeItems,
       captures: partial,
+      inspiration: noInspiration,
     })
     const [params] = mocks.create.mock.calls[0] ?? []
     const images = params.messages[0].content.filter(
@@ -409,7 +451,14 @@ describe('hair-color consult analysis provider', () => {
 
   it('sends no missing-views line for a full pack', async () => {
     mocks.create.mockResolvedValue(message(validOutput()))
-    await runConsultAnalysis({ service, capturePack, intake: {}, intakeItems: [], captures })
+    await runConsultAnalysis({
+      service,
+      capturePack,
+      intake: {},
+      intakeItems: [],
+      captures,
+      inspiration: noInspiration,
+    })
     const [params] = mocks.create.mock.calls[0] ?? []
     expect(JSON.stringify(params.messages[0].content)).not.toContain(
       'Missing views',
@@ -430,7 +479,14 @@ describe('hair-color consult analysis provider', () => {
   it('returns typed content-free failures for provider errors and refusals', async () => {
     mocks.create.mockRejectedValueOnce(new Error('provider request secret'))
     await expect(
-      runConsultAnalysis({ service, capturePack, intake: {}, intakeItems: [], captures }),
+      runConsultAnalysis({
+      service,
+      capturePack,
+      intake: {},
+      intakeItems: [],
+      captures,
+      inspiration: noInspiration,
+    }),
     ).rejects.toMatchObject({
       kind: 'unavailable',
       message: 'Consult analysis is unavailable.',
@@ -438,7 +494,14 @@ describe('hair-color consult analysis provider', () => {
 
     mocks.create.mockResolvedValueOnce(message({}, 'refusal'))
     await expect(
-      runConsultAnalysis({ service, capturePack, intake: {}, intakeItems: [], captures }),
+      runConsultAnalysis({
+      service,
+      capturePack,
+      intake: {},
+      intakeItems: [],
+      captures,
+      inspiration: noInspiration,
+    }),
     ).rejects.toMatchObject({ kind: 'refused' } satisfies Partial<ConsultAnalysisProviderError>)
   })
 
@@ -468,3 +531,93 @@ describe('hair-color consult analysis provider', () => {
     ).toBe('STRAND_TEST')
   })
 })
+
+describe('P4 — the inspiration reference in the analysis prompt', () => {
+  const analysis: NonNullable<ConsultAnalysisInput['inspiration']['analysis']> = {
+    level: obs('LEVEL_9'),
+    tone: obs('COOL'),
+    technique: obs('BALAYAGE'),
+    placement: obs('MIDS_TO_ENDS'),
+    rootBlend: obs('SHADOW_ROOT'),
+    finish: obs('HIGH_SHINE'),
+    dimension: {
+      value: 'UNKNOWN' as const,
+      confidence: { min: 0.05, max: 0.3 },
+      evidence: [],
+      region: null,
+    },
+  }
+
+  it('names every attribute it read, and says plainly which one it could not', () => {
+    const block = consultInspirationBlock({
+      source: 'EXTERNAL_UPLOAD',
+      analysis,
+      answers: [
+        { question: 'Which color or colors in this picture are your favorite?', answer: 'The lightest pieces (LIKE)' },
+      ],
+    })
+    expect(block).toContain('source: EXTERNAL_UPLOAD')
+    expect(block).toContain('- level: LEVEL_9 (confidence 0.4–0.6)')
+    expect(block).toContain('- tone: COOL')
+    expect(block).toContain('- rootBlend: SHADOW_ROOT')
+    // An attribute the photograph did not show is stated as unread, not omitted
+    // — an omission reads to the model as "not relevant", which is a different
+    // claim from "not visible".
+    expect(block).toContain('- dimension: UNKNOWN (the photograph does not show it)')
+    // Her own words ride alongside the read.
+    expect(block).toContain('The lightest pieces (LIKE)')
+    // And the reference is never presented as an observation about the client.
+    expect(block).toContain('this describes the DESIRED result, not the client')
+  })
+
+  it('says the client brought nothing rather than leaving the model to assume', () => {
+    const block = consultInspirationBlock({ source: 'NONE', analysis: null, answers: [] })
+    expect(block).toContain('brought no reference photograph')
+    expect(block).toContain('do not invent a reference')
+  })
+
+  it('is one of the context blocks the provider is actually sent', () => {
+    const blocks = consultAnalysisContextBlocks({
+      service,
+      capturePack,
+      intake: {},
+      intakeItems: [],
+      inspiration: { source: 'PLATFORM_LOOK', analysis, answers: [] },
+    })
+    expect(blocks.some((block) => block.includes('Client inspiration reference'))).toBe(true)
+  })
+
+  it('labels a capture whose colour the quality gate warned about', async () => {
+    mocks.create.mockResolvedValue(message(validOutput()))
+    await runConsultAnalysis({
+      service,
+      capturePack,
+      intake: {},
+      intakeItems: [],
+      captures: captures.map((capture) =>
+        capture.shotKey === 'hair_back'
+          ? { ...capture, qualityWarningCode: 'WARM_INDOOR_LIGHT' as const }
+          : capture,
+      ),
+      inspiration: noInspiration,
+    })
+    const [params] = mocks.create.mock.calls[0] ?? []
+    const serialized = JSON.stringify(params.messages[0].content)
+    expect(serialized).toContain(
+      'Evidence label: hair_back (colour warning: WARM_INDOOR_LIGHT',
+    )
+    // Only the warned frame is labelled; the rest stay plain.
+    expect(serialized).toContain('Evidence label: hair_left"')
+    expect(params.system).toContain('widen the confidence range on any tone or level observation')
+  })
+})
+
+/** A minimal known inspiration observation for the prompt tests. */
+function obs<const T extends string>(value: T) {
+  return {
+    value,
+    confidence: { min: 0.4, max: 0.6 },
+    evidence: ['inspiration' as const],
+    region: { x: 0.1, y: 0.1, w: 0.5, h: 0.5 },
+  }
+}
