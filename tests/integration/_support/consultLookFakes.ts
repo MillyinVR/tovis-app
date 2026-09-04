@@ -25,6 +25,23 @@ export type FakeStorageObject = {
 }
 
 /** The private objects a suite's uploads have "landed" in. */
+/**
+ * P4 made the analysis resolve the ANCHORING LOOK's media URL — the reference
+ * has to be fetched before it can be read — so every suite that drives a
+ * look-anchored consult to COMPLETED now needs a Supabase URL to build a
+ * public object URL from. The integration workflow sets none (unlike e2e.yml
+ * and perf-availability.yml), so without this the read fails
+ * INSPIRATION_LOOK_UNAVAILABLE and the consult 404s three steps later, which
+ * is exactly how it showed up in CI while passing on a laptop that happens to
+ * have real Supabase env.
+ *
+ * `||=` so a developer's real value still wins. Same self-contained default
+ * `consult-look-anchor.test.ts` already sets for itself; this is that line,
+ * shared by the suites that were missing it. It builds a URL string and makes
+ * no network call — a public bucket needs no credential.
+ */
+process.env.NEXT_PUBLIC_SUPABASE_URL ||= 'https://storage.test'
+
 export const fakeStorageObjects = new Map<string, FakeStorageObject>()
 
 const state = {
