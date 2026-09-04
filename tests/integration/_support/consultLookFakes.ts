@@ -219,3 +219,44 @@ export async function fakeRunConsultAnalysis(input: {
     },
   }
 }
+
+/**
+ * P4 — the inspiration read, faked for every suite that drives a consult to
+ * COMPLETED. Two seams, because the read is two steps: fetching the reference
+ * bytes through the signed-read path, and the paid vision call over them.
+ *
+ * `fetchConsultInspirationImage` MUST be faked in these suites: the fake
+ * storage mints `https://storage.test/...`, and the real fetch correctly
+ * refuses that host (it is not this project's Supabase origin), which would
+ * otherwise surface as a 422 on every analysis.
+ */
+export async function fakeFetchConsultInspirationImage(): Promise<{
+  base64: string
+  mediaType: 'image/jpeg'
+}> {
+  return { base64: 'aW5zcGlyYXRpb24=', mediaType: 'image/jpeg' }
+}
+
+export async function fakeRunConsultInspirationVision(): Promise<{
+  model: string
+  analysis: Record<string, unknown>
+}> {
+  const known = (value: string) => ({
+    value,
+    confidence: { min: 0.4, max: 0.65 },
+    evidence: ['inspiration'] as const,
+    region: { x: 0.15, y: 0.2, w: 0.6, h: 0.5 },
+  })
+  return {
+    model: 'fake-inspiration-model',
+    analysis: {
+      level: known('LEVEL_8'),
+      tone: known('COOL'),
+      technique: known('BALAYAGE'),
+      placement: known('MIDS_TO_ENDS'),
+      rootBlend: known('SHADOW_ROOT'),
+      finish: known('HIGH_SHINE'),
+      dimension: known('MEDIUM'),
+    },
+  }
+}

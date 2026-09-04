@@ -230,6 +230,19 @@ async function latestReview(
   return null
 }
 
+/**
+ * P4 widened the return: the analysis now needs the REVIEW itself, not just
+ * its id, so the client's own words about her reference can travel into the
+ * analysis prompt beside the vision read of it. `revisionId` keeps its
+ * meaning and its callers.
+ */
+export type CompletedConsultInspiration = {
+  revisionId: string
+  source: ConsultInspirationSourceDTO
+  inspirationId: string | null
+  answers: readonly ConsultInspirationAnswerDTO[]
+}
+
 export async function requireCompletedConsultInspiration(
   tx: Prisma.TransactionClient,
   args: {
@@ -238,7 +251,7 @@ export async function requireCompletedConsultInspiration(
     professionalId: string
     now: Date
   },
-): Promise<{ revisionId: string }> {
+): Promise<CompletedConsultInspiration> {
   const review = await latestReview(tx, args.consultSessionId)
   if (!review?.complete) {
     throw new ConsultWriteError(
@@ -260,7 +273,13 @@ export async function requireCompletedConsultInspiration(
       'Guided inspiration must be completed after current consent.',
     )
   }
-  if (review.source === 'NONE') return { revisionId: review.revisionId }
+  const completed: CompletedConsultInspiration = {
+    revisionId: review.revisionId,
+    source: review.source,
+    inspirationId: review.inspirationId,
+    answers: review.answers,
+  }
+  if (review.source === 'NONE') return completed
   const source = await tx.consultInspiration.findFirst({
     where: {
       id: review.inspirationId ?? '',
@@ -281,7 +300,7 @@ export async function requireCompletedConsultInspiration(
       'Guided inspiration source is unavailable.',
     )
   }
-  return { revisionId: review.revisionId }
+  return completed
 }
 
 /** The single cross-step readiness boundary. Either capture or inspiration may
@@ -400,10 +419,22 @@ async function lookAvailableToBoth(
   }
 }
 
+/**
+ * What the image-visibility rules actually read off the session. Narrower than
+ * `InspirationScope` on purpose: the analysis path (P4) reaches these rules
+ * with its own, smaller select, and widening its select just to satisfy a type
+ * would be loading rows nothing uses.
+ */
+export type ConsultInspirationImageScope = {
+  id: string
+  clientId: string
+  professionalId: string
+}
+
 async function imageAvailable(
   tx: Prisma.TransactionClient,
   source: Awaited<ReturnType<typeof activeSource>>,
-  session: InspirationScope,
+  session: ConsultInspirationImageScope,
   now: Date,
 ): Promise<boolean> {
   if (!source || source.status !== ConsultInspirationStatus.ATTACHED) return false
@@ -1281,43 +1312,67 @@ async function lookPrimaryMediaPointers(
  * under-reporting costs one early refetch, over-reporting hands the client a
  * dark image with no scheduled recovery.
  */
-export async function loadClientInspirationSignedRead(args: {
-  consultSessionId: string
-  clientId: string
-  actorUserId: string
-  now?: Date
-  storage?: ConsultInspirationStorage
-}): Promise<{ url: string; expiresInSeconds: number }> {
-  const now = args.now ?? new Date()
-  const source = await prisma.$transaction(async (tx) => {
-    await lockSession(tx, args.consultSessionId, 'SHARE')
-    const session = await requireScope(tx, { ...args, now, mutation: false })
-    await requireCurrentConsultAgreementAcceptances(tx, session.id)
-    const current = await activeSource(tx, session.id)
-    if (!current || !(await imageAvailable(tx, current, session, now))) {
+/**
+ * The active source resolved to something readable, WITHOUT minting a URL.
+ *
+ * Split out of `loadClientInspirationSignedRead` so P4's analysis path can
+ * reach the same resolution from inside a transaction that already holds the
+ * ConsultSession row FOR UPDATE. Calling the public function there would
+ * self-deadlock: it opens its own transaction and takes FOR SHARE on the row
+ * the caller is holding. One resolution, two callers, no second copy of the
+ * visibility rules.
+ */
+export type ConsultInspirationReadTarget =
+  | { kind: 'UPLOAD'; inspirationId: string; source: ConsultInspirationSource; storagePath: string }
+  | {
+      kind: 'LOOK'
+      inspirationId: string
+      source: ConsultInspirationSource
+      pointers: NonNullable<Awaited<ReturnType<typeof lookPrimaryMediaPointers>>>
+    }
+
+export async function resolveLockedConsultInspirationReadTarget(
+  tx: Prisma.TransactionClient,
+  session: ConsultInspirationImageScope,
+  now: Date,
+): Promise<ConsultInspirationReadTarget> {
+  const current = await activeSource(tx, session.id)
+  if (!current || !(await imageAvailable(tx, current, session, now))) {
+    throw new ConsultWriteError('NOT_FOUND', 'Not found.')
+  }
+  if (current.source === ConsultInspirationSource.EXTERNAL_UPLOAD) {
+    if (!current.storagePath) {
       throw new ConsultWriteError('NOT_FOUND', 'Not found.')
     }
-    if (current.source === ConsultInspirationSource.EXTERNAL_UPLOAD) {
-      if (!current.storagePath) {
-        throw new ConsultWriteError('NOT_FOUND', 'Not found.')
-      }
-      return { kind: 'UPLOAD', storagePath: current.storagePath } as const
+    return {
+      kind: 'UPLOAD',
+      inspirationId: current.id,
+      source: current.source,
+      storagePath: current.storagePath,
     }
-    const pointers = await lookPrimaryMediaPointers(
-      tx,
-      current.sourceLookPostId ?? '',
+  }
+  const pointers = await lookPrimaryMediaPointers(tx, current.sourceLookPostId ?? '')
+  if (!pointers) {
+    throw new ConsultWriteError(
+      'INSPIRATION_LOOK_UNAVAILABLE',
+      'The selected Look is unavailable.',
     )
-    if (!pointers) {
-      throw new ConsultWriteError(
-        'INSPIRATION_LOOK_UNAVAILABLE',
-        'The selected Look is unavailable.',
-      )
-    }
-    return { kind: 'LOOK', pointers } as const
-  })
+  }
+  return {
+    kind: 'LOOK',
+    inspirationId: current.id,
+    source: current.source,
+    pointers,
+  }
+}
 
-  if (source.kind === 'LOOK') {
-    const rendered = await renderMediaUrls(source.pointers)
+/** A resolved target → the `{ url, expiresInSeconds }` both callers answer with. */
+export async function mintConsultInspirationReadUrl(
+  target: ConsultInspirationReadTarget,
+  storage: ConsultInspirationStorage = consultInspirationStorage,
+): Promise<{ url: string; expiresInSeconds: number }> {
+  if (target.kind === 'LOOK') {
+    const rendered = await renderMediaUrls(target.pointers)
     if (!rendered.renderUrl) {
       throw new ConsultWriteError(
         'INSPIRATION_LOOK_UNAVAILABLE',
@@ -1334,11 +1389,10 @@ export async function loadClientInspirationSignedRead(args: {
   }
 
   try {
-    const storage = args.storage ?? consultInspirationStorage
     await storage.assertReady()
     return {
       url: await storage.createSignedRead(
-        source.storagePath,
+        target.storagePath,
         CONSULT_INSPIRATION_READ_TTL_SECONDS,
       ),
       expiresInSeconds: CONSULT_INSPIRATION_READ_TTL_SECONDS,
@@ -1352,6 +1406,26 @@ export async function loadClientInspirationSignedRead(args: {
     }
     throw error
   }
+}
+
+export async function loadClientInspirationSignedRead(args: {
+  consultSessionId: string
+  clientId: string
+  actorUserId: string
+  now?: Date
+  storage?: ConsultInspirationStorage
+}): Promise<{ url: string; expiresInSeconds: number }> {
+  const now = args.now ?? new Date()
+  const target = await prisma.$transaction(async (tx) => {
+    await lockSession(tx, args.consultSessionId, 'SHARE')
+    const session = await requireScope(tx, { ...args, now, mutation: false })
+    await requireCurrentConsultAgreementAcceptances(tx, session.id)
+    return resolveLockedConsultInspirationReadTarget(tx, session, now)
+  })
+  return mintConsultInspirationReadUrl(
+    target,
+    args.storage ?? consultInspirationStorage,
+  )
 }
 
 export async function loadProInspirationSignedRead(args: {

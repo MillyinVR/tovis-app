@@ -12,6 +12,7 @@ import {
 import { assertProCanViewClient } from '@/lib/clientVisibility'
 import type {
   ConsultBriefFeedbackRatingDTO,
+  ConsultInspirationAnalysisDTO,
   ConsultProBriefDTO,
   ConsultServiceEstimateDTO,
 } from '@/lib/dto/consult'
@@ -22,6 +23,7 @@ import {
   ImmutableConsultResultError,
   loadLatestImmutableConsultResult,
 } from './immutableResult'
+import { normalizeStoredConsultInspirationAnalysis } from './inspirationAnalysisContract'
 import { loadConsultServiceEstimatesByConsultId } from './serviceEstimate'
 
 export { selectLatestConsultRevision } from './immutableResult'
@@ -57,6 +59,45 @@ export function sortConsultBriefHistory<
       new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime() ||
       right.consultId.localeCompare(left.consultId),
   )
+}
+
+/**
+ * P4: the inspiration-analysis artefact for this brief, or null.
+ *
+ * It is a SIBLING read, not part of the brief payload — the brief is
+ * re-derived and byte-compared on every read
+ * (`loadLatestImmutableConsultResult`), and folding a second artefact into
+ * that projection would make an unrelated artefact able to invalidate a
+ * finished brief. Same shape as B3's `serviceEstimate`, for the same reason.
+ *
+ * The pin is checked here: an artefact read against a different INSPIRATION
+ * revision than the one the brief carries is stale, and stale means the wrong
+ * photograph. Null, not "close enough".
+ */
+async function loadBriefInspirationAnalysis(
+  tx: Prisma.TransactionClient,
+  consultSessionId: string,
+  inspirationRevisionId: string | null,
+): Promise<ConsultInspirationAnalysisDTO | null> {
+  if (!inspirationRevisionId) return null
+  const revision = await tx.consultRevision.findFirst({
+    where: {
+      consultSessionId,
+      kind: ConsultRevisionKind.INSPIRATION_ANALYSIS,
+    },
+    select: {
+      id: true,
+      payload: true,
+      schemaVersion: true,
+      promptVersion: true,
+      model: true,
+      createdAt: true,
+    },
+    orderBy: [{ revision: 'desc' }, { id: 'desc' }],
+  })
+  if (!revision) return null
+  const analysis = normalizeStoredConsultInspirationAnalysis(revision)
+  return analysis?.inspirationRevisionId === inspirationRevisionId ? analysis : null
 }
 
 async function loadSessionBrief(
@@ -102,6 +143,11 @@ async function loadSessionBrief(
     // Book the Look, B3. Omitted rather than nulled for a booking-anchored
     // consult, which has no estimate to carry.
     ...(session.anchorLookPostId ? { serviceEstimate } : {}),
+    inspirationAnalysis: await loadBriefInspirationAnalysis(
+      tx,
+      session.id,
+      payload.inspiration.revisionId,
+    ),
     feedback: feedback
       ? { rating: feedback.rating, createdAt: feedback.createdAt.toISOString() }
       : null,

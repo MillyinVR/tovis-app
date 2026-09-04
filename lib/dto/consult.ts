@@ -899,6 +899,88 @@ export type ConsultBriefInspirationDTO = {
   catalogGuidance: ConsultInspirationCatalogGuidanceDTO[]
 }
 
+// ── P4: what the consult read off the client's inspiration reference ────────
+// Stage 1 of docs/consult/tovis-ai-consult-handoff.md. Seven hair-colour
+// attributes, each in the same observation shape the feature profile uses
+// (value + confidence range + evidence) plus a region: where on the reference
+// the attribute was read from. Enum values only — this artefact carries no
+// free text, so it cannot describe the person in the photograph.
+
+export type ConsultInspirationAnalysisLevelDTO =
+  | 'LEVEL_1' | 'LEVEL_2' | 'LEVEL_3' | 'LEVEL_4' | 'LEVEL_5'
+  | 'LEVEL_6' | 'LEVEL_7' | 'LEVEL_8' | 'LEVEL_9' | 'LEVEL_10'
+  | 'UNKNOWN'
+
+export type ConsultInspirationAnalysisToneDTO =
+  | 'WARM' | 'COOL' | 'NEUTRAL' | 'UNKNOWN'
+
+export type ConsultInspirationAnalysisTechniqueDTO =
+  | 'SINGLE_PROCESS' | 'BALAYAGE' | 'FOIL_HIGHLIGHTS' | 'BABYLIGHTS'
+  | 'LOWLIGHTS' | 'COLOR_MELT' | 'GLOSS_ONLY' | 'DOUBLE_PROCESS'
+  | 'NATURAL_UNCOLORED' | 'UNKNOWN'
+
+export type ConsultInspirationAnalysisPlacementDTO =
+  | 'ALL_OVER' | 'FACE_FRAMING' | 'MIDS_TO_ENDS' | 'ENDS_ONLY'
+  | 'SURFACE_ONLY' | 'UNDERNEATH' | 'PANELS' | 'UNKNOWN'
+
+export type ConsultInspirationAnalysisRootBlendDTO =
+  | 'SOLID_TO_ROOT' | 'SHADOW_ROOT' | 'SEAMLESS_MELT' | 'GROWN_OUT' | 'UNKNOWN'
+
+export type ConsultInspirationAnalysisFinishDTO =
+  | 'HIGH_SHINE' | 'SATIN' | 'MATTE' | 'UNKNOWN'
+
+export type ConsultInspirationAnalysisDimensionDTO =
+  | 'FLAT' | 'SUBTLE' | 'MEDIUM' | 'HIGH_CONTRAST' | 'UNKNOWN'
+
+/**
+ * Where on the reference the attribute is most visible, normalized to the
+ * image (0..1, top-left origin). Null when the value is UNKNOWN.
+ *
+ * Nothing renders it yet (Tori, 2026-09-04); P5 will.
+ */
+export type ConsultInspirationAnalysisRegionDTO = {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+export type ConsultInspirationAnalysisObservationDTO<T extends string> = {
+  value: T
+  confidence: ConsultAnalysisConfidenceDTO
+  evidence: 'inspiration'[]
+  region: ConsultInspirationAnalysisRegionDTO | null
+}
+
+export type ConsultInspirationAnalysisAttributesDTO = {
+  level: ConsultInspirationAnalysisObservationDTO<ConsultInspirationAnalysisLevelDTO>
+  tone: ConsultInspirationAnalysisObservationDTO<ConsultInspirationAnalysisToneDTO>
+  technique: ConsultInspirationAnalysisObservationDTO<ConsultInspirationAnalysisTechniqueDTO>
+  placement: ConsultInspirationAnalysisObservationDTO<ConsultInspirationAnalysisPlacementDTO>
+  rootBlend: ConsultInspirationAnalysisObservationDTO<ConsultInspirationAnalysisRootBlendDTO>
+  finish: ConsultInspirationAnalysisObservationDTO<ConsultInspirationAnalysisFinishDTO>
+  dimension: ConsultInspirationAnalysisObservationDTO<ConsultInspirationAnalysisDimensionDTO>
+}
+
+/**
+ * The stored artefact, pinned to the guided-inspiration revision it was read
+ * against: a new inspiration revision makes this one stale, and the pro brief
+ * declines to show a stale one rather than showing the wrong picture's colour.
+ */
+export type ConsultInspirationAnalysisDTO = {
+  revisionId: string
+  /** The INSPIRATION revision this was read against. */
+  inspirationRevisionId: string
+  /** The attached ConsultInspiration row whose image was read. */
+  inspirationId: string
+  source: Exclude<ConsultInspirationSourceDTO, 'NONE'>
+  schemaVersion: number
+  promptVersion: string
+  model: string
+  attributes: ConsultInspirationAnalysisAttributesDTO
+  createdAt: string
+}
+
 export type ConsultBriefFeedbackRatingDTO = 'ACCURATE_USEFUL' | 'OFF'
 
 export type ConsultBriefFeedbackDTO = {
@@ -1299,6 +1381,13 @@ export type ConsultProBriefDTO = {
   // valid. Present only for a LOOK-anchored consult; a booking-anchored one has
   // real BookingServiceItem prices and nothing to translate.
   serviceEstimate?: ConsultServiceEstimateDTO | null
+  // P4 — what the consult read off the client's inspiration reference. OPTIONAL
+  // on the wire for the same reason `serviceEstimate` is: the published schema
+  // grows by addition only and shipped iOS fixtures stay valid. Null when the
+  // client brought no reference, or when the stored artefact is pinned to a
+  // DIFFERENT inspiration revision than this brief — a stale read is the wrong
+  // photograph's colour, so the brief shows nothing rather than the wrong thing.
+  inspirationAnalysis?: ConsultInspirationAnalysisDTO | null
   feedback: ConsultBriefFeedbackDTO | null
   createdAt: string
 }
@@ -1439,6 +1528,12 @@ export type ConsultAgreementErrorCode =
   | 'CONSULT_INSPIRATION_STORAGE_UNAVAILABLE'
   | 'CONSULT_INSPIRATION_INVALID_ANSWER'
   | 'CONSULT_INSPIRATION_QUESTION_OUT_OF_ORDER'
+  // P4: the inspiration reference could not be read. UNAVAILABLE is the
+  // provider being down or refusing (retry); UNREADABLE is this PHOTO —
+  // the model looked and could name nothing, so the client is asked for a
+  // clearer one. Neither ever falls back to a static question list.
+  | 'CONSULT_INSPIRATION_ANALYSIS_UNAVAILABLE'
+  | 'CONSULT_INSPIRATION_ANALYSIS_UNREADABLE'
   | 'CONSULT_LOOK_NOT_CONSULTABLE'
 
 export type ConsultAgreementErrorDTO = {

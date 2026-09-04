@@ -7087,6 +7087,8 @@
         "CONSULT_INSPIRATION_STORAGE_UNAVAILABLE",
         "CONSULT_INSPIRATION_INVALID_ANSWER",
         "CONSULT_INSPIRATION_QUESTION_OUT_OF_ORDER",
+        "CONSULT_INSPIRATION_ANALYSIS_UNAVAILABLE",
+        "CONSULT_INSPIRATION_ANALYSIS_UNREADABLE",
         "CONSULT_LOOK_NOT_CONSULTABLE"
       ],
       "type": "string"
@@ -9229,6 +9231,431 @@
       ],
       "type": "object"
     },
+    "ConsultInspirationAnalysisAttributesDTO": {
+      "properties": {
+        "dimension": {
+          "$ref": "#/definitions/ConsultInspirationAnalysisObservationDTO%3CConsultInspirationAnalysisDimensionDTO%3E"
+        },
+        "finish": {
+          "$ref": "#/definitions/ConsultInspirationAnalysisObservationDTO%3CConsultInspirationAnalysisFinishDTO%3E"
+        },
+        "level": {
+          "$ref": "#/definitions/ConsultInspirationAnalysisObservationDTO%3CConsultInspirationAnalysisLevelDTO%3E"
+        },
+        "placement": {
+          "$ref": "#/definitions/ConsultInspirationAnalysisObservationDTO%3CConsultInspirationAnalysisPlacementDTO%3E"
+        },
+        "rootBlend": {
+          "$ref": "#/definitions/ConsultInspirationAnalysisObservationDTO%3CConsultInspirationAnalysisRootBlendDTO%3E"
+        },
+        "technique": {
+          "$ref": "#/definitions/ConsultInspirationAnalysisObservationDTO%3CConsultInspirationAnalysisTechniqueDTO%3E"
+        },
+        "tone": {
+          "$ref": "#/definitions/ConsultInspirationAnalysisObservationDTO%3CConsultInspirationAnalysisToneDTO%3E"
+        }
+      },
+      "required": [
+        "level",
+        "tone",
+        "technique",
+        "placement",
+        "rootBlend",
+        "finish",
+        "dimension"
+      ],
+      "type": "object"
+    },
+    "ConsultInspirationAnalysisDTO": {
+      "description": "The stored artefact, pinned to the guided-inspiration revision it was read against: a new inspiration revision makes this one stale, and the pro brief declines to show a stale one rather than showing the wrong picture's colour.",
+      "properties": {
+        "attributes": {
+          "$ref": "#/definitions/ConsultInspirationAnalysisAttributesDTO"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "inspirationId": {
+          "description": "The attached ConsultInspiration row whose image was read.",
+          "type": "string"
+        },
+        "inspirationRevisionId": {
+          "description": "The INSPIRATION revision this was read against.",
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "promptVersion": {
+          "type": "string"
+        },
+        "revisionId": {
+          "type": "string"
+        },
+        "schemaVersion": {
+          "type": "number"
+        },
+        "source": {
+          "$ref": "#/definitions/ConsultInspirationSource"
+        }
+      },
+      "required": [
+        "revisionId",
+        "inspirationRevisionId",
+        "inspirationId",
+        "source",
+        "schemaVersion",
+        "promptVersion",
+        "model",
+        "attributes",
+        "createdAt"
+      ],
+      "type": "object"
+    },
+    "ConsultInspirationAnalysisDimensionDTO": {
+      "enum": [
+        "FLAT",
+        "SUBTLE",
+        "MEDIUM",
+        "HIGH_CONTRAST",
+        "UNKNOWN"
+      ],
+      "type": "string"
+    },
+    "ConsultInspirationAnalysisFinishDTO": {
+      "enum": [
+        "HIGH_SHINE",
+        "SATIN",
+        "MATTE",
+        "UNKNOWN"
+      ],
+      "type": "string"
+    },
+    "ConsultInspirationAnalysisLevelDTO": {
+      "enum": [
+        "LEVEL_1",
+        "LEVEL_2",
+        "LEVEL_3",
+        "LEVEL_4",
+        "LEVEL_5",
+        "LEVEL_6",
+        "LEVEL_7",
+        "LEVEL_8",
+        "LEVEL_9",
+        "LEVEL_10",
+        "UNKNOWN"
+      ],
+      "type": "string"
+    },
+    "ConsultInspirationAnalysisObservationDTO<ConsultInspirationAnalysisDimensionDTO>": {
+      "properties": {
+        "confidence": {
+          "$ref": "#/definitions/ConsultAnalysisConfidenceDTO"
+        },
+        "evidence": {
+          "items": {
+            "const": "inspiration",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "region": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultInspirationAnalysisRegionDTO"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "value": {
+          "$ref": "#/definitions/ConsultInspirationAnalysisDimensionDTO"
+        }
+      },
+      "required": [
+        "value",
+        "confidence",
+        "evidence",
+        "region"
+      ],
+      "type": "object"
+    },
+    "ConsultInspirationAnalysisObservationDTO<ConsultInspirationAnalysisFinishDTO>": {
+      "properties": {
+        "confidence": {
+          "$ref": "#/definitions/ConsultAnalysisConfidenceDTO"
+        },
+        "evidence": {
+          "items": {
+            "const": "inspiration",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "region": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultInspirationAnalysisRegionDTO"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "value": {
+          "$ref": "#/definitions/ConsultInspirationAnalysisFinishDTO"
+        }
+      },
+      "required": [
+        "value",
+        "confidence",
+        "evidence",
+        "region"
+      ],
+      "type": "object"
+    },
+    "ConsultInspirationAnalysisObservationDTO<ConsultInspirationAnalysisLevelDTO>": {
+      "properties": {
+        "confidence": {
+          "$ref": "#/definitions/ConsultAnalysisConfidenceDTO"
+        },
+        "evidence": {
+          "items": {
+            "const": "inspiration",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "region": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultInspirationAnalysisRegionDTO"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "value": {
+          "$ref": "#/definitions/ConsultInspirationAnalysisLevelDTO"
+        }
+      },
+      "required": [
+        "value",
+        "confidence",
+        "evidence",
+        "region"
+      ],
+      "type": "object"
+    },
+    "ConsultInspirationAnalysisObservationDTO<ConsultInspirationAnalysisPlacementDTO>": {
+      "properties": {
+        "confidence": {
+          "$ref": "#/definitions/ConsultAnalysisConfidenceDTO"
+        },
+        "evidence": {
+          "items": {
+            "const": "inspiration",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "region": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultInspirationAnalysisRegionDTO"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "value": {
+          "$ref": "#/definitions/ConsultInspirationAnalysisPlacementDTO"
+        }
+      },
+      "required": [
+        "value",
+        "confidence",
+        "evidence",
+        "region"
+      ],
+      "type": "object"
+    },
+    "ConsultInspirationAnalysisObservationDTO<ConsultInspirationAnalysisRootBlendDTO>": {
+      "properties": {
+        "confidence": {
+          "$ref": "#/definitions/ConsultAnalysisConfidenceDTO"
+        },
+        "evidence": {
+          "items": {
+            "const": "inspiration",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "region": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultInspirationAnalysisRegionDTO"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "value": {
+          "$ref": "#/definitions/ConsultInspirationAnalysisRootBlendDTO"
+        }
+      },
+      "required": [
+        "value",
+        "confidence",
+        "evidence",
+        "region"
+      ],
+      "type": "object"
+    },
+    "ConsultInspirationAnalysisObservationDTO<ConsultInspirationAnalysisTechniqueDTO>": {
+      "properties": {
+        "confidence": {
+          "$ref": "#/definitions/ConsultAnalysisConfidenceDTO"
+        },
+        "evidence": {
+          "items": {
+            "const": "inspiration",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "region": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultInspirationAnalysisRegionDTO"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "value": {
+          "$ref": "#/definitions/ConsultInspirationAnalysisTechniqueDTO"
+        }
+      },
+      "required": [
+        "value",
+        "confidence",
+        "evidence",
+        "region"
+      ],
+      "type": "object"
+    },
+    "ConsultInspirationAnalysisObservationDTO<ConsultInspirationAnalysisToneDTO>": {
+      "properties": {
+        "confidence": {
+          "$ref": "#/definitions/ConsultAnalysisConfidenceDTO"
+        },
+        "evidence": {
+          "items": {
+            "const": "inspiration",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "region": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultInspirationAnalysisRegionDTO"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "value": {
+          "$ref": "#/definitions/ConsultInspirationAnalysisToneDTO"
+        }
+      },
+      "required": [
+        "value",
+        "confidence",
+        "evidence",
+        "region"
+      ],
+      "type": "object"
+    },
+    "ConsultInspirationAnalysisPlacementDTO": {
+      "enum": [
+        "ALL_OVER",
+        "FACE_FRAMING",
+        "MIDS_TO_ENDS",
+        "ENDS_ONLY",
+        "SURFACE_ONLY",
+        "UNDERNEATH",
+        "PANELS",
+        "UNKNOWN"
+      ],
+      "type": "string"
+    },
+    "ConsultInspirationAnalysisRegionDTO": {
+      "description": "Where on the reference the attribute is most visible, normalized to the image (0..1, top-left origin). Null when the value is UNKNOWN.\n\nNothing renders it yet (Tori, 2026-09-04); P5 will.",
+      "properties": {
+        "h": {
+          "type": "number"
+        },
+        "w": {
+          "type": "number"
+        },
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "w",
+        "h"
+      ],
+      "type": "object"
+    },
+    "ConsultInspirationAnalysisRootBlendDTO": {
+      "enum": [
+        "SOLID_TO_ROOT",
+        "SHADOW_ROOT",
+        "SEAMLESS_MELT",
+        "GROWN_OUT",
+        "UNKNOWN"
+      ],
+      "type": "string"
+    },
+    "ConsultInspirationAnalysisTechniqueDTO": {
+      "enum": [
+        "SINGLE_PROCESS",
+        "BALAYAGE",
+        "FOIL_HIGHLIGHTS",
+        "BABYLIGHTS",
+        "LOWLIGHTS",
+        "COLOR_MELT",
+        "GLOSS_ONLY",
+        "DOUBLE_PROCESS",
+        "NATURAL_UNCOLORED",
+        "UNKNOWN"
+      ],
+      "type": "string"
+    },
+    "ConsultInspirationAnalysisToneDTO": {
+      "enum": [
+        "WARM",
+        "COOL",
+        "NEUTRAL",
+        "UNKNOWN"
+      ],
+      "type": "string"
+    },
     "ConsultInspirationAnswerDTO": {
       "properties": {
         "questionKey": {
@@ -10271,6 +10698,16 @@
         },
         "inspiration": {
           "$ref": "#/definitions/ConsultBriefInspirationDTO"
+        },
+        "inspirationAnalysis": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultInspirationAnalysisDTO"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "intakeRevisionId": {
           "type": "string"

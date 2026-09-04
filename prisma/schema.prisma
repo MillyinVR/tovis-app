@@ -7296,6 +7296,10 @@ enum ConsultSessionStatus {
 enum ConsultRevisionKind {
   INTAKE
   INSPIRATION
+  /// P4, Stage 1: what the vision model read off the client's inspiration
+  /// reference, pinned to the INSPIRATION revision it was read against.
+  /// Written during ANALYZING, immediately before the analysis provider call.
+  INSPIRATION_ANALYSIS
   ANALYSIS
   BRIEF
 }

@@ -14,7 +14,9 @@ import {
 
 import type {
   ConsultAnalysisStateDTO,
+  ConsultCaptureQualityWarningCodeDTO,
   ConsultCaptureShotKeyDTO,
+  ConsultInspirationAnswerDTO,
 } from '@/lib/dto/consult'
 import { decimalToCents } from '@/lib/money'
 import { prisma } from '@/lib/prisma'
@@ -42,9 +44,17 @@ import {
 import {
   CONSULT_CAPTURE_MEDIA_TYPES,
   CONSULT_CAPTURE_QUALITY_SCHEMA_VERSION,
+  CONSULT_CAPTURE_QUALITY_WARNING_CODES,
   isAnalyzableConsultCapturePromptVersion,
   type ConsultCaptureMediaType,
 } from './captureVision'
+import { analyzeLockedConsultInspiration } from './inspirationAnalysisContract'
+import {
+  buildExactClientDetails,
+  CONSULT_INSPIRATION_QUESTIONS,
+} from './inspirationPack'
+import type { ConsultInspirationStorage } from './inspirationStorage'
+import type { ConsultInspirationVisionProvider } from './inspirationVision'
 import { CONSULT_ANCHOR_SELECT, evaluateConsultAnchor } from './anchor'
 import { ConsultWriteError } from './errors'
 import {
@@ -178,6 +188,9 @@ const CAPTURE_SELECT = {
   checksumSha256: true,
   status: true,
   qualityReasonCode: true,
+  // P4: a frame the gate accepted WITH a colour finding is lower-confidence
+  // colour evidence, and the analysis prompt is told so per view.
+  qualityWarningCode: true,
   qualitySchemaVersion: true,
   qualityPromptVersion: true,
   qualityModel: true,
@@ -340,6 +353,32 @@ async function currentCompletedIntake(
   return { revision, payload }
 }
 
+/** The stored warning column narrowed to the DTO union, or null. */
+function consultCaptureWarningCode(
+  value: string | null,
+): ConsultCaptureQualityWarningCodeDTO | null {
+  return (
+    CONSULT_CAPTURE_QUALITY_WARNING_CODES.find((candidate) => candidate === value) ??
+    null
+  )
+}
+
+/**
+ * The client's guided-inspiration answers as the prompt reads them: her own
+ * words, from the SAME `buildExactClientDetails` the pro brief renders — so
+ * the model and the professional are looking at one list, not two.
+ */
+function consultInspirationPromptAnswers(
+  answers: readonly ConsultInspirationAnswerDTO[],
+): { question: string; answer: string }[] {
+  return buildExactClientDetails(answers).map((detail) => ({
+    question:
+      CONSULT_INSPIRATION_QUESTIONS.find((question) => question.key === detail.questionKey)
+        ?.label ?? detail.questionKey,
+    answer: `${detail.clientWords} (${detail.sentiment})`,
+  }))
+}
+
 function captureMediaType(value: string): ConsultCaptureMediaType {
   const mediaType = CONSULT_CAPTURE_MEDIA_TYPES.find((candidate) => candidate === value)
   if (!mediaType) {
@@ -428,7 +467,13 @@ async function currentCaptures(
 async function readVerifiedImages(
   captures: readonly AnalysisCapture[],
   storage: ConsultCaptureStorage,
-): Promise<Array<{ shotKey: ConsultCaptureShotKeyDTO; image: ConsultCaptureImage }>> {
+): Promise<
+  Array<{
+    shotKey: ConsultCaptureShotKeyDTO
+    image: ConsultCaptureImage
+    qualityWarningCode: ConsultCaptureQualityWarningCodeDTO | null
+  }>
+> {
   try {
     await storage.assertReady()
     const images = []
@@ -456,7 +501,11 @@ async function readVerifiedImages(
         expectedContentType: mediaType,
         maxBytes: capture.sizeBytes,
       })
-      images.push({ shotKey: capture.shotKey, image })
+      images.push({
+        shotKey: capture.shotKey,
+        image,
+        qualityWarningCode: consultCaptureWarningCode(capture.qualityWarningCode),
+      })
     }
     return images
   } catch (error) {
@@ -764,6 +813,9 @@ export async function runConsultAnalysis(args: {
   loadInput: () => Promise<AnalysisInput>
   storage?: ConsultCaptureStorage
   provider?: ConsultAnalysisProvider
+  /** P4 seams: the inspiration object store and its vision provider. */
+  inspirationStorage?: ConsultInspirationStorage
+  inspirationProvider?: ConsultInspirationVisionProvider
 }): Promise<{ state: ConsultAnalysisStateDTO; replayed: boolean }> {
   const startedAt = args.now ?? new Date()
   const storage = args.storage ?? consultCaptureStorage
@@ -856,6 +908,24 @@ export async function runConsultAnalysis(args: {
           toStatus: ConsultSessionStatus.ANALYZING,
         })
         const images = await readVerifiedImages(captures, storage)
+        // Stage 1 (P4). Runs HERE, inside the claimed ANALYZING transaction:
+        // the artefact's lifecycle pin allows no other state, the reference is
+        // resolved through the same read path the client's viewer uses, and a
+        // failure surfaces as its own typed error rather than degrading the
+        // analysis to a picture-blind one.
+        const inspirationAnalysis =
+          inspiration.source === 'NONE'
+            ? null
+            : await analyzeLockedConsultInspiration(tx, {
+                session,
+                clientId: args.clientId,
+                inspirationRevisionId: inspiration.revisionId,
+                analysisIdempotencyKey: input.idempotencyKey,
+                actor: args.actor,
+                now: startedAt,
+                storage: args.inspirationStorage,
+                provider: args.inspirationProvider,
+              })
         const menu = await loadRecommendationOfferings(tx, session)
         const service = await loadServiceContext(tx, session, menu.offerings)
         const profile = resolveConsultServiceProfile(session.serviceCategory)
@@ -872,6 +942,11 @@ export async function runConsultAnalysis(args: {
                 shotKeys: profile.capturePack.shots.map((shot) => shot.key),
               },
               captures: images,
+              inspiration: {
+                source: inspiration.source,
+                analysis: inspirationAnalysis?.analysis ?? null,
+                answers: consultInspirationPromptAnswers(inspiration.answers),
+              },
             }),
             {
               menuServiceNames: service.menuServiceNames,

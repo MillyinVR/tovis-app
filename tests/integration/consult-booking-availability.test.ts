@@ -71,6 +71,21 @@ vi.mock('@/lib/consult/captureVision', async (importOriginal) => {
   return { ...original, checkConsultCapture: fakes.fakeCheckConsultCapture }
 })
 
+vi.mock('@/lib/consult/inspirationImage', async () => {
+  const fakes = await import('./_support/consultLookFakes')
+  return { fetchConsultInspirationImage: fakes.fakeFetchConsultInspirationImage }
+})
+
+vi.mock('@/lib/consult/inspirationVision', async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import('@/lib/consult/inspirationVision')>()
+  const fakes = await import('./_support/consultLookFakes')
+  return {
+    ...original,
+    runConsultInspirationVision: fakes.fakeRunConsultInspirationVision,
+  }
+})
+
 vi.mock('@/lib/consult/analysisEngine', async (importOriginal) => {
   const original =
     await importOriginal<typeof import('@/lib/consult/analysisEngine')>()
