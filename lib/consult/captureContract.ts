@@ -84,6 +84,7 @@ const QUALITY_REASON_CODES = new Set<ConsultCaptureQualityReasonCodeDTO>([
   'COLOR_CAST',
   'VIEW_MISMATCH',
   'HAIR_NOT_VISIBLE',
+  'SUBJECT_NOT_VISIBLE',
   'BLURRY',
   'TOO_DARK',
   'TOO_BRIGHT',

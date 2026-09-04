@@ -29,6 +29,7 @@ import {
   ConsultActorType,
   ConsultAgreementKind,
   ConsultAuditAction,
+  ConsultCaptureStatus,
   ConsultRevisionKind,
   ConsultServiceFamily,
   ConsultSessionStatus,
@@ -40,6 +41,8 @@ import {
   VerificationStatus,
 } from '@prisma/client'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import type { ConsultCaptureQualityResult } from '@/lib/consult/captureVision'
 
 vi.hoisted(() => {
   process.env.JWT_SECRET ||= 'integration-test-jwt-secret'
@@ -56,6 +59,12 @@ const fake = vi.hoisted(() => ({
     .toString(16)
     .padStart(8, '0'),
   modelCalls: [] as string[],
+  /**
+   * A quality verdict to return for one shot key instead of PASS. Typed as the
+   * vision module's own result so a fixture can never name a reason code the
+   * wire does not have, nor drift from the shape the contract is handed.
+   */
+  qualityByShot: new Map<string, ConsultCaptureQualityResult>(),
   analysisCalls: 0,
   /** The shot keys the engine was told it may cite, per call. */
   suppliedShotKeys: [] as string[][],
@@ -121,7 +130,15 @@ vi.mock('@/lib/consult/captureVision', async (importOriginal) => {
     ...original,
     async checkConsultCapture(input: { shotKey: string }) {
       fake.modelCalls.push(input.shotKey)
-      return { accepted: true, reasonCode: 'PASS', warningCode: null, retakeTip: null, model: 'fake-quality' }
+      return (
+        fake.qualityByShot.get(input.shotKey) ?? {
+          accepted: true,
+          reasonCode: 'PASS',
+          warningCode: null,
+          retakeTip: null,
+          model: 'fake-quality',
+        }
+      )
     },
   }
 })
@@ -402,8 +419,8 @@ function skipInspiration(consult: Consult, label: string) {
   })
 }
 
-/** Issue → put the bytes → attach → quality-check, under THIS pack's versions. */
-async function acceptShot(
+/** Issue → put the bytes → attach, under THIS pack's versions. */
+async function issueAttach(
   consult: Consult,
   pack: ConsultCapturePackDefinition,
   shotKey: string,
@@ -440,14 +457,39 @@ async function acceptShot(
     context(consult.sessionId),
   )
   expect(attached.status).toBe(200)
-  const captureId = (await body(attached)).captureId as string
-  const quality = await checkQuality(
+  return (await body(attached)).captureId as string
+}
+
+/** The quality check on an attached capture — the response, unasserted, so a
+ *  rejection can be inspected as well as an acceptance. */
+function checkShotQuality(
+  consult: Consult,
+  pack: ConsultCapturePackDefinition,
+  captureId: string,
+  label: string,
+) {
+  return checkQuality(
     jsonRequest(
       `/api/v1/client/consult/${consult.sessionId}/capture/${captureId}/quality`,
-      { idempotencyKey: `${label}-quality-${shotKey}`, ...versions },
+      {
+        idempotencyKey: `${label}-quality-${captureId}`,
+        shotPackVersion: pack.version,
+        schemaVersion: pack.schemaVersion,
+      },
     ),
     captureContext(consult.sessionId, captureId),
   )
+}
+
+/** Issue → put the bytes → attach → quality-check, expecting acceptance. */
+async function acceptShot(
+  consult: Consult,
+  pack: ConsultCapturePackDefinition,
+  shotKey: string,
+  label: string,
+) {
+  const captureId = await issueAttach(consult, pack, shotKey, label)
+  const quality = await checkShotQuality(consult, pack, captureId, label)
   expect(quality.status).toBe(200)
   return captureId
 }
@@ -599,6 +641,7 @@ beforeEach(() => {
   delete process.env.AI_CONSULT_SERVICE_SCOPE
   fake.objects.clear()
   fake.modelCalls.length = 0
+  fake.qualityByShot.clear()
   fake.analysisCalls = 0
   fake.suppliedShotKeys.length = 0
   fake.capturePackIds.length = 0
@@ -661,6 +704,76 @@ describe('the area pack (NAILS) against PostgreSQL', () => {
       },
     })
     expect(transitions).toHaveLength(1)
+  })
+
+  // SUBJECT_NOT_VISIBLE is the area pack's equivalent of HAIR_NOT_VISIBLE. The
+  // vision enum, the DTO union and the ConsultCapture_quality_contract CHECK all
+  // carried it from migration 20261005; the contract's own reason-code set did
+  // not, so the write refused its OWN model's verdict and the client got
+  // CONSULT_CAPTURE_QUALITY_UNAVAILABLE (503) — a retakeable photo reported as
+  // a broken feature — instead of the retake tip that tells them what to fix.
+  it('surfaces a SUBJECT_NOT_VISIBLE rejection with its retake tip', async () => {
+    const consult = await createConsult({
+      label: 'nails-subject-not-visible',
+      serviceCategoryId: nailsCategoryId,
+      serviceId: nailsServiceId,
+      skipInspiration: true,
+    })
+    authenticate(consult)
+    const retakeTip = 'Fill the frame with the nails themselves, in indirect daylight.'
+    fake.qualityByShot.set('area_closeup', {
+      accepted: false,
+      reasonCode: 'SUBJECT_NOT_VISIBLE',
+      warningCode: null,
+      retakeTip,
+      model: 'fake-quality',
+    })
+
+    const captureId = await issueAttach(
+      consult,
+      AREA_CAPTURE_PACK,
+      'area_closeup',
+      'nails-snv',
+    )
+    const response = await checkShotQuality(
+      consult,
+      AREA_CAPTURE_PACK,
+      captureId,
+      'nails-snv',
+    )
+
+    expect(response.status).toBe(200)
+    const payload = await body(response)
+    expect(payload).toMatchObject({
+      quality: { accepted: false, reasonCode: 'SUBJECT_NOT_VISIBLE', retakeTip },
+    })
+
+    // The slot the client renders from carries the reason and the tip, not a
+    // blank rejection: stateForCapture drops any code it does not recognize.
+    const capture = payload.capture as {
+      slots: Array<{
+        shotKey: string
+        state: string
+        qualityReasonCode: string | null
+        retakeTip: string | null
+      }>
+    }
+    expect(capture.slots.find((slot) => slot.shotKey === 'area_closeup')).toMatchObject(
+      { state: 'REJECTED', qualityReasonCode: 'SUBJECT_NOT_VISIBLE', retakeTip },
+    )
+
+    // And the row itself: proof the database CHECK takes the code for a
+    // REJECTED capture, not just that the application let it through.
+    expect(
+      await db.consultCapture.findUniqueOrThrow({
+        where: { id: captureId },
+        select: { status: true, qualityReasonCode: true, retakeTip: true },
+      }),
+    ).toMatchObject({
+      status: ConsultCaptureStatus.REJECTED,
+      qualityReasonCode: 'SUBJECT_NOT_VISIBLE',
+      retakeTip,
+    })
   })
 
   it('runs the analysis on the area pack and the guard accepts the v3 write', async () => {
