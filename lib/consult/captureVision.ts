@@ -97,6 +97,33 @@ export class ConsultCaptureVisionError extends Error {
 
 const DEFAULT_MODEL = 'claude-sonnet-5'
 const REQUEST_TIMEOUT_MS = 50_000
+
+/**
+ * 🔴 This was 300, and 300 was not enough — the photo check has been failing
+ * intermittently in production for as long as it has existed.
+ *
+ * THINKING TOKENS COUNT AGAINST `max_tokens`. Measured on 2026-09-04 against
+ * `claude-sonnet-5`, two consecutive checks on the same capture pack:
+ *
+ *   accepted:  87 output tokens, of which  56 were thinking  → stop end_turn
+ *   truncated: 300 output tokens, of which 277 were thinking → stop max_tokens
+ *
+ * The second call's JSON stopped mid-string (`{"accepted":false,"reasonCode":
+ * "VIEW_M`), which reaches `sanitizeConsultCaptureQuality` as unparseable and
+ * surfaces to the client as a 503 on a photo that the model had in fact
+ * already judged. How long the model deliberates varies per image, so this was
+ * a coin flip nothing in the mocked suite could see.
+ *
+ * The verdict itself needs about 90 tokens. This is deliberately generous
+ * because the variable half is the thinking, not the answer.
+ *
+ * Only the CEILING moves: not the prompt, not the schema, not the effort
+ * level. A truncated answer is not a different verdict, it is the same verdict
+ * cut off — so `CONSULT_CAPTURE_QUALITY_PROMPT_VERSION` deliberately does NOT
+ * move with it, and no capture already accepted under v3 is invalidated
+ * (bumping it strands a client mid-consult; see the version constant below).
+ */
+const CONSULT_CAPTURE_QUALITY_MAX_TOKENS = 2_000
 const RETAKE_TIP_MAX_CHARS = 160
 
 let cachedClient: Anthropic | null = null
@@ -247,7 +274,7 @@ export async function checkConsultCapture(input: {
     message = await getClient().messages.create(
       {
         model,
-        max_tokens: 300,
+        max_tokens: CONSULT_CAPTURE_QUALITY_MAX_TOKENS,
         system: SYSTEM,
         messages: [
           {
@@ -277,6 +304,12 @@ export async function checkConsultCapture(input: {
 
   if (message.stop_reason === 'refusal') {
     throw new ConsultCaptureVisionError('refused')
+  }
+  // Truncation is this repo's cap being too low, not a provider fault, and it
+  // must not reach the parser as unexplained garbage — see
+  // CONSULT_CAPTURE_QUALITY_MAX_TOKENS for the run that found it.
+  if (message.stop_reason === 'max_tokens') {
+    throw new ConsultCaptureVisionError('bad_output')
   }
   const text = message.content
     .filter((block): block is Anthropic.TextBlock => block.type === 'text')

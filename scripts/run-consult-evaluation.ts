@@ -9,6 +9,8 @@ import {
   HAIR_COLOR_CAPTURE_PACK_ID,
   HAIR_COLOR_CAPTURE_SHOT_KEYS,
 } from '@/lib/consult/capturePack'
+import { HAIR_COLOR_INTAKE_PACK_ID } from '@/lib/consult/intake/packs/hairColor'
+import { deriveConsultSafetyFlagPolicy } from '@/lib/consult/safetyFlags'
 import {
   ConsultEvaluationError,
   assertLiveConsultEvaluationAuthorized,
@@ -123,6 +125,16 @@ async function liveProvider(
     // supplied — the same shape a client who skipped the inspiration step
     // produces, not a stub for one that failed.
     inspiration: { source: 'NONE', analysis: null, answers: [] },
+    // The corpus runs the COLOUR intake, whose policy derives what may be
+    // raised from the fixture's own answers — the same derivation the consult
+    // route makes, so the eval measures the enum production actually sends.
+    safetyCodes: [
+      ...deriveConsultSafetyFlagPolicy({
+        intakePackId: HAIR_COLOR_INTAKE_PACK_ID,
+        intake: fixture.intake,
+        visibleCondition: 'UNKNOWN',
+      }).supported,
+    ],
   })
 }
 

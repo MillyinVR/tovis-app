@@ -23,7 +23,10 @@ import ClientConsultResults from './ClientConsultResults'
 
 const confidence = { min: 0.4, max: 0.7 }
 
-function results(withSafety = true): ConsultClientResultsDTO {
+function results(
+  withSafety = true,
+  recommendationCount = 2,
+): ConsultClientResultsDTO {
   return {
     consultId: 'consult_1',
     bookingId: 'booking_1',
@@ -43,7 +46,8 @@ function results(withSafety = true): ConsultClientResultsDTO {
       },
     ],
     aiObservations: {
-      currentLevel: { min: 4, max: 5, confidence, evidence: ['hair_back'] },
+      baseLevel: { value: 'LEVEL_4', confidence, evidence: ['hair_back'] },
+      lightestLevel: { value: 'LEVEL_5', confidence, evidence: ['hair_back'] },
       currentTone: { value: 'MIXED', confidence, evidence: ['hair_left'] },
       visibleCondition: {
         value: 'POSSIBLE_COMPROMISE',
@@ -120,7 +124,10 @@ function results(withSafety = true): ConsultClientResultsDTO {
       context: 'Condition needs an in-person check.',
       discussWithProfessional: true,
     },
-    recommendationDirections: [1, 2].map((index) => ({
+    recommendationDirections: Array.from(
+      { length: recommendationCount },
+      (_, offset) => offset + 1,
+    ).map((index) => ({
       title: `Direction ${index}`,
       why: `Reason ${index}.`,
       direction: `Direction to discuss with the professional: ${index}.`,
@@ -201,6 +208,31 @@ describe('ClientConsultResults', () => {
       expect(item.textContent).toContain(copy.recommendationDiscussionPrefix)
     }
     expect(copy.intro.toLowerCase()).not.toMatch(/guarantee|promise|will achieve/)
+  })
+
+  it('names a SINGLE recommendation as the pro’s answer, not a short list', () => {
+    // Tori, 2026-09-04: one recommendation is a valid result. The heading has
+    // to read as deliberate, or a correct consult looks like a broken one.
+    const { container } = render(
+      <ClientConsultResults results={results(true, 1)} copy={copy} />,
+    )
+
+    expect(screen.getByText(copy.singleRecommendationTitle)).toBeInTheDocument()
+    expect(screen.queryByText(copy.recommendationsTitle)).not.toBeInTheDocument()
+    // The one direction is still rendered — the heading changed, not the list.
+    expect(container.innerHTML).toContain('Direction 1')
+    expect(container.innerHTML).not.toContain('Direction 2')
+    // ...and the position counter reads as complete, not truncated.
+    expect(container.innerHTML).toContain('1 / 1')
+  })
+
+  it('keeps the plural heading when there is more than one', () => {
+    render(<ClientConsultResults results={results(true, 2)} copy={copy} />)
+
+    expect(screen.getByText(copy.recommendationsTitle)).toBeInTheDocument()
+    expect(
+      screen.queryByText(copy.singleRecommendationTitle),
+    ).not.toBeInTheDocument()
   })
 
   it('keeps the safety section visible even when there are no flags', () => {

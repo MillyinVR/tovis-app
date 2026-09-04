@@ -16,6 +16,9 @@ export default defineConfig({
       '**/.next/**',
       '**/.claude/**',
       '**/tests/integration/**',
+      // The live-model suite makes real, paid provider calls. It has its own
+      // config (vitest.live.config.mts) and runs nightly, never per-PR.
+      '**/tests/live/**',
     ],
     clearMocks: true,
     restoreMocks: true,

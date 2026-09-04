@@ -152,6 +152,13 @@ const observed = (value: string, evidence: string[] = ['hair_back']) => ({
  * slot from. Schema v3: the provider names the services from the menu it was
  * handed, so the fake reads them off its input rather than guessing.
  */
+/** `service` name → the stored `{serviceIntent, serviceName}` the engine emits. */
+function recommended(service: string) {
+  return service === 'A consultation with the professional'
+    ? { serviceIntent: 'CONSULTATION' as const, serviceName: null }
+    : { serviceIntent: 'SERVICE' as const, serviceName: service }
+}
+
 export async function fakeRunConsultAnalysis(input: {
   service: { menuServiceNames: readonly string[] }
 }) {
@@ -193,9 +200,13 @@ export async function fakeRunConsultAnalysis(input: {
         discussWithProfessional: true,
       })),
       core: {
-        currentLevel: {
-          min: 4,
-          max: 5,
+        baseLevel: {
+          value: 'LEVEL_4',
+          confidence: { min: 0.5, max: 0.75 },
+          evidence: ['hair_back', 'hair_crown'],
+        },
+        lightestLevel: {
+          value: 'LEVEL_5',
           confidence: { min: 0.5, max: 0.75 },
           evidence: ['hair_back', 'hair_crown'],
         },
@@ -217,16 +228,21 @@ export async function fakeRunConsultAnalysis(input: {
         discussWithProfessional: true,
       },
       safetyFlags: state.safetyFlags.map((flag) => ({ ...flag })),
+      // 🔴 The STORED shape (serviceIntent + serviceName), because that is
+      // what `runConsultAnalysis` returns — `sanitizeRecommendation` converts
+      // the provider's `service` enum on the way through. This fake used to
+      // return the un-converted provider shape, which is how a validator that
+      // could never accept a real analysis passed every test it had.
       recommendations: [
         {
-          service: named(/balayage/i),
+          ...recommended(named(/balayage/i)),
           title: 'Hand-painted dimension',
           rationale: 'A hand-painted approach suits the blended direction.',
           achievability: 'The professional decides what is achievable today.',
           discussWithProfessional: true,
         },
         {
-          service: named(/toner gloss/i),
+          ...recommended(named(/toner gloss/i)),
           title: 'A gloss to hold the tone',
           rationale: 'The mid-lengths would otherwise read brassy in weeks.',
           achievability: 'The professional confirms the toner in person.',
@@ -267,7 +283,8 @@ export async function fakeRunConsultInspirationVision(): Promise<{
   return {
     model: 'fake-inspiration-model',
     analysis: {
-      level: known('LEVEL_8'),
+      baseLevel: known('LEVEL_5'),
+      lightestLevel: known('LEVEL_8'),
       tone: known('COOL'),
       technique: known('BALAYAGE'),
       placement: known('MIDS_TO_ENDS'),

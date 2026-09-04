@@ -614,6 +614,20 @@ export type ConsultAnalysisObservationDTO<T extends string> = {
   evidence: ConsultAnalysisEvidenceDTO[]
 }
 
+/**
+ * The salon level scale, 1 (black) to 10 (lightest blonde), plus UNKNOWN.
+ *
+ * ONE vocabulary, because two artefacts report it and they are meant to be
+ * compared: the client's own hair (`ConsultAnalysisPayloadDTO.core`) and the
+ * reference she brought (`ConsultInspirationAnalysisAttributesDTO`). Both
+ * report a `baseLevel` and a `lightestLevel` — see lib/consult/hairLevel.ts
+ * for why one number per head was never enough.
+ */
+export type ConsultHairLevelDTO =
+  | 'LEVEL_1' | 'LEVEL_2' | 'LEVEL_3' | 'LEVEL_4' | 'LEVEL_5'
+  | 'LEVEL_6' | 'LEVEL_7' | 'LEVEL_8' | 'LEVEL_9' | 'LEVEL_10'
+  | 'UNKNOWN'
+
 // Analysis schema v3 (service-aware consult, 2026-09-03): the safety codes any
 // intake pack's policy can raise (lib/consult/safetyFlags.ts). Additive over
 // the colour-only set.
@@ -772,13 +786,15 @@ export type ConsultStyleDirectionDTO = {
 export type ConsultAnalysisPayloadDTO = {
   profile: ConsultAnalysisFeatureProfileDTO
   styleDirections: ConsultStyleDirectionDTO[]
+  // Schema v4: two NAMED levels replace v3's positional `currentLevel:
+  // {min, max}`, which never said whether the pair meant dark-to-light or a
+  // spread of uncertainty — while rendering on screen as "Level 5–7", which
+  // reads as the former, from a model that was asked for neither.
+  // `baseLevel` is the depth at the root, `lightestLevel` the lightest
+  // dominant colour; a solid single-process reports the same value in both.
   core: {
-    currentLevel: {
-      min: number | null
-      max: number | null
-      confidence: ConsultAnalysisConfidenceDTO
-      evidence: ConsultAnalysisEvidenceDTO[]
-    }
+    baseLevel: ConsultAnalysisObservationDTO<ConsultHairLevelDTO>
+    lightestLevel: ConsultAnalysisObservationDTO<ConsultHairLevelDTO>
     currentTone: ConsultAnalysisObservationDTO<
       'ASHY' | 'NEUTRAL' | 'GOLDEN' | 'COPPER' | 'RED' | 'MIXED' | 'UNKNOWN'
     >
@@ -860,7 +876,8 @@ export type ConsultBriefClientIntakeItemDTO = {
 }
 
 export type ConsultBriefAiObservationsDTO = {
-  currentLevel: ConsultAnalysisPayloadDTO['core']['currentLevel']
+  baseLevel: ConsultAnalysisPayloadDTO['core']['baseLevel']
+  lightestLevel: ConsultAnalysisPayloadDTO['core']['lightestLevel']
   currentTone: ConsultAnalysisPayloadDTO['core']['currentTone']
   visibleCondition: ConsultAnalysisPayloadDTO['core']['visibleCondition']
   density: ConsultAnalysisPayloadDTO['core']['density']
@@ -900,16 +917,11 @@ export type ConsultBriefInspirationDTO = {
 }
 
 // ── P4: what the consult read off the client's inspiration reference ────────
-// Stage 1 of docs/consult/tovis-ai-consult-handoff.md. Seven hair-colour
+// Stage 1 of docs/consult/tovis-ai-consult-handoff.md. Eight hair-colour
 // attributes, each in the same observation shape the feature profile uses
 // (value + confidence range + evidence) plus a region: where on the reference
 // the attribute was read from. Enum values only — this artefact carries no
 // free text, so it cannot describe the person in the photograph.
-
-export type ConsultInspirationAnalysisLevelDTO =
-  | 'LEVEL_1' | 'LEVEL_2' | 'LEVEL_3' | 'LEVEL_4' | 'LEVEL_5'
-  | 'LEVEL_6' | 'LEVEL_7' | 'LEVEL_8' | 'LEVEL_9' | 'LEVEL_10'
-  | 'UNKNOWN'
 
 export type ConsultInspirationAnalysisToneDTO =
   | 'WARM' | 'COOL' | 'NEUTRAL' | 'UNKNOWN'
@@ -953,7 +965,8 @@ export type ConsultInspirationAnalysisObservationDTO<T extends string> = {
 }
 
 export type ConsultInspirationAnalysisAttributesDTO = {
-  level: ConsultInspirationAnalysisObservationDTO<ConsultInspirationAnalysisLevelDTO>
+  baseLevel: ConsultInspirationAnalysisObservationDTO<ConsultHairLevelDTO>
+  lightestLevel: ConsultInspirationAnalysisObservationDTO<ConsultHairLevelDTO>
   tone: ConsultInspirationAnalysisObservationDTO<ConsultInspirationAnalysisToneDTO>
   technique: ConsultInspirationAnalysisObservationDTO<ConsultInspirationAnalysisTechniqueDTO>
   placement: ConsultInspirationAnalysisObservationDTO<ConsultInspirationAnalysisPlacementDTO>

@@ -32,9 +32,10 @@ function unavailable(): never {
  */
 function upgradeLegacyPayload(payload: Record<string, unknown>): Record<string, unknown> {
   if (!Array.isArray(payload.recommendations)) unavailable()
-  const { hairColorLens, ...rest } = payload
+  const { hairColorLens, core, ...rest } = payload
   return {
     ...rest,
+    core: upgradeLegacyCore(core),
     serviceLens: hairColorLens,
     recommendations: payload.recommendations.map((item) => {
       if (!isRecord(item) || typeof item.serviceIntent !== 'string') unavailable()
@@ -54,6 +55,31 @@ function upgradeLegacyPayload(payload: Record<string, unknown>): Record<string, 
       }
     }),
   }
+}
+
+/**
+ * Schema 2's `core.currentLevel: { min, max }` → schema 4's two named levels.
+ *
+ * 🔴 One assumption, stated rather than buried: `min` is read as the BASE and
+ * `max` as the LIGHTEST. The old field never said which it meant — that
+ * ambiguity is the whole reason for the rename (lib/consult/hairLevel.ts) —
+ * but it is the reading the client screen already rendered ("Levels 5–7"), so
+ * it is the one a stored row's reader would have to honour. It applies to no
+ * real data: production has never held an analysis revision of ANY version,
+ * because the schema did not compile until v5.
+ */
+function upgradeLegacyCore(core: unknown): unknown {
+  if (!isRecord(core) || !isRecord(core.currentLevel)) return core
+  const { currentLevel, ...rest } = core
+  const { min, max, ...shared } = currentLevel
+  const level = (value: unknown): Record<string, unknown> => ({
+    ...shared,
+    value:
+      typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 10
+        ? `LEVEL_${value}`
+        : 'UNKNOWN',
+  })
+  return { baseLevel: level(min), lightestLevel: level(max), ...rest }
 }
 
 export function normalizeStoredConsultAnalysisPayload(

@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  buildConsultAnalysisOutputSchema,
-  CONSULT_ANALYSIS_OUTPUT_SCHEMA,
+  buildConsultDirectionOutputSchema,
+  CONSULT_ANALYSIS_DIRECTION_OUTPUT_SCHEMA,
+  CONSULT_ANALYSIS_PROFILE_OUTPUT_SCHEMA,
 } from './analysisEngine'
 import { CONSULT_INSPIRATION_ANALYSIS_OUTPUT_SCHEMA } from './inspirationVision'
 import {
@@ -68,8 +69,13 @@ describe('toProviderOutputSchema', () => {
 
   it('makes every schema this repo sends acceptable, and proves the constants still state the bounds', () => {
     for (const schema of [
-      CONSULT_ANALYSIS_OUTPUT_SCHEMA,
-      buildConsultAnalysisOutputSchema({ menuServiceNames: ['Balayage', 'Toner Gloss'] }),
+      CONSULT_ANALYSIS_PROFILE_OUTPUT_SCHEMA,
+      CONSULT_ANALYSIS_DIRECTION_OUTPUT_SCHEMA,
+      buildConsultDirectionOutputSchema({
+        menuServiceNames: ['Balayage', 'Toner Gloss'],
+        safetyCodes: ['ALLERGY_HISTORY_UNKNOWN'],
+        suppliedShotKeys: ['hair_back', 'face_front'],
+      }),
       CONSULT_INSPIRATION_ANALYSIS_OUTPUT_SCHEMA,
     ]) {
       // The constant is the statement of intent and still carries the bounds…

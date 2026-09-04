@@ -117,7 +117,8 @@ function immutableResult(recommendationCount = 2) {
         },
       ],
       aiObservations: {
-        currentLevel: { min: 4, max: 5, confidence, evidence: ['hair_back'] },
+        baseLevel: { value: 'LEVEL_4', confidence, evidence: ['hair_back'] },
+        lightestLevel: { value: 'LEVEL_5', confidence, evidence: ['hair_back'] },
         currentTone: { value: 'MIXED', confidence, evidence: ['hair_left'] },
         visibleCondition: {
           value: 'POSSIBLE_COMPROMISE',
@@ -246,14 +247,35 @@ describe('authorized client consult results', () => {
     })
   })
 
-  it('rejects a stored result outside the client 2–3 recommendation contract', async () => {
+  it('serves a SINGLE recommendation — one is a result, not a short list', async () => {
+    // Tori, 2026-09-04. The gate used to demand two while the analysis schema
+    // permits one to three, so a consult could complete, store, and then be
+    // unservable to the client who paid for it — and three consecutive live
+    // runs each returned exactly one, because only one menu service fitted.
     mocks.loadImmutable.mockResolvedValue(immutableResult(1))
 
-    await expect(loadAuthorizedClientConsultResults(request)).rejects.toMatchObject({
-      code: 'UNAVAILABLE',
-    } satisfies Partial<ClientConsultResultsError>)
-    expect(mocks.auditCreate).not.toHaveBeenCalled()
-    expect(mocks.logServe).not.toHaveBeenCalled()
+    const results = await loadAuthorizedClientConsultResults(request)
+
+    expect(results.recommendationDirections).toHaveLength(1)
+    expect(results.recommendationDirections[0]?.discussWithProfessional).toBe(true)
+    // It is a real serve: the audit fact and the metric are written, exactly
+    // as they are for two.
+    expect(mocks.auditCreate).toHaveBeenCalled()
+    expect(mocks.logServe).toHaveBeenCalled()
+  })
+
+  it('rejects a stored result outside the client 1–3 recommendation contract', async () => {
+    for (const count of [0, 4]) {
+      mocks.auditCreate.mockClear()
+      mocks.logServe.mockClear()
+      mocks.loadImmutable.mockResolvedValue(immutableResult(count))
+
+      await expect(loadAuthorizedClientConsultResults(request)).rejects.toMatchObject({
+        code: 'UNAVAILABLE',
+      } satisfies Partial<ClientConsultResultsError>)
+      expect(mocks.auditCreate).not.toHaveBeenCalled()
+      expect(mocks.logServe).not.toHaveBeenCalled()
+    }
   })
 
   it('replays the singular completion/first-serve audit fact without a second write', async () => {

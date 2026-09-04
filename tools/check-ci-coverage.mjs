@@ -68,6 +68,8 @@ const MANUAL_ONLY = {
     'Alias for two guards that already run via check:static-guards.',
 
   // --- costs real money or needs production-shaped secrets ----------------
+  'test:live:consult-e2e':
+    'Drives ONE look-anchored consult through the real model — roughly seven paid vision calls per run — and needs both a seeded test database and ANTHROPIC_API_KEY. `test:live:consult-schema` is the nightly gate; this is the deliberate end-to-end proof you run when a consult schema or prompt changes.',
   'test:chaos': 'Needs .env.local; fault-injection is run deliberately, not per-PR.',
   'test:load:signup': 'Load test — can bill real Twilio/Postmark. Run deliberately.',
   'test:load:availability': 'Load test — run deliberately against staging.',

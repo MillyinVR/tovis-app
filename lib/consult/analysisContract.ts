@@ -947,6 +947,18 @@ export async function runConsultAnalysis(args: {
                 analysis: inspirationAnalysis?.analysis ?? null,
                 answers: consultInspirationPromptAnswers(inspiration.answers),
               },
+              // The codes this intake can support, narrowing the provider's
+              // enum BEFORE the call rather than refusing the answer after it.
+              // `visibleCondition` is UNKNOWN here on purpose: the only code
+              // that depends on it is VISIBLE_COMPROMISE, which the model
+              // raises off the photos and which the schema always allows.
+              safetyCodes: [
+                ...deriveConsultSafetyFlagPolicy({
+                  intakePackId: intake.payload.packId,
+                  intake: intake.payload.answers,
+                  visibleCondition: 'UNKNOWN',
+                }).supported,
+              ],
             }),
             {
               menuServiceNames: service.menuServiceNames,

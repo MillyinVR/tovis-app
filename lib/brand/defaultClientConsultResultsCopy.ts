@@ -13,13 +13,14 @@ export const defaultClientConsultResultsCopy: BrandClientConsultResultsCopy = {
   aiObservationsTitle: 'Photo-based observations',
   aiObservationsBody:
     'These observations are a starting point for your professional to verify in person.',
-  currentLevelLabel: 'Current level range',
+  baseLevelLabel: 'Base level',
+  lightestLevelLabel: 'Lightest level',
   toneLabel: 'Visible tone',
   conditionLabel: 'Visible condition',
   densityLabel: 'Density',
   textureLabel: 'Texture',
   unknownLabel: 'Unknown',
-  levelPrefix: 'Levels',
+  levelPrefix: 'Level',
   confidenceSuffix: 'confidence',
   safetyTitle: 'Safety and history to discuss',
   safetyEmpty:
@@ -62,6 +63,7 @@ export const defaultClientConsultResultsCopy: BrandClientConsultResultsCopy = {
   },
   whyItFlattersLabel: 'Why this flatters you',
   recommendationsTitle: 'Directions to discuss',
+  singleRecommendationTitle: 'Your pro’s recommendation for this look',
   recommendationDiscussionPrefix: 'A direction to discuss with your professional:',
   bookLookTitle: 'Ready to book this look?',
   bookLookBody:

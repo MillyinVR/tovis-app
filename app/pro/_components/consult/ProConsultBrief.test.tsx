@@ -40,12 +40,8 @@ const brief: ConsultProBriefDTO = {
     },
   ],
   aiObservations: {
-    currentLevel: {
-      min: 4,
-      max: 5,
-      confidence,
-      evidence: ['hair_back'],
-    },
+    baseLevel: { value: 'LEVEL_4', confidence, evidence: ['hair_back'] },
+    lightestLevel: { value: 'LEVEL_5', confidence, evidence: ['hair_back'] },
     currentTone: { value: 'MIXED', confidence, evidence: ['hair_left'] },
     visibleCondition: {
       value: 'POSSIBLE_COMPROMISE',

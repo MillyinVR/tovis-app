@@ -40,7 +40,8 @@ const UNKNOWN = {
 
 function output(overrides: Record<string, unknown> = {}) {
   return {
-    level: known('LEVEL_8'),
+    baseLevel: known('LEVEL_5'),
+    lightestLevel: known('LEVEL_8'),
     tone: known('COOL'),
     technique: known('BALAYAGE'),
     placement: known('MIDS_TO_ENDS'),
@@ -84,12 +85,13 @@ describe('inspiration vision schema', () => {
   })
 
   it('pins the versions the stored artefact is written under', () => {
-    expect(CONSULT_INSPIRATION_ANALYSIS_SCHEMA_VERSION).toBe(1)
+    expect(CONSULT_INSPIRATION_ANALYSIS_SCHEMA_VERSION).toBe(2)
     expect(CONSULT_INSPIRATION_ANALYSIS_PROMPT_VERSION).toBe(
-      'inspiration-hair-color-v1',
+      'inspiration-hair-color-v2',
     )
     expect([...CONSULT_INSPIRATION_ANALYSIS_FIELDS]).toEqual([
-      'level',
+      'baseLevel',
+      'lightestLevel',
       'tone',
       'technique',
       'placement',
@@ -103,10 +105,36 @@ describe('inspiration vision schema', () => {
 describe('sanitizeConsultInspirationAnalysis', () => {
   it('parses the wire region string into a stored box', () => {
     const analysis = sanitizeConsultInspirationAnalysis(
-      output({ level: known('LEVEL_9', '0.25,0.05,0.5,0.2') }),
+      output({ lightestLevel: known('LEVEL_9', '0.25,0.05,0.5,0.2') }),
     )
-    expect(analysis.level.region).toEqual({ x: 0.25, y: 0.05, w: 0.5, h: 0.2 })
+    expect(analysis.lightestLevel.region).toEqual({
+      x: 0.25,
+      y: 0.05,
+      w: 0.5,
+      h: 0.2,
+    })
     expect(analysis.tone.value).toBe('COOL')
+  })
+
+  it('refuses a base level lighter than the lightest, and accepts them equal', () => {
+    // A grown-out balayage differs; a solid single-process does not. Only the
+    // impossible ordering fails — see lib/consult/hairLevel.ts.
+    expect(() =>
+      sanitizeConsultInspirationAnalysis(
+        output({ baseLevel: known('LEVEL_9'), lightestLevel: known('LEVEL_5') }),
+      ),
+    ).toThrowError(ConsultInspirationVisionError)
+    expect(
+      sanitizeConsultInspirationAnalysis(
+        output({ baseLevel: known('LEVEL_6'), lightestLevel: known('LEVEL_6') }),
+      ).baseLevel.value,
+    ).toBe('LEVEL_6')
+    // An UNKNOWN end is unobserved, not out of order.
+    expect(
+      sanitizeConsultInspirationAnalysis(
+        output({ baseLevel: UNKNOWN }),
+      ).baseLevel.value,
+    ).toBe('UNKNOWN')
   })
 
   it('clamps a box that rounding pushed past the edge, and refuses one that is really out', () => {
@@ -165,7 +193,7 @@ describe('sanitizeConsultInspirationAnalysis', () => {
     const analysis = sanitizeConsultInspirationAnalysis(
       output({ rootBlend: UNKNOWN, finish: UNKNOWN, dimension: UNKNOWN }),
     )
-    expect(countKnownConsultInspirationAttributes(analysis)).toBe(4)
+    expect(countKnownConsultInspirationAttributes(analysis)).toBe(5)
     expect(analysis.rootBlend.region).toBeNull()
   })
 

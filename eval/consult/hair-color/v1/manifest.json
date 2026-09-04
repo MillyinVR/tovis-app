@@ -1,7 +1,7 @@
 {
-  "manifestVersion": "hair-color-eval-manifest-v1",
-  "analysisSchemaVersion": 3,
-  "promptVersion": "service-analysis-v4",
+  "manifestVersion": "hair-color-eval-manifest-v2",
+  "analysisSchemaVersion": 4,
+  "promptVersion": "service-analysis-v5",
   "requestedModel": "claude-sonnet-5",
   "fixtures": [
     {
@@ -39,10 +39,22 @@
         "budget": "251-400"
       },
       "expected": {
-        "currentLevel": {
-          "acceptedRange": [
-            8,
-            9
+        "baseLevel": {
+          "acceptedValues": [
+            "LEVEL_8",
+            "LEVEL_9"
+          ],
+          "allowedEvidence": [
+            "hair_back",
+            "hair_left",
+            "hair_right",
+            "hair_crown"
+          ]
+        },
+        "lightestLevel": {
+          "acceptedValues": [
+            "LEVEL_8",
+            "LEVEL_9"
           ],
           "allowedEvidence": [
             "hair_back",
@@ -145,10 +157,22 @@
         "budget": "150-250"
       },
       "expected": {
-        "currentLevel": {
-          "acceptedRange": [
-            6,
-            7
+        "baseLevel": {
+          "acceptedValues": [
+            "LEVEL_6",
+            "LEVEL_7"
+          ],
+          "allowedEvidence": [
+            "hair_back",
+            "hair_left",
+            "hair_right",
+            "hair_crown"
+          ]
+        },
+        "lightestLevel": {
+          "acceptedValues": [
+            "LEVEL_6",
+            "LEVEL_7"
           ],
           "allowedEvidence": [
             "hair_back",
@@ -250,10 +274,22 @@
         "budget": "under-150"
       },
       "expected": {
-        "currentLevel": {
-          "acceptedRange": [
-            4,
-            5
+        "baseLevel": {
+          "acceptedValues": [
+            "LEVEL_4",
+            "LEVEL_5"
+          ],
+          "allowedEvidence": [
+            "hair_back",
+            "hair_left",
+            "hair_right",
+            "hair_crown"
+          ]
+        },
+        "lightestLevel": {
+          "acceptedValues": [
+            "LEVEL_4",
+            "LEVEL_5"
           ],
           "allowedEvidence": [
             "hair_back",
@@ -358,10 +394,22 @@
         "budget": "over-400"
       },
       "expected": {
-        "currentLevel": {
-          "acceptedRange": [
-            3,
-            4
+        "baseLevel": {
+          "acceptedValues": [
+            "LEVEL_3",
+            "LEVEL_4"
+          ],
+          "allowedEvidence": [
+            "hair_back",
+            "hair_left",
+            "hair_right",
+            "hair_crown"
+          ]
+        },
+        "lightestLevel": {
+          "acceptedValues": [
+            "LEVEL_3",
+            "LEVEL_4"
           ],
           "allowedEvidence": [
             "hair_back",
@@ -469,10 +517,22 @@
         "budget": "251-400"
       },
       "expected": {
-        "currentLevel": {
-          "acceptedRange": [
-            2,
-            3
+        "baseLevel": {
+          "acceptedValues": [
+            "LEVEL_2",
+            "LEVEL_3"
+          ],
+          "allowedEvidence": [
+            "hair_back",
+            "hair_left",
+            "hair_right",
+            "hair_crown"
+          ]
+        },
+        "lightestLevel": {
+          "acceptedValues": [
+            "LEVEL_2",
+            "LEVEL_3"
           ],
           "allowedEvidence": [
             "hair_back",
@@ -575,10 +635,22 @@
         "budget": "discuss-with-pro"
       },
       "expected": {
-        "currentLevel": {
-          "acceptedRange": [
-            1,
-            2
+        "baseLevel": {
+          "acceptedValues": [
+            "LEVEL_1",
+            "LEVEL_2"
+          ],
+          "allowedEvidence": [
+            "hair_back",
+            "hair_left",
+            "hair_right",
+            "hair_crown"
+          ]
+        },
+        "lightestLevel": {
+          "acceptedValues": [
+            "LEVEL_1",
+            "LEVEL_2"
           ],
           "allowedEvidence": [
             "hair_back",

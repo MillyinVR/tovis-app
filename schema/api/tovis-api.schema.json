@@ -7456,6 +7456,28 @@
       ],
       "type": "object"
     },
+    "ConsultAnalysisObservationDTO<ConsultHairLevelDTO>": {
+      "properties": {
+        "confidence": {
+          "$ref": "#/definitions/ConsultAnalysisConfidenceDTO"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/definitions/ConsultAnalysisEvidenceDTO"
+          },
+          "type": "array"
+        },
+        "value": {
+          "$ref": "#/definitions/ConsultHairLevelDTO"
+        }
+      },
+      "required": [
+        "value",
+        "confidence",
+        "evidence"
+      ],
+      "type": "object"
+    },
     "ConsultAnalysisObservationDTO<ConsultProfileBrowDensityDTO>": {
       "properties": {
         "confidence": {
@@ -7702,43 +7724,17 @@
       "properties": {
         "core": {
           "properties": {
-            "currentLevel": {
-              "properties": {
-                "confidence": {
-                  "$ref": "#/definitions/ConsultAnalysisConfidenceDTO"
-                },
-                "evidence": {
-                  "items": {
-                    "$ref": "#/definitions/ConsultAnalysisEvidenceDTO"
-                  },
-                  "type": "array"
-                },
-                "max": {
-                  "type": [
-                    "number",
-                    "null"
-                  ]
-                },
-                "min": {
-                  "type": [
-                    "number",
-                    "null"
-                  ]
-                }
-              },
-              "required": [
-                "min",
-                "max",
-                "confidence",
-                "evidence"
-              ],
-              "type": "object"
+            "baseLevel": {
+              "$ref": "#/definitions/ConsultAnalysisObservationDTO%3CConsultHairLevelDTO%3E"
             },
             "currentTone": {
               "$ref": "#/definitions/ConsultAnalysisObservationDTO%3C(%22ASHY%22%7C%22NEUTRAL%22%7C%22GOLDEN%22%7C%22COPPER%22%7C%22RED%22%7C%22MIXED%22%7C%22UNKNOWN%22)%3E"
             },
             "density": {
               "$ref": "#/definitions/ConsultAnalysisObservationDTO%3C(%22LOW%22%7C%22MEDIUM%22%7C%22HIGH%22%7C%22UNKNOWN%22)%3E"
+            },
+            "lightestLevel": {
+              "$ref": "#/definitions/ConsultAnalysisObservationDTO%3CConsultHairLevelDTO%3E"
             },
             "texture": {
               "$ref": "#/definitions/ConsultAnalysisObservationDTO%3C(%22STRAIGHT%22%7C%22WAVY%22%7C%22CURLY%22%7C%22COILY%22%7C%22MIXED%22%7C%22UNKNOWN%22)%3E"
@@ -7748,7 +7744,8 @@
             }
           },
           "required": [
-            "currentLevel",
+            "baseLevel",
+            "lightestLevel",
             "currentTone",
             "visibleCondition",
             "density",
@@ -8332,40 +8329,11 @@
         "appointmentContextSummary": {
           "type": "string"
         },
+        "baseLevel": {
+          "$ref": "#/definitions/ConsultAnalysisObservationDTO%3CConsultHairLevelDTO%3E"
+        },
         "constraintsSummary": {
           "type": "string"
-        },
-        "currentLevel": {
-          "properties": {
-            "confidence": {
-              "$ref": "#/definitions/ConsultAnalysisConfidenceDTO"
-            },
-            "evidence": {
-              "items": {
-                "$ref": "#/definitions/ConsultAnalysisEvidenceDTO"
-              },
-              "type": "array"
-            },
-            "max": {
-              "type": [
-                "number",
-                "null"
-              ]
-            },
-            "min": {
-              "type": [
-                "number",
-                "null"
-              ]
-            }
-          },
-          "required": [
-            "min",
-            "max",
-            "confidence",
-            "evidence"
-          ],
-          "type": "object"
         },
         "currentTone": {
           "$ref": "#/definitions/ConsultAnalysisObservationDTO%3C(%22ASHY%22%7C%22NEUTRAL%22%7C%22GOLDEN%22%7C%22COPPER%22%7C%22RED%22%7C%22MIXED%22%7C%22UNKNOWN%22)%3E"
@@ -8379,6 +8347,9 @@
         "historySummary": {
           "type": "string"
         },
+        "lightestLevel": {
+          "$ref": "#/definitions/ConsultAnalysisObservationDTO%3CConsultHairLevelDTO%3E"
+        },
         "maintenanceSummary": {
           "type": "string"
         },
@@ -8390,7 +8361,8 @@
         }
       },
       "required": [
-        "currentLevel",
+        "baseLevel",
+        "lightestLevel",
         "currentTone",
         "visibleCondition",
         "density",
@@ -9231,16 +9203,36 @@
       ],
       "type": "object"
     },
+    "ConsultHairLevelDTO": {
+      "description": "The salon level scale, 1 (black) to 10 (lightest blonde), plus UNKNOWN.\n\nONE vocabulary, because two artefacts report it and they are meant to be compared: the client's own hair (`ConsultAnalysisPayloadDTO.core`) and the reference she brought (`ConsultInspirationAnalysisAttributesDTO`). Both report a `baseLevel` and a `lightestLevel` — see lib/consult/hairLevel.ts for why one number per head was never enough.",
+      "enum": [
+        "LEVEL_1",
+        "LEVEL_2",
+        "LEVEL_3",
+        "LEVEL_4",
+        "LEVEL_5",
+        "LEVEL_6",
+        "LEVEL_7",
+        "LEVEL_8",
+        "LEVEL_9",
+        "LEVEL_10",
+        "UNKNOWN"
+      ],
+      "type": "string"
+    },
     "ConsultInspirationAnalysisAttributesDTO": {
       "properties": {
+        "baseLevel": {
+          "$ref": "#/definitions/ConsultInspirationAnalysisObservationDTO%3CConsultHairLevelDTO%3E"
+        },
         "dimension": {
           "$ref": "#/definitions/ConsultInspirationAnalysisObservationDTO%3CConsultInspirationAnalysisDimensionDTO%3E"
         },
         "finish": {
           "$ref": "#/definitions/ConsultInspirationAnalysisObservationDTO%3CConsultInspirationAnalysisFinishDTO%3E"
         },
-        "level": {
-          "$ref": "#/definitions/ConsultInspirationAnalysisObservationDTO%3CConsultInspirationAnalysisLevelDTO%3E"
+        "lightestLevel": {
+          "$ref": "#/definitions/ConsultInspirationAnalysisObservationDTO%3CConsultHairLevelDTO%3E"
         },
         "placement": {
           "$ref": "#/definitions/ConsultInspirationAnalysisObservationDTO%3CConsultInspirationAnalysisPlacementDTO%3E"
@@ -9256,7 +9248,8 @@
         }
       },
       "required": [
-        "level",
+        "baseLevel",
+        "lightestLevel",
         "tone",
         "technique",
         "placement",
@@ -9331,21 +9324,39 @@
       ],
       "type": "string"
     },
-    "ConsultInspirationAnalysisLevelDTO": {
-      "enum": [
-        "LEVEL_1",
-        "LEVEL_2",
-        "LEVEL_3",
-        "LEVEL_4",
-        "LEVEL_5",
-        "LEVEL_6",
-        "LEVEL_7",
-        "LEVEL_8",
-        "LEVEL_9",
-        "LEVEL_10",
-        "UNKNOWN"
+    "ConsultInspirationAnalysisObservationDTO<ConsultHairLevelDTO>": {
+      "properties": {
+        "confidence": {
+          "$ref": "#/definitions/ConsultAnalysisConfidenceDTO"
+        },
+        "evidence": {
+          "items": {
+            "const": "inspiration",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "region": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultInspirationAnalysisRegionDTO"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "value": {
+          "$ref": "#/definitions/ConsultHairLevelDTO"
+        }
+      },
+      "required": [
+        "value",
+        "confidence",
+        "evidence",
+        "region"
       ],
-      "type": "string"
+      "type": "object"
     },
     "ConsultInspirationAnalysisObservationDTO<ConsultInspirationAnalysisDimensionDTO>": {
       "properties": {
@@ -9405,40 +9416,6 @@
         },
         "value": {
           "$ref": "#/definitions/ConsultInspirationAnalysisFinishDTO"
-        }
-      },
-      "required": [
-        "value",
-        "confidence",
-        "evidence",
-        "region"
-      ],
-      "type": "object"
-    },
-    "ConsultInspirationAnalysisObservationDTO<ConsultInspirationAnalysisLevelDTO>": {
-      "properties": {
-        "confidence": {
-          "$ref": "#/definitions/ConsultAnalysisConfidenceDTO"
-        },
-        "evidence": {
-          "items": {
-            "const": "inspiration",
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "region": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/ConsultInspirationAnalysisRegionDTO"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "value": {
-          "$ref": "#/definitions/ConsultInspirationAnalysisLevelDTO"
         }
       },
       "required": [

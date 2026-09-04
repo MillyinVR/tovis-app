@@ -11,6 +11,8 @@
 // pass on NULLs. Only a real Postgres proves the new definitions do what the
 // migration claims.
 
+import { readFileSync, writeFileSync } from 'node:fs'
+
 import {
   BookingStatus,
   ConsultActorType,
@@ -49,7 +51,13 @@ const mockRequireClient = vi.hoisted(() => vi.fn())
 const fake = vi.hoisted(() => ({
   objects: new Map<
     string,
-    { contentType: string; sizeBytes: number; checksumSha256: string | null }
+    {
+      contentType: string
+      sizeBytes: number
+      checksumSha256: string | null
+      /** LIVE mode only: the real fixture bytes this object stands for. */
+      base64?: string
+    }
   >(),
   purgedPaths: [] as string[],
   pathSequence: 0,
@@ -57,6 +65,105 @@ const fake = vi.hoisted(() => ({
     .toString(16)
     .padStart(8, '0'),
 }))
+
+/**
+ * LIVE mode — `TOVIS_LIVE_CONSULT_MODEL=1 pnpm test:live:consult-e2e`.
+ *
+ * The same flow, the same fixtures, the same database guards, with the three
+ * PAID provider calls unmocked: the capture quality gate, the inspiration
+ * read, and the two-call analysis. It exists because the analysis provider
+ * shipped for two schema versions unable to make one successful request while
+ * this suite was green — the mocks cannot tell you that the schema the API
+ * would refuse is the schema you are sending.
+ *
+ * Off by default, and it must stay off: it costs real money, needs a real key,
+ * and depends on a third party. It is never a merge gate.
+ */
+const live = vi.hoisted(() => ({
+  on: process.env.TOVIS_LIVE_CONSULT_MODEL === '1',
+  /** Every provider request this run made, for the report it prints. */
+  calls: [] as Array<{
+    system: string
+    content: unknown
+    schema: unknown
+    latencyMs: number
+    responseText: string
+    usage: unknown
+  }>,
+}))
+
+// In LIVE mode this wraps the real SDK to record what was actually sent and
+// what came back — the rendered prompt, the raw JSON, the latency and the
+// token usage are the report this run exists to produce, and none of them are
+// visible from outside `runConsultAnalysis`, which maps every failure to
+// `unavailable`. With LIVE off it is the untouched module.
+vi.mock('@anthropic-ai/sdk', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@anthropic-ai/sdk')>()
+  if (!live.on) return original
+  const Real = original.default
+  class RecordingAnthropic extends Real {
+    constructor(options: ConstructorParameters<typeof Real>[0]) {
+      super(options)
+      const create = this.messages.create.bind(this.messages)
+      // The SDK's `create` is overloaded on streaming; this repo only ever
+      // makes the non-streaming call, so the recorder narrows to that one
+      // shape rather than handling a stream it can never receive.
+      type Body = {
+        system?: unknown
+        messages?: Array<{ content?: unknown }>
+        output_config?: { format?: { schema?: unknown } }
+      }
+      type NonStreamingResponse = {
+        content?: Array<{ type: string; text?: string }>
+        usage?: unknown
+        stop_reason?: string | null
+      }
+      // @ts-expect-error narrowing a deliberately overloaded SDK method
+      this.messages.create = async (bodyArg: Body, optionsArg: unknown) => {
+        const started = Date.now()
+        const record = (
+          responseText: string,
+          usage: unknown,
+        ): void => {
+          live.calls.push({
+            system: String(bodyArg.system ?? ''),
+            content: bodyArg.messages?.[0]?.content,
+            schema: bodyArg.output_config?.format?.schema,
+            latencyMs: Date.now() - started,
+            responseText,
+            usage,
+          })
+        }
+        let response: NonStreamingResponse
+        try {
+          // @ts-expect-error same narrowing, on the delegated call
+          response = (await create(bodyArg, optionsArg)) as NonStreamingResponse
+        } catch (error) {
+          // 🔴 Record the failure and re-throw. Every consult provider maps
+          // its errors to a bare `unavailable`, which the route turns into a
+          // 503 saying nothing — so without this a live run that fails tells
+          // you only that it failed. This is the one place that still holds
+          // the provider's own words.
+          record(
+            `PROVIDER THREW: ${error instanceof Error ? `${error.name}: ${error.message}` : String(error)}`,
+            null,
+          )
+          throw error
+        }
+        record(
+          `[stop=${response.stop_reason}] ` +
+            (response.content ?? [])
+              .filter((block) => block.type === 'text')
+              .map((block) => block.text ?? '')
+              .join(''),
+          response.usage,
+        )
+        return response
+      }
+    }
+  }
+  return { ...original, default: RecordingAnthropic }
+})
 
 vi.mock('@/app/api/_utils/auth/requireClient', () => ({
   requireClient: mockRequireClient,
@@ -112,7 +219,13 @@ vi.mock('@/lib/consult/captureStorage', () => {
       async readObject(args: { path: string }) {
         const object = fake.objects.get(args.path)
         if (!object) throw new FakeStorageError('missing')
-        return { base64: 'bm90LXJhdy1pbi1kYg==', mediaType: object.contentType }
+        // Storage is faked in both modes — it is not what this suite proves.
+        // In LIVE mode it hands back the REAL fixture bytes, because a vision
+        // call over a placeholder string proves nothing about the schema.
+        return {
+          base64: object.base64 ?? 'bm90LXJhdy1pbi1kYg==',
+          mediaType: object.contentType,
+        }
       },
       async copyObject(args: { fromPath: string; toPath: string }) {
         const object = fake.objects.get(args.fromPath)
@@ -130,6 +243,7 @@ vi.mock('@/lib/consult/captureStorage', () => {
 vi.mock('@/lib/consult/captureVision', async (importOriginal) => {
   const original =
     await importOriginal<typeof import('@/lib/consult/captureVision')>()
+  if (live.on) return original
   return {
     ...original,
     async checkConsultCapture() {
@@ -149,6 +263,18 @@ vi.mock('@/lib/consult/captureVision', async (importOriginal) => {
 // what the test exercises.
 vi.mock('@/lib/consult/inspirationImage', () => ({
   async fetchConsultInspirationImage() {
+    // The look's media lives in Supabase, which this suite does not reach. In
+    // LIVE mode the reference is a real photograph from the eval fixtures —
+    // the only images in this repo that are safe to send anywhere.
+    if (live.on) {
+      const { readFileSync } = await import('node:fs')
+      return {
+        base64: readFileSync(
+          'eval/consult/hair-color/v1/fixtures/synthetic-ii-hair_back.jpg',
+        ).toString('base64'),
+        mediaType: 'image/jpeg' as const,
+      }
+    }
     return { base64: 'aW5zcGlyYXRpb24=', mediaType: 'image/jpeg' as const }
   },
 }))
@@ -156,6 +282,7 @@ vi.mock('@/lib/consult/inspirationImage', () => ({
 vi.mock('@/lib/consult/inspirationVision', async (importOriginal) => {
   const original =
     await importOriginal<typeof import('@/lib/consult/inspirationVision')>()
+  if (live.on) return original
   const known = (value: string) => ({
     value,
     confidence: { min: 0.4, max: 0.65 },
@@ -168,7 +295,8 @@ vi.mock('@/lib/consult/inspirationVision', async (importOriginal) => {
       return {
         model: 'fake-inspiration-model',
         analysis: {
-          level: known('LEVEL_9'),
+          baseLevel: known('LEVEL_6'),
+          lightestLevel: known('LEVEL_9'),
           tone: known('COOL'),
           technique: known('BALAYAGE'),
           placement: known('MIDS_TO_ENDS'),
@@ -198,6 +326,18 @@ const captured = vi.hoisted(() => ({
 vi.mock('@/lib/consult/analysisEngine', async (importOriginal) => {
   const original =
     await importOriginal<typeof import('@/lib/consult/analysisEngine')>()
+  if (live.on) {
+    return {
+      ...original,
+      async runConsultAnalysis(input: { inspiration?: unknown }) {
+        // Still captured, so the P4 assertions below hold in both modes.
+        captured.analysisInputs.push(input)
+        return original.runConsultAnalysis(
+          input as Parameters<typeof original.runConsultAnalysis>[0],
+        )
+      },
+    }
+  }
   const observed = (value: string, evidence: string[] = ['hair_back']) => ({
     value,
     confidence:
@@ -247,9 +387,13 @@ vi.mock('@/lib/consult/analysisEngine', async (importOriginal) => {
             discussWithProfessional: true,
           })),
           core: {
-            currentLevel: {
-              min: 4,
-              max: 5,
+            baseLevel: {
+              value: 'LEVEL_4',
+              confidence: { min: 0.5, max: 0.75 },
+              evidence: ['hair_back', 'hair_crown'],
+            },
+            lightestLevel: {
+              value: 'LEVEL_5',
               confidence: { min: 0.5, max: 0.75 },
               evidence: ['hair_back', 'hair_crown'],
             },
@@ -272,20 +416,24 @@ vi.mock('@/lib/consult/analysisEngine', async (importOriginal) => {
             discussWithProfessional: true,
           },
           safetyFlags: [],
-          // Two directions minimum: the client-results serve boundary
-          // (requireClientResultFraming) refuses a framing outside 2–3.
+          // Two, so the plural client heading is the one exercised here;
+          // one is also valid (Tori, 2026-09-04) and has its own test.
+          // The STORED shape the engine returns — see the note in
+          // tests/integration/_support/consultLookFakes.ts.
           recommendations: [
             {
-              service: 'A consultation with the professional',
+              serviceIntent: 'CONSULTATION',
+              serviceName: null,
               title: 'Hair color consultation',
               rationale: 'Review a realistic red direction and chemical history.',
               achievability: 'The professional should confirm the service plan.',
               discussWithProfessional: true,
             },
             {
-              service:
+              serviceIntent: 'SERVICE',
+              serviceName:
                 input.service.menuServiceNames.find((name) => /balayage/i.test(name)) ??
-                'A consultation with the professional',
+                null,
               title: 'Hand-painted dimension',
               rationale: 'A hand-painted approach suits the blended direction.',
               achievability: 'The professional decides what is achievable today.',
@@ -300,6 +448,7 @@ vi.mock('@/lib/consult/analysisEngine', async (importOriginal) => {
 
 import { POST as attachCapture } from '@/app/api/v1/client/consult/[id]/capture/attach/route'
 import { POST as checkQuality } from '@/app/api/v1/client/consult/[id]/capture/[captureId]/quality/route'
+import { POST as proceedCapture } from '@/app/api/v1/client/consult/[id]/capture/proceed/route'
 import { POST as issueUpload } from '@/app/api/v1/client/consult/[id]/capture/uploads/route'
 import { POST as startAnalysis } from '@/app/api/v1/client/consult/[id]/analysis/route'
 import { GET as getLookAvailability } from '@/app/api/v1/client/consult/look/availability/route'
@@ -331,7 +480,12 @@ import {
 } from '@/lib/consult/intakePack'
 import { loadAuthorizedClientConsultResults } from '@/lib/consult/clientResults'
 import { analyzeConsultInspiration } from '@/lib/consult/inspirationAnalysisContract'
+import {
+  CONSULT_INSPIRATION_ANALYSIS_PROMPT_VERSION,
+  CONSULT_INSPIRATION_ANALYSIS_SCHEMA_VERSION,
+} from '@/lib/consult/inspirationVision'
 import { loadAuthorizedProConsultBriefs } from '@/lib/consult/proBrief'
+import type { ConsultProBriefDTO } from '@/lib/dto/consult'
 import {
   acceptConsultAgreement,
   appendConsultIntakeRevision,
@@ -558,6 +712,15 @@ async function attachAcceptedCapture(
     contentType: 'image/jpeg',
     sizeBytes: row.maxBytes,
     checksumSha256: row.checksumSha256,
+    // LIVE mode sends a REAL photograph for this view, so the quality gate and
+    // the analysis are looking at something they can actually read.
+    ...(live.on
+      ? {
+          base64: readFileSync(
+            `eval/consult/hair-color/v1/fixtures/synthetic-i-${shotKey}.jpg`,
+          ).toString('base64'),
+        }
+      : {}),
   })
   const attached = await attachCapture(
     jsonRequest(`/api/v1/client/consult/${sessionId}/capture/attach`, {
@@ -586,6 +749,32 @@ async function attachAcceptedCapture(
   expect(quality.status).toBe(200)
   return captureId
 }
+
+afterAll(() => {
+  // A failing live run is the one that most needs its report: the assertion
+  // says "expected 503 to be 200", and the provider's own words are here.
+  if (live.on && live.calls.length > 0) {
+    console.log(
+      `\nprovider calls this run: ${live.calls.length}\n` +
+        live.calls
+          .map(
+            (call, index) =>
+              `  ${index + 1}. ${call.latencyMs}ms ${JSON.stringify(call.usage)} — ${call.responseText.slice(0, 200)}`,
+          )
+          .join('\n'),
+    )
+    // Every consult provider maps its failures to a bare `unavailable`, and
+    // the checks AFTER the provider (evidence honesty, the safety policy, the
+    // database guard) say only "503". The full exchange is the only way to
+    // tell which of them refused, so a run can be diagnosed without paying
+    // for another one.
+    const dumpPath = process.env.TOVIS_LIVE_CONSULT_REPORT
+    if (dumpPath) {
+      writeFileSync(dumpPath, JSON.stringify(live.calls, null, 2))
+      console.log(`full exchange written to ${dumpPath}`)
+    }
+  }
+})
 
 beforeAll(async () => {
   process.env.ENABLE_AI_CONSULT = '1'
@@ -1149,16 +1338,37 @@ describe('a look-anchored consult reaches analysis results', () => {
     await consentAndCompleteIntake(sessionId, 'e2e')
     await answerInspiration(sessionId, 'e2e')
 
-    for (const shotKey of [
-      'hair_back',
-      'hair_left',
-      'hair_right',
-      'hair_crown',
-      'face_front',
-      'face_side',
-      'eyes_closeup',
-    ] as const) {
+    // LIVE mode attaches only the four HAIR views. The eval face fixtures are
+    // 1.8KB placeholders, and the real quality gate correctly refuses them
+    // (VIEW_MISMATCH, measured 2026-09-04) — a partial pack is a supported
+    // state, and forcing those through would mean faking the gate this run
+    // exists to exercise.
+    for (const shotKey of (live.on
+      ? (['hair_back', 'hair_left', 'hair_right', 'hair_crown'] as const)
+      : ([
+          'hair_back',
+          'hair_left',
+          'hair_right',
+          'hair_crown',
+          'face_front',
+          'face_side',
+          'eyes_closeup',
+        ] as const))) {
       await attachAcceptedCapture(sessionId, shotKey, 'e2e')
+    }
+
+    if (live.on) {
+      // A partial pack does not auto-advance — only a full seven-shot pack
+      // does — so the client's explicit "proceed anyway" is part of this path
+      // (lib/consult/captureContract.ts, Tori 2026-08-27). Exercising it is a
+      // bonus: it is the branch a real partial-pack consult actually takes.
+      const proceeded = await proceedCapture(
+        new Request(`http://test/api/v1/client/consult/${sessionId}/capture/proceed`, {
+          method: 'POST',
+        }),
+        context(sessionId),
+      )
+      expect(proceeded.status).toBe(200)
     }
 
     expect(
@@ -1176,6 +1386,16 @@ describe('a look-anchored consult reaches analysis results', () => {
       }),
       context(sessionId),
     )
+    // The body, not just the status: every consult failure is some flavour of
+    // 503 and the CODE is the only thing that says which. A bare
+    // `expected 503 to be 200` sends you looking in the wrong place — it cost
+    // several live runs to learn that (2026-09-04). Logged rather than folded
+    // into the assertion, because a matcher diff hides the keys that MATCH.
+    if (analysis.status !== 200) {
+      console.log(
+        `analysis refused: ${analysis.status} ${JSON.stringify(await body(analysis.clone()))}`,
+      )
+    }
     expect(analysis.status).toBe(200)
     expect(
       await db.consultSession.findUniqueOrThrow({
@@ -1205,8 +1425,109 @@ describe('a look-anchored consult reaches analysis results', () => {
         select: { chartCopyCompletedAt: true },
       }),
     ).toEqual({ chartCopyCompletedAt: null })
-  })
+
+    // ── through the BRIEF ────────────────────────────────────────────────
+    // The results screen is the client's half. The brief is the pro's, and it
+    // is a different read path over the same stored artefact — a level shape
+    // the pro brief cannot map is a broken screen no client test would catch.
+    //
+    // 🔴 The pro can only read it if she may view this CLIENT at all
+    // (lib/clients/proClientRelationship.ts). A look-anchored consult creates
+    // no booking and so establishes no relationship on its own; in the full
+    // suite an earlier test has made one, but a single filtered run — which is
+    // how the live E2E executes — has not. That refusal is the relationship
+    // gate working, not the artefact being wrong, so it is the ONE outcome
+    // tolerated here, and only for its exact code.
+    let brief: ConsultProBriefDTO | undefined
+    try {
+      const briefs = await loadAuthorizedProConsultBriefs({
+        professionalId,
+        clientId,
+      })
+      brief = briefs.find((item) => item.consultId === sessionId)
+    } catch (error) {
+      expect(error).toMatchObject({ code: 'NOT_FOUND' })
+    }
+    if (brief) {
+      expect(brief.aiObservations.baseLevel.value).toMatch(
+        /^(LEVEL_(10|[1-9])|UNKNOWN)$/,
+      )
+      expect(brief.aiObservations.lightestLevel.value).toMatch(
+        /^(LEVEL_(10|[1-9])|UNKNOWN)$/,
+      )
+    }
+
+    if (live.on) {
+      reportLiveRun({ sessionId, results, brief })
+    }
+  },
+  // 🔴 The mocked path finishes in ~400ms and inherits vitest's 5s default.
+  // The LIVE path makes SEVEN paid vision calls in sequence — four capture
+  // gates, the inspiration read, and the two analysis calls — and measured
+  // ~2 minutes. Without this the live run dies at 5s with a timeout that says
+  // nothing about the model.
+  live.on ? 600_000 : undefined)
 })
+
+/**
+ * What a LIVE run is FOR: the rendered prompts, the raw responses, the
+ * latencies and the paid-call inventory, printed where a person can read them.
+ * Assertions prove the pipeline works; this says what the model actually did.
+ */
+function reportLiveRun(args: {
+  sessionId: string
+  results: { styleDirections: unknown[] }
+  brief: unknown
+}): void {
+  const lines: string[] = [
+    '',
+    '═'.repeat(78),
+    `LIVE consult run — session ${args.sessionId}`,
+    '═'.repeat(78),
+    `paid provider calls: ${live.calls.length}`,
+    `total provider latency: ${live.calls.reduce((sum, call) => sum + call.latencyMs, 0)}ms`,
+    '',
+  ]
+  live.calls.forEach((call, index) => {
+    const content = Array.isArray(call.content) ? call.content : []
+    const images = content.filter(
+      (block: unknown) =>
+        typeof block === 'object' && block !== null && 'type' in block &&
+        (block as { type: string }).type === 'image',
+    ).length
+    const text = content
+      .filter(
+        (block: unknown) =>
+          typeof block === 'object' && block !== null && 'type' in block &&
+          (block as { type: string }).type === 'text',
+      )
+      .map((block: unknown) => (block as { text: string }).text)
+      .join('\n---\n')
+    lines.push(
+      '─'.repeat(78),
+      `CALL ${index + 1}  ${call.latencyMs}ms  images=${images}  usage=${JSON.stringify(call.usage)}`,
+      `schema bytes: ${JSON.stringify(call.schema).length}`,
+      '',
+      '· SYSTEM PROMPT ·',
+      call.system,
+      '',
+      '· RENDERED USER CONTENT (text blocks) ·',
+      text,
+      '',
+      '· RAW RESPONSE ·',
+      call.responseText,
+      '',
+    )
+  })
+  lines.push(
+    '─'.repeat(78),
+    '· STORED BRIEF (pro-facing) ·',
+    JSON.stringify(args.brief, null, 2),
+    '═'.repeat(78),
+    '',
+  )
+  console.log(lines.join('\n'))
+}
 
 describe('purge lifecycles stay separate', () => {
   it('purging a look-anchored consult leaves the LOOK and its media intact', async () => {
@@ -1321,8 +1642,12 @@ describe('P4 — the inspiration reference is read, stored, and reaches both aud
       },
       orderBy: { revision: 'desc' },
     })
-    expect(artefact.schemaVersion).toBe(1)
-    expect(artefact.promptVersion).toBe('inspiration-hair-color-v1')
+    expect(artefact.schemaVersion).toBe(
+      CONSULT_INSPIRATION_ANALYSIS_SCHEMA_VERSION,
+    )
+    expect(artefact.promptVersion).toBe(
+      CONSULT_INSPIRATION_ANALYSIS_PROMPT_VERSION,
+    )
     expect(artefact.model).toBe('fake-inspiration-model')
     // Keyed to the inspiration revision — the whole point of the artefact.
     expect(
@@ -1337,7 +1662,9 @@ describe('P4 — the inspiration reference is read, stored, and reaches both aud
         attributes: Record<string, { value: string; region: unknown } | undefined>
       }
     ).attributes
-    expect(attributes.level?.value).toBe('LEVEL_9')
+    // Two named ends, not one conflated level (lib/consult/hairLevel.ts).
+    expect(attributes.baseLevel?.value).toBe('LEVEL_6')
+    expect(attributes.lightestLevel?.value).toBe('LEVEL_9')
     // The region rides along even though nothing consumes it yet (P5 will).
     expect(attributes.tone?.region).toEqual({ x: 0.15, y: 0.2, w: 0.6, h: 0.5 })
     // An UNKNOWN stores no region at all.
@@ -1355,11 +1682,15 @@ describe('P4 — the inspiration reference is read, stored, and reaches both aud
     const [analysisInput] = captured.analysisInputs
     const inspirationInput = analysisInput?.inspiration as {
       source: string
-      analysis: { level: { value: string } } | null
+      analysis: {
+        baseLevel: { value: string }
+        lightestLevel: { value: string }
+      } | null
       answers: { question: string; answer: string }[]
     }
     expect(inspirationInput.source).toBe('BOOKED_PRO_LOOK')
-    expect(inspirationInput.analysis?.level.value).toBe('LEVEL_9')
+    expect(inspirationInput.analysis?.baseLevel.value).toBe('LEVEL_6')
+    expect(inspirationInput.analysis?.lightestLevel.value).toBe('LEVEL_9')
     expect(inspirationInput.answers.length).toBeGreaterThan(0)
     expect(JSON.stringify(inspirationInput)).not.toContain('base64')
 
@@ -1371,7 +1702,7 @@ describe('P4 — the inspiration reference is read, stored, and reaches both aud
     expect(brief?.inspirationAnalysis).toMatchObject({
       inspirationRevisionId: inspirationRevision.id,
       source: 'BOOKED_PRO_LOOK',
-      promptVersion: 'inspiration-hair-color-v1',
+      promptVersion: CONSULT_INSPIRATION_ANALYSIS_PROMPT_VERSION,
       model: 'fake-inspiration-model',
     })
     expect(brief?.inspirationAnalysis?.attributes.technique.value).toBe('BALAYAGE')

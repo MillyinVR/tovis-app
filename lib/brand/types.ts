@@ -576,12 +576,20 @@ export type BrandClientConsultResultsCopy = {
   clientWordsTitle: string
   aiObservationsTitle: string
   aiObservationsBody: string
-  currentLevelLabel: string
+  /**
+   * Schema v4 reports the two named ends of the head, so the screen names
+   * them too. v3's single "Current level range" tile rendered a min/max pair
+   * as "Levels 5–7", which reads as base-to-lightest — a claim the model was
+   * never asked to make (lib/consult/hairLevel.ts).
+   */
+  baseLevelLabel: string
+  lightestLevelLabel: string
   toneLabel: string
   conditionLabel: string
   densityLabel: string
   textureLabel: string
   unknownLabel: string
+  /** Prefixes ONE level, e.g. "Level 7". */
   levelPrefix: string
   confidenceSuffix: string
   safetyTitle: string
@@ -626,6 +634,12 @@ export type BrandClientConsultResultsCopy = {
   >
   whyItFlattersLabel: string
   recommendationsTitle: string
+  /**
+   * The heading when the analysis produced exactly ONE recommendation. A lone
+   * result is valid (Tori, 2026-09-04) and should read as the pro's considered
+   * answer, not as a list that came up short.
+   */
+  singleRecommendationTitle: string
   recommendationDiscussionPrefix: string
   /**
    * Book the Look, B4b — the CTA that turns a finished look-anchored consult

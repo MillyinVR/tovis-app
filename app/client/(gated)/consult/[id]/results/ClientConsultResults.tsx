@@ -3,9 +3,11 @@ import Link from 'next/link'
 import ClientPage from '../../../_components/ClientPage'
 
 import type { BrandClientConsultResultsCopy } from '@/lib/brand/types'
+import { consultHairLevelNumber } from '@/lib/consult/hairLevel'
 import type {
   ConsultAnalysisConfidenceDTO,
   ConsultClientResultsDTO,
+  ConsultHairLevelDTO,
 } from '@/lib/dto/consult'
 
 import LockedMeCardTeaser from './LockedMeCardTeaser'
@@ -23,11 +25,14 @@ function Observation({
   value,
   confidence,
   copy,
+  /** The level tiles pass copy-built text; every other tile passes an enum. */
+  preformatted = false,
 }: {
   label: string
   value: string
   confidence: ConsultAnalysisConfidenceDTO
   copy: BrandClientConsultResultsCopy
+  preformatted?: boolean
 }) {
   return (
     <li className="rounded-xl border border-surfaceGlass/10 bg-bgPrimary px-3 py-2.5">
@@ -35,7 +40,7 @@ function Observation({
         {label}
       </div>
       <div className="mt-1 text-[13px] font-semibold text-textPrimary">
-        {labelCode(value)}{' '}
+        {preformatted ? value : labelCode(value)}{' '}
         <span className="font-normal text-textMuted">
           · {Math.round(confidence.min * 100)}–{Math.round(confidence.max * 100)}%{' '}
           {copy.confidenceSuffix}
@@ -53,11 +58,13 @@ export default function ClientConsultResults({
   copy: BrandClientConsultResultsCopy
 }) {
   const observations = results.aiObservations
-  const level = observations.currentLevel
-  const levelValue =
-    level.min == null || level.max == null
-      ? copy.unknownLabel
-      : `${copy.levelPrefix} ${level.min}–${level.max}`
+  // Schema v4: two named levels, each an ordinary observation, so each gets an
+  // ordinary tile. v3 rendered one min/max pair as "Levels 5–7" — which reads
+  // as base-to-lightest, from a field that never said that was what it meant.
+  const levelText = (level: ConsultHairLevelDTO): string => {
+    const number = consultHairLevelNumber(level)
+    return number === null ? copy.unknownLabel : `${copy.levelPrefix} ${number}`
+  }
 
   // A consult is anchored to a booking or, since Book the Look, to a look —
   // and ClientPage without a `back` leaves the client's only exit as a tab, so
@@ -119,18 +126,20 @@ export default function ClientConsultResults({
           {copy.aiObservationsBody}
         </p>
         <ul className="mt-3 grid gap-2 sm:grid-cols-2">
-          <li className="rounded-xl border border-surfaceGlass/10 bg-bgPrimary px-3 py-2.5">
-            <div className="text-[11px] font-bold uppercase tracking-wide text-textMuted">
-              {copy.currentLevelLabel}
-            </div>
-            <div className="mt-1 text-[13px] font-semibold text-textPrimary">
-              {levelValue}{' '}
-              <span className="font-normal text-textMuted">
-                · {Math.round(level.confidence.min * 100)}–
-                {Math.round(level.confidence.max * 100)}% {copy.confidenceSuffix}
-              </span>
-            </div>
-          </li>
+          <Observation
+            label={copy.baseLevelLabel}
+            value={levelText(observations.baseLevel.value)}
+            confidence={observations.baseLevel.confidence}
+            copy={copy}
+            preformatted
+          />
+          <Observation
+            label={copy.lightestLevelLabel}
+            value={levelText(observations.lightestLevel.value)}
+            confidence={observations.lightestLevel.confidence}
+            copy={copy}
+            preformatted
+          />
           <Observation
             label={copy.toneLabel}
             value={observations.currentTone.value}
@@ -280,7 +289,12 @@ export default function ClientConsultResults({
           id={`${results.consultId}-directions`}
           className="text-lg font-black text-textPrimary"
         >
-          {copy.recommendationsTitle}
+          {/* One recommendation is a valid result, not a short list (Tori,
+              2026-09-04) — so it gets a heading that reads as the pro's
+              considered answer rather than a plural that came up one shy. */}
+          {results.recommendationDirections.length === 1
+            ? copy.singleRecommendationTitle
+            : copy.recommendationsTitle}
         </h2>
         <ol className="mt-3 grid gap-3">
           {results.recommendationDirections.map((recommendation, index) => (
