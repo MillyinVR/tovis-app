@@ -5,6 +5,7 @@ import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 
 import { getCurrentUser } from '@/lib/currentUser'
+import { pathnameFromHeaders } from '@/lib/requestPath'
 import { canListProPublicly } from '@/lib/proTrustState'
 import '@/lib/brand/proOverview.css'
 import { checkProReadiness } from '@/lib/pro/readiness/proReadiness'
@@ -36,16 +37,6 @@ function verifyHref(next: string): string {
   return `/verify-phone?next=${encodeURIComponent(next)}`
 }
 
-function currentProPathFromHeaders(h: Headers): string {
-  return (
-    h.get('x-pathname') ??
-    h.get('x-current-path') ??
-    h.get('next-url') ??
-    h.get('x-invoke-path') ??
-    '/pro'
-  )
-}
-
 export default async function ProRootLayout({
   children,
   modal,
@@ -72,7 +63,7 @@ export default async function ProRootLayout({
   }
 
   const requestHeaders = await headers()
-  const pathname = currentProPathFromHeaders(requestHeaders)
+  const pathname = pathnameFromHeaders(requestHeaders, '/pro')
 
   const readiness = await checkProReadiness(user.professionalProfile.id)
   const onboardingRedirectHref = getProOnboardingRedirectHref({

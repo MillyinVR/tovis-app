@@ -2,6 +2,7 @@
 
 import type { ReactNode } from 'react'
 import { formatMoneyFromUnknown } from '@/lib/money'
+import { headers } from 'next/headers'
 import { notFound, redirect } from 'next/navigation'
 
 import { COPY } from '@/lib/copy'
@@ -10,6 +11,7 @@ import { mapsHrefFromLocation } from '@/lib/maps'
 import { buildClientAcceptedMethods } from '@/lib/payments/clientPaymentOptions'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import { prisma } from '@/lib/prisma'
+import { pathWithQueryFromHeaders } from '@/lib/requestPath'
 import { friendlyTimeZoneLabel, sanitizeTimeZone } from '@/lib/timeZone'
 import { formatInTimeZone } from '@/lib/time'
 import { cn } from '@/lib/utils'
@@ -769,9 +771,16 @@ export default async function ClientBookingPage(props: {
 
   const clientId = user.clientProfile?.id
   if (!clientId) {
-    redirect(
-      `/login?from=${encodeURIComponent(`/client/bookings/${bookingId}`)}`,
+    // Same bug, same fix as the gated layout: `?step=` is what selects the tab,
+    // so bouncing to `/client/bookings/{id}` bare drops a signed-out viewer on
+    // the overview instead of the aftercare/consult step they tapped. The
+    // booking-scoped path is the fallback, not the target — and the assembled
+    // path is sanitized before it becomes a `?from=`.
+    const requestedPath = pathWithQueryFromHeaders(
+      await headers(),
+      `/client/bookings/${bookingId}`,
     )
+    redirect(`/login?from=${encodeURIComponent(requestedPath)}`)
   }
 
   // AI beauty consult (2026-08-26 full-analysis launch): founder-gated,

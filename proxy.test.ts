@@ -51,6 +51,46 @@ describe('proxy', () => {
     }
   })
 
+  it('forwards the requested path and query to server components', async () => {
+    const req = makeRequest(
+      'https://app.tovis.app/client/bookings/booking_1?step=aftercare',
+    )
+
+    const res = await proxy(req)
+
+    expect(res.headers.get('x-middleware-request-x-pathname')).toBe(
+      '/client/bookings/booking_1',
+    )
+    expect(res.headers.get('x-middleware-request-x-search')).toBe(
+      '?step=aftercare',
+    )
+  })
+
+  it("drops Next's internal RSC marker from the forwarded query", async () => {
+    const req = makeRequest(
+      'https://app.tovis.app/client/bookings/booking_1?step=aftercare&_rsc=1a2b3',
+    )
+
+    const res = await proxy(req)
+
+    expect(res.headers.get('x-middleware-request-x-search')).toBe(
+      '?step=aftercare',
+    )
+  })
+
+  it('overwrites a forged x-search header with the real query', async () => {
+    const req = makeRequest('https://app.tovis.app/client/bookings/booking_1', {
+      headers: { 'x-search': '?step=aftercare', 'x-pathname': '/evil' },
+    })
+
+    const res = await proxy(req)
+
+    expect(res.headers.get('x-middleware-request-x-pathname')).toBe(
+      '/client/bookings/booking_1',
+    )
+    expect(res.headers.get('x-middleware-request-x-search')).toBe('')
+  })
+
   it('redirects VERIFICATION sessions away from normal app pages', async () => {
     mockVerifyMiddlewareToken.mockResolvedValue({
       userId: 'user_1',
