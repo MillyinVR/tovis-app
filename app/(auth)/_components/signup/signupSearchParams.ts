@@ -1,3 +1,4 @@
+import { sanitizeInternalPath as sanitizeInternalPathStrict } from '@/lib/security/internalPath'
 // app/(auth)/_components/signup/signupSearchParams.ts
 //
 // Shared handling for the query params the signup chooser forwards to both
@@ -10,12 +11,7 @@ export function normalizeTrimmed(value: string | null | undefined): string | nul
 }
 
 export function sanitizeNextUrl(nextUrl: unknown): string | null {
-  if (typeof nextUrl !== 'string') return null
-  const s = nextUrl.trim()
-  if (!s) return null
-  if (!s.startsWith('/')) return null
-  if (s.startsWith('//')) return null
-  return s
+  return sanitizeInternalPathStrict(nextUrl)
 }
 
 export function splitFullName(fullName: string | null): {

@@ -8,18 +8,14 @@
 
 import { isRecord } from '@/lib/guards'
 import { readBooleanField, readStringField } from '@/lib/http'
+import { sanitizeInternalPath as sanitizeInternalPathStrict } from '@/lib/security/internalPath'
 
 export type UserRole = 'ADMIN' | 'PRO' | 'CLIENT'
 
 export const PRO_HOME = '/pro/calendar'
 
 export function sanitizeInternalPath(raw: string | null): string | null {
-  if (!raw) return null
-  const s = raw.trim()
-  if (!s) return null
-  if (!s.startsWith('/')) return null
-  if (s.startsWith('//')) return null
-  return s
+  return sanitizeInternalPathStrict(raw)
 }
 
 function isAuthPath(path: string): boolean {

@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
-import { resolvePostAuthNavigation } from './postAuthRedirect'
+import {
+  resolvePostAuthNavigation,
+  sanitizeInternalPath,
+  sanitizeRedirectTarget,
+} from './postAuthRedirect'
 
 const base = { nextSafe: null, fromSafe: null }
 
@@ -76,5 +80,50 @@ describe('resolvePostAuthNavigation', () => {
         { nextSafe: '/pro', fromSafe: null },
       ),
     ).toEqual({ kind: 'navigate', url: '/pro/calendar' })
+  })
+})
+
+/**
+ * `/\` starts with exactly ONE slash, so the old `startsWith('//')` rule let it
+ * through — and the URL parser resolves it to a different HOST, which made
+ * `/login?from=/\evil.example` a live open redirect. Asserted at the login
+ * screen, not only on the shared helper, because this is the sink that mattered.
+ */
+describe('post-auth redirect refuses off-origin `from` values', () => {
+  function landingFor(loginUrl: string): string | null {
+    const fromRaw = new URL(loginUrl, 'https://app.tovis.app').searchParams.get(
+      'from',
+    )
+    const fromSafe = sanitizeRedirectTarget(sanitizeInternalPath(fromRaw))
+    const nav = resolvePostAuthNavigation(
+      {
+        user: { role: 'CLIENT' },
+        isPhoneVerified: true,
+        isEmailVerified: true,
+        isFullyVerified: true,
+      },
+      { nextSafe: null, fromSafe },
+    )
+    return nav.kind === 'navigate' ? nav.url : null
+  }
+
+  it('a backslash path resolves off-origin, and is now refused', () => {
+    expect(new URL('/\\evil.example/x', 'https://app.tovis.app').host).toBe(
+      'evil.example',
+    )
+    expect(sanitizeInternalPath('/\\evil.example/x')).toBeNull()
+    expect(landingFor('/login?from=%2F%5Cevil.example%2Fx')).toBe('/looks')
+  })
+
+  it('still refuses the shapes it always did', () => {
+    expect(landingFor('/login?from=%2F%2Fevil.example%2Fx')).toBe('/looks')
+    expect(landingFor('/login?from=https%3A%2F%2Fevil.example')).toBe('/looks')
+    expect(landingFor('/login?from=%2Flogin%3Ffrom%3D%2Fclient')).toBe('/looks')
+  })
+
+  it('still lets a genuine internal path through', () => {
+    expect(landingFor('/login?from=%2Fclient%2Fbookings%2Fb1%3Fstep%3Daftercare')).toBe(
+      '/client/bookings/b1?step=aftercare',
+    )
   })
 })

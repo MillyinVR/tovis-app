@@ -7,6 +7,7 @@ import type { TenantContext } from '@/lib/tenant/context'
 import { buildSmsOptOutDisclosureSuffix } from '@/lib/transactionalSmsPolicy'
 
 import { type NotificationTemplateKey } from '../eventKeys'
+import { sanitizeInternalPath as sanitizeInternalPathStrict } from '@/lib/security/internalPath'
 
 const DEFAULT_TEMPLATE_VERSION = 1
 const MAX_EMAIL_SUBJECT = 160
@@ -133,11 +134,7 @@ function normalizeText(value: unknown): string {
 }
 
 function sanitizeInternalHref(value: unknown): string {
-  const href = typeof value === 'string' ? value.trim() : ''
-  if (!href) return ''
-  if (!href.startsWith('/')) return ''
-  if (href.startsWith('//')) return ''
-  return href
+  return sanitizeInternalPathStrict(value) ?? ''
 }
 
 function readAppOrigin(): string {

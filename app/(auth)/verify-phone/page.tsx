@@ -30,6 +30,7 @@ import {
 } from '@/lib/http'
 import { cn } from '@/lib/utils'
 import { useBrand } from '@/lib/brand/BrandProvider'
+import { sanitizeInternalPath as sanitizeInternalPathStrict } from '@/lib/security/internalPath'
 
 const NEXT_URL_RECOVERY_DELAY_MS = 3000
 
@@ -96,11 +97,7 @@ function TinyButton({
 }
 
 function sanitizeNextUrl(raw: string | null): string | null {
-  const s = (raw ?? '').trim()
-  if (!s) return null
-  if (!s.startsWith('/')) return null
-  if (s.startsWith('//')) return null
-  return s
+  return sanitizeInternalPathStrict(raw)
 }
 
 function sanitizeOptionalText(raw: string | null): string | null {

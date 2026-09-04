@@ -17,6 +17,7 @@ import {
   buildClientIdempotencyKey,
   idempotencyHeaders,
 } from '@/lib/idempotency/client'
+import { sanitizeInternalPath as sanitizeInternalPathStrict } from '@/lib/security/internalPath'
 
 type CenterState = {
   label: string
@@ -60,11 +61,7 @@ function getBoolProp(obj: unknown, key: string): boolean | null {
 }
 
 function isSafeInternalHref(href: unknown): href is string {
-  return (
-    typeof href === 'string' &&
-    href.startsWith('/') &&
-    !href.startsWith('//')
-  )
+  return sanitizeInternalPathStrict(href) !== null
 }
 
 function redirectToLogin(router: ReturnType<typeof useRouter>, reason?: string): void {

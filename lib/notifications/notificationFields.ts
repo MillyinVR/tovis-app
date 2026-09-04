@@ -5,6 +5,7 @@
 // inbound title/body/href/payload values identically.
 
 import { Prisma } from '@prisma/client'
+import { sanitizeInternalPath as sanitizeInternalPathStrict } from '@/lib/security/internalPath'
 
 /** Trim, coerce non-strings to '', and clip to `max` characters. */
 export function normRequiredString(value: unknown, max: number): string {
@@ -29,10 +30,7 @@ export function normNullableString(value: unknown, max: number): string | null {
  */
 export function normInternalHref(value: unknown, max: number): string {
   const s = typeof value === 'string' ? value.trim().slice(0, max) : ''
-  if (!s) return ''
-  if (!s.startsWith('/')) return ''
-  if (s.startsWith('//')) return ''
-  return s
+  return sanitizeInternalPathStrict(s) ?? ''
 }
 
 /** Map a JSON field to Prisma's JsonNull, leaving undefined as a no-op. */
