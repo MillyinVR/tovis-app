@@ -634,6 +634,7 @@ export type {
   ConsultCaptureShotDTO,
   ConsultCaptureShotPackDTO,
   ConsultCaptureQualityReasonCodeDTO,
+  ConsultCaptureQualityWarningCodeDTO,
   ConsultCaptureSlotStateDTO,
   ConsultCaptureStateDTO,
   ConsultCaptureStateResponseDTO,

@@ -76,7 +76,9 @@ describe('checkConsultCapture', () => {
     expect(params.model).toBe('claude-sonnet-5')
     expect(params.output_config.format.type).toBe('json_schema')
     expect(params.messages[0].content[1].text).toContain('hair_crown')
-    expect(params.system).toContain('Reject any warm indoor lighting or color cast')
+    expect(params.system).toContain(
+      'Whether the requested view is visible always outranks how the light reads',
+    )
     expect(options.timeout).toBeLessThanOrEqual(50_000)
   })
 
@@ -94,7 +96,7 @@ describe('checkConsultCapture', () => {
   })
 
   it.each(['WARM_INDOOR_LIGHT', 'COLOR_CAST']) (
-    'fails closed when a provider inconsistently accepts %s',
+    'fails closed when a provider inconsistently accepts %s on a full view',
     async (reasonCode) => {
       mocks.create.mockResolvedValue(
         message({ accepted: true, reasonCode, retakeTip: null }),
@@ -104,6 +106,116 @@ describe('checkConsultCapture', () => {
       ).rejects.toMatchObject({ kind: 'bad_output' } satisfies Partial<ConsultCaptureVisionError>)
     },
   )
+
+  // B3: the eyes/brows shot was being refused by a rule written for a photo of
+  // a whole head. Its own spec asks the eyes to FILL the frame, so there is
+  // barely any room left to read the light off and the average colour is skin.
+  describe('shot-aware colour policy (B3)', () => {
+    it.each([
+      ['eyes_closeup', 'WARM_INDOOR_LIGHT'],
+      ['eyes_closeup', 'COLOR_CAST'],
+      ['area_closeup', 'WARM_INDOOR_LIGHT'],
+      ['area_closeup', 'COLOR_CAST'],
+    ])(
+      'accepts %s with a %s warning instead of rejecting it',
+      async (shotKey, reasonCode) => {
+        // The honest provider answer to "is this light warm?" is a rejection;
+        // the SERVER decides what that costs on this view.
+        mocks.create.mockResolvedValue(
+          message({
+            accepted: false,
+            reasonCode,
+            retakeTip: 'Move near a window and face the daylight.',
+          }),
+        )
+        await expect(
+          checkConsultCapture({ shotKey, image: IMAGE }),
+        ).resolves.toMatchObject({
+          accepted: true,
+          reasonCode: 'PASS',
+          warningCode: reasonCode,
+          retakeTip: null,
+        })
+      },
+    )
+
+    it('lands on the same result when the provider already accepted the cast', async () => {
+      mocks.create.mockResolvedValue(
+        message({ accepted: true, reasonCode: 'COLOR_CAST', retakeTip: null }),
+      )
+      await expect(
+        checkConsultCapture({ shotKey: 'eyes_closeup', image: IMAGE }),
+      ).resolves.toMatchObject({
+        accepted: true,
+        reasonCode: 'PASS',
+        warningCode: 'COLOR_CAST',
+      })
+    })
+
+    it.each(['VIEW_MISMATCH', 'BLURRY', 'TOO_DARK'])(
+      'still rejects a tight crop for %s — the view outranks the light',
+      async (reasonCode) => {
+        mocks.create.mockResolvedValue(
+          message({ accepted: false, reasonCode, retakeTip: 'Fill the frame with both eyes.' }),
+        )
+        await expect(
+          checkConsultCapture({ shotKey: 'eyes_closeup', image: IMAGE }),
+        ).resolves.toMatchObject({
+          accepted: false,
+          reasonCode,
+          warningCode: null,
+        })
+      },
+    )
+
+    it.each(['WARM_INDOOR_LIGHT', 'COLOR_CAST'])(
+      'still rejects a full view for %s',
+      async (reasonCode) => {
+        mocks.create.mockResolvedValue(
+          message({ accepted: false, reasonCode, retakeTip: 'Move near a window.' }),
+        )
+        await expect(
+          checkConsultCapture({ shotKey: 'face_front', image: IMAGE }),
+        ).resolves.toMatchObject({
+          accepted: false,
+          reasonCode,
+          warningCode: null,
+          retakeTip: 'Move near a window.',
+        })
+      },
+    )
+
+    it('carries no warning on an unremarkable full view under neutral light', async () => {
+      mocks.create.mockResolvedValue(
+        message({ accepted: true, reasonCode: 'PASS', retakeTip: null }),
+      )
+      await expect(
+        checkConsultCapture({ shotKey: 'face_front', image: IMAGE }),
+      ).resolves.toMatchObject({
+        accepted: true,
+        reasonCode: 'PASS',
+        warningCode: null,
+      })
+    })
+
+    it('tells the model which rule applies to the view it is judging', async () => {
+      mocks.create.mockResolvedValue(
+        message({ accepted: true, reasonCode: 'PASS', retakeTip: null }),
+      )
+
+      await checkConsultCapture({ shotKey: 'eyes_closeup', image: IMAGE })
+      const tight = mocks.create.mock.calls[0]?.[0].messages[0].content[1].text
+      expect(tight).toContain('Do NOT reject it for lighting alone')
+      expect(tight).toContain('outranks any color finding')
+
+      await checkConsultCapture({ shotKey: 'face_front', image: IMAGE })
+      const full = mocks.create.mock.calls[1]?.[0].messages[0].content[1].text
+      expect(full).toContain(
+        'WARM_INDOOR_LIGHT and COLOR_CAST are rejected even when the requested view is otherwise visible',
+      )
+      expect(full).not.toContain('Do NOT reject it for lighting alone')
+    })
+  })
 
   it('maps provider errors and refusals to typed content-free failures', async () => {
     mocks.create.mockRejectedValueOnce(new Error('provider secret detail'))

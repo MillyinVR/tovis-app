@@ -35,6 +35,9 @@ export const AREA_CAPTURE_PACK: ConsultCapturePackDefinition = Object.freeze({
       requirement: 'REQUIRED',
       acceptance:
         'Accept only when the treatment area is clearly represented in full and in context, focus and exposure are usable, no beauty filter is apparent, and indirect daylight preserves color. Use VIEW_MISMATCH when the area is missing or mostly out of frame.',
+      // "In context" — the surroundings are part of what is asked for, so
+      // there is room in the frame and the light reading is the room's.
+      framing: 'FULL_VIEW',
     },
     {
       key: 'area_closeup',
@@ -44,6 +47,9 @@ export const AREA_CAPTURE_PACK: ConsultCapturePackDefinition = Object.freeze({
       requirement: 'REQUIRED',
       acceptance:
         'Accept only when the treatment area fills most of the frame in sharp focus with its surface and edges visible, exposure is usable, no beauty filter is apparent, and indirect daylight preserves color. Use VIEW_MISMATCH when the close-up shows something else.',
+      // "Fills most of the frame" — the same skin-filled close-up as the
+      // eyes shot, for hands, brows or a patch of skin.
+      framing: 'TIGHT_CROP',
     },
     FACE_FRONT_SHOT,
   ]),

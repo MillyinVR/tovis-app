@@ -8777,16 +8777,35 @@
             "string",
             "null"
           ]
+        },
+        "warningCode": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultCaptureQualityWarningCodeDTO"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Non-null only on an accepted tight-crop shot; see the type's own note."
         }
       },
       "required": [
         "captureId",
         "accepted",
         "reasonCode",
+        "warningCode",
         "retakeTip",
         "checkedAt"
       ],
       "type": "object"
+    },
+    "ConsultCaptureQualityWarningCodeDTO": {
+      "enum": [
+        "WARM_INDOOR_LIGHT",
+        "COLOR_CAST"
+      ],
+      "type": "string"
     },
     "ConsultCaptureShotDTO": {
       "properties": {
@@ -8880,6 +8899,16 @@
             }
           ]
         },
+        "qualityWarningCode": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultCaptureQualityWarningCodeDTO"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "rawExpiresAt": {
           "type": [
             "string",
@@ -8912,6 +8941,7 @@
         "state",
         "captureId",
         "qualityReasonCode",
+        "qualityWarningCode",
         "retakeTip",
         "rawExpiresAt",
         "purgedAt"

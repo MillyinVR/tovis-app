@@ -2,9 +2,13 @@ import Anthropic from '@anthropic-ai/sdk'
 
 import { readOptionalEnv, requireEnv } from '@/lib/env'
 import { isRecord } from '@/lib/guards'
-import type { ConsultCaptureQualityReasonCodeDTO } from '@/lib/dto/consult'
+import type {
+  ConsultCaptureQualityReasonCodeDTO,
+  ConsultCaptureQualityWarningCodeDTO,
+} from '@/lib/dto/consult'
 
 import { findConsultCaptureShot } from './capture/registry'
+import { shotToleratesColorCast } from './capture/types'
 import { isAllowedConsultProviderModel } from './providerModel'
 
 export const CONSULT_CAPTURE_MEDIA_TYPES = [
@@ -17,7 +21,36 @@ export type ConsultCaptureMediaType =
   (typeof CONSULT_CAPTURE_MEDIA_TYPES)[number]
 
 export const CONSULT_CAPTURE_QUALITY_SCHEMA_VERSION = 1
-export const CONSULT_CAPTURE_QUALITY_PROMPT_VERSION = 'full-analysis-capture-v2'
+// v3 (2026-09-03, B3): the colour-cast rejection became shot-aware. A warm or
+// cast reading on a TIGHT_CROP view is a warning on the accepted result; on a
+// FULL_VIEW it is still a rejection. Both the system prompt and `sanitize`
+// changed, so stored rows must be distinguishable by version.
+export const CONSULT_CAPTURE_QUALITY_PROMPT_VERSION = 'full-analysis-capture-v3'
+
+/**
+ * Which prompt versions an accepted capture may have been judged under and
+ * still be a usable analysis input. The bump to v3 only LOOSENED a colour
+ * rule, so a photo that passed the stricter v2 gate is still a good input —
+ * pinning the analysis to the current version alone would strand a client
+ * who accepted photos before the deploy and pressed Analyze after it, with no
+ * way back (an accepted slot cannot be retaken, only replaced).
+ *
+ * Mirrored by the database prerequisite guard
+ * (`consult_revision_requires_agreements`); the two must agree.
+ */
+export const CONSULT_ANALYZABLE_CAPTURE_PROMPT_VERSIONS = [
+  'full-analysis-capture-v2',
+  CONSULT_CAPTURE_QUALITY_PROMPT_VERSION,
+] as const
+
+export function isAnalyzableConsultCapturePromptVersion(
+  value: string | null,
+): boolean {
+  return CONSULT_ANALYZABLE_CAPTURE_PROMPT_VERSIONS.some(
+    (candidate) => candidate === value,
+  )
+}
+
 export const CONSULT_CAPTURE_QUALITY_REASON_CODES = [
   'PASS',
   'WARM_INDOOR_LIGHT',
@@ -31,9 +64,27 @@ export const CONSULT_CAPTURE_QUALITY_REASON_CODES = [
   'OTHER_QUALITY_FAILURE',
 ] as const satisfies readonly ConsultCaptureQualityReasonCodeDTO[]
 
+export const CONSULT_CAPTURE_QUALITY_WARNING_CODES = [
+  'WARM_INDOOR_LIGHT',
+  'COLOR_CAST',
+] as const satisfies readonly ConsultCaptureQualityWarningCodeDTO[]
+
+function isColorFinding(
+  reasonCode: ConsultCaptureQualityReasonCodeDTO,
+): reasonCode is ConsultCaptureQualityWarningCodeDTO {
+  return CONSULT_CAPTURE_QUALITY_WARNING_CODES.some(
+    (candidate) => candidate === reasonCode,
+  )
+}
+
 export type ConsultCaptureQualityResult = {
   accepted: boolean
   reasonCode: ConsultCaptureQualityReasonCodeDTO
+  /**
+   * A colour finding that did NOT block this shot — only ever set alongside
+   * `accepted: true` and `reasonCode: 'PASS'`, and only on a tight-crop view.
+   */
+  warningCode: ConsultCaptureQualityWarningCodeDTO | null
   retakeTip: string | null
   model: string
 }
@@ -87,7 +138,7 @@ const QUALITY_SCHEMA: Record<string, unknown> = {
     retakeTip: {
       type: ['string', 'null'],
       description:
-        'At most one short, concrete retake instruction; null when accepted.',
+        'At most one short, concrete retake instruction; null when the reason code is PASS.',
     },
   },
 }
@@ -96,9 +147,12 @@ const SYSTEM =
   'You are a strict capture-quality gate for a beauty consultation. ' +
   'Judge only whether this single photo is a usable input for later analysis. ' +
   'Do not analyze the client, infer traits, diagnose, recommend services, or ' +
-  'describe sensitive content. Reject any warm indoor lighting or color cast, ' +
-  'even if the requested view is otherwise visible. Return exactly one ' +
-  'stable reason code and at most one short retake tip.'
+  'describe sensitive content. Whether the requested view is visible always ' +
+  'outranks how the light reads: if the view is missing, obstructed, or wrong, ' +
+  'report that instead. How much a warm-light or color-cast finding costs the ' +
+  'photo depends on the requested view, and each request states which rule ' +
+  'applies to it. Return exactly one stable reason code and at most one short ' +
+  'retake tip.'
 
 /**
  * The acceptance sentence for a view comes from the shot's definition in the
@@ -108,12 +162,17 @@ const SYSTEM =
 function instructions(shotKey: string): string {
   const shot = findConsultCaptureShot(shotKey)
   if (!shot) throw new ConsultCaptureVisionError('bad_output')
+  // The colour-fidelity line is the shot's own `framing`, not a list of keys
+  // this file keeps: a new pack brings its answer with it.
+  const colorRule = shotToleratesColorCast(shot)
+    ? 'This view is a tight crop: the subject fills the frame, so its average color is mostly skin or surface and a warm reading is as likely to be the person as the room. Do NOT reject it for lighting alone. If the requested view is visible and everything else is usable but the light reads warm or cast, still report WARM_INDOOR_LIGHT or COLOR_CAST — it is recorded as a warning, not a refusal. If the requested view is NOT visible, report the view or subject failure instead; that outranks any color finding.'
+    : 'This view is a full view with room around the subject, and color fidelity is the point of it: WARM_INDOOR_LIGHT and COLOR_CAST are rejected even when the requested view is otherwise visible.'
   return [
     `Requested view: ${shotKey}.`,
     shot.acceptance,
-    'WARM_INDOOR_LIGHT and COLOR_CAST are always rejected.',
-    'Use PASS only with accepted=true. Every other reason requires accepted=false.',
-    'retakeTip must be null on acceptance; on rejection provide zero or one concrete sentence, max 160 characters.',
+    colorRule,
+    'Use PASS only when nothing at all is wrong. Every other reason code names the one thing that is.',
+    'retakeTip: give zero or one concrete sentence, max 160 characters, whenever the reason code is not PASS.',
   ].join('\n')
 }
 
@@ -123,9 +182,16 @@ function cleanTip(value: unknown): string | null {
   return cleaned || null
 }
 
-function sanitize(
+/**
+ * The provider's raw JSON → the stored result, including the shot-aware
+ * colour policy. Exported because the capture integration tests stand a fake
+ * provider in front of the network and must still run its payload through THE
+ * policy, not a second copy of it.
+ */
+export function sanitizeConsultCaptureQuality(
   raw: unknown,
   model: string,
+  shotKey: string,
 ): ConsultCaptureQualityResult {
   if (!isRecord(raw) || typeof raw.accepted !== 'boolean') {
     throw new ConsultCaptureVisionError('bad_output')
@@ -134,12 +200,28 @@ function sanitize(
     (candidate) => candidate === raw.reasonCode,
   )
   if (!reasonCode) throw new ConsultCaptureVisionError('bad_output')
+  const shot = findConsultCaptureShot(shotKey)
+  if (!shot) throw new ConsultCaptureVisionError('bad_output')
 
-  // Color fidelity is a non-negotiable hair-color gate. Treat inconsistent
-  // provider output as a rejection, never as permission to analyze.
-  const hardColorFailure =
-    reasonCode === 'WARM_INDOOR_LIGHT' || reasonCode === 'COLOR_CAST'
-  if (raw.accepted && (reasonCode !== 'PASS' || hardColorFailure)) {
+  // The downgrade is decided HERE, not by the provider: the prompt asks for
+  // the finding, the server decides what it costs. So a model that answers
+  // `accepted: false` (the honest reading of "this light is warm") and one
+  // that answers `accepted: true` land on the same stored result, and no
+  // provider wobble can turn a full-view cast into an acceptance.
+  if (isColorFinding(reasonCode) && shotToleratesColorCast(shot)) {
+    return {
+      accepted: true,
+      reasonCode: 'PASS',
+      warningCode: reasonCode,
+      retakeTip: null,
+      model,
+    }
+  }
+
+  // Color fidelity is a non-negotiable gate on every full view. Treat
+  // inconsistent provider output as a rejection, never as permission to
+  // analyze.
+  if (raw.accepted && reasonCode !== 'PASS') {
     throw new ConsultCaptureVisionError('bad_output')
   }
   if (!raw.accepted && reasonCode === 'PASS') {
@@ -149,6 +231,7 @@ function sanitize(
   return {
     accepted: raw.accepted,
     reasonCode,
+    warningCode: null,
     retakeTip: raw.accepted ? null : cleanTip(raw.retakeTip),
     model,
   }
@@ -202,7 +285,7 @@ export async function checkConsultCapture(input: {
   if (!text) throw new ConsultCaptureVisionError('bad_output')
 
   try {
-    return sanitize(JSON.parse(text), model)
+    return sanitizeConsultCaptureQuality(JSON.parse(text), model, input.shotKey)
   } catch (error) {
     if (error instanceof ConsultCaptureVisionError) throw error
     throw new ConsultCaptureVisionError('bad_output')

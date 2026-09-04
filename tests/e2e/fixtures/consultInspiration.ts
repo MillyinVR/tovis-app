@@ -223,6 +223,7 @@ export const captureState: ConsultCaptureStateDTO = {
       "state": "ACCEPTED",
       "captureId": "capture_back_2",
       "qualityReasonCode": "PASS",
+      "qualityWarningCode": null,
       "retakeTip": null,
       "rawExpiresAt": "2026-08-12T18:00:00.000Z",
       "purgedAt": null
@@ -232,6 +233,7 @@ export const captureState: ConsultCaptureStateDTO = {
       "state": "ACCEPTED",
       "captureId": "capture_left_1",
       "qualityReasonCode": "PASS",
+      "qualityWarningCode": null,
       "retakeTip": null,
       "rawExpiresAt": "2026-08-12T18:00:00.000Z",
       "purgedAt": null
@@ -241,6 +243,7 @@ export const captureState: ConsultCaptureStateDTO = {
       "state": "ACCEPTED",
       "captureId": "capture_right_1",
       "qualityReasonCode": "PASS",
+      "qualityWarningCode": null,
       "retakeTip": null,
       "rawExpiresAt": "2026-08-12T18:00:00.000Z",
       "purgedAt": null
@@ -250,6 +253,7 @@ export const captureState: ConsultCaptureStateDTO = {
       "state": "ACCEPTED",
       "captureId": "capture_crown_1",
       "qualityReasonCode": "PASS",
+      "qualityWarningCode": null,
       "retakeTip": null,
       "rawExpiresAt": "2026-08-12T18:00:00.000Z",
       "purgedAt": null
@@ -259,6 +263,7 @@ export const captureState: ConsultCaptureStateDTO = {
       "state": "ACCEPTED",
       "captureId": "capture_face_front_1",
       "qualityReasonCode": "PASS",
+      "qualityWarningCode": null,
       "retakeTip": null,
       "rawExpiresAt": "2026-08-12T18:00:00.000Z",
       "purgedAt": null
@@ -268,6 +273,7 @@ export const captureState: ConsultCaptureStateDTO = {
       "state": "ACCEPTED",
       "captureId": "capture_face_side_1",
       "qualityReasonCode": "PASS",
+      "qualityWarningCode": null,
       "retakeTip": null,
       "rawExpiresAt": "2026-08-12T18:00:00.000Z",
       "purgedAt": null
@@ -277,6 +283,7 @@ export const captureState: ConsultCaptureStateDTO = {
       "state": "ACCEPTED",
       "captureId": "capture_eyes_closeup_1",
       "qualityReasonCode": "PASS",
+      "qualityWarningCode": null,
       "retakeTip": null,
       "rawExpiresAt": "2026-08-12T18:00:00.000Z",
       "purgedAt": null
