@@ -317,6 +317,17 @@ export type ConsultInspirationSourceStateDTO = {
   inspirationId: string
   source: Exclude<ConsultInspirationSourceDTO, 'NONE'>
   lookPostId: string | null
+  /**
+   * Server-absolute path of the ONE route that answers this consult's
+   * inspiration image as {@link ConsultInspirationSignedReadResponseDTO} —
+   * `{ url, expiresInSeconds }` — for EVERY source, uploads and looks alike.
+   *
+   * 🔴 It may only ever carry a route that returns that shape. It once forked
+   * on the source and pointed look-anchored consults at `/api/v1/looks/{id}`,
+   * which answers a look DTO instead; the clients read `undefined` off it and
+   * either looped (web scheduled its refresh from `NaN`) or silently rendered
+   * nothing (iOS refused the path and swallowed the throw).
+   */
   imageReadEndpoint: string
   imageAvailable: boolean
   useExpiresAt: string | null

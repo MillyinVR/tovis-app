@@ -22,6 +22,7 @@ import type {
 } from '@/lib/dto/consult'
 import { buildLookPolicyInput, loadLookAccess } from '@/lib/looks/access'
 import { canViewLookPost } from '@/lib/looks/guards'
+import { MEDIA_SIGNED_URL_TTL_SECONDS, renderMediaUrls } from '@/lib/media/renderUrls'
 import { prisma } from '@/lib/prisma'
 
 import { requireCurrentConsultAgreementAcceptances } from './agreementContract'
@@ -439,10 +440,17 @@ async function buildState(
         inspirationId: source.id,
         source: source.source,
         lookPostId: source.sourceLookPostId,
-        imageReadEndpoint:
-          source.source === ConsultInspirationSource.EXTERNAL_UPLOAD
-            ? `/api/v1/client/consult/${encodeURIComponent(session.id)}/inspiration/media`
-            : `/api/v1/looks/${encodeURIComponent(source.sourceLookPostId ?? '')}`,
+        // 🔴 `imageReadEndpoint` is a TYPED contract, not a link: whatever it
+        // names must answer `{ url, expiresInSeconds }`
+        // (`ConsultInspirationSignedReadResponseDTO`). It used to fork on the
+        // source and point look-anchored consults at `/api/v1/looks/{id}`,
+        // which answers a whole look DTO — no `url`, no `expiresInSeconds`.
+        // Web read `undefined` off it and scheduled its next refresh from
+        // `NaN` (a setTimeout(NaN) fires immediately → a refetch loop), and
+        // iOS's endpoint guard refused it and swallowed the throw, which is
+        // B4: a look-anchored consult asks "what did you like about it?" with
+        // nothing on screen. ONE route, ONE shape, both sources.
+        imageReadEndpoint: `/api/v1/client/consult/${encodeURIComponent(session.id)}/inspiration/media`,
         imageAvailable: await imageAvailable(tx, source, session, now),
         useExpiresAt: source.useExpiresAt?.toISOString() ?? null,
       }
@@ -1224,6 +1232,55 @@ export async function removeConsultInspiration(args: {
   }
 }
 
+/**
+ * The Look's own primary photo, as storage pointers.
+ *
+ * Deliberately pointers and NOT a URL: resolving them is `renderMediaUrls`'s
+ * job, and it must happen OUTSIDE the transaction because a private-bucket
+ * look costs a Supabase round-trip to sign. Returns null when the look or its
+ * asset is gone — the caller turns that into a refusal, never into a blank
+ * image.
+ */
+async function lookPrimaryMediaPointers(
+  tx: Prisma.TransactionClient,
+  lookPostId: string,
+): Promise<{
+  storageBucket: string | null
+  storagePath: string | null
+  url: string | null
+} | null> {
+  if (!lookPostId) return null
+  const look = await tx.lookPost.findUnique({
+    where: { id: lookPostId },
+    select: {
+      primaryMediaAsset: {
+        select: { storageBucket: true, storagePath: true, url: true },
+      },
+    },
+  })
+  return look?.primaryMediaAsset ?? null
+}
+
+/**
+ * The ONE read behind `imageReadEndpoint`, for every inspiration source.
+ *
+ * Both branches answer the same `{ url, expiresInSeconds }` shape, and both
+ * re-check visibility at READ time rather than trusting the state DTO that
+ * carried the endpoint:
+ *
+ * - EXTERNAL_UPLOAD → a signed read of the client's own private object.
+ * - PLATFORM_LOOK / BOOKED_PRO_LOOK → the anchoring Look's primary media,
+ *   resolved through `renderMediaUrls` (signed for a private bucket, public
+ *   URL for a public one). `imageAvailable` re-runs `lookAvailableToBoth`
+ *   here, which is the whole reason this is a route and not a URL baked into
+ *   the state DTO: a look that gets unpublished, hidden or moderated mid-
+ *   consult stops resolving on the very next read, where a handed-out URL
+ *   would keep working forever.
+ *
+ * `expiresInSeconds` is the FLOOR of the two TTLs in play, never the larger:
+ * under-reporting costs one early refetch, over-reporting hands the client a
+ * dark image with no scheduled recovery.
+ */
 export async function loadClientInspirationSignedRead(args: {
   consultSessionId: string
   clientId: string
@@ -1237,22 +1294,51 @@ export async function loadClientInspirationSignedRead(args: {
     const session = await requireScope(tx, { ...args, now, mutation: false })
     await requireCurrentConsultAgreementAcceptances(tx, session.id)
     const current = await activeSource(tx, session.id)
-    if (
-      !current ||
-      current.source !== ConsultInspirationSource.EXTERNAL_UPLOAD ||
-      !(await imageAvailable(tx, current, session, now)) ||
-      !current.storagePath
-    ) {
+    if (!current || !(await imageAvailable(tx, current, session, now))) {
       throw new ConsultWriteError('NOT_FOUND', 'Not found.')
     }
-    return current
+    if (current.source === ConsultInspirationSource.EXTERNAL_UPLOAD) {
+      if (!current.storagePath) {
+        throw new ConsultWriteError('NOT_FOUND', 'Not found.')
+      }
+      return { kind: 'UPLOAD', storagePath: current.storagePath } as const
+    }
+    const pointers = await lookPrimaryMediaPointers(
+      tx,
+      current.sourceLookPostId ?? '',
+    )
+    if (!pointers) {
+      throw new ConsultWriteError(
+        'INSPIRATION_LOOK_UNAVAILABLE',
+        'The selected Look is unavailable.',
+      )
+    }
+    return { kind: 'LOOK', pointers } as const
   })
+
+  if (source.kind === 'LOOK') {
+    const rendered = await renderMediaUrls(source.pointers)
+    if (!rendered.renderUrl) {
+      throw new ConsultWriteError(
+        'INSPIRATION_LOOK_UNAVAILABLE',
+        'The selected Look is unavailable.',
+      )
+    }
+    return {
+      url: rendered.renderUrl,
+      expiresInSeconds: Math.min(
+        CONSULT_INSPIRATION_READ_TTL_SECONDS,
+        MEDIA_SIGNED_URL_TTL_SECONDS,
+      ),
+    }
+  }
+
   try {
     const storage = args.storage ?? consultInspirationStorage
     await storage.assertReady()
     return {
       url: await storage.createSignedRead(
-        source.storagePath ?? '',
+        source.storagePath,
         CONSULT_INSPIRATION_READ_TTL_SECONDS,
       ),
       expiresInSeconds: CONSULT_INSPIRATION_READ_TTL_SECONDS,
