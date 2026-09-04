@@ -199,7 +199,8 @@ vi.mock('@/lib/consult/inspirationVision', async (importOriginal) => {
       return {
         model: 'fake-inspiration-model',
         analysis: {
-          level: known('LEVEL_7'),
+          baseLevel: known('LEVEL_5'),
+          lightestLevel: known('LEVEL_7'),
           tone: known('WARM'),
           technique: known('SINGLE_PROCESS'),
           placement: known('ALL_OVER'),
@@ -264,9 +265,13 @@ vi.mock('@/lib/consult/analysisEngine', async (importOriginal) => {
             discussWithProfessional: true,
           })),
           core: {
-            currentLevel: {
-              min: 4,
-              max: 5,
+            baseLevel: {
+              value: 'LEVEL_4',
+              confidence: { min: 0.5, max: 0.75 },
+              evidence: ['hair_back', 'hair_crown'],
+            },
+            lightestLevel: {
+              value: 'LEVEL_5',
               confidence: { min: 0.5, max: 0.75 },
               evidence: ['hair_back', 'hair_crown'],
             },
@@ -288,7 +293,10 @@ vi.mock('@/lib/consult/analysisEngine', async (importOriginal) => {
           safetyFlags: [],
           recommendations: [
             {
-              service: 'A consultation with the professional',
+              // The STORED shape the engine returns (serviceIntent +
+              // serviceName), not the provider's `service` enum.
+              serviceIntent: 'CONSULTATION',
+              serviceName: null,
               title: 'Hair color consultation',
               rationale: 'Review a realistic red direction and chemical history.',
               achievability: 'The professional should confirm the service plan.',
@@ -1987,9 +1995,13 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
           kind: 'ANALYSIS',
           payload: {
             core: {
-              currentLevel: {
-                min: 4,
-                max: 5,
+              baseLevel: {
+                value: 'LEVEL_4',
+                confidence: { min: 0.5, max: 0.75 },
+                evidence: ['hair_back'],
+              },
+              lightestLevel: {
+                value: 'LEVEL_5',
                 confidence: { min: 0.5, max: 0.75 },
                 evidence: ['hair_back'],
               },

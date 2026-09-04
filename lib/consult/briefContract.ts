@@ -110,7 +110,8 @@ function buildHairColorProBriefCore(
       confidence: { ...direction.confidence },
     })),
     aiObservations: {
-      currentLevel: args.analysis.core.currentLevel,
+      baseLevel: args.analysis.core.baseLevel,
+      lightestLevel: args.analysis.core.lightestLevel,
       currentTone: args.analysis.core.currentTone,
       visibleCondition: args.analysis.core.visibleCondition,
       density: args.analysis.core.density,

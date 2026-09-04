@@ -125,12 +125,24 @@ function clientResultsDto(args: {
   }
 }
 
+/**
+ * The serve boundary: what the client is allowed to be shown.
+ *
+ * ONE recommendation is a valid result, not a thin list (Tori, 2026-09-04).
+ * This gate previously demanded two, while the analysis schema permits one to
+ * three — so a consult could complete, store, and then be unservable to the
+ * client who paid for it. Measured: three consecutive live runs each returned
+ * exactly one recommendation, because only one menu service genuinely fitted.
+ * A professional with a single relevant service is the ordinary case, not a
+ * degraded one; the prompt still asks for two so the normal answer offers a
+ * choice, and the screen names a lone recommendation as deliberate.
+ */
 function requireClientResultFraming(
   result: Awaited<ReturnType<typeof loadLatestImmutableConsultResult>>,
 ): void {
   const directions = result.payload.recommendationDirections
   if (
-    directions.length < 2 ||
+    directions.length < 1 ||
     directions.length > 3 ||
     !result.payload.achievabilityDirection.discussWithProfessional ||
     directions.some((direction) => !direction.discussWithProfessional)

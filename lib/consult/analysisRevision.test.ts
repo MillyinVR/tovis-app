@@ -61,7 +61,8 @@ const lens = {
 }
 
 const core = {
-  currentLevel: { min: 4, max: 5, confidence, evidence: ['hair_back'] },
+  baseLevel: { value: 'LEVEL_4', confidence, evidence: ['hair_back'] },
+  lightestLevel: { value: 'LEVEL_5', confidence, evidence: ['hair_back'] },
   currentTone: observed('MIXED'),
   visibleCondition: observed('NO_VISIBLE_CONCERN'),
   density: observed('UNKNOWN', []),
@@ -75,7 +76,7 @@ const reference = {
 }
 
 describe('normalizeStoredConsultAnalysisPayload', () => {
-  it('reads a schema-3 row as written', () => {
+  it('reads a current-schema row as written', () => {
     const payload = {
       profile: profile(),
       styleDirections: styleDirections(),
@@ -94,7 +95,9 @@ describe('normalizeStoredConsultAnalysisPayload', () => {
         },
       ],
     }
-    const result = normalizeStoredConsultAnalysisPayload(payload, 3)
+    const result = normalizeStoredConsultAnalysisPayload(payload, 4)
+    expect(result.core.baseLevel.value).toBe('LEVEL_4')
+    expect(result.core.lightestLevel.value).toBe('LEVEL_5')
     expect(result.serviceLens.goal).toBe('A noticeable change.')
     expect(result.recommendations[0]).toMatchObject({
       serviceIntent: 'SERVICE',
@@ -103,11 +106,18 @@ describe('normalizeStoredConsultAnalysisPayload', () => {
     })
   })
 
-  it('upgrades a schema-2 row: the colour lens becomes the service lens and colour intents become kinds', () => {
+  it('upgrades a schema-2 row: the colour lens becomes the service lens, colour intents become kinds, and the level pair is named', () => {
     const legacy = {
       profile: profile(),
       styleDirections: styleDirections(),
-      core,
+      // A real schema-2 core: one positional level pair, not two named ends.
+      core: {
+        currentLevel: { min: 4, max: 5, confidence, evidence: ['hair_back'] },
+        currentTone: observed('MIXED'),
+        visibleCondition: observed('NO_VISIBLE_CONCERN'),
+        density: observed('UNKNOWN', []),
+        texture: observed('WAVY'),
+      },
       hairColorLens: lens,
       safetyFlags: [],
       recommendations: [
@@ -142,6 +152,14 @@ describe('normalizeStoredConsultAnalysisPayload', () => {
       LEGACY_HAIR_COLOR_ANALYSIS_SCHEMA_VERSION,
     )
     expect(result.serviceLens).toEqual(lens)
+    // `min` becomes the base and `max` the lightest — the reading the old
+    // screen rendered, and the only one a reader can honour.
+    expect(result.core.baseLevel).toEqual({
+      value: 'LEVEL_4',
+      confidence,
+      evidence: ['hair_back'],
+    })
+    expect(result.core.lightestLevel.value).toBe('LEVEL_5')
     expect(
       result.recommendations.map((item) => [item.serviceIntent, item.serviceName]),
     ).toEqual([
@@ -153,7 +171,7 @@ describe('normalizeStoredConsultAnalysisPayload', () => {
     expect(result.recommendations[0]?.reference).toEqual(reference)
   })
 
-  it('refuses a schema it does not know, and a schema-3 row missing the service lens', () => {
+  it('refuses a schema it does not know, including the versions that never compiled', () => {
     const payload = {
       profile: profile(),
       styleDirections: styleDirections(),
@@ -165,8 +183,13 @@ describe('normalizeStoredConsultAnalysisPayload', () => {
     expect(() => normalizeStoredConsultAnalysisPayload(payload, 1)).toThrowError(
       ConsultWriteError,
     )
+    // Schema 3 is not readable and never needs to be: its provider schema was
+    // refused by the API, so no row was ever written under it.
+    expect(() => normalizeStoredConsultAnalysisPayload(payload, 3)).toThrowError(
+      ConsultWriteError,
+    )
     expect(() =>
-      normalizeStoredConsultAnalysisPayload({ ...payload, hairColorLens: lens }, 3),
+      normalizeStoredConsultAnalysisPayload({ ...payload, hairColorLens: lens }, 4),
     ).toThrowError(ConsultWriteError)
   })
 })

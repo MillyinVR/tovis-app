@@ -1,0 +1,71 @@
+name: live-model-contract
+
+# Sends the consult's REAL structured-output schemas to the REAL Messages API
+# and checks they compile, answer, and parse.
+#
+# Why this workflow exists: `runConsultAnalysis` shipped for two schema
+# versions unable to make one successful request — the API refused its
+# json_schema, first for unsupported keywords and then for the size of the
+# compiled grammar. Every consult test mocks the provider, so unit-tests.yml
+# and integration.yml were green throughout and the only symptom was
+# CONSULT_ANALYSIS_UNAVAILABLE in production. No mock can catch that; only a
+# live request can.
+#
+# Nightly rather than per-PR, because it costs real money, needs a real key,
+# and depends on a third party being up — none of which belong on a merge gate.
+# A PR that changes a consult schema should be run through it by hand
+# (workflow_dispatch) before merging.
+
+on:
+  schedule:
+    # 07:20 UTC daily. Off the hour on purpose: the top of the hour is the
+    # busiest cron slot on GitHub's shared runners and jobs get queued there.
+    - cron: '20 7 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # One live run at a time. A queued second run would bill a second set of
+  # vision calls to prove the same thing.
+  group: live-model-contract
+  cancel-in-progress: false
+
+jobs:
+  consult-schema:
+    name: Consult schemas against the live model
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        # npm audits during the install this action performs, which put npm's
+        # advisory service on the critical path of every job (see the same note
+        # in unit-tests.yml, and the 425s outage on 2026-09-04).
+        env:
+          NPM_CONFIG_AUDIT: 'false'
+        with:
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The suite THROWS rather than skips when the key is absent, so a missing
+      # or expired secret goes red here instead of passing silently — which is
+      # the failure mode that let the broken schema ship in the first place.
+      - name: Consult provider schema contract
+        run: pnpm test:live:consult-schema
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

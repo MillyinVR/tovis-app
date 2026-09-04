@@ -203,13 +203,6 @@ export default function ProConsultBrief({
   feedbackEnabled?: boolean
 }) {
   const observations = brief.aiObservations
-  const level = observations.currentLevel
-  const levelValue =
-    level.min == null || level.max == null
-      ? 'Unknown'
-      : level.min === level.max
-        ? `Level ${level.min}`
-        : `Levels ${level.min}–${level.max}`
 
   return (
     <article className="grid gap-5" data-consult-brief-id={brief.briefRevisionId}>
@@ -255,18 +248,11 @@ export default function ProConsultBrief({
           Photo-based observations to verify in person.
         </p>
         <ul className="mt-3 grid gap-2 sm:grid-cols-2">
-          <li className="rounded-xl border border-surfaceGlass/10 bg-bgPrimary px-3 py-2.5">
-            <div className="text-[11px] font-bold uppercase tracking-wide text-textMuted">
-              Current level
-            </div>
-            <div className="mt-1 text-[13px] font-semibold text-textPrimary">
-              {levelValue}{' '}
-              <span className="font-normal text-textMuted">
-                · {Math.round(level.confidence.min * 100)}–
-                {Math.round(level.confidence.max * 100)}% confidence
-              </span>
-            </div>
-          </li>
+          {/* Two named levels, not a range: `labelCode` turns LEVEL_7 into
+              "Level 7" and UNKNOWN into "Unknown", the same way it renders
+              every other observation's enum. */}
+          <Observation label="Base level" {...observations.baseLevel} />
+          <Observation label="Lightest level" {...observations.lightestLevel} />
           <Observation label="Tone" {...observations.currentTone} />
           <Observation
             label="Visible condition"

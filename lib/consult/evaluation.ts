@@ -23,13 +23,17 @@ import {
   HAIR_COLOR_CAPTURE_SHOT_KEYS,
   type HairColorCaptureShotKey,
 } from './capturePack'
+import { CONSULT_HAIR_LEVELS, type ConsultHairLevel } from './hairLevel'
 import { validateHairColorC5EvaluationIntakeAnswers } from './intakePack'
 
 export const CONSULT_EVALUATION_SCORER_VERSION = 'hair-color-scorer-v1'
 export const CONSULT_EVALUATION_RUNNER_VERSION = 'hair-color-runner-v1'
 
 export const CONSULT_EVALUATION_METRICS = [
-  'currentLevel',
+  // Schema v4 splits the one ambiguous level metric into the two named ends
+  // it always conflated (lib/consult/hairLevel.ts).
+  'baseLevel',
+  'lightestLevel',
   'currentTone',
   'visibleCondition',
   'density',
@@ -76,10 +80,8 @@ export type ConsultEvaluationFixture = {
   captures: Record<HairColorCaptureShotKey, string>
   intake: Record<string, string>
   expected: {
-    currentLevel: {
-      acceptedRange: [number, number] | null
-      allowedEvidence: HairColorCaptureShotKey[]
-    }
+    baseLevel: ExpectedObservation<ConsultHairLevel>
+    lightestLevel: ExpectedObservation<ConsultHairLevel>
     currentTone: ExpectedObservation<Tone>
     visibleCondition: ExpectedObservation<Condition>
     density: ExpectedObservation<Density>
@@ -352,7 +354,8 @@ function parseExpected(value: unknown): ConsultEvaluationFixture['expected'] {
   if (
     !isRecord(value) ||
     !exactKeys(value, [
-      'currentLevel',
+      'baseLevel',
+      'lightestLevel',
       'currentTone',
       'visibleCondition',
       'density',
@@ -361,34 +364,11 @@ function parseExpected(value: unknown): ConsultEvaluationFixture['expected'] {
       'achievability',
       'recommendations',
     ]) ||
-    !isRecord(value.currentLevel) ||
-    !exactKeys(value.currentLevel, ['acceptedRange', 'allowedEvidence']) ||
     !isRecord(value.recommendations) ||
     !exactKeys(value.recommendations, ['allowedIntents', 'resolvableIntents'])
   ) {
     invalidManifest()
   }
-
-  let acceptedRange: [number, number] | null = null
-  if (value.currentLevel.acceptedRange !== null) {
-    const range = value.currentLevel.acceptedRange
-    if (
-      !Array.isArray(range) ||
-      range.length !== 2 ||
-      !Number.isInteger(range[0]) ||
-      !Number.isInteger(range[1]) ||
-      typeof range[0] !== 'number' ||
-      typeof range[1] !== 'number' ||
-      range[0] < 1 ||
-      range[1] > 10 ||
-      range[0] > range[1]
-    ) {
-      invalidManifest()
-    }
-    acceptedRange = [range[0], range[1]]
-  }
-  const levelEvidence = evidenceArray(value.currentLevel.allowedEvidence, true)
-  if ((acceptedRange === null) !== (levelEvidence.length === 0)) invalidManifest()
 
   const allowedIntents = uniqueEnumArray(
     value.recommendations.allowedIntents,
@@ -405,7 +385,8 @@ function parseExpected(value: unknown): ConsultEvaluationFixture['expected'] {
   }
 
   return {
-    currentLevel: { acceptedRange, allowedEvidence: levelEvidence },
+    baseLevel: parseObservation(value.baseLevel, CONSULT_HAIR_LEVELS),
+    lightestLevel: parseObservation(value.lightestLevel, CONSULT_HAIR_LEVELS),
     currentTone: parseObservation(value.currentTone, CONSULT_ANALYSIS_TONES),
     visibleCondition: parseObservation(
       value.visibleCondition,
@@ -527,20 +508,6 @@ function evidenceScore(actual: readonly EvidenceKey[], allowed: readonly Evidenc
   return rounded(actual.filter((key) => allowed.includes(key)).length / actual.length)
 }
 
-function levelScore(
-  actual: { min: number | null; max: number | null },
-  expected: [number, number] | null,
-): number {
-  if (expected === null) return actual.min === null && actual.max === null ? 1 : 0
-  if (actual.min === null || actual.max === null) return 0
-  const intersection = Math.max(
-    0,
-    Math.min(actual.max, expected[1]) - Math.max(actual.min, expected[0]) + 1,
-  )
-  const union = Math.max(actual.max, expected[1]) - Math.min(actual.min, expected[0]) + 1
-  return rounded(intersection / union)
-}
-
 function confidenceScore(
   confidence: { min: number; max: number },
   accurate: boolean,
@@ -603,19 +570,13 @@ export function scoreConsultEvaluationFixture(
     return malformedFixtureReport(fixture)
   }
 
-  const levelAccuracy = levelScore(
-    result.analysis.core.currentLevel,
-    fixture.expected.currentLevel.acceptedRange,
+  const baseLevel = observationScores(
+    result.analysis.core.baseLevel,
+    fixture.expected.baseLevel,
   )
-  const levelUnknown = fixture.expected.currentLevel.acceptedRange === null
-  const levelEvidence = evidenceScore(
-    result.analysis.core.currentLevel.evidence,
-    fixture.expected.currentLevel.allowedEvidence,
-  )
-  const levelCalibration = confidenceScore(
-    result.analysis.core.currentLevel.confidence,
-    levelAccuracy === 1,
-    levelUnknown,
+  const lightestLevel = observationScores(
+    result.analysis.core.lightestLevel,
+    fixture.expected.lightestLevel,
   )
   const tone = observationScores(
     result.analysis.core.currentTone,
@@ -670,14 +631,8 @@ export function scoreConsultEvaluationFixture(
     ),
   )
   const unknownScores = [
-    levelUnknown
-      ? result.analysis.core.currentLevel.min === null &&
-        result.analysis.core.currentLevel.max === null &&
-        result.analysis.core.currentLevel.evidence.length === 0 &&
-        result.analysis.core.currentLevel.confidence.max <= 0.35
-        ? 1
-        : 0
-      : null,
+    baseLevel.unknown,
+    lightestLevel.unknown,
     tone.unknown,
     condition.unknown,
     density.unknown,
@@ -690,20 +645,23 @@ export function scoreConsultEvaluationFixture(
     : 1
 
   const scores: FixtureScores = {
-    currentLevel: levelAccuracy,
+    baseLevel: baseLevel.accuracy,
+    lightestLevel: lightestLevel.accuracy,
     currentTone: tone.accuracy,
     visibleCondition: condition.accuracy,
     density: density.accuracy,
     texture: texture.accuracy,
     evidenceCitations: average([
-      levelEvidence,
+      baseLevel.evidence,
+      lightestLevel.evidence,
       tone.evidence,
       condition.evidence,
       density.evidence,
       texture.evidence,
     ]),
     confidenceCalibration: average([
-      levelCalibration,
+      baseLevel.calibration,
+      lightestLevel.calibration,
       tone.calibration,
       condition.calibration,
       density.calibration,
@@ -758,7 +716,6 @@ function firstExpectedValue<T>(values: readonly T[]): T {
 export function createDeterministicConsultEvaluationResult(
   fixture: ConsultEvaluationFixture,
 ): ConsultAnalysisProviderResult {
-  const levelRange = fixture.expected.currentLevel.acceptedRange
   const observation = <T extends string>(expected: ExpectedObservation<T>) => {
     const value = firstExpectedValue(expected.acceptedValues)
     return {
@@ -804,12 +761,8 @@ export function createDeterministicConsultEvaluationResult(
         discussWithProfessional: true as const,
       })),
       core: {
-        currentLevel: {
-          min: levelRange?.[0] ?? null,
-          max: levelRange?.[1] ?? null,
-          confidence: fakeConfidence(levelRange === null),
-          evidence: [...fixture.expected.currentLevel.allowedEvidence],
-        },
+        baseLevel: observation(fixture.expected.baseLevel),
+        lightestLevel: observation(fixture.expected.lightestLevel),
         currentTone: observation(fixture.expected.currentTone),
         visibleCondition: observation(fixture.expected.visibleCondition),
         density: observation(fixture.expected.density),

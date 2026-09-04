@@ -26,7 +26,8 @@ function analysisWith(args: {
     profile: {} as ConsultAnalysisProviderOutput['profile'],
     styleDirections: [],
     core: {
-      currentLevel: { min: null, max: null, confidence: { min: 0, max: 0.2 }, evidence: [] },
+      baseLevel: { value: 'UNKNOWN', confidence: { min: 0, max: 0.2 }, evidence: [] },
+      lightestLevel: { value: 'UNKNOWN', confidence: { min: 0, max: 0.2 }, evidence: [] },
       currentTone: observation,
       visibleCondition: observation,
       density: observation,

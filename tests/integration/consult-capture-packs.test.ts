@@ -197,9 +197,13 @@ vi.mock('@/lib/consult/analysisEngine', async (importOriginal) => {
             discussWithProfessional: true,
           })),
           core: {
-            currentLevel: {
-              min: null,
-              max: null,
+            baseLevel: {
+              value: 'UNKNOWN',
+              confidence: { min: 0, max: 0.25 },
+              evidence: [],
+            },
+            lightestLevel: {
+              value: 'UNKNOWN',
               confidence: { min: 0, max: 0.25 },
               evidence: [],
             },
@@ -221,7 +225,10 @@ vi.mock('@/lib/consult/analysisEngine', async (importOriginal) => {
           safetyFlags: [],
           recommendations: [
             {
-              service: original.CONSULT_ANALYSIS_CONSULTATION_OPTION,
+              // The STORED shape the engine returns, not the provider's
+              // `service` enum — see tests/integration/_support/consultLookFakes.ts.
+              serviceIntent: 'CONSULTATION',
+              serviceName: null,
               title: 'A consultation first',
               rationale: 'Review the direction and history together.',
               achievability: 'The professional should confirm the plan.',
@@ -1044,7 +1051,8 @@ function guardPayload(safetyFlags: Array<{ code: string }>) {
       discussWithProfessional: true,
     })),
     core: {
-      currentLevel: { min: null, max: null, confidence: { min: 0, max: 0.25 }, evidence: [] },
+      baseLevel: { value: 'UNKNOWN', confidence: { min: 0, max: 0.25 }, evidence: [] },
+      lightestLevel: { value: 'UNKNOWN', confidence: { min: 0, max: 0.25 }, evidence: [] },
       currentTone: unknown(),
       visibleCondition: unknown(),
       density: unknown(),
