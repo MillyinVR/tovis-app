@@ -1064,7 +1064,7 @@ function InspirationImagePanel({
       ) : failed ? (
         <div
           role="alert"
-          data-testid="inspiration-image-error"
+          data-testid="consult-inspiration-image-error"
           className="grid gap-2 rounded-lg border border-toneDanger/30 bg-toneDanger/10 px-3 py-3"
         >
           <p className="text-sm font-bold text-textPrimary">

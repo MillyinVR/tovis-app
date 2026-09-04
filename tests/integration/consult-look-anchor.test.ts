@@ -35,6 +35,13 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 
 vi.hoisted(() => {
   process.env.JWT_SECRET ||= 'integration-test-jwt-secret'
+  // A look-anchored consult's inspiration image is the LOOK's own media,
+  // resolved by lib/media/renderUrls. A PUBLIC-bucket object needs the Supabase
+  // project origin to build its URL, and integration.yml exports only the two
+  // DATABASE URLs — so without this the resolve returns null on CI (a correct
+  // 404, but not the case the read test means to exercise) while passing
+  // locally off .env.test.local. Never overrides a real value.
+  process.env.NEXT_PUBLIC_SUPABASE_URL ||= 'https://storage.test'
 })
 
 const mockRequireClient = vi.hoisted(() => vi.fn())
@@ -976,10 +983,20 @@ describe('inspiration seeded from the anchoring look', () => {
       actorUserId: clientUserId,
     })
     // The look fixture's asset lives in the PUBLIC bucket, so this resolves to
-    // a public object URL; a private-bucket look would resolve to a signed one.
-    // Either way the SHAPE is the contract, and the expiry is finite and
-    // positive so the clients have something to schedule a renewal from.
-    expect(read.url).toContain(`${tag}/`)
+    // a public object URL naming that exact object; a private-bucket look would
+    // resolve to a signed one instead. Either way the SHAPE is the contract,
+    // and the expiry is finite and positive so the clients have something to
+    // schedule a renewal from.
+    const media = await db.mediaAsset.findUniqueOrThrow({
+      where: { id: (await db.lookPost.findUniqueOrThrow({
+        where: { id: lookPostId },
+        select: { primaryMediaAssetId: true },
+      })).primaryMediaAssetId },
+      select: { storageBucket: true, storagePath: true },
+    })
+    expect(media.storageBucket).toBe('media-public')
+    expect(read.url).toContain(process.env.NEXT_PUBLIC_SUPABASE_URL ?? '\u0000')
+    expect(read.url).toContain(media.storagePath!)
     expect(Number.isFinite(read.expiresInSeconds)).toBe(true)
     expect(read.expiresInSeconds).toBeGreaterThan(0)
     // No storage traffic: this is the LOOK's own object, never a copy.

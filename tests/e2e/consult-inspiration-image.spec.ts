@@ -95,7 +95,7 @@ function signedRead(expiresInSeconds: number) {
 
 const photo = (page: Page) =>
   page.getByRole('img', { name: 'Your inspiration photo' })
-const errorState = (page: Page) => page.getByTestId('inspiration-image-error')
+const errorState = (page: Page) => page.getByTestId('consult-inspiration-image-error')
 
 test.describe('consult inspiration image', () => {
   test('renders for a LOOK-anchored consult and reads once, not in a loop', async ({
