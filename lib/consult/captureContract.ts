@@ -14,6 +14,7 @@ import {
 import type {
   ConsultCaptureQualityReasonCodeDTO,
   ConsultCaptureQualityResultDTO,
+  ConsultCaptureQualityWarningCodeDTO,
   ConsultCaptureSlotStateDTO,
   ConsultCaptureStateDTO,
   ConsultCaptureUploadDTO,
@@ -22,7 +23,10 @@ import { prisma } from '@/lib/prisma'
 
 import { requireCurrentConsultAgreementAcceptances } from './agreementContract'
 import { packHasShot } from './capture/registry'
-import type { ConsultCapturePackDefinition } from './capture/types'
+import {
+  shotToleratesColorCast,
+  type ConsultCapturePackDefinition,
+} from './capture/types'
 import { purgeConsultCaptureRawObject } from './capturePurge'
 import {
   CONSULT_CAPTURE_BUCKET,
@@ -84,6 +88,13 @@ const QUALITY_REASON_CODES = new Set<ConsultCaptureQualityReasonCodeDTO>([
   'TOO_DARK',
   'TOO_BRIGHT',
   'OTHER_QUALITY_FAILURE',
+])
+
+// A colour finding that rode along on an ACCEPTED tight-crop shot instead of
+// blocking it (B3). Never set on a rejection, never on a full view.
+const QUALITY_WARNING_CODES = new Set<ConsultCaptureQualityWarningCodeDTO>([
+  'WARM_INDOOR_LIGHT',
+  'COLOR_CAST',
 ])
 
 type ClientActor = {
@@ -229,6 +240,7 @@ function stateForCapture(
     shotKey: string
     status: ConsultCaptureStatus
     qualityReasonCode: string | null
+    qualityWarningCode: string | null
     retakeTip: string | null
     rawExpiresAt: Date
     purgedAt: Date | null
@@ -258,6 +270,10 @@ function stateForCapture(
     state,
     captureId: capture.id,
     qualityReasonCode: reasonCode,
+    qualityWarningCode:
+      [...QUALITY_WARNING_CODES].find(
+        (candidate) => candidate === capture.qualityWarningCode,
+      ) ?? null,
     retakeTip: capture.retakeTip,
     rawExpiresAt: capture.purgedAt ? null : capture.rawExpiresAt.toISOString(),
     purgedAt: capture.purgedAt?.toISOString() ?? null,
@@ -281,6 +297,7 @@ async function buildState(
           shotKey: true,
           status: true,
           qualityReasonCode: true,
+          qualityWarningCode: true,
           retakeTip: true,
           rawExpiresAt: true,
           purgedAt: true,
@@ -325,6 +342,7 @@ async function buildState(
           state: 'EMPTY',
           captureId: null,
           qualityReasonCode: null,
+          qualityWarningCode: null,
           retakeTip: null,
           rawExpiresAt: null,
           purgedAt: null,
@@ -683,6 +701,7 @@ function qualityDto(capture: {
   id: string
   status: ConsultCaptureStatus
   qualityReasonCode: string | null
+  qualityWarningCode: string | null
   retakeTip: string | null
   qualityCheckedAt: Date | null
 }): ConsultCaptureQualityResultDTO {
@@ -696,6 +715,10 @@ function qualityDto(capture: {
     captureId: capture.id,
     accepted: capture.status === ConsultCaptureStatus.ACCEPTED,
     reasonCode,
+    warningCode:
+      [...QUALITY_WARNING_CODES].find(
+        (candidate) => candidate === capture.qualityWarningCode,
+      ) ?? null,
     retakeTip: capture.retakeTip,
     checkedAt: capture.qualityCheckedAt.toISOString(),
   }
@@ -745,6 +768,14 @@ export async function checkConsultCaptureQuality(args: {
       })
       if (!capture || !packHasShot(pack, capture.shotKey)) {
         throw new ConsultWriteError('NOT_FOUND', 'Capture not found.')
+      }
+      // The pack's own definition of this slot — what says whether a colour
+      // finding may ride along as a warning here (B3).
+      const shotForCapture = pack.shots.find(
+        (shot) => shot.key === capture.shotKey,
+      )
+      if (!shotForCapture) {
+        throw new ConsultWriteError('CAPTURE_INVALID_SLOT', 'Invalid capture slot.')
       }
       if (capture.qualityIdempotencyKey === idempotencyKey) {
         if (capture.qualityRequestHash !== requestHash) {
@@ -840,6 +871,15 @@ export async function checkConsultCaptureQuality(args: {
         !QUALITY_REASON_CODES.has(quality.reasonCode) ||
         (quality.accepted && quality.reasonCode !== 'PASS') ||
         (!quality.accepted && quality.reasonCode === 'PASS') ||
+        // A warning is only ever a colour finding that was downgraded on an
+        // ACCEPTED tight-crop shot. On a rejection, on a full view, or with an
+        // unknown code it is inconsistent output, refused like any other —
+        // the shot's own spec decides, so this boundary cannot drift from the
+        // gate that produced the result.
+        (quality.warningCode !== null &&
+          (!quality.accepted ||
+            !QUALITY_WARNING_CODES.has(quality.warningCode) ||
+            !shotToleratesColorCast(shotForCapture))) ||
         typeof quality.model !== 'string' ||
         !quality.model.trim() ||
         quality.model !== quality.model.trim() ||
@@ -860,6 +900,7 @@ export async function checkConsultCaptureQuality(args: {
         data: {
           status,
           qualityReasonCode: quality.reasonCode,
+          qualityWarningCode: quality.warningCode,
           retakeTip: quality.retakeTip,
           qualitySchemaVersion: CONSULT_CAPTURE_QUALITY_SCHEMA_VERSION,
           qualityPromptVersion: CONSULT_CAPTURE_QUALITY_PROMPT_VERSION,

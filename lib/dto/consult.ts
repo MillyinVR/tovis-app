@@ -488,11 +488,22 @@ export type ConsultCaptureQualityReasonCodeDTO =
   | 'TOO_BRIGHT'
   | 'OTHER_QUALITY_FAILURE'
 
+// The colour-fidelity findings that are a REJECTION on a full view and only a
+// WARNING on a tight crop (a skin-filled close-up, where the frame is mostly
+// one subject and a warm reading is as likely to be the skin as the room —
+// see lib/consult/capture/types.ts `framing`). A warning never blocks the
+// slot: it rides along on the accepted result so the analysis, the pro brief
+// and any later audit know the colour on this frame is not fully trustworthy.
+export type ConsultCaptureQualityWarningCodeDTO =
+  | 'WARM_INDOOR_LIGHT'
+  | 'COLOR_CAST'
+
 export type ConsultCaptureSlotStateDTO = {
   shotKey: ConsultCaptureShotKeyDTO
   state: 'EMPTY' | 'UPLOADED' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED' | 'PURGED'
   captureId: string | null
   qualityReasonCode: ConsultCaptureQualityReasonCodeDTO | null
+  qualityWarningCode: ConsultCaptureQualityWarningCodeDTO | null
   retakeTip: string | null
   rawExpiresAt: string | null
   purgedAt: string | null
@@ -574,6 +585,8 @@ export type ConsultCaptureQualityResultDTO = {
   captureId: string
   accepted: boolean
   reasonCode: ConsultCaptureQualityReasonCodeDTO
+  /** Non-null only on an accepted tight-crop shot; see the type's own note. */
+  warningCode: ConsultCaptureQualityWarningCodeDTO | null
   retakeTip: string | null
   checkedAt: string
 }

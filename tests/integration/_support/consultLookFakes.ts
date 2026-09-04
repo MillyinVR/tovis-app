@@ -111,6 +111,7 @@ export async function fakeCheckConsultCapture() {
   return {
     accepted: true,
     reasonCode: 'PASS',
+    warningCode: null,
     retakeTip: null,
     model: 'fake-quality-model',
   }

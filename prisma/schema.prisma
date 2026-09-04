@@ -7526,6 +7526,10 @@ model ConsultCapture {
   status ConsultCaptureStatus @default(ATTACHED)
 
   qualityReasonCode    String?   @db.VarChar(64)
+  /// A colour finding (warm light / cast) that did NOT block a tight-crop
+  /// shot — carried on the ACCEPTED row so the analysis and the pro brief
+  /// know this frame's colour is not fully trustworthy. NULL everywhere else.
+  qualityWarningCode   String?   @db.VarChar(64)
   retakeTip            String?   @db.VarChar(160)
   qualitySchemaVersion Int?
   qualityPromptVersion String?   @db.VarChar(64)

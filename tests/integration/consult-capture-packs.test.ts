@@ -121,7 +121,7 @@ vi.mock('@/lib/consult/captureVision', async (importOriginal) => {
     ...original,
     async checkConsultCapture(input: { shotKey: string }) {
       fake.modelCalls.push(input.shotKey)
-      return { accepted: true, reasonCode: 'PASS', retakeTip: null, model: 'fake-quality' }
+      return { accepted: true, reasonCode: 'PASS', warningCode: null, retakeTip: null, model: 'fake-quality' }
     },
   }
 })

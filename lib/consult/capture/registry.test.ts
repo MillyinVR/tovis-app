@@ -14,6 +14,7 @@ import {
   packHasShot,
   resolveConsultCapturePack,
 } from './registry'
+import { shotToleratesColorCast } from './types'
 
 describe('consult capture registry', () => {
   it('keeps the hair pack byte-stable and registers the two family packs beside it', () => {
@@ -113,5 +114,47 @@ describe('consult capture registry', () => {
     expect(packHasShot(AREA_CAPTURE_PACK, 'hair_back')).toBe(false)
     expect(packHasShot(AREA_CAPTURE_PACK, 'face_front')).toBe(true)
     expect(packHasShot(HAIR_COLOR_CAPTURE_PACK, 'area_wide')).toBe(false)
+  })
+
+  // B3. The gate must not carry a list of close-up keys, and the flag must not
+  // drift away from the sentence it is a summary of: a shot is a tight crop
+  // exactly when its own acceptance rule asks the subject to FILL the frame.
+  describe('shot framing', () => {
+    const everyShot = CONSULT_CAPTURE_PACKS.flatMap((pack) => pack.shots)
+
+    it('declares a framing on every registered shot', () => {
+      for (const shot of everyShot) {
+        expect(['FULL_VIEW', 'TIGHT_CROP']).toContain(shot.framing)
+      }
+    })
+
+    it('marks exactly the shots whose acceptance rule asks the subject to fill the frame', () => {
+      const askedToFill = everyShot
+        .filter((shot) => /fills? most of the frame/.test(shot.acceptance))
+        .map((shot) => shot.key)
+      const tolerant = everyShot
+        .filter(shotToleratesColorCast)
+        .map((shot) => shot.key)
+
+      expect(new Set(tolerant)).toEqual(new Set(askedToFill))
+      expect(new Set(tolerant)).toEqual(new Set(['eyes_closeup', 'area_closeup']))
+    })
+
+    it('keeps every full view — hair, face and the area in context — colour-strict', () => {
+      const strict = everyShot
+        .filter((shot) => !shotToleratesColorCast(shot))
+        .map((shot) => shot.key)
+      expect(new Set(strict)).toEqual(
+        new Set([
+          'hair_back',
+          'hair_left',
+          'hair_right',
+          'hair_crown',
+          'face_front',
+          'face_side',
+          'area_wide',
+        ]),
+      )
+    })
   })
 })

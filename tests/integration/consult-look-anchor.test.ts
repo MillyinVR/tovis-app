@@ -135,6 +135,7 @@ vi.mock('@/lib/consult/captureVision', async (importOriginal) => {
       return {
         accepted: true,
         reasonCode: 'PASS',
+        warningCode: null,
         retakeTip: null,
         model: 'fake-quality-model',
       }

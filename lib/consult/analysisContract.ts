@@ -40,9 +40,9 @@ import {
   type ConsultCaptureStorage,
 } from './captureStorage'
 import {
-  CONSULT_CAPTURE_QUALITY_PROMPT_VERSION,
-  CONSULT_CAPTURE_QUALITY_SCHEMA_VERSION,
   CONSULT_CAPTURE_MEDIA_TYPES,
+  CONSULT_CAPTURE_QUALITY_SCHEMA_VERSION,
+  isAnalyzableConsultCapturePromptVersion,
   type ConsultCaptureMediaType,
 } from './captureVision'
 import { CONSULT_ANCHOR_SELECT, evaluateConsultAnchor } from './anchor'
@@ -382,7 +382,7 @@ async function currentCaptures(
       !capture.storagePath ||
       capture.qualityReasonCode !== 'PASS' ||
       capture.qualitySchemaVersion !== CONSULT_CAPTURE_QUALITY_SCHEMA_VERSION ||
-      capture.qualityPromptVersion !== CONSULT_CAPTURE_QUALITY_PROMPT_VERSION ||
+      !isAnalyzableConsultCapturePromptVersion(capture.qualityPromptVersion) ||
       !capture.qualityModel ||
       capture.purgeEligibleAt ||
       capture.purgeRequestedAt ||

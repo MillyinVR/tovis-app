@@ -145,13 +145,20 @@ vi.mock('@/lib/consult/captureVision', async (importOriginal) => {
     ...original,
     async checkConsultCapture(input: { shotKey: string }) {
       fake.modelCalls.push(input.shotKey)
-      return (
-        fake.qualityByShot.get(input.shotKey) ?? {
-          accepted: true,
-          reasonCode: 'PASS',
-          retakeTip: null,
-          model: 'fake-quality-model',
-        }
+      // The fake stands in for the NETWORK, not for the policy: whatever the
+      // provider would have answered goes through the real sanitizer, so the
+      // shot-aware colour rule (B3) is exercised end to end here instead of
+      // being restated in a second place.
+      const entry = fake.qualityByShot.get(input.shotKey) ?? {
+        accepted: true,
+        reasonCode: 'PASS' as const,
+        retakeTip: null,
+        model: 'fake-quality-model',
+      }
+      return original.sanitizeConsultCaptureQuality(
+        { accepted: entry.accepted, reasonCode: entry.reasonCode, retakeTip: entry.retakeTip },
+        entry.model,
+        input.shotKey,
       )
     },
   }
@@ -2878,5 +2885,122 @@ describe('consult partial capture submission against PostgreSQL (Tori, 2026-08-2
       qualityReasonCode: 'WARM_INDOOR_LIGHT',
       retakeTip: 'Face a window in indirect daylight.',
     })
+  })
+
+  // B3. The eyes/brows shot was being refused by a colour rule written for a
+  // photo of a whole head. On a view whose own spec asks the eyes to FILL the
+  // frame there is almost no background left to read the light off, so the
+  // finding is recorded as a warning and the slot is accepted.
+  it('accepts a warm-lit eyes/brows close-up with a warning, and still rejects a warm full-face shot', async () => {
+    const consult = await createReadyConsult('tight-crop-warning')
+    authenticate(consult)
+    // Exactly what the provider answers today for the shot Tori's walkthrough
+    // could never get past the gate.
+    fake.qualityByShot.set('eyes_closeup', {
+      accepted: false,
+      reasonCode: 'WARM_INDOOR_LIGHT',
+      retakeTip: 'Move near a window and face the daylight.',
+      model: 'fake-quality-model',
+    })
+    const eyesId = await issueAttach(consult, 'eyes_closeup', 'tight-crop')
+    const eyesResponse = await quality(consult, eyesId, 'tight-crop-q')
+    expect(eyesResponse.status).toBe(200)
+    expect(await body(eyesResponse)).toMatchObject({
+      quality: {
+        accepted: true,
+        reasonCode: 'PASS',
+        warningCode: 'WARM_INDOOR_LIGHT',
+        retakeTip: null,
+      },
+    })
+
+    // (a) the warning is in the STORED row, not just the response…
+    const storedEyes = await db.consultCapture.findUniqueOrThrow({
+      where: { id: eyesId },
+      select: {
+        status: true,
+        qualityReasonCode: true,
+        qualityWarningCode: true,
+        retakeTip: true,
+        qualityPromptVersion: true,
+        purgedAt: true,
+      },
+    })
+    expect(storedEyes).toMatchObject({
+      status: ConsultCaptureStatus.ACCEPTED,
+      qualityReasonCode: 'PASS',
+      qualityWarningCode: 'WARM_INDOOR_LIGHT',
+      retakeTip: null,
+      qualityPromptVersion: 'full-analysis-capture-v3',
+    })
+    // …and the raw object survives, as it must for an accepted shot.
+    expect(storedEyes.purgedAt).toBeNull()
+
+    // (b) a genuinely warm-cast FULL-FACE shot is still a hard rejection.
+    fake.qualityByShot.set('face_front', {
+      accepted: false,
+      reasonCode: 'WARM_INDOOR_LIGHT',
+      retakeTip: 'Move near a window and face the daylight.',
+      model: 'fake-quality-model',
+    })
+    const faceId = await issueAttach(consult, 'face_front', 'warm-full-face')
+    expect(await body(await quality(consult, faceId, 'warm-full-face-q'))).toMatchObject({
+      quality: {
+        accepted: false,
+        reasonCode: 'WARM_INDOOR_LIGHT',
+        warningCode: null,
+        retakeTip: 'Move near a window and face the daylight.',
+      },
+    })
+    expect(
+      await db.consultCapture.findUniqueOrThrow({
+        where: { id: faceId },
+        select: { status: true, qualityWarningCode: true, purgedAt: true },
+      }),
+    ).toMatchObject({
+      status: ConsultCaptureStatus.REJECTED,
+      qualityWarningCode: null,
+      purgedAt: expect.any(Date),
+    })
+
+    // (d) an ordinary full view under neutral light is untouched: accepted,
+    // no warning. (The default fake answer is a clean PASS.)
+    const sideId = await issueAttach(consult, 'face_side', 'neutral-full-view')
+    expect(await body(await quality(consult, sideId, 'neutral-full-view-q'))).toMatchObject({
+      quality: { accepted: true, reasonCode: 'PASS', warningCode: null },
+    })
+
+    // (c) the "N / M accepted" counter is `slots.filter(state == ACCEPTED)`
+    // on both clients, so the close-up now counts toward it and the warm
+    // full-face shot does not.
+    const state = await getCapture(
+      new Request(`http://test/api/v1/client/consult/${consult.sessionId}/capture`),
+      context(consult.sessionId),
+    )
+    const payload = (await body(state)) as {
+      capture: { slots: Array<Record<string, unknown>> }
+    }
+    const bySlot = new Map(
+      payload.capture.slots.map((slot) => [slot.shotKey as string, slot]),
+    )
+    expect(bySlot.get('eyes_closeup')).toMatchObject({
+      state: 'ACCEPTED',
+      qualityReasonCode: 'PASS',
+      qualityWarningCode: 'WARM_INDOOR_LIGHT',
+      retakeTip: null,
+    })
+    expect(bySlot.get('face_front')).toMatchObject({
+      state: 'REJECTED',
+      qualityReasonCode: 'WARM_INDOOR_LIGHT',
+      qualityWarningCode: null,
+    })
+    expect(bySlot.get('face_side')).toMatchObject({
+      state: 'ACCEPTED',
+      qualityWarningCode: null,
+    })
+    expect(
+      payload.capture.slots.filter((slot) => slot.state === 'ACCEPTED').length,
+    ).toBe(2)
+    expect(payload.capture.slots.length).toBe(7)
   })
 })
