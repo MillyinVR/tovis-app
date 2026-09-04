@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { NotificationEventKey } from '@/lib/prismaEnums'
+import { sanitizeInternalPath as sanitizeInternalPathStrict } from '@/lib/security/internalPath'
 
 type NotificationCardProps = {
   id: string
@@ -82,11 +83,7 @@ function eventKeyBadgeClass(eventKey: NotificationEventKey): string {
 }
 
 function safeInternalHref(raw: string): string {
-  const value = (raw || '').trim()
-  if (!value) return '/pro/notifications'
-  if (!value.startsWith('/')) return '/pro/notifications'
-  if (value.startsWith('//')) return '/pro/notifications'
-  return value
+  return sanitizeInternalPathStrict(raw) ?? '/pro/notifications'
 }
 
 function buildCardClass(unread: boolean): string {

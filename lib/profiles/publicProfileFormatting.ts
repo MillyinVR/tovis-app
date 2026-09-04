@@ -10,6 +10,7 @@ import { formatCompactCount } from '@/lib/format/compactCount'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import { formatProfessionLabel } from '@/lib/professions'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
+import { sanitizeInternalPath as sanitizeInternalPathStrict } from '@/lib/security/internalPath'
 
 // Re-exported, not re-implemented: the label map now lives in lib/professions
 // (one home, shared with the signup dropdown that had forked it), and this
@@ -71,13 +72,7 @@ export function buildLoginHref(fromPath: string): string {
 }
 
 export function sanitizeLocalHref(value: string | null | undefined): string {
-  const trimmed = trimToNull(value)
-
-  if (!trimmed) return '/looks'
-  if (!trimmed.startsWith('/')) return '/looks'
-  if (trimmed.startsWith('//')) return '/looks'
-
-  return trimmed
+  return sanitizeInternalPathStrict(value) ?? '/looks'
 }
 
 export function buildProfessionalProfileHref(args: {

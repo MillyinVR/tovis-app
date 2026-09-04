@@ -9,6 +9,7 @@ import { prisma } from '@/lib/prisma'
 import { logAuthEvent } from '@/lib/observability/authEvents'
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import type { TenantContext } from '@/lib/tenant/context'
+import { sanitizeInternalPath as sanitizeInternalPathStrict } from '@/lib/security/internalPath'
 
 const POSTMARK_SEND_URL = 'https://api.postmarkapp.com/email'
 
@@ -43,11 +44,7 @@ function getDb(tx?: Prisma.TransactionClient): DbClient {
 }
 
 function sanitizeInternalPath(raw: string | null | undefined): string | null {
-  const value = (raw ?? '').trim()
-  if (!value) return null
-  if (!value.startsWith('/')) return null
-  if (value.startsWith('//')) return null
-  return value
+  return sanitizeInternalPathStrict(raw)
 }
 
 function sanitizeOptionalText(raw: string | null | undefined): string | null {

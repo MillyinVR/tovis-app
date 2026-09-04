@@ -18,6 +18,7 @@ import {
   readStringField,
 } from '@/lib/http'
 import { useBrand } from '@/lib/brand/BrandProvider'
+import { sanitizeInternalPath as sanitizeInternalPathStrict } from '@/lib/security/internalPath'
 
 type VerifyEmailResult = {
   alreadyVerified: boolean
@@ -52,11 +53,7 @@ function sanitizeVerificationId(raw: string | null): string | null {
 }
 
 function sanitizeNextUrl(raw: string | null): string | null {
-  const value = (raw ?? '').trim()
-  if (!value) return null
-  if (!value.startsWith('/')) return null
-  if (value.startsWith('//')) return null
-  return value
+  return sanitizeInternalPathStrict(raw)
 }
 
 function sanitizeOptionalText(raw: string | null): string | null {

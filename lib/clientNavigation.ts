@@ -1,3 +1,4 @@
+import { sanitizeInternalPath as sanitizeInternalPathStrict } from '@/lib/security/internalPath'
 // lib/clientNavigation.ts
 //
 // Navigation helpers: "where is the viewer standing?" and "send them to log in
@@ -48,13 +49,7 @@ export function currentPathWithQuery(fallback: string): string {
 export function sanitizeInternalPath(
   value: string | null | undefined,
 ): string | null {
-  const trimmed = (value ?? '').trim()
-
-  if (!trimmed) return null
-  if (!trimmed.startsWith('/')) return null
-  if (trimmed.startsWith('//')) return null
-
-  return trimmed
+  return sanitizeInternalPathStrict(value)
 }
 
 /**
