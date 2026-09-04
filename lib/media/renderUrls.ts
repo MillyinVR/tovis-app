@@ -9,7 +9,17 @@ import {
 import { BUCKETS } from '@/lib/storageBuckets'
 import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
 
-const SIGNED_TTL_SECONDS = 60 * 10
+/**
+ * How long a signed read URL minted by this module stays valid.
+ *
+ * Exported because callers that re-serve one of these URLs behind their own
+ * contract have to tell the client when it dies. Under-reporting is safe
+ * (an early refetch); over-reporting hands the client a dark image and no
+ * scheduled recovery.
+ */
+export const MEDIA_SIGNED_URL_TTL_SECONDS = 60 * 10
+
+const SIGNED_TTL_SECONDS = MEDIA_SIGNED_URL_TTL_SECONDS
 
 function isPublicBucket(bucket: string) {
   return bucket === BUCKETS.mediaPublic

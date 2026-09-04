@@ -254,7 +254,11 @@ import {
 import {
   purgeConsultSessionRawObjects,
 } from '@/lib/consult/capturePurge'
-import { answerConsultInspirationQuestion } from '@/lib/consult/inspirationContract'
+import {
+  answerConsultInspirationQuestion,
+  loadClientInspirationSignedRead,
+  loadConsultInspirationState,
+} from '@/lib/consult/inspirationContract'
 import {
   purgeConsultSessionInspirationObjects,
   runConsultInspirationPurgeSweep,
@@ -940,6 +944,70 @@ describe('inspiration seeded from the anchoring look', () => {
         },
       }),
     ).toBe(1)
+  })
+
+  // 🔴 B4. The inspiration image has to be READABLE, not just referenced. The
+  // state used to hand a look-anchored consult `/api/v1/looks/{id}` as its
+  // `imageReadEndpoint` — a route that answers a look DTO, not
+  // `{ url, expiresInSeconds }` — so the likes/dislikes step ran with nothing
+  // on screen on both platforms. One route, one shape, both sources.
+  it('serves the anchoring look image through the consult-scoped read route', async () => {
+    const lookPostId = await freshHairLook()
+    const created = await startLook(lookPostId)
+    const sessionId = ((await body(created)).consult as { id: string }).id
+    if (!sessionIds.includes(sessionId)) sessionIds.push(sessionId)
+    await consentAndCompleteIntake(sessionId, 'look-read')
+
+    const state = await loadConsultInspirationState({
+      consultSessionId: sessionId,
+      clientId,
+      actorUserId: clientUserId,
+    })
+    expect(state.source).toMatchObject({
+      source: ConsultInspirationSource.BOOKED_PRO_LOOK,
+      lookPostId,
+      imageAvailable: true,
+      imageReadEndpoint: `/api/v1/client/consult/${sessionId}/inspiration/media`,
+    })
+
+    const read = await loadClientInspirationSignedRead({
+      consultSessionId: sessionId,
+      clientId,
+      actorUserId: clientUserId,
+    })
+    // The look fixture's asset lives in the PUBLIC bucket, so this resolves to
+    // a public object URL; a private-bucket look would resolve to a signed one.
+    // Either way the SHAPE is the contract, and the expiry is finite and
+    // positive so the clients have something to schedule a renewal from.
+    expect(read.url).toContain(`${tag}/`)
+    expect(Number.isFinite(read.expiresInSeconds)).toBe(true)
+    expect(read.expiresInSeconds).toBeGreaterThan(0)
+    // No storage traffic: this is the LOOK's own object, never a copy.
+    expect(fake.objects.size).toBe(0)
+
+    // Unpublish the look and the very next read refuses. This is why the
+    // endpoint is a route and not a URL baked into the state DTO — a URL
+    // handed out once keeps working after the look stops being viewable.
+    await db.lookPost.update({
+      where: { id: lookPostId },
+      data: { status: LookPostStatus.DRAFT },
+    })
+    await expect(
+      loadClientInspirationSignedRead({
+        consultSessionId: sessionId,
+        clientId,
+        actorUserId: clientUserId,
+      }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    expect(
+      (
+        await loadConsultInspirationState({
+          consultSessionId: sessionId,
+          clientId,
+          actorUserId: clientUserId,
+        })
+      ).source?.imageAvailable,
+    ).toBe(false)
   })
 
   it('does not seed a booking-anchored consult', async () => {

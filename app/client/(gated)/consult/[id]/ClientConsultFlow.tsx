@@ -7,6 +7,7 @@
 // server-served; this component only renders them.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import * as Sentry from '@sentry/nextjs'
 import { useRouter } from 'next/navigation'
 
 import type { BrandClientConsultCaptureCopy } from '@/lib/brand/types'
@@ -943,9 +944,60 @@ function ZoomableImage({ src, alt }: { src: string; alt: string }) {
 }
 
 /**
- * Keeps the uploaded inspiration photo on screen through the whole question
- * flow. The signed read URL lives ~10 minutes, so it is refetched shortly
- * before expiry and on image-load failure.
+ * The signed-read response, validated rather than trusted.
+ *
+ * 🔴 The read endpoint is server-supplied, so its answer is a claim, not a
+ * fact. The previous version destructured it straight into state: a route that
+ * answered some OTHER shape (which is exactly what look-anchored consults got
+ * — `/api/v1/looks/{id}`) produced `url: undefined` and
+ * `expiresAt: NaN`, which rendered a broken image AND scheduled the next
+ * refresh from `NaN`. `setTimeout(fn, NaN)` fires on the next tick, so the
+ * panel refetched the same endpoint forever. Fail CLOSED: an answer that is
+ * not `{ url: string, expiresInSeconds: finite > 0 }` is an error, not a URL.
+ */
+function parseSignedRead(
+  value: unknown,
+): { url: string; expiresInSeconds: number } | null {
+  if (!value || typeof value !== 'object') return null
+  const { url, expiresInSeconds } = value as {
+    url?: unknown
+    expiresInSeconds?: unknown
+  }
+  if (typeof url !== 'string' || url.length === 0) return null
+  if (typeof expiresInSeconds !== 'number') return null
+  if (!Number.isFinite(expiresInSeconds) || expiresInSeconds <= 0) return null
+  return { url, expiresInSeconds }
+}
+
+/** Telemetry for a read the client could not use. Mirrors iOS's os_log line. */
+function reportInspirationReadFailure(
+  endpoint: string,
+  reason: 'CONTRACT_MISMATCH' | 'REQUEST_FAILED',
+  detail: string | null,
+): void {
+  Sentry.captureMessage('consult.inspiration.image_read_failed', {
+    level: 'warning',
+    tags: {
+      namespace: 'ai_consult',
+      metric: 'INSPIRATION_IMAGE_READ_FAILED',
+      reason,
+    },
+    // The endpoint is a route template plus this consult's own id — no media
+    // path, no signed token, no client trait. Matches the privacy boundary
+    // lib/observability/aiConsultEvents.ts draws for the server-side lines.
+    extra: { endpoint, detail },
+  })
+}
+
+/**
+ * Keeps the inspiration photo — uploaded OR the anchoring Look — on screen
+ * through the whole question flow. One endpoint answers both
+ * (`imageReadEndpoint`, see `ConsultInspirationSourceStateDTO`).
+ *
+ * Refresh scheduling is derived ONLY from a validated `expiresInSeconds`. When
+ * the read fails or answers the wrong shape, the panel surfaces the failure
+ * with a manual retry and schedules nothing — there is no timer that can turn
+ * a broken contract into a request loop.
  */
 function InspirationImagePanel({
   source,
@@ -954,47 +1006,92 @@ function InspirationImagePanel({
   source: NonNullable<ConsultInspirationStateDTO['source']>
   focusHint: string | null
 }) {
-  const [signed, setSigned] = useState<{ url: string; expiresAt: number } | null>(
-    null,
-  )
+  const [signedUrl, setSignedUrl] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
+  // The ONLY thing that starts a read. It advances on mount, on an endpoint
+  // change, and from exactly two places: the renewal timer a SUCCESSFUL read
+  // scheduled, and the user's Retry press. A failure advances nothing, so a
+  // persistently broken read costs one request, not a loop.
+  const [attempt, setAttempt] = useState(0)
   const endpoint = source.imageReadEndpoint
 
-  const load = useCallback(async () => {
-    try {
-      const read = await api<{ url: string; expiresInSeconds: number }>(endpoint)
-      setSigned({
-        url: read.url,
-        expiresAt: Date.now() + read.expiresInSeconds * 1000,
-      })
-      setFailed(false)
-    } catch {
-      setFailed(true)
-    }
-  }, [endpoint])
-
   useEffect(() => {
-    // Initial fetch immediately (delay 0), then again shortly before the
-    // signed URL expires so the photo never goes dark mid-questionnaire.
-    const delay = signed
-      ? Math.max(0, signed.expiresAt - 60_000 - Date.now())
-      : 0
-    const timer = setTimeout(() => {
-      void load()
-    }, delay)
-    return () => clearTimeout(timer)
-  }, [load, signed])
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+
+    void (async () => {
+      let read: { url: string; expiresInSeconds: number } | null = null
+      try {
+        read = parseSignedRead(await api<unknown>(endpoint))
+        if (!read) reportInspirationReadFailure(endpoint, 'CONTRACT_MISMATCH', null)
+      } catch (error) {
+        reportInspirationReadFailure(
+          endpoint,
+          'REQUEST_FAILED',
+          error instanceof ConsultFlowApiError ? error.code : null,
+        )
+      }
+      if (cancelled) return
+      if (!read) {
+        setSignedUrl(null)
+        setFailed(true)
+        return
+      }
+      setSignedUrl(read.url)
+      setFailed(false)
+      // Renew shortly before the URL dies so the photo never goes dark
+      // mid-questionnaire. The delay is finite by construction (only a
+      // validated, positive, finite `expiresInSeconds` reaches this line) and
+      // floored at 30s so a server that ever answers a very short TTL slows
+      // the panel down rather than turning it back into a request loop.
+      timer = setTimeout(
+        () => setAttempt((value) => value + 1),
+        Math.max(30_000, read.expiresInSeconds * 1000 - 60_000),
+      )
+    })()
+
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+    }
+  }, [endpoint, attempt])
 
   if (!source.imageAvailable) return null
   return (
     <div className="mt-4 grid gap-2">
-      {signed ? (
-        <ZoomableImage src={signed.url} alt="Your inspiration photo" />
+      {signedUrl ? (
+        <ZoomableImage src={signedUrl} alt="Your inspiration photo" />
+      ) : failed ? (
+        <div
+          role="alert"
+          data-testid="inspiration-image-error"
+          className="grid gap-2 rounded-lg border border-toneDanger/30 bg-toneDanger/10 px-3 py-3"
+        >
+          <p className="text-sm font-bold text-textPrimary">
+            We couldn’t load your inspiration photo.
+          </p>
+          <p className="text-xs leading-5 text-textSecondary">
+            Answer these questions with the photo in front of you — tap retry,
+            and if it still won’t load, go back a step and pick it again.
+          </p>
+          <div>
+            <button
+              type="button"
+              className={BUTTON_SECONDARY}
+              onClick={() => {
+                // Clearing `failed` swaps the alert for the loading line, so
+                // the press has visible feedback without a second flag.
+                setFailed(false)
+                setAttempt((value) => value + 1)
+              }}
+            >
+              Retry
+            </button>
+          </div>
+        </div>
       ) : (
         <p className="text-sm text-textSecondary">
-          {failed
-            ? 'Your inspiration photo could not be loaded right now.'
-            : 'Loading your inspiration photo…'}
+          Loading your inspiration photo…
         </p>
       )}
       {focusHint ? (
