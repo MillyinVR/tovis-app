@@ -41,6 +41,24 @@ function normalizePathname(pathname: string): string {
   return pathname.replace(/\/+$/, '') || '/'
 }
 
+// The request's query string as a server component should see it: the viewer's
+// own params, without Next's internal RSC marker. `_rsc` is appended by the
+// client router to every soft navigation, and would otherwise ride along into
+// any `?from=` we build out of the requested URL.
+//
+// The result is re-serialized through URLSearchParams, so it is equivalent to
+// the original query but not byte-identical to it (`a b` comes back as `a+b`).
+// Read it as params, never compare it to a raw URL.
+function normalizeSearch(search: string): string {
+  if (!search) return ''
+
+  const params = new URLSearchParams(search)
+  params.delete('_rsc')
+
+  const qs = params.toString()
+  return qs ? `?${qs}` : ''
+}
+
 function hostToHostname(hostHeader: string | null): string | null {
   if (!hostHeader) return null
 
@@ -274,6 +292,7 @@ export async function proxy(req: NextRequest) {
   const requestHeaders = new Headers(req.headers)
   requestHeaders.set('x-request-id', requestId)
   requestHeaders.set('x-pathname', pathname)
+  requestHeaders.set('x-search', normalizeSearch(req.nextUrl.search))
 
   const cookieToken = req.cookies.get('tovis_token')?.value ?? null
   const bearerToken = parseBearerToken(req.headers.get('authorization'))
