@@ -137,6 +137,17 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
+        # This action installs pnpm by running `npm install`, and npm audits during
+        # an install. That puts npm's advisory service on the critical path of this
+        # job before any of our code runs. On 2026-09-04 that service stopped
+        # answering and this step went from ~11s to 425s on main, which pushed the
+        # unit-test job past its 15-minute cap. Measured with the service degraded:
+        # `npm install` 51s, `NPM_CONFIG_AUDIT=false npm install` 0.26s.
+        #
+        # We do not want npm's opinion on the two packages its own installer pulls;
+        # our dependencies are audited by the security-scan workflow.
+        env:
+          NPM_CONFIG_AUDIT: 'false'
         with:
           run_install: false
 
