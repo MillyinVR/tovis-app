@@ -357,6 +357,15 @@ import {
   skipConsultInspiration,
 } from '@/lib/consult/inspirationContract'
 import { runConsultInspirationPurgeSweep } from '@/lib/consult/inspirationPurge'
+import { CONSULT_INSPIRATION_V2_SCHEMA_VERSION } from '@/lib/consult/inspiration/types'
+
+/**
+ * P5c — the guided inspiration a NEW consult is served is contract v2, whatever
+ * its family. Clients echo the version the server just gave them
+ * (`ConsultInspirationStateDTO.schemaVersion`); these fixtures name the constant
+ * rather than a literal so the next contract bump moves them all at once.
+ */
+const INSPIRATION_SCHEMA_VERSION = CONSULT_INSPIRATION_V2_SCHEMA_VERSION
 
 const databaseUrl = process.env.DATABASE_URL
 if (!databaseUrl) throw new Error('Run with pnpm test:integration')
@@ -522,7 +531,7 @@ async function createReadyConsult(
       actor: { type: ConsultActorType.CLIENT, id: user.id },
       input: {
         idempotencyKey: `skip-inspiration-${label}`,
-        schemaVersion: 1,
+        schemaVersion: INSPIRATION_SCHEMA_VERSION,
       },
     })
   }
@@ -673,7 +682,7 @@ async function attachExternalInspiration(consult: ReadyConsult, suffix: string) 
     actor: { type: ConsultActorType.CLIENT, id: consult.userId },
     input: {
       idempotencyKey: `${suffix}-issue`,
-      schemaVersion: 1,
+      schemaVersion: INSPIRATION_SCHEMA_VERSION,
       contentType: 'image/jpeg',
       sizeBytes: 100,
       checksumSha256: null,
@@ -694,7 +703,7 @@ async function attachExternalInspiration(consult: ReadyConsult, suffix: string) 
     input: {
       idempotencyKey: `${suffix}-attach`,
       inspirationId: row.id,
-      schemaVersion: 1,
+      schemaVersion: INSPIRATION_SCHEMA_VERSION,
     },
   })
   return row
@@ -1306,7 +1315,7 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
       consultSessionId: consult.sessionId,
       clientId: consult.clientId,
       actor: { type: ConsultActorType.CLIENT, id: consult.userId },
-      input: { idempotencyKey: 'fresh-inspiration-after-reconsent', schemaVersion: 1 },
+      input: { idempotencyKey: 'fresh-inspiration-after-reconsent', schemaVersion: INSPIRATION_SCHEMA_VERSION },
     })
     const fresh = await issue(consult, 'hair_right', 'fresh-consent')
     expect(fresh.status).toBe(200)
@@ -2237,7 +2246,7 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
       consultSessionId: consult.sessionId,
       clientId: consult.clientId,
       actor: { type: ConsultActorType.CLIENT, id: consult.userId },
-      input: { idempotencyKey: 'skip-last', schemaVersion: 1 },
+      input: { idempotencyKey: 'skip-last', schemaVersion: INSPIRATION_SCHEMA_VERSION },
     })
     expect(first.state.status).toBe(ConsultSessionStatus.ANALYSIS_PENDING)
     expect(first.state.latestReview).toMatchObject({
@@ -2326,7 +2335,7 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
       actor: { type: ConsultActorType.CLIENT, id: consult.userId },
       input: {
         idempotencyKey: 'select-booked-look',
-        schemaVersion: 1,
+        schemaVersion: INSPIRATION_SCHEMA_VERSION,
         source: 'BOOKED_PRO_LOOK',
         lookPostId: look.id,
       },
@@ -2433,7 +2442,7 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
       actor: { type: ConsultActorType.CLIENT, id: consult.userId },
       input: {
         idempotencyKey: 'select-platform-look',
-        schemaVersion: 1,
+        schemaVersion: INSPIRATION_SCHEMA_VERSION,
         source: 'PLATFORM_LOOK',
         lookPostId: look.id,
       },
@@ -2477,7 +2486,7 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
       actor: { type: ConsultActorType.CLIENT, id: consult.userId } as const,
       input: {
         idempotencyKey: 'concurrent-issue',
-        schemaVersion: 1,
+        schemaVersion: INSPIRATION_SCHEMA_VERSION,
         contentType: 'image/jpeg',
         sizeBytes: 100,
         checksumSha256: null,
@@ -2504,7 +2513,7 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
       input: {
         idempotencyKey: 'concurrent-attach',
         inspirationId: row.id,
-        schemaVersion: 1,
+        schemaVersion: INSPIRATION_SCHEMA_VERSION,
       },
     }
     const attached = await Promise.all([
@@ -2527,7 +2536,7 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
     ).toBe(1)
   })
 
-  it('keeps an external image private and completes seven ordered answers with bounded guidance', async () => {
+  it('keeps an external image private and completes the pack’s ordered answers with bounded guidance', async () => {
     const consult = await createReadyConsult('inspiration-external', {}, {
       skipInspiration: false,
     })
@@ -2565,24 +2574,25 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
         actor: { type: ConsultActorType.CLIENT, id: consult.userId },
         input: {
           idempotencyKey: 'out-of-order',
-          schemaVersion: 1,
+          schemaVersion: INSPIRATION_SCHEMA_VERSION,
           questionKey: 'avoid_colors',
           selectedValues: ['none'],
         },
       }),
     ).rejects.toMatchObject({ code: 'INSPIRATION_QUESTION_OUT_OF_ORDER' })
 
+    // P5c: the colour pack's contract-v2 questions. Same keys, same values —
+    // `other_detail` is gone, because v2 records no free text.
     const answers = [
-      ['favorite_colors', ['cool-smoky'], undefined, undefined],
-      ['avoid_colors', ['none'], undefined, undefined],
-      ['length_goal', ['yes-same-length'], undefined, undefined],
-      ['fullness_goal', ['more-full'], undefined, undefined],
-      ['current_styling', ['not-sure'], undefined, undefined],
-      ['styling_walkthrough', ['no'], undefined, undefined],
-      ['other_detail', ['nothing-else'], undefined, 'NONE'],
+      ['favorite_colors', ['cool-smoky']],
+      ['avoid_colors', ['none']],
+      ['length_goal', ['yes-same-length']],
+      ['fullness_goal', ['more-full']],
+      ['current_styling', ['not-sure']],
+      ['styling_walkthrough', ['no']],
     ] as const
     let completed: Awaited<ReturnType<typeof answerConsultInspirationQuestion>> | null = null
-    for (const [questionKey, selectedValues, text, sentiment] of answers) {
+    for (const [questionKey, selectedValues] of answers) {
       try {
         completed = await answerConsultInspirationQuestion({
         consultSessionId: consult.sessionId,
@@ -2590,11 +2600,9 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
         actor: { type: ConsultActorType.CLIENT, id: consult.userId },
         input: {
           idempotencyKey: `answer-${questionKey}`,
-          schemaVersion: 1,
+          schemaVersion: INSPIRATION_SCHEMA_VERSION,
           questionKey,
           selectedValues: [...selectedValues],
-          text,
-          sentiment,
         },
         })
       } catch (error) {
@@ -2604,7 +2612,9 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
     expect(completed?.state.latestReview).toMatchObject({
       complete: true,
       source: 'EXTERNAL_UPLOAD',
-      answers: expect.arrayContaining([expect.objectContaining({ questionKey: 'other_detail' })]),
+      answers: expect.arrayContaining([
+        expect.objectContaining({ questionKey: 'styling_walkthrough' }),
+      ]),
       exactClientDetails: expect.arrayContaining([
         expect.objectContaining({ clientWords: 'The cool or smoky colors' }),
       ]),
@@ -2621,9 +2631,14 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
       ],
     })
     expect(completed?.state.progress).toMatchObject({
-      answeredQuestionCount: 7,
+      answeredQuestionCount: 6,
+      // Two selections are neutral ("None", "Not sure") and the walkthrough
+      // answer is a service preference rather than a detail she pointed at
+      // (`countsAsDetail: false`), so three is what this answer set produces —
+      // it is no longer what completion REQUIRES.
       specificDetailCount: 3,
       canComplete: true,
+      requiredSpecificDetailCount: 0,
     })
     expect(
       (await answerConsultInspirationQuestion({
@@ -2632,7 +2647,7 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
         actor: { type: ConsultActorType.CLIENT, id: consult.userId },
         input: {
           idempotencyKey: 'answer-favorite_colors',
-          schemaVersion: 1,
+          schemaVersion: INSPIRATION_SCHEMA_VERSION,
           questionKey: 'favorite_colors',
           selectedValues: ['cool-smoky'],
         },
@@ -2645,7 +2660,7 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
         actor: { type: ConsultActorType.CLIENT, id: consult.userId },
         input: {
           idempotencyKey: 'answer-favorite_colors',
-          schemaVersion: 1,
+          schemaVersion: INSPIRATION_SCHEMA_VERSION,
           questionKey: 'favorite_colors',
           selectedValues: ['warm-golden'],
         },
@@ -2756,7 +2771,7 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
     ).rejects.toMatchObject({ code: 'NOT_FOUND' })
   })
 
-  it('never mutates the Booking row across the seven-question external inspiration flow', async () => {
+  it('never mutates the Booking row across the guided external inspiration flow', async () => {
     const consult = await createReadyConsult('inspiration-booking-snapshot', {}, {
       skipInspiration: false,
     })
@@ -2764,34 +2779,31 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
 
     await attachExternalInspiration(consult, 'booking-snapshot')
     const answers = [
-      ['favorite_colors', ['cool-smoky'], undefined, undefined],
-      ['avoid_colors', ['none'], undefined, undefined],
-      ['length_goal', ['yes-same-length'], undefined, undefined],
-      ['fullness_goal', ['more-full'], undefined, undefined],
-      ['current_styling', ['not-sure'], undefined, undefined],
-      ['styling_walkthrough', ['no'], undefined, undefined],
-      ['other_detail', ['nothing-else'], undefined, 'NONE'],
+      ['favorite_colors', ['cool-smoky']],
+      ['avoid_colors', ['none']],
+      ['length_goal', ['yes-same-length']],
+      ['fullness_goal', ['more-full']],
+      ['current_styling', ['not-sure']],
+      ['styling_walkthrough', ['no']],
     ] as const
     let completed: Awaited<ReturnType<typeof answerConsultInspirationQuestion>> | null = null
-    for (const [questionKey, selectedValues, text, sentiment] of answers) {
+    for (const [questionKey, selectedValues] of answers) {
       completed = await answerConsultInspirationQuestion({
         consultSessionId: consult.sessionId,
         clientId: consult.clientId,
         actor: { type: ConsultActorType.CLIENT, id: consult.userId },
         input: {
           idempotencyKey: `booking-snapshot-answer-${questionKey}`,
-          schemaVersion: 1,
+          schemaVersion: INSPIRATION_SCHEMA_VERSION,
           questionKey,
           selectedValues: [...selectedValues],
-          text,
-          sentiment,
         },
       })
     }
     // Guards against a vacuous pass: confirm the flow actually completed
     // before asserting nothing else moved.
     expect(completed?.state.progress).toMatchObject({
-      answeredQuestionCount: 7,
+      answeredQuestionCount: 6,
       canComplete: true,
     })
 
@@ -2808,7 +2820,7 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
       consultSessionId: replaced.sessionId,
       clientId: replaced.clientId,
       actor: { type: ConsultActorType.CLIENT, id: replaced.userId },
-      input: { idempotencyKey: 'replace-with-skip', schemaVersion: 1 },
+      input: { idempotencyKey: 'replace-with-skip', schemaVersion: INSPIRATION_SCHEMA_VERSION },
     })
     expect(fake.objects.has(replacedRow.storagePath!)).toBe(false)
     expect(

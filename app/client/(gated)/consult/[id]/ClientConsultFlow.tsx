@@ -125,18 +125,34 @@ const NEUTRAL_INSPIRATION_VALUES = new Set([
   'nothing-else',
 ])
 
-/** Where to look in the inspiration photo for each question. Presentation only. */
+/**
+ * Where to look in the inspiration photo for each question. Presentation only,
+ * and OPTIONAL: a key with no entry simply renders no hint, which is what a
+ * pack this map has not been taught looks like.
+ *
+ * Keyed by question key across every pack (lib/consult/inspiration/packs/),
+ * because the packs deliberately share a key wherever they ask the same thing.
+ * `other_detail` is contract v1's free-text question, kept here for consults
+ * still being asked it.
+ */
 const INSPIRATION_FOCUS: Readonly<Record<string, string>> = {
   favorite_colors:
     'Zoom into the hair and look at the mix of colors — the brightest pieces, the deepest pieces, and the tones in between.',
   avoid_colors:
     'Look over each color in the hair again — is there any you would not want on you?',
+  favorite_details: 'Look over the whole picture — what stands out to you first?',
+  avoid_details: 'Look again — is there anything in it you would not want on you?',
   length_goal: 'Look at where the hair ends — how long it falls.',
   fullness_goal: 'Look at how thick and full the hair appears overall.',
+  intensity_goal:
+    'Think about how strong a version of this you would actually want.',
   current_styling:
     'Look at how the hair is styled — straight, waves, curls, or something else.',
+  current_upkeep: 'Think about whether this is something you already do yourself.',
   styling_walkthrough:
     'Think about whether you could get it styled this way on your own.',
+  upkeep_walkthrough:
+    'Think about whether you would want to be shown how to keep it up.',
   other_detail: 'One last look — anything else stand out, good or bad?',
 }
 

@@ -14,6 +14,7 @@ import {
 } from './defaults'
 import { defaultProCalendarCopy } from './defaultProCalendarCopy'
 import { defaultClientConsultBookingCopy } from './defaultClientConsultBookingCopy'
+import { defaultClientConsultInspirationCopy } from './defaultClientConsultInspirationCopy'
 import { defaultClientConsultThreadCopy } from './defaultClientConsultThreadCopy'
 import { defaultClientConsultResultsCopy } from './defaultClientConsultResultsCopy'
 import { defaultClientConsultCaptureCopy } from './defaultClientConsultCaptureCopy'
@@ -57,6 +58,7 @@ export type CreateBrandInput = {
   clientConsultCapture?: BrandConfig['clientConsultCapture']
   clientConsultBooking?: BrandConfig['clientConsultBooking']
   clientConsultThread?: BrandConfig['clientConsultThread']
+  clientConsultInspiration?: BrandConfig['clientConsultInspiration']
 }
 
 export function createBrandConfig(input: CreateBrandInput): BrandConfig {
@@ -110,6 +112,8 @@ export function createBrandConfig(input: CreateBrandInput): BrandConfig {
       input.clientConsultBooking ?? defaultClientConsultBookingCopy,
     clientConsultThread:
       input.clientConsultThread ?? defaultClientConsultThreadCopy,
+    clientConsultInspiration:
+      input.clientConsultInspiration ?? defaultClientConsultInspirationCopy,
     tokensByMode: {
       dark: buildTokens('dark'),
       light: buildTokens('light'),

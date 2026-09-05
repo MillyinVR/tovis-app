@@ -527,6 +527,15 @@ import {
   acceptConsultAgreement,
   appendConsultIntakeRevision,
 } from '@/lib/consult/writeBoundary'
+import { CONSULT_INSPIRATION_V2_SCHEMA_VERSION } from '@/lib/consult/inspiration/types'
+
+/**
+ * P5c — the guided inspiration a NEW consult is served is contract v2, whatever
+ * its family. Clients echo the version the server just gave them
+ * (`ConsultInspirationStateDTO.schemaVersion`); these fixtures name the constant
+ * rather than a literal so the next contract bump moves them all at once.
+ */
+const INSPIRATION_SCHEMA_VERSION = CONSULT_INSPIRATION_V2_SCHEMA_VERSION
 
 const databaseUrl = process.env.DATABASE_URL
 if (!databaseUrl) throw new Error('Run with pnpm test:integration')
@@ -569,16 +578,20 @@ const completeAnswers = {
   prior_reaction: 'no',
 }
 
-const INSPIRATION_ANSWERS: ReadonlyArray<
-  [string, string[], string | null, string | null]
-> = [
-  ['favorite_colors', ['cool-smoky'], null, null],
-  ['avoid_colors', ['none'], null, null],
-  ['length_goal', ['yes-same-length'], null, null],
-  ['fullness_goal', ['more-full'], null, null],
-  ['current_styling', ['not-sure'], null, null],
-  ['styling_walkthrough', ['no'], null, null],
-  ['other_detail', ['nothing-else'], null, 'NONE'],
+/**
+ * P5c — the colour pack's contract-v2 questions, in the order it asks them.
+ *
+ * Keys and values are byte-identical to the v1 questions they replace. What is
+ * gone is `other_detail`: v2 stores keys and enums only, so there is nowhere to
+ * put a client's sentence, and no `text`/`sentiment` to pass.
+ */
+const INSPIRATION_ANSWERS: ReadonlyArray<[string, string[]]> = [
+  ['favorite_colors', ['cool-smoky']],
+  ['avoid_colors', ['none']],
+  ['length_goal', ['yes-same-length']],
+  ['fullness_goal', ['more-full']],
+  ['current_styling', ['not-sure']],
+  ['styling_walkthrough', ['no']],
 ]
 
 function context(id: string) {
@@ -698,18 +711,16 @@ async function consentAndCompleteIntake(sessionId: string, label: string) {
 }
 
 async function answerInspiration(sessionId: string, label: string) {
-  for (const [questionKey, selectedValues, text, sentiment] of INSPIRATION_ANSWERS) {
+  for (const [questionKey, selectedValues] of INSPIRATION_ANSWERS) {
     await answerConsultInspirationQuestion({
       consultSessionId: sessionId,
       clientId,
       actor: { type: ConsultActorType.CLIENT, id: clientUserId },
       input: {
         idempotencyKey: `${label}-${questionKey}`,
-        schemaVersion: 1,
+        schemaVersion: INSPIRATION_SCHEMA_VERSION,
         questionKey,
         selectedValues,
-        ...(text ? { text } : {}),
-        ...(sentiment ? { sentiment } : {}),
       },
     })
   }

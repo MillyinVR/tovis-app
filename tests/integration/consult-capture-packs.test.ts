@@ -264,6 +264,15 @@ import {
   appendConsultIntakeRevision,
   transitionLockedConsultSession,
 } from '@/lib/consult/writeBoundary'
+import { CONSULT_INSPIRATION_V2_SCHEMA_VERSION } from '@/lib/consult/inspiration/types'
+
+/**
+ * P5c — the guided inspiration a NEW consult is served is contract v2, whatever
+ * its family. Clients echo the version the server just gave them
+ * (`ConsultInspirationStateDTO.schemaVersion`); these fixtures name the constant
+ * rather than a literal so the next contract bump moves them all at once.
+ */
+const INSPIRATION_SCHEMA_VERSION = CONSULT_INSPIRATION_V2_SCHEMA_VERSION
 
 const databaseUrl = process.env.DATABASE_URL
 if (!databaseUrl) throw new Error('Run with pnpm test:integration')
@@ -421,7 +430,7 @@ function skipInspiration(consult: Consult, label: string) {
     consultSessionId: consult.sessionId,
     clientId: consult.clientId,
     actor: { type: ConsultActorType.CLIENT, id: consult.userId },
-    input: { idempotencyKey: `skip-inspiration-${label}`, schemaVersion: 1 },
+    input: { idempotencyKey: `skip-inspiration-${label}`, schemaVersion: INSPIRATION_SCHEMA_VERSION },
   })
 }
 

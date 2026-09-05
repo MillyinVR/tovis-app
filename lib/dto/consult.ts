@@ -282,14 +282,25 @@ export type ConsultIntakeSubmitResponseDTO = ConsultIntakeStateResponseDTO & {
 
 export type ConsultInspirationSourceDTO = 'NONE' | ConsultInspirationSource
 
-export type ConsultInspirationQuestionKeyDTO =
-  | 'favorite_colors'
-  | 'avoid_colors'
-  | 'length_goal'
-  | 'fullness_goal'
-  | 'current_styling'
-  | 'styling_walkthrough'
-  | 'other_detail'
+/**
+ * A guided-inspiration question key.
+ *
+ * 🔴 WIDENED in P5c, from the seven hair-colour keys to any pack key. The
+ * questions are no longer one hard-coded list: each service family serves its
+ * own pack (lib/consult/inspiration/), so the key a client echoes back is
+ * whatever the server just asked her. Clients must treat it as an opaque
+ * string and render the question they were sent — a client that switches on
+ * these seven values renders nothing for every family but colour.
+ *
+ * The seven v1 keys are still served, and are still what a consult that
+ * started before P5c is asked:
+ *   favorite_colors, avoid_colors, length_goal, fullness_goal,
+ *   current_styling, styling_walkthrough, other_detail
+ *
+ * The widening is a LOOSENING on the wire: every value that validated before
+ * still validates, so shipped fixtures and shipped clients keep working.
+ */
+export type ConsultInspirationQuestionKeyDTO = string
 
 export type ConsultInspirationQuestionOptionDTO = {
   value: string
@@ -378,6 +389,18 @@ export type ConsultInspirationReviewDTO = {
   revisionId: string
   revision: number
   schemaVersion: number
+  /**
+   * P5c — the inspiration PACK this review was written under.
+   *
+   * `null` for a contract-v1 review, which predates packs: those are the seven
+   * hair-colour questions. ABSENT means the SERVER predates P5c and knows
+   * nothing about packs at all — treat it exactly like null.
+   *
+   * OPTIONAL on the wire so the published schema grows by addition only, which
+   * is what keeps the shipped iOS fixtures and shipped clients valid.
+   */
+  packId?: string | null
+  packVersion?: number | null
   source: ConsultInspirationSourceDTO
   inspirationId: string | null
   complete: boolean
@@ -400,11 +423,21 @@ export type ConsultInspirationStateDTO = {
     currentQuestion: ConsultInspirationQuestionDTO | null
     answeredQuestionCount: number
     specificDetailCount: number
-    requiredSpecificDetailCount: 3
+    /**
+     * How many non-neutral details this consult's contract requires before it
+     * can complete.
+     *
+     * 🔴 WIDENED in P5c, from the literal 3 to a number, because contract v2
+     * dropped the gate entirely and answers 0. A consult that started on v1
+     * still answers 3 and is still gated. A client must render this number
+     * rather than the word "three", and must not treat 0 as "unknown".
+     */
+    requiredSpecificDetailCount: number
     canComplete: boolean
     blocker:
       | 'SOURCE_DECISION_REQUIRED'
       | 'QUESTIONS_REMAINING'
+      /** v1 only. Contract v2 has no detail gate, so it never sends this. */
       | 'AT_LEAST_THREE_DETAILS_REQUIRED'
       | null
   }
