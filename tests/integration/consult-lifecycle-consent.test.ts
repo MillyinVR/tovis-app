@@ -364,7 +364,7 @@ describe('AI consult lifecycle and legal foundation', () => {
         packVersion: HAIR_COLOR_INTAKE_PACK_VERSION,
         schemaVersion: HAIR_COLOR_INTAKE_SCHEMA_VERSION,
         complete: false,
-        answers: { current_color: 'brunette' },
+        answers: { change_scale: 'noticeable' },
         idempotencyKey: `${tag}-immutable-intake`,
       }),
     }).finally(() => {

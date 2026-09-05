@@ -87,3 +87,58 @@ export function intakeQuestion(
     options: intakeOptions(values),
   }
 }
+
+/**
+ * P6 (the intake diet): a NEW VERSION of an existing pack that keeps only the
+ * questions the analysis cannot answer for itself, and may re-word the ones it
+ * keeps.
+ *
+ * Derived from the previous version rather than re-typed, for two reasons. A
+ * kept question's KEY and OPTION VALUES are what the safety policy
+ * (lib/consult/safetyFlags.ts, lib/consult/safetyRouting.ts) and the database
+ * guards read, so they must be byte-identical to the version they came from —
+ * deriving makes that structural instead of a thing to check. And a `keep` key
+ * the base pack does not have is a module-load error, not a question that
+ * quietly fails to appear.
+ */
+export function dietedIntakePack(args: {
+  base: ConsultIntakePackDefinition
+  version: number
+  /** Kept question keys, in the order the client is asked them. */
+  keep: readonly string[]
+  /** Re-wording for a kept question — everything else is inherited. */
+  reword?: Readonly<
+    Record<string, { label?: string; helpText?: string | null }>
+  >
+  goalDirection: ConsultIntakeGoalDirectionRule | null
+}): ConsultIntakePackDefinition {
+  const byKey = new Map(args.base.questions.map((entry) => [entry.key, entry]))
+  const questions = args.keep.map((key) => {
+    const question = byKey.get(key)
+    if (!question) {
+      throw new Error(
+        `Intake pack ${args.base.id} v${args.version} keeps unknown question "${key}".`,
+      )
+    }
+    const reword = args.reword?.[key]
+    if (!reword) return question
+    return {
+      ...question,
+      label: reword.label ?? question.label,
+      helpText: reword.helpText === undefined ? question.helpText : reword.helpText,
+    }
+  })
+  if (args.goalDirection && !questions.some((entry) => entry.key === args.goalDirection?.questionKey)) {
+    throw new Error(
+      `Intake pack ${args.base.id} v${args.version} drops its goal-direction question.`,
+    )
+  }
+  return {
+    id: args.base.id,
+    categorySlug: args.base.categorySlug,
+    version: args.version,
+    schemaVersion: args.base.schemaVersion,
+    goalDirection: args.goalDirection,
+    questions,
+  }
+}

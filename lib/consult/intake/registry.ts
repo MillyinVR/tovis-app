@@ -21,9 +21,18 @@ import type {
   ConsultIntakeQuestionPackDTO,
 } from '@/lib/dto/consult'
 
-import { GENERAL_SERVICE_INTAKE_PACK } from './packs/generalService'
-import { HAIR_COLOR_INTAKE_PACK } from './packs/hairColor'
-import { HAIR_GENERAL_INTAKE_PACK } from './packs/hairGeneral'
+import {
+  GENERAL_SERVICE_INTAKE_PACK,
+  GENERAL_SERVICE_INTAKE_PACK_V1,
+} from './packs/generalService'
+import {
+  HAIR_COLOR_INTAKE_PACK,
+  HAIR_COLOR_INTAKE_PACK_V2,
+} from './packs/hairColor'
+import {
+  HAIR_GENERAL_INTAKE_PACK,
+  HAIR_GENERAL_INTAKE_PACK_V1,
+} from './packs/hairGeneral'
 import type {
   ConsultIntakePackDefinition,
   ConsultIntakePayload,
@@ -37,7 +46,29 @@ export const CONSULT_INTAKE_PACKS: readonly ConsultIntakePackDefinition[] = [
   GENERAL_SERVICE_INTAKE_PACK,
 ]
 
+/**
+ * Superseded pack versions, kept registered because stored ConsultRevision
+ * payloads name them. A consult that already has an intake keeps the version
+ * it started on for its whole life (`resolveConsultSessionIntakePack`), so a
+ * client mid-flow when a new version ships is never asked to start again and
+ * never has her stored answers read as "no intake".
+ */
+export const CONSULT_INTAKE_PACK_ARCHIVE: readonly ConsultIntakePackDefinition[] =
+  [
+    HAIR_COLOR_INTAKE_PACK_V2,
+    HAIR_GENERAL_INTAKE_PACK_V1,
+    GENERAL_SERVICE_INTAKE_PACK_V1,
+  ]
+
 const PACKS_BY_ID = new Map(CONSULT_INTAKE_PACKS.map((pack) => [pack.id, pack]))
+
+/** Every registered version of every pack, keyed `${id}@${version}`. */
+const PACKS_BY_ID_AND_VERSION = new Map(
+  [...CONSULT_INTAKE_PACKS, ...CONSULT_INTAKE_PACK_ARCHIVE].map((pack) => [
+    `${pack.id}@${pack.version}`,
+    pack,
+  ]),
+)
 
 /**
  * Category slugs that carry their OWN pack, ahead of the family rule. Data,
@@ -47,10 +78,17 @@ const PACKS_BY_ID = new Map(CONSULT_INTAKE_PACKS.map((pack) => [pack.id, pack]))
 const PACKS_BY_CATEGORY_SLUG: ReadonlyMap<string, ConsultIntakePackDefinition> =
   new Map([[HAIR_COLOR_INTAKE_PACK.categorySlug, HAIR_COLOR_INTAKE_PACK]])
 
+/**
+ * The pack a payload or a brief NAMES. With a version, the exact registered
+ * version — current or archived; without one, whatever version that pack is on
+ * today, which is what a caller that only knows an id can mean.
+ */
 export function findConsultIntakePack(
   packId: string,
+  packVersion?: number,
 ): ConsultIntakePackDefinition | null {
-  return PACKS_BY_ID.get(packId) ?? null
+  if (packVersion === undefined) return PACKS_BY_ID.get(packId) ?? null
+  return PACKS_BY_ID_AND_VERSION.get(`${packId}@${packVersion}`) ?? null
 }
 
 export function resolveConsultIntakePack(args: {
@@ -169,22 +207,25 @@ const PAYLOAD_KEYS = new Set([
 ])
 
 /**
- * Read normalization for a stored INTAKE payload. The pack is the one the
- * payload NAMES; its versions must be that pack's current versions, its shape
- * exact, its answers valid. Anything else reads as "no intake" (`null`) —
- * stale or malformed rows are skipped, never partially trusted.
+ * Read normalization for a stored INTAKE payload, together with the pack
+ * DEFINITION it was written under. The pack is the one the payload names, at
+ * the VERSION it names — a registered older version is read against its own
+ * question list, not against today's. Its schema version must be that
+ * version's, its shape exact, its answers valid against it. Anything else
+ * reads as "no intake" (`null`): an unregistered pack or version, or a
+ * malformed row, is skipped rather than partially trusted.
  */
-export function normalizeConsultIntakePayload(
+export function resolveConsultIntakePayload(
   raw: unknown,
-): ConsultIntakePayload | null {
+): { pack: ConsultIntakePackDefinition; payload: ConsultIntakePayload } | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
   const record: Record<string, unknown> = { ...raw }
   if (Object.keys(record).some((key) => !PAYLOAD_KEYS.has(key))) return null
   if (typeof record.packId !== 'string') return null
-  const pack = findConsultIntakePack(record.packId)
+  if (typeof record.packVersion !== 'number') return null
+  const pack = findConsultIntakePack(record.packId, record.packVersion)
   if (
     !pack ||
-    record.packVersion !== pack.version ||
     record.schemaVersion !== pack.schemaVersion ||
     typeof record.complete !== 'boolean'
   ) {
@@ -197,25 +238,69 @@ export function normalizeConsultIntakePayload(
   )
   if (!validated.ok) return null
   return {
-    packId: pack.id,
-    packVersion: pack.version,
-    schemaVersion: pack.schemaVersion,
-    complete: record.complete,
-    answers: validated.answers,
+    pack,
+    payload: {
+      packId: pack.id,
+      packVersion: pack.version,
+      schemaVersion: pack.schemaVersion,
+      complete: record.complete,
+      answers: validated.answers,
+    },
   }
+}
+
+export function normalizeConsultIntakePayload(
+  raw: unknown,
+): ConsultIntakePayload | null {
+  return resolveConsultIntakePayload(raw)?.payload ?? null
 }
 
 /**
  * A normalized payload whose pack must ALSO be the one this session serves —
  * what every reader that is about to act on an intake (analysis, brief) needs,
  * as opposed to a reader that merely lists revisions.
+ *
+ * Matched on pack ID and VERSION, so callers must pass the session's PINNED
+ * pack (`resolveConsultSessionIntakePack`) rather than the current one. A
+ * category whose family changed mid-consult still starts its intake over
+ * rather than mixing two packs' answers; a consult that merely predates a new
+ * version of the same pack does not.
  */
 export function normalizeConsultIntakePayloadForPack(
   pack: ConsultIntakePackDefinition,
   raw: unknown,
 ): ConsultIntakePayload | null {
   const payload = normalizeConsultIntakePayload(raw)
-  return payload && payload.packId === pack.id ? payload : null
+  return payload &&
+    payload.packId === pack.id &&
+    payload.packVersion === pack.version
+    ? payload
+    : null
+}
+
+/**
+ * WHICH VERSION of its pack a consult serves.
+ *
+ * A session that has already written an intake keeps the version it wrote —
+ * that is the revision pin. Re-serving a client the current version instead
+ * would refuse her stored answers as "no intake", re-ask every question, and
+ * (on the write side) reject her next answer with PACK_VERSION_MISMATCH; a
+ * consult in flight when a new version ships must not notice.
+ *
+ * `payloads` are the session's INTAKE revision payloads, NEWEST FIRST. Rows
+ * that do not normalize, and rows written under a different pack entirely
+ * (a category that changed family), are skipped — the same rows the readers
+ * skip.
+ */
+export function resolveConsultSessionIntakePack(
+  currentPack: ConsultIntakePackDefinition,
+  payloads: readonly unknown[],
+): ConsultIntakePackDefinition {
+  for (const raw of payloads) {
+    const resolved = resolveConsultIntakePayload(raw)
+    if (resolved && resolved.pack.id === currentPack.id) return resolved.pack
+  }
+  return currentPack
 }
 
 /**

@@ -906,10 +906,17 @@ function IntakeStage({
   const answeredCount = intake.questionPack.questions.filter(
     (entry) => answers[entry.key],
   ).length
+  // The service the consult is FOR, in the client's own language. Before this
+  // the header said "your goal" and the flow named the service nowhere, which
+  // is the shape of handoff bug B6.
+  const serviceName = intake.service.name
 
   return (
     <section className="grid gap-4">
-      <StageHeading eyebrow="Step 2 of 4" title="Tell us about your goal" />
+      <StageHeading
+        eyebrow="Step 2 of 4"
+        title={serviceName ? `About your ${serviceName}` : 'Tell us about your goal'}
+      />
       <div className={CARD}>
         <div className="font-mono text-[10px] font-bold uppercase tracking-[0.12em] text-textMuted">
           {answeredCount} / {intake.questionPack.questions.length} answered

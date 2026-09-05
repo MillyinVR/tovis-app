@@ -71,26 +71,27 @@ let nailsSessionId = ''
 let consentVersionId = ''
 let adultVersionId = ''
 
+// The P6 diet: the hair pack is down to what the photographs cannot answer.
 const completeHair = {
-  service_experience: 'first-time',
   change_scale: 'noticeable',
-  current_length: 'shoulder',
-  hair_texture: 'wavy',
   chemical_history: 'never',
   prior_lightening: 'over-12-months',
-  last_service_timing: '1-3-months',
   prior_reaction: 'no',
-  budget: '150-250',
 }
 
 const completeNails = {
-  service_experience: 'regular',
   change_scale: 'subtle',
   goal_direction: 'shape',
   recent_treatment_timing: 'within-6-months',
   skin_sensitivity: 'no',
   known_allergies: 'none-known',
   prior_reaction: 'no',
+}
+
+/** The v1 general-service answers, still stored on pre-diet sessions. */
+const completeNailsV1 = {
+  ...completeNails,
+  service_experience: 'regular',
   last_service_timing: 'within-4-weeks',
 }
 
@@ -408,7 +409,7 @@ describe('service-aware consult intake against PostgreSQL', () => {
       version: HAIR_GENERAL_INTAKE_PACK.version,
       schemaVersion: HAIR_GENERAL_INTAKE_PACK.schemaVersion,
     })
-    expect(intake.progress.nextQuestionKey).toBe('service_experience')
+    expect(intake.progress.nextQuestionKey).toBe('change_scale')
 
     // The client's colour self-profile is not a question here, so it is not
     // a suggestion — and the signal says so.
@@ -417,15 +418,18 @@ describe('service-aware consult intake against PostgreSQL', () => {
     ).toBeUndefined()
     expect(intake.prefillSignals).toContainEqual({ source: 'SELF_PROFILE', available: false })
 
-    // The completed extensions booking 45 days ago lands on this pack's
-    // "last service" question.
+    // P6: the diet moved "when was your last professional service?" onto the
+    // post-booking follow-up, so the completed extensions booking 45 days ago
+    // no longer has a question to land on. The signal must say so rather than
+    // claim a prefill that is not on screen.
+    expect(hairHistoryBookingId).not.toBe('')
     expect(
       intake.prefillSuggestions.find((item) => item.questionKey === 'last_service_timing'),
-    ).toMatchObject({
-      value: '1-3-months',
-      provenance: [{ source: 'BOOKING_HISTORY', sourceId: hairHistoryBookingId }],
+    ).toBeUndefined()
+    expect(intake.prefillSignals).toContainEqual({
+      source: 'BOOKING_HISTORY',
+      available: false,
     })
-    expect(intake.prefillSignals).toContainEqual({ source: 'BOOKING_HISTORY', available: true })
   })
 
   it('refuses a colour answer on the hair pack and accepts the hair pack’s own', async () => {
@@ -441,11 +445,24 @@ describe('service-aware consult intake against PostgreSQL', () => {
       code: 'CONSULT_INVALID_ANSWERS',
     })
 
+    // A question the diet removed is now an unknown key, exactly like a colour one.
+    const dropped = await submit(
+      hairSessionId,
+      HAIR_GENERAL_INTAKE_PACK,
+      'hair-dropped-answer',
+      { hair_texture: 'wavy' },
+      false,
+    )
+    expect(dropped.status).toBe(400)
+    await expect(json(dropped)).resolves.toMatchObject({
+      code: 'CONSULT_INVALID_ANSWERS',
+    })
+
     const partial = await submit(
       hairSessionId,
       HAIR_GENERAL_INTAKE_PACK,
       'hair-partial',
-      { hair_texture: 'wavy' },
+      { chemical_history: 'never' },
       false,
     )
     expect(partial.status).toBe(200)
@@ -457,7 +474,7 @@ describe('service-aware consult intake against PostgreSQL', () => {
           packId: HAIR_GENERAL_INTAKE_PACK.id,
           packVersion: HAIR_GENERAL_INTAKE_PACK.version,
           complete: false,
-          answers: { hair_texture: 'wavy' },
+          answers: { chemical_history: 'never' },
         },
       },
     })
@@ -581,6 +598,148 @@ describe('service-aware consult intake against PostgreSQL', () => {
         answers: { service_experience: 'regular' },
       }),
     ).rejects.toThrow(/invalid consult intake payload version or shape/)
+
+    // P6 — the guard learned v2 without forgetting v1. Each version validates
+    // against ITS OWN key set, in both directions: a question the diet removed
+    // is refused on v2, and it is still accepted on v1 (which is what keeps a
+    // pre-diet session's stored payload readable).
+    await expect(
+      direct({
+        packId: GENERAL_SERVICE_INTAKE_PACK.id,
+        packVersion: 2,
+        schemaVersion: 2,
+        complete: false,
+        answers: { service_experience: 'regular' },
+      }),
+    ).rejects.toThrow(/invalid general-service intake answers/)
+    await expect(
+      direct({
+        packId: GENERAL_SERVICE_INTAKE_PACK.id,
+        packVersion: 2,
+        schemaVersion: 2,
+        complete: true,
+        answers: completeNailsV1,
+      }),
+    ).rejects.toThrow(/invalid general-service intake answers/)
+    // v2 complete needs every v2 required answer, and refuses an unresolved
+    // goal direction exactly as v1 does.
+    await expect(
+      direct({
+        packId: GENERAL_SERVICE_INTAKE_PACK.id,
+        packVersion: 2,
+        schemaVersion: 2,
+        complete: true,
+        answers: { change_scale: 'total' },
+      }),
+    ).rejects.toThrow(/complete general-service intake is missing/)
+    await expect(
+      direct({
+        packId: GENERAL_SERVICE_INTAKE_PACK.id,
+        packVersion: 2,
+        schemaVersion: 2,
+        complete: true,
+        answers: { ...completeNails, goal_direction: 'not-sure' },
+      }),
+    ).rejects.toThrow(/complete general-service intake is missing/)
+    // A version nobody registered.
+    await expect(
+      direct({
+        packId: GENERAL_SERVICE_INTAKE_PACK.id,
+        packVersion: 3,
+        schemaVersion: 2,
+        complete: false,
+        answers: completeNails,
+      }),
+    ).rejects.toThrow(/invalid general-service intake payload version or shape/)
+  })
+
+  // The load-bearing back-compat check. Sessions were mid-flight on v1 when
+  // the diet shipped; the read path must serve them the pack they started on,
+  // with their stored answers intact, rather than telling them they have no
+  // intake and asking all eleven questions again.
+  it('keeps a session that already answered on the pack version it started on', async () => {
+    const session = await db.consultSession.findUniqueOrThrow({
+      where: { id: nailsSessionId },
+      select: { revisionSequence: true },
+    })
+    // A v1 payload written directly, standing in for the row the PREVIOUS
+    // deploy's code wrote. The sequence is bumped first because
+    // `consult_revision_sequence` requires the two to match.
+    const nextRevision = session.revisionSequence + 1
+    await db.consultSession.update({
+      where: { id: nailsSessionId },
+      data: { revisionSequence: nextRevision },
+    })
+    await db.consultRevision.create({
+      data: {
+        consultSessionId: nailsSessionId,
+        revision: nextRevision,
+        kind: ConsultRevisionKind.INTAKE,
+        schemaVersion: 2,
+        idempotencyKey: 'pre-diet-v1-row',
+        requestHash: 'f'.repeat(64),
+        payload: {
+          packId: GENERAL_SERVICE_INTAKE_PACK.id,
+          packVersion: 1,
+          schemaVersion: 2,
+          complete: true,
+          answers: completeNailsV1,
+        },
+      },
+    })
+
+    const response = await getIntake(
+      new Request(intakeUrl(nailsSessionId)),
+      context(nailsSessionId),
+    )
+    expect(response.status).toBe(200)
+    const { intake } = (await json(response)) as {
+      intake: {
+        questionPack: { id: string; version: number; questions: Array<{ key: string }> }
+        progress: { canComplete: boolean }
+        latestRevision: { packVersion: number; answers: Record<string, string> } | null
+      }
+    }
+    expect(intake.questionPack).toMatchObject({
+      id: GENERAL_SERVICE_INTAKE_PACK.id,
+      version: 1,
+    })
+    expect(intake.questionPack.questions).toHaveLength(11)
+    expect(intake.latestRevision).toMatchObject({
+      packVersion: 1,
+      answers: completeNailsV1,
+    })
+    expect(intake.progress.canComplete).toBe(true)
+
+    // And a correction still WRITES on v1 — the pinned version, not the
+    // current one, which is what a mid-flow client's next tap sends.
+    const correction = await submit(
+      nailsSessionId,
+      { version: 1, schemaVersion: 2 },
+      'nails-v1-correction',
+      { ...completeNailsV1, skin_sensitivity: 'sometimes' },
+      true,
+    )
+    expect(correction.status).toBe(200)
+    await expect(json(correction)).resolves.toMatchObject({
+      intake: {
+        questionPack: { version: 1 },
+        latestRevision: { packVersion: 1, complete: true },
+      },
+    })
+    // Sending the CURRENT version on a pinned session is the stale-version
+    // refusal, not a silent switch.
+    const wrongVersion = await submit(
+      nailsSessionId,
+      GENERAL_SERVICE_INTAKE_PACK,
+      'nails-v2-on-a-v1-session',
+      completeNails,
+      true,
+    )
+    expect(wrongVersion.status).toBe(409)
+    await expect(json(wrongVersion)).resolves.toMatchObject({
+      code: 'CONSULT_PACK_VERSION_MISMATCH',
+    })
   })
 
   it('serves each family its own shot pack once the intake is complete', async () => {

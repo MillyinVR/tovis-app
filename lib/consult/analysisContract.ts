@@ -90,11 +90,8 @@ import { mapStoredConsultAnalysisRevision } from './analysisRevision'
 import {
   consultIntakeItems,
   normalizeConsultIntakePayloadForPack,
+  resolveConsultSessionIntakePack,
 } from './intake/registry'
-import {
-  resolveLookPrimaryService,
-  toLookPrimaryServiceSummary,
-} from '@/lib/looks/serviceOwnership'
 import { normalizeServiceName } from '@/lib/migration/serviceMatch'
 import {
   loadProLocationCapability,
@@ -107,6 +104,12 @@ import {
   applyConsultSafetyFlagPolicy,
   deriveConsultSafetyFlagPolicy,
 } from './safetyFlags'
+import {
+  CONSULT_SERVICE_IDENTITY_BOOKING_SELECT,
+  CONSULT_SERVICE_IDENTITY_LOOK_SELECT,
+  consultServiceIdentityFromBooking,
+  consultServiceIdentityFromLook,
+} from './serviceIdentity'
 import {
   CONSULT_SAFETY_SERVICE_BOOKING_RULES,
   determineConsultSafetyRouting,
@@ -141,10 +144,11 @@ const ANALYSIS_SCOPE_SELECT = {
       proTenantId: true,
       locationType: true,
       ...CONSULT_ANCHOR_SELECT.booking.select,
+      ...CONSULT_SERVICE_IDENTITY_BOOKING_SELECT,
       service: {
         select: {
           ...CONSULT_ANCHOR_SELECT.booking.select.service.select,
-          name: true,
+          ...CONSULT_SERVICE_IDENTITY_BOOKING_SELECT.service.select,
         },
       },
     },
@@ -168,32 +172,22 @@ async function loadServiceContext(
   menu: readonly RecommendationOffering[],
 ): Promise<ConsultAnalysisServiceContext> {
   const profile = resolveConsultServiceProfile(session.serviceCategory)
-  let serviceName: string | null = session.booking?.service.name ?? null
-  if (!serviceName && session.anchorLookPostId) {
-    const look = await tx.lookPost.findUnique({
-      where: { id: session.anchorLookPostId },
-      select: {
-        serviceId: true,
-        service: {
-          select: {
-            id: true,
-            name: true,
-            category: { select: { name: true, slug: true } },
-          },
-        },
-      },
-    })
-    const primary = look
-      ? toLookPrimaryServiceSummary(
-          resolveLookPrimaryService({ serviceId: look.serviceId, service: look.service }),
-        )
-      : null
-    serviceName = primary?.name ?? null
-  }
+  // The PRO-FACING name: the model recommends from `menuServiceNames`, which
+  // are catalog names, so the service it is told about has to be one too.
+  const identity = session.booking
+    ? consultServiceIdentityFromBooking(session.booking)
+    : consultServiceIdentityFromLook(
+        session.anchorLookPostId
+          ? await tx.lookPost.findUnique({
+              where: { id: session.anchorLookPostId },
+              select: CONSULT_SERVICE_IDENTITY_LOOK_SELECT,
+            })
+          : null,
+      )
   return {
     family: profile.family,
     categoryName: profile.categoryName,
-    serviceName,
+    serviceName: identity.proFacingName,
     menuServiceNames: menu.map((offering) => offering.service.name),
   }
 }
@@ -357,12 +351,22 @@ async function currentCompletedIntake(
   tx: Prisma.TransactionClient,
   session: AnalysisScope,
 ) {
-  const pack = resolveConsultServiceProfile(session.serviceCategory).intakePack
-  const revision = await tx.consultRevision.findFirst({
+  const currentPack = resolveConsultServiceProfile(
+    session.serviceCategory,
+  ).intakePack
+  const revisions = await tx.consultRevision.findMany({
     where: { consultSessionId: session.id, kind: ConsultRevisionKind.INTAKE },
     select: { id: true, revision: true, payload: true },
     orderBy: { revision: 'desc' },
   })
+  // The pack VERSION this session is pinned to, so a consult that completed
+  // its intake before a new version shipped still analyses rather than
+  // failing its own prerequisite check.
+  const pack = resolveConsultSessionIntakePack(
+    currentPack,
+    revisions.map((entry) => entry.payload),
+  )
+  const revision = revisions[0] ?? null
   const payload = revision
     ? normalizeConsultIntakePayloadForPack(pack, revision.payload)
     : null
@@ -372,7 +376,7 @@ async function currentCompletedIntake(
       'A current completed intake is required.',
     )
   }
-  return { revision, payload }
+  return { revision, payload, pack }
 }
 
 /** The stored warning column narrowed to the DTO union, or null. */
@@ -1347,7 +1351,9 @@ export async function executeConsultAnalysisRun(args: {
       )
     }
     const profile = resolveConsultServiceProfile(context.session.serviceCategory)
-    const pack = profile.intakePack
+    // The PINNED pack, not the current one: the intake items the model is
+    // shown must carry the labels this client actually answered.
+    const pack = context.intake.pack
     const images = await readVerifiedImages(context.captures, storage)
 
     // ── Phase B: the paid calls, between transactions ────────────────────

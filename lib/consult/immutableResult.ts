@@ -118,6 +118,7 @@ export async function loadLatestImmutableConsultResult(
     const buildArgs = {
       intakeRevisionId: intake.id,
       intakePackId: normalizedIntake.packId,
+      intakePackVersion: normalizedIntake.packVersion,
       intakeAnswers: normalizedIntake.answers,
       analysisRevisionId: analysis.id,
       analysisRevision: analysis.revision,

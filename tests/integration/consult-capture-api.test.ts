@@ -391,17 +391,11 @@ type ReadyConsult = {
 }
 
 const completeAnswers = {
-  current_color: 'brunette',
-  desired_color: 'red',
   change_scale: 'noticeable',
   box_dye_history: 'over-12-months',
   prior_lightening: '6-12-months',
   henna_plant_dye_history: 'never',
-  perm_history: 'never',
-  relaxer_texturizer_history: 'never',
-  keratin_smoothing_history: 'never',
   other_chemical_history: 'never',
-  last_color_service_timing: '1-3-months',
   prior_reaction: 'no',
 }
 

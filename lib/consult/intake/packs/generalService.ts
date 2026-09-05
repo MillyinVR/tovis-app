@@ -10,6 +10,15 @@
 //
 // `known_allergies` and `skin_sensitivity` are what let the safety policy
 // route a patch test without a hair-specific chemical history.
+//
+// TWO versions. v1 is frozen (stored payloads and the
+// `consult_intake_payload_guard` trigger name it). v2 is the P6 diet: the
+// safety questions no photograph can answer — recent treatment, sensitivity,
+// allergies, prior reaction — plus how big a change the client wants.
+// `service_experience` moves to the post-booking follow-up phrased with the
+// service's own name (handoff B6), and `last_service_timing`,
+// `maintenance_tolerance`, `event_timing` and `budget` go with it
+// (lib/consult/intake/followUp.ts).
 
 import type {
   ConsultIntakeAnswerMapDTO,
@@ -28,13 +37,15 @@ import {
   TREATMENT_TIMING_OPTIONS,
 } from '../sharedOptions'
 import {
+  dietedIntakePack,
   intakeQuestion,
   type ConsultIntakeOptionValues,
   type ConsultIntakePackDefinition,
 } from '../types'
 
 export const GENERAL_SERVICE_INTAKE_PACK_ID = 'general-service' as const
-export const GENERAL_SERVICE_INTAKE_PACK_VERSION = 1
+export const GENERAL_SERVICE_INTAKE_PACK_VERSION = 2
+export const GENERAL_SERVICE_INTAKE_PACK_V1_VERSION = 1
 export const GENERAL_SERVICE_INTAKE_SCHEMA_VERSION = 2
 
 export const GENERAL_SERVICE_INTAKE_QUESTION_KEYS = [
@@ -70,10 +81,11 @@ function goalNeedsDirection(
   return answers.change_scale === 'subtle'
 }
 
-export const GENERAL_SERVICE_INTAKE_PACK: ConsultIntakePackDefinition = {
+/** v1 — FROZEN. */
+export const GENERAL_SERVICE_INTAKE_PACK_V1: ConsultIntakePackDefinition = {
   id: GENERAL_SERVICE_INTAKE_PACK_ID,
   categorySlug: 'general',
-  version: GENERAL_SERVICE_INTAKE_PACK_VERSION,
+  version: GENERAL_SERVICE_INTAKE_PACK_V1_VERSION,
   schemaVersion: GENERAL_SERVICE_INTAKE_SCHEMA_VERSION,
   goalDirection: {
     questionKey: 'goal_direction',
@@ -169,3 +181,26 @@ export const GENERAL_SERVICE_INTAKE_PACK: ConsultIntakePackDefinition = {
     ),
   ],
 }
+
+/** v2 keys — kept in v1's order. */
+export const GENERAL_SERVICE_INTAKE_V2_QUESTION_KEYS = [
+  'change_scale',
+  'goal_direction',
+  'recent_treatment_timing',
+  'skin_sensitivity',
+  'known_allergies',
+  'prior_reaction',
+] as const satisfies readonly GeneralServiceIntakeQuestionKey[]
+
+/** v2 — CURRENT. */
+export const GENERAL_SERVICE_INTAKE_PACK: ConsultIntakePackDefinition =
+  dietedIntakePack({
+    base: GENERAL_SERVICE_INTAKE_PACK_V1,
+    version: GENERAL_SERVICE_INTAKE_PACK_VERSION,
+    keep: GENERAL_SERVICE_INTAKE_V2_QUESTION_KEYS,
+    goalDirection: {
+      questionKey: 'goal_direction',
+      unresolvedValue: GOAL_DIRECTION_UNRESOLVED_VALUE,
+      requiredWhen: goalNeedsDirection,
+    },
+  })
