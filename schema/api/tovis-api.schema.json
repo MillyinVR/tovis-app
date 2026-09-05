@@ -103,6 +103,26 @@
       ],
       "type": "string"
     },
+    "$Enums.ConsultAnalysisRunStage": {
+      "enum": [
+        "QUEUED",
+        "READING_PHOTOS",
+        "UNDERSTANDING_REFERENCE",
+        "BUILDING_PLAN",
+        "FINALIZING",
+        "DONE"
+      ],
+      "type": "string"
+    },
+    "$Enums.ConsultAnalysisRunStatus": {
+      "enum": [
+        "QUEUED",
+        "RUNNING",
+        "COMPLETED",
+        "FAILED"
+      ],
+      "type": "string"
+    },
     "$Enums.ConsultInspirationSource": {
       "enum": [
         "PLATFORM_LOOK",
@@ -317,6 +337,8 @@
         "BOOKING_REQUEST_CREATED",
         "BOOKING_CONFIRMED",
         "AI_CONSULT_INVITATION",
+        "AI_CONSULT_ANALYSIS_READY",
+        "AI_CONSULT_ANALYSIS_FAILED",
         "BOOKING_STARTED",
         "BOOKING_RESCHEDULED",
         "BOOKING_CANCELLED_BY_CLIENT",
@@ -7077,6 +7099,7 @@
         "CONSULT_ANALYSIS_CAPTURES_REQUIRED",
         "CONSULT_ANALYSIS_INSPIRATION_REQUIRED",
         "CONSULT_ANALYSIS_UNAVAILABLE",
+        "CONSULT_ANALYSIS_TRANSACTION_EXPIRED",
         "CONSULT_INSPIRATION_SCHEMA_VERSION_MISMATCH",
         "CONSULT_INSPIRATION_LOOK_UNAVAILABLE",
         "CONSULT_INSPIRATION_SOURCE_REQUIRED",
@@ -7952,6 +7975,76 @@
       ],
       "type": "object"
     },
+    "ConsultAnalysisRunDTO": {
+      "description": "P4b: one background analysis run, as the client's waiting screen reads it.\n\n`stage` drives the progress copy and `photoCount` fills in the number in it (\"reading your 4 photos\"). Everything here is either a lifecycle fact or a count — no model output, no failure text: `failureCode` is a code the client maps to its own copy, never a message to render.",
+      "properties": {
+        "attemptCount": {
+          "type": "number"
+        },
+        "failureCode": {
+          "description": "Set only on FAILED. A code from the consult error vocabulary.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "finishedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "maxAttempts": {
+          "type": "number"
+        },
+        "photoCount": {
+          "description": "How many of the client's captures this run reads.",
+          "type": "number"
+        },
+        "queuedAt": {
+          "type": "string"
+        },
+        "retryable": {
+          "description": "Whether POSTing the analysis endpoint again would start a fresh run. True only for a FAILED run — a live run must never be raced by a retry tap, and a COMPLETED one has an artefact to read instead.",
+          "type": "boolean"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "stage": {
+          "$ref": "#/definitions/ConsultAnalysisRunStage"
+        },
+        "startedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/definitions/ConsultAnalysisRunStatus"
+        }
+      },
+      "required": [
+        "runId",
+        "status",
+        "stage",
+        "photoCount",
+        "attemptCount",
+        "maxAttempts",
+        "queuedAt",
+        "startedAt",
+        "finishedAt",
+        "failureCode",
+        "retryable"
+      ],
+      "type": "object"
+    },
+    "ConsultAnalysisRunStage": {
+      "$ref": "#/definitions/%24Enums.ConsultAnalysisRunStage"
+    },
+    "ConsultAnalysisRunStatus": {
+      "$ref": "#/definitions/%24Enums.ConsultAnalysisRunStatus"
+    },
     "ConsultAnalysisSafetyCodeDTO": {
       "enum": [
         "PRIOR_REACTION",
@@ -8028,6 +8121,17 @@
             }
           ]
         },
+        "run": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultAnalysisRunDTO"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "P4b: the most recent background run, or null when the analysis has never been started. The client polls this endpoint while `run.status` is QUEUED or RUNNING; `result` is what it opens when the run COMPLETES."
+        },
         "schemaVersion": {
           "type": "number"
         },
@@ -8040,7 +8144,8 @@
         "status",
         "schemaVersion",
         "promptVersion",
-        "result"
+        "result",
+        "run"
       ],
       "type": "object"
     },

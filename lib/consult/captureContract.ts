@@ -45,6 +45,10 @@ import {
   type ConsultCaptureMediaType,
   type ConsultCaptureQualityResult,
 } from './captureVision'
+import {
+  flushConsultProviderMeter,
+  type ConsultProviderMeterSink,
+} from './providerMeter'
 import { CONSULT_ANCHOR_SELECT, evaluateConsultAnchor } from './anchor'
 import {
   CONSULT_SERVICE_PROFILE_CATEGORY_SELECT,
@@ -740,6 +744,7 @@ export async function checkConsultCaptureQuality(args: {
   qualityCheck?: (input: {
     shotKey: string
     image: { base64: string; mediaType: ConsultCaptureMediaType }
+    meter?: ConsultProviderMeterSink | null
   }) => Promise<ConsultCaptureQualityResult>
 }): Promise<{ quality: ConsultCaptureQualityResultDTO; replayed: boolean }> {
   const now = args.now ?? new Date()
@@ -830,7 +835,15 @@ export async function checkConsultCaptureQuality(args: {
 
       let quality: ConsultCaptureQualityResult
       try {
-        quality = await qualityCheck({ shotKey: capture.shotKey, image })
+        // P4b: the gate is a PAID call, billed in this request — one per
+        // photo, before any analysis run exists. It carries the session and a
+        // null run, which is what makes a consult's true cost the sum over
+        // this table rather than just the run's three calls.
+        quality = await qualityCheck({
+          shotKey: capture.shotKey,
+          image,
+          meter: { consultSessionId: session.id, analysisRunId: null },
+        })
       } catch (error) {
         if (error instanceof ConsultCaptureVisionError) {
           throw new ConsultWriteError(
@@ -943,6 +956,11 @@ export async function checkConsultCaptureQuality(args: {
     },
     { maxWait: 10_000, timeout: 60_000 },
   )
+  // The transaction has committed, so the ConsultSession row lock is gone and
+  // the meter's FK insert can finally take the FOR KEY SHARE it needs. Waiting
+  // for it INSIDE the transaction above is a self-deadlock — see
+  // lib/consult/providerMeter.ts.
+  await flushConsultProviderMeter()
   if (result.rejectedId) {
     try {
       await purgeConsultCaptureRawObject(

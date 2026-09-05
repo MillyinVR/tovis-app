@@ -31,6 +31,13 @@ export type ConsultWriteErrorCode =
   | 'ANALYSIS_CAPTURES_REQUIRED'
   | 'ANALYSIS_INSPIRATION_REQUIRED'
   | 'ANALYSIS_UNAVAILABLE'
+  // P4b. The database transaction the analysis ran in expired (Prisma P2028).
+  // Named rather than left to fall through to a bare 500, because before P4b
+  // this was the single most likely way a real analysis died: the interactive
+  // transaction budget was 115s and the provider budget it wrapped was 245s.
+  // It is retryable — the run's own attempt budget covers it — and the client
+  // is told so instead of being told nothing.
+  | 'ANALYSIS_TRANSACTION_EXPIRED'
   | 'INSPIRATION_SCHEMA_VERSION_MISMATCH'
   | 'INSPIRATION_LOOK_UNAVAILABLE'
   | 'INSPIRATION_SOURCE_REQUIRED'

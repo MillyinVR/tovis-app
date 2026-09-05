@@ -206,6 +206,13 @@ export function consultWriteErrorResponse(error: unknown): Response | null {
         'Consult analysis is unavailable.',
         'CONSULT_ANALYSIS_UNAVAILABLE',
       )
+    case 'ANALYSIS_TRANSACTION_EXPIRED':
+      // 503, not 500: this is transient and retrying is the right advice.
+      return consultAgreementFail(
+        503,
+        'Your analysis took longer than we allow. Try again in a moment.',
+        'CONSULT_ANALYSIS_TRANSACTION_EXPIRED',
+      )
     case 'INSPIRATION_SCHEMA_VERSION_MISMATCH':
       return consultAgreementFail(409, 'The inspiration schema version is no longer current.', 'CONSULT_INSPIRATION_SCHEMA_VERSION_MISMATCH')
     case 'INSPIRATION_LOOK_UNAVAILABLE':

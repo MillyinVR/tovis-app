@@ -13,9 +13,11 @@ import {
   type RouteContext,
 } from '@/app/api/_utils/routeContext'
 import {
+  asConsultAnalysisTransactionError,
   loadConsultAnalysisState,
-  runConsultAnalysis,
+  startConsultAnalysis,
 } from '@/lib/consult/analysisContract'
+import { kickConsultAnalysisRun } from '@/lib/consult/analysisRunner'
 import {
   consultNotFoundResponse,
   consultWriteErrorResponse,
@@ -30,28 +32,25 @@ import { safeError } from '@/lib/security/logging'
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 /**
- * This ONE request makes three sequential provider calls: the inspiration read
- * (50s ceiling) and then the two analysis calls (45s and 150s — see
- * CONSULT_ANALYSIS_PROFILE_TIMEOUT_MS / _DIRECTION_TIMEOUT_MS, both measured).
- * Worst case 245s of provider time before any database work — so the previous
- * 150s was below the floor from the moment the analysis became two calls, and
- * would have surfaced as an intermittent gateway timeout AFTER the client had
- * been billed for the model calls.
+ * P4b: this request no longer makes a single provider call.
  *
- * That 245s holds only because both of those clients run with `maxRetries: 0`.
- * The SDK retries a timeout by default, which doubled a single slow direction
- * call to 180s in a measured run — more than this whole budget, for one call.
+ * It validates the prerequisites, claims the session, writes a
+ * ConsultAnalysisRun and returns — a handful of queries in one short
+ * transaction. The three paid calls (inspiration read, profile, direction; up
+ * to 245s combined) happen in the background worker, drained by
+ * /api/internal/jobs/consult-analysis/process at `maxDuration = 300`.
  *
- * Measured end to end on 2026-09-04 across a dozen live look-anchored consults
- * with a four-image partial pack: the inspiration read 5.5s and the profile
- * call 5.0-8.6s are steady, while the direction call ranged 29s to over 90s.
- * That tail is the reason for the budget, not the median.
+ * The duration here is still generous, and deliberately so: `kickConsultAnalysisRun`
+ * uses `waitUntil`, which keeps THIS invocation alive after the response is
+ * sent for as long as the work it scheduled takes. The client is not waiting
+ * on any of it — the response has already gone — but the platform ceiling
+ * still bounds how much of the run a kick can finish before the cron has to
+ * pick up the rest.
  *
  * ⚠️ NOT verified on Vercel. 150 was already above the Hobby ceiling, so this
  * project is on a plan whose Node.js functions allow more; 300 is the Pro
- * ceiling. If a deploy rejects this value, the alternative is not a smaller
- * number — 150 cannot fit three calls — it is moving the analysis off the
- * request path.
+ * ceiling. If a deploy rejects this value, the response time is unaffected —
+ * only the kick is, and the every-minute cron already backstops it.
  */
 export const maxDuration = 300
 
@@ -74,6 +73,11 @@ async function readStartInput(req: Request) {
   }
 }
 
+/**
+ * The client's poll while a run is in flight, and the read after it settles.
+ * One request answers both "what is it doing?" (`analysis.run.stage`) and "is
+ * it done?" (`analysis.result`).
+ */
 export async function GET(_req: Request, ctx: RouteContext) {
   try {
     const auth = await requireClient()
@@ -101,27 +105,39 @@ export async function POST(req: Request, ctx: RouteContext) {
     const { id } = await resolveRouteParams(ctx)
     if (!id) return consultNotFoundResponse()
 
-    // Paid provider call: one analysis per session is enforced structurally
-    // (partial unique index); the vision bucket bounds how fast repeated
-    // attempts across sessions can spend.
+    // Paid provider calls: one analysis per session is enforced structurally
+    // (partial unique index), and one LIVE RUN per session by a second one, so
+    // this bucket bounds how fast repeated retries across sessions can spend.
     const limited = await enforceRateLimit({
       bucket: 'client:consult:vision',
       identity: await rateLimitIdentity(auth.user.id),
     })
     if (limited) return limited
 
-    const result = await runConsultAnalysis({
+    const result = await startConsultAnalysis({
       consultSessionId: id,
       clientId: auth.clientId,
       actor: { type: ConsultActorType.CLIENT, id: auth.user.id },
       loadInput: () => readStartInput(req),
     })
+
+    // Start the run now rather than at the next cron tick — after the response
+    // is sent, and never blocking it. The cron backstops a kick that cannot
+    // run (see lib/consult/analysisRunner.ts).
+    if (result.run && !result.replayed) {
+      kickConsultAnalysisRun()
+    }
+
     return jsonOk<ConsultAnalysisStartResponseDTO>({
       analysis: result.state,
       replayed: result.replayed,
     })
   } catch (error: unknown) {
-    const response = consultWriteErrorResponse(error)
+    // A database transaction that expired is a named, retryable refusal — not
+    // an anonymous 500. See asConsultAnalysisTransactionError.
+    const response = consultWriteErrorResponse(
+      asConsultAnalysisTransactionError(error) ?? error,
+    )
     if (response) return response
     console.error('POST consult analysis error', { error: safeError(error) })
     return jsonFail(500, 'Internal server error')

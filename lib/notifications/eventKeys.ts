@@ -29,6 +29,8 @@ export type NotificationTemplateKey =
   | 'rebook_cadence_due'
   | 'saved_look_consult_nudge'
   | 'ai_consult_invitation'
+  | 'ai_consult_analysis_ready'
+  | 'ai_consult_analysis_failed'
   | 'saved_look_price_alternative'
   | 'viral_request_approved'
   | 'payment_collected'
@@ -210,6 +212,8 @@ export const NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.REBOOK_CADENCE_DUE,
   NotificationEventKey.SAVED_LOOK_CONSULT_NUDGE,
   NotificationEventKey.AI_CONSULT_INVITATION,
+  NotificationEventKey.AI_CONSULT_ANALYSIS_READY,
+  NotificationEventKey.AI_CONSULT_ANALYSIS_FAILED,
   NotificationEventKey.SAVED_LOOK_PRICE_ALTERNATIVE,
   NotificationEventKey.VIRAL_REQUEST_APPROVED,
   NotificationEventKey.PAYMENT_COLLECTED,
@@ -639,6 +643,43 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     transactional: false,
     allowQuietHoursBypass: false,
     templateKey: 'ai_consult_invitation',
+    supportedRecipients: [NotificationRecipientKind.CLIENT],
+    defaultChannelsByRecipient: {
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
+    },
+  },
+
+  [NotificationEventKey.AI_CONSULT_ANALYSIS_READY]: {
+    // P4b. TRANSACTIONAL, unlike its AI_CONSULT_INVITATION sibling above, and
+    // the difference is who started it: the invitation is the app suggesting
+    // something, this is the answer to a thing the client explicitly asked for
+    // and is waiting on. It draws no re-engagement budget and it bypasses
+    // quiet hours — a client who tapped "run my analysis" at 22:30 and closed
+    // the app is owed the result, not a nine-hour silence.
+    key: NotificationEventKey.AI_CONSULT_ANALYSIS_READY,
+    defaultPriority: NotificationPriority.NORMAL,
+    transactional: true,
+    allowQuietHoursBypass: true,
+    templateKey: 'ai_consult_analysis_ready',
+    supportedRecipients: [NotificationRecipientKind.CLIENT],
+    defaultChannelsByRecipient: {
+      // No SMS. The result lives behind a login and says nothing useful in 160
+      // characters; in-app + email + push is the whole audience that can act
+      // on it.
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
+    },
+  },
+
+  [NotificationEventKey.AI_CONSULT_ANALYSIS_FAILED]: {
+    // P4b. Also transactional — the client is sitting on a promise the app
+    // made and cannot otherwise learn it was broken. The copy carries no
+    // failure detail: the code is for the client app to map, and what the
+    // client is told is that it did not finish and can be tried again.
+    key: NotificationEventKey.AI_CONSULT_ANALYSIS_FAILED,
+    defaultPriority: NotificationPriority.NORMAL,
+    transactional: true,
+    allowQuietHoursBypass: true,
+    templateKey: 'ai_consult_analysis_failed',
     supportedRecipients: [NotificationRecipientKind.CLIENT],
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
@@ -1271,6 +1312,8 @@ export const CLIENT_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.REBOOK_CADENCE_DUE,
   NotificationEventKey.SAVED_LOOK_CONSULT_NUDGE,
   NotificationEventKey.AI_CONSULT_INVITATION,
+  NotificationEventKey.AI_CONSULT_ANALYSIS_READY,
+  NotificationEventKey.AI_CONSULT_ANALYSIS_FAILED,
   NotificationEventKey.SAVED_LOOK_PRICE_ALTERNATIVE,
   NotificationEventKey.PAYMENT_COLLECTED,
   NotificationEventKey.PAYMENT_ACTION_REQUIRED,

@@ -26,6 +26,7 @@
 // the `$defs` note on the schema below for how the eighth attribute fits.
 
 import Anthropic from '@anthropic-ai/sdk'
+import { ConsultProviderCallKind } from '@prisma/client'
 
 import { readOptionalEnv, requireEnv } from '@/lib/env'
 import { isRecord } from '@/lib/guards'
@@ -36,6 +37,10 @@ import {
   consultHairLevelPairIsOrdered,
   type ConsultHairLevel,
 } from './hairLevel'
+import {
+  meterConsultProviderCall,
+  type ConsultProviderMeterSink,
+} from './providerMeter'
 import { isAllowedConsultProviderModel } from './providerModel'
 import { toProviderOutputSchema } from './providerSchema'
 
@@ -563,11 +568,17 @@ export function resetConsultInspirationVisionClientForTests(): void {
 
 export type ConsultInspirationVisionProvider = (input: {
   image: { base64: string; mediaType: ConsultCaptureMediaType }
+  /** P4b: where this call's cost is recorded. See lib/consult/providerMeter.ts. */
+  meter?: ConsultProviderMeterSink | null
 }) => Promise<ConsultInspirationAnalysisResult>
 
 export const runConsultInspirationVision: ConsultInspirationVisionProvider =
   async (input) => {
     const model = modelName()
+    return meterConsultProviderCall(
+      input.meter,
+      { kind: ConsultProviderCallKind.INSPIRATION_READ, model },
+      async (reportUsage) => {
     let message: Anthropic.Message
     try {
       message = await getClient().messages.create(
@@ -615,6 +626,8 @@ export const runConsultInspirationVision: ConsultInspirationVisionProvider =
     } catch {
       throw new ConsultInspirationVisionError('unavailable')
     }
+    // Billed the moment it answered — before the refusal check and the parser.
+    reportUsage(message.usage)
 
     if (message.stop_reason === 'refusal') {
       throw new ConsultInspirationVisionError('refused')
@@ -637,6 +650,8 @@ export const runConsultInspirationVision: ConsultInspirationVisionProvider =
       if (error instanceof ConsultInspirationVisionError) throw error
       throw new ConsultInspirationVisionError('bad_output')
     }
+      },
+    )
   }
 
 /**

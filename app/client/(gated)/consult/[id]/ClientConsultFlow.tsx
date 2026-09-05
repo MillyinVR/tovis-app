@@ -17,8 +17,14 @@ import {
   CONSULT_INSPIRATION_TEXT_MAX_CHARS,
   CONSULT_INSPIRATION_UNSUPPORTED_TRAIT_LANGUAGE,
 } from '@/lib/consult/inspirationTextRules'
+import {
+  CONSULT_ANALYSIS_POLL_INTERVAL_MS,
+  consultAnalysisRunProgress,
+  isConsultAnalysisRunLive,
+} from '@/lib/consult/analysisRunCopy'
 import type {
   ConsultAgreementStateDTO,
+  ConsultAnalysisRunDTO,
   ConsultAnalysisStateDTO,
   ConsultCaptureQualityReasonCodeDTO,
   ConsultCaptureShotDTO,
@@ -156,6 +162,89 @@ function StageHeading({ eyebrow, title }: { eyebrow: string; title: string }) {
   )
 }
 
+/**
+ * P4b: the waiting screen for a background analysis run.
+ *
+ * Three states, and the difference between them matters more than the styling:
+ * a LIVE run shows progress and no buttons (there is nothing useful to press);
+ * a FAILED run shows the retry, which is the whole reason a client is not
+ * stranded; a COMPLETED run is a moment the poll is about to route away from,
+ * so it just says so rather than flashing a control.
+ *
+ * The bar is `aria-hidden` and the same information is in the text above it —
+ * a progress bar with no accessible name is decoration, and the headline is
+ * the real status.
+ */
+function AnalysisRunProgress({
+  run,
+  busy,
+  onRetry,
+  onRefresh,
+}: {
+  run: ConsultAnalysisRunDTO
+  busy: boolean
+  onRetry: () => void
+  onRefresh: () => void
+}) {
+  const progress = consultAnalysisRunProgress(run)
+  const live = isConsultAnalysisRunLive(run)
+
+  return (
+    <div>
+      <StageHeading eyebrow="Analysis" title="We’re building your plan" />
+      <p
+        className="mt-3 text-sm font-bold text-textPrimary"
+        role="status"
+        aria-live="polite"
+      >
+        {progress.headline}
+      </p>
+      {progress.detail ? (
+        <p className="mt-1 text-sm leading-6 text-textSecondary">
+          {progress.detail}
+        </p>
+      ) : null}
+
+      <div
+        aria-hidden="true"
+        className="mt-4 h-1.5 w-full overflow-hidden rounded-full bg-surfaceGlass/10"
+      >
+        <div
+          className="h-full rounded-full bg-textPrimary transition-[width] duration-700 ease-out"
+          style={{ width: `${Math.round(progress.fraction * 100)}%` }}
+        />
+      </div>
+
+      {run.status === 'FAILED' ? (
+        <button
+          type="button"
+          className={`mt-4 ${BUTTON_PRIMARY}`}
+          disabled={busy}
+          onClick={onRetry}
+        >
+          {busy ? 'Starting…' : 'Try again'}
+        </button>
+      ) : null}
+
+      {live ? (
+        <p className="mt-4 text-xs leading-5 text-textSecondary">
+          You can close this — we’ll let you know when it’s ready.
+        </p>
+      ) : null}
+
+      {!live && run.status !== 'FAILED' ? (
+        <button
+          type="button"
+          className={`mt-4 ${BUTTON_SECONDARY}`}
+          onClick={onRefresh}
+        >
+          Check progress
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
 function ErrorNote({ message }: { message: string | null }) {
   if (!message) return null
   return (
@@ -228,6 +317,15 @@ export default function ClientConsultFlow({
         const state = await api<{ intake: ConsultIntakeStateDTO }>(`${base}/intake`)
         setIntake(state.intake)
         setIntakeAnswers(state.intake.latestRevision?.answers ?? {})
+        return
+      }
+      if (stage === 'ANALYZING') {
+        // P4b: ANALYZING is now a state the client SITS in, sometimes for two
+        // minutes and sometimes across a page reload. It has to load the run.
+        const analysisState = await api<{ analysis: ConsultAnalysisStateDTO }>(
+          `${base}/analysis`,
+        )
+        setAnalysis(analysisState.analysis)
         return
       }
       if (stage === 'MEDIA_READY' || stage === 'ANALYSIS_PENDING') {
@@ -537,7 +635,9 @@ export default function ClientConsultFlow({
       setCapture(state.capture)
     })
 
-  // ── Analysis ──────────────────────────────────────────────────────────────
+  // ── Analysis (P4b) ────────────────────────────────────────────────────────
+  // The POST claims the analysis and returns a run in a fraction of a second.
+  // Everything after that is the poll below.
   const startAnalysis = () =>
     run(async () => {
       if (!analysis) return
@@ -555,6 +655,7 @@ export default function ClientConsultFlow({
           },
         )
         setAnalysis(state.analysis)
+        setStatus(state.analysis.status)
         if (state.analysis.status === 'COMPLETED') {
           router.replace(
             `/client/consult/${encodeURIComponent(consultId)}/results`,
@@ -564,6 +665,58 @@ export default function ClientConsultFlow({
         setAnalyzing(false)
       }
     })
+
+  /**
+   * A retry is a NEW run, not a new claim: the server keeps the session in
+   * ANALYZING and starts a fresh run row. A fresh idempotency key would be
+   * wrong — the artefact this run writes is the same artefact the first
+   * attempt would have written, and the server checks that the key matches.
+   */
+  const retryAnalysis = () => startAnalysis()
+
+  // ── The poll ──────────────────────────────────────────────────────────────
+  // Every 5s while a run is live and this screen is mounted. Stops on its own
+  // when the run settles; a completed run routes straight to the results.
+  //
+  // `document.hidden` is checked per tick rather than by subscribing to the
+  // visibility event: a backgrounded tab should not keep asking, and the tick
+  // that runs when it comes back is the catch-up.
+  const analysisRun = analysis?.run ?? null
+  const runIsLive = analysisRun ? isConsultAnalysisRunLive(analysisRun) : false
+  useEffect(() => {
+    if (!runIsLive) return
+    let cancelled = false
+
+    const tick = async () => {
+      if (typeof document !== 'undefined' && document.hidden) return
+      try {
+        const state = await api<{ analysis: ConsultAnalysisStateDTO }>(
+          `${base}/analysis`,
+        )
+        if (cancelled) return
+        setAnalysis(state.analysis)
+        setStatus(state.analysis.status)
+        if (state.analysis.status === 'COMPLETED') {
+          router.replace(
+            `/client/consult/${encodeURIComponent(consultId)}/results`,
+          )
+        }
+      } catch {
+        // A dropped poll is not a failed analysis — the run keeps going on the
+        // server and the next tick asks again. Surfacing an error here would
+        // tell the client something is wrong when nothing is.
+      }
+    }
+
+    const timer = setInterval(
+      () => void tick(),
+      CONSULT_ANALYSIS_POLL_INTERVAL_MS,
+    )
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [base, consultId, router, runIsLive])
 
   // ── Render ────────────────────────────────────────────────────────────────
   if (!status) {
@@ -703,16 +856,27 @@ export default function ClientConsultFlow({
 
       {status === 'ANALYZING' ? (
         <section className={CARD}>
-          <p className="text-sm text-textPrimary">
-            Your analysis is running. This can take a minute or two.
-          </p>
-          <button
-            type="button"
-            className={`mt-4 ${BUTTON_SECONDARY}`}
-            onClick={() => void refresh()}
-          >
-            Check progress
-          </button>
+          {analysisRun ? (
+            <AnalysisRunProgress
+              run={analysisRun}
+              busy={busy || analyzing}
+              onRetry={() => void retryAnalysis()}
+              onRefresh={() => void refresh()}
+            />
+          ) : (
+            <>
+              <p className="text-sm text-textPrimary">
+                Your analysis is running. This can take a minute or two.
+              </p>
+              <button
+                type="button"
+                className={`mt-4 ${BUTTON_SECONDARY}`}
+                onClick={() => void refresh()}
+              >
+                Check progress
+              </button>
+            </>
+          )}
         </section>
       ) : null}
     </div>

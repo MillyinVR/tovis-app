@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
-import type { ConsultServiceFamily } from '@prisma/client'
+import { ConsultProviderCallKind, type ConsultServiceFamily } from '@prisma/client'
 
 import type {
   ConsultAnalysisEvidenceDTO,
@@ -20,6 +20,10 @@ import {
   type ConsultHairLevel,
 } from './hairLevel'
 import type { ConsultCaptureImage } from './captureStorage'
+import {
+  meterConsultProviderCall,
+  type ConsultProviderMeterSink,
+} from './providerMeter'
 import { isAllowedConsultProviderModel } from './providerModel'
 import {
   CONSULT_INSPIRATION_ANALYSIS_FIELDS,
@@ -526,6 +530,12 @@ export type ConsultAnalysisInput = {
    * `menuServiceNames` narrows the recommendation enum.
    */
   safetyCodes: readonly ConsultAnalysisSafetyCode[]
+  /**
+   * P4b: where this run's two paid calls report their cost. Supplied by the
+   * worker, which knows both the consult and the run; absent in unit tests and
+   * the eval script, which then go unmetered rather than unattributed.
+   */
+  meter?: ConsultProviderMeterSink | null
 }
 
 /**
@@ -1801,7 +1811,28 @@ async function requestConsultAnalysisJson(args: {
   schema: Record<string, unknown>
   maxTokens: number
   timeoutMs: number
+  /** P4b: which of the two analysis calls this is, and where its cost lands. */
+  kind: ConsultProviderCallKind
+  meter?: ConsultProviderMeterSink | null
 }): Promise<unknown> {
+  return meterConsultProviderCall(
+    args.meter,
+    { kind: args.kind, model: args.model },
+    (reportUsage) => requestConsultAnalysisJsonUnmetered(args, reportUsage),
+  )
+}
+
+async function requestConsultAnalysisJsonUnmetered(
+  args: {
+    model: string
+    system: string
+    content: Anthropic.ContentBlockParam[]
+    schema: Record<string, unknown>
+    maxTokens: number
+    timeoutMs: number
+  },
+  reportUsage: (usage: unknown) => void,
+): Promise<unknown> {
   let message: Anthropic.Message
   try {
     message = await getClient().messages.create(
@@ -1828,6 +1859,8 @@ async function requestConsultAnalysisJson(args: {
   } catch {
     throw new ConsultAnalysisProviderError('unavailable')
   }
+  // Billed the moment it answered — before the refusal check and the parser.
+  reportUsage(message.usage)
   if (message.stop_reason === 'refusal') {
     throw new ConsultAnalysisProviderError('refused')
   }
@@ -1901,6 +1934,8 @@ export const runConsultAnalysis: ConsultAnalysisProvider = async (input) => {
       schema: buildConsultProfileOutputSchema({ suppliedShotKeys }),
       maxTokens: CONSULT_ANALYSIS_PROFILE_MAX_TOKENS,
       timeoutMs: CONSULT_ANALYSIS_PROFILE_TIMEOUT_MS,
+      kind: ConsultProviderCallKind.ANALYSIS_PROFILE,
+      meter: input.meter,
     }),
   )
 
@@ -1923,6 +1958,8 @@ export const runConsultAnalysis: ConsultAnalysisProvider = async (input) => {
       }),
       maxTokens: CONSULT_ANALYSIS_DIRECTION_MAX_TOKENS,
       timeoutMs: CONSULT_ANALYSIS_DIRECTION_TIMEOUT_MS,
+      kind: ConsultProviderCallKind.ANALYSIS_DIRECTION,
+      meter: input.meter,
     }),
     { menuServiceNames: input.service.menuServiceNames },
   )

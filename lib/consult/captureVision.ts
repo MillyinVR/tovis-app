@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
+import { ConsultProviderCallKind } from '@prisma/client'
 
 import { readOptionalEnv, requireEnv } from '@/lib/env'
 import { isRecord } from '@/lib/guards'
@@ -9,6 +10,10 @@ import type {
 
 import { findConsultCaptureShot } from './capture/registry'
 import { shotToleratesColorCast } from './capture/types'
+import {
+  meterConsultProviderCall,
+  type ConsultProviderMeterSink,
+} from './providerMeter'
 import { isAllowedConsultProviderModel } from './providerModel'
 
 export const CONSULT_CAPTURE_MEDIA_TYPES = [
@@ -267,60 +272,80 @@ export function sanitizeConsultCaptureQuality(
 export async function checkConsultCapture(input: {
   shotKey: string
   image: { base64: string; mediaType: ConsultCaptureMediaType }
+  /**
+   * P4b: where this call's cost is recorded. The gate runs in its own request,
+   * one per photo, long before an analysis run exists — so its rows carry the
+   * session and a null run. Omitted by unit tests and the eval script, which
+   * simply go unmetered.
+   */
+  meter?: ConsultProviderMeterSink | null
 }): Promise<ConsultCaptureQualityResult> {
   const model = modelName()
-  let message: Anthropic.Message
-  try {
-    message = await getClient().messages.create(
-      {
-        model,
-        max_tokens: CONSULT_CAPTURE_QUALITY_MAX_TOKENS,
-        system: SYSTEM,
-        messages: [
+  return meterConsultProviderCall(
+    input.meter,
+    { kind: ConsultProviderCallKind.CAPTURE_GATE, model },
+    async (reportUsage) => {
+      let message: Anthropic.Message
+      try {
+        message = await getClient().messages.create(
           {
-            role: 'user',
-            content: [
+            model,
+            max_tokens: CONSULT_CAPTURE_QUALITY_MAX_TOKENS,
+            system: SYSTEM,
+            messages: [
               {
-                type: 'image',
-                source: {
-                  type: 'base64',
-                  media_type: input.image.mediaType,
-                  data: input.image.base64,
-                },
+                role: 'user',
+                content: [
+                  {
+                    type: 'image',
+                    source: {
+                      type: 'base64',
+                      media_type: input.image.mediaType,
+                      data: input.image.base64,
+                    },
+                  },
+                  { type: 'text', text: instructions(input.shotKey) },
+                ],
               },
-              { type: 'text', text: instructions(input.shotKey) },
             ],
+            output_config: {
+              format: { type: 'json_schema', schema: QUALITY_SCHEMA },
+            },
           },
-        ],
-        output_config: {
-          format: { type: 'json_schema', schema: QUALITY_SCHEMA },
-        },
-      },
-      { timeout: REQUEST_TIMEOUT_MS },
-    )
-  } catch {
-    throw new ConsultCaptureVisionError('unavailable')
-  }
+          { timeout: REQUEST_TIMEOUT_MS },
+        )
+      } catch {
+        throw new ConsultCaptureVisionError('unavailable')
+      }
+      // Before the refusal check and before the parser: the answer arrived, so
+      // it was billed, whatever this repo decides to do with it next.
+      reportUsage(message.usage)
 
-  if (message.stop_reason === 'refusal') {
-    throw new ConsultCaptureVisionError('refused')
-  }
-  // Truncation is this repo's cap being too low, not a provider fault, and it
-  // must not reach the parser as unexplained garbage — see
-  // CONSULT_CAPTURE_QUALITY_MAX_TOKENS for the run that found it.
-  if (message.stop_reason === 'max_tokens') {
-    throw new ConsultCaptureVisionError('bad_output')
-  }
-  const text = message.content
-    .filter((block): block is Anthropic.TextBlock => block.type === 'text')
-    .map((block) => block.text)
-    .join('')
-  if (!text) throw new ConsultCaptureVisionError('bad_output')
+      if (message.stop_reason === 'refusal') {
+        throw new ConsultCaptureVisionError('refused')
+      }
+      // Truncation is this repo's cap being too low, not a provider fault, and
+      // it must not reach the parser as unexplained garbage — see
+      // CONSULT_CAPTURE_QUALITY_MAX_TOKENS for the run that found it.
+      if (message.stop_reason === 'max_tokens') {
+        throw new ConsultCaptureVisionError('bad_output')
+      }
+      const text = message.content
+        .filter((block): block is Anthropic.TextBlock => block.type === 'text')
+        .map((block) => block.text)
+        .join('')
+      if (!text) throw new ConsultCaptureVisionError('bad_output')
 
-  try {
-    return sanitizeConsultCaptureQuality(JSON.parse(text), model, input.shotKey)
-  } catch (error) {
-    if (error instanceof ConsultCaptureVisionError) throw error
-    throw new ConsultCaptureVisionError('bad_output')
-  }
+      try {
+        return sanitizeConsultCaptureQuality(
+          JSON.parse(text),
+          model,
+          input.shotKey,
+        )
+      } catch (error) {
+        if (error instanceof ConsultCaptureVisionError) throw error
+        throw new ConsultCaptureVisionError('bad_output')
+      }
+    },
+  )
 }
