@@ -335,7 +335,7 @@ const C5_EVALUATION_REQUIRED_INTAKE_KEYS = [
 
 /**
  * Preserves the immutable C5 fixture-input contract. Current product intake is
- * v2; C5 remains v1 until a separately approved full evaluation is versioned.
+ * v3; C5 remains v1 until a separately approved full evaluation is versioned.
  */
 export function validateHairColorC5EvaluationIntakeAnswers(
   raw: unknown,
