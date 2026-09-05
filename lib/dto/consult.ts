@@ -6,6 +6,8 @@
 
 import type {
   ConsultAgreementKind,
+  ConsultAnalysisRunStage,
+  ConsultAnalysisRunStatus,
   ConsultInspirationSource,
   ConsultServiceEstimateLineSource,
   ConsultServiceEstimateRefusalCode,
@@ -852,12 +854,47 @@ export type ConsultAnalysisStateDTO = {
   schemaVersion: number
   promptVersion: string
   result: ConsultAnalysisResultDTO | null
+  /**
+   * P4b: the most recent background run, or null when the analysis has never
+   * been started. The client polls this endpoint while `run.status` is QUEUED
+   * or RUNNING; `result` is what it opens when the run COMPLETES.
+   */
+  run: ConsultAnalysisRunDTO | null
 }
 
 export type ConsultAnalysisStartRequestDTO = {
   idempotencyKey: string
   schemaVersion: number
   promptVersion: string
+}
+
+/**
+ * P4b: one background analysis run, as the client's waiting screen reads it.
+ *
+ * `stage` drives the progress copy and `photoCount` fills in the number in it
+ * ("reading your 4 photos"). Everything here is either a lifecycle fact or a
+ * count — no model output, no failure text: `failureCode` is a code the client
+ * maps to its own copy, never a message to render.
+ */
+export type ConsultAnalysisRunDTO = {
+  runId: string
+  status: ConsultAnalysisRunStatus
+  stage: ConsultAnalysisRunStage
+  /** How many of the client's captures this run reads. */
+  photoCount: number
+  attemptCount: number
+  maxAttempts: number
+  queuedAt: string
+  startedAt: string | null
+  finishedAt: string | null
+  /** Set only on FAILED. A code from the consult error vocabulary. */
+  failureCode: string | null
+  /**
+   * Whether POSTing the analysis endpoint again would start a fresh run. True
+   * only for a FAILED run — a live run must never be raced by a retry tap,
+   * and a COMPLETED one has an artefact to read instead.
+   */
+  retryable: boolean
 }
 
 export type ConsultAnalysisStateResponseDTO = {
@@ -1531,6 +1568,7 @@ export type ConsultAgreementErrorCode =
   | 'CONSULT_ANALYSIS_CAPTURES_REQUIRED'
   | 'CONSULT_ANALYSIS_INSPIRATION_REQUIRED'
   | 'CONSULT_ANALYSIS_UNAVAILABLE'
+  | 'CONSULT_ANALYSIS_TRANSACTION_EXPIRED'
   | 'CONSULT_INSPIRATION_SCHEMA_VERSION_MISMATCH'
   | 'CONSULT_INSPIRATION_LOOK_UNAVAILABLE'
   | 'CONSULT_INSPIRATION_SOURCE_REQUIRED'

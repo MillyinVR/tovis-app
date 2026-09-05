@@ -103,6 +103,9 @@ const EVENT_LABELS: Record<NotificationEventKey, string> = {
   [NotificationEventKey.REBOOK_CADENCE_DUE]: 'Time-for-a-refresh reminders',
   [NotificationEventKey.SAVED_LOOK_CONSULT_NUDGE]: 'Consult reminders for big decisions',
   [NotificationEventKey.AI_CONSULT_INVITATION]: 'Pre-appointment consult invitations',
+  [NotificationEventKey.AI_CONSULT_ANALYSIS_READY]: 'Your consult is ready',
+  [NotificationEventKey.AI_CONSULT_ANALYSIS_FAILED]:
+    'Problems finishing your consult',
   [NotificationEventKey.SAVED_LOOK_PRICE_ALTERNATIVE]: 'Similar looks in your range',
   [NotificationEventKey.VIRAL_REQUEST_APPROVED]: 'Feature request approved',
   [NotificationEventKey.PAYMENT_COLLECTED]: 'Payment receipt',
@@ -179,6 +182,8 @@ const CATEGORY_DEFS: readonly CategoryDef[] = [
       NotificationEventKey.CONSULTATION_APPROVED,
       NotificationEventKey.CONSULTATION_REJECTED,
       NotificationEventKey.AI_CONSULT_INVITATION,
+      NotificationEventKey.AI_CONSULT_ANALYSIS_READY,
+      NotificationEventKey.AI_CONSULT_ANALYSIS_FAILED,
       NotificationEventKey.AFTERCARE_READY,
     ],
   },

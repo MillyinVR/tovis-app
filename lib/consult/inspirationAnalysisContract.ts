@@ -18,6 +18,7 @@ import {
   type ConsultInspirationReadTarget,
 } from './inspirationContract'
 import type { ConsultInspirationStorage } from './inspirationStorage'
+import type { ConsultProviderMeterSink } from './providerMeter'
 import {
   CONSULT_INSPIRATION_ANALYSIS_FIELDS,
   CONSULT_INSPIRATION_ANALYSIS_PROMPT_VERSION,
@@ -39,19 +40,27 @@ import { appendLockedConsultInspirationAnalysisRevision } from './writeBoundary'
  * stores the result as its own immutable revision, pinned to the guided-
  * inspiration revision it was read against.
  *
- * WHERE IT RUNS: inside the analysis transaction, in ANALYZING, immediately
- * before the analysis provider call — the same place `readVerifiedImages`
- * already does its Supabase round-trips, and the reason that transaction has a
- * 115-second budget. Running it at inspiration-completion time instead would
- * mean a vision outage could block the client from finishing the inspiration
- * step, which is a bigger blast radius for no gain: the analysis is the only
- * thing that consumes it.
+ * WHERE IT RUNS (P4b): in the background worker, in ANALYZING, split across
+ * the run's three phases —
  *
- * SPEND: it is a second paid provider call inside the same request as the
- * analysis, so it sits inside the SAME `client:consult:vision` rate-limit
- * bucket the analysis route already enforces (40/day/user). No new bucket —
- * what that bucket bounds is total provider spend per client, and this is part
- * of it. One analysis attempt now costs two calls rather than one.
+ *   1. `prepareConsultInspirationRead`  — read-only, no lock. Resolves the
+ *      target and the request hash, and returns an already-stored artefact if
+ *      this exact reference has been read under this exact prompt before.
+ *   2. `performConsultInspirationRead`  — the paid call. NO database handle at
+ *      all, by signature: this is the phase that must not be able to hold a
+ *      row lock while a model is thinking.
+ *   3. `persistLockedConsultInspirationAnalysis` — the revision write, inside
+ *      the finalize transaction alongside the analysis artefact.
+ *
+ * `analyzeLockedConsultInspiration` still composes all three for the narrow
+ * re-read entry point below, which is not on the analysis path.
+ *
+ * SPEND: it is a paid provider call in the same run as the two analysis calls,
+ * so it sits inside the SAME `client:consult:vision` rate-limit bucket the
+ * analysis route enforces at start time (40/day/user). No new bucket — what
+ * that bucket bounds is total provider spend per client, and this is part of
+ * it. One analysis attempt costs three calls, all three metered
+ * (lib/consult/providerMeter.ts).
  */
 
 /**
@@ -214,24 +223,23 @@ function surfacedFailure(kind: ConsultInspirationVisionError['kind']): ConsultWr
 }
 
 /**
- * The locked core. The caller owns the transaction and has already taken the
- * ConsultSession row FOR UPDATE and re-checked scope and consent.
+ * Phase 1 — read-only. Resolve which reference this run reads, and whether it
+ * has already been read under this exact prompt.
+ *
+ * Takes a plain `db` handle rather than a transaction because it must be safe
+ * to call OUTSIDE one: the worker runs it with no lock held. The "locked"
+ * naming stays off this function deliberately — nothing here is locked.
  */
-export async function analyzeLockedConsultInspiration(
-  tx: Prisma.TransactionClient,
+export async function prepareConsultInspirationRead(
+  db: Prisma.TransactionClient,
   args: {
     session: InspirationSessionScope
-    clientId: string
     inspirationRevisionId: string
-    analysisIdempotencyKey: string
-    actor: { type: typeof ConsultActorType.CLIENT; id: string }
     now: Date
-    storage?: ConsultInspirationStorage
-    provider?: ConsultInspirationVisionProvider
   },
-): Promise<ConsultInspirationAnalysisArtefact> {
+): Promise<ConsultInspirationReadPlan> {
   const target: ConsultInspirationReadTarget =
-    await resolveLockedConsultInspirationReadTarget(tx, args.session, args.now)
+    await resolveLockedConsultInspirationReadTarget(db, args.session, args.now)
   const requestHash = inspirationAnalysisRequestHash({
     inspirationRevisionId: args.inspirationRevisionId,
     inspirationId: target.inspirationId,
@@ -241,8 +249,9 @@ export async function analyzeLockedConsultInspiration(
 
   // An artefact already read against this exact reference under this exact
   // prompt is the same artefact. Reuse it rather than paying for the call
-  // again — the request hash is what makes that safe to say.
-  const existing = await tx.consultRevision.findFirst({
+  // again — the request hash is what makes that safe to say. This is also what
+  // makes a RETRIED run cheap: attempt two does not re-read the reference.
+  const existing = await db.consultRevision.findFirst({
     where: {
       consultSessionId: args.session.id,
       kind: ConsultRevisionKind.INSPIRATION_ANALYSIS,
@@ -263,27 +272,68 @@ export async function analyzeLockedConsultInspiration(
     const analysis = storedAnalysis(stored)
     if (stored && analysis) {
       return {
-        revisionId: stored.revisionId,
-        inspirationRevisionId: stored.inspirationRevisionId,
-        inspirationId: stored.inspirationId,
-        source: stored.source,
-        model: stored.model,
-        analysis,
+        target,
+        requestHash,
+        artefact: {
+          revisionId: stored.revisionId,
+          inspirationRevisionId: stored.inspirationRevisionId,
+          inspirationId: stored.inspirationId,
+          source: stored.source,
+          model: stored.model,
+          analysis,
+        },
       }
     }
   }
 
+  return { target, requestHash, artefact: null }
+}
+
+export type ConsultInspirationReadPlan = {
+  target: ConsultInspirationReadTarget
+  requestHash: string
+  /** Non-null when this reference was already read — no call is needed. */
+  artefact: ConsultInspirationAnalysisArtefact | null
+}
+
+/** What phase 2 produces and phase 3 writes. */
+export type ConsultInspirationReadResult = {
+  source: ConsultInspirationAnalysisDTO['source']
+  model: string
+  analysis: ConsultInspirationAnalysis
+}
+
+/**
+ * Phase 2 — the paid call, and NOTHING else.
+ *
+ * 🔴 The absence of a database parameter here is the P4b contract, not an
+ * oversight. Before P4b this work ran inside the analysis transaction, so a
+ * `SELECT ... FOR UPDATE` on the consult was held for the whole of a model's
+ * thinking time. A signature that cannot accept a transaction cannot
+ * accidentally regain that behaviour.
+ */
+export async function performConsultInspirationRead(args: {
+  plan: ConsultInspirationReadPlan
+  consultSessionId: string
+  clientId: string
+  storage?: ConsultInspirationStorage
+  provider?: ConsultInspirationVisionProvider
+  meter?: ConsultProviderMeterSink | null
+}): Promise<ConsultInspirationReadResult> {
   const startedAt = Date.now()
-  const source = sourceDto(target.source)
+  const source = sourceDto(args.plan.target.source)
   const provider = args.provider ?? runConsultInspirationVision
   let result
   try {
-    const read = await mintConsultInspirationReadUrl(target, args.storage)
+    const read = await mintConsultInspirationReadUrl(
+      args.plan.target,
+      args.storage,
+    )
     const image = await fetchConsultInspirationImage(read.url)
-    result = await provider({ image })
+    result = await provider({ image, meter: args.meter })
   } catch (error) {
     logAiConsultInspirationAnalysis({
-      consultId: args.session.id,
+      consultId: args.consultSessionId,
       clientId: args.clientId,
       source,
       outcome:
@@ -308,7 +358,7 @@ export async function analyzeLockedConsultInspiration(
   }
 
   logAiConsultInspirationAnalysis({
-    consultId: args.session.id,
+    consultId: args.consultSessionId,
     clientId: args.clientId,
     source,
     outcome: 'OK',
@@ -317,28 +367,98 @@ export async function analyzeLockedConsultInspiration(
     durationMs: Date.now() - startedAt,
   })
 
+  return { source, model: result.model, analysis: result.analysis }
+}
+
+/**
+ * Phase 3 — the revision write, in the caller's finalize transaction.
+ *
+ * The lifecycle pin on this revision kind admits ANALYZING only, which is
+ * exactly where the finalize transaction runs.
+ */
+export async function persistLockedConsultInspirationAnalysis(
+  tx: Prisma.TransactionClient,
+  args: {
+    consultSessionId: string
+    inspirationRevisionId: string
+    plan: ConsultInspirationReadPlan
+    read: ConsultInspirationReadResult
+    analysisIdempotencyKey: string
+    actor: { type: typeof ConsultActorType.CLIENT; id: string }
+  },
+): Promise<ConsultInspirationAnalysisArtefact> {
   const revision = await appendLockedConsultInspirationAnalysisRevision(tx, {
-    consultSessionId: args.session.id,
+    consultSessionId: args.consultSessionId,
     payload: toArtefactPayload({
       inspirationRevisionId: args.inspirationRevisionId,
-      inspirationId: target.inspirationId,
-      source,
-      analysis: result.analysis,
+      inspirationId: args.plan.target.inspirationId,
+      source: args.read.source,
+      analysis: args.read.analysis,
     }),
-    model: result.model,
+    model: args.read.model,
     idempotencyKey: inspirationAnalysisIdempotencyKey(args.analysisIdempotencyKey),
-    requestHash,
+    requestHash: args.plan.requestHash,
     actor: args.actor,
   })
 
   return {
     revisionId: revision.id,
     inspirationRevisionId: args.inspirationRevisionId,
-    inspirationId: target.inspirationId,
-    source,
-    model: result.model,
-    analysis: result.analysis,
+    inspirationId: args.plan.target.inspirationId,
+    source: args.read.source,
+    model: args.read.model,
+    analysis: args.read.analysis,
   }
+}
+
+/**
+ * The locked core, composed from the three phases above. The caller owns the
+ * transaction and has already taken the ConsultSession row FOR UPDATE and
+ * re-checked scope and consent.
+ *
+ * ⚠️ This composition DOES hold the row lock across the paid call, so it is no
+ * longer on the analysis path — the worker calls the three phases separately.
+ * It survives for the narrow standalone re-read (`analyzeConsultInspiration`),
+ * where there is no analysis in flight and the whole operation is one call.
+ */
+export async function analyzeLockedConsultInspiration(
+  tx: Prisma.TransactionClient,
+  args: {
+    session: InspirationSessionScope
+    clientId: string
+    inspirationRevisionId: string
+    analysisIdempotencyKey: string
+    actor: { type: typeof ConsultActorType.CLIENT; id: string }
+    now: Date
+    storage?: ConsultInspirationStorage
+    provider?: ConsultInspirationVisionProvider
+    meter?: ConsultProviderMeterSink | null
+  },
+): Promise<ConsultInspirationAnalysisArtefact> {
+  const plan = await prepareConsultInspirationRead(tx, {
+    session: args.session,
+    inspirationRevisionId: args.inspirationRevisionId,
+    now: args.now,
+  })
+  if (plan.artefact) return plan.artefact
+
+  const read = await performConsultInspirationRead({
+    plan,
+    consultSessionId: args.session.id,
+    clientId: args.clientId,
+    storage: args.storage,
+    provider: args.provider,
+    meter: args.meter,
+  })
+
+  return persistLockedConsultInspirationAnalysis(tx, {
+    consultSessionId: args.session.id,
+    inspirationRevisionId: args.inspirationRevisionId,
+    plan,
+    read,
+    analysisIdempotencyKey: args.analysisIdempotencyKey,
+    actor: args.actor,
+  })
 }
 
 /** The DTO's attributes back into the engine's type — same shape, same values. */

@@ -423,6 +423,8 @@ const templateCtaLabels: Record<NotificationTemplateKey, string> = {
   rebook_cadence_due: 'Book again',
   saved_look_consult_nudge: 'Ask a question',
   ai_consult_invitation: 'Prepare for your appointment',
+  ai_consult_analysis_ready: 'See my consult',
+  ai_consult_analysis_failed: 'Try again',
   saved_look_price_alternative: 'Explore looks',
   viral_request_approved: 'View request',
   payment_collected: 'View payment',
@@ -544,6 +546,12 @@ const templateRenderers: Record<NotificationTemplateKey, TemplateRendererSet> = 
   ),
   ai_consult_invitation: buildStandardTemplateRenderer(
     templateCtaLabels.ai_consult_invitation,
+  ),
+  ai_consult_analysis_ready: buildStandardTemplateRenderer(
+    templateCtaLabels.ai_consult_analysis_ready,
+  ),
+  ai_consult_analysis_failed: buildStandardTemplateRenderer(
+    templateCtaLabels.ai_consult_analysis_failed,
   ),
   saved_look_price_alternative: buildStandardTemplateRenderer(
     templateCtaLabels.saved_look_price_alternative,

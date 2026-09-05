@@ -245,6 +245,7 @@ import { POST as attachCapture } from '@/app/api/v1/client/consult/[id]/capture/
 import { POST as issueUpload } from '@/app/api/v1/client/consult/[id]/capture/uploads/route'
 import { POST as checkQuality } from '@/app/api/v1/client/consult/[id]/capture/[captureId]/quality/route'
 import { POST as startAnalysis } from '@/app/api/v1/client/consult/[id]/analysis/route'
+import { processConsultAnalysisRuns } from '@/lib/consult/analysisRunner'
 import {
   CONSULT_ANALYSIS_PROMPT_VERSION,
   CONSULT_ANALYSIS_SCHEMA_VERSION,
@@ -510,8 +511,15 @@ async function status(sessionId: string) {
   ).status
 }
 
-function runAnalysis(consult: Consult, label: string) {
-  return startAnalysis(
+/**
+ * Start the analysis AND drain the run it queues.
+ *
+ * P4b split those into two steps: the request claims and returns, the worker
+ * analyzes. These tests assert on the stored artefact, so they need both — the
+ * production equivalent is the in-request kick plus the every-minute cron.
+ */
+async function runAnalysis(consult: Consult, label: string) {
+  const started = await startAnalysis(
     jsonRequest(`/api/v1/client/consult/${consult.sessionId}/analysis`, {
       idempotencyKey: `${label}-analysis`,
       schemaVersion: CONSULT_ANALYSIS_SCHEMA_VERSION,
@@ -519,6 +527,10 @@ function runAnalysis(consult: Consult, label: string) {
     }),
     context(consult.sessionId),
   )
+  if (started.status === 200) {
+    await processConsultAnalysisRuns({ take: 1 })
+  }
+  return started
 }
 
 beforeAll(async () => {

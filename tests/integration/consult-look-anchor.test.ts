@@ -450,7 +450,10 @@ import { POST as attachCapture } from '@/app/api/v1/client/consult/[id]/capture/
 import { POST as checkQuality } from '@/app/api/v1/client/consult/[id]/capture/[captureId]/quality/route'
 import { POST as proceedCapture } from '@/app/api/v1/client/consult/[id]/capture/proceed/route'
 import { POST as issueUpload } from '@/app/api/v1/client/consult/[id]/capture/uploads/route'
-import { POST as startAnalysis } from '@/app/api/v1/client/consult/[id]/analysis/route'
+import {
+  GET as readAnalysis,
+  POST as startAnalysis,
+} from '@/app/api/v1/client/consult/[id]/analysis/route'
 import { GET as getLookAvailability } from '@/app/api/v1/client/consult/look/availability/route'
 import { POST as startLookConsult } from '@/app/api/v1/client/consult/look/route'
 import {
@@ -479,6 +482,10 @@ import {
   HAIR_COLOR_INTAKE_SCHEMA_VERSION,
 } from '@/lib/consult/intakePack'
 import { loadAuthorizedClientConsultResults } from '@/lib/consult/clientResults'
+import type { ConsultAnalysisRunDTO } from '@/lib/dto/consult'
+import { processConsultAnalysisRuns } from '@/lib/consult/analysisRunner'
+import { readConsultProviderCalls } from '@/lib/consult/providerMeter'
+import { formatConsultProviderCost } from '@/lib/consult/providerCost'
 import { analyzeConsultInspiration } from '@/lib/consult/inspirationAnalysisContract'
 import {
   CONSULT_INSPIRATION_ANALYSIS_PROMPT_VERSION,
@@ -1343,17 +1350,7 @@ describe('a look-anchored consult reaches analysis results', () => {
     // (VIEW_MISMATCH, measured 2026-09-04) — a partial pack is a supported
     // state, and forcing those through would mean faking the gate this run
     // exists to exercise.
-    for (const shotKey of (live.on
-      ? (['hair_back', 'hair_left', 'hair_right', 'hair_crown'] as const)
-      : ([
-          'hair_back',
-          'hair_left',
-          'hair_right',
-          'hair_crown',
-          'face_front',
-          'face_side',
-          'eyes_closeup',
-        ] as const))) {
+    for (const shotKey of live.on ? LIVE_SHOT_KEYS : MOCK_SHOT_KEYS) {
       await attachAcceptedCapture(sessionId, shotKey, 'e2e')
     }
 
@@ -1397,6 +1394,165 @@ describe('a look-anchored consult reaches analysis results', () => {
       )
     }
     expect(analysis.status).toBe(200)
+
+    // ── P4b: the start request RETURNS. It does not analyze. ─────────────
+    // The session is claimed and a run is queued; the three paid calls have
+    // not happened yet. Asserting COMPLETED here — which is what this test
+    // used to do — is exactly the behaviour P4b removed.
+    const started = (await body(analysis)) as {
+      analysis: { status: string; run: ConsultAnalysisRunDTO | null }
+    }
+    expect(started.analysis.status).toBe(ConsultSessionStatus.ANALYZING)
+    expect(started.analysis.run).toMatchObject({
+      status: 'QUEUED',
+      stage: 'QUEUED',
+      attemptCount: 0,
+      finishedAt: null,
+      retryable: false,
+    })
+    const runId = started.analysis.run?.runId
+    expect(runId).toBeTruthy()
+    // The photo count on the waiting screen is what this run will ACTUALLY
+    // read — the accepted, unexpired captures — not the number of shots the
+    // client attached. Those differ: the live quality gate genuinely rejects
+    // some of the synthetic fixtures, and it rejects a different number on
+    // different runs. Asserting the attached count instead would be asserting
+    // the mock, and it fails the moment the real gate does its job.
+    const acceptedCaptureCount = await db.consultCapture.count({
+      where: {
+        consultSessionId: sessionId,
+        status: 'ACCEPTED',
+        purgedAt: null,
+      },
+    })
+    expect(acceptedCaptureCount).toBeGreaterThan(0)
+    expect(started.analysis.run?.photoCount).toBe(acceptedCaptureCount)
+
+    // The worker, started but NOT awaited — so the poll below runs against a
+    // run that is genuinely in flight, which is the only way the stage
+    // transitions can be observed at all.
+    const worker = processConsultAnalysisRuns({ take: 1 })
+
+    const stageLog: Array<{ at: number; status: string; stage: string }> = []
+    const pollStartedAt = Date.now()
+    const deadline = pollStartedAt + (live.on ? 480_000 : 30_000)
+    let settled: { status: string; run: ConsultAnalysisRunDTO | null } | null =
+      null
+    while (Date.now() < deadline) {
+      const polled = await readAnalysis(
+        new Request(`http://test/api/v1/client/consult/${sessionId}/analysis`),
+        context(sessionId),
+      )
+      if (polled.status !== 200) {
+        // Same reasoning as the start call above: every consult failure is
+        // some flavour of 4xx/5xx and only the body names which.
+        console.log(
+          `poll refused: ${polled.status} ${JSON.stringify(await body(polled.clone()))}`,
+        )
+      }
+      expect(polled.status).toBe(200)
+      const state = (
+        (await body(polled)) as {
+          analysis: { status: string; run: ConsultAnalysisRunDTO | null }
+        }
+      ).analysis
+      const last = stageLog.at(-1)
+      if (
+        state.run &&
+        (!last || last.status !== state.run.status || last.stage !== state.run.stage)
+      ) {
+        stageLog.push({
+          at: Date.now() - pollStartedAt,
+          status: state.run.status,
+          stage: state.run.stage,
+        })
+      }
+      if (
+        state.status === ConsultSessionStatus.COMPLETED ||
+        state.run?.status === 'FAILED'
+      ) {
+        settled = state
+        break
+      }
+      // The real client's cadence in live mode. Mocked runs finish in
+      // milliseconds, so a 5s tick there would just make the suite slow.
+      await new Promise((resolve) => setTimeout(resolve, live.on ? 5_000 : 25))
+    }
+    const workerOutcomes = await worker
+
+    if (settled?.run?.status === 'FAILED') {
+      console.log(
+        `analysis run FAILED: ${settled.run.failureCode} after ${settled.run.attemptCount} attempt(s)`,
+      )
+    }
+    expect(settled?.status).toBe(ConsultSessionStatus.COMPLETED)
+    expect(workerOutcomes.outcomes[0]?.result).toBe('COMPLETED')
+
+    // The stored run record, as the client saw it settle.
+    const runRecord = await db.consultAnalysisRun.findUniqueOrThrow({
+      where: { id: runId },
+    })
+    expect(runRecord).toMatchObject({
+      status: 'COMPLETED',
+      stage: 'DONE',
+      attemptCount: 1,
+      failureCode: null,
+    })
+    expect(runRecord.startedAt).toBeInstanceOf(Date)
+    expect(runRecord.finishedAt).toBeInstanceOf(Date)
+    expect(runRecord.analysisRevisionId).toBeTruthy()
+    // 🔴 The claim happened exactly once, and stayed happened. A retry that
+    // walked the session back to ANALYSIS_PENDING could never re-claim it —
+    // `ConsultAuditEvent_one_analysis_claim_transition` permits one such audit
+    // row per consult for all time.
+    expect(
+      await db.consultAuditEvent.count({
+        where: {
+          consultSessionId: sessionId,
+          action: 'LIFECYCLE_TRANSITIONED',
+          fromStatus: ConsultSessionStatus.ANALYSIS_PENDING,
+          toStatus: ConsultSessionStatus.ANALYZING,
+        },
+      }),
+    ).toBe(1)
+
+    // Every paid call this consult made, metered.
+    const meterRows = await readConsultProviderCalls(sessionId)
+    const runCalls = meterRows.filter((row) => row.analysisRunId === runId)
+
+    if (live.on) {
+      // The capture gates are attributed to the session with NO run — they ran
+      // in their own earlier requests, before this run existed — and the three
+      // calls this run made carry its id, in the order it made them.
+      expect(runCalls.map((row) => row.kind)).toEqual([
+        'INSPIRATION_READ',
+        'ANALYSIS_PROFILE',
+        'ANALYSIS_DIRECTION',
+      ])
+      // One gate row per photo SUBMITTED — including the ones the gate
+      // rejected. A rejected photo cost exactly as much as an accepted one,
+      // and a meter that only counted the accepted ones would under-report
+      // every consult where a client retook a shot.
+      expect(
+        meterRows.filter(
+          (row) => row.kind === 'CAPTURE_GATE' && row.analysisRunId === null,
+        ).length,
+      ).toBe(LIVE_SHOT_KEYS.length)
+      expect(meterRows.every((row) => row.outcome === 'OK')).toBe(true)
+      expect(runCalls.every((row) => row.inputTokens > 0)).toBe(true)
+      expect(runCalls.every((row) => row.latencyMs > 0)).toBe(true)
+      // claude-sonnet-5 is in the committed price table, so every row must
+      // carry a price. A null here means the model routed somewhere the repo
+      // has no rate for — which is a thing to know, not to round to zero.
+      expect(runCalls.every((row) => row.costMicroUsd !== null)).toBe(true)
+    } else {
+      // 🔴 The mocked run must meter NOTHING, and that is the assertion — not
+      // an omission. Every provider is replaced above the SDK, so no call is
+      // made and no money is spent; a meter row here would mean the meter is
+      // inventing spend, which is worse than not measuring it at all.
+      expect(meterRows).toEqual([])
+    }
+
     expect(
       await db.consultSession.findUniqueOrThrow({
         where: { id: sessionId },
@@ -1458,7 +1614,14 @@ describe('a look-anchored consult reaches analysis results', () => {
     }
 
     if (live.on) {
-      reportLiveRun({ sessionId, results, brief })
+      reportLiveRun({
+        sessionId,
+        results,
+        brief,
+        run: runRecord,
+        stageLog,
+        meterRows,
+      })
     }
   },
   // 🔴 The mocked path finishes in ~400ms and inherits vitest's 5s default.
@@ -1474,17 +1637,119 @@ describe('a look-anchored consult reaches analysis results', () => {
  * latencies and the paid-call inventory, printed where a person can read them.
  * Assertions prove the pipeline works; this says what the model actually did.
  */
+/**
+ * The views the E2E attaches, and therefore both the run's `photoCount` and
+ * the number of CAPTURE_GATE meter rows it should produce.
+ *
+ * LIVE mode attaches only the four HAIR views. The eval face fixtures are
+ * 1.8KB placeholders and the real quality gate correctly refuses them
+ * (VIEW_MISMATCH, measured 2026-09-04) — a partial pack is a supported state,
+ * and forcing those through would mean faking the gate this run exists to
+ * exercise.
+ */
+const LIVE_SHOT_KEYS = [
+  'hair_back',
+  'hair_left',
+  'hair_right',
+  'hair_crown',
+] as const
+const MOCK_SHOT_KEYS = [
+  'hair_back',
+  'hair_left',
+  'hair_right',
+  'hair_crown',
+  'face_front',
+  'face_side',
+  'eyes_closeup',
+] as const
+
 function reportLiveRun(args: {
   sessionId: string
   results: { styleDirections: unknown[] }
   brief: unknown
+  run: {
+    id: string
+    status: string
+    stage: string
+    attemptCount: number
+    maxAttempts: number
+    photoCount: number
+    createdAt: Date
+    startedAt: Date | null
+    finishedAt: Date | null
+    failureCode: string | null
+    analysisRevisionId: string | null
+  }
+  stageLog: Array<{ at: number; status: string; stage: string }>
+  meterRows: Array<{
+    kind: string
+    outcome: string
+    model: string
+    analysisRunId: string | null
+    inputTokens: number
+    outputTokens: number
+    cacheCreationInputTokens: number
+    cacheReadInputTokens: number
+    latencyMs: number
+    costMicroUsd: number | null
+  }>
 }): void {
+  const run = args.run
+  const wallClockMs =
+    run.finishedAt && run.startedAt
+      ? run.finishedAt.getTime() - run.startedAt.getTime()
+      : null
+  const totalMicroUsd = args.meterRows.reduce(
+    (sum, row) => sum + (row.costMicroUsd ?? 0),
+    0,
+  )
+  const unpriced = args.meterRows.filter((row) => row.costMicroUsd === null)
+
   const lines: string[] = [
     '',
     '═'.repeat(78),
     `LIVE consult run — session ${args.sessionId}`,
     '═'.repeat(78),
-    `paid provider calls: ${live.calls.length}`,
+    '',
+    '· RUN RECORD (P4b) ·',
+    `  id             ${run.id}`,
+    `  status/stage   ${run.status} / ${run.stage}`,
+    `  attempts       ${run.attemptCount} of ${run.maxAttempts}`,
+    `  photos read    ${run.photoCount}`,
+    `  queued         ${run.createdAt.toISOString()}`,
+    `  started        ${run.startedAt?.toISOString() ?? '—'}`,
+    `  finished       ${run.finishedAt?.toISOString() ?? '—'}`,
+    `  wall clock     ${wallClockMs === null ? '—' : `${wallClockMs}ms`}`,
+    `  failure code   ${run.failureCode ?? 'none'}`,
+    `  artefact       ${run.analysisRevisionId ?? 'none'}`,
+    '',
+    '· STAGE TRANSITIONS (as the polling client saw them) ·',
+    ...args.stageLog.map(
+      (entry) =>
+        `  +${String(entry.at).padStart(7)}ms  ${entry.status.padEnd(9)} ${entry.stage}`,
+    ),
+    '',
+    '· PROVIDER CALL METER ·',
+    ...args.meterRows.map((row) => {
+      const scope = row.analysisRunId ? 'run' : 'session'
+      const cache =
+        row.cacheCreationInputTokens || row.cacheReadInputTokens
+          ? ` cache(w=${row.cacheCreationInputTokens} r=${row.cacheReadInputTokens})`
+          : ''
+      return (
+        `  ${row.kind.padEnd(18)} ${row.outcome.padEnd(4)} ${scope.padEnd(7)}` +
+        ` ${String(row.latencyMs).padStart(6)}ms` +
+        ` in=${String(row.inputTokens).padStart(6)}` +
+        ` out=${String(row.outputTokens).padStart(5)}${cache}` +
+        `  ${formatConsultProviderCost(row.costMicroUsd)}  ${row.model}`
+      )
+    }),
+    `  ${'—'.repeat(70)}`,
+    `  TOTAL ${args.meterRows.length} paid calls` +
+      `  ${formatConsultProviderCost(totalMicroUsd)}` +
+      (unpriced.length > 0 ? `  (+${unpriced.length} unpriced)` : ''),
+    '',
+    `provider calls recorded by the SDK wrapper: ${live.calls.length}`,
     `total provider latency: ${live.calls.reduce((sum, call) => sum + call.latencyMs, 0)}ms`,
     '',
   ]
@@ -1629,6 +1894,10 @@ describe('P4 — the inspiration reference is read, stored, and reaches both aud
       context(sessionId),
     )
     expect(analysis.status).toBe(200)
+    // P4b: the start request only queues the run. The artefact this test is
+    // about is written by the worker's finalize transaction, so drain it.
+    const drained = await processConsultAnalysisRuns({ take: 1 })
+    expect(drained.outcomes[0]?.result).toBe('COMPLETED')
 
     // 1. The artefact exists, as its own revision, under its own versions.
     const inspirationRevision = await db.consultRevision.findFirstOrThrow({

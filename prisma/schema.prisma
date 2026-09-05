@@ -642,6 +642,13 @@ enum NotificationEventKey {
   // C5 exposure block keeps the emitter dark until a reviewed live baseline
   // and candidate have passed.
   AI_CONSULT_INVITATION
+  /// P4b: the client's plan finished building while she was away from the
+  /// screen. Transactional — she asked for it, it is about her own request,
+  /// and it is the only thing that tells her the wait is over.
+  AI_CONSULT_ANALYSIS_READY
+  /// P4b: the run exhausted its attempts. Carries no failure detail, only the
+  /// door back to the retry.
+  AI_CONSULT_ANALYSIS_FAILED
   BOOKING_STARTED
   BOOKING_RESCHEDULED
   BOOKING_CANCELLED_BY_CLIENT
@@ -7363,6 +7370,63 @@ enum ConsultInspirationStatus {
   REMOVED
 }
 
+/// P4b: the lifecycle of one background analysis attempt-set. QUEUED and
+/// RUNNING are the two live states the client polls; COMPLETED and FAILED are
+/// terminal for THIS run. A failed run is never resumed — the client's retry
+/// creates a NEW run against the same claim (see ConsultAnalysisRun).
+enum ConsultAnalysisRunStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+/// What the run is doing right now, in the client's language. The web and iOS
+/// progress copy is keyed off this and nothing else, so a stage that never
+/// appears here can never appear on screen.
+enum ConsultAnalysisRunStage {
+  /// Claimed, not yet picked up by a worker.
+  QUEUED
+  /// Downloading and re-verifying the client's own capture objects.
+  READING_PHOTOS
+  /// The inspiration read (Stage 1) — one paid call, skipped when the consult
+  /// carries no reference.
+  UNDERSTANDING_REFERENCE
+  /// The two analysis calls: feature profile, then the direction grounded in it.
+  BUILDING_PLAN
+  /// Provider work is done; the finalize transaction is writing the artefact.
+  FINALIZING
+  /// Terminal for a COMPLETED run. A FAILED run keeps the stage it died in,
+  /// which is the cheapest signal for where the pipeline is losing runs.
+  DONE
+}
+
+/// Which paid provider call a meter row measures. Every entry corresponds to
+/// exactly one `messages.create` this repo issues for a consult; adding a call
+/// site without adding a member here is what the meter exists to prevent.
+enum ConsultProviderCallKind {
+  /// lib/consult/captureVision.ts — the per-photo quality gate. One per shot,
+  /// billed in its own earlier request, before any run exists.
+  CAPTURE_GATE
+  /// lib/consult/inspirationVision.ts — Stage 1, the client's reference.
+  INSPIRATION_READ
+  /// lib/consult/analysisEngine.ts, call 1 — the feature profile.
+  ANALYSIS_PROFILE
+  /// lib/consult/analysisEngine.ts, call 2 — the direction.
+  ANALYSIS_DIRECTION
+}
+
+/// How a metered call ended. A call that failed still cost money whenever the
+/// provider answered at all, so the meter records the outcome rather than only
+/// recording successes — an UNAVAILABLE row with zero tokens is a call that
+/// never reached the model, and the two must stay distinguishable.
+enum ConsultProviderCallOutcome {
+  OK
+  REFUSED
+  BAD_OUTPUT
+  UNAVAILABLE
+}
+
 /// A client's pre-visit AI consult (ai-consult.md). Phase 0 is booking-attached
 /// and founder-gated (lib/consult/access.ts, the technical-record allowlist
 /// precedent): a client runs a consult tied to an upcoming booking, and the
@@ -7441,6 +7505,8 @@ model ConsultSession {
   uploadSessions       UploadSession[]
   serviceEstimate      ConsultServiceEstimate?
   bookingProposals     ConsultBookingProposal[]
+  analysisRuns         ConsultAnalysisRun[]
+  providerCalls        ConsultProviderCall[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -7710,6 +7776,119 @@ model ConsultAuditEvent {
   @@index([revisionId])
   @@index([captureId])
   @@index([inspirationId])
+}
+
+/// P4b: one background execution of the analysis pipeline.
+///
+/// The run IS the queue — there is no separate job row. It carries its own
+/// `runAt`/`claimedAt` lease so the dedicated runner
+/// (/api/internal/jobs/consult-analysis/process) can claim it exactly once,
+/// and the every-minute cron backstops the in-request kick.
+///
+/// 🔴 The claim and the run are deliberately different things. The
+/// ANALYSIS_PENDING → ANALYZING lifecycle transition is the CLAIM, and the
+/// database permits it at most once per session for all time
+/// (`ConsultAuditEvent_one_analysis_claim_transition`). So a retry must NEVER
+/// return the session to ANALYSIS_PENDING: it stays in ANALYZING and gets a
+/// new run row. `attemptCount` is the within-run retry budget the worker
+/// spends; a fresh row is what the client's retry button creates.
+model ConsultAnalysisRun {
+  id String @id @default(cuid())
+
+  consultSessionId String
+  consultSession   ConsultSession @relation(fields: [consultSessionId], references: [id], onDelete: Cascade)
+
+  status ConsultAnalysisRunStatus @default(QUEUED)
+  stage  ConsultAnalysisRunStage  @default(QUEUED)
+
+  /// Within-run retries. The worker re-queues a transient failure until this
+  /// reaches `maxAttempts`, then marks the run FAILED.
+  attemptCount Int @default(0)
+  maxAttempts  Int @default(3)
+
+  /// The client's key for the whole analysis, replayed verbatim onto the
+  /// artefact — so a retried run writes the SAME revision the first attempt
+  /// would have, and the one-analysis-per-session index stays meaningful.
+  idempotencyKey String
+  schemaVersion  Int
+  promptVersion  String
+
+  /// The prerequisite fingerprint taken at claim time. The finalize
+  /// transaction recomputes it and refuses to write if the client changed her
+  /// intake, reference, or photos while the model was thinking.
+  requestHash String
+
+  /// How many of the client's photos this run reads. Shown on the waiting
+  /// screen ("reading 4 photos"), so it is a product field, not a debug one.
+  photoCount Int @default(0)
+
+  /// Lease + timing. `runAt` is when the run becomes claimable (retry
+  /// backoff); `claimedAt` is the lease stamp a stale-claim sweep reads.
+  runAt      DateTime  @default(now())
+  claimedAt  DateTime?
+  startedAt  DateTime?
+  finishedAt DateTime?
+
+  /// On FAILED: the surfaced client code (the same vocabulary the API
+  /// returns), plus the raw message for operators. Never rendered to a client.
+  failureCode String?
+  lastError   String?
+
+  /// The artefact this run produced, on COMPLETED.
+  analysisRevisionId String?
+
+  providerCalls ConsultProviderCall[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// The runner's claim scan: due work, oldest first.
+  @@index([status, runAt, createdAt, id])
+  /// "What is my consult doing?" — the client poll, and the one-live-run check.
+  @@index([consultSessionId, createdAt])
+}
+
+/// P4b: one paid provider call, metered.
+///
+/// Keyed on the SESSION, not the run, because the capture gates are billed in
+/// their own earlier requests — before a run exists — and a consult's true
+/// cost is the sum across all of them. `analysisRunId` is set for the three
+/// calls a run makes and null for the gates.
+///
+/// Token counts are the provider's own `usage`; `costMicroUsd` is derived from
+/// them by lib/consult/providerCost.ts and is NULL when the model is not in
+/// that price table — an unpriced call records what it spent in tokens rather
+/// than inventing a dollar figure.
+model ConsultProviderCall {
+  id String @id @default(cuid())
+
+  consultSessionId String
+  consultSession   ConsultSession @relation(fields: [consultSessionId], references: [id], onDelete: Cascade)
+
+  analysisRunId String?
+  analysisRun   ConsultAnalysisRun? @relation(fields: [analysisRunId], references: [id], onDelete: SetNull)
+
+  kind    ConsultProviderCallKind
+  outcome ConsultProviderCallOutcome
+  model   String
+
+  inputTokens              Int @default(0)
+  outputTokens             Int @default(0)
+  cacheCreationInputTokens Int @default(0)
+  cacheReadInputTokens     Int @default(0)
+
+  /// Wall-clock around the provider call itself, including SDK retries.
+  latencyMs Int
+
+  /// Millionths of a US dollar. NULL means "this model has no committed
+  /// price in the repo", never "free".
+  costMicroUsd Int?
+
+  createdAt DateTime @default(now())
+
+  @@index([consultSessionId, createdAt])
+  @@index([analysisRunId, createdAt])
+  @@index([createdAt])
 }
 
 enum ConsultServiceEstimateStatus {

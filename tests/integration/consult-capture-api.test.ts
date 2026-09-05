@@ -316,6 +316,7 @@ import { POST as issueUpload } from '@/app/api/v1/client/consult/[id]/capture/up
 import { POST as checkQuality } from '@/app/api/v1/client/consult/[id]/capture/[captureId]/quality/route'
 import { DELETE as deleteCapture } from '@/app/api/v1/client/consult/[id]/capture/[captureId]/route'
 import { GET as getAnalysis, POST as startAnalysis } from '@/app/api/v1/client/consult/[id]/analysis/route'
+import { processConsultAnalysisRuns } from '@/lib/consult/analysisRunner'
 import {
   CONSULT_ANALYSIS_PROMPT_VERSION,
   CONSULT_ANALYSIS_SCHEMA_VERSION,
@@ -705,7 +706,11 @@ async function attachExternalInspiration(consult: ReadyConsult, suffix: string) 
   return row
 }
 
-function analysisRequest(consult: ReadyConsult, idempotencyKey: string) {
+/**
+ * Just the START request: claims the analysis, queues a run, returns. Makes no
+ * provider call (P4b).
+ */
+function startAnalysisRequest(consult: ReadyConsult, idempotencyKey: string) {
   return startAnalysis(
     jsonRequest(`/api/v1/client/consult/${consult.sessionId}/analysis`, {
       idempotencyKey,
@@ -714,6 +719,18 @@ function analysisRequest(consult: ReadyConsult, idempotencyKey: string) {
     }),
     context(consult.sessionId),
   )
+}
+
+/**
+ * Start AND run, for the tests that assert on the finished artefact. In
+ * production the two halves are the in-request kick and the every-minute cron.
+ */
+async function analysisRequest(consult: ReadyConsult, idempotencyKey: string) {
+  const started = await startAnalysisRequest(consult, idempotencyKey)
+  if (started.status === 200) {
+    await processConsultAnalysisRuns({ take: 1 })
+  }
+  return started
 }
 
 beforeAll(async () => {
@@ -1500,12 +1517,23 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
       select: { revisionSequence: true },
     })
 
+    // Both starts race the claim. P4b makes the loser's answer the LIVE RUN
+    // rather than a second claim, so a double-tap costs nothing: one claim,
+    // one run, one paid analysis.
     const [first, retry] = await Promise.all([
-      analysisRequest(consult, 'canonical-analysis'),
-      analysisRequest(consult, 'canonical-analysis'),
+      startAnalysisRequest(consult, 'canonical-analysis'),
+      startAnalysisRequest(consult, 'canonical-analysis'),
     ])
     expect(first.status).toBe(200)
     expect(retry.status).toBe(200)
+    expect(
+      await db.consultAnalysisRun.count({
+        where: { consultSessionId: consult.sessionId },
+      }),
+    ).toBe(1)
+    expect(fake.analysisCalls).toBe(0)
+
+    await processConsultAnalysisRuns({ take: 1 })
     expect(fake.analysisCalls).toBe(1)
     expect([await body(first), await body(retry)]).toEqual(
       expect.arrayContaining([
@@ -1760,16 +1788,52 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
       select: { revisionSequence: true },
     })
     fake.analysisFails = true
-    const failed = await analysisRequest(consult, 'provider-failure')
-    expect(failed.status).toBe(503)
-    expect(await body(failed)).toMatchObject({ code: 'CONSULT_ANALYSIS_UNAVAILABLE' })
+
+    // P4b: the START always succeeds — it makes no provider call. The failure
+    // happens in the worker and lands on the RUN, which is the thing the
+    // client is polling.
+    const started = await startAnalysisRequest(consult, 'provider-failure')
+    expect(started.status).toBe(200)
+
+    // The run spends its whole attempt budget, one drain per attempt. Each
+    // retry is scheduled 15s out, so the drain has to be given a clock that
+    // has reached it — otherwise the run simply is not due and nothing runs.
+    const attempts: string[] = []
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const drained = await processConsultAnalysisRuns({
+        now: new Date(Date.now() + attempt * 20_000),
+        take: 1,
+      })
+      attempts.push(drained.outcomes[0]?.result ?? 'NOTHING_DUE')
+    }
+    expect(attempts).toEqual([
+      'RETRY_SCHEDULED',
+      'RETRY_SCHEDULED',
+      'FAILED_FINAL',
+    ])
+    expect(fake.analysisCalls).toBe(3)
+
+    const failedRun = await db.consultAnalysisRun.findFirstOrThrow({
+      where: { consultSessionId: consult.sessionId },
+      orderBy: { createdAt: 'desc' },
+    })
+    expect(failedRun).toMatchObject({
+      status: 'FAILED',
+      attemptCount: 3,
+      failureCode: 'ANALYSIS_UNAVAILABLE',
+    })
+
+    // Nothing durable was written, and the session is parked in ANALYZING —
+    // NOT walked back to ANALYSIS_PENDING. Walking it back is what would wedge
+    // the consult forever: the claim audit index below permits one such row
+    // per consult for all time, so a second claim could never be recorded.
     expect(
       await db.consultSession.findUniqueOrThrow({
         where: { id: consult.sessionId },
         select: { status: true, revisionSequence: true },
       }),
     ).toEqual({
-      status: ConsultSessionStatus.ANALYSIS_PENDING,
+      status: ConsultSessionStatus.ANALYZING,
       revisionSequence: before.revisionSequence,
     })
     expect(
@@ -1777,6 +1841,26 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
         where: { consultSessionId: consult.sessionId, kind: 'ANALYSIS' },
       }),
     ).toBe(0)
+
+    // The retry: a NEW run against the SAME claim, under the same idempotency
+    // key, and it completes.
+    fake.analysisFails = false
+    const recovered = await analysisRequest(consult, 'provider-failure')
+    expect(recovered.status).toBe(200)
+    expect(fake.analysisCalls).toBe(4)
+    expect(
+      await db.consultSession.findUniqueOrThrow({
+        where: { id: consult.sessionId },
+        select: { status: true },
+      }),
+    ).toEqual({ status: ConsultSessionStatus.COMPLETED })
+    expect(
+      await db.consultAnalysisRun.count({
+        where: { consultSessionId: consult.sessionId },
+      }),
+    ).toBe(2)
+
+    // 🔴 Still exactly ONE claim transition, across a failure and a recovery.
     expect(
       await db.consultAuditEvent.count({
         where: {
@@ -1785,12 +1869,69 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
           toStatus: ConsultSessionStatus.ANALYZING,
         },
       }),
-    ).toBe(0)
+    ).toBe(1)
+  })
 
-    fake.analysisFails = false
-    const recovered = await analysisRequest(consult, 'provider-failure')
-    expect(recovered.status).toBe(200)
-    expect(fake.analysisCalls).toBe(2)
+  it('recovers a run whose worker died mid-flight, once its lease expires', async () => {
+    // 🔴 The only thing standing between a killed function (a deploy, an OOM,
+    // a platform timeout) and a client watching a spinner forever. The run is
+    // left RUNNING with a stale `claimedAt` and nothing to finish it; the
+    // stale-lease sweep is what picks it back up.
+    //
+    // Worth its own test because the failure mode is SILENCE: a run stuck in
+    // RUNNING throws nothing, logs nothing, and notifies nobody. If this path
+    // regressed, every other test in this file would still pass.
+    const consult = await createReadyConsult('analysis-stale-lease')
+    authenticate(consult)
+    await completeCapturePack(consult, 'analysis-stale-lease')
+
+    const started = await startAnalysisRequest(consult, 'stale-lease')
+    expect(started.status).toBe(200)
+
+    // Simulate the worker that claimed it and then vanished.
+    const abandonedAt = new Date(Date.now() - 10 * 60_000)
+    await db.consultAnalysisRun.updateMany({
+      where: { consultSessionId: consult.sessionId },
+      data: {
+        status: 'RUNNING',
+        stage: 'BUILDING_PLAN',
+        claimedAt: abandonedAt,
+        startedAt: abandonedAt,
+        attemptCount: 1,
+      },
+    })
+
+    // A sweep BEFORE the lease expires must leave it alone — otherwise two
+    // workers analyze the same consult and the client pays twice.
+    const tooSoon = await processConsultAnalysisRuns({
+      now: new Date(abandonedAt.getTime() + 60_000),
+      take: 1,
+    })
+    expect(tooSoon.scannedCount).toBe(0)
+    expect(
+      await db.consultAnalysisRun.findFirstOrThrow({
+        where: { consultSessionId: consult.sessionId },
+        select: { status: true },
+      }),
+    ).toEqual({ status: 'RUNNING' })
+
+    // Past the lease (420s), it is claimable again and finishes.
+    const recovered = await processConsultAnalysisRuns({ take: 1 })
+    expect(recovered.outcomes[0]?.result).toBe('COMPLETED')
+    expect(
+      await db.consultSession.findUniqueOrThrow({
+        where: { id: consult.sessionId },
+        select: { status: true },
+      }),
+    ).toEqual({ status: ConsultSessionStatus.COMPLETED })
+
+    // Recovery re-used the SAME run — a fresh row would have meant two runs
+    // for one claim, which the live-run index exists to prevent.
+    const runs = await db.consultAnalysisRun.findMany({
+      where: { consultSessionId: consult.sessionId },
+    })
+    expect(runs).toHaveLength(1)
+    expect(runs[0]).toMatchObject({ status: 'COMPLETED', attemptCount: 2 })
   })
 
   it('keeps completed analysis durable and lets cleanup retry a failed post-commit purge', async () => {
@@ -1940,20 +2081,30 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
         data: { status: BookingStatus.CANCELLED },
       })
     }
-    const response = await analysisRequest(consult, 'cancel-race')
-    expect(response.status).toBe(409)
+    // P4b: the discard happens in the RUN, which is where the provider call
+    // now lives. The client's start request already returned 200; what she
+    // learns is that the run failed, and the refusal code says why.
+    const response = await startAnalysisRequest(consult, 'cancel-race')
+    expect(response.status).toBe(200)
+    const drained = await processConsultAnalysisRuns({ take: 1 })
+    expect(drained.outcomes[0]).toMatchObject({
+      result: 'FAILED_FINAL',
+      failureCode: 'BOOKING_INELIGIBLE',
+    })
     expect(fake.analysisCalls).toBe(1)
     expect(
       await db.consultRevision.count({
         where: { consultSessionId: consult.sessionId, kind: 'ANALYSIS' },
       }),
     ).toBe(0)
+    // The claim stands; the run is what failed. Walking the session back to
+    // ANALYSIS_PENDING is the move that would make it unclaimable forever.
     expect(
       await db.consultSession.findUniqueOrThrow({
         where: { id: consult.sessionId },
         select: { status: true },
       }),
-    ).toEqual({ status: ConsultSessionStatus.ANALYSIS_PENDING })
+    ).toEqual({ status: ConsultSessionStatus.ANALYZING })
     expect(
       await db.consultCapture.count({
         where: {
@@ -2531,15 +2682,25 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
     // P4 — the failure path first, on the SAME consult, so the refusal is
     // proven against a session that is otherwise ready to analyze.
     //
-    // An unreadable reference surfaces its own 422 and rolls the whole run
-    // back: no analysis revision, no artefact, and the session is left where a
-    // retry can pick it up. Part 0 rule 4 — no silent fall-back to a
-    // picture-blind analysis, and none to the old static question list.
+    // An unreadable reference fails the RUN and writes nothing: no analysis
+    // revision, no artefact, and the client is left with a retry. Part 0 rule
+    // 4 — no silent fall-back to a picture-blind analysis, and none to the old
+    // static question list.
+    //
+    // P4b: it is TERMINAL on the first attempt rather than burning the retry
+    // budget. The same photograph read three times is the same non-answer and
+    // two more paid calls.
     fake.inspirationUnreadable = true
     const refused = await analysisRequest(consult, 'external-unreadable')
-    expect(refused.status).toBe(422)
-    expect(await refused.json()).toMatchObject({
-      code: 'CONSULT_INSPIRATION_ANALYSIS_UNREADABLE',
+    expect(refused.status).toBe(200)
+    const unreadableRun = await db.consultAnalysisRun.findFirstOrThrow({
+      where: { consultSessionId: consult.sessionId },
+      orderBy: { createdAt: 'desc' },
+    })
+    expect(unreadableRun).toMatchObject({
+      status: 'FAILED',
+      attemptCount: 1,
+      failureCode: 'INSPIRATION_ANALYSIS_UNREADABLE',
     })
     expect(fake.analysisCalls).toBe(0)
     expect(
@@ -2555,7 +2716,7 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
         where: { id: consult.sessionId },
         select: { status: true },
       }),
-    ).toEqual({ status: 'ANALYSIS_PENDING' })
+    ).toEqual({ status: 'ANALYZING' })
 
     fake.inspirationUnreadable = false
     expect((await analysisRequest(consult, 'external-brief-analysis')).status).toBe(200)

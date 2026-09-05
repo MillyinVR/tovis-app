@@ -58,6 +58,10 @@
       "schedule": "*/5 * * * *"
     },
     {
+      "path": "/api/internal/jobs/consult-analysis/process",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/internal/jobs/stale-sessions",
       "schedule": "*/15 * * * *"
     },

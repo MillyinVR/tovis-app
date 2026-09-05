@@ -38,6 +38,7 @@ import { POST as attachCapture } from '@/app/api/v1/client/consult/[id]/capture/
 import { POST as checkQuality } from '@/app/api/v1/client/consult/[id]/capture/[captureId]/quality/route'
 import { POST as issueUpload } from '@/app/api/v1/client/consult/[id]/capture/uploads/route'
 import { POST as startAnalysis } from '@/app/api/v1/client/consult/[id]/analysis/route'
+import { processConsultAnalysisRuns } from '@/lib/consult/analysisRunner'
 import { POST as startLookConsult } from '@/app/api/v1/client/consult/look/route'
 import {
   CONSULT_ANALYSIS_PROMPT_VERSION,
@@ -338,6 +339,16 @@ export async function runConsultToCompletion(
     context(sessionId),
   )
   expect(analysis.status).toBe(200)
+
+  // P4b: the start request claims the analysis and queues a run; it does not
+  // analyze. Every suite that reaches through this fixture wants a FINISHED
+  // consult, so the fixture drains the run — the production equivalent is the
+  // in-request kick plus the every-minute cron, neither of which exists in a
+  // test process (`kickConsultAnalysisRun` deliberately no-ops under VITEST so
+  // no unit test can make a paid call by accident).
+  const drained = await processConsultAnalysisRuns({ take: 1 })
+  expect(drained.outcomes[0]?.result).toBe('COMPLETED')
+
   expect(
     await db.consultSession.findUniqueOrThrow({
       where: { id: sessionId },
