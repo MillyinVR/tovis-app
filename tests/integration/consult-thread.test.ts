@@ -423,6 +423,63 @@ describe('consult thread projection', () => {
     await db.booking.deleteMany({ where: { id: earlier.id } })
   })
 
+  // The other half of "book at the spark": once she HAS booked, the thread does
+  // not end — it turns into prep. This is the state every message after the
+  // booking confirmation is written for, and nothing else in the suite reaches
+  // it, because booking runs the ordinary path and never touches this code.
+  it('turns into prep once she has booked, and stays open', async () => {
+    const sessionId = await startConsult()
+    await acceptBothAgreements(sessionId)
+
+    const before = await thread(sessionId)
+    expect(ofKind(before.messages, 'BOOKING')).toHaveLength(0)
+
+    // What the ORDINARY look-booking path leaves behind: a booking stamped with
+    // the look, made after the consult started. It knows nothing about the
+    // consult, which is exactly why the projection joins on the look.
+    const booking = await db.booking.create({
+      data: {
+        clientId: fx.clientId,
+        professionalId: fx.professionalId,
+        serviceId: fx.balayageServiceId,
+        offeringId: fx.balayageOfferingId,
+        status: BookingStatus.ACCEPTED,
+        sourceLookPostId: before.book.lookPostId!,
+        scheduledFor: new Date(Date.now() + 7 * 86_400_000),
+        locationType: ServiceLocationType.SALON,
+        locationId: fx.locationId,
+        locationTimeZone: ZONE,
+        subtotalSnapshot: new Prisma.Decimal(BALAYAGE_PRICE),
+        totalAmount: new Prisma.Decimal(BALAYAGE_PRICE),
+        totalDurationMinutes: 60,
+        proTenantId: fx.tenantId,
+        clientHomeTenantId: fx.tenantId,
+      },
+      select: { id: true },
+    })
+
+    const after = await thread(sessionId)
+
+    const confirmation = ofKind(after.messages, 'BOOKING')
+    expect(confirmation).toHaveLength(1)
+    expect(confirmation[0]?.bookingId).toBe(booking.id)
+    expect(confirmation[0]?.text).toContain(after.professionalDisplayName)
+
+    // 🔴 The thread STAYS OPEN. Everything after the confirmation is prep, and
+    // the bubble that says so names the pro — "help <pro> get ready".
+    const prep = ofKind(after.messages, 'TEXT').find((m) => m.id === 'prep-intro')
+    expect(prep?.text).toContain(after.professionalDisplayName)
+    expect(after.messages.length).toBeGreaterThan(before.messages.length)
+    // Still work to do: the consult did not end when the appointment was made.
+    expect(after.nextOpenMessageId).not.toBeNull()
+
+    // And the CTA steps aside rather than offering a second appointment.
+    expect(after.book.enabled).toBe(false)
+    expect(after.book.reason).toBe('ALREADY_BOOKED')
+
+    await db.booking.deleteMany({ where: { id: booking.id } })
+  })
+
   it('renders the plan card once the analysis has committed a result', async () => {
     const lookPostId = await createLook(db, fx.balayageServiceId)
     const sessionId = await runConsultToCompletion(db, lookPostId, 'thread-plan')
