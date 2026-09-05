@@ -39,11 +39,7 @@ import { SERVICE_TIMING_QUESTION_KEYS } from './intake/sharedOptions'
 import type { ConsultIntakePackDefinition } from './intake/types'
 import {
   CONSULT_SERVICE_IDENTITY_BOOKING_SELECT,
-  CONSULT_SERVICE_IDENTITY_LOOK_SELECT,
-  CONSULT_SERVICE_IDENTITY_NONE,
-  consultServiceIdentityFromBooking,
-  consultServiceIdentityFromLook,
-  withProfessionalOfferingTitle,
+  resolveConsultServiceIdentity,
   type ConsultServiceIdentity,
 } from './serviceIdentity'
 import {
@@ -242,25 +238,14 @@ async function loadConsultServiceIdentity(
   tx: Prisma.TransactionClient,
   session: IntakeScope,
 ): Promise<ConsultServiceIdentity> {
-  const base = session.booking
-    ? consultServiceIdentityFromBooking(session.booking)
-    : consultServiceIdentityFromLook(
-        session.anchorLookPostId
-          ? await tx.lookPost.findUnique({
-              where: { id: session.anchorLookPostId },
-              select: CONSULT_SERVICE_IDENTITY_LOOK_SELECT,
-            })
-          : null,
-      )
-  if (!base.serviceId) return CONSULT_SERVICE_IDENTITY_NONE
-  const offering = await tx.professionalServiceOffering.findFirst({
-    where: {
-      professionalId: session.professionalId,
-      serviceId: base.serviceId,
-    },
-    select: { title: true },
+  // Delegates to the SSOT: the thread projection needs the same answer, and two
+  // copies of "which look, then which offering" is how one surface ends up
+  // naming a service the other does not.
+  return resolveConsultServiceIdentity(tx, {
+    professionalId: session.professionalId,
+    anchorLookPostId: session.anchorLookPostId,
+    booking: session.booking,
   })
-  return withProfessionalOfferingTitle(base, offering)
 }
 
 function serviceIdentityDto(

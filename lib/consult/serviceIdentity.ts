@@ -118,3 +118,42 @@ export function withProfessionalOfferingTitle(
     }),
   }
 }
+
+/**
+ * The whole answer for a consult session, for either anchor: the service, and
+ * the pro's own title for it.
+ *
+ * Lives here rather than in one caller because two surfaces now need the same
+ * answer — the intake state (which names the service on the screen it belongs
+ * to) and the thread projection (whose opening bubble names it before any
+ * intake exists). A second copy of "which look, then which offering" is exactly
+ * how one of them ends up naming a service the other does not.
+ *
+ * Takes the client as a parameter so it composes inside a caller's transaction
+ * as easily as it runs on its own.
+ */
+export async function resolveConsultServiceIdentity(
+  db: Pick<Prisma.TransactionClient, 'lookPost' | 'professionalServiceOffering'>,
+  session: {
+    professionalId: string
+    anchorLookPostId: string | null
+    booking: { serviceId: string; service: { name: string } } | null
+  },
+): Promise<ConsultServiceIdentity> {
+  const base = session.booking
+    ? consultServiceIdentityFromBooking(session.booking)
+    : consultServiceIdentityFromLook(
+        session.anchorLookPostId
+          ? await db.lookPost.findUnique({
+              where: { id: session.anchorLookPostId },
+              select: CONSULT_SERVICE_IDENTITY_LOOK_SELECT,
+            })
+          : null,
+      )
+  if (!base.serviceId) return CONSULT_SERVICE_IDENTITY_NONE
+  const offering = await db.professionalServiceOffering.findFirst({
+    where: { professionalId: session.professionalId, serviceId: base.serviceId },
+    select: { title: true },
+  })
+  return withProfessionalOfferingTitle(base, offering)
+}

@@ -1,46 +1,65 @@
 'use client'
 
-// Web client consult wizard (2026-08-26 full-analysis launch). Drives the
-// existing consult API contracts end to end: consent → intake (one question at
-// a time) → inspiration → the service family's shot pack with the chart-copy choice →
-// analysis → results. All legal wording, questions, and shot instructions are
-// server-served; this component only renders them.
+// The client consult, as a THREAD (P5a — "the consult is a chat", handoff
+// Part 2). It replaces the four-step wizard this file used to be.
+//
+// What changed, and why it is not a re-skin:
+//
+//   * ONE read drives the screen. `GET …/consult/[id]/thread` serves the whole
+//     flow state as an ordered message list plus `nextOpenMessageId`, so
+//     "reopening resumes at the next open step" is the server's answer, not
+//     four progress blockers re-interpreted here. The per-stage endpoints are
+//     unchanged and remain the only way to ANSWER anything.
+//   * Earlier steps stay on screen as history. A wizard that replaces the
+//     question you just answered gives you nothing to scroll back to.
+//   * No free-text input, anywhere. Every prompt is a tappable card, which is
+//     what makes the thread deterministic, instant and free per message.
+//   * The sticky Book the look CTA unlocks on the SELFIE, not on the analysis.
+//     Booking runs the ORDINARY look-booking path — the analysis takes ~100s,
+//     which is longer than a spark lasts.
+//
+// All legal wording, questions, shot instructions and system-bubble copy are
+// server-served; this component renders them and owns the mutations.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import * as Sentry from '@sentry/nextjs'
 import { useRouter } from 'next/navigation'
 
-import type { BrandClientConsultCaptureCopy } from '@/lib/brand/types'
-import { formatConsultCaptureIntro } from '@/lib/consult/captureCopy'
+import type { BrandClientConsultThreadCopy } from '@/lib/brand/types'
 import { CONSULT_CAPTURE_MAX_BYTES } from '@/lib/consult/capturePack'
-import {
-  CONSULT_INSPIRATION_TEXT_MAX_CHARS,
-  CONSULT_INSPIRATION_UNSUPPORTED_TRAIT_LANGUAGE,
-} from '@/lib/consult/inspirationTextRules'
 import {
   CONSULT_ANALYSIS_POLL_INTERVAL_MS,
   consultAnalysisRunProgress,
   isConsultAnalysisRunLive,
 } from '@/lib/consult/analysisRunCopy'
 import type {
-  ConsultAgreementStateDTO,
   ConsultAnalysisRunDTO,
-  ConsultAnalysisStateDTO,
   ConsultCaptureQualityReasonCodeDTO,
-  ConsultCaptureShotDTO,
   ConsultCaptureSlotStateDTO,
-  ConsultCaptureStateDTO,
   ConsultInspirationQuestionDTO,
   ConsultInspirationStateDTO,
-  ConsultIntakeStateDTO,
-  ConsultSessionDTO,
-  ConsultSessionLookupDTO,
+  ConsultThreadConsentMessageDTO,
+  ConsultThreadDTO,
+  ConsultThreadInspirationMessageDTO,
+  ConsultThreadMessageDTO,
+  ConsultThreadPhotoRequestMessageDTO,
+  ConsultThreadPlanMessageDTO,
+  ConsultThreadQuestionMessageDTO,
 } from '@/lib/dto/consult'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import {
   ImagePreparationError,
   prepareImageForUpload,
 } from '@/lib/media/prepareImageForUpload'
+
+import {
+  THREAD_BUTTON_PRIMARY,
+  THREAD_BUTTON_SECONDARY,
+  ThreadBubble,
+  ThreadCard,
+  ThreadMessageSlot,
+  ThreadShell,
+} from './_thread/ThreadShell'
 
 type ApiEnvelope = { ok?: boolean; error?: string; code?: string }
 
@@ -89,38 +108,24 @@ async function browserSha256Hex(buffer: ArrayBuffer): Promise<string> {
     .join('')
 }
 
-const CARD = 'rounded-2xl border border-surfaceGlass/10 bg-bgSurface p-5'
-const BUTTON_PRIMARY =
-  'rounded-xl bg-textPrimary px-4 py-2.5 text-sm font-black text-bgPrimary disabled:opacity-50'
-const BUTTON_SECONDARY =
-  'rounded-xl border border-surfaceGlass/20 px-4 py-2.5 text-sm font-bold text-textPrimary disabled:opacity-50'
-const CHIP_ACTIVE =
-  'rounded-lg bg-textPrimary px-3 py-1.5 text-xs font-black text-bgPrimary disabled:opacity-50'
+const BUTTON_PRIMARY = THREAD_BUTTON_PRIMARY
+const BUTTON_SECONDARY = THREAD_BUTTON_SECONDARY
+/** The small square controls on the zoomable inspiration image. */
 const CHIP_INACTIVE =
   'rounded-lg border border-surfaceGlass/20 px-3 py-1.5 text-xs font-bold text-textPrimary disabled:opacity-50'
 
-type InspirationSentiment = 'GOOD' | 'BAD' | 'BOTH'
-
-const SENTIMENT_OPTIONS: ReadonlyArray<{
-  value: InspirationSentiment
-  label: string
-}> = [
-  { value: 'GOOD', label: 'Something I like' },
-  { value: 'BAD', label: 'Something I’d avoid' },
-  { value: 'BOTH', label: 'A bit of both' },
-]
-
-// Mirrors NEUTRAL_VALUES in lib/consult/inspirationPack.ts: the server rejects
-// a neutral option combined with any other selection.
+/**
+ * Values the server refuses to combine with anything else ("None", "Not sure",
+ * "Nothing else"). Picking one clears the rest instead of letting the mix
+ * bounce back as a generic error.
+ */
 const NEUTRAL_INSPIRATION_VALUES = new Set([
   'none',
   'not-sure',
-  'not-part-of-goal',
   'nothing-else',
 ])
 
-// Where to look in the inspiration photo for each question. Presentation-only
-// guidance beside the server-served question copy.
+/** Where to look in the inspiration photo for each question. Presentation only. */
 const INSPIRATION_FOCUS: Readonly<Record<string, string>> = {
   favorite_colors:
     'Zoom into the hair and look at the mix of colors — the brightest pieces, the deepest pieces, and the tones in between.',
@@ -150,7 +155,6 @@ const QUALITY_REASON_COPY: Readonly<
   TOO_BRIGHT: 'The photo is too bright or washed out.',
   OTHER_QUALITY_FAILURE: 'This photo can’t be used for the analysis.',
 }
-
 function StageHeading({ eyebrow, title }: { eyebrow: string; title: string }) {
   return (
     <div>
@@ -254,30 +258,27 @@ function ErrorNote({ message }: { message: string | null }) {
   )
 }
 
+
 export default function ClientConsultFlow({
   consultId,
-  captureCopy,
+  copy,
 }: {
   consultId: string
-  captureCopy: BrandClientConsultCaptureCopy
+  /** Every system bubble's wording, from the brand copy table. */
+  copy: BrandClientConsultThreadCopy
 }) {
   const router = useRouter()
   const base = `/api/v1/client/consult/${encodeURIComponent(consultId)}`
 
-  const [status, setStatus] = useState<ConsultSessionDTO['status'] | null>(null)
+  const [thread, setThread] = useState<ConsultThreadDTO | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-
-  const [agreements, setAgreements] = useState<ConsultAgreementStateDTO | null>(null)
-  const [intake, setIntake] = useState<ConsultIntakeStateDTO | null>(null)
-  const [intakeAnswers, setIntakeAnswers] = useState<Record<string, string>>({})
-  const [inspiration, setInspiration] = useState<ConsultInspirationStateDTO | null>(null)
-  const [capture, setCapture] = useState<ConsultCaptureStateDTO | null>(null)
-  const [analysis, setAnalysis] = useState<ConsultAnalysisStateDTO | null>(null)
   const [analyzing, setAnalyzing] = useState(false)
   const analysisKey = useRef<string>(newKey())
-  // Local-only previews of this session's uploads (rejected photos are purged
-  // server-side immediately, so the local blob is the only reviewable copy).
+
+  // Local-only previews of this session's uploads. A REJECTED photo is purged
+  // server-side immediately, so this blob is the only copy she can still look
+  // at while reading why it was refused.
   const [slotPreviews, setSlotPreviews] = useState<Record<string, string>>({})
   const [slotErrors, setSlotErrors] = useState<Record<string, string>>({})
   const previewsRef = useRef<Record<string, string>>({})
@@ -293,69 +294,17 @@ export default function ClientConsultFlow({
     [],
   )
 
-  const refreshSession = useCallback(async () => {
-    // Either anchor (booking or look) — only `status` is read here.
-    const session = await api<{ consult: ConsultSessionLookupDTO }>(base)
-    setStatus(session.consult.status)
-    return session.consult.status
+  /** The one read. Everything on screen comes from it. */
+  const refresh = useCallback(async () => {
+    const next = await api<{ thread: ConsultThreadDTO }>(`${base}/thread`)
+    setThread(next.thread)
+    return next.thread
   }, [base])
 
-  const loadStage = useCallback(
-    async (stage: ConsultSessionDTO['status']) => {
-      // CONSENT_REVOKED loads the agreements too: accepting one un-revokes the
-      // session server-side, so this is the screen that leads back in. Without
-      // it the revoked branch below renders its explanation next to no Accept
-      // button, which looks like a dead end for a second time.
-      if (stage === 'CONSENT_REQUIRED' || stage === 'CONSENT_REVOKED') {
-        const state = await api<{ agreementState: ConsultAgreementStateDTO }>(
-          `${base}/agreements`,
-        )
-        setAgreements(state.agreementState)
-        return
-      }
-      if (stage === 'INTAKE_READY' || stage === 'INTAKE_IN_PROGRESS') {
-        const state = await api<{ intake: ConsultIntakeStateDTO }>(`${base}/intake`)
-        setIntake(state.intake)
-        setIntakeAnswers(state.intake.latestRevision?.answers ?? {})
-        return
-      }
-      if (stage === 'ANALYZING') {
-        // P4b: ANALYZING is now a state the client SITS in, sometimes for two
-        // minutes and sometimes across a page reload. It has to load the run.
-        const analysisState = await api<{ analysis: ConsultAnalysisStateDTO }>(
-          `${base}/analysis`,
-        )
-        setAnalysis(analysisState.analysis)
-        return
-      }
-      if (stage === 'MEDIA_READY' || stage === 'ANALYSIS_PENDING') {
-        const [inspirationState, captureState] = await Promise.all([
-          api<{ inspiration: ConsultInspirationStateDTO }>(`${base}/inspiration`),
-          api<{ capture: ConsultCaptureStateDTO }>(`${base}/capture`),
-        ])
-        setInspiration(inspirationState.inspiration)
-        setCapture(captureState.capture)
-        if (stage === 'ANALYSIS_PENDING') {
-          const analysisState = await api<{ analysis: ConsultAnalysisStateDTO }>(
-            `${base}/analysis`,
-          )
-          setAnalysis(analysisState.analysis)
-        }
-        return
-      }
-    },
-    [base],
-  )
-
-  const refresh = useCallback(async () => {
+  const load = useCallback(async () => {
     setError(null)
     try {
-      const stage = await refreshSession()
-      if (stage === 'COMPLETED') {
-        router.replace(`/client/consult/${encodeURIComponent(consultId)}/results`)
-        return
-      }
-      await loadStage(stage)
+      await refresh()
     } catch (caught) {
       setError(
         caught instanceof ConsultFlowApiError
@@ -363,11 +312,11 @@ export default function ClientConsultFlow({
           : 'Something went wrong. Please try again.',
       )
     }
-  }, [consultId, loadStage, refreshSession, router])
+  }, [refresh])
 
   useEffect(() => {
-    void refresh()
-  }, [refresh])
+    void load()
+  }, [load])
 
   const run = useCallback(
     async (work: () => Promise<void>) => {
@@ -375,6 +324,7 @@ export default function ClientConsultFlow({
       setError(null)
       try {
         await work()
+        await refresh()
       } catch (caught) {
         setError(
           caught instanceof ConsultFlowApiError
@@ -385,92 +335,85 @@ export default function ClientConsultFlow({
         setBusy(false)
       }
     },
-    [],
+    [refresh],
   )
 
   // ── Consent ───────────────────────────────────────────────────────────────
   const acceptAgreement = (kind: string, agreementVersionId: string) =>
     run(async () => {
-      const state = await api<{ agreementState: ConsultAgreementStateDTO }>(
-        `${base}/agreements/accept`,
-        {
-          method: 'POST',
-          body: JSON.stringify({ kind, agreementVersionId }),
-        },
-      )
-      setAgreements(state.agreementState)
-      setStatus(state.agreementState.status)
-      if (state.agreementState.status !== 'CONSENT_REQUIRED') {
-        await loadStage(state.agreementState.status)
-      }
+      await api(`${base}/agreements/accept`, {
+        method: 'POST',
+        body: JSON.stringify({ kind, agreementVersionId }),
+      })
     })
 
   // ── Intake ────────────────────────────────────────────────────────────────
-  const submitIntake = (answers: Record<string, string>, complete: boolean) =>
+  //
+  // One tap answers one question, and the POST carries the WHOLE revision — so
+  // the answers already in the thread are read back out of it rather than kept
+  // in a second copy here that could drift from what the server holds.
+  const answerIntake = (
+    message: ConsultThreadQuestionMessageDTO,
+    value: string,
+  ) =>
     run(async () => {
-      if (!intake) return
-      const state = await api<{ intake: ConsultIntakeStateDTO }>(`${base}/intake`, {
+      if (!thread) return
+      const answers: Record<string, string> = {}
+      for (const entry of thread.messages) {
+        if (entry.kind === 'QUESTION' && entry.answer !== null) {
+          answers[entry.question.key] = entry.answer
+        }
+      }
+      answers[message.question.key] = value
+
+      // `complete` is the server's own judgement, echoed: every REQUIRED
+      // question now has an answer. Claiming completeness early is refused, and
+      // claiming it late leaves the client on a step with no way forward.
+      const required = thread.messages.filter(
+        (entry): entry is ConsultThreadQuestionMessageDTO =>
+          entry.kind === 'QUESTION' &&
+          entry.question.requirement === 'REQUIRED',
+      )
+      const complete = required.every((entry) => answers[entry.question.key])
+
+      await api(`${base}/intake`, {
         method: 'POST',
         body: JSON.stringify({
           idempotencyKey: newKey(),
-          packVersion: intake.questionPack.version,
-          schemaVersion: intake.questionPack.schemaVersion,
+          packVersion: message.packVersion,
+          schemaVersion: message.schemaVersion,
           complete,
           answers,
         }),
       })
-      setIntake(state.intake)
-      setIntakeAnswers(state.intake.latestRevision?.answers ?? answers)
-      setStatus(state.intake.status)
-      if (
-        state.intake.status !== 'INTAKE_READY' &&
-        state.intake.status !== 'INTAKE_IN_PROGRESS'
-      ) {
-        await loadStage(state.intake.status)
-      }
     })
 
   // ── Inspiration ───────────────────────────────────────────────────────────
-  const refreshInspiration = useCallback(async () => {
-    const state = await api<{ inspiration: ConsultInspirationStateDTO }>(
-      `${base}/inspiration`,
-    )
-    setInspiration(state.inspiration)
-    return state.inspiration
-  }, [base])
-
-  const skipInspiration = () =>
+  const skipInspiration = (message: ConsultThreadInspirationMessageDTO) =>
     run(async () => {
-      if (!inspiration) return
-      const state = await api<{ inspiration: ConsultInspirationStateDTO }>(
-        `${base}/inspiration`,
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            idempotencyKey: newKey(),
-            source: 'NONE',
-            schemaVersion: inspiration.schemaVersion,
-          }),
-        },
-      )
-      setInspiration(state.inspiration)
+      await api(`${base}/inspiration`, {
+        method: 'POST',
+        body: JSON.stringify({
+          idempotencyKey: newKey(),
+          source: 'NONE',
+          schemaVersion: message.schemaVersion,
+        }),
+      })
     })
 
-  const uploadInspiration = (file: File) =>
+  const uploadInspiration = (
+    message: ConsultThreadInspirationMessageDTO,
+    file: File,
+  ) =>
     run(async () => {
-      if (!inspiration) return
       const bytes = await file.arrayBuffer()
       const issued = await api<{
-        upload: {
-          inspirationId: string
-          signedUrl: string | null
-          maxBytes: number
-        }
+        upload: { inspirationId: string; signedUrl: string | null }
       }>(`${base}/inspiration/uploads`, {
         method: 'POST',
         body: JSON.stringify({
           idempotencyKey: newKey(),
-          schemaVersion: inspiration.schemaVersion,
+          schemaVersion: message.schemaVersion,
           contentType: file.type,
           sizeBytes: file.size,
           checksumSha256: await browserSha256Hex(bytes),
@@ -492,49 +435,39 @@ export default function ClientConsultFlow({
         body: JSON.stringify({
           idempotencyKey: newKey(),
           inspirationId: issued.upload.inspirationId,
-          schemaVersion: inspiration.schemaVersion,
+          schemaVersion: message.schemaVersion,
         }),
       })
-      await refreshInspiration()
     })
 
+  /**
+   * 🔴 No free text reaches this call, by construction: the thread has no text
+   * input at all. A question that allows a note is answered with its own
+   * tappable "nothing else" option instead, which is the value the server
+   * requires when there is no note.
+   */
   const answerInspiration = (
+    message: ConsultThreadInspirationMessageDTO,
     question: ConsultInspirationQuestionDTO,
     selectedValues: string[],
-    text: string,
-    sentiment: InspirationSentiment | null,
   ) =>
     run(async () => {
-      if (!inspiration) return
-      // The server requires exactly one of a free-text note (with a GOOD/BAD/
-      // BOTH sentiment) or the "nothing-else" selection; a blank note means
-      // "nothing else".
-      const trimmed = question.allowText ? text.trim() : ''
       const values =
-        question.allowText && !trimmed && selectedValues.length === 0
+        question.allowText && selectedValues.length === 0
           ? ['nothing-else']
           : selectedValues
       await api(`${base}/inspiration/answers`, {
         method: 'POST',
         body: JSON.stringify({
           idempotencyKey: newKey(),
-          schemaVersion: inspiration.schemaVersion,
+          schemaVersion: message.schemaVersion,
           questionKey: question.key,
           selectedValues: values,
-          ...(trimmed ? { text: trimmed, sentiment } : {}),
         }),
       })
-      await refreshInspiration()
-      await refresh()
     })
 
-  // ── Capture ───────────────────────────────────────────────────────────────
-  const refreshCapture = useCallback(async () => {
-    const state = await api<{ capture: ConsultCaptureStateDTO }>(`${base}/capture`)
-    setCapture(state.capture)
-    return state.capture
-  }, [base])
-
+  // ── Photos ────────────────────────────────────────────────────────────────
   const setSlotPreview = useCallback((shotKey: string, blob: Blob) => {
     setSlotPreviews((current) => {
       const previous = current[shotKey]
@@ -543,9 +476,12 @@ export default function ClientConsultFlow({
     })
   }, [])
 
-  const uploadShot = (shot: ConsultCaptureShotDTO, file: File) =>
+  const uploadShot = (
+    message: ConsultThreadPhotoRequestMessageDTO,
+    file: File,
+  ) =>
     run(async () => {
-      if (!capture) return
+      const shot = message.shot
       setSlotErrors((current) => ({ ...current, [shot.key]: '' }))
       try {
         const prepared = await prepareImageForUpload(
@@ -560,8 +496,8 @@ export default function ClientConsultFlow({
           body: JSON.stringify({
             idempotencyKey: newKey(),
             shotKey: shot.key,
-            shotPackVersion: capture.shotPack.version,
-            schemaVersion: capture.shotPack.schemaVersion,
+            shotPackVersion: message.shotPackVersion,
+            schemaVersion: message.schemaVersion,
             contentType: 'image/jpeg',
             sizeBytes: prepared.size,
             checksumSha256: await browserSha256Hex(bytes),
@@ -578,18 +514,21 @@ export default function ClientConsultFlow({
         if (!put.ok) {
           throw new ConsultFlowApiError('The photo upload failed. Try again.', null)
         }
-        const attached = await api<{ captureId: string }>(`${base}/capture/attach`, {
-          method: 'POST',
-          body: JSON.stringify({
-            idempotencyKey: newKey(),
-            uploadSessionId: issued.upload.uploadSessionId,
-            shotKey: shot.key,
-            shotPackVersion: capture.shotPack.version,
-            schemaVersion: capture.shotPack.schemaVersion,
-          }),
-        })
+        const attached = await api<{ captureId: string }>(
+          `${base}/capture/attach`,
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              idempotencyKey: newKey(),
+              uploadSessionId: issued.upload.uploadSessionId,
+              shotKey: shot.key,
+              shotPackVersion: message.shotPackVersion,
+              schemaVersion: message.schemaVersion,
+            }),
+          },
+        )
         // The photo is on the server now — keep the local copy reviewable even
-        // if the quality verdict rejects (and purges) the server copy.
+        // if the quality verdict rejects (and purges) the server's copy.
         setSlotPreview(shot.key, prepared)
         await api(
           `${base}/capture/${encodeURIComponent(attached.captureId)}/quality`,
@@ -597,91 +536,74 @@ export default function ClientConsultFlow({
             method: 'POST',
             body: JSON.stringify({
               idempotencyKey: newKey(),
-              shotPackVersion: capture.shotPack.version,
-              schemaVersion: capture.shotPack.schemaVersion,
+              shotPackVersion: message.shotPackVersion,
+              schemaVersion: message.schemaVersion,
             }),
           },
         )
       } catch (caught) {
-        // Bind the failure to the photo tile it belongs to instead of the
-        // page-top banner the user scrolls away from.
-        const message =
+        // Bind the failure to the photo message it belongs to, not to a
+        // page-top banner she has already scrolled past.
+        const message_ =
           caught instanceof ConsultFlowApiError ||
           caught instanceof ImagePreparationError
             ? caught.message
             : 'Something went wrong with this photo. Try again.'
-        setSlotErrors((current) => ({ ...current, [shot.key]: message }))
+        setSlotErrors((current) => ({ ...current, [shot.key]: message_ }))
       }
-      await refreshCapture()
-      await refresh()
     })
 
   const proceedWithAccepted = () =>
     run(async () => {
-      const state = await api<{ capture: ConsultCaptureStateDTO }>(
-        `${base}/capture/proceed`,
-        { method: 'POST', body: JSON.stringify({}) },
-      )
-      setCapture(state.capture)
-      await refresh()
+      await api(`${base}/capture/proceed`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      })
     })
 
   const setChartCopy = (optIn: boolean) =>
     run(async () => {
-      const state = await api<{ capture: ConsultCaptureStateDTO }>(
-        `${base}/capture/chart-copy`,
-        { method: 'POST', body: JSON.stringify({ optIn }) },
-      )
-      setCapture(state.capture)
+      await api(`${base}/capture/chart-copy`, {
+        method: 'POST',
+        body: JSON.stringify({ optIn }),
+      })
     })
 
   // ── Analysis (P4b) ────────────────────────────────────────────────────────
   // The POST claims the analysis and returns a run in a fraction of a second.
   // Everything after that is the poll below.
-  const startAnalysis = () =>
+  const startAnalysis = (message: ConsultThreadPlanMessageDTO) =>
     run(async () => {
-      if (!analysis) return
+      if (message.schemaVersion === null || message.promptVersion === null) {
+        return
+      }
       setAnalyzing(true)
       try {
-        const state = await api<{ analysis: ConsultAnalysisStateDTO }>(
-          `${base}/analysis`,
-          {
-            method: 'POST',
-            body: JSON.stringify({
-              idempotencyKey: analysisKey.current,
-              schemaVersion: analysis.schemaVersion,
-              promptVersion: analysis.promptVersion,
-            }),
-          },
-        )
-        setAnalysis(state.analysis)
-        setStatus(state.analysis.status)
-        if (state.analysis.status === 'COMPLETED') {
-          router.replace(
-            `/client/consult/${encodeURIComponent(consultId)}/results`,
-          )
-        }
+        await api(`${base}/analysis`, {
+          method: 'POST',
+          body: JSON.stringify({
+            idempotencyKey: analysisKey.current,
+            schemaVersion: message.schemaVersion,
+            promptVersion: message.promptVersion,
+          }),
+        })
       } finally {
         setAnalyzing(false)
       }
     })
 
-  /**
-   * A retry is a NEW run, not a new claim: the server keeps the session in
-   * ANALYZING and starts a fresh run row. A fresh idempotency key would be
-   * wrong — the artefact this run writes is the same artefact the first
-   * attempt would have written, and the server checks that the key matches.
-   */
-  const retryAnalysis = () => startAnalysis()
-
   // ── The poll ──────────────────────────────────────────────────────────────
   // Every 5s while a run is live and this screen is mounted. Stops on its own
-  // when the run settles; a completed run routes straight to the results.
+  // when the run settles. Unlike the wizard this replaces, a completed run does
+  // NOT route away: the plan lands in the thread and the thread stays open.
   //
   // `document.hidden` is checked per tick rather than by subscribing to the
   // visibility event: a backgrounded tab should not keep asking, and the tick
   // that runs when it comes back is the catch-up.
-  const analysisRun = analysis?.run ?? null
+  const planMessage = thread?.messages.find(
+    (entry): entry is ConsultThreadPlanMessageDTO => entry.kind === 'PLAN',
+  )
+  const analysisRun = planMessage?.run ?? null
   const runIsLive = analysisRun ? isConsultAnalysisRunLive(analysisRun) : false
   useEffect(() => {
     if (!runIsLive) return
@@ -690,17 +612,8 @@ export default function ClientConsultFlow({
     const tick = async () => {
       if (typeof document !== 'undefined' && document.hidden) return
       try {
-        const state = await api<{ analysis: ConsultAnalysisStateDTO }>(
-          `${base}/analysis`,
-        )
         if (cancelled) return
-        setAnalysis(state.analysis)
-        setStatus(state.analysis.status)
-        if (state.analysis.status === 'COMPLETED') {
-          router.replace(
-            `/client/consult/${encodeURIComponent(consultId)}/results`,
-          )
-        }
+        await refresh()
       } catch {
         // A dropped poll is not a failed analysis — the run keeps going on the
         // server and the next tick asks again. Surfacing an error here would
@@ -716,10 +629,10 @@ export default function ClientConsultFlow({
       cancelled = true
       clearInterval(timer)
     }
-  }, [base, consultId, router, runIsLive])
+  }, [refresh, runIsLive])
 
   // ── Render ────────────────────────────────────────────────────────────────
-  if (!status) {
+  if (!thread) {
     return (
       <div className="grid gap-4">
         <ErrorNote message={error} />
@@ -728,260 +641,722 @@ export default function ClientConsultFlow({
     )
   }
 
-  // CANCELLED is genuinely terminal — purged mid-analysis, with no transition
-  // back. CONSENT_REVOKED is NOT: accepting a fresh agreement moves it back to
-  // CONSENT_REQUIRED (lib/consult/writeBoundary.ts), so it falls through to the
-  // consent step below. Collapsing the two here is what made revoking consent a
-  // permanent dead end — the way back existed on the server and no screen ever
-  // offered it.
-  if (status === 'CANCELLED') {
-    return (
-      <div className={CARD}>
-        <p className="text-sm text-textPrimary">
-          This consult is no longer active.
-        </p>
-      </div>
-    )
+  return (
+    <ThreadShell
+      openMessageId={thread.nextOpenMessageId}
+      footer={
+        <BookTheLookCta
+          thread={thread}
+          copy={copy}
+          busy={busy}
+          onBook={() => router.push(bookTheLookHref(thread))}
+        />
+      }
+    >
+      <ErrorNote message={error} />
+      {thread.messages.map((message) => (
+        <ThreadMessageSlot key={message.id} id={message.id}>
+          <ConsultThreadMessage
+            message={message}
+            busy={busy}
+            analyzing={analyzing}
+            slotPreviews={slotPreviews}
+            slotErrors={slotErrors}
+            onAcceptAgreement={acceptAgreement}
+            onAnswerIntake={answerIntake}
+            onSkipInspiration={skipInspiration}
+            onUploadInspiration={uploadInspiration}
+            onAnswerInspiration={answerInspiration}
+            onUploadShot={uploadShot}
+            onStartAnalysis={startAnalysis}
+            onRefresh={() => void refresh()}
+          />
+        </ThreadMessageSlot>
+      ))}
+      <CapturePrepControls
+        thread={thread}
+        busy={busy}
+        onChartCopy={setChartCopy}
+        onProceed={proceedWithAccepted}
+      />
+    </ThreadShell>
+  )
+}
+
+// ── The consult SCRIPT ───────────────────────────────────────────────────────
+//
+// One renderer per message kind. Everything above this line is state and
+// mutations; everything below is "what does this step look like as a message".
+// The shell (./_thread/ThreadShell) knows none of it, which is what lets the
+// pro-side mentor reuse the shell with a different script.
+
+function ConsultThreadMessage({
+  message,
+  busy,
+  analyzing,
+  slotPreviews,
+  slotErrors,
+  onAcceptAgreement,
+  onAnswerIntake,
+  onSkipInspiration,
+  onUploadInspiration,
+  onAnswerInspiration,
+  onUploadShot,
+  onStartAnalysis,
+  onRefresh,
+}: {
+  message: ConsultThreadMessageDTO
+  busy: boolean
+  analyzing: boolean
+  slotPreviews: Record<string, string>
+  slotErrors: Record<string, string>
+  onAcceptAgreement: (kind: string, agreementVersionId: string) => void
+  onAnswerIntake: (
+    message: ConsultThreadQuestionMessageDTO,
+    value: string,
+  ) => void
+  onSkipInspiration: (message: ConsultThreadInspirationMessageDTO) => void
+  onUploadInspiration: (
+    message: ConsultThreadInspirationMessageDTO,
+    file: File,
+  ) => void
+  onAnswerInspiration: (
+    message: ConsultThreadInspirationMessageDTO,
+    question: ConsultInspirationQuestionDTO,
+    selectedValues: string[],
+  ) => void
+  onUploadShot: (
+    message: ConsultThreadPhotoRequestMessageDTO,
+    file: File,
+  ) => void
+  onStartAnalysis: (message: ConsultThreadPlanMessageDTO) => void
+  onRefresh: () => void
+}) {
+  switch (message.kind) {
+    case 'TEXT':
+      return (
+        <ThreadBubble author={message.author}>{message.text}</ThreadBubble>
+      )
+
+    case 'BOOKING':
+      return <ThreadBubble author="APP">{message.text}</ThreadBubble>
+
+    case 'CONSENT':
+      return (
+        <ConsentMessage
+          message={message}
+          busy={busy}
+          onAccept={onAcceptAgreement}
+        />
+      )
+
+    case 'QUESTION':
+      return (
+        <QuestionMessage
+          message={message}
+          busy={busy}
+          onAnswer={onAnswerIntake}
+        />
+      )
+
+    case 'INSPIRATION':
+      return (
+        <InspirationMessage
+          message={message}
+          busy={busy}
+          onSkip={onSkipInspiration}
+          onUpload={onUploadInspiration}
+          onAnswer={onAnswerInspiration}
+        />
+      )
+
+    case 'PHOTO_REQUEST':
+      return (
+        <PhotoRequestMessage
+          message={message}
+          busy={busy}
+          preview={slotPreviews[message.shot.key]}
+          error={slotErrors[message.shot.key]}
+          onUpload={onUploadShot}
+        />
+      )
+
+    case 'PLAN':
+      return (
+        <PlanMessage
+          message={message}
+          busy={busy}
+          analyzing={analyzing}
+          onStart={onStartAnalysis}
+          onRefresh={onRefresh}
+        />
+      )
   }
+}
+
+function ConsentMessage({
+  message,
+  busy,
+  onAccept,
+}: {
+  message: ConsultThreadConsentMessageDTO
+  busy: boolean
+  onAccept: (kind: string, agreementVersionId: string) => void
+}) {
+  return (
+    <div className="grid gap-3">
+      <ThreadBubble author="APP">{message.text}</ThreadBubble>
+      {message.requirements.map((requirement) => {
+        const accepted = Boolean(requirement.currentAcceptance)
+        return (
+          <ThreadCard key={requirement.kind} dimmed={accepted}>
+            <h3 className="text-base font-black text-textPrimary">
+              {requirement.requiredVersion.title}
+            </h3>
+            <p className="mt-2 whitespace-pre-line text-sm leading-6 text-textSecondary">
+              {requirement.requiredVersion.body}
+            </p>
+            <button
+              type="button"
+              className={`mt-4 ${accepted ? BUTTON_SECONDARY : BUTTON_PRIMARY}`}
+              disabled={busy || accepted}
+              onClick={() =>
+                onAccept(requirement.kind, requirement.requiredVersion.id)
+              }
+            >
+              {accepted ? 'Agreed' : 'I agree'}
+            </button>
+          </ThreadCard>
+        )
+      })}
+    </div>
+  )
+}
+
+/**
+ * One intake question, one message.
+ *
+ * An ANSWERED question keeps its card — dimmed — and gains the client's own
+ * answer as a bubble on her side. That echo is the point: a thread you can
+ * scroll back through is the difference between a conversation and a form.
+ */
+function QuestionMessage({
+  message,
+  busy,
+  onAnswer,
+}: {
+  message: ConsultThreadQuestionMessageDTO
+  busy: boolean
+  onAnswer: (
+    message: ConsultThreadQuestionMessageDTO,
+    value: string,
+  ) => void
+}) {
+  const { question, answer } = message
+  const answeredLabel =
+    answer === null
+      ? null
+      : (question.options.find((option) => option.value === answer)?.label ??
+        answer)
 
   return (
-    <div className="grid gap-6">
-      <ErrorNote message={error} />
-
-      {status === 'CONSENT_REVOKED' ? (
-        <div className={CARD}>
-          <p className="text-sm text-textPrimary">
-            You revoked consent for this consult, so it stopped where it was.
-            Accepting below starts it again.
-          </p>
-        </div>
-      ) : null}
-
-      {(status === 'CONSENT_REQUIRED' || status === 'CONSENT_REVOKED') &&
-      agreements ? (
-        <section className="grid gap-4">
-          <StageHeading eyebrow="Step 1 of 4" title="Before we start" />
-          {agreements.requirements.map((requirement) => {
-            const accepted = Boolean(requirement.currentAcceptance)
-            return (
-              <div key={requirement.kind} className={CARD}>
-                <h3 className="text-base font-black text-textPrimary">
-                  {requirement.requiredVersion.title}
-                </h3>
-                <p className="mt-2 whitespace-pre-line text-sm leading-6 text-textSecondary">
-                  {requirement.requiredVersion.body}
-                </p>
-                <button
-                  type="button"
-                  className={`mt-4 ${accepted ? BUTTON_SECONDARY : BUTTON_PRIMARY}`}
-                  disabled={busy || accepted}
-                  onClick={() =>
-                    acceptAgreement(
-                      requirement.kind,
-                      requirement.requiredVersion.id,
-                    )
-                  }
-                >
-                  {accepted ? 'Agreed' : 'I agree'}
-                </button>
-              </div>
-            )
-          })}
-        </section>
-      ) : null}
-
-      {(status === 'INTAKE_READY' || status === 'INTAKE_IN_PROGRESS') && intake ? (
-        <IntakeStage
-          intake={intake}
-          answers={intakeAnswers}
-          busy={busy}
-          onAnswer={(questionKey, value) => {
-            const next = { ...intakeAnswers, [questionKey]: value }
-            setIntakeAnswers(next)
-            void submitIntake(next, false)
-          }}
-          onComplete={() => void submitIntake(intakeAnswers, true)}
-        />
-      ) : null}
-
-      {(status === 'MEDIA_READY' || status === 'ANALYSIS_PENDING') &&
-      inspiration ? (
-        <InspirationStage
-          inspiration={inspiration}
-          busy={busy}
-          onSkip={() => void skipInspiration()}
-          onUpload={(file) => void uploadInspiration(file)}
-          onAnswer={(question, values, text, sentiment) =>
-            void answerInspiration(question, values, text, sentiment)
-          }
-        />
-      ) : null}
-
-      {(status === 'MEDIA_READY' || status === 'ANALYSIS_PENDING') && capture ? (
-        <CaptureStage
-          capture={capture}
-          copy={captureCopy}
-          busy={busy}
-          slotPreviews={slotPreviews}
-          slotErrors={slotErrors}
-          inspirationDone={Boolean(
-            inspiration &&
-              inspiration.progress.canComplete &&
-              !inspiration.progress.currentQuestion,
-          )}
-          onUpload={(shot, file) => void uploadShot(shot, file)}
-          onChartCopy={(optIn) => void setChartCopy(optIn)}
-          onProceed={() => void proceedWithAccepted()}
-        />
-      ) : null}
-
-      {status === 'ANALYSIS_PENDING' && analysis ? (
-        <section className={CARD}>
-          <StageHeading eyebrow="Final step" title="Run your analysis" />
+    <div className="grid gap-2">
+      <ThreadCard dimmed={answer !== null}>
+        <h3 className="text-base font-black text-textPrimary">
+          {question.label}
+        </h3>
+        {question.helpText ? (
           <p className="mt-2 text-sm leading-6 text-textSecondary">
-            Your photos and answers are ready. The analysis takes a minute or
-            two, and your photos are deleted from processing storage right
-            after it finishes.
+            {question.helpText}
           </p>
-          <button
-            type="button"
-            className={`mt-4 ${BUTTON_PRIMARY}`}
-            disabled={busy || analyzing}
-            onClick={() => void startAnalysis()}
-          >
-            {analyzing ? 'Analyzing — hold tight…' : 'Run my analysis'}
-          </button>
-        </section>
-      ) : null}
-
-      {status === 'ANALYZING' ? (
-        <section className={CARD}>
-          {analysisRun ? (
-            <AnalysisRunProgress
-              run={analysisRun}
-              busy={busy || analyzing}
-              onRetry={() => void retryAnalysis()}
-              onRefresh={() => void refresh()}
-            />
-          ) : (
-            <>
-              <p className="text-sm text-textPrimary">
-                Your analysis is running. This can take a minute or two.
-              </p>
+        ) : null}
+        {answer === null ? (
+          <div className="mt-3 grid gap-2">
+            {question.options.map((option) => (
               <button
+                key={option.value}
                 type="button"
-                className={`mt-4 ${BUTTON_SECONDARY}`}
-                onClick={() => void refresh()}
+                disabled={busy}
+                className={`${BUTTON_SECONDARY} text-left`}
+                onClick={() => onAnswer(message, option.value)}
               >
-                Check progress
+                {option.label}
               </button>
-            </>
-          )}
-        </section>
+            ))}
+          </div>
+        ) : null}
+      </ThreadCard>
+      {answeredLabel ? (
+        <ThreadBubble author="CLIENT">{answeredLabel}</ThreadBubble>
       ) : null}
     </div>
   )
 }
 
-function IntakeStage({
-  intake,
-  answers,
+/**
+ * The inspiration card.
+ *
+ * P5a renders the CURRENT v1 questions inside a card; P5 replaces the content
+ * with the zoom-card script (a crop of the attribute's region + "is this part
+ * of what you like?"). The card is what is being fixed in place here, not the
+ * wording inside it.
+ */
+function InspirationMessage({
+  message,
   busy,
+  onSkip,
+  onUpload,
   onAnswer,
-  onComplete,
 }: {
-  intake: ConsultIntakeStateDTO
-  answers: Record<string, string>
+  message: ConsultThreadInspirationMessageDTO
   busy: boolean
-  onAnswer: (questionKey: string, value: string) => void
-  onComplete: () => void
+  onSkip: (message: ConsultThreadInspirationMessageDTO) => void
+  onUpload: (
+    message: ConsultThreadInspirationMessageDTO,
+    file: File,
+  ) => void
+  onAnswer: (
+    message: ConsultThreadInspirationMessageDTO,
+    question: ConsultInspirationQuestionDTO,
+    selectedValues: string[],
+  ) => void
 }) {
-  const nextKey = intake.progress.nextQuestionKey
-  const question = useMemo(() => {
-    if (nextKey) {
-      return intake.questionPack.questions.find((entry) => entry.key === nextKey)
-    }
-    return intake.questionPack.questions.find((entry) => !answers[entry.key])
-  }, [answers, intake.questionPack.questions, nextKey])
-  const answeredCount = intake.questionPack.questions.filter(
-    (entry) => answers[entry.key],
-  ).length
-  // The service the consult is FOR, in the client's own language. Before this
-  // the header said "your goal" and the flow named the service nowhere, which
-  // is the shape of handoff bug B6.
-  const serviceName = intake.service.name
-
+  const done = message.state === 'DONE'
   return (
-    <section className="grid gap-4">
-      <StageHeading
-        eyebrow="Step 2 of 4"
-        title={serviceName ? `About your ${serviceName}` : 'Tell us about your goal'}
-      />
-      <div className={CARD}>
-        <div className="font-mono text-[10px] font-bold uppercase tracking-[0.12em] text-textMuted">
-          {answeredCount} / {intake.questionPack.questions.length} answered
-        </div>
-        {question ? (
-          <div className="mt-3 grid gap-3">
-            <h3 className="text-base font-black text-textPrimary">
-              {question.label}
-            </h3>
-            {question.helpText ? (
-              <p className="text-sm text-textSecondary">{question.helpText}</p>
-            ) : null}
-            <div className="grid gap-2">
-              {question.options.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
+    <div className="grid gap-2">
+      <ThreadBubble author="APP">{message.text}</ThreadBubble>
+      {done ? null : (
+        <ThreadCard>
+          {message.sourceDecisionRequired ? (
+            <div className="grid gap-3">
+              <label className={`inline-block cursor-pointer ${BUTTON_PRIMARY}`}>
+                Add a photo
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
                   disabled={busy}
-                  className={`${
-                    answers[question.key] === option.value
-                      ? BUTTON_PRIMARY
-                      : BUTTON_SECONDARY
-                  } text-left`}
-                  onClick={() => onAnswer(question.key, option.value)}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-            {question.requirement === 'SKIPPABLE' && !answers[question.key] ? (
+                  onChange={(event) => {
+                    const file = event.target.files?.[0]
+                    if (file) onUpload(message, file)
+                    event.target.value = ''
+                  }}
+                />
+              </label>
               <button
                 type="button"
-                disabled={busy}
                 className={`${BUTTON_SECONDARY} justify-self-start`}
-                onClick={() => onAnswer(question.key, question.options[0]!.value)}
+                disabled={busy}
+                onClick={() => onSkip(message)}
               >
-                Use “{question.options[0]!.label}”
+                Carry on without one
               </button>
-            ) : null}
-          </div>
-        ) : (
-          <div className="mt-3 grid gap-3">
-            <p className="text-sm text-textPrimary">
-              That is everything we need for this part.
+            </div>
+          ) : null}
+
+          {message.source ? (
+            <InspirationImagePanel
+              source={message.source}
+              focusHint={
+                message.question
+                  ? (INSPIRATION_FOCUS[message.question.key] ?? null)
+                  : null
+              }
+            />
+          ) : null}
+
+          {message.specificDetailCount < message.requiredSpecificDetailCount &&
+          message.answeredQuestionCount > 0 ? (
+            <p className="mt-3 rounded-lg border border-toneWarn/30 bg-toneWarn/10 px-3 py-2 text-xs leading-5 text-textPrimary">
+              Pick out at least {message.requiredSpecificDetailCount} specific
+              details you love or want to avoid — answers like “not sure” don’t
+              give your professional anything to work from, so a couple of
+              questions come back around.
             </p>
-            <button
-              type="button"
-              disabled={busy || !intake.progress.canComplete}
-              className={`${BUTTON_PRIMARY} justify-self-start`}
-              onClick={onComplete}
-            >
-              Continue to photos
-            </button>
-          </div>
-        )}
-      </div>
-    </section>
+          ) : null}
+
+          {message.question ? (
+            <InspirationQuestionForm
+              key={message.question.key}
+              question={message.question}
+              busy={busy}
+              onAnswer={(question, values) =>
+                onAnswer(message, question, values)
+              }
+            />
+          ) : null}
+        </ThreadCard>
+      )}
+    </div>
   )
 }
 
 /**
- * Pinch/wheel/double-tap zoomable image so the client can inspect the exact
- * area a question asks about. Pointer events cover mouse and touch; two-finger
- * pinch is handled by tracking both active pointers.
+ * A photo request, and the badge that comes back with it.
+ *
+ * 🔴 The badge ladder is the P2d one, LIFTED rather than rewritten: EMPTY →
+ * "Add photo", UPLOADED → "Checking…", ACCEPTED → "Passed", REJECTED →
+ * "Retake" with the server's own reason and tip. Every state below is a served
+ * slot state; nothing here invents one.
  */
+function PhotoRequestMessage({
+  message,
+  busy,
+  preview,
+  error,
+  onUpload,
+}: {
+  message: ConsultThreadPhotoRequestMessageDTO
+  busy: boolean
+  preview: string | undefined
+  error: string | undefined
+  onUpload: (
+    message: ConsultThreadPhotoRequestMessageDTO,
+    file: File,
+  ) => void
+}) {
+  const { shot, slot } = message
+  const accepted = slot.state === 'ACCEPTED'
+  const badge = photoBadge(slot.state)
+
+  return (
+    <ThreadCard dimmed={accepted}>
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-black text-textPrimary">{shot.title}</h3>
+            <span
+              className={`rounded-full px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-[0.08em] ${badge.className}`}
+            >
+              {badge.label}
+            </span>
+          </div>
+          <p className="mt-1 text-xs leading-5 text-textSecondary">
+            {shot.instruction}
+          </p>
+        </div>
+        {preview ? (
+          <RemoteImage
+            src={preview}
+            alt={`Your ${shot.title} photo`}
+            intrinsic
+            className="h-16 w-16 shrink-0 rounded-lg border border-surfaceGlass/20 object-cover"
+          />
+        ) : null}
+      </div>
+
+      {slot.state === 'REJECTED' ? (
+        <div className="mt-2 rounded-lg border border-toneWarn/30 bg-toneWarn/10 px-2 py-1.5 text-xs leading-5 text-textPrimary">
+          {slot.qualityReasonCode
+            ? QUALITY_REASON_COPY[slot.qualityReasonCode]
+            : QUALITY_REASON_COPY.OTHER_QUALITY_FAILURE}
+          {slot.retakeTip ? ` ${slot.retakeTip}` : null}
+        </div>
+      ) : null}
+
+      {slot.qualityWarningCode && accepted ? (
+        <div className="mt-2 rounded-lg border border-toneWarn/30 bg-toneWarn/10 px-2 py-1.5 text-xs leading-5 text-textPrimary">
+          {QUALITY_REASON_COPY[slot.qualityWarningCode]} We can still use it.
+        </div>
+      ) : null}
+
+      {error ? (
+        <p className="mt-2 rounded-lg border border-toneDanger/30 bg-toneDanger/10 px-2 py-1.5 text-xs leading-5 text-textPrimary">
+          {error}
+        </p>
+      ) : null}
+
+      <label
+        className={`mt-3 inline-block cursor-pointer ${
+          accepted ? BUTTON_SECONDARY : BUTTON_PRIMARY
+        }`}
+      >
+        {accepted ? 'Replace this photo' : badge.action}
+        <input
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          className="hidden"
+          disabled={busy}
+          onChange={(event) => {
+            const file = event.target.files?.[0]
+            if (file) onUpload(message, file)
+            event.target.value = ''
+          }}
+        />
+      </label>
+    </ThreadCard>
+  )
+}
+
+/**
+ * The served slot state, as a badge and a button label.
+ *
+ * UPLOADED is deliberately its own state and not "not taken yet": it means the
+ * server holds bytes with no verdict, and telling the client to do again the
+ * thing she has already done is exactly the failure the P2d ladder exists to
+ * prevent.
+ */
+function photoBadge(state: ConsultCaptureSlotStateDTO['state']): {
+  label: string
+  action: string
+  className: string
+} {
+  switch (state) {
+    case 'ACCEPTED':
+      return {
+        label: 'Passed',
+        action: 'Replace this photo',
+        className: 'bg-toneSuccess/15 text-toneSuccess',
+      }
+    case 'REJECTED':
+      return {
+        label: 'Retake',
+        action: 'Take another',
+        className: 'bg-toneWarn/15 text-toneWarn',
+      }
+    case 'UPLOADED':
+      return {
+        label: 'Checking',
+        action: 'Send a different one',
+        className: 'bg-toneInfo/15 text-toneInfo',
+      }
+    case 'EXPIRED':
+    case 'PURGED':
+      return {
+        label: 'Send again',
+        action: 'Add this photo again',
+        className: 'bg-toneWarn/15 text-toneWarn',
+      }
+    case 'EMPTY':
+      return {
+        label: 'Needed',
+        action: 'Add photo',
+        className: 'bg-surfaceGlass/10 text-textMuted',
+      }
+  }
+}
+
+/** The plan card — the reveal. P5a renders the existing analysis result. */
+function PlanMessage({
+  message,
+  busy,
+  analyzing,
+  onStart,
+  onRefresh,
+}: {
+  message: ConsultThreadPlanMessageDTO
+  busy: boolean
+  analyzing: boolean
+  onStart: (message: ConsultThreadPlanMessageDTO) => void
+  onRefresh: () => void
+}) {
+  return (
+    <div className="grid gap-2">
+      <ThreadBubble author="APP">{message.text}</ThreadBubble>
+      <ThreadCard>
+        {message.run ? (
+          <AnalysisRunProgress
+            run={message.run}
+            busy={busy || analyzing}
+            onRetry={() => onStart(message)}
+            onRefresh={onRefresh}
+          />
+        ) : message.awaitingStart ? (
+          <button
+            type="button"
+            className={BUTTON_PRIMARY}
+            disabled={busy || analyzing}
+            onClick={() => onStart(message)}
+          >
+            {analyzing ? 'Starting…' : 'Build my plan'}
+          </button>
+        ) : null}
+
+        {message.results ? (
+          <div className="grid gap-3">
+            <PlanSummary results={message.results} />
+            <a
+              className={`${BUTTON_SECONDARY} justify-self-start`}
+              href={`/client/consult/${encodeURIComponent(
+                message.results.consultId,
+              )}/results`}
+            >
+              See the whole plan
+            </a>
+          </div>
+        ) : null}
+      </ThreadCard>
+    </div>
+  )
+}
+
+/**
+ * The plan card's PLACEHOLDER body (P5a).
+ *
+ * It shows the analysis's own headline directions and sends the client to the
+ * full results page for the rest. The versioned plan card the handoff describes
+ * — the reveal, with its own history — is later work, and inventing half of it
+ * here would be a second thing to migrate.
+ */
+function PlanSummary({
+  results,
+}: {
+  results: NonNullable<ConsultThreadPlanMessageDTO['results']>
+}) {
+  return (
+    <div className="grid gap-2">
+      <h3 className="text-base font-black text-textPrimary">
+        {results.directionsTitle}
+      </h3>
+      <ul className="grid gap-1">
+        {results.recommendationDirections.slice(0, 3).map((direction) => (
+          <li key={direction.title} className="text-sm leading-6 text-textPrimary">
+            {direction.title}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+/**
+ * The two capture-step controls that are NOT steps: the chart-copy preference
+ * she can flip at any point in the window, and the offer to run the analysis on
+ * the photos that were accepted.
+ *
+ * They sit under the thread rather than inside a message because neither is a
+ * question with an answer — turning either into a bubble would put a message in
+ * the history that she can change after the fact.
+ */
+function CapturePrepControls({
+  thread,
+  busy,
+  onChartCopy,
+  onProceed,
+}: {
+  thread: ConsultThreadDTO
+  busy: boolean
+  onChartCopy: (optIn: boolean) => void
+  onProceed: () => void
+}) {
+  const photos = thread.messages.filter(
+    (entry): entry is ConsultThreadPhotoRequestMessageDTO =>
+      entry.kind === 'PHOTO_REQUEST',
+  )
+  if (photos.length === 0 || !thread.chartCopy) return null
+
+  const accepted = photos.filter(
+    (entry) => entry.slot.state === 'ACCEPTED',
+  ).length
+  const canProceed =
+    thread.status === 'MEDIA_READY' && accepted >= 1 && accepted < photos.length
+
+  return (
+    <div className="grid gap-3">
+      <ThreadCard>
+        <label className="flex items-start gap-3">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={thread.chartCopy.optIn}
+            disabled={busy}
+            onChange={(event) => onChartCopy(event.target.checked)}
+          />
+          <span className="text-sm leading-6 text-textPrimary">
+            Keep these photos on my chart with my professional, so future
+            appointments can refer back to them. You can turn this off any time
+            before the analysis runs; otherwise photos are deleted after
+            analysis either way.
+          </span>
+        </label>
+      </ThreadCard>
+      {canProceed ? (
+        <ThreadCard>
+          <p className="text-sm leading-6 text-textSecondary">
+            You can keep going with the photos that came through. The views you
+            skip can’t be analyzed, so those parts of your plan will honestly
+            say unknown.
+          </p>
+          <button
+            type="button"
+            className={`mt-3 ${BUTTON_SECONDARY}`}
+            disabled={busy}
+            onClick={onProceed}
+          >
+            Carry on with {accepted} of {photos.length} photos
+          </button>
+        </ThreadCard>
+      ) : null}
+    </div>
+  )
+}
+
+/**
+ * Where the sticky CTA sends her: the ORDINARY look-booking path.
+ *
+ * 🔴 NOT the consult proposal route. That one refuses with ESTIMATE_MISSING
+ * until the analysis commits an estimate, and the analysis takes ~100s — longer
+ * than the spark lasts. The look's own booking entry books instantly at the
+ * pro's menu starting price, which is what "book at the spark" means; the
+ * consult then continues as prep.
+ */
+function bookTheLookHref(thread: ConsultThreadDTO): string {
+  const params = new URLSearchParams()
+  if (thread.book.serviceId) params.set('serviceId', thread.book.serviceId)
+  if (thread.book.lookMediaId) params.set('mediaId', thread.book.lookMediaId)
+  params.set('source', 'DISCOVERY')
+  return `/looks/${encodeURIComponent(thread.book.lookPostId ?? '')}?${params.toString()}#book`
+}
+
+/**
+ * The sticky Book the look button.
+ *
+ * Disabled until one selfie is in, and it SAYS why — a dead button with no
+ * explanation is the thing that makes a client think the app is broken.
+ */
+function BookTheLookCta({
+  thread,
+  copy,
+  busy,
+  onBook,
+}: {
+  thread: ConsultThreadDTO
+  copy: BrandClientConsultThreadCopy
+  busy: boolean
+  onBook: () => void
+}) {
+  const { book } = thread
+  // A booking-anchored consult already HAS its appointment, and a stopped one
+  // has nothing to book. Neither gets a button at all — a permanently disabled
+  // CTA reads as a bug, not as a rule.
+  if (book.reason === 'NOT_LOOK_ANCHORED' || book.reason === 'CONSULT_STOPPED') {
+    return null
+  }
+  if (book.reason === 'ALREADY_BOOKED') return null
+
+  return (
+    <div className="grid gap-2">
+      <button
+        type="button"
+        className={`${BUTTON_PRIMARY} w-full`}
+        disabled={!book.enabled || busy}
+        onClick={onBook}
+      >
+        {copy.bookCtaLabel}
+      </button>
+      {book.reason === 'SELFIE_REQUIRED' ? (
+        <p className="text-center text-xs text-textMuted">
+          {copy.bookCtaSelfieRequired}
+        </p>
+      ) : null}
+      {book.reason === 'LOOK_NOT_BOOKABLE' ? (
+        <p className="text-center text-xs text-textMuted">
+          {copy.bookCtaNotBookable}
+        </p>
+      ) : null}
+    </div>
+  )
+}
 function ZoomableImage({ src, alt }: { src: string; alt: string }) {
   const [transform, setTransform] = useState({ scale: 1, x: 0, y: 0 })
   const pointers = useRef(new Map<number, { x: number; y: number }>())
@@ -1274,93 +1649,17 @@ function InspirationImagePanel({
   )
 }
 
-function InspirationStage({
-  inspiration,
-  busy,
-  onSkip,
-  onUpload,
-  onAnswer,
-}: {
-  inspiration: ConsultInspirationStateDTO
-  busy: boolean
-  onSkip: () => void
-  onUpload: (file: File) => void
-  onAnswer: (
-    question: ConsultInspirationQuestionDTO,
-    selectedValues: string[],
-    text: string,
-    sentiment: InspirationSentiment | null,
-  ) => void
-}) {
-  const question = inspiration.progress.currentQuestion
 
-  if (inspiration.progress.canComplete && !question) return null
-
-  return (
-    <section className="grid gap-4">
-      <StageHeading eyebrow="Step 3 of 4" title="Your inspiration" />
-      <div className={CARD}>
-        <p className="text-sm leading-6 text-textSecondary">
-          {inspiration.introduction}
-        </p>
-        {inspiration.progress.blocker === 'SOURCE_DECISION_REQUIRED' ? (
-          <div className="mt-4 grid gap-2">
-            <label className={`${BUTTON_PRIMARY} cursor-pointer text-center`}>
-              Add an inspiration photo
-              <input
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                className="hidden"
-                disabled={busy}
-                onChange={(event) => {
-                  const file = event.target.files?.[0]
-                  if (file) onUpload(file)
-                  event.target.value = ''
-                }}
-              />
-            </label>
-            <button
-              type="button"
-              disabled={busy}
-              className={BUTTON_SECONDARY}
-              onClick={onSkip}
-            >
-              Continue without one
-            </button>
-          </div>
-        ) : null}
-        {inspiration.source && question ? (
-          <InspirationImagePanel
-            source={inspiration.source}
-            focusHint={INSPIRATION_FOCUS[question.key] ?? null}
-          />
-        ) : null}
-        {inspiration.source && question ? (
-          <p className="mt-2 text-xs leading-5 text-textMuted">
-            {inspiration.referenceNote}
-          </p>
-        ) : null}
-        {inspiration.progress.blocker === 'AT_LEAST_THREE_DETAILS_REQUIRED' ? (
-          <p className="mt-3 rounded-lg border border-toneInfo/30 bg-toneInfo/10 px-3 py-2 text-xs leading-5 text-textPrimary">
-            Pick out at least three specific details you love or want to avoid
-            across these questions — answers like “not sure” don’t give your
-            professional anything to work from, so a couple of questions are
-            coming back around.
-          </p>
-        ) : null}
-        {question ? (
-          <InspirationQuestionForm
-            key={question.key}
-            question={question}
-            busy={busy}
-            onAnswer={onAnswer}
-          />
-        ) : null}
-      </div>
-    </section>
-  )
-}
-
+/**
+ * The inspiration question, as taps only.
+ *
+ * 🔴 The free-text note and its GOOD/BAD/BOTH sentiment picker are GONE from
+ * the thread (P5a: "no free-text input"). Nothing is lost from the contract:
+ * every question that allowed a note also carries a tappable option, and the
+ * server treats a blank note as that option. What the removal buys is the
+ * property that makes a scripted thread worth having — every prompt is
+ * deterministic, instant, and free per message.
+ */
 function InspirationQuestionForm({
   question,
   busy,
@@ -1371,31 +1670,24 @@ function InspirationQuestionForm({
   onAnswer: (
     question: ConsultInspirationQuestionDTO,
     selectedValues: string[],
-    text: string,
-    sentiment: InspirationSentiment | null,
   ) => void
 }) {
   const [selected, setSelected] = useState<string[]>([])
-  const [text, setText] = useState('')
-  const [sentiment, setSentiment] = useState<InspirationSentiment | null>(null)
 
-  const trimmed = question.allowText ? text.trim() : ''
-  const traitBlocked = Boolean(
-    trimmed && CONSULT_INSPIRATION_UNSUPPORTED_TRAIT_LANGUAGE.test(trimmed),
-  )
-  const needsSentiment = Boolean(trimmed) && !sentiment
   const needsSelection =
     question.kind !== 'TEXT' && selected.length < question.minSelections
 
   const toggleOption = (value: string) => {
     setSelected((current) => {
-      if (question.kind === 'SINGLE_SELECT') return [value]
+      if (question.kind === 'SINGLE_SELECT' || question.kind === 'TEXT') {
+        return [value]
+      }
       if (current.includes(value)) {
         return current.filter((entry) => entry !== value)
       }
       // The server refuses a neutral choice ("None", "Not sure", "Nothing
       // else") combined with anything else — keep the selection consistent
-      // instead of letting the mix bounce with a generic error.
+      // instead of letting the mix bounce back with a generic error.
       if (NEUTRAL_INSPIRATION_VALUES.has(value)) return [value]
       const withoutNeutrals = current.filter(
         (entry) => !NEUTRAL_INSPIRATION_VALUES.has(entry),
@@ -1403,11 +1695,6 @@ function InspirationQuestionForm({
       if (withoutNeutrals.length >= question.maxSelections) return current
       return [...withoutNeutrals, value]
     })
-    if (question.kind === 'TEXT') {
-      // "Nothing else" and a written note are mutually exclusive.
-      setText('')
-      setSentiment(null)
-    }
   }
 
   return (
@@ -1432,250 +1719,14 @@ function InspirationQuestionForm({
           )
         })}
       </div>
-      {question.allowText || question.kind === 'TEXT' ? (
-        <div className="grid gap-2">
-          <textarea
-            className="rounded-xl border border-surfaceGlass/20 bg-bgPrimary p-3 text-sm text-textPrimary"
-            rows={2}
-            maxLength={CONSULT_INSPIRATION_TEXT_MAX_CHARS}
-            value={text}
-            placeholder="Anything else, in your own words — or leave this blank"
-            onChange={(event) => {
-              setText(event.target.value)
-              if (event.target.value.trim()) {
-                setSelected((current) =>
-                  current.filter((entry) => entry !== 'nothing-else'),
-                )
-              }
-            }}
-          />
-          {trimmed ? (
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs text-textSecondary">This is…</span>
-              {SENTIMENT_OPTIONS.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  disabled={busy}
-                  className={
-                    sentiment === option.value ? CHIP_ACTIVE : CHIP_INACTIVE
-                  }
-                  onClick={() => setSentiment(option.value)}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-          ) : null}
-          {traitBlocked ? (
-            <p className="rounded-lg border border-toneWarn/30 bg-toneWarn/10 px-3 py-2 text-xs leading-5 text-textPrimary">
-              Keep this note about the look itself — words about the face,
-              eyes, skin, or body can’t be included here. Your photos already
-              show your professional everything they need.
-            </p>
-          ) : null}
-        </div>
-      ) : null}
       <button
         type="button"
-        disabled={busy || needsSelection || needsSentiment || traitBlocked}
+        disabled={busy || needsSelection}
         className={`${BUTTON_PRIMARY} justify-self-start`}
-        onClick={() => onAnswer(question, selected, text, sentiment)}
+        onClick={() => onAnswer(question, selected)}
       >
         Next
       </button>
-      {needsSentiment ? (
-        <p className="text-xs text-textMuted">
-          Tell us whether that note is something you like, something to avoid,
-          or a bit of both.
-        </p>
-      ) : null}
     </div>
-  )
-}
-
-function slotLabel(slot: ConsultCaptureSlotStateDTO | undefined): string {
-  if (!slot || slot.state === 'EMPTY') return 'Add photo'
-  if (slot.state === 'ACCEPTED') return 'Accepted ✓'
-  if (slot.state === 'REJECTED') return 'Retake photo'
-  if (slot.state === 'EXPIRED' || slot.state === 'PURGED') return 'Add photo again'
-  return 'Checking…'
-}
-
-function CaptureStage({
-  capture,
-  copy,
-  busy,
-  slotPreviews,
-  slotErrors,
-  inspirationDone,
-  onUpload,
-  onChartCopy,
-  onProceed,
-}: {
-  capture: ConsultCaptureStateDTO
-  copy: BrandClientConsultCaptureCopy
-  busy: boolean
-  slotPreviews: Record<string, string>
-  slotErrors: Record<string, string>
-  inspirationDone: boolean
-  onUpload: (shot: ConsultCaptureShotDTO, file: File) => void
-  onChartCopy: (optIn: boolean) => void
-  onProceed: () => void
-}) {
-  const [lightbox, setLightbox] = useState<{ url: string; title: string } | null>(
-    null,
-  )
-  const slots = new Map(capture.slots.map((slot) => [slot.shotKey, slot]))
-  const totalCount = capture.shotPack.shots.length
-  const acceptedCount = capture.slots.filter(
-    (slot) => slot.state === 'ACCEPTED',
-  ).length
-  const rejectedCount = capture.slots.filter(
-    (slot) => slot.state === 'REJECTED',
-  ).length
-  const showPartialContinue =
-    capture.status === 'MEDIA_READY' &&
-    acceptedCount >= 1 &&
-    acceptedCount < totalCount
-
-  return (
-    <section className="grid gap-4">
-      <StageHeading eyebrow={copy.eyebrow} title={copy.title} />
-      <p className="text-sm leading-6 text-textSecondary">
-        {formatConsultCaptureIntro(copy, capture.shotPack)}
-      </p>
-      <div className="grid gap-3 sm:grid-cols-2">
-        {capture.shotPack.shots.map((shot) => {
-          const slot = slots.get(shot.key)
-          const accepted = slot?.state === 'ACCEPTED'
-          const preview = slotPreviews[shot.key]
-          const slotError = slotErrors[shot.key]
-          return (
-            <div key={shot.key} className={CARD}>
-              <div className="flex items-start gap-3">
-                <div className="min-w-0 flex-1">
-                  <h3 className="text-sm font-black text-textPrimary">
-                    {shot.title}
-                  </h3>
-                  <p className="mt-1 text-xs leading-5 text-textSecondary">
-                    {shot.instruction}
-                  </p>
-                </div>
-                {preview ? (
-                  <button
-                    type="button"
-                    className="shrink-0 overflow-hidden rounded-lg border border-surfaceGlass/20"
-                    aria-label={`View your ${shot.title} photo`}
-                    onClick={() => setLightbox({ url: preview, title: shot.title })}
-                  >
-                    <RemoteImage
-                      src={preview}
-                      alt={`Your ${shot.title} photo`}
-                      intrinsic
-                      className="h-16 w-16 object-cover"
-                    />
-                  </button>
-                ) : null}
-              </div>
-              {slot?.state === 'REJECTED' ? (
-                <div className="mt-2 rounded-lg border border-toneWarn/30 bg-toneWarn/10 px-2 py-1.5 text-xs leading-5 text-textPrimary">
-                  {slot.qualityReasonCode
-                    ? QUALITY_REASON_COPY[slot.qualityReasonCode]
-                    : QUALITY_REASON_COPY.OTHER_QUALITY_FAILURE}
-                  {slot.retakeTip ? ` ${slot.retakeTip}` : null}
-                </div>
-              ) : null}
-              {slotError ? (
-                <p className="mt-2 rounded-lg border border-toneDanger/30 bg-toneDanger/10 px-2 py-1.5 text-xs leading-5 text-textPrimary">
-                  {slotError}
-                </p>
-              ) : null}
-              <label
-                className={`mt-3 inline-block cursor-pointer ${
-                  accepted ? BUTTON_SECONDARY : BUTTON_PRIMARY
-                }`}
-              >
-                {slotLabel(slot)}
-                <input
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                  className="hidden"
-                  disabled={busy || accepted}
-                  onChange={(event) => {
-                    const file = event.target.files?.[0]
-                    if (file) onUpload(shot, file)
-                    event.target.value = ''
-                  }}
-                />
-              </label>
-            </div>
-          )
-        })}
-      </div>
-      <div className={CARD}>
-        <label className="flex items-start gap-3">
-          <input
-            type="checkbox"
-            className="mt-1"
-            checked={capture.chartCopy.optIn}
-            disabled={busy}
-            onChange={(event) => onChartCopy(event.target.checked)}
-          />
-          <span className="text-sm leading-6 text-textPrimary">
-            Keep these photos on my chart with my professional, so future
-            appointments can refer back to them. You can turn this off any time
-            before the analysis runs; otherwise photos are deleted after
-            analysis either way.
-          </span>
-        </label>
-      </div>
-      <div className="font-mono text-[10px] font-bold uppercase tracking-[0.12em] text-textMuted">
-        {acceptedCount} / {totalCount} photos accepted
-        {rejectedCount > 0 ? ` · ${rejectedCount} need a retake` : ''}
-      </div>
-      {showPartialContinue ? (
-        <div className={CARD}>
-          <p className="text-sm leading-6 text-textSecondary">
-            You can keep going with the photos that were accepted. The views
-            you skip can’t be analyzed, so those parts of your results will
-            honestly say unknown.
-          </p>
-          <button
-            type="button"
-            className={`mt-3 ${BUTTON_SECONDARY}`}
-            disabled={busy || !inspirationDone}
-            onClick={onProceed}
-          >
-            Continue with {acceptedCount} of {totalCount} photos
-          </button>
-          {!inspirationDone ? (
-            <p className="mt-2 text-xs text-textMuted">
-              Finish the inspiration step above first.
-            </p>
-          ) : null}
-        </div>
-      ) : null}
-      {lightbox ? (
-        <button
-          type="button"
-          aria-label="Close photo preview"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-scrim/80 p-4"
-          onClick={() => setLightbox(null)}
-        >
-          <span className="grid max-h-full gap-2">
-            <RemoteImage
-              src={lightbox.url}
-              alt={`Your ${lightbox.title} photo`}
-              intrinsic
-              className="max-h-[80vh] w-auto max-w-full rounded-xl object-contain"
-            />
-            <span className="justify-self-center rounded-lg bg-bgSurface px-3 py-1 text-center text-xs font-bold text-textPrimary">
-              {lightbox.title} — tap anywhere to close
-            </span>
-          </span>
-        </button>
-      ) : null}
-    </section>
   )
 }

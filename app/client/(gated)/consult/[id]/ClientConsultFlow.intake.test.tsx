@@ -1,16 +1,28 @@
-// The web intake wizard, driven the way a client drives it: tap the one
-// question on screen, over and over, until the photo step.
+// The web consult intake, driven the way a client drives it: tap the one
+// question the thread is offering, over and over, until the photos.
 //
 // It exists to MEASURE the P6 diet rather than describe it. The fake server
 // here does not emulate the pacing rule — it calls the real
-// `evaluateConsultIntakeProgress` against the real pack, so what the wizard
+// `evaluateConsultIntakeProgress` against the real pack, so what the thread
 // walks is the contract that actually ships, and the tap count it returns is
 // the number a client would count on the screen.
+//
+// 🔴 P5a moved the flow from a wizard to a thread, which costs ONE TAP FEWER:
+// there is no final "Continue to photos", because the photo requests were in
+// the thread the whole time. The saved tap is the shape change, not a change to
+// the pack — the pack's own cost is still the difference between the two
+// numbers below.
+//
+// Naming the service (handoff B6) is no longer asserted here. In a thread the
+// app's sentences are composed SERVER-side, so asserting the opening bubble
+// against this file's own fake would only prove the fake agrees with itself;
+// the real guard is in tests/integration/consult-thread.test.ts, against the
+// projection and real PostgreSQL.
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { defaultClientConsultCaptureCopy } from '@/lib/brand/defaultClientConsultCaptureCopy'
+import { defaultClientConsultThreadCopy } from '@/lib/brand/defaultClientConsultThreadCopy'
 import { HAIR_COLOR_INTAKE_PACK_V2 } from '@/lib/consult/intake/packs/hairColor'
 import {
   evaluateConsultIntakeProgress,
@@ -18,61 +30,91 @@ import {
 } from '@/lib/consult/intake/registry'
 import type { ConsultIntakePackDefinition } from '@/lib/consult/intake/types'
 import { resolveConsultIntakePack } from '@/lib/consult/intake/registry'
+import type { ConsultThreadMessageDTO } from '@/lib/dto/consult'
 
 const replace = vi.fn()
-vi.mock('next/navigation', () => ({ useRouter: () => ({ replace }) }))
+const push = vi.fn()
+vi.mock('next/navigation', () => ({ useRouter: () => ({ replace, push }) }))
 
 import ClientConsultFlow from './ClientConsultFlow'
 
 const CONSULT_ID = 'consult_1'
-// The real brand copy — the capture step is never reached here, but the
-// component takes it, and a stub would drift from the type.
-const CAPTURE_COPY = defaultClientConsultCaptureCopy
+const COPY = defaultClientConsultThreadCopy
 
-function intakeState(
+/**
+ * The thread the server would project for this pack and these answers.
+ *
+ * The ORDERING rule is the server's (lib/consult/thread.ts) and is proven
+ * against real PostgreSQL; what is reproduced here is only the part this test
+ * drives — history, then the one open question — off the REAL progress
+ * evaluation, so the pacing under test is the shipped one.
+ */
+function threadFor(
   pack: ConsultIntakePackDefinition,
   answers: Record<string, string>,
 ) {
+  const packDto = toConsultIntakeQuestionPackDTO(pack)
+  const progress = evaluateConsultIntakeProgress(pack, answers)
+  // The server's own fallback (lib/consult/thread.ts): `nextQuestionKey` goes
+  // null once every REQUIRED question is answered and never names a SKIPPABLE
+  // one, so the projection opens the first unanswered question instead. Without
+  // it here the optional questions are never offered and the measured tap count
+  // silently under-reports the pack.
+  const openKey =
+    progress.nextQuestionKey ??
+    packDto.questions.find((entry) => !answers[entry.key])?.key ??
+    null
+  const messages: ConsultThreadMessageDTO[] = [
+    {
+      kind: 'TEXT',
+      id: 'opening',
+      author: 'APP',
+      state: 'DONE',
+      text: 'Love this one.',
+    },
+  ]
+  for (const question of packDto.questions) {
+    const answer = answers[question.key] ?? null
+    if (answer === null && question.key !== openKey) continue
+    messages.push({
+      kind: 'QUESTION',
+      id: `intake:${question.key}`,
+      author: 'APP',
+      state: question.key === openKey ? 'OPEN' : 'DONE',
+      question,
+      answer,
+      packVersion: packDto.version,
+      schemaVersion: packDto.schemaVersion,
+    })
+  }
   return {
     ok: true,
-    intake: {
+    thread: {
       consultId: CONSULT_ID,
-      status: 'INTAKE_READY',
-      service: {
+      status: openKey ? 'INTAKE_READY' : 'MEDIA_READY',
+      professionalId: 'pro_1',
+      professionalDisplayName: 'Susie',
+      nextOpenMessageId: openKey ? `intake:${openKey}` : null,
+      messages,
+      chartCopy: null,
+      book: {
+        enabled: false,
+        reason: 'SELFIE_REQUIRED',
+        lookPostId: 'look_1',
         serviceId: 'service_1',
-        name: 'Signature Balayage',
-        proFacingName: 'Balayage',
+        lookMediaId: 'media_1',
       },
-      questionPack: toConsultIntakeQuestionPackDTO(pack),
-      // The REAL rule, not a copy of it.
-      progress: evaluateConsultIntakeProgress(pack, answers),
-      prefillSuggestions: [],
-      prefillSignals: [],
-      latestRevision:
-        Object.keys(answers).length === 0
-          ? null
-          : {
-              id: 'rev_1',
-              revision: 1,
-              packId: pack.id,
-              packVersion: pack.version,
-              schemaVersion: pack.schemaVersion,
-              complete: false,
-              answers,
-              createdAt: '2026-09-04T00:00:00.000Z',
-            },
     },
   }
 }
 
 /**
- * Renders the wizard against a fake consult on `pack`, taps the single
- * question it offers until it offers none, then taps Continue. Returns the
- * total taps to reach the photo step.
+ * Renders the thread against a fake consult on `pack`, taps the single open
+ * question until there is none left, and returns the taps it took to reach the
+ * photo step.
  */
 async function tapsToThePhotoStep(pack: ConsultIntakePackDefinition) {
   let answers: Record<string, string> = {}
-  let completed = false
 
   vi.stubGlobal(
     'fetch',
@@ -83,48 +125,57 @@ async function tapsToThePhotoStep(pack: ConsultIntakePackDefinition) {
           status: 200,
           headers: { 'content-type': 'application/json' },
         })
-      if (url.endsWith(`/consult/${CONSULT_ID}`)) {
-        return body({ ok: true, consult: { id: CONSULT_ID, status: 'INTAKE_READY' } })
-      }
       if (url.endsWith('/intake') && init?.method === 'POST') {
         const sent = JSON.parse(String(init.body)) as {
           answers: Record<string, string>
-          complete: boolean
         }
         answers = sent.answers
-        if (sent.complete) completed = true
-        return body({ ...intakeState(pack, answers), replayed: false })
+        return body({ ...threadFor(pack, answers), replayed: false })
       }
-      if (url.endsWith('/intake')) return body(intakeState(pack, answers))
+      if (url.endsWith('/thread')) return body(threadFor(pack, answers))
       throw new Error(`unexpected fetch: ${url}`)
     }),
   )
 
-  render(<ClientConsultFlow consultId={CONSULT_ID} captureCopy={CAPTURE_COPY} />)
+  render(<ClientConsultFlow consultId={CONSULT_ID} copy={COPY} />)
+  // The thread is ONE read, and it is asynchronous — without waiting for it the
+  // loop below finds nothing tappable and reports a triumphant zero taps.
+  await screen.findByText('Love this one.')
 
   let taps = 0
   for (;;) {
-    // The screen shows exactly one question's options, or the Continue button.
-    const continueButton = screen.queryByRole('button', {
-      name: 'Continue to photos',
-    })
-    if (continueButton) {
-      fireEvent.click(continueButton)
-      taps += 1
-      break
-    }
-    const heading = await screen.findByRole('heading', { level: 3 })
-    const question = pack.questions.find((entry) => entry.label === heading.textContent)
-    expect(question, `no pack question matches "${heading.textContent}"`).toBeDefined()
-    // Only ONE question is on screen at a time.
-    expect(screen.getAllByRole('heading', { level: 3 })).toHaveLength(1)
-    const option = question!.options[0]!
-    fireEvent.click(screen.getByRole('button', { name: option.label }))
+    // Which question is ANSWERABLE right now, found from the DOM rather than by
+    // re-deriving the pacing rule this test measures. Scoped PER MESSAGE, not by
+    // option label: several questions in these packs offer the same words
+    // ("Never", "No"), so a label search finds one question's buttons and
+    // attributes them to five.
+    //
+    // An answered question keeps its card and its heading — that is the thread —
+    // but loses its options, so exactly one intake message is ever tappable.
+    const tappable = Array.from(
+      document.querySelectorAll('[data-thread-message^="intake:"]'),
+    ).filter((node) => node.querySelectorAll('button').length > 0)
+
+    if (tappable.length === 0) break
+    expect(
+      tappable.length,
+      `two questions answerable at once: ${tappable
+        .map((node) => node.getAttribute('data-thread-message'))
+        .join(', ')}`,
+    ).toBe(1)
+
+    const card = tappable[0]!
+    const key = card.getAttribute('data-thread-message')!.slice('intake:'.length)
+    const question = pack.questions.find((entry) => entry.key === key)!
+    const option = question.options[0]!
+    const button = Array.from(card.querySelectorAll('button')).find(
+      (node) => node.textContent?.trim() === option.label,
+    )!
+    fireEvent.click(button)
     taps += 1
-    await waitFor(() => expect(answers[question!.key]).toBe(option.value))
+    await waitFor(() => expect(answers[question.key]).toBe(option.value))
     expect(taps).toBeLessThanOrEqual(pack.questions.length)
   }
-  await waitFor(() => expect(completed).toBe(true))
   return taps
 }
 
@@ -134,26 +185,29 @@ afterEach(() => {
 })
 
 describe('the web consult intake, one question at a time', () => {
-  it('names the service the consult is about', async () => {
-    await tapsToThePhotoStep(resolveConsultIntakePack({
+  it('leaves every answered question on screen as history', async () => {
+    const pack = resolveConsultIntakePack({
       categorySlug: 'hair-color',
       family: 'HAIR',
-    }))
-    // Rendered from the served identity, not from a category or a constant.
-    expect(screen.getByText('About your Signature Balayage')).toBeTruthy()
+    })
+    await tapsToThePhotoStep(pack)
+    // The wizard replaced each question with the next one. A thread keeps them:
+    // the client's own answers are still there to scroll back to.
+    const answered = screen.getAllByRole('heading', { level: 3 })
+    expect(answered.length).toBe(pack.questions.length)
   })
 
   // The product principle, measured: sixteen taps to reach the camera was a
   // form. The diet is the difference between these two numbers.
   it('reaches the photo step in half the taps the pre-diet pack needed', async () => {
-    expect(await tapsToThePhotoStep(HAIR_COLOR_INTAKE_PACK_V2)).toBe(16)
+    expect(await tapsToThePhotoStep(HAIR_COLOR_INTAKE_PACK_V2)).toBe(15)
   })
 
-  it('reaches the photo step in eight taps on the shipped pack', async () => {
+  it('reaches the photo step in seven taps on the shipped pack', async () => {
     expect(
       await tapsToThePhotoStep(
         resolveConsultIntakePack({ categorySlug: 'hair-color', family: 'HAIR' }),
       ),
-    ).toBe(8)
+    ).toBe(7)
   })
 })

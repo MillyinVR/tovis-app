@@ -108,7 +108,7 @@ const sessionIds: string[] = []
  * decides, so these values are chosen to keep `blocksChemicalRecommendations`
  * false — a "not-sure" or a recent box dye anywhere here flips it.
  */
-const completeAnswers = {
+export const completeAnswers = {
   change_scale: 'noticeable',
   box_dye_history: 'over-12-months',
   prior_lightening: '6-12-months',
@@ -117,7 +117,7 @@ const completeAnswers = {
   prior_reaction: 'no',
 }
 
-const INSPIRATION_ANSWERS: ReadonlyArray<
+export const INSPIRATION_ANSWERS: ReadonlyArray<
   [string, string[], string | null, string | null]
 > = [
   ['favorite_colors', ['cool-smoky'], null, null],
@@ -202,7 +202,7 @@ export async function createLook(
   return look.id
 }
 
-async function attachAcceptedCapture(
+export async function attachAcceptedCapture(
   db: PrismaClient,
   sessionId: string,
   shotKey: HairColorCaptureShotKey,
