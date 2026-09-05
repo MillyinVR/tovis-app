@@ -1,11 +1,29 @@
 // lib/consult/intake/packs/hairColor.ts
 //
-// The hair-colour intake pack — the founder pilot's original pack, moved here
-// UNCHANGED when the consult became service-aware. Its id, versions, keys,
+// The hair-colour intake pack.
+//
+// TWO versions live here. v2 is the founder pilot's pack, frozen: its keys,
 // option values and conditional rule are pinned by stored ConsultRevision
 // payloads in production (19 INTAKE v2 rows on 2026-09-03) and by the
-// `consult_intake_payload_guard` trigger's hair-color branch, so a change here
-// is a new pack version, never an edit.
+// `consult_intake_payload_guard` trigger, so it is never edited — a change is
+// a new version. v3 is the P6 diet: only the questions the analysis cannot
+// answer for itself.
+//
+// What v3 drops and why (docs/consult/tovis-ai-consult-handoff.md, Stage 1/3):
+//   * `current_color` — the starting-point photos are read into
+//     `core.baseLevel` / `lightestLevel` / `currentTone`.
+//   * `desired_color` — the inspiration reference is read into seven hair
+//     colour attributes (P4, lib/consult/inspirationVision.ts).
+//   * `perm_history`, `relaxer_texturizer_history`,
+//     `keratin_smoothing_history` — folded into `other_chemical_history`,
+//     which already carries the identical option values and is already what
+//     `hasReportedNonColorTreatment` reads. One question, same routing.
+//   * `last_color_service_timing`, `event_timing`, `budget` — the pro wants
+//     them; nothing before the analysis does. They move to the post-booking
+//     follow-up pack (lib/consult/intake/followUp.ts).
+//
+// Every KEPT question keeps its v2 key and option values exactly, which is
+// what lets one safety policy and one database mirror serve both versions.
 
 import {
   BOARD_CURRENT_COLOR_OPTIONS,
@@ -27,6 +45,7 @@ import {
   TREATMENT_TIMING_OPTIONS,
 } from '../sharedOptions'
 import {
+  dietedIntakePack,
   intakeQuestion,
   type ConsultIntakeOptionValues,
   type ConsultIntakePackDefinition,
@@ -34,7 +53,8 @@ import {
 } from '../types'
 
 export const HAIR_COLOR_INTAKE_PACK_ID = 'hair-color' as const
-export const HAIR_COLOR_INTAKE_PACK_VERSION = 2
+export const HAIR_COLOR_INTAKE_PACK_VERSION = 3
+export const HAIR_COLOR_INTAKE_PACK_V2_VERSION = 2
 export const HAIR_COLOR_INTAKE_SCHEMA_VERSION = 2
 
 export const HAIR_COLOR_INTAKE_QUESTION_KEYS = [
@@ -90,11 +110,11 @@ function goalNeedsDirection(
   )
 }
 
-/** New C2 wording is pinned by this pack version; board wording is reused. */
-export const HAIR_COLOR_INTAKE_PACK: ConsultIntakePackDefinition = {
+/** v2 — FROZEN. New C2 wording pinned by this version; board wording reused. */
+export const HAIR_COLOR_INTAKE_PACK_V2: ConsultIntakePackDefinition = {
   id: HAIR_COLOR_INTAKE_PACK_ID,
   categorySlug: 'hair-color',
-  version: HAIR_COLOR_INTAKE_PACK_VERSION,
+  version: HAIR_COLOR_INTAKE_PACK_V2_VERSION,
   schemaVersion: HAIR_COLOR_INTAKE_SCHEMA_VERSION,
   goalDirection: {
     questionKey: 'goal_direction',
@@ -214,6 +234,48 @@ export const HAIR_COLOR_INTAKE_PACK: ConsultIntakePackDefinition = {
   ],
 }
 
+/**
+ * v3 keys — the questions a photograph cannot answer. Kept in v2's order so a
+ * client who has seen both packs meets them in the same sequence.
+ */
+export const HAIR_COLOR_INTAKE_V3_QUESTION_KEYS = [
+  'change_scale',
+  'goal_direction',
+  'box_dye_history',
+  'prior_lightening',
+  'henna_plant_dye_history',
+  'other_chemical_history',
+  'prior_reaction',
+] as const satisfies readonly HairColorIntakeQuestionKey[]
+
+/**
+ * v3 — CURRENT. With the colour pair gone, the only thing that can leave a
+ * colour goal ambiguous is the client asking for a subtle change, which is the
+ * same rule every other pack uses.
+ */
+export const HAIR_COLOR_INTAKE_PACK: ConsultIntakePackDefinition = dietedIntakePack({
+  base: HAIR_COLOR_INTAKE_PACK_V2,
+  version: HAIR_COLOR_INTAKE_PACK_VERSION,
+  keep: HAIR_COLOR_INTAKE_V3_QUESTION_KEYS,
+  reword: {
+    goal_direction: {
+      label: 'What would you most like to change about your color?',
+    },
+    // Absorbs v2's perm, relaxer/texturizer and keratin/smoothing questions.
+    // Same key, same option values, same safety routing — one question.
+    other_chemical_history: {
+      label:
+        'When did you last have a perm, relaxer, keratin or other chemical treatment?',
+      helpText: TREATMENT_HISTORY_HELP,
+    },
+  },
+  goalDirection: {
+    questionKey: 'goal_direction',
+    unresolvedValue: GOAL_DIRECTION_UNRESOLVED_VALUE,
+    requiredWhen: (answers) => answers.change_scale === 'subtle',
+  },
+})
+
 // ── C5 evaluation fixture contract (frozen v1) ─────────────────────────────
 
 const C5_EVALUATION_INTAKE_OPTIONS = {
@@ -273,7 +335,7 @@ const C5_EVALUATION_REQUIRED_INTAKE_KEYS = [
 
 /**
  * Preserves the immutable C5 fixture-input contract. Current product intake is
- * v2; C5 remains v1 until a separately approved full evaluation is versioned.
+ * v3; C5 remains v1 until a separately approved full evaluation is versioned.
  */
 export function validateHairColorC5EvaluationIntakeAnswers(
   raw: unknown,

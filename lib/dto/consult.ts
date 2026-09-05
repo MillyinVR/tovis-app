@@ -226,9 +226,29 @@ export type ConsultIntakeRevisionDTO = {
   createdAt: string
 }
 
+/**
+ * WHICH SERVICE this consult is about (lib/consult/serviceIdentity.ts). The
+ * booking's service on a booking anchor, the Look's primary service on a look
+ * anchor — the flow is look-based, so before this the client could be asked
+ * about "this kind of service" with no service named anywhere on screen
+ * (handoff B6).
+ *
+ * `name` is the plain-language name the CLIENT is shown (the pro's own
+ * offering title when they set one); `proFacingName` is the catalog name the
+ * pro's menu uses and the analysis recommends from. Every field is nullable
+ * together: a Look whose linked service row was deleted names nothing, and a
+ * client is told "your consult" rather than the wrong service.
+ */
+export type ConsultServiceIdentityDTO = {
+  serviceId: string | null
+  name: string | null
+  proFacingName: string | null
+}
+
 export type ConsultIntakeStateDTO = {
   consultId: string
   status: ConsultSessionStatus
+  service: ConsultServiceIdentityDTO
   questionPack: ConsultIntakeQuestionPackDTO
   progress: {
     canComplete: boolean

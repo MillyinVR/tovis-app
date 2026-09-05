@@ -294,14 +294,12 @@ type Consult = { userId: string; clientId: string; sessionId: string }
 // A complete general-service intake that routes to NO safety test, so the
 // menu needs no Patch Test row and the analysis is the thing under test.
 const completeGeneral = {
-  service_experience: 'regular',
   change_scale: 'subtle',
   goal_direction: 'shape',
   recent_treatment_timing: 'within-6-months',
   skin_sensitivity: 'no',
   known_allergies: 'none-known',
   prior_reaction: 'no',
-  last_service_timing: 'within-4-weeks',
 }
 
 function context(id: string) {

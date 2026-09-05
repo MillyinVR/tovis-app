@@ -609,6 +609,7 @@ export type {
   ConsultIntakePrefillSuggestionDTO,
   ConsultIntakePrefillSignalDTO,
   ConsultIntakeRevisionDTO,
+  ConsultServiceIdentityDTO,
   ConsultIntakeStateDTO,
   ConsultIntakeSubmitRequestDTO,
   ConsultIntakeStateResponseDTO,

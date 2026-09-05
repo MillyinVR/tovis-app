@@ -1,11 +1,23 @@
 // lib/consult/intake/packs/hairGeneral.ts
 //
 // The intake for every HAIR-family service that is not a colour service —
-// extensions, cuts and barbering today, anything hair tomorrow. It asks what a
-// stylist needs before touching hair that may have chemical history (the
-// safety policy reads `chemical_history`, `prior_lightening` and
-// `prior_reaction`), what the client has in mind, and the same closing
-// deadline/budget pair every pack ends with.
+// extensions, cuts and barbering today, anything hair tomorrow.
+//
+// TWO versions. v1 is frozen (stored payloads and the
+// `consult_intake_payload_guard` trigger name it). v2 is the P6 diet: the
+// questions the analysis cannot answer for itself — the chemical history the
+// safety policy reads (`chemical_history`, `prior_lightening`,
+// `prior_reaction`) plus how big a change the client wants.
+//
+// What v2 drops and why:
+//   * `current_length`, `hair_texture` — the hair capture pack photographs
+//     front, back, sides and a close-up; length and texture are read off them
+//     (`core.texture`, and the views themselves).
+//   * `service_experience` — moves to the post-booking follow-up, phrased with
+//     the service's own name (handoff B6; lib/consult/intake/followUp.ts).
+//   * `last_service_timing`, `maintenance_tolerance`, `event_timing`,
+//     `budget` — the pro wants them, nothing before the analysis does. They
+//     move to the same follow-up.
 //
 // Option VALUES are shared with the colour pack wherever a downstream reader
 // keys on them (lib/consult/intake/sharedOptions.ts); keys are the pack's own.
@@ -28,13 +40,15 @@ import {
   TREATMENT_TIMING_OPTIONS,
 } from '../sharedOptions'
 import {
+  dietedIntakePack,
   intakeQuestion,
   type ConsultIntakeOptionValues,
   type ConsultIntakePackDefinition,
 } from '../types'
 
 export const HAIR_GENERAL_INTAKE_PACK_ID = 'hair-general' as const
-export const HAIR_GENERAL_INTAKE_PACK_VERSION = 1
+export const HAIR_GENERAL_INTAKE_PACK_VERSION = 2
+export const HAIR_GENERAL_INTAKE_PACK_V1_VERSION = 1
 export const HAIR_GENERAL_INTAKE_SCHEMA_VERSION = 2
 
 export const HAIR_GENERAL_INTAKE_QUESTION_KEYS = [
@@ -75,10 +89,11 @@ function goalNeedsDirection(
   return answers.change_scale === 'subtle'
 }
 
-export const HAIR_GENERAL_INTAKE_PACK: ConsultIntakePackDefinition = {
+/** v1 — FROZEN. */
+export const HAIR_GENERAL_INTAKE_PACK_V1: ConsultIntakePackDefinition = {
   id: HAIR_GENERAL_INTAKE_PACK_ID,
   categorySlug: 'hair',
-  version: HAIR_GENERAL_INTAKE_PACK_VERSION,
+  version: HAIR_GENERAL_INTAKE_PACK_V1_VERSION,
   schemaVersion: HAIR_GENERAL_INTAKE_SCHEMA_VERSION,
   goalDirection: {
     questionKey: 'goal_direction',
@@ -183,3 +198,24 @@ export const HAIR_GENERAL_INTAKE_PACK: ConsultIntakePackDefinition = {
     ),
   ],
 }
+
+/** v2 keys — kept in v1's order. */
+export const HAIR_GENERAL_INTAKE_V2_QUESTION_KEYS = [
+  'change_scale',
+  'goal_direction',
+  'chemical_history',
+  'prior_lightening',
+  'prior_reaction',
+] as const satisfies readonly HairGeneralIntakeQuestionKey[]
+
+/** v2 — CURRENT. */
+export const HAIR_GENERAL_INTAKE_PACK: ConsultIntakePackDefinition = dietedIntakePack({
+  base: HAIR_GENERAL_INTAKE_PACK_V1,
+  version: HAIR_GENERAL_INTAKE_PACK_VERSION,
+  keep: HAIR_GENERAL_INTAKE_V2_QUESTION_KEYS,
+  goalDirection: {
+    questionKey: 'goal_direction',
+    unresolvedValue: GOAL_DIRECTION_UNRESOLVED_VALUE,
+    requiredWhen: goalNeedsDirection,
+  },
+})

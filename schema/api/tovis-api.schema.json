@@ -10535,6 +10535,9 @@
         "questionPack": {
           "$ref": "#/definitions/ConsultIntakeQuestionPackDTO"
         },
+        "service": {
+          "$ref": "#/definitions/ConsultServiceIdentityDTO"
+        },
         "status": {
           "$ref": "#/definitions/ConsultSessionStatus"
         }
@@ -10542,6 +10545,7 @@
       "required": [
         "consultId",
         "status",
+        "service",
         "questionPack",
         "progress",
         "prefillSuggestions",
@@ -11469,6 +11473,35 @@
     },
     "ConsultServiceEstimateStatus": {
       "$ref": "#/definitions/%24Enums.ConsultServiceEstimateStatus"
+    },
+    "ConsultServiceIdentityDTO": {
+      "description": "WHICH SERVICE this consult is about (lib/consult/serviceIdentity.ts). The booking's service on a booking anchor, the Look's primary service on a look anchor — the flow is look-based, so before this the client could be asked about \"this kind of service\" with no service named anywhere on screen (handoff B6).\n\n`name` is the plain-language name the CLIENT is shown (the pro's own offering title when they set one); `proFacingName` is the catalog name the pro's menu uses and the analysis recommends from. Every field is nullable together: a Look whose linked service row was deleted names nothing, and a client is told \"your consult\" rather than the wrong service.",
+      "properties": {
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "proFacingName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "serviceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "serviceId",
+        "name",
+        "proFacingName"
+      ],
+      "type": "object"
     },
     "ConsultSessionDTO": {
       "properties": {

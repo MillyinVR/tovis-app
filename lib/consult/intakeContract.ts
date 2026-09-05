@@ -10,6 +10,7 @@ import {
 
 import { normalizeBoardAnswers } from '@/lib/boards/context'
 import type {
+  ConsultServiceIdentityDTO,
   ConsultIntakePrefillProvenanceDTO,
   ConsultIntakePrefillSignalDTO,
   ConsultIntakePrefillSourceDTO,
@@ -31,10 +32,20 @@ import { ConsultWriteError } from './errors'
 import {
   evaluateConsultIntakeProgress,
   normalizeConsultIntakePayloadForPack,
+  resolveConsultSessionIntakePack,
   toConsultIntakeQuestionPackDTO,
 } from './intake/registry'
 import { SERVICE_TIMING_QUESTION_KEYS } from './intake/sharedOptions'
 import type { ConsultIntakePackDefinition } from './intake/types'
+import {
+  CONSULT_SERVICE_IDENTITY_BOOKING_SELECT,
+  CONSULT_SERVICE_IDENTITY_LOOK_SELECT,
+  CONSULT_SERVICE_IDENTITY_NONE,
+  consultServiceIdentityFromBooking,
+  consultServiceIdentityFromLook,
+  withProfessionalOfferingTitle,
+  type ConsultServiceIdentity,
+} from './serviceIdentity'
 import {
   CONSULT_SERVICE_PROFILE_CATEGORY_SELECT,
   resolveConsultServiceProfile,
@@ -53,6 +64,20 @@ const INTAKE_SCOPE_SELECT = {
   // The anchor rule reads the slug; the service profile reads the family and
   // the name as well, so the wider select replaces the anchor's narrower one.
   serviceCategory: { select: CONSULT_SERVICE_PROFILE_CATEGORY_SELECT },
+  // Same for the booking: the anchor rule needs its category, the intake
+  // state needs the SERVICE the client is here about.
+  booking: {
+    select: {
+      ...CONSULT_ANCHOR_SELECT.booking.select,
+      ...CONSULT_SERVICE_IDENTITY_BOOKING_SELECT,
+      service: {
+        select: {
+          ...CONSULT_ANCHOR_SELECT.booking.select.service.select,
+          ...CONSULT_SERVICE_IDENTITY_BOOKING_SELECT.service.select,
+        },
+      },
+    },
+  },
 } satisfies Prisma.ConsultSessionSelect
 
 type IntakeScope = Prisma.ConsultSessionGetPayload<{
@@ -148,11 +173,37 @@ const SAVED_LOOK_COLOR_TAGS: Readonly<Record<string, string>> = {
   vividhair: 'fantasy',
 }
 
-function signal(
-  source: ConsultIntakePrefillSourceDTO,
-  available: boolean,
-): ConsultIntakePrefillSignalDTO {
-  return { source, available }
+/**
+ * The signal families, in the order the wire has always listed them.
+ *
+ * `available` used to be spelled out per family against the COLOUR pack's
+ * question keys ("BOARD is available if this pack asks desired_color"). The P6
+ * diet broke that: the board also feeds `change_scale`, which the dieted pack
+ * still asks, so the hand-written rule reported BOARD unavailable while a
+ * board-sourced suggestion sat on the screen. Deriving the signal from the
+ * suggestions that actually SURVIVED the pack filter cannot drift from what
+ * the client sees, and it is one rule rather than five.
+ */
+const CONSULT_INTAKE_PREFILL_SOURCES: readonly ConsultIntakePrefillSourceDTO[] = [
+  'SELF_PROFILE',
+  'BOARD',
+  'SAVED_LOOK',
+  'TASTE_VECTOR',
+  'BOOKING_HISTORY',
+]
+
+function prefillSignals(
+  suggestions: readonly ConsultIntakePrefillSuggestionDTO[],
+): ConsultIntakePrefillSignalDTO[] {
+  const informed = new Set(
+    suggestions.flatMap((suggestion) =>
+      suggestion.provenance.map((entry) => entry.source),
+    ),
+  )
+  return CONSULT_INTAKE_PREFILL_SOURCES.map((source) => ({
+    source,
+    available: informed.has(source),
+  }))
 }
 
 function mapLatestRevision(
@@ -181,6 +232,48 @@ function mapLatestRevision(
 }
 
 /**
+ * Which service this consult is about, for whichever anchor it has. Booking
+ * anchors answer from the row already loaded; look anchors need the Look, and
+ * the pro's own offering title for it (the client-facing name), which is one
+ * more read on each — cheap, and the alternative is a consult that still
+ * cannot say what it is for.
+ */
+async function loadConsultServiceIdentity(
+  tx: Prisma.TransactionClient,
+  session: IntakeScope,
+): Promise<ConsultServiceIdentity> {
+  const base = session.booking
+    ? consultServiceIdentityFromBooking(session.booking)
+    : consultServiceIdentityFromLook(
+        session.anchorLookPostId
+          ? await tx.lookPost.findUnique({
+              where: { id: session.anchorLookPostId },
+              select: CONSULT_SERVICE_IDENTITY_LOOK_SELECT,
+            })
+          : null,
+      )
+  if (!base.serviceId) return CONSULT_SERVICE_IDENTITY_NONE
+  const offering = await tx.professionalServiceOffering.findFirst({
+    where: {
+      professionalId: session.professionalId,
+      serviceId: base.serviceId,
+    },
+    select: { title: true },
+  })
+  return withProfessionalOfferingTitle(base, offering)
+}
+
+function serviceIdentityDto(
+  identity: ConsultServiceIdentity,
+): ConsultServiceIdentityDTO {
+  return {
+    serviceId: identity.serviceId,
+    name: identity.clientFacingName,
+    proFacingName: identity.proFacingName,
+  }
+}
+
+/**
  * Reads only owner-scoped, approved signals after both current legal versions
  * are proven. The transaction performs no writes to any source record.
  */
@@ -201,7 +294,23 @@ export async function loadConsultIntakeState(args: {
           'Consult lifecycle does not permit intake access.',
         )
       }
-      const pack = resolveConsultServiceProfile(session.serviceCategory).intakePack
+      const currentPack = resolveConsultServiceProfile(
+        session.serviceCategory,
+      ).intakePack
+      // Newest-first, so the pin is the version the LATEST readable intake
+      // revision was written under.
+      const intakeRevisions = await tx.consultRevision.findMany({
+        where: {
+          consultSessionId: session.id,
+          kind: ConsultRevisionKind.INTAKE,
+        },
+        select: { id: true, revision: true, payload: true, createdAt: true },
+        orderBy: { revision: 'desc' },
+      })
+      const pack = resolveConsultSessionIntakePack(
+        currentPack,
+        intakeRevisions.map((revision) => revision.payload),
+      )
       const packAsks = (questionKey: string) =>
         pack.questions.some((question) => question.key === questionKey)
       // The one "when was your last service?" key THIS pack asks, if any —
@@ -209,7 +318,7 @@ export async function loadConsultIntakeState(args: {
       const serviceTimingKey =
         SERVICE_TIMING_QUESTION_KEYS.find((key) => packAsks(key)) ?? null
 
-      const [profile, boards, savedLooks, bookingHistory, latestRevision] =
+      const [profile, boards, savedLooks, bookingHistory, serviceIdentity] =
         await Promise.all([
           tx.clientProfile.findUnique({
             where: { id: args.clientId },
@@ -255,17 +364,7 @@ export async function loadConsultIntakeState(args: {
             select: { id: true, scheduledFor: true },
             orderBy: [{ scheduledFor: 'desc' }, { id: 'desc' }],
           }),
-          // C1 allowed opaque INTAKE payloads before this versioned pack
-          // existed. Walk newest-first and return the latest one that conforms
-          // to the current normalized contract.
-          tx.consultRevision.findMany({
-            where: {
-              consultSessionId: session.id,
-              kind: ConsultRevisionKind.INTAKE,
-            },
-            select: { id: true, revision: true, payload: true, createdAt: true },
-            orderBy: { revision: 'desc' },
-          }),
+          loadConsultServiceIdentity(tx, session),
         ])
       const [tasteVector, savedLookEmbeddings] = await Promise.all([
         fetchClientTasteVector(tx, args.clientId),
@@ -284,14 +383,12 @@ export async function loadConsultIntakeState(args: {
         })
       }
 
-      let boardSignalAvailable = false
       for (const board of boards) {
         const answers = normalizeBoardAnswers(
           BoardType.COLOR_TRANSFORMATION,
           board.answers,
         )
         if (!answers) continue
-        boardSignalAvailable = true
         const boardMappings = [
           ['current_color', 'current_color'],
           ['dream_color', 'desired_color'],
@@ -308,7 +405,6 @@ export async function loadConsultIntakeState(args: {
         }
       }
 
-      let savedLookSignalAvailable = false
       const tasteRankedSavedLooks = [...savedLooks].sort((left, right) => {
         if (!tasteVector) return 0
         const leftEmbedding = savedLookEmbeddings.get(left.lookPostId)
@@ -325,7 +421,6 @@ export async function loadConsultIntakeState(args: {
         for (const tag of savedLook.lookPost.tags) {
           const value = SAVED_LOOK_COLOR_TAGS[tag.slug]
           if (!value) continue
-          savedLookSignalAvailable = true
           addSuggestion(suggestions, 'desired_color', value, {
             source: 'SAVED_LOOK',
             sourceId: savedLook.lookPostId,
@@ -369,35 +464,20 @@ export async function loadConsultIntakeState(args: {
         })
       }
 
-      const mappedLatestRevision = mapLatestRevision(pack, latestRevision)
+      const mappedLatestRevision = mapLatestRevision(pack, intakeRevisions)
       return {
         consultId: session.id,
         status: session.status,
+        service: serviceIdentityDto(serviceIdentity),
         questionPack: toConsultIntakeQuestionPackDTO(pack),
         progress: evaluateConsultIntakeProgress(
           pack,
           mappedLatestRevision?.answers ?? {},
         ),
         prefillSuggestions,
-        // A signal family counts as "informed prefill" only when this pack
-        // asks the question it feeds.
-        prefillSignals: [
-          signal(
-            'SELF_PROFILE',
-            Boolean(selfProfile?.hair_color) && packAsks('current_color'),
-          ),
-          signal('BOARD', boardSignalAvailable && packAsks('desired_color')),
-          signal(
-            'SAVED_LOOK',
-            savedLookSignalAvailable && packAsks('desired_color'),
-          ),
-          signal(
-            'TASTE_VECTOR',
-            Boolean(tasteVector && tasteVector.signalCount > 0) &&
-              packAsks('desired_color'),
-          ),
-          signal('BOOKING_HISTORY', Boolean(bookingHistory && serviceTimingKey)),
-        ],
+        // A signal family counts as "informed prefill" only when a suggestion
+        // it provided survived the pack filter above.
+        prefillSignals: prefillSignals(prefillSuggestions),
         latestRevision: mappedLatestRevision,
       }
     },

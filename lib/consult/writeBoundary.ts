@@ -31,6 +31,7 @@ import { CONSULT_MAX_CAPTURE_SHOTS } from './capture/registry'
 import { ConsultWriteError } from './errors'
 import {
   normalizeConsultIntakePayload,
+  resolveConsultSessionIntakePack,
   validateConsultIntakeAnswers,
 } from './intake/registry'
 import type { ConsultIntakePackDefinition } from './intake/types'
@@ -755,6 +756,7 @@ export async function finalizeLockedHairColorAnalysis(
   const briefPayload = buildHairColorProBriefPayload({
     intakeRevisionId: intakeRevision.id,
     intakePackId: intake.packId,
+    intakePackVersion: intake.packVersion,
     intakeAnswers: intake.answers,
     analysisRevisionId: revision.id,
     analysisRevision: revision.revision,
@@ -926,9 +928,25 @@ export async function appendConsultIntakeRevision(args: {
       args.consultSessionId,
       args.actor,
     )
-    const pack: ConsultIntakePackDefinition = resolveConsultServiceProfile(
+    const currentPack: ConsultIntakePackDefinition = resolveConsultServiceProfile(
       scope.serviceCategory,
     ).intakePack
+    // The session keeps the pack VERSION it started on. A client mid-intake
+    // when a new version ships answers the pack she was served, not the one
+    // that shipped underneath her — otherwise her next tap is a
+    // PACK_VERSION_MISMATCH she has no way to resolve.
+    const priorIntakePayloads = await tx.consultRevision.findMany({
+      where: {
+        consultSessionId: args.consultSessionId,
+        kind: ConsultRevisionKind.INTAKE,
+      },
+      select: { payload: true },
+      orderBy: { revision: 'desc' },
+    })
+    const pack = resolveConsultSessionIntakePack(
+      currentPack,
+      priorIntakePayloads.map((revision) => revision.payload),
+    )
     const session = await tx.consultSession.findUniqueOrThrow({
       where: { id: args.consultSessionId },
       select: { status: true },

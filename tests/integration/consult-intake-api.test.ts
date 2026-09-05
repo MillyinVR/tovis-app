@@ -70,22 +70,16 @@ let boardId = ''
 let mediaId = ''
 let lookId = ''
 
-const partialAnswers = { current_color: 'brunette' }
+// P6, the intake diet: the colour pack is v3 and asks only what the analysis
+// cannot read off the photographs.
+const partialAnswers = { change_scale: 'noticeable' }
 const completeAnswers = {
-  current_color: 'brunette',
-  desired_color: 'red',
   change_scale: 'noticeable',
   box_dye_history: 'over-12-months',
   prior_lightening: '6-12-months',
   henna_plant_dye_history: 'never',
-  perm_history: 'never',
-  relaxer_texturizer_history: 'never',
-  keratin_smoothing_history: 'never',
   other_chemical_history: 'never',
-  last_color_service_timing: '1-3-months',
   prior_reaction: 'no',
-  event_timing: '2-4-weeks',
-  budget: '150-250',
 }
 
 function context(id = sessionId) {
@@ -568,35 +562,36 @@ describe('client hair-color consult intake API against PostgreSQL', () => {
         },
         progress: {
           canComplete: false,
-          nextQuestionKey: 'current_color',
+          nextQuestionKey: 'change_scale',
           blocker: 'REQUIRED_ANSWERS_MISSING',
         },
         latestRevision: null,
-        prefillSuggestions: expect.arrayContaining([
-          expect.objectContaining({
-            questionKey: 'current_color',
-            value: 'brunette',
-          }),
-          expect.objectContaining({
-            questionKey: 'desired_color',
-            value: 'red',
-            provenance: expect.arrayContaining([
-              { source: 'SAVED_LOOK', sourceId: lookId },
-              { source: 'TASTE_VECTOR', sourceId: null },
-            ]),
-          }),
-          expect.objectContaining({
-            questionKey: 'last_color_service_timing',
-            value: '1-3-months',
-          }),
-        ]),
-        prefillSignals: expect.arrayContaining([
-          { source: 'SELF_PROFILE', available: true },
+        // 🔴 P6 consequence, asserted rather than assumed. Three of the four
+        // prefillable questions — current colour, dream colour, last colour
+        // service — are questions the diet REMOVED, because the photographs
+        // and the inspiration reference answer them. Every one of those
+        // sources is populated in this fixture and every one now lands
+        // nowhere. What survives is the board's `change_scale`, which the
+        // dieted pack still asks.
+        //
+        // The signals must agree with that exactly: BOARD available because a
+        // board suggestion is on screen, the other four not. A signal claiming
+        // "available" while nothing was filled is a claim the client can see
+        // is false.
+        prefillSuggestions: [
+          {
+            questionKey: 'change_scale',
+            value: 'noticeable',
+            provenance: [{ source: 'BOARD', sourceId: expect.any(String) }],
+          },
+        ],
+        prefillSignals: [
+          { source: 'SELF_PROFILE', available: false },
           { source: 'BOARD', available: true },
-          { source: 'SAVED_LOOK', available: true },
-          { source: 'TASTE_VECTOR', available: true },
-          { source: 'BOOKING_HISTORY', available: true },
-        ]),
+          { source: 'SAVED_LOOK', available: false },
+          { source: 'TASTE_VECTOR', available: false },
+          { source: 'BOOKING_HISTORY', available: false },
+        ],
       },
     })
     const serialized = JSON.stringify(body)
@@ -637,7 +632,13 @@ describe('client hair-color consult intake API against PostgreSQL', () => {
         'CONSULT_INVALID_REQUEST',
       ],
       [
-        intakeRequest('bad-option', { current_color: 'purple' }, false),
+        intakeRequest('bad-option', { change_scale: 'enormous' }, false),
+        400,
+        'CONSULT_INVALID_ANSWERS',
+      ],
+      // A question the diet removed is an unknown key now, not a stale one.
+      [
+        intakeRequest('dropped-question', { current_color: 'brunette' }, false),
         400,
         'CONSULT_INVALID_ANSWERS',
       ],
@@ -649,7 +650,7 @@ describe('client hair-color consult intake API against PostgreSQL', () => {
       [
         intakeRequest(
           'goal-direction-required',
-          { ...completeAnswers, desired_color: 'not-sure' },
+          { ...completeAnswers, change_scale: 'subtle' },
           true,
         ),
         409,
@@ -660,7 +661,7 @@ describe('client hair-color consult intake API against PostgreSQL', () => {
           'goal-direction-unresolved',
           {
             ...completeAnswers,
-            desired_color: 'not-sure',
+            change_scale: 'subtle',
             goal_direction: 'not-sure',
           },
           true,
@@ -730,7 +731,7 @@ describe('client hair-color consult intake API against PostgreSQL', () => {
     ).resolves.toBe(1)
 
     const conflict = await postIntake(
-      intakeRequest('partial-retry', { current_color: 'blonde' }, false),
+      intakeRequest('partial-retry', { change_scale: 'total' }, false),
       context(),
     )
     expect(conflict.status).toBe(409)
@@ -762,7 +763,7 @@ describe('client hair-color consult intake API against PostgreSQL', () => {
       },
     })
 
-    const correctedAnswers = { ...completeAnswers, budget: '251-400' }
+    const correctedAnswers = { ...completeAnswers, prior_reaction: 'not-sure' }
     const corrections = await Promise.all(
       Array.from({ length: 6 }, () =>
         postIntake(

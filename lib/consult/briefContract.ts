@@ -12,7 +12,10 @@ import type {
 } from '@/lib/dto/consult'
 
 import { consultIntakeItems, findConsultIntakePack } from './intake/registry'
-import { HAIR_COLOR_INTAKE_PACK_ID } from './intake/packs/hairColor'
+import {
+  HAIR_COLOR_INTAKE_PACK_ID,
+  HAIR_COLOR_INTAKE_PACK_V2_VERSION,
+} from './intake/packs/hairColor'
 
 export const CONSULT_PRO_BRIEF_SCHEMA_VERSION = 3
 export const CONSULT_PRO_BRIEF_PROMPT_VERSION = 'full-analysis-pro-brief-v3'
@@ -56,9 +59,13 @@ function structuredCloneProfile(
 
 function intakeItems(
   intakePackId: string,
+  intakePackVersion: number | undefined,
   answers: Readonly<Record<string, string>>,
 ): ConsultBriefClientIntakeItemDTO[] {
-  const pack = findConsultIntakePack(intakePackId)
+  // The VERSION the answers were written under, so the brief shows the pro the
+  // questions the client actually saw. Undefined only for a brief built before
+  // any pack had a second version; that is the colour pack's v2.
+  const pack = findConsultIntakePack(intakePackId, intakePackVersion)
   if (!pack) throw new Error('Consult brief intake pack is unknown.')
   return consultIntakeItems(pack, answers)
 }
@@ -76,6 +83,12 @@ type HairColorProBriefBuildArgs = {
    * pack any brief written before the service-aware consult could carry.
    */
   intakePackId?: string
+  /**
+   * Which VERSION of that pack. Defaults with `intakePackId` to the colour
+   * pack v2 — the only pack/version pairing a brief written before the intake
+   * diet could carry.
+   */
+  intakePackVersion?: number
   intakeAnswers: Readonly<Record<string, string>>
   analysisRevisionId: string
   analysisRevision: number
@@ -88,6 +101,7 @@ function buildHairColorProBriefCore(
 ): HairColorProBriefCore {
   const clientIntake = intakeItems(
     args.intakePackId ?? HAIR_COLOR_INTAKE_PACK_ID,
+    args.intakePackVersion ?? HAIR_COLOR_INTAKE_PACK_V2_VERSION,
     args.intakeAnswers,
   )
   if (clientIntake.length === 0) {
