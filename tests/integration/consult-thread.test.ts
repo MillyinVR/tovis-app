@@ -18,7 +18,14 @@
 //   * a consult with no answers yet does not leak the whole question pack into
 //     the thread. A thread that renders every unanswered question is a form.
 
-import { ConsultActorType, ConsultAgreementKind, PrismaClient } from '@prisma/client'
+import {
+  BookingStatus,
+  ConsultActorType,
+  ConsultAgreementKind,
+  Prisma,
+  PrismaClient,
+  ServiceLocationType,
+} from '@prisma/client'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.hoisted(() => {
@@ -75,6 +82,7 @@ vi.mock('@/lib/consult/analysisEngine', async (importOriginal) => {
 })
 
 import { POST as startLookConsult } from '@/app/api/v1/client/consult/look/route'
+import { defaultClientConsultCaptureCopy } from '@/lib/brand/defaultClientConsultCaptureCopy'
 import { defaultClientConsultThreadCopy } from '@/lib/brand/defaultClientConsultThreadCopy'
 import { answerConsultInspirationQuestion } from '@/lib/consult/inspirationContract'
 import {
@@ -91,7 +99,9 @@ import type { ConsultThreadMessageDTO } from '@/lib/dto/consult'
 
 import { resetConsultLookFakes } from './_support/consultLookFakes'
 import {
+  BALAYAGE_PRICE,
   INSPIRATION_ANSWERS,
+  ZONE,
   attachAcceptedCapture,
   body,
   completeAnswers,
@@ -144,6 +154,7 @@ function thread(consultSessionId: string) {
     clientId: fx.clientId,
     actorUserId: fx.clientUserId,
     copy,
+    captureCopy: defaultClientConsultCaptureCopy,
   })
 }
 
@@ -300,6 +311,13 @@ describe('consult thread projection', () => {
     const t = await thread(sessionId)
     const photos = ofKind(t.messages, 'PHOTO_REQUEST')
     expect(photos).toHaveLength(7)
+
+    // 🔴 The intro names the PACK's own counts. A fixed sentence here is what
+    // let a nails consult (three shots) read hair copy and wait for four slots
+    // that would never appear, so the pack-aware line is part of the contract.
+    const intro = ofKind(t.messages, 'TEXT').find((m) => m.id === 'capture-intro')
+    expect(intro?.text).toContain('seven')
+    expect(intro?.text).toContain('four of your hair')
     // Every shot is a message; only the first outstanding one is the open step.
     expect(photos.filter((p) => p.state === 'OPEN')).toHaveLength(1)
     expect(photos[0]?.state).toBe('OPEN')
@@ -355,6 +373,54 @@ describe('consult thread projection', () => {
     expect(unlocked.book.enabled).toBe(true)
     expect(unlocked.book.reason).toBeNull()
     expect(unlocked.status).not.toBe('COMPLETED')
+  })
+
+  // 🔴 The booking join is on the LOOK, because booking at the spark runs the
+  // ordinary path and stamps `sourceLookPostId` — it knows nothing about this
+  // consult. An unscoped join is therefore satisfied by an appointment she
+  // booked from the same look months ago, which would open a brand-new consult
+  // by telling her she is already on the calendar AND hide the Book button over
+  // an appointment that has nothing to do with it.
+  it('ignores a booking that predates the consult, and keeps Book open', async () => {
+    const lookPostId = await createLook(db, fx.balayageServiceId)
+
+    // An appointment from BEFORE this consult existed, sourced from the same
+    // look, in a status that is otherwise "live".
+    const earlier = await db.booking.create({
+      data: {
+        clientId: fx.clientId,
+        professionalId: fx.professionalId,
+        serviceId: fx.balayageServiceId,
+        offeringId: fx.balayageOfferingId,
+        status: BookingStatus.ACCEPTED,
+        sourceLookPostId: lookPostId,
+        scheduledFor: new Date(Date.now() + 86_400_000),
+        locationType: ServiceLocationType.SALON,
+        locationId: fx.locationId,
+        locationTimeZone: ZONE,
+        subtotalSnapshot: new Prisma.Decimal(BALAYAGE_PRICE),
+        totalAmount: new Prisma.Decimal(BALAYAGE_PRICE),
+        totalDurationMinutes: 60,
+        proTenantId: fx.tenantId,
+        clientHomeTenantId: fx.tenantId,
+        createdAt: new Date(Date.now() - 86_400_000),
+      },
+      select: { id: true },
+    })
+
+    const created = await startLookConsult(
+      jsonRequest('/api/v1/client/consult/look', { lookPostId }),
+    )
+    expect(created.status).toBe(200)
+    const sessionId = ((await body(created)).consult as { id: string }).id
+    startedSessionIds.push(sessionId)
+
+    const t = await thread(sessionId)
+    expect(ofKind(t.messages, 'BOOKING')).toHaveLength(0)
+    // The gate is the selfie, not someone else's appointment.
+    expect(t.book.reason).toBe('SELFIE_REQUIRED')
+
+    await db.booking.deleteMany({ where: { id: earlier.id } })
   })
 
   it('renders the plan card once the analysis has committed a result', async () => {

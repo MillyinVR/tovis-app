@@ -51,15 +51,16 @@ export async function GET(request: Request, ctx: RouteContext) {
       return jsonFail(404, 'Not found.')
     }
 
-    const copy = getBrandForTenantContext(
+    const brand = getBrandForTenantContext(
       await resolveTenantContextForRequest(request),
-    ).clientConsultThread
+    )
 
     const thread = await loadConsultThread({
       consultSessionId: id,
       clientId: auth.clientId,
       actorUserId: auth.user.id,
-      copy,
+      copy: brand.clientConsultThread,
+      captureCopy: brand.clientConsultCapture,
     })
 
     return jsonOk<ConsultThreadResponseDTO>({ thread })

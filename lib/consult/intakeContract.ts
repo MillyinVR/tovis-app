@@ -39,9 +39,6 @@ import { SERVICE_TIMING_QUESTION_KEYS } from './intake/sharedOptions'
 import type { ConsultIntakePackDefinition } from './intake/types'
 import {
   CONSULT_SERVICE_IDENTITY_BOOKING_SELECT,
-  CONSULT_SERVICE_IDENTITY_LOOK_SELECT,
-  CONSULT_SERVICE_IDENTITY_NONE,
-  consultServiceIdentityFromBooking,
   resolveConsultServiceIdentity,
   type ConsultServiceIdentity,
 } from './serviceIdentity'

@@ -27,7 +27,10 @@ import 'server-only'
 
 import { BookingStatus, ConsultSessionStatus } from '@prisma/client'
 
-import type { BrandClientConsultThreadCopy } from '@/lib/brand/types'
+import type {
+  BrandClientConsultCaptureCopy,
+  BrandClientConsultThreadCopy,
+} from '@/lib/brand/types'
 import type {
   ConsultCaptureStateDTO,
   ConsultThreadBookCtaDTO,
@@ -43,6 +46,7 @@ import {
 import { prisma } from '@/lib/prisma'
 
 import { loadConsultAgreementState } from './agreementContract'
+import { formatConsultCaptureIntro } from './captureCopy'
 import { loadConsultAnalysisState } from './analysisContract'
 import { loadConsultCaptureState } from './captureContract'
 import { loadAuthorizedClientConsultResults } from './clientResults'
@@ -68,17 +72,19 @@ const STOPPED_STATUSES = new Set<ConsultSessionStatus>([
 ])
 
 /**
- * Bookings that count as "she booked this look".
+ * Bookings that count as "she booked this look, and it is still ahead of her".
  *
- * A cancelled booking must NOT — the thread would greet her with "you're on
- * Susie's calendar" over an appointment that no longer exists, and the sticky
- * CTA would stay hidden with no way back to booking.
+ * 🔴 CANCELLED and COMPLETED are both excluded, for the same reason and it is
+ * not tidiness. The booking message says "you're on Susie's calendar" and the
+ * sticky CTA hides itself on `ALREADY_BOOKED` — so counting an appointment that
+ * no longer exists, or one that already happened, tells her something false AND
+ * takes the Book button away with no way to get it back. A consult whose
+ * appointment is over is a consult she can book from again.
  */
 const LIVE_BOOKING_STATUSES: BookingStatus[] = [
   BookingStatus.PENDING,
   BookingStatus.ACCEPTED,
   BookingStatus.IN_PROGRESS,
-  BookingStatus.COMPLETED,
 ]
 
 type MessageBuilder = {
@@ -115,6 +121,7 @@ const THREAD_SESSION_SELECT = {
   id: true,
   status: true,
   clientId: true,
+  createdAt: true,
   bookingId: true,
   professionalId: true,
   anchorLookPostId: true,
@@ -175,6 +182,13 @@ export async function loadConsultThread(args: {
   clientId: string
   actorUserId: string
   copy: BrandClientConsultThreadCopy
+  /**
+   * The capture step's own copy table, whose count line is filled from the
+   * SERVED pack. Kept separate from the thread's copy because it is the same
+   * table both clients already mirror, and one pack-aware sentence should not
+   * be rewritten per surface.
+   */
+  captureCopy: BrandClientConsultCaptureCopy
   now?: Date
 }): Promise<ConsultThreadDTO> {
   const now = args.now ?? new Date()
@@ -230,12 +244,19 @@ export async function loadConsultThread(args: {
   // `sourceLookPostId` and knows nothing about this consult, so the join is on
   // the look. `sourceConsultSessionId` is honored too for the day the booking
   // side starts attaching itself — either linkage means the same thing here.
+  //
+  // 🔴 Scoped to bookings made AT OR AFTER this consult started. The look-sourced
+  // join is otherwise satisfied by an appointment she booked from the same look
+  // months ago — which would open a brand-new consult by telling her she is
+  // already on the calendar, and hide the Book button over an appointment that
+  // has nothing to do with this consult.
   const booking = session.anchorLookPostId
     ? await prisma.booking.findFirst({
         where: {
           clientId: args.clientId,
           professionalId: session.professionalId,
           status: { in: LIVE_BOOKING_STATUSES },
+          createdAt: { gte: session.createdAt },
           OR: [
             { sourceLookPostId: session.anchorLookPostId },
             { sourceConsultSessionId: session.id },
@@ -368,7 +389,19 @@ export async function loadConsultThread(args: {
   // ── Photos ───────────────────────────────────────────────────────────────
   const capture = await optionalStage(() => loadConsultCaptureState(stageArgs))
   if (capture) {
-    out.push(text('capture-intro', copy.captureIntro))
+    // 🔴 The intro names the PACK's own counts, and it must keep doing so. The
+    // thread shows every photo request as its own message, so she can see them —
+    // but the sentence that says "three of your hair and two of your face" is
+    // what stops a nails consult (three shots) reading hair copy and waiting for
+    // four slots that will never appear. That is the whole reason
+    // `formatConsultCaptureIntro` exists, so it is reused rather than replaced
+    // by a fixed sentence.
+    out.push(
+      text(
+        'capture-intro',
+        `${copy.captureIntro} ${formatConsultCaptureIntro(args.captureCopy, capture.shotPack)}`,
+      ),
+    )
     const slots = new Map(capture.slots.map((slot) => [slot.shotKey, slot]))
     let firstOpenShot = true
     for (const shot of capture.shotPack.shots) {
