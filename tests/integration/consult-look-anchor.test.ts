@@ -291,7 +291,16 @@ vi.mock('@/lib/consult/inspirationVision', async (importOriginal) => {
   })
   return {
     ...original,
-    async runConsultInspirationVision() {
+    async runConsultInspirationVision(input: {
+      meter?: { consultSessionId: string; analysisRunId?: string | null } | null
+    }) {
+      captured.inspirationCalls += 1
+      captured.inspirationMeters.push(input.meter ?? null)
+      if (captured.inspirationFailure) {
+        throw new original.ConsultInspirationVisionError(
+          captured.inspirationFailure,
+        )
+      }
       return {
         model: 'fake-inspiration-model',
         analysis: {
@@ -321,6 +330,26 @@ vi.mock('@/lib/consult/inspirationVision', async (importOriginal) => {
  */
 const captured = vi.hoisted(() => ({
   analysisInputs: [] as Array<{ inspiration?: unknown }>,
+  /**
+   * How many times the PAID inspiration read actually ran. P5b's whole cost
+   * argument is "one photograph, one reading", and only a counter can say so —
+   * an assertion on the stored artefact cannot tell one call from two.
+   */
+  inspirationCalls: 0,
+  /**
+   * The meter sink the CONTRACT handed the provider, per call.
+   *
+   * 🔴 Asserted instead of a stored meter row on purpose. The fakes here spend
+   * no money, and this suite separately asserts that a mocked run writes NO
+   * meter rows — a fake that metered would be inventing spend. What P5b is
+   * responsible for is supplying the sink, and that is what this records.
+   */
+  inspirationMeters: [] as Array<{
+    consultSessionId: string
+    analysisRunId?: string | null
+  } | null>,
+  /** Set to make the next read fail the way an unreadable photo fails. */
+  inspirationFailure: null as null | 'unreadable' | 'unavailable',
 }))
 
 vi.mock('@/lib/consult/analysisEngine', async (importOriginal) => {
@@ -454,6 +483,7 @@ import {
   GET as readAnalysis,
   POST as startAnalysis,
 } from '@/app/api/v1/client/consult/[id]/analysis/route'
+import { POST as readInspiration } from '@/app/api/v1/client/consult/[id]/inspiration/read/route'
 import { GET as getLookAvailability } from '@/app/api/v1/client/consult/look/availability/route'
 import { POST as startLookConsult } from '@/app/api/v1/client/consult/look/route'
 import {
@@ -1857,8 +1887,194 @@ describe('purge lifecycles stay separate', () => {
   })
 })
 
+describe('P5b — the reference is read in its own MEDIA_READY stage', () => {
+  /**
+   * The stage exists so P5's cards can be built from the reading BEFORE the
+   * client has answered anything about the picture. Everything below is about
+   * that sentence: it runs in MEDIA_READY, it runs once, it is metered, it
+   * surfaces its own failure, and the analysis that follows does not pay to
+   * read the same photograph again.
+   */
+  async function readStage(sessionId: string, key: string) {
+    return readInspiration(
+      jsonRequest(`/api/v1/client/consult/${sessionId}/inspiration/read`, {
+        idempotencyKey: key,
+      }),
+      context(sessionId),
+    )
+  }
+
+  async function inspirationSource(sessionId: string) {
+    const state = await loadConsultInspirationState({
+      consultSessionId: sessionId,
+      clientId,
+      actorUserId: clientUserId,
+    })
+    return state.source
+  }
+
+  it('reads the photograph before a single question is answered, once, and hands it to the analysis for free', async () => {
+    captured.analysisInputs.length = 0
+    captured.inspirationCalls = 0
+    captured.inspirationMeters.length = 0
+    captured.inspirationFailure = null
+    const lookPostId = await freshHairLook()
+    const created = await startLook(lookPostId)
+    const sessionId = ((await body(created)).consult as { id: string }).id
+    if (!sessionIds.includes(sessionId)) sessionIds.push(sessionId)
+    await consentAndCompleteIntake(sessionId, 'p5b')
+
+    // The session is in MEDIA_READY with a seeded reference and NO guided
+    // inspiration revision at all — the state the old pin could not write in.
+    const session = await db.consultSession.findUniqueOrThrow({
+      where: { id: sessionId },
+      select: { status: true },
+    })
+    expect(session.status).toBe(ConsultSessionStatus.MEDIA_READY)
+    expect(
+      await db.consultRevision.count({
+        where: {
+          consultSessionId: sessionId,
+          kind: ConsultRevisionKind.INSPIRATION,
+        },
+      }),
+    ).toBe(0)
+    expect((await inspirationSource(sessionId))?.analysisReady).toBe(false)
+
+    // 1. The stage runs here, and pays exactly once.
+    const first = await readStage(sessionId, 'p5b-read-1')
+    expect(first.status).toBe(200)
+    expect((await body(first)).read).toBe(true)
+    expect(captured.inspirationCalls).toBe(1)
+    const artefact = await db.consultRevision.findFirstOrThrow({
+      where: {
+        consultSessionId: sessionId,
+        kind: ConsultRevisionKind.INSPIRATION_ANALYSIS,
+      },
+      orderBy: { revision: 'desc' },
+    })
+    expect(
+      (artefact.payload as { attributes: { tone: { value: string } } }).attributes
+        .tone.value,
+    ).toBe('COOL')
+    expect((await inspirationSource(sessionId))?.analysisReady).toBe(true)
+
+    // 2. 🔴 It is METERED, with no run to hang it on. This call happens outside
+    //    the analysis run — often before the booking exists — so nothing else
+    //    counts it, and a consult's cost line would under-report by exactly
+    //    the call it now always makes. The SINK is asserted rather than a
+    //    stored row: the fakes spend no money, and this suite separately
+    //    asserts a mocked run writes no meter rows at all.
+    expect(captured.inspirationMeters).toEqual([
+      { consultSessionId: sessionId, analysisRunId: null },
+    ])
+
+    // 3. Asking again is free and answers with the SAME artefact. A double
+    //    tap, a remounted screen and a resumed app all land here.
+    const second = await readStage(sessionId, 'p5b-read-2')
+    expect(second.status).toBe(200)
+    expect((await body(second)).read).toBe(false)
+    expect(captured.inspirationCalls).toBe(1)
+    expect(
+      await db.consultRevision.count({
+        where: {
+          consultSessionId: sessionId,
+          kind: ConsultRevisionKind.INSPIRATION_ANALYSIS,
+        },
+      }),
+    ).toBe(1)
+
+    // 4. 🔴 The finding-4 regression. Answering the guided questions writes new
+    //    INSPIRATION revisions; under the old revision-keyed request hash that
+    //    made the analysis miss the cache and read — and bill — the same
+    //    photograph a second time. The counter must still say one.
+    await answerInspiration(sessionId, 'p5b')
+    for (const shotKey of [
+      'hair_back',
+      'hair_left',
+      'hair_right',
+      'hair_crown',
+      'face_front',
+      'face_side',
+      'eyes_closeup',
+    ] as const) {
+      await attachAcceptedCapture(sessionId, shotKey, 'p5b')
+    }
+    const analysis = await startAnalysis(
+      jsonRequest(`/api/v1/client/consult/${sessionId}/analysis`, {
+        idempotencyKey: 'p5b-analysis',
+        schemaVersion: CONSULT_ANALYSIS_SCHEMA_VERSION,
+        promptVersion: CONSULT_ANALYSIS_PROMPT_VERSION,
+      }),
+      context(sessionId),
+    )
+    expect(analysis.status).toBe(200)
+    expect(
+      (await processConsultAnalysisRuns({ take: 1 })).outcomes[0]?.result,
+    ).toBe('COMPLETED')
+    expect(captured.inspirationCalls).toBe(1)
+    expect(
+      await db.consultRevision.count({
+        where: {
+          consultSessionId: sessionId,
+          kind: ConsultRevisionKind.INSPIRATION_ANALYSIS,
+        },
+      }),
+    ).toBe(1)
+
+    // …and the reading the stage stored is the one the analysis reasoned over.
+    const [analysisInput] = captured.analysisInputs
+    expect(
+      (analysisInput?.inspiration as { analysis: { tone: { value: string } } })
+        .analysis.tone.value,
+    ).toBe('COOL')
+  })
+
+  it('surfaces an unreadable photograph instead of storing an empty reading', async () => {
+    // Part 0 rule 4: the failure is SHOWN. It never becomes a stored artefact,
+    // and it never silently leaves the client on the old question list.
+    captured.inspirationCalls = 0
+    captured.inspirationFailure = 'unreadable'
+    const lookPostId = await freshHairLook()
+    const created = await startLook(lookPostId)
+    const sessionId = ((await body(created)).consult as { id: string }).id
+    if (!sessionIds.includes(sessionId)) sessionIds.push(sessionId)
+    await consentAndCompleteIntake(sessionId, 'p5b-unreadable')
+
+    const refused = await readStage(sessionId, 'p5b-unreadable-1')
+    expect(refused.status).toBe(422)
+    expect((await body(refused)).code).toBe(
+      'CONSULT_INSPIRATION_ANALYSIS_UNREADABLE',
+    )
+    expect(captured.inspirationCalls).toBe(1)
+    expect(
+      await db.consultRevision.count({
+        where: {
+          consultSessionId: sessionId,
+          kind: ConsultRevisionKind.INSPIRATION_ANALYSIS,
+        },
+      }),
+    ).toBe(0)
+    expect((await inspirationSource(sessionId))?.analysisReady).toBe(false)
+
+    // A provider blip is a different answer — retryable, not "your photo is
+    // bad" — and the retry after it succeeds and stores.
+    captured.inspirationFailure = 'unavailable'
+    const unavailable = await readStage(sessionId, 'p5b-unreadable-2')
+    expect(unavailable.status).toBe(503)
+    expect((await body(unavailable)).code).toBe(
+      'CONSULT_INSPIRATION_ANALYSIS_UNAVAILABLE',
+    )
+
+    captured.inspirationFailure = null
+    const recovered = await readStage(sessionId, 'p5b-unreadable-3')
+    expect(recovered.status).toBe(200)
+    expect((await inspirationSource(sessionId))?.analysisReady).toBe(true)
+  })
+})
+
 describe('P4 — the inspiration reference is read, stored, and reaches both audiences', () => {
-  it('writes the artefact pinned to the inspiration revision, feeds it to the analysis, and shows it to the pro', async () => {
+  it('writes the artefact pinned to the inspiration row, feeds it to the analysis, and shows it to the pro', async () => {
     captured.analysisInputs.length = 0
     const lookPostId = await freshHairLook()
     const created = await startLook(lookPostId)
@@ -1894,9 +2110,12 @@ describe('P4 — the inspiration reference is read, stored, and reaches both aud
     expect(drained.outcomes[0]?.result).toBe('COMPLETED')
 
     // 1. The artefact exists, as its own revision, under its own versions.
-    const inspirationRevision = await db.consultRevision.findFirstOrThrow({
-      where: { consultSessionId: sessionId, kind: ConsultRevisionKind.INSPIRATION },
-      orderBy: { revision: 'desc' },
+    const attachedSource = await db.consultInspiration.findFirstOrThrow({
+      where: {
+        consultSessionId: sessionId,
+        status: ConsultInspirationStatus.ATTACHED,
+      },
+      select: { id: true },
     })
     const artefact = await db.consultRevision.findFirstOrThrow({
       where: {
@@ -1912,10 +2131,13 @@ describe('P4 — the inspiration reference is read, stored, and reaches both aud
       CONSULT_INSPIRATION_ANALYSIS_PROMPT_VERSION,
     )
     expect(artefact.model).toBe('fake-inspiration-model')
-    // Keyed to the inspiration revision — the whole point of the artefact.
-    expect(
-      (artefact.payload as { inspirationRevisionId: string }).inspirationRevisionId,
-    ).toBe(inspirationRevision.id)
+    // Keyed to the inspiration ROW — the photograph it is a reading OF (P5b).
+    // It carries no revision pin at all any more: the reading cannot change
+    // because the client answered another question about the same picture.
+    expect((artefact.payload as { inspirationId: string }).inspirationId).toBe(
+      attachedSource.id,
+    )
+    expect(artefact.payload).not.toHaveProperty('inspirationRevisionId')
     // The anchoring look is this professional's own, so the seeded source is
     // BOOKED_PRO_LOOK — the artefact records which of the two look kinds it
     // read, not a generic "a look".
@@ -1957,13 +2179,13 @@ describe('P4 — the inspiration reference is read, stored, and reaches both aud
     expect(inspirationInput.answers.length).toBeGreaterThan(0)
     expect(JSON.stringify(inspirationInput)).not.toContain('base64')
 
-    // 4. The pro sees it on the brief, pinned to the same inspiration revision.
+    // 4. The pro sees it on the brief, pinned to the same photograph.
     const [brief] = await loadAuthorizedProConsultBriefs({
       professionalId,
       clientId,
     })
     expect(brief?.inspirationAnalysis).toMatchObject({
-      inspirationRevisionId: inspirationRevision.id,
+      inspirationId: attachedSource.id,
       source: 'BOOKED_PRO_LOOK',
       promptVersion: CONSULT_INSPIRATION_ANALYSIS_PROMPT_VERSION,
       model: 'fake-inspiration-model',
@@ -1983,9 +2205,10 @@ describe('P4 — the inspiration reference is read, stored, and reaches both aud
 
     // Re-reading a reference whose artefact already exists returns THAT
     // artefact and spends nothing: the request hash is over the inspiration
-    // revision, the prompt version and the schema version, so the same
-    // reference under the same prompt is the same read. This is the property
-    // that keeps a retry from paying for a second vision call.
+    // ROW, the prompt version and the schema version, so the same photograph
+    // under the same prompt is the same read. This is the property that keeps
+    // a retry — and, since P5b, the analysis run itself — from paying for a
+    // second vision call.
     const finished = await db.consultSession.findFirstOrThrow({
       where: { id: { in: sessionIds }, status: ConsultSessionStatus.COMPLETED },
       select: { id: true },
@@ -2025,21 +2248,19 @@ describe('P4 — the inspiration reference is read, stored, and reaches both aud
     ).toBe(before)
   })
 
-  it('the lifecycle pin refuses an artefact written outside ANALYZING', async () => {
-    // Sabotage the state, not the payload: a structurally perfect artefact on
-    // a COMPLETED session must still be refused, or the pin added with the
-    // kind is decorative.
+  it('the lifecycle pin refuses an artefact written outside MEDIA_READY and ANALYZING', async () => {
+    // Sabotage the STATE and nothing else: a byte-identical copy of a
+    // structurally perfect artefact, on a COMPLETED session, must still be
+    // refused — otherwise the pin is decorative.
+    //
+    // 🔴 This is why the row below reuses the stored payload AND its stored
+    // version columns. Until P5b it hard-coded `schemaVersion: 1` and
+    // `'inspiration-hair-color-v1'`, which the payload guard refuses on
+    // version grounds before it ever looks at the state — so the test went
+    // green without exercising the pin it names.
     const finished = await db.consultSession.findFirstOrThrow({
       where: { id: { in: sessionIds }, status: ConsultSessionStatus.COMPLETED },
       select: { id: true, revisionSequence: true },
-    })
-    const inspirationRevision = await db.consultRevision.findFirstOrThrow({
-      where: {
-        consultSessionId: finished.id,
-        kind: ConsultRevisionKind.INSPIRATION,
-      },
-      orderBy: { revision: 'desc' },
-      select: { id: true },
     })
     const valid = await db.consultRevision.findFirstOrThrow({
       where: {
@@ -2047,35 +2268,253 @@ describe('P4 — the inspiration reference is read, stored, and reaches both aud
         kind: ConsultRevisionKind.INSPIRATION_ANALYSIS,
       },
       orderBy: { revision: 'desc' },
-      select: { payload: true },
+      select: {
+        payload: true,
+        schemaVersion: true,
+        promptVersion: true,
+        model: true,
+      },
     })
-    expect(
-      (valid.payload as { inspirationRevisionId: string }).inspirationRevisionId,
-    ).toBe(inspirationRevision.id)
     await expect(
       db.consultRevision.create({
         data: {
           consultSessionId: finished.id,
           revision: finished.revisionSequence + 1,
           kind: ConsultRevisionKind.INSPIRATION_ANALYSIS,
-          schemaVersion: 1,
-          promptVersion: 'inspiration-hair-color-v1',
-          model: 'fake-inspiration-model',
+          schemaVersion: valid.schemaVersion,
+          promptVersion: valid.promptVersion,
+          model: valid.model,
           idempotencyKey: 'outside-analyzing',
           requestHash: 'b'.repeat(64),
           payload: valid.payload as Prisma.InputJsonObject,
         },
       }),
     ).rejects.toThrow()
+
+    // …and the same row IS accepted in MEDIA_READY, which is the state the
+    // read stage writes in. Sabotaging one direction only cannot tell a real
+    // pin from a guard that refuses everything, so both are asserted.
+    const openLook = await freshHairLook()
+    const openCreated = await startLook(openLook)
+    const openId = ((await body(openCreated)).consult as { id: string }).id
+    if (!sessionIds.includes(openId)) sessionIds.push(openId)
+    await consentAndCompleteIntake(openId, 'pin-media-ready')
+    const open = await db.consultSession.findUniqueOrThrow({
+      where: { id: openId },
+      select: { id: true, status: true, revisionSequence: true },
+    })
+    expect(open.status).toBe(ConsultSessionStatus.MEDIA_READY)
+    const openSource = await db.consultInspiration.findFirstOrThrow({
+      where: {
+        consultSessionId: open.id,
+        status: ConsultInspirationStatus.ATTACHED,
+      },
+      select: { id: true, source: true },
+    })
+    const accepted = await db.$transaction(async (tx) => {
+      const sequenced = await tx.consultSession.update({
+        where: { id: open.id },
+        data: { revisionSequence: { increment: 1 } },
+        select: { revisionSequence: true },
+      })
+      const row = await tx.consultRevision.create({
+        data: {
+          consultSessionId: open.id,
+          revision: sequenced.revisionSequence,
+          kind: ConsultRevisionKind.INSPIRATION_ANALYSIS,
+          schemaVersion: valid.schemaVersion,
+          promptVersion: valid.promptVersion,
+          model: valid.model,
+          idempotencyKey: 'inside-media-ready',
+          requestHash: 'c'.repeat(64),
+          payload: {
+            ...(valid.payload as Prisma.JsonObject),
+            inspirationId: openSource.id,
+            source: openSource.source,
+          } as Prisma.InputJsonObject,
+        },
+      })
+      await tx.consultAuditEvent.create({
+        data: {
+          consultSessionId: open.id,
+          action: ConsultAuditAction.REVISION_CREATED,
+          actorType: ConsultActorType.CLIENT,
+          actorId: clientUserId,
+          revisionId: row.id,
+        },
+      })
+      return row
+    })
+    expect(accepted.id).toBeTruthy()
   })
 
-  it('the database refuses an artefact pinned to a stale inspiration revision', async () => {
-    // The pin is not a display convenience: a stale one is the WRONG
+  it('still accepts the SHIPPED v2 artefact, so the migrate-before-deploy window does not break production', async () => {
+    // 🔴 `migrate-deploy.yml` migrates production on every push to `main`,
+    // while deploys are manual and wait on Tori. Production therefore runs the
+    // NEW schema against the OLD code for as long as that gap lasts. A guard
+    // that took schema 3 alone would refuse every artefact the still-deployed
+    // code writes — 23514, raised AFTER the vision call was billed — and every
+    // consult analysis in the window would fail.
+    //
+    // So the v2 arm is load-bearing, and this is the test that says so. It
+    // writes exactly what the shipped code writes: schema 2, ANALYZING, and
+    // the pin to the current INSPIRATION revision.
+    const finished = await db.consultSession.findFirstOrThrow({
+      where: { id: { in: sessionIds }, status: ConsultSessionStatus.COMPLETED },
+      select: { id: true },
+    })
+    const attributes = (
+      await db.consultRevision.findFirstOrThrow({
+        where: {
+          consultSessionId: finished.id,
+          kind: ConsultRevisionKind.INSPIRATION_ANALYSIS,
+        },
+        orderBy: { revision: 'desc' },
+        select: { payload: true },
+      })
+    ).payload as { attributes: Prisma.JsonObject; inspirationId: string; source: string }
+
+    // A consult still in ANALYZING is what the old code would be writing into.
+    const lookPostId = await freshHairLook()
+    const created = await startLook(lookPostId)
+    const analyzingId = ((await body(created)).consult as { id: string }).id
+    if (!sessionIds.includes(analyzingId)) sessionIds.push(analyzingId)
+    await consentAndCompleteIntake(analyzingId, 'v2-window')
+    await answerInspiration(analyzingId, 'v2-window')
+    for (const shotKey of [
+      'hair_back',
+      'hair_left',
+      'hair_right',
+      'hair_crown',
+      'face_front',
+      'face_side',
+      'eyes_closeup',
+    ] as const) {
+      await attachAcceptedCapture(analyzingId, shotKey, 'v2-window')
+    }
+    // Into ANALYZING the way production gets there — by starting the analysis.
+    // The lifecycle guards refuse both the MEDIA_READY shortcut and an
+    // unaudited status write, and forcing past them would be a test setting up
+    // a state the app can never be in. The run is deliberately NOT drained:
+    // the point is the window where the session sits in ANALYZING and the
+    // still-deployed code writes its v2 artefact.
+    const started = await startAnalysis(
+      jsonRequest(`/api/v1/client/consult/${analyzingId}/analysis`, {
+        idempotencyKey: 'v2-window-analysis',
+        schemaVersion: CONSULT_ANALYSIS_SCHEMA_VERSION,
+        promptVersion: CONSULT_ANALYSIS_PROMPT_VERSION,
+      }),
+      context(analyzingId),
+    )
+    expect(started.status).toBe(200)
+    expect(
+      (
+        await db.consultSession.findUniqueOrThrow({
+          where: { id: analyzingId },
+          select: { status: true },
+        })
+      ).status,
+    ).toBe(ConsultSessionStatus.ANALYZING)
+    const inspirationRevision = await db.consultRevision.findFirstOrThrow({
+      where: {
+        consultSessionId: analyzingId,
+        kind: ConsultRevisionKind.INSPIRATION,
+      },
+      orderBy: { revision: 'desc' },
+      select: { id: true },
+    })
+    const source = await db.consultInspiration.findFirstOrThrow({
+      where: {
+        consultSessionId: analyzingId,
+        status: ConsultInspirationStatus.ATTACHED,
+      },
+      select: { id: true, source: true },
+    })
+
+    const accepted = await db.$transaction(async (tx) => {
+      const sequenced = await tx.consultSession.update({
+        where: { id: analyzingId },
+        data: { revisionSequence: { increment: 1 } },
+        select: { revisionSequence: true },
+      })
+      const row = await tx.consultRevision.create({
+        data: {
+          consultSessionId: analyzingId,
+          revision: sequenced.revisionSequence,
+          kind: ConsultRevisionKind.INSPIRATION_ANALYSIS,
+          schemaVersion: 2,
+          promptVersion: 'inspiration-hair-color-v2',
+          model: 'fake-inspiration-model',
+          idempotencyKey: 'v2-window-artefact',
+          requestHash: 'd'.repeat(64),
+          payload: {
+            schemaVersion: 2,
+            inspirationRevisionId: inspirationRevision.id,
+            inspirationId: source.id,
+            source: source.source,
+            attributes: attributes.attributes,
+          } as Prisma.InputJsonObject,
+        },
+      })
+      await tx.consultAuditEvent.create({
+        data: {
+          consultSessionId: analyzingId,
+          action: ConsultAuditAction.REVISION_CREATED,
+          actorType: ConsultActorType.CLIENT,
+          actorId: clientUserId,
+          revisionId: row.id,
+        },
+      })
+      return row
+    })
+    expect(accepted.schemaVersion).toBe(2)
+
+    // The v2 arm is a WINDOW, not a loosening: its own rules still bite. A v2
+    // payload whose revision pin is stale is refused exactly as before.
+    await expect(
+      db.consultRevision.create({
+        data: {
+          consultSessionId: analyzingId,
+          revision: 9_999,
+          kind: ConsultRevisionKind.INSPIRATION_ANALYSIS,
+          schemaVersion: 2,
+          promptVersion: 'inspiration-hair-color-v2',
+          model: 'fake-inspiration-model',
+          idempotencyKey: 'v2-window-stale-pin',
+          requestHash: 'e'.repeat(64),
+          payload: {
+            schemaVersion: 2,
+            inspirationRevisionId: 'not-the-current-revision',
+            inspirationId: source.id,
+            source: source.source,
+            attributes: attributes.attributes,
+          } as Prisma.InputJsonObject,
+        },
+      }),
+    ).rejects.toThrow()
+  })
+
+  it('the database refuses an artefact naming a photograph that is not this consult’s attached reference', async () => {
+    // The pin is not a display convenience: a wrong one is ANOTHER
     // photograph's colour attached to this consult. Sabotage it and the guard
-    // must refuse, or the pin proves nothing.
+    // must refuse, or the pin proves nothing. Versions are the stored ones, so
+    // the only thing wrong is the id.
     const session = await db.consultSession.findFirstOrThrow({
       where: { id: { in: sessionIds }, status: ConsultSessionStatus.COMPLETED },
       select: { id: true, revisionSequence: true },
+    })
+    const valid = await db.consultRevision.findFirstOrThrow({
+      where: {
+        consultSessionId: session.id,
+        kind: ConsultRevisionKind.INSPIRATION_ANALYSIS,
+      },
+      orderBy: { revision: 'desc' },
+      select: {
+        payload: true,
+        schemaVersion: true,
+        promptVersion: true,
+        model: true,
+      },
     })
     await expect(
       db.consultRevision.create({
@@ -2083,18 +2522,15 @@ describe('P4 — the inspiration reference is read, stored, and reaches both aud
           consultSessionId: session.id,
           revision: session.revisionSequence + 1,
           kind: ConsultRevisionKind.INSPIRATION_ANALYSIS,
-          schemaVersion: 1,
-          promptVersion: 'inspiration-hair-color-v1',
-          model: 'fake-inspiration-model',
-          idempotencyKey: 'stale-pin',
+          schemaVersion: valid.schemaVersion,
+          promptVersion: valid.promptVersion,
+          model: valid.model,
+          idempotencyKey: 'wrong-photograph',
           requestHash: 'a'.repeat(64),
           payload: {
-            schemaVersion: 1,
-            inspirationRevisionId: 'not-the-current-revision',
-            inspirationId: 'whatever',
-            source: 'PLATFORM_LOOK',
-            attributes: {},
-          },
+            ...(valid.payload as Prisma.JsonObject),
+            inspirationId: 'not-this-consults-reference',
+          } as Prisma.InputJsonObject,
         },
       }),
     ).rejects.toThrow()

@@ -26,6 +26,8 @@ export const defaultClientConsultThreadCopy: BrandClientConsultThreadCopy = {
 
   inspirationSourceIntro:
     'Want to show me a picture of the look you’re after? You can skip this and still carry on.',
+  inspirationReading: 'Let me have a proper look at this…',
+  inspirationReadRetryLabel: 'Have another go',
   inspirationIntro:
     'Now tell me what you like about it — tap what catches your eye.',
   inspirationDone: 'Got it. {pro} will see exactly what you picked out.',

@@ -275,6 +275,13 @@ export default function ClientConsultFlow({
   const [busy, setBusy] = useState(false)
   const [analyzing, setAnalyzing] = useState(false)
   const analysisKey = useRef<string>(newKey())
+  // P5b — the inspiration read stage: its own busy flag, its own error, and
+  // the id of the reference it last asked about.
+  const [readingInspiration, setReadingInspiration] = useState(false)
+  const [inspirationReadError, setInspirationReadError] = useState<string | null>(
+    null,
+  )
+  const inspirationRead = useRef<string | null>(null)
 
   // Local-only previews of this session's uploads. A REJECTED photo is purged
   // server-side immediately, so this blob is the only copy she can still look
@@ -439,6 +446,68 @@ export default function ClientConsultFlow({
         }),
       })
     })
+
+  /**
+   * P5b — the inspiration READ stage.
+   *
+   * The reference is read by the vision model as its own step, before she is
+   * asked anything about it, because P5's cards are built from that reading.
+   * It is a paid call of a few seconds, so it gets its own busy flag rather
+   * than the thread-wide one: the sticky Book CTA must stay live throughout.
+   * Booking at the spark never waits on a model (handoff Part 2).
+   */
+  const readInspiration = useCallback(
+    async (inspirationId: string) => {
+      inspirationRead.current = inspirationId
+      setReadingInspiration(true)
+      setInspirationReadError(null)
+      try {
+        await api(`${base}/inspiration/read`, {
+          method: 'POST',
+          body: JSON.stringify({ idempotencyKey: newKey() }),
+        })
+        await refresh()
+      } catch (caught) {
+        // Surfaced, never swallowed (Part 0 rule 4). The server distinguishes
+        // "this photograph could not be read" from "the provider is down" and
+        // words each itself; this only decides where the sentence lands.
+        setInspirationReadError(
+          caught instanceof ConsultFlowApiError
+            ? caught.message
+            : 'Something went wrong. Please try again.',
+        )
+      } finally {
+        setReadingInspiration(false)
+      }
+    },
+    [base, refresh],
+  )
+
+  /**
+   * Ask for the reading as soon as there is a reference to read.
+   *
+   * 🔴 Guarded by a ref holding the inspiration id it last asked for, not by a
+   * boolean. A failed read leaves `analysisReady` false, so a bare "have we
+   * asked?" flag either retries forever (a paid call, on a loop) or never
+   * retries a swapped photo. Keyed on the id, a NEW reference is read and the
+   * failed one waits for the retry button.
+   */
+  useEffect(() => {
+    if (readingInspiration) return
+    const inspiration = thread?.messages.find(
+      (message) => message.kind === 'INSPIRATION',
+    )
+    const source = inspiration?.kind === 'INSPIRATION' ? inspiration.source : null
+    if (
+      !source ||
+      !source.imageAvailable ||
+      source.analysisReady !== false ||
+      inspirationRead.current === source.inspirationId
+    ) {
+      return
+    }
+    void readInspiration(source.inspirationId)
+  }, [thread, readingInspiration, readInspiration])
 
   /**
    * 🔴 No free text reaches this call, by construction: the thread has no text
@@ -667,6 +736,10 @@ export default function ClientConsultFlow({
             onSkipInspiration={skipInspiration}
             onUploadInspiration={uploadInspiration}
             onAnswerInspiration={answerInspiration}
+            copy={copy}
+            readingInspiration={readingInspiration}
+            inspirationReadError={inspirationReadError}
+            onRetryInspirationRead={readInspiration}
             onUploadShot={uploadShot}
             onStartAnalysis={startAnalysis}
             onRefresh={() => void refresh()}
@@ -701,6 +774,10 @@ function ConsultThreadMessage({
   onSkipInspiration,
   onUploadInspiration,
   onAnswerInspiration,
+  copy,
+  readingInspiration,
+  inspirationReadError,
+  onRetryInspirationRead,
   onUploadShot,
   onStartAnalysis,
   onRefresh,
@@ -720,6 +797,10 @@ function ConsultThreadMessage({
     message: ConsultThreadInspirationMessageDTO,
     file: File,
   ) => void
+  copy: BrandClientConsultThreadCopy
+  readingInspiration: boolean
+  inspirationReadError: string | null
+  onRetryInspirationRead: (inspirationId: string) => void
   onAnswerInspiration: (
     message: ConsultThreadInspirationMessageDTO,
     question: ConsultInspirationQuestionDTO,
@@ -764,6 +845,10 @@ function ConsultThreadMessage({
         <InspirationMessage
           message={message}
           busy={busy}
+          copy={copy}
+          reading={readingInspiration}
+          readError={inspirationReadError}
+          onRetryRead={onRetryInspirationRead}
           onSkip={onSkipInspiration}
           onUpload={onUploadInspiration}
           onAnswer={onAnswerInspiration}
@@ -904,12 +989,22 @@ function QuestionMessage({
 function InspirationMessage({
   message,
   busy,
+  copy,
+  reading,
+  readError,
+  onRetryRead,
   onSkip,
   onUpload,
   onAnswer,
 }: {
   message: ConsultThreadInspirationMessageDTO
   busy: boolean
+  copy: BrandClientConsultThreadCopy
+  /** P5b: the vision read of this reference is in flight. */
+  reading: boolean
+  /** The server's own words for why the read failed, or null. */
+  readError: string | null
+  onRetryRead: (inspirationId: string) => void
   onSkip: (message: ConsultThreadInspirationMessageDTO) => void
   onUpload: (
     message: ConsultThreadInspirationMessageDTO,
@@ -922,6 +1017,11 @@ function InspirationMessage({
   ) => void
 }) {
   const done = message.state === 'DONE'
+  // Bound once rather than re-narrowed at each use: the retry handler needs the
+  // id, and a non-null assertion inside a callback is exactly where a later
+  // edit turns a narrowed value back into `undefined` without the compiler
+  // noticing.
+  const source = message.source
   return (
     <div className="grid gap-2">
       <ThreadBubble author="APP">{message.text}</ThreadBubble>
@@ -963,6 +1063,35 @@ function InspirationMessage({
                   : null
               }
             />
+          ) : null}
+
+          {/* P5b — the read stage, under the picture it is reading. It is not
+              a blocker: the questions below stay answerable and the sticky
+              Book CTA is untouched, because nothing the client can do should
+              wait on a model. */}
+          {source && reading ? (
+            <p
+              className="mt-3 text-xs leading-5 text-textSecondary"
+              data-testid="consult-inspiration-reading"
+            >
+              {copy.inspirationReading}
+            </p>
+          ) : null}
+          {source && !reading && readError ? (
+            <div
+              className="mt-3 rounded-lg border border-toneWarn/30 bg-toneWarn/10 px-3 py-2"
+              data-testid="consult-inspiration-read-error"
+            >
+              <p className="text-xs leading-5 text-textPrimary">{readError}</p>
+              <button
+                type="button"
+                className={`${BUTTON_SECONDARY} mt-2`}
+                disabled={busy}
+                onClick={() => onRetryRead(source.inspirationId)}
+              >
+                {copy.inspirationReadRetryLabel}
+              </button>
+            </div>
           ) : null}
 
           {message.specificDetailCount < message.requiredSpecificDetailCount &&

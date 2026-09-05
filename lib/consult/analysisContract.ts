@@ -1366,7 +1366,6 @@ export async function executeConsultAnalysisRun(args: {
         ? null
         : await prepareConsultInspirationRead(prisma, {
             session: context.session,
-            inspirationRevisionId: context.inspiration.revisionId,
             now,
           })
     const inspirationRead =
@@ -1477,7 +1476,6 @@ export async function executeConsultAnalysisRun(args: {
         if (inspirationPlan && inspirationRead) {
           await persistLockedConsultInspirationAnalysis(tx, {
             consultSessionId: finalContext.session.id,
-            inspirationRevisionId: finalContext.inspiration.revisionId,
             plan: inspirationPlan,
             read: inspirationRead,
             analysisIdempotencyKey: claimed.idempotencyKey,

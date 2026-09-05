@@ -56,6 +56,10 @@ import {
   type ConsultInspirationStorage,
 } from './inspirationStorage'
 import { CONSULT_CAPTURE_MEDIA_TYPES, type ConsultCaptureMediaType } from './captureVision'
+import {
+  CONSULT_INSPIRATION_ANALYSIS_PROMPT_VERSION,
+  CONSULT_INSPIRATION_ANALYSIS_SCHEMA_VERSION,
+} from './inspirationVision'
 import { CONSULT_MAX_CAPTURE_SHOTS } from './capture/registry'
 import {
   CONSULT_SERVICE_PROFILE_CATEGORY_SELECT,
@@ -134,7 +138,13 @@ function requireSchemaVersion(value: number): void {
   }
 }
 
-async function lockSession(
+/**
+ * The consult row lock. Exported since P5b: the inspiration READ stage takes
+ * the same lock from `inspirationAnalysisContract`, and a second copy of this
+ * query beside it is exactly the duplication that lets one caller drift to a
+ * different lock mode without anyone noticing.
+ */
+export async function lockConsultSessionRow(
   tx: Prisma.TransactionClient,
   consultSessionId: string,
   mode: 'SHARE' | 'UPDATE',
@@ -303,6 +313,41 @@ export async function requireCompletedConsultInspiration(
   return completed
 }
 
+/**
+ * P5b — the scope check the inspiration READ stage runs, in the file that owns
+ * the inspiration step's rules.
+ *
+ * It is the mutation scope (`MEDIA_READY` only) plus current consent, and
+ * nothing else: whether there is a readable reference is
+ * `resolveLockedConsultInspirationReadTarget`'s answer, and asking it twice
+ * would be two copies of the visibility rules.
+ *
+ * Exported rather than inlined in `inspirationAnalysisContract.ts` because
+ * `requireScope` — the anchor eligibility, the readable/mutable window, the
+ * ownership comparison — is this file's contract, and a second hand-rolled
+ * copy beside the analysis artefact is exactly how the two drift.
+ *
+ * 🔴 The pilot scope switch (`AI_CONSULT_SERVICE_SCOPE`) is NOT re-checked
+ * here, and that is not an omission: it gates whether a consult exists for a
+ * category at all (lib/consult/eligibility.ts via `isConsultCategoryInScope`),
+ * so a session reaching this function is already inside the pilot. Tori's
+ * 2026-09-05 decision was to keep the pre-booking read behind the existing
+ * switch and add no new gate.
+ */
+export async function requireLockedConsultInspirationStageScope(
+  tx: Prisma.TransactionClient,
+  args: {
+    consultSessionId: string
+    clientId: string
+    actorUserId: string
+    now: Date
+  },
+): Promise<InspirationScope> {
+  const session = await requireScope(tx, { ...args, mutation: true })
+  await requireCurrentConsultAgreementAcceptances(tx, session.id)
+  return session
+}
+
 /** The single cross-step readiness boundary. Either capture or inspiration may
  * finish last; both call here while holding the ConsultSession row lock.
  * Auto-advance (the default) still requires the full accepted pack; the
@@ -457,6 +502,39 @@ async function imageAvailable(
   ).available
 }
 
+/**
+ * P5b — has THIS reference already been read by the vision model?
+ *
+ * Matched on the inspiration ROW plus the artefact's two version columns, so a
+ * reading stored under a superseded schema or prompt reads as "not read" and
+ * the client asks for a current one. Those are the same two constants
+ * `normalizeStoredConsultInspirationAnalysis` checks.
+ *
+ * Deliberately a column-and-payload query here rather than a call into
+ * `inspirationAnalysisContract`: that module imports this one, and answering a
+ * boolean is not worth a cycle between them. The narrow gap that leaves — a
+ * row whose columns are current but whose payload the normalizer would refuse
+ * — cannot arise through the app, because the database's own payload guard is
+ * strictly stricter than the normalizer.
+ */
+async function inspirationAnalysisStored(
+  tx: Prisma.TransactionClient,
+  consultSessionId: string,
+  inspirationId: string,
+): Promise<boolean> {
+  const stored = await tx.consultRevision.findFirst({
+    where: {
+      consultSessionId,
+      kind: ConsultRevisionKind.INSPIRATION_ANALYSIS,
+      schemaVersion: CONSULT_INSPIRATION_ANALYSIS_SCHEMA_VERSION,
+      promptVersion: CONSULT_INSPIRATION_ANALYSIS_PROMPT_VERSION,
+      payload: { path: ['inspirationId'], equals: inspirationId },
+    },
+    select: { id: true },
+  })
+  return Boolean(stored)
+}
+
 async function buildState(
   tx: Prisma.TransactionClient,
   session: InspirationScope,
@@ -484,6 +562,7 @@ async function buildState(
         imageReadEndpoint: `/api/v1/client/consult/${encodeURIComponent(session.id)}/inspiration/media`,
         imageAvailable: await imageAvailable(tx, source, session, now),
         useExpiresAt: source.useExpiresAt?.toISOString() ?? null,
+        analysisReady: await inspirationAnalysisStored(tx, session.id, source.id),
       }
     : null
 
@@ -600,7 +679,7 @@ export async function loadConsultInspirationState(args: {
   const now = args.now ?? new Date()
   return prisma.$transaction(
     async (tx) => {
-      await lockSession(tx, args.consultSessionId, 'SHARE')
+      await lockConsultSessionRow(tx, args.consultSessionId, 'SHARE')
       const session = await requireScope(tx, { ...args, now, mutation: false })
       await requireCurrentConsultAgreementAcceptances(tx, session.id)
       return buildState(tx, session, now)
@@ -623,7 +702,7 @@ export async function chooseConsultInspirationLook(args: {
 }): Promise<{ state: ConsultInspirationStateDTO; replayed: boolean }> {
   const now = args.now ?? new Date()
   return prisma.$transaction(async (tx) => {
-    await lockSession(tx, args.consultSessionId, 'UPDATE')
+    await lockConsultSessionRow(tx, args.consultSessionId, 'UPDATE')
     const session = await requireScope(tx, {
       consultSessionId: args.consultSessionId,
       clientId: args.clientId,
@@ -691,7 +770,7 @@ export async function skipConsultInspiration(args: {
 }): Promise<{ state: ConsultInspirationStateDTO; replayed: boolean }> {
   const now = args.now ?? new Date()
   const result = await prisma.$transaction(async (tx) => {
-    await lockSession(tx, args.consultSessionId, 'UPDATE')
+    await lockConsultSessionRow(tx, args.consultSessionId, 'UPDATE')
     const session = await requireScope(tx, {
       consultSessionId: args.consultSessionId,
       clientId: args.clientId,
@@ -780,7 +859,7 @@ export async function issueConsultInspirationUpload(args: {
   const now = args.now ?? new Date()
   const storage = args.storage ?? consultInspirationStorage
   return prisma.$transaction(async (tx) => {
-    await lockSession(tx, args.consultSessionId, 'UPDATE')
+    await lockConsultSessionRow(tx, args.consultSessionId, 'UPDATE')
     const session = await requireScope(tx, {
       consultSessionId: args.consultSessionId,
       clientId: args.clientId,
@@ -892,7 +971,7 @@ export async function attachConsultInspirationUpload(args: {
   const now = args.now ?? new Date()
   const storage = args.storage ?? consultInspirationStorage
   return prisma.$transaction(async (tx) => {
-    await lockSession(tx, args.consultSessionId, 'UPDATE')
+    await lockConsultSessionRow(tx, args.consultSessionId, 'UPDATE')
     const session = await requireScope(tx, {
       consultSessionId: args.consultSessionId,
       clientId: args.clientId,
@@ -1037,7 +1116,7 @@ export async function answerConsultInspirationQuestion(args: {
 }): Promise<{ state: ConsultInspirationStateDTO; replayed: boolean }> {
   const now = args.now ?? new Date()
   return prisma.$transaction(async (tx) => {
-    await lockSession(tx, args.consultSessionId, 'UPDATE')
+    await lockConsultSessionRow(tx, args.consultSessionId, 'UPDATE')
     const session = await requireScope(tx, {
       consultSessionId: args.consultSessionId,
       clientId: args.clientId,
@@ -1213,7 +1292,7 @@ export async function removeConsultInspiration(args: {
 }): Promise<void> {
   const now = args.now ?? new Date()
   const source = await prisma.$transaction(async (tx) => {
-    await lockSession(tx, args.consultSessionId, 'UPDATE')
+    await lockConsultSessionRow(tx, args.consultSessionId, 'UPDATE')
     const session = await requireScope(tx, {
       consultSessionId: args.consultSessionId,
       clientId: args.clientId,
@@ -1417,7 +1496,7 @@ export async function loadClientInspirationSignedRead(args: {
 }): Promise<{ url: string; expiresInSeconds: number }> {
   const now = args.now ?? new Date()
   const target = await prisma.$transaction(async (tx) => {
-    await lockSession(tx, args.consultSessionId, 'SHARE')
+    await lockConsultSessionRow(tx, args.consultSessionId, 'SHARE')
     const session = await requireScope(tx, { ...args, now, mutation: false })
     await requireCurrentConsultAgreementAcceptances(tx, session.id)
     return resolveLockedConsultInspirationReadTarget(tx, session, now)

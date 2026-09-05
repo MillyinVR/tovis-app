@@ -70,16 +70,22 @@ export function sortConsultBriefHistory<
  * that projection would make an unrelated artefact able to invalidate a
  * finished brief. Same shape as B3's `serviceEstimate`, for the same reason.
  *
- * The pin is checked here: an artefact read against a different INSPIRATION
- * revision than the one the brief carries is stale, and stale means the wrong
+ * The pin is checked here: an artefact read against a different inspiration
+ * ROW than the one the brief carries is stale, and stale means the wrong
  * photograph. Null, not "close enough".
+ *
+ * 🔴 It compares the inspiration ROW, not the guided-inspiration REVISION it
+ * used to compare (P5b). Same intent — "is this a reading of the picture this
+ * brief is about?" — but asked of the picture. The revision comparison also
+ * went stale whenever the client answered another question about the SAME
+ * photograph, which hid a perfectly good reading from the pro.
  */
 async function loadBriefInspirationAnalysis(
   tx: Prisma.TransactionClient,
   consultSessionId: string,
-  inspirationRevisionId: string | null,
+  inspirationId: string | null,
 ): Promise<ConsultInspirationAnalysisDTO | null> {
-  if (!inspirationRevisionId) return null
+  if (!inspirationId) return null
   const revision = await tx.consultRevision.findFirst({
     where: {
       consultSessionId,
@@ -97,7 +103,7 @@ async function loadBriefInspirationAnalysis(
   })
   if (!revision) return null
   const analysis = normalizeStoredConsultInspirationAnalysis(revision)
-  return analysis?.inspirationRevisionId === inspirationRevisionId ? analysis : null
+  return analysis?.inspirationId === inspirationId ? analysis : null
 }
 
 async function loadSessionBrief(
@@ -146,7 +152,7 @@ async function loadSessionBrief(
     inspirationAnalysis: await loadBriefInspirationAnalysis(
       tx,
       session.id,
-      payload.inspiration.revisionId,
+      payload.inspiration.inspirationId,
     ),
     feedback: feedback
       ? { rating: feedback.rating, createdAt: feedback.createdAt.toISOString() }
