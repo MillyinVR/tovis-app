@@ -1612,3 +1612,259 @@ export type ConsultAgreementErrorDTO = {
   error: string
   code: ConsultAgreementErrorCode
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// P5a — the consult THREAD projection.
+//
+// "The consult is a chat" (handoff Part 2, Tori 2026-09-05). The thread is
+// SCRIPTED BY THE SERVER FLOW STATE, not free-text LLM chat: every prompt is a
+// tappable card, so it is deterministic, instant, and free per message.
+//
+// This is a PROJECTION and nothing else. It adds no state, owns no writes and
+// changes no contract — every payload below is an existing DTO from this file,
+// re-emitted in thread order. The stage endpoints keep serving exactly what
+// they serve today; this is the same information, ordered, in ONE read, so
+// resume is a read rather than client-side bookkeeping and the ordering rule
+// lives in one place instead of once per client.
+//
+// 🔴 The mutation routes are unchanged and remain the ONLY way to answer
+// anything here. A thread message is a rendering of state, never an authority
+// over it — the client still POSTs to the same intake/inspiration/capture/
+// analysis endpoints, and re-reads the thread afterwards.
+
+/**
+ * Who a message is from.
+ *
+ * `APP` is the app's own voice — warm, short, and never impersonating the pro
+ * (handoff: "the pro is the recipient of the Brief"). `CLIENT` is the client's
+ * own answer echoed back into the thread as history.
+ */
+export type ConsultThreadAuthorDTO = 'APP' | 'CLIENT'
+
+/**
+ * Whether a message is still awaiting the client, or is settled history.
+ *
+ * 🔴 SEVERAL messages can be `OPEN` at once, and that is not a bug: the
+ * inspiration review and the photo pack are genuinely concurrent server-side —
+ * she can answer either, in either order — so marking one of them `BLOCKED`
+ * would be a lie about what the server will accept. `BLOCKED` means a step that
+ * really cannot be acted on yet.
+ *
+ * Where to RESUME is `ConsultThreadDTO.nextOpenMessageId`, which names the FIRST
+ * open message in thread order. That is a served field rather than something
+ * each client re-derives from four progress blockers.
+ */
+export type ConsultThreadMessageStateDTO = 'DONE' | 'OPEN' | 'BLOCKED'
+
+/** A system text bubble. Its wording comes from the brand copy table. */
+export type ConsultThreadTextMessageDTO = {
+  kind: 'TEXT'
+  id: string
+  author: ConsultThreadAuthorDTO
+  state: ConsultThreadMessageStateDTO
+  text: string
+}
+
+/**
+ * The consent prerequisites, in the thread rather than in front of it.
+ *
+ * Not one of the handoff's six message types, and deliberately included: the
+ * flow is unreachable without it, and a consult whose consent was revoked
+ * resumes HERE. Leaving it outside the thread would make "reopening resumes at
+ * the next open step" false for exactly the client who most needs it.
+ */
+export type ConsultThreadConsentMessageDTO = {
+  kind: 'CONSENT'
+  id: string
+  author: 'APP'
+  state: ConsultThreadMessageStateDTO
+  text: string
+  requirements: ConsultAgreementRequirementDTO[]
+}
+
+/**
+ * One intake question, one message (handoff: "one per message"). `answer` is
+ * what the client has already chosen — present on a `DONE` message, null on the
+ * `OPEN` one.
+ */
+export type ConsultThreadQuestionMessageDTO = {
+  kind: 'QUESTION'
+  id: string
+  author: 'APP'
+  state: ConsultThreadMessageStateDTO
+  question: ConsultIntakeQuestionDTO
+  answer: string | null
+  /**
+   * The pack this question belongs to. Carried because answering it POSTs a
+   * whole intake revision pinned to these versions — a thread that rendered the
+   * question but made the client go and fetch the version to answer it would
+   * not be "one read".
+   */
+  packVersion: number
+  schemaVersion: number
+}
+
+/**
+ * The inspiration step as a card.
+ *
+ * P5a renders the CURRENT v1 questions; P5 replaces the content with the
+ * zoom-card script (a crop of the attribute's region + "is this part of what
+ * you like?"). The card shape is what P5a is fixing in place, not the wording.
+ *
+ * `sourceDecisionRequired` is the state before any reference exists at all —
+ * the client either adds one photo or continues without.
+ */
+export type ConsultThreadInspirationMessageDTO = {
+  kind: 'INSPIRATION'
+  id: string
+  author: 'APP'
+  state: ConsultThreadMessageStateDTO
+  text: string
+  sourceDecisionRequired: boolean
+  source: ConsultInspirationSourceStateDTO | null
+  question: ConsultInspirationQuestionDTO | null
+  answeredQuestionCount: number
+  specificDetailCount: number
+  requiredSpecificDetailCount: number
+  /** The version every inspiration mutation must echo. */
+  schemaVersion: number
+}
+
+/**
+ * A photo request — the message that opens the guided (P2d) camera and comes
+ * back as a thumbnail carrying its own badge.
+ *
+ * 🔴 `slot` is the SERVED capture slot, unchanged. The Uploading → Checking →
+ * Passed / Retake badge is resolved on the CLIENT, because the durable upload
+ * queue knows about a shot the server has not been told about yet and must
+ * outrank the served state. That rule already ships in both clients and is
+ * lifted into this message, never re-derived here.
+ */
+export type ConsultThreadPhotoRequestMessageDTO = {
+  kind: 'PHOTO_REQUEST'
+  id: string
+  author: 'APP'
+  state: ConsultThreadMessageStateDTO
+  shot: ConsultCaptureShotDTO
+  /** The versions the upload / attach / quality calls must echo. */
+  shotPackVersion: number
+  schemaVersion: number
+  /**
+   * The served slot. Always present — the server serves an EMPTY slot for every
+   * shot in the pack from the start, so the client never has to invent a
+   * placeholder for "not taken yet".
+   */
+  slot: ConsultCaptureSlotStateDTO
+}
+
+/**
+ * The plan card — the reveal.
+ *
+ * P5a is the PLACEHOLDER the handoff asks for: it renders the existing analysis
+ * result when one is present, the live run while one is going, and the invitation
+ * to start one before that. The versioned plan-card content is later work.
+ */
+export type ConsultThreadPlanMessageDTO = {
+  kind: 'PLAN'
+  id: string
+  author: 'APP'
+  state: ConsultThreadMessageStateDTO
+  text: string
+  /** Present while a background run is live or has failed (P4b). */
+  run: ConsultAnalysisRunDTO | null
+  /** Present once the analysis has committed a result. */
+  results: ConsultClientResultsDTO | null
+  /** True when the client has to start the run herself (ANALYSIS_PENDING). */
+  awaitingStart: boolean
+  /** The versions the start-analysis call must echo. Null once it has run. */
+  schemaVersion: number | null
+  promptVersion: string | null
+}
+
+/**
+ * The booking confirmation, and everything after it is prep.
+ *
+ * 🔴 `bookingId` non-null is what makes the rest of the thread read as "help
+ * <pro> get ready" rather than as a consult still trying to sell an appointment.
+ */
+export type ConsultThreadBookingMessageDTO = {
+  kind: 'BOOKING'
+  id: string
+  author: 'APP'
+  state: ConsultThreadMessageStateDTO
+  text: string
+  bookingId: string
+}
+
+export type ConsultThreadMessageDTO =
+  | ConsultThreadTextMessageDTO
+  | ConsultThreadConsentMessageDTO
+  | ConsultThreadQuestionMessageDTO
+  | ConsultThreadInspirationMessageDTO
+  | ConsultThreadPhotoRequestMessageDTO
+  | ConsultThreadPlanMessageDTO
+  | ConsultThreadBookingMessageDTO
+
+/**
+ * Why the sticky Book the look button is not live yet.
+ *
+ * `SELFIE_REQUIRED` is the ordinary one: the handoff unlocks booking "once one
+ * selfie is in", so the gate is the face_front slot being accepted (a WARNED
+ * shot is an accepted shot — `qualityWarningCode` is only ever set on one).
+ */
+export type ConsultThreadBookGateReasonDTO =
+  | 'SELFIE_REQUIRED'
+  | 'ALREADY_BOOKED'
+  | 'NOT_LOOK_ANCHORED'
+  | 'CONSULT_STOPPED'
+  | 'LOOK_NOT_BOOKABLE'
+
+/**
+ * The sticky CTA's state, decided by the SERVER so the two clients cannot
+ * disagree about when the spark is bookable.
+ *
+ * 🔴 `enabled` deliberately does NOT wait for the analysis. Booking here runs
+ * the ORDINARY look-booking path (handoff: "instant; analysis is ~100s and
+ * cannot gate the spark"), which is why this carries the look's own service and
+ * media rather than a consult proposal: the consult-proposal path refuses with
+ * ESTIMATE_MISSING until the analysis commits an estimate, and that refusal
+ * stays exactly as it is.
+ */
+export type ConsultThreadBookCtaDTO = {
+  enabled: boolean
+  reason: ConsultThreadBookGateReasonDTO | null
+  /** The look this consult is anchored to. Null on a booking-anchored consult. */
+  lookPostId: string | null
+  /** The look's linked service — what the ordinary booking path books. */
+  serviceId: string | null
+  /** The look's primary media, so the booking sheet's cover is the photo she tapped. */
+  lookMediaId: string | null
+}
+
+export type ConsultThreadDTO = {
+  consultId: string
+  status: ConsultSessionStatus
+  /** The consult's professional, and her public display name (honors nameDisplay). */
+  professionalId: string
+  professionalDisplayName: string
+  /**
+   * The FIRST message still awaiting the client, or null when nothing is.
+   * Reopening a consult scrolls here — this is the "next open step" in one read.
+   * Other messages may also be `OPEN` (see `ConsultThreadMessageStateDTO`);
+   * this is the one to land on.
+   */
+  nextOpenMessageId: string | null
+  messages: ConsultThreadMessageDTO[]
+  book: ConsultThreadBookCtaDTO
+  /**
+   * The keep-these-photos-on-my-chart choice (decision 2026-08-26). Present
+   * only while the capture step is readable, which is the only window in which
+   * it can still be changed. Not a message: it is a standing preference the
+   * client can flip at any point in that window, not a step she answers once.
+   */
+  chartCopy: ConsultChartCopyStateDTO | null
+}
+
+export type ConsultThreadResponseDTO = {
+  thread: ConsultThreadDTO
+}

@@ -11609,6 +11609,509 @@
       ],
       "type": "string"
     },
+    "ConsultThreadAuthorDTO": {
+      "description": "Who a message is from.\n\n`APP` is the app's own voice — warm, short, and never impersonating the pro (handoff: \"the pro is the recipient of the Brief\"). `CLIENT` is the client's own answer echoed back into the thread as history.",
+      "enum": [
+        "APP",
+        "CLIENT"
+      ],
+      "type": "string"
+    },
+    "ConsultThreadBookCtaDTO": {
+      "description": "The sticky CTA's state, decided by the SERVER so the two clients cannot disagree about when the spark is bookable.\n\n🔴 `enabled` deliberately does NOT wait for the analysis. Booking here runs the ORDINARY look-booking path (handoff: \"instant; analysis is ~100s and cannot gate the spark\"), which is why this carries the look's own service and media rather than a consult proposal: the consult-proposal path refuses with ESTIMATE_MISSING until the analysis commits an estimate, and that refusal stays exactly as it is.",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "lookMediaId": {
+          "description": "The look's primary media, so the booking sheet's cover is the photo she tapped.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lookPostId": {
+          "description": "The look this consult is anchored to. Null on a booking-anchored consult.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultThreadBookGateReasonDTO"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "serviceId": {
+          "description": "The look's linked service — what the ordinary booking path books.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "enabled",
+        "reason",
+        "lookPostId",
+        "serviceId",
+        "lookMediaId"
+      ],
+      "type": "object"
+    },
+    "ConsultThreadBookGateReasonDTO": {
+      "description": "Why the sticky Book the look button is not live yet.\n\n`SELFIE_REQUIRED` is the ordinary one: the handoff unlocks booking \"once one selfie is in\", so the gate is the face_front slot being accepted (a WARNED shot is an accepted shot — `qualityWarningCode` is only ever set on one).",
+      "enum": [
+        "SELFIE_REQUIRED",
+        "ALREADY_BOOKED",
+        "NOT_LOOK_ANCHORED",
+        "CONSULT_STOPPED",
+        "LOOK_NOT_BOOKABLE"
+      ],
+      "type": "string"
+    },
+    "ConsultThreadBookingMessageDTO": {
+      "description": "The booking confirmation, and everything after it is prep.\n\n🔴 `bookingId` non-null is what makes the rest of the thread read as \"help <pro> get ready\" rather than as a consult still trying to sell an appointment.",
+      "properties": {
+        "author": {
+          "const": "APP",
+          "type": "string"
+        },
+        "bookingId": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "BOOKING",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/definitions/ConsultThreadMessageStateDTO"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "author",
+        "state",
+        "text",
+        "bookingId"
+      ],
+      "type": "object"
+    },
+    "ConsultThreadConsentMessageDTO": {
+      "description": "The consent prerequisites, in the thread rather than in front of it.\n\nNot one of the handoff's six message types, and deliberately included: the flow is unreachable without it, and a consult whose consent was revoked resumes HERE. Leaving it outside the thread would make \"reopening resumes at the next open step\" false for exactly the client who most needs it.",
+      "properties": {
+        "author": {
+          "const": "APP",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "CONSENT",
+          "type": "string"
+        },
+        "requirements": {
+          "items": {
+            "$ref": "#/definitions/ConsultAgreementRequirementDTO"
+          },
+          "type": "array"
+        },
+        "state": {
+          "$ref": "#/definitions/ConsultThreadMessageStateDTO"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "author",
+        "state",
+        "text",
+        "requirements"
+      ],
+      "type": "object"
+    },
+    "ConsultThreadDTO": {
+      "properties": {
+        "book": {
+          "$ref": "#/definitions/ConsultThreadBookCtaDTO"
+        },
+        "chartCopy": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultChartCopyStateDTO"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The keep-these-photos-on-my-chart choice (decision 2026-08-26). Present only while the capture step is readable, which is the only window in which it can still be changed. Not a message: it is a standing preference the client can flip at any point in that window, not a step she answers once."
+        },
+        "consultId": {
+          "type": "string"
+        },
+        "messages": {
+          "items": {
+            "$ref": "#/definitions/ConsultThreadMessageDTO"
+          },
+          "type": "array"
+        },
+        "nextOpenMessageId": {
+          "description": "The FIRST message still awaiting the client, or null when nothing is. Reopening a consult scrolls here — this is the \"next open step\" in one read. Other messages may also be `OPEN` (see `ConsultThreadMessageStateDTO`); this is the one to land on.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "professionalDisplayName": {
+          "type": "string"
+        },
+        "professionalId": {
+          "description": "The consult's professional, and her public display name (honors nameDisplay).",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/ConsultSessionStatus"
+        }
+      },
+      "required": [
+        "consultId",
+        "status",
+        "professionalId",
+        "professionalDisplayName",
+        "nextOpenMessageId",
+        "messages",
+        "book",
+        "chartCopy"
+      ],
+      "type": "object"
+    },
+    "ConsultThreadInspirationMessageDTO": {
+      "description": "The inspiration step as a card.\n\nP5a renders the CURRENT v1 questions; P5 replaces the content with the zoom-card script (a crop of the attribute's region + \"is this part of what you like?\"). The card shape is what P5a is fixing in place, not the wording.\n\n`sourceDecisionRequired` is the state before any reference exists at all — the client either adds one photo or continues without.",
+      "properties": {
+        "answeredQuestionCount": {
+          "type": "number"
+        },
+        "author": {
+          "const": "APP",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "INSPIRATION",
+          "type": "string"
+        },
+        "question": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultInspirationQuestionDTO"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requiredSpecificDetailCount": {
+          "type": "number"
+        },
+        "schemaVersion": {
+          "description": "The version every inspiration mutation must echo.",
+          "type": "number"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultInspirationSourceStateDTO"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sourceDecisionRequired": {
+          "type": "boolean"
+        },
+        "specificDetailCount": {
+          "type": "number"
+        },
+        "state": {
+          "$ref": "#/definitions/ConsultThreadMessageStateDTO"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "author",
+        "state",
+        "text",
+        "sourceDecisionRequired",
+        "source",
+        "question",
+        "answeredQuestionCount",
+        "specificDetailCount",
+        "requiredSpecificDetailCount",
+        "schemaVersion"
+      ],
+      "type": "object"
+    },
+    "ConsultThreadMessageDTO": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ConsultThreadTextMessageDTO"
+        },
+        {
+          "$ref": "#/definitions/ConsultThreadConsentMessageDTO"
+        },
+        {
+          "$ref": "#/definitions/ConsultThreadQuestionMessageDTO"
+        },
+        {
+          "$ref": "#/definitions/ConsultThreadInspirationMessageDTO"
+        },
+        {
+          "$ref": "#/definitions/ConsultThreadPhotoRequestMessageDTO"
+        },
+        {
+          "$ref": "#/definitions/ConsultThreadPlanMessageDTO"
+        },
+        {
+          "$ref": "#/definitions/ConsultThreadBookingMessageDTO"
+        }
+      ]
+    },
+    "ConsultThreadMessageStateDTO": {
+      "description": "Whether a message is still awaiting the client, or is settled history.\n\n🔴 SEVERAL messages can be `OPEN` at once, and that is not a bug: the inspiration review and the photo pack are genuinely concurrent server-side — she can answer either, in either order — so marking one of them `BLOCKED` would be a lie about what the server will accept. `BLOCKED` means a step that really cannot be acted on yet.\n\nWhere to RESUME is `ConsultThreadDTO.nextOpenMessageId`, which names the FIRST open message in thread order. That is a served field rather than something each client re-derives from four progress blockers.",
+      "enum": [
+        "DONE",
+        "OPEN",
+        "BLOCKED"
+      ],
+      "type": "string"
+    },
+    "ConsultThreadPhotoRequestMessageDTO": {
+      "description": "A photo request — the message that opens the guided (P2d) camera and comes back as a thumbnail carrying its own badge.\n\n🔴 `slot` is the SERVED capture slot, unchanged. The Uploading → Checking → Passed / Retake badge is resolved on the CLIENT, because the durable upload queue knows about a shot the server has not been told about yet and must outrank the served state. That rule already ships in both clients and is lifted into this message, never re-derived here.",
+      "properties": {
+        "author": {
+          "const": "APP",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "PHOTO_REQUEST",
+          "type": "string"
+        },
+        "schemaVersion": {
+          "type": "number"
+        },
+        "shot": {
+          "$ref": "#/definitions/ConsultCaptureShotDTO"
+        },
+        "shotPackVersion": {
+          "description": "The versions the upload / attach / quality calls must echo.",
+          "type": "number"
+        },
+        "slot": {
+          "$ref": "#/definitions/ConsultCaptureSlotStateDTO",
+          "description": "The served slot. Always present — the server serves an EMPTY slot for every shot in the pack from the start, so the client never has to invent a placeholder for \"not taken yet\"."
+        },
+        "state": {
+          "$ref": "#/definitions/ConsultThreadMessageStateDTO"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "author",
+        "state",
+        "shot",
+        "shotPackVersion",
+        "schemaVersion",
+        "slot"
+      ],
+      "type": "object"
+    },
+    "ConsultThreadPlanMessageDTO": {
+      "description": "The plan card — the reveal.\n\nP5a is the PLACEHOLDER the handoff asks for: it renders the existing analysis result when one is present, the live run while one is going, and the invitation to start one before that. The versioned plan-card content is later work.",
+      "properties": {
+        "author": {
+          "const": "APP",
+          "type": "string"
+        },
+        "awaitingStart": {
+          "description": "True when the client has to start the run herself (ANALYSIS_PENDING).",
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "PLAN",
+          "type": "string"
+        },
+        "promptVersion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "results": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultClientResultsDTO"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Present once the analysis has committed a result."
+        },
+        "run": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultAnalysisRunDTO"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Present while a background run is live or has failed (P4b)."
+        },
+        "schemaVersion": {
+          "description": "The versions the start-analysis call must echo. Null once it has run.",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/definitions/ConsultThreadMessageStateDTO"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "author",
+        "state",
+        "text",
+        "run",
+        "results",
+        "awaitingStart",
+        "schemaVersion",
+        "promptVersion"
+      ],
+      "type": "object"
+    },
+    "ConsultThreadQuestionMessageDTO": {
+      "description": "One intake question, one message (handoff: \"one per message\"). `answer` is what the client has already chosen — present on a `DONE` message, null on the `OPEN` one.",
+      "properties": {
+        "answer": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "author": {
+          "const": "APP",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "QUESTION",
+          "type": "string"
+        },
+        "packVersion": {
+          "description": "The pack this question belongs to. Carried because answering it POSTs a whole intake revision pinned to these versions — a thread that rendered the question but made the client go and fetch the version to answer it would not be \"one read\".",
+          "type": "number"
+        },
+        "question": {
+          "$ref": "#/definitions/ConsultIntakeQuestionDTO"
+        },
+        "schemaVersion": {
+          "type": "number"
+        },
+        "state": {
+          "$ref": "#/definitions/ConsultThreadMessageStateDTO"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "author",
+        "state",
+        "question",
+        "answer",
+        "packVersion",
+        "schemaVersion"
+      ],
+      "type": "object"
+    },
+    "ConsultThreadResponseDTO": {
+      "properties": {
+        "thread": {
+          "$ref": "#/definitions/ConsultThreadDTO"
+        }
+      },
+      "required": [
+        "thread"
+      ],
+      "type": "object"
+    },
+    "ConsultThreadTextMessageDTO": {
+      "description": "A system text bubble. Its wording comes from the brand copy table.",
+      "properties": {
+        "author": {
+          "$ref": "#/definitions/ConsultThreadAuthorDTO"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "TEXT",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/definitions/ConsultThreadMessageStateDTO"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "author",
+        "state",
+        "text"
+      ],
+      "type": "object"
+    },
     "ConsultationApprovalProofMethod": {
       "$ref": "#/definitions/%24Enums.ConsultationApprovalProofMethod"
     },

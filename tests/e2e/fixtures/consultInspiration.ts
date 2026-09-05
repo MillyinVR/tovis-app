@@ -16,6 +16,8 @@ import type {
   ConsultCaptureStateDTO,
   ConsultInspirationStateDTO,
   ConsultSessionLookupDTO,
+  ConsultThreadDTO,
+  ConsultThreadMessageDTO,
 } from '@/lib/dto/consult'
 
 export const CONSULT_FIXTURE_ID = 'consult_fixture_1'
@@ -292,5 +294,98 @@ export const captureState: ConsultCaptureStateDTO = {
   "chartCopy": {
     "optIn": true,
     "decidedAt": "2026-08-12T17:00:00.000Z"
+  }
+}
+
+// ── P5a — the THREAD the page actually reads ────────────────────────────────
+//
+// The page makes ONE call now (`…/thread`) instead of five per-stage calls, so
+// these compose the same stage states above into the message list the server
+// projects. Typed as the DTO for the same reason everything else here is: a
+// projection that gains or renames a field fails typecheck in this file.
+
+/** The photo requests, derived from the same shot pack + slots as the stage state. */
+function threadPhotoMessages(
+  capture: ConsultCaptureStateDTO,
+  overrides: Partial<Record<string, ConsultCaptureStateDTO['slots'][number]['state']>> = {},
+): ConsultThreadMessageDTO[] {
+  const slots = new Map(capture.slots.map((slot) => [slot.shotKey, slot]))
+  let firstOpen = true
+  return capture.shotPack.shots.map((shot) => {
+    const base = slots.get(shot.key)!
+    const state = overrides[shot.key] ?? base.state
+    const slot = { ...base, state }
+    const settled = state === 'ACCEPTED'
+    const open = !settled && firstOpen
+    if (open) firstOpen = false
+    return {
+      kind: 'PHOTO_REQUEST',
+      id: `photo:${shot.key}`,
+      author: 'APP',
+      state: settled ? 'DONE' : open ? 'OPEN' : 'BLOCKED',
+      shot,
+      shotPackVersion: capture.shotPack.version,
+      schemaVersion: capture.shotPack.schemaVersion,
+      slot,
+    }
+  })
+}
+
+export function threadFixture(args: {
+  inspiration: ConsultInspirationStateDTO
+  /** Force particular slots to a state, e.g. the selfie not yet sent. */
+  slotOverrides?: Partial<Record<string, ConsultCaptureStateDTO['slots'][number]['state']>>
+  bookEnabled?: boolean
+}): ConsultThreadDTO {
+  const photos = threadPhotoMessages(captureState, args.slotOverrides)
+  const messages: ConsultThreadMessageDTO[] = [
+    {
+      kind: 'TEXT',
+      id: 'opening',
+      author: 'APP',
+      state: 'DONE',
+      text: 'Love this one. Let’s work out what it would take on you.',
+    },
+    {
+      kind: 'INSPIRATION',
+      id: 'inspiration',
+      author: 'APP',
+      state: 'OPEN',
+      text: 'Now tell me what you like about it — tap what catches your eye.',
+      sourceDecisionRequired: false,
+      source: args.inspiration.source,
+      question: args.inspiration.progress.currentQuestion,
+      answeredQuestionCount: args.inspiration.progress.answeredQuestionCount,
+      specificDetailCount: args.inspiration.progress.specificDetailCount,
+      requiredSpecificDetailCount:
+        args.inspiration.progress.requiredSpecificDetailCount,
+      schemaVersion: args.inspiration.schemaVersion,
+    },
+    {
+      kind: 'TEXT',
+      id: 'capture-intro',
+      author: 'APP',
+      state: 'DONE',
+      text: 'Now a few of you, in daylight if you can.',
+    },
+    ...photos,
+  ]
+
+  return {
+    consultId: CONSULT_FIXTURE_ID,
+    status: 'MEDIA_READY',
+    professionalId: 'cmq9p645v0002jp04fttoatlq',
+    professionalDisplayName: 'Susie',
+    nextOpenMessageId:
+      messages.find((message) => message.state === 'OPEN')?.id ?? null,
+    messages,
+    chartCopy: captureState.chartCopy,
+    book: {
+      enabled: args.bookEnabled ?? true,
+      reason: args.bookEnabled === false ? 'SELFIE_REQUIRED' : null,
+      lookPostId: 'look_fixture_1',
+      serviceId: 'service_fixture_1',
+      lookMediaId: 'media_fixture_1',
+    },
   }
 }

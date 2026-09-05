@@ -34,10 +34,9 @@
 import { expect, test, type Page, type Route } from '@playwright/test'
 
 import {
-  captureState,
   CONSULT_FIXTURE_ID,
-  consultLookup,
   lookSourceInspiration,
+  threadFixture,
   uploadSourceInspiration,
 } from './fixtures/consultInspiration'
 
@@ -60,6 +59,8 @@ async function stubConsult(
   options: {
     inspiration: typeof lookSourceInspiration
     media: (route: Route) => Promise<void>
+    bookEnabled?: boolean
+    slotOverrides?: Record<string, 'EMPTY' | 'ACCEPTED' | 'REJECTED'>
   },
 ): Promise<{ mediaRequests: () => number }> {
   let mediaRequests = 0
@@ -69,14 +70,19 @@ async function stubConsult(
     mediaRequests += 1
     await options.media(route)
   })
-  await page.route(`**${BASE}/inspiration`, async (route) =>
-    route.fulfill({ json: { ok: true, inspiration: options.inspiration } }),
-  )
-  await page.route(`**${BASE}/capture`, async (route) =>
-    route.fulfill({ json: { ok: true, capture: captureState } }),
-  )
-  await page.route(`**${BASE}`, async (route) =>
-    route.fulfill({ json: { ok: true, consult: consultLookup } }),
+  // P5a: ONE read drives the page. The stage endpoints still exist and still
+  // serve mutations; the page no longer reads them.
+  await page.route(`**${BASE}/thread`, async (route) =>
+    route.fulfill({
+      json: {
+        ok: true,
+        thread: threadFixture({
+          inspiration: options.inspiration,
+          bookEnabled: options.bookEnabled,
+          slotOverrides: options.slotOverrides,
+        }),
+      },
+    }),
   )
   await page.route('https://storage.test/**', async (route) =>
     route.fulfill({ status: 200, contentType: 'image/gif', body: IMAGE_BYTES }),
@@ -185,5 +191,148 @@ test.describe('consult inspiration image', () => {
     expect(afterMount).toBeLessThanOrEqual(STRICT_MODE_MOUNT_READS)
     await page.waitForTimeout(6_000)
     expect(mediaRequests()).toBe(afterMount)
+  })
+})
+
+// ── P5a — the consult as a THREAD ───────────────────────────────────────────
+//
+// Driven in a real browser for the reasons a unit test cannot cover: the sticky
+// CTA is a layout claim, "no free-text input" is a claim about what the DOM
+// contains, and "resume lands on the open step" is a scroll claim. All three
+// were green in every unit test while being wrong on screen.
+
+test.describe('consult thread', () => {
+  test('renders the flow as a thread, with history left on screen', async ({
+    page,
+  }) => {
+    await stubConsult(page, {
+      inspiration: lookSourceInspiration,
+      media: (route) => route.fulfill({ json: signedRead(600) }),
+    })
+
+    await page.goto(`/client/consult/${CONSULT_FIXTURE_ID}`)
+
+    // The opening bubble, an inspiration card and every photo request are all
+    // on ONE screen. The wizard this replaces showed exactly one of them.
+    await expect(
+      page.getByText('Love this one.', { exact: false }),
+    ).toBeVisible()
+    await expect(
+      page.getByRole('heading', {
+        name: 'Which color or colors in this picture are your favorite?',
+      }),
+    ).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Face front' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Eyes & brows' })).toBeVisible()
+  })
+
+  test('has NO free-text input anywhere in the thread', async ({ page }) => {
+    await stubConsult(page, {
+      inspiration: lookSourceInspiration,
+      media: (route) => route.fulfill({ json: signedRead(600) }),
+    })
+
+    await page.goto(`/client/consult/${CONSULT_FIXTURE_ID}`)
+    await expect(
+      page.getByRole('heading', {
+        name: 'Which color or colors in this picture are your favorite?',
+      }),
+    ).toBeVisible()
+
+    // Every prompt is a tappable card. A textarea or a text input anywhere here
+    // means the deterministic-and-free property has quietly been given up.
+    await expect(page.locator('textarea')).toHaveCount(0)
+    await expect(page.locator('input[type="text"]')).toHaveCount(0)
+  })
+
+  test('shows each photo request with its served badge', async ({ page }) => {
+    await stubConsult(page, {
+      inspiration: lookSourceInspiration,
+      media: (route) => route.fulfill({ json: signedRead(600) }),
+      slotOverrides: { face_front: 'EMPTY', eyes_closeup: 'REJECTED' },
+    })
+
+    await page.goto(`/client/consult/${CONSULT_FIXTURE_ID}`)
+
+    // Accepted, outstanding and refused are three visibly different things —
+    // the failure this guards is a sent photo reading as one never taken.
+    await expect(page.getByText('Passed').first()).toBeVisible()
+    await expect(page.getByText('Needed').first()).toBeVisible()
+    await expect(page.getByText('Retake').first()).toBeVisible()
+  })
+
+  test('Book the look is disabled until a selfie is in, and says why', async ({
+    page,
+  }) => {
+    await stubConsult(page, {
+      inspiration: lookSourceInspiration,
+      media: (route) => route.fulfill({ json: signedRead(600) }),
+      bookEnabled: false,
+      slotOverrides: { face_front: 'EMPTY' },
+    })
+
+    await page.goto(`/client/consult/${CONSULT_FIXTURE_ID}`)
+
+    const cta = page.getByRole('button', { name: 'Book the look' })
+    await expect(cta).toBeVisible()
+    await expect(cta).toBeDisabled()
+    // A dead button with no explanation is what makes a client think the app is
+    // broken, so the reason is part of the assertion.
+    await expect(
+      page.getByText('Send one photo of yourself and this opens up.'),
+    ).toBeVisible()
+  })
+
+  test('Book the look goes live once the selfie is accepted', async ({
+    page,
+  }) => {
+    await stubConsult(page, {
+      inspiration: lookSourceInspiration,
+      media: (route) => route.fulfill({ json: signedRead(600) }),
+      bookEnabled: true,
+    })
+
+    await page.goto(`/client/consult/${CONSULT_FIXTURE_ID}`)
+
+    const cta = page.getByRole('button', { name: 'Book the look' })
+    await expect(cta).toBeVisible()
+    await expect(cta).toBeEnabled()
+    await expect(
+      page.getByText('Send one photo of yourself and this opens up.'),
+    ).toHaveCount(0)
+  })
+
+  test('the sticky CTA stays on screen while the thread scrolls', async ({
+    page,
+  }) => {
+    await stubConsult(page, {
+      inspiration: lookSourceInspiration,
+      media: (route) => route.fulfill({ json: signedRead(600) }),
+    })
+
+    await page.goto(`/client/consult/${CONSULT_FIXTURE_ID}`)
+    const cta = page.getByRole('button', { name: 'Book the look' })
+    await expect(cta).toBeVisible()
+
+    // Scroll to the very bottom of a seven-photo thread and it is still there.
+    await page.mouse.wheel(0, 4000)
+    await page.waitForTimeout(500)
+    await expect(cta).toBeInViewport()
+
+    // 🔴 `toBeInViewport` is NOT enough, and this is the assertion that matters.
+    // The first build of this footer was pinned to `bottom-0`, which pins to the
+    // bottom of the scrollport — underneath the app shell's FIXED bottom nav.
+    // It rendered, it was in the viewport, and it was covered edge to edge: the
+    // button could not be pressed. Only asking the document what is actually at
+    // the button's own centre catches that.
+    const topmost = await cta.evaluate((node) => {
+      const rect = node.getBoundingClientRect()
+      const hit = document.elementFromPoint(
+        rect.left + rect.width / 2,
+        rect.top + rect.height / 2,
+      )
+      return hit === node || node.contains(hit) ? 'cta' : (hit?.tagName ?? 'nothing')
+    })
+    expect(topmost).toBe('cta')
   })
 })

@@ -686,6 +686,81 @@ export type BrandClientConsultCaptureCopy = {
   introPartialAllowed: string
 }
 
+/**
+ * P5a — the consult THREAD's system bubbles ("the consult is a chat").
+ *
+ * Every sentence the app says in its OWN voice lives here, so the wording can
+ * be edited without touching code. Warm, short, no jargon before its picture,
+ * never a question that sounds like a test — and never impersonating the pro:
+ * the pro is the RECIPIENT of the Brief, not a character in the thread.
+ *
+ * `{pro}` is the professional's public display name; `{service}` the service in
+ * the client's own language. A slot is filled by lib/consult/threadCopy.ts,
+ * never by a caller assembling the sentence itself.
+ */
+export type BrandClientConsultThreadCopy = {
+  /** The first bubble, when the service is known / when it is not. */
+  openingWithService: string
+  opening: string
+
+  /** Consent, in the thread. `{pro}` is the professional. */
+  consentIntro: string
+  /** Shown instead when the client previously revoked and is resuming. */
+  consentResume: string
+
+  /** Before the first intake question. */
+  intakeIntro: string
+  /** After the last intake question is answered. */
+  intakeDone: string
+
+  /** The inspiration card's own framing, before a reference exists. */
+  inspirationSourceIntro: string
+  /** Once a reference is on screen. */
+  inspirationIntro: string
+  /** When the client has answered enough to move on. */
+  inspirationDone: string
+
+  /** Before the photo requests. */
+  captureIntro: string
+  /** When every requested photo is accepted. */
+  captureDone: string
+  /** When some were skipped but the client can still continue. */
+  capturePartial: string
+
+  /** The plan card, before the run is started. */
+  planAwaitingStart: string
+  /** While the background run is going. */
+  planRunning: string
+  /** Once a result exists. */
+  planReady: string
+
+  /** The booking confirmation. `{pro}` is the professional. */
+  booked: string
+  /** The bubble that turns the rest of the thread into prep. `{pro}`. */
+  prepIntro: string
+  /**
+   * Posted once the analysis has produced an estimate for an already-booked
+   * consult — the moment the provisional price firms up. `{pro}`.
+   */
+  estimateReady: string
+
+  /** The sticky CTA's label, and the hints under it while it is not live. */
+  bookCtaLabel: string
+  bookCtaSelfieRequired: string
+  bookCtaNotBookable: string
+
+  /** A consult that was stopped server-side, and one the client revoked. */
+  stopped: string
+  stoppedRevoked: string
+
+  /**
+   * What `{pro}` becomes when the professional has no usable name token at all.
+   * The display-name SSOT's own fallback is "Professional", which is correct and
+   * cold; the thread's voice needs its own.
+   */
+  proFallback: string
+}
+
 export type BrandClientConsultBookingCopy = {
   backToResults: string
   eyebrow: string
@@ -770,4 +845,5 @@ export type BrandConfig = {
   clientConsultResults: BrandClientConsultResultsCopy
   clientConsultCapture: BrandClientConsultCaptureCopy
   clientConsultBooking: BrandClientConsultBookingCopy
+  clientConsultThread: BrandClientConsultThreadCopy
 }
