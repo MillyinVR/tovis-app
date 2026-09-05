@@ -1872,6 +1872,68 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
     ).toBe(1)
   })
 
+  it('recovers a run whose worker died mid-flight, once its lease expires', async () => {
+    // 🔴 The only thing standing between a killed function (a deploy, an OOM,
+    // a platform timeout) and a client watching a spinner forever. The run is
+    // left RUNNING with a stale `claimedAt` and nothing to finish it; the
+    // stale-lease sweep is what picks it back up.
+    //
+    // Worth its own test because the failure mode is SILENCE: a run stuck in
+    // RUNNING throws nothing, logs nothing, and notifies nobody. If this path
+    // regressed, every other test in this file would still pass.
+    const consult = await createReadyConsult('analysis-stale-lease')
+    authenticate(consult)
+    await completeCapturePack(consult, 'analysis-stale-lease')
+
+    const started = await startAnalysisRequest(consult, 'stale-lease')
+    expect(started.status).toBe(200)
+
+    // Simulate the worker that claimed it and then vanished.
+    const abandonedAt = new Date(Date.now() - 10 * 60_000)
+    await db.consultAnalysisRun.updateMany({
+      where: { consultSessionId: consult.sessionId },
+      data: {
+        status: 'RUNNING',
+        stage: 'BUILDING_PLAN',
+        claimedAt: abandonedAt,
+        startedAt: abandonedAt,
+        attemptCount: 1,
+      },
+    })
+
+    // A sweep BEFORE the lease expires must leave it alone — otherwise two
+    // workers analyze the same consult and the client pays twice.
+    const tooSoon = await processConsultAnalysisRuns({
+      now: new Date(abandonedAt.getTime() + 60_000),
+      take: 1,
+    })
+    expect(tooSoon.scannedCount).toBe(0)
+    expect(
+      await db.consultAnalysisRun.findFirstOrThrow({
+        where: { consultSessionId: consult.sessionId },
+        select: { status: true },
+      }),
+    ).toEqual({ status: 'RUNNING' })
+
+    // Past the lease (420s), it is claimable again and finishes.
+    const recovered = await processConsultAnalysisRuns({ take: 1 })
+    expect(recovered.outcomes[0]?.result).toBe('COMPLETED')
+    expect(
+      await db.consultSession.findUniqueOrThrow({
+        where: { id: consult.sessionId },
+        select: { status: true },
+      }),
+    ).toEqual({ status: ConsultSessionStatus.COMPLETED })
+
+    // Recovery re-used the SAME run — a fresh row would have meant two runs
+    // for one claim, which the live-run index exists to prevent.
+    const runs = await db.consultAnalysisRun.findMany({
+      where: { consultSessionId: consult.sessionId },
+    })
+    expect(runs).toHaveLength(1)
+    expect(runs[0]).toMatchObject({ status: 'COMPLETED', attemptCount: 2 })
+  })
+
   it('keeps completed analysis durable and lets cleanup retry a failed post-commit purge', async () => {
     const consult = await createReadyConsult('analysis-purge-retry')
     authenticate(consult)
