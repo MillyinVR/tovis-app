@@ -12,7 +12,9 @@ import { requireCurrentConsultAgreementAcceptances } from './agreementContract'
 import { ConsultWriteError } from './errors'
 import { fetchConsultInspirationImage } from './inspirationImage'
 import {
+  lockConsultSessionRow,
   mintConsultInspirationReadUrl,
+  requireLockedConsultInspirationStageScope,
   resolveLockedConsultInspirationReadTarget,
   sourceDto,
   type ConsultInspirationReadTarget,
@@ -37,8 +39,18 @@ import { appendLockedConsultInspirationAnalysisRevision } from './writeBoundary'
  * P4 — Stage 1 of the consultation pipeline.
  *
  * Reads the client's active inspiration reference with the vision model and
- * stores the result as its own immutable revision, pinned to the guided-
- * inspiration revision it was read against.
+ * stores the result as its own immutable revision, identified by the
+ * inspiration ROW it read (P5b — see the request-hash note below for why it is
+ * no longer the guided-inspiration revision).
+ *
+ * WHERE IT RUNS (P5b): in its OWN stage, in MEDIA_READY, the moment the client
+ * has attached a reference — `readConsultInspiration` below. The analysis run
+ * still composes the same three phases, and now almost always finds the
+ * artefact already written and pays nothing.
+ *
+ * Why it moved: P5's inspiration cards are generated FROM this reading, and
+ * they are shown before the client has answered anything. The read could not
+ * stay inside a run that cannot start until she has.
  *
  * WHERE IT RUNS (P4b): in the background worker, in ANALYZING, split across
  * the run's three phases —
@@ -80,7 +92,6 @@ type InspirationSessionScope = Parameters<
 
 export type ConsultInspirationAnalysisArtefact = {
   revisionId: string
-  inspirationRevisionId: string
   inspirationId: string
   source: ConsultInspirationAnalysisDTO['source']
   model: string
@@ -89,12 +100,20 @@ export type ConsultInspirationAnalysisArtefact = {
 
 /**
  * The artefact's own request identity — what makes it "keyed to the
- * inspiration revision". Two runs against the same reference under the same
- * prompt hash identically; a re-answered inspiration step or a prompt bump
- * does not.
+ * inspiration ROW". Two reads of the same photograph under the same prompt
+ * hash identically; a swapped reference or a prompt bump does not.
+ *
+ * 🔴 It used to include the guided-inspiration REVISION id, and that was a
+ * standing double charge. Every answer the client gives writes a new
+ * INSPIRATION revision, so the revision current when the artefact was written
+ * is never the revision current when the analysis runs: the hash missed, the
+ * reference was read and billed a second time (~$0.012), and a duplicate
+ * artefact was stored. The reading describes a PHOTOGRAPH — it cannot change
+ * because she answered a question about it — so the photograph is what
+ * identifies it. (P5b; the same change is what lets the read happen before any
+ * revision exists at all.)
  */
 function inspirationAnalysisRequestHash(args: {
-  inspirationRevisionId: string
   inspirationId: string
   promptVersion: string
   schemaVersion: number
@@ -113,14 +132,12 @@ function inspirationAnalysisIdempotencyKey(analysisIdempotencyKey: string): stri
 }
 
 function toArtefactPayload(args: {
-  inspirationRevisionId: string
   inspirationId: string
   source: ConsultInspirationAnalysisDTO['source']
   analysis: ConsultInspirationAnalysis
 }): Prisma.InputJsonObject {
   return {
     schemaVersion: CONSULT_INSPIRATION_ANALYSIS_SCHEMA_VERSION,
-    inspirationRevisionId: args.inspirationRevisionId,
     inspirationId: args.inspirationId,
     source: args.source,
     attributes: toConsultInspirationAnalysisJson(args.analysis),
@@ -142,7 +159,6 @@ export function normalizeStoredConsultInspirationAnalysis(revision: {
     revision.promptVersion !== CONSULT_INSPIRATION_ANALYSIS_PROMPT_VERSION ||
     !revision.model ||
     !isRecord(payload) ||
-    typeof payload.inspirationRevisionId !== 'string' ||
     typeof payload.inspirationId !== 'string' ||
     !isRecord(payload.attributes)
   ) {
@@ -194,7 +210,6 @@ export function normalizeStoredConsultInspirationAnalysis(revision: {
 
   return {
     revisionId: revision.id,
-    inspirationRevisionId: payload.inspirationRevisionId,
     inspirationId: payload.inspirationId,
     source,
     schemaVersion: revision.schemaVersion,
@@ -234,28 +249,48 @@ export async function prepareConsultInspirationRead(
   db: Prisma.TransactionClient,
   args: {
     session: InspirationSessionScope
-    inspirationRevisionId: string
     now: Date
   },
 ): Promise<ConsultInspirationReadPlan> {
   const target: ConsultInspirationReadTarget =
     await resolveLockedConsultInspirationReadTarget(db, args.session, args.now)
   const requestHash = inspirationAnalysisRequestHash({
-    inspirationRevisionId: args.inspirationRevisionId,
     inspirationId: target.inspirationId,
     promptVersion: CONSULT_INSPIRATION_ANALYSIS_PROMPT_VERSION,
     schemaVersion: CONSULT_INSPIRATION_ANALYSIS_SCHEMA_VERSION,
   })
 
-  // An artefact already read against this exact reference under this exact
-  // prompt is the same artefact. Reuse it rather than paying for the call
-  // again — the request hash is what makes that safe to say. This is also what
-  // makes a RETRIED run cheap: attempt two does not re-read the reference.
+  return {
+    target,
+    requestHash,
+    artefact: await findStoredConsultInspirationArtefact(db, {
+      consultSessionId: args.session.id,
+      requestHash,
+    }),
+  }
+}
+
+/**
+ * An artefact already read against this exact reference under this exact
+ * prompt is the same artefact. Reuse it rather than paying for the call again
+ * — the request hash is what makes that safe to say.
+ *
+ * Two callers, on purpose: `prepareConsultInspirationRead` asks before paying,
+ * and the persist phase asks AGAIN under the row lock. The second ask is what
+ * bounds a race between two clients (or a client and the analysis worker)
+ * arriving at an unread reference at once — both may pay, but only one
+ * artefact is ever stored, so nothing downstream sees two readings of one
+ * photograph.
+ */
+async function findStoredConsultInspirationArtefact(
+  db: Prisma.TransactionClient,
+  args: { consultSessionId: string; requestHash: string },
+): Promise<ConsultInspirationAnalysisArtefact | null> {
   const existing = await db.consultRevision.findFirst({
     where: {
-      consultSessionId: args.session.id,
+      consultSessionId: args.consultSessionId,
       kind: ConsultRevisionKind.INSPIRATION_ANALYSIS,
-      requestHash,
+      requestHash: args.requestHash,
     },
     select: {
       id: true,
@@ -267,26 +302,17 @@ export async function prepareConsultInspirationRead(
     },
     orderBy: [{ revision: 'desc' }, { id: 'desc' }],
   })
-  if (existing) {
-    const stored = normalizeStoredConsultInspirationAnalysis(existing)
-    const analysis = storedAnalysis(stored)
-    if (stored && analysis) {
-      return {
-        target,
-        requestHash,
-        artefact: {
-          revisionId: stored.revisionId,
-          inspirationRevisionId: stored.inspirationRevisionId,
-          inspirationId: stored.inspirationId,
-          source: stored.source,
-          model: stored.model,
-          analysis,
-        },
-      }
-    }
+  if (!existing) return null
+  const stored = normalizeStoredConsultInspirationAnalysis(existing)
+  const analysis = storedAnalysis(stored)
+  if (!stored || !analysis) return null
+  return {
+    revisionId: stored.revisionId,
+    inspirationId: stored.inspirationId,
+    source: stored.source,
+    model: stored.model,
+    analysis,
   }
-
-  return { target, requestHash, artefact: null }
 }
 
 export type ConsultInspirationReadPlan = {
@@ -380,17 +406,26 @@ export async function persistLockedConsultInspirationAnalysis(
   tx: Prisma.TransactionClient,
   args: {
     consultSessionId: string
-    inspirationRevisionId: string
     plan: ConsultInspirationReadPlan
     read: ConsultInspirationReadResult
     analysisIdempotencyKey: string
     actor: { type: typeof ConsultActorType.CLIENT; id: string }
   },
 ): Promise<ConsultInspirationAnalysisArtefact> {
+  // Under the lock, and only now: did someone else store this same reading
+  // while this caller was paying for it? If so theirs stands and this one is
+  // dropped. Writing both would leave two artefacts for one photograph, and
+  // every reader here takes the newest — so which reading the brief showed
+  // would depend on insert order.
+  const raced = await findStoredConsultInspirationArtefact(tx, {
+    consultSessionId: args.consultSessionId,
+    requestHash: args.plan.requestHash,
+  })
+  if (raced) return raced
+
   const revision = await appendLockedConsultInspirationAnalysisRevision(tx, {
     consultSessionId: args.consultSessionId,
     payload: toArtefactPayload({
-      inspirationRevisionId: args.inspirationRevisionId,
       inspirationId: args.plan.target.inspirationId,
       source: args.read.source,
       analysis: args.read.analysis,
@@ -403,7 +438,6 @@ export async function persistLockedConsultInspirationAnalysis(
 
   return {
     revisionId: revision.id,
-    inspirationRevisionId: args.inspirationRevisionId,
     inspirationId: args.plan.target.inspirationId,
     source: args.read.source,
     model: args.read.model,
@@ -426,7 +460,6 @@ export async function analyzeLockedConsultInspiration(
   args: {
     session: InspirationSessionScope
     clientId: string
-    inspirationRevisionId: string
     analysisIdempotencyKey: string
     actor: { type: typeof ConsultActorType.CLIENT; id: string }
     now: Date
@@ -437,7 +470,6 @@ export async function analyzeLockedConsultInspiration(
 ): Promise<ConsultInspirationAnalysisArtefact> {
   const plan = await prepareConsultInspirationRead(tx, {
     session: args.session,
-    inspirationRevisionId: args.inspirationRevisionId,
     now: args.now,
   })
   if (plan.artefact) return plan.artefact
@@ -453,7 +485,6 @@ export async function analyzeLockedConsultInspiration(
 
   return persistLockedConsultInspirationAnalysis(tx, {
     consultSessionId: args.session.id,
-    inspirationRevisionId: args.inspirationRevisionId,
     plan,
     read,
     analysisIdempotencyKey: args.analysisIdempotencyKey,
@@ -477,6 +508,91 @@ function storedAnalysis(
     }
   }
   return analysis as ConsultInspirationAnalysis
+}
+
+/**
+ * P5b — THE STAGE. Read the client's reference now, in MEDIA_READY, as its own
+ * step in the flow.
+ *
+ * This is the entry point the client calls once she has attached a reference,
+ * and it is the one that makes P5's cards possible: they are generated from
+ * this artefact, and they are shown before she has answered anything.
+ *
+ * It is `analyzeLockedConsultInspiration` with the lock DROPPED across the paid
+ * call — the P4b split, applied here for the same reason it was applied there.
+ * Three steps, and the middle one holds nothing:
+ *
+ *   1. a short transaction: lock, scope, consent, resolve the target, and
+ *      return early if this photograph has already been read;
+ *   2. no transaction at all: the paid call;
+ *   3. a short transaction: re-lock, re-check scope and consent, and write.
+ *
+ * Phase 3 re-runs the whole scope check rather than trusting phase 1's answer.
+ * Consent can be revoked, and the consult can leave MEDIA_READY, while the
+ * model is thinking — a reading that arrives after either must not be stored.
+ */
+export async function readConsultInspiration(args: {
+  consultSessionId: string
+  clientId: string
+  actor: { type: typeof ConsultActorType.CLIENT; id: string }
+  idempotencyKey: string
+  now?: Date
+  storage?: ConsultInspirationStorage
+  provider?: ConsultInspirationVisionProvider
+  meter?: ConsultProviderMeterSink | null
+}): Promise<ConsultInspirationAnalysisArtefact> {
+  const now = args.now ?? new Date()
+  const scopeArgs = {
+    consultSessionId: args.consultSessionId,
+    clientId: args.clientId,
+    actorUserId: args.actor.id,
+    now,
+  }
+
+  // ── Phase 1: what are we reading, and has it been read? ──────────────────
+  const plan = await prisma.$transaction(async (tx) => {
+    await lockConsultSessionRow(tx, args.consultSessionId, 'SHARE')
+    const session = await requireLockedConsultInspirationStageScope(tx, scopeArgs)
+    return prepareConsultInspirationRead(tx, { session, now })
+  })
+  if (plan.artefact) return plan.artefact
+
+  // ── Phase 2: the paid call, with nothing held ────────────────────────────
+  //
+  // 🔴 METERED by default, with no run to attach to. Every other paid call in
+  // this pipeline is metered by the analysis worker, which owns the run and
+  // supplies the sink; this one has no run — it happens before the analysis
+  // exists, and often before the booking does. An unmetered default would have
+  // made the one call that moved OUTSIDE the run the one call that stopped
+  // being counted, so a consult's cost line would quietly under-report by the
+  // read it now always makes. `analysisRunId` is nullable exactly for this.
+  const read = await performConsultInspirationRead({
+    plan,
+    consultSessionId: args.consultSessionId,
+    clientId: args.clientId,
+    storage: args.storage,
+    provider: args.provider,
+    meter:
+      args.meter === undefined
+        ? { consultSessionId: args.consultSessionId, analysisRunId: null }
+        : args.meter,
+  })
+
+  // ── Phase 3: write it, under the lock, against re-checked scope ──────────
+  return prisma.$transaction(async (tx) => {
+    await lockConsultSessionRow(tx, args.consultSessionId, 'UPDATE')
+    await requireLockedConsultInspirationStageScope(tx, {
+      ...scopeArgs,
+      now: new Date(Math.max(now.getTime(), Date.now())),
+    })
+    return persistLockedConsultInspirationAnalysis(tx, {
+      consultSessionId: args.consultSessionId,
+      plan,
+      read,
+      analysisIdempotencyKey: args.idempotencyKey,
+      actor: args.actor,
+    })
+  })
 }
 
 /**
@@ -518,9 +634,7 @@ export async function analyzeConsultInspiration(
 
   return prisma.$transaction(
     async (tx) => {
-      await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-        SELECT "id" FROM "ConsultSession" WHERE "id" = ${consultSession.id} FOR UPDATE
-      `)
+      await lockConsultSessionRow(tx, consultSession.id, 'UPDATE')
       const session = await tx.consultSession.findUnique({
         where: { id: consultSession.id },
         select: CONSULT_INSPIRATION_ANALYSIS_SESSION_SELECT,
@@ -528,26 +642,15 @@ export async function analyzeConsultInspiration(
       if (!session) throw new ConsultWriteError('NOT_FOUND', 'Not found.')
       // Consent is re-checked here as well as at the trigger: a revoked
       // session must not have its reference read, and the lifecycle pin on the
-      // artefact (ANALYZING only) is what refuses the write itself.
+      // artefact (MEDIA_READY or ANALYZING) is what refuses the write itself.
       await requireCurrentConsultAgreementAcceptances(tx, session.id)
-      const inspirationRevision = await tx.consultRevision.findFirst({
-        where: {
-          consultSessionId: session.id,
-          kind: ConsultRevisionKind.INSPIRATION,
-        },
-        select: { id: true },
-        orderBy: [{ revision: 'desc' }, { id: 'desc' }],
-      })
-      if (!inspirationRevision) {
-        throw new ConsultWriteError(
-          'ANALYSIS_PREREQUISITES_REQUIRED',
-          'Guided inspiration is incomplete.',
-        )
-      }
+      // 🔴 No "guided inspiration must be complete" check any more, and its
+      // absence is the P5b change in one line. The reading is of a
+      // PHOTOGRAPH; requiring the client to have answered questions about it
+      // first was only ever an artefact of where the read used to live.
       return analyzeLockedConsultInspiration(tx, {
         session,
         clientId: consultSession.clientId,
-        inspirationRevisionId: inspirationRevision.id,
         analysisIdempotencyKey: options.idempotencyKey,
         actor: { type: ConsultActorType.CLIENT, id: actorUserId },
         now,

@@ -44,7 +44,7 @@ import {
 import { isAllowedConsultProviderModel } from './providerModel'
 import { toProviderOutputSchema } from './providerSchema'
 
-export const CONSULT_INSPIRATION_ANALYSIS_SCHEMA_VERSION = 2
+export const CONSULT_INSPIRATION_ANALYSIS_SCHEMA_VERSION = 3
 // v1 (2026-09-04, P4): first read of the inspiration reference. Seven
 // hair-colour attributes, each an observation plus a normalized region box.
 // v2 (2026-09-04, P4a): the level is NAMED, and there are two of them.
@@ -55,6 +55,17 @@ export const CONSULT_INSPIRATION_ANALYSIS_SCHEMA_VERSION = 2
 // could not be compared with the client's own hair, whose reading had a
 // different shape again. Both artefacts now report `baseLevel` and
 // `lightestLevel` on the one shared scale (lib/consult/hairLevel.ts).
+// v3 (2026-09-05, P5b): the ENVELOPE changes, not the reading. The artefact
+// dropped `inspirationRevisionId` and is identified by the inspiration ROW it
+// read. See the identity note in lib/consult/inspirationAnalysisContract.ts:
+// the read now happens before the client has answered anything, so there is no
+// review revision to pin to, and pinning to one made the analysis pay to read
+// the same photograph a second time.
+//
+// 🔴 The PROMPT version is deliberately unchanged: v3 sends byte-identical
+// system text, schema and image to the model, so a v2 reading and a v3 reading
+// of the same photograph are the same reading. Bumping it would have
+// invalidated nothing and re-billed everything.
 export const CONSULT_INSPIRATION_ANALYSIS_PROMPT_VERSION = 'inspiration-hair-color-v2'
 
 const DEFAULT_MODEL = 'claude-sonnet-5'

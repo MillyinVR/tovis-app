@@ -331,6 +331,24 @@ function threadPhotoMessages(
   })
 }
 
+/**
+ * P5b — the same inspiration state, with the vision read not yet done.
+ *
+ * `analysisReady: false` is what makes the page ask for the reading; ABSENT
+ * (every other fixture here) means a server with no read stage, which the page
+ * must leave alone.
+ */
+export function withAnalysisReady(
+  inspiration: ConsultInspirationStateDTO,
+  analysisReady: boolean,
+): ConsultInspirationStateDTO {
+  if (!inspiration.source) return inspiration
+  return {
+    ...inspiration,
+    source: { ...inspiration.source, analysisReady },
+  }
+}
+
 export function threadFixture(args: {
   inspiration: ConsultInspirationStateDTO
   /** Force particular slots to a state, e.g. the selfie not yet sent. */

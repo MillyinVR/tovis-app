@@ -631,6 +631,7 @@ export type {
   ConsultInspirationIssueUploadResponseDTO,
   ConsultInspirationDeleteResponseDTO,
   ConsultInspirationSignedReadResponseDTO,
+  ConsultInspirationReadResponseDTO,
   ConsultCaptureShotKeyDTO,
   ConsultCaptureShotDTO,
   ConsultCaptureShotPackDTO,

@@ -38,6 +38,7 @@ import {
   lookSourceInspiration,
   threadFixture,
   uploadSourceInspiration,
+  withAnalysisReady,
 } from './fixtures/consultInspiration'
 
 const BASE = `/api/v1/client/consult/${CONSULT_FIXTURE_ID}`
@@ -61,14 +62,32 @@ async function stubConsult(
     media: (route: Route) => Promise<void>
     bookEnabled?: boolean
     slotOverrides?: Record<string, 'EMPTY' | 'ACCEPTED' | 'REJECTED'>
+    /** P5b: how POST /inspiration/read answers. */
+    read?: (route: Route) => Promise<void>
   },
-): Promise<{ mediaRequests: () => number }> {
+): Promise<{
+  mediaRequests: () => number
+  readRequests: () => number
+  /** Change what the next thread read answers with — the state after a read. */
+  setInspiration: (inspiration: typeof lookSourceInspiration) => void
+}> {
   let mediaRequests = 0
+  const current = { inspiration: options.inspiration }
 
   // Most specific first: Playwright matches routes in registration order.
   await page.route(`**${MEDIA}`, async (route) => {
     mediaRequests += 1
     await options.media(route)
+  })
+  // P5b: the inspiration READ stage. Counted, and answered by the caller when
+  // it cares — most tests here predate the stage and serve a source with no
+  // `analysisReady` at all, which the page must leave alone.
+  let readRequests = 0
+  await page.route(`**${BASE}/inspiration/read`, async (route) => {
+    readRequests += 1
+    await (options.read ?? ((r: Route) => r.fulfill({ status: 404, json: { ok: false } })))(
+      route,
+    )
   })
   // P5a: ONE read drives the page. The stage endpoints still exist and still
   // serve mutations; the page no longer reads them.
@@ -77,7 +96,7 @@ async function stubConsult(
       json: {
         ok: true,
         thread: threadFixture({
-          inspiration: options.inspiration,
+          inspiration: current.inspiration,
           bookEnabled: options.bookEnabled,
           slotOverrides: options.slotOverrides,
         }),
@@ -88,7 +107,13 @@ async function stubConsult(
     route.fulfill({ status: 200, contentType: 'image/gif', body: IMAGE_BYTES }),
   )
 
-  return { mediaRequests: () => mediaRequests }
+  return {
+    mediaRequests: () => mediaRequests,
+    readRequests: () => readRequests,
+    setInspiration: (inspiration) => {
+      current.inspiration = inspiration
+    },
+  }
 }
 
 function signedRead(expiresInSeconds: number) {
@@ -300,6 +325,106 @@ test.describe('consult thread', () => {
     await expect(
       page.getByText('Send one photo of yourself and this opens up.'),
     ).toHaveCount(0)
+  })
+
+  // ── P5b: the read stage, in a real browser ───────────────────────────────
+  //
+  // Three things a unit test cannot see: that the page ASKS exactly once (it is
+  // a paid call on an effect — the same shape that produced 4,457 requests in
+  // six seconds above), that a failure is READABLE rather than an empty pause,
+  // and that none of it takes the Book button away.
+
+  test('asks for the reading once, shows that it is happening, and stops asking', async ({
+    page,
+  }) => {
+    const stub = await stubConsult(page, {
+      inspiration: withAnalysisReady(lookSourceInspiration, false),
+      media: (route) => route.fulfill({ json: signedRead(600) }),
+      read: async (route) => {
+        // The server answers with the state it just produced.
+        stub.setInspiration(withAnalysisReady(lookSourceInspiration, true))
+        await route.fulfill({
+          json: {
+            ok: true,
+            read: true,
+            inspiration: withAnalysisReady(lookSourceInspiration, true),
+          },
+        })
+      },
+    })
+
+    await page.goto(`/client/consult/${CONSULT_FIXTURE_ID}`)
+
+    // It asked, and the client was told what was happening while it did.
+    await expect
+      .poll(() => stub.readRequests(), { timeout: 10_000 })
+      .toBeGreaterThan(0)
+    await expect(page.getByTestId('consult-inspiration-read-error')).toHaveCount(0)
+
+    // Once the reading exists it stops asking. A count that climbs here is the
+    // effect re-firing on every poll — a paid call on a loop.
+    await page.waitForTimeout(6_000)
+    expect(stub.readRequests()).toBeLessThanOrEqual(STRICT_MODE_MOUNT_READS)
+    await expect(page.getByTestId('consult-inspiration-reading')).toHaveCount(0)
+  })
+
+  test('surfaces an unreadable photograph, and retries only when asked', async ({
+    page,
+  }) => {
+    const stub = await stubConsult(page, {
+      inspiration: withAnalysisReady(lookSourceInspiration, false),
+      media: (route) => route.fulfill({ json: signedRead(600) }),
+      read: (route) =>
+        route.fulfill({
+          status: 422,
+          json: {
+            ok: false,
+            error: 'We couldn’t read this one — try another photo or a clearer shot.',
+            code: 'CONSULT_INSPIRATION_ANALYSIS_UNREADABLE',
+          },
+        }),
+    })
+
+    await page.goto(`/client/consult/${CONSULT_FIXTURE_ID}`)
+
+    const failure = page.getByTestId('consult-inspiration-read-error')
+    await expect(failure).toBeVisible()
+    await expect(
+      failure.getByText('We couldn’t read this one — try another photo or a clearer shot.'),
+    ).toBeVisible()
+
+    // 🔴 A failure leaves `analysisReady` false. The effect must NOT read that
+    // as "ask again" — the guard is the inspiration id it last asked about, so
+    // a failed read waits for the button. A climbing count here is a paid call
+    // firing on every poll of a consult whose photo cannot be read.
+    const afterMount = stub.readRequests()
+    expect(afterMount).toBeLessThanOrEqual(STRICT_MODE_MOUNT_READS)
+    await page.waitForTimeout(6_000)
+    expect(stub.readRequests()).toBe(afterMount)
+
+    // And the spark is still bookable. Nothing about a model may take the CTA
+    // away (handoff Part 2 — booking runs the ordinary look path).
+    await expect(page.getByRole('button', { name: 'Book the look' })).toBeEnabled()
+
+    await page.getByRole('button', { name: 'Have another go' }).click()
+    await expect
+      .poll(() => stub.readRequests(), { timeout: 10_000 })
+      .toBe(afterMount + 1)
+  })
+
+  test('leaves a server with no read stage alone', async ({ page }) => {
+    // Every other fixture in this file omits `analysisReady` entirely, which is
+    // what a pre-P5b server answers. Absent is NOT "false": there is no read
+    // route on such a server, so asking would be a POST at a 404 on a loop.
+    const stub = await stubConsult(page, {
+      inspiration: lookSourceInspiration,
+      media: (route) => route.fulfill({ json: signedRead(600) }),
+    })
+
+    await page.goto(`/client/consult/${CONSULT_FIXTURE_ID}`)
+    await expect(photo(page)).toBeVisible()
+    await page.waitForTimeout(3_000)
+    expect(stub.readRequests()).toBe(0)
   })
 
   test('the sticky CTA stays on screen while the thread scrolls', async ({

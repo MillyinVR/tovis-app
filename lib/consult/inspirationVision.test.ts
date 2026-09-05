@@ -85,7 +85,12 @@ describe('inspiration vision schema', () => {
   })
 
   it('pins the versions the stored artefact is written under', () => {
-    expect(CONSULT_INSPIRATION_ANALYSIS_SCHEMA_VERSION).toBe(2)
+    // 🔴 These two numbers are ALSO written into
+    // `consult_inspiration_analysis_payload_guard`. Moving one without the
+    // other raises 23514 on insert, after the paid call has been billed — so
+    // this assertion is the reminder, and the integration test that actually
+    // writes an artefact through the live guard is the proof.
+    expect(CONSULT_INSPIRATION_ANALYSIS_SCHEMA_VERSION).toBe(3)
     expect(CONSULT_INSPIRATION_ANALYSIS_PROMPT_VERSION).toBe(
       'inspiration-hair-color-v2',
     )

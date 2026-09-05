@@ -715,6 +715,14 @@ export type BrandClientConsultThreadCopy = {
 
   /** The inspiration card's own framing, before a reference exists. */
   inspirationSourceIntro: string
+  /**
+   * P5b — while the vision model is reading the reference she just gave.
+   * A few seconds, and it happens before she is asked anything about the
+   * picture, so it says what is happening rather than asking her to wait.
+   */
+  inspirationReading: string
+  /** The button on a read that failed. The REASON comes from the server. */
+  inspirationReadRetryLabel: string
   /** Once a reference is on screen. */
   inspirationIntro: string
   /** When the client has answered enough to move on. */

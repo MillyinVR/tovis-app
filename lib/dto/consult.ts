@@ -353,6 +353,25 @@ export type ConsultInspirationSourceStateDTO = {
   imageReadEndpoint: string
   imageAvailable: boolean
   useExpiresAt: string | null
+  /**
+   * P5b — has this reference been READ by the vision model yet?
+   *
+   * False means the client should POST to
+   * `/api/v1/client/consult/{id}/inspiration/read`, which makes the paid call
+   * and stores the artefact. True means it is already stored, and a second
+   * POST is free (the request hash matches and no call is made).
+   *
+   * OPTIONAL on the wire, like `serviceEstimate` and `inspirationAnalysis`
+   * before it: the published schema grows by addition only, so the shipped iOS
+   * fixtures for `ConsultInspirationStateDTO` stay valid and neither repo has
+   * to merge first.
+   *
+   * 🔴 ABSENT is not `false`. A server that omits it is one that predates the
+   * read stage, so it has no `/inspiration/read` route to call either — a
+   * client that treated absent as "not read yet" would POST at a 404 on a
+   * loop. Absent means "this server has no read stage": do nothing.
+   */
+  analysisReady?: boolean
 }
 
 export type ConsultInspirationReviewDTO = {
@@ -464,6 +483,21 @@ export type ConsultInspirationSignedReadResponseDTO = {
   url: string
   expiresInSeconds: number
 }
+
+/**
+ * P5b — what POST `/inspiration/read` answers: the inspiration state, with
+ * `source.analysisReady` now true.
+ *
+ * The READING itself is deliberately not on the wire here. It is a colourist's
+ * description of someone else's hair, and the client has no use for the raw
+ * enums; what she sees is P5d's cards, built from it server-side. The pro sees
+ * it on her brief.
+ */
+export type ConsultInspirationReadResponseDTO =
+  ConsultInspirationStateResponseDTO & {
+    /** True when this request made the paid call rather than reusing a stored reading. */
+    read: boolean
+  }
 
 // Every shot key any capture pack defines (lib/consult/capture/registry.ts):
 // the hair pack's seven, plus the two treatment-area views the area pack adds
@@ -1033,14 +1067,16 @@ export type ConsultInspirationAnalysisAttributesDTO = {
 }
 
 /**
- * The stored artefact, pinned to the guided-inspiration revision it was read
- * against: a new inspiration revision makes this one stale, and the pro brief
- * declines to show a stale one rather than showing the wrong picture's colour.
+ * The stored artefact, identified by the inspiration ROW it read: a SWAPPED
+ * reference makes this one stale, and the pro brief declines to show a stale
+ * one rather than showing the wrong picture's colour.
+ *
+ * 🔴 It used to be pinned to the guided-inspiration REVISION instead, which
+ * made it stale every time the client answered a question about the very same
+ * photograph — and made the analysis pay to read that photograph again (P5b).
  */
 export type ConsultInspirationAnalysisDTO = {
   revisionId: string
-  /** The INSPIRATION revision this was read against. */
-  inspirationRevisionId: string
   /** The attached ConsultInspiration row whose image was read. */
   inspirationId: string
   source: Exclude<ConsultInspirationSourceDTO, 'NONE'>
