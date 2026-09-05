@@ -9,6 +9,7 @@ import {
 } from '@prisma/client'
 import { createHash } from 'node:crypto'
 
+import { defaultClientConsultInspirationCopy } from '@/lib/brand/defaultClientConsultInspirationCopy'
 import { prisma } from '@/lib/prisma'
 
 import {
@@ -36,7 +37,6 @@ import {
 } from './intake/registry'
 import type { ConsultIntakePackDefinition } from './intake/types'
 import {
-  CONSULT_INSPIRATION_REFERENCE_NOTE,
   normalizeStoredInspirationPayload,
 } from './inspirationPack'
 import {
@@ -770,7 +770,12 @@ export async function finalizeLockedHairColorAnalysis(
         inspiration.source === 'EXTERNAL_UPLOAD'
           ? `/api/v1/pro/consults/${encodeURIComponent(args.consultSessionId)}/inspiration/media`
           : null,
-      referenceNote: CONSULT_INSPIRATION_REFERENCE_NOTE,
+      // 🔴 The brand DEFAULT, not the tenant's, and deliberately so: this
+      // sentence is stored in the brief payload, and
+      // lib/consult/immutableResult.ts rebuilds that payload and compares it
+      // byte-for-byte against the stored one. Two readers seeing two sentences
+      // would stop an immutable brief reproducing.
+      referenceNote: defaultClientConsultInspirationCopy.referenceNote,
       exactClientDetails: inspiration.exactClientDetails,
       possibleProfessionalInterpretation:
         inspiration.possibleProfessionalInterpretation,

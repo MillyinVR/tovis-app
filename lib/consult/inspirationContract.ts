@@ -13,9 +13,12 @@ import {
   Role,
 } from '@prisma/client'
 
+import { defaultClientConsultInspirationCopy } from '@/lib/brand/defaultClientConsultInspirationCopy'
+import type { BrandClientConsultInspirationCopy } from '@/lib/brand/types'
 import type {
   ConsultInspirationAnswerDTO,
   ConsultInspirationCatalogGuidanceDTO,
+  ConsultInspirationExactDetailDTO,
   ConsultInspirationSourceDTO,
   ConsultInspirationStateDTO,
   ConsultInspirationUploadDTO,
@@ -30,17 +33,27 @@ import { isAiConsultC6ExposureEnabledForPro } from './access'
 import { CONSULT_ANCHOR_SELECT, evaluateConsultAnchor } from './anchor'
 import { ConsultWriteError } from './errors'
 import {
+  deriveConsultInspirationCatalogDetails,
+  evaluateConsultInspirationProgress as evaluateConsultInspirationProgressV2,
+  findConsultInspirationPack,
+  resolveConsultInspirationPack,
+  resolveConsultSessionInspirationPack,
+  toConsultInspirationJsonPayloadV2,
+  validateConsultInspirationAnswer as validateConsultInspirationAnswerV2,
+} from './inspiration/registry'
+import type {
+  ConsultInspirationCatalogDetail,
+  ConsultInspirationPackDefinition,
+  ConsultInspirationPayloadV2,
+} from './inspiration/types'
+import {
   buildExactClientDetails,
   buildPossibleProfessionalInterpretation,
-  CONSULT_INSPIRATION_INTRODUCTION,
   CONSULT_INSPIRATION_QUESTIONS,
-  CONSULT_INSPIRATION_REFERENCE_NOTE,
-  CONSULT_INSPIRATION_REFLECTION_PROMPT,
   CONSULT_INSPIRATION_REQUIRED_DETAIL_COUNT,
   CONSULT_INSPIRATION_SCHEMA_VERSION,
   evaluateConsultInspirationProgress,
   mapStoredInspirationRevision,
-  normalizeStoredInspirationPayload,
   toInspirationJsonPayload,
   validateConsultInspirationAnswer,
   type InspirationReviewPayload,
@@ -85,6 +98,10 @@ const SCOPE_SELECT = {
   status: true,
   client: { select: { userId: true } },
   ...CONSULT_ANCHOR_SELECT,
+  // The anchor rule reads the slug; the service profile — which decides WHICH
+  // inspiration pack this consult serves — reads the family and the name as
+  // well, so the wider select replaces the anchor's narrower one.
+  serviceCategory: { select: CONSULT_SERVICE_PROFILE_CATEGORY_SELECT },
   booking: {
     select: {
       totalDurationMinutes: true,
@@ -129,8 +146,19 @@ function mediaType(value: unknown): ConsultCaptureMediaType {
   return found
 }
 
-function requireSchemaVersion(value: number): void {
-  if (value !== CONSULT_INSPIRATION_SCHEMA_VERSION) {
+/**
+ * The client must echo the schema version she was SERVED, which since P5c is
+ * the one belonging to the contract THIS consult is on — a v1 consult keeps
+ * echoing 1 for the rest of its life, a v2 one echoes its pack's version.
+ * Both clients read it off the state they were just given
+ * (`ConsultInspirationStateDTO.schemaVersion`), so neither has a version
+ * compiled into it.
+ */
+function requireSchemaVersion(
+  value: number,
+  pack: ConsultInspirationPackDefinition | null,
+): void {
+  if (value !== (pack ? pack.schemaVersion : CONSULT_INSPIRATION_SCHEMA_VERSION)) {
     throw new ConsultWriteError(
       'INSPIRATION_SCHEMA_VERSION_MISMATCH',
       'The inspiration schema version is stale.',
@@ -227,6 +255,7 @@ async function activeSource(tx: Prisma.TransactionClient, consultSessionId: stri
 async function latestReview(
   tx: Prisma.TransactionClient,
   consultSessionId: string,
+  copy: BrandClientConsultInspirationCopy = defaultClientConsultInspirationCopy,
 ) {
   const revisions = await tx.consultRevision.findMany({
     where: { consultSessionId, kind: ConsultRevisionKind.INSPIRATION },
@@ -234,7 +263,7 @@ async function latestReview(
     orderBy: [{ revision: 'desc' }, { id: 'desc' }],
   })
   for (const revision of revisions) {
-    const mapped = mapStoredInspirationRevision(revision)
+    const mapped = mapStoredInspirationRevision(revision, copy)
     if (mapped) return mapped
   }
   return null
@@ -251,6 +280,18 @@ export type CompletedConsultInspiration = {
   source: ConsultInspirationSourceDTO
   inspirationId: string | null
   answers: readonly ConsultInspirationAnswerDTO[]
+  /**
+   * P5c: her selections already rendered as words, and the label of the
+   * question each came from.
+   *
+   * The analysis prompt used to rebuild both by running the raw answers back
+   * through the hard-coded hair-colour question list — which produced nothing
+   * at all for any other pack. Derivation belongs to whichever contract wrote
+   * the row, so it happens once, here, where the contract is known.
+   */
+  exactClientDetails: readonly ConsultInspirationExactDetailDTO[]
+  /** Question key -> the label the client actually saw. */
+  questionLabels: Readonly<Record<string, string>>
 }
 
 export async function requireCompletedConsultInspiration(
@@ -283,11 +324,21 @@ export async function requireCompletedConsultInspiration(
       'Guided inspiration must be completed after current consent.',
     )
   }
+  const questionLabels: Record<string, string> = {}
+  const pack =
+    typeof review.packId === 'string' && typeof review.packVersion === 'number'
+      ? findConsultInspirationPack(review.packId, review.packVersion)
+      : null
+  for (const question of pack ? pack.questions : CONSULT_INSPIRATION_QUESTIONS) {
+    questionLabels[question.key] = question.label
+  }
   const completed: CompletedConsultInspiration = {
     revisionId: review.revisionId,
     source: review.source,
     inspirationId: review.inspirationId,
     answers: review.answers,
+    exactClientDetails: review.exactClientDetails,
+    questionLabels,
   }
   if (review.source === 'NONE') return completed
   const source = await tx.consultInspiration.findFirst({
@@ -535,14 +586,86 @@ async function inspirationAnalysisStored(
   return Boolean(stored)
 }
 
+/**
+ * P5c — WHICH CONTRACT this consult's guided inspiration is on.
+ *
+ * A session that has already written a contract-v1 inspiration stays on v1 for
+ * the rest of its life (`null`), because switching a client mid-flow would
+ * refuse her stored answers as "no inspiration", re-ask everything in a
+ * different vocabulary, and reject her next tap with a schema mismatch she has
+ * no way to resolve. Everyone else — every consult that has written nothing
+ * yet, and every consult already on v2 — gets a PACK, at the version it
+ * started on.
+ *
+ * Newest-first, because the pin is whatever the LATEST readable revision says.
+ */
+async function sessionInspirationPack(
+  tx: Prisma.TransactionClient,
+  session: InspirationScope,
+): Promise<ConsultInspirationPackDefinition | null> {
+  const currentPack = resolveConsultInspirationPack({
+    categorySlug: session.serviceCategory.slug,
+    family: session.serviceCategory.consultFamily,
+  })
+  const revisions = await tx.consultRevision.findMany({
+    where: { consultSessionId: session.id, kind: ConsultRevisionKind.INSPIRATION },
+    select: { payload: true },
+    orderBy: [{ revision: 'desc' }, { id: 'desc' }],
+  })
+  return resolveConsultSessionInspirationPack(
+    currentPack,
+    revisions.map((revision) => revision.payload),
+  )
+}
+
+/** Her stored answers as the v2 engine reads them: question key -> values. */
+function answerMap(
+  answers: readonly ConsultInspirationAnswerDTO[],
+): Record<string, readonly string[]> {
+  const map: Record<string, readonly string[]> = {}
+  for (const answer of answers) map[answer.questionKey] = answer.selectedValues
+  return map
+}
+
+type InspirationStateContext = {
+  /** Null when this consult is on contract v1. */
+  pack: ConsultInspirationPackDefinition | null
+  copy: BrandClientConsultInspirationCopy
+}
+
+/**
+ * The contract this consult is on, plus the sentences to render it with.
+ *
+ * `copy` defaults to the brand's default table, and the CONSULT THREAD
+ * (lib/consult/thread.ts) is what passes a tenant's own — the same division
+ * the capture step already uses. The standalone `/inspiration` routes stay on
+ * the default deliberately: resolving a tenant there would put a database
+ * lookup that can THROW in front of a route that has already made a paid
+ * provider call (P5b's `/inspiration/read`), and turn a successful reading
+ * into a 500. The thread is where a client reads these sentences.
+ */
+async function inspirationStateContext(
+  tx: Prisma.TransactionClient,
+  session: InspirationScope,
+  copy: BrandClientConsultInspirationCopy | undefined,
+): Promise<InspirationStateContext> {
+  return {
+    pack: await sessionInspirationPack(tx, session),
+    copy: copy ?? defaultClientConsultInspirationCopy,
+  }
+}
+
+
 async function buildState(
   tx: Prisma.TransactionClient,
   session: InspirationScope,
   now: Date,
+  ctx: InspirationStateContext,
 ): Promise<ConsultInspirationStateDTO> {
+  const { pack, copy } = ctx
   const [source, review] = await Promise.all([
     activeSource(tx, session.id),
-    latestReview(tx, session.id),
+    latestReview(tx, session.id, copy),
   ])
   const sourceState = source
     ? {
@@ -566,20 +689,30 @@ async function buildState(
       }
     : null
 
+  // The step's own sentences, and the version the client must echo back. Both
+  // come from the contract this consult is on: a v1 consult keeps being asked
+  // v1's questions at v1's schema version, whatever the current pack is.
+  const shell = {
+    schemaVersion: pack ? pack.schemaVersion : CONSULT_INSPIRATION_SCHEMA_VERSION,
+    introduction: copy.introduction,
+    referenceNote: copy.referenceNote,
+    reflectionPrompt: pack ? copy[pack.reflectionPromptKey] : copy.reflectionPromptHair,
+  }
+  // 🔴 Contract v2 has NO detail gate — that is the P5c change. A v1 consult
+  // still reports (and is still held to) three.
+  const requiredSpecificDetailCount = pack ? 0 : CONSULT_INSPIRATION_REQUIRED_DETAIL_COUNT
+
   if (!review && !sourceState) {
     return {
       consultId: session.id,
       status: session.status,
-      schemaVersion: CONSULT_INSPIRATION_SCHEMA_VERSION,
-      introduction: CONSULT_INSPIRATION_INTRODUCTION,
-      referenceNote: CONSULT_INSPIRATION_REFERENCE_NOTE,
-      reflectionPrompt: CONSULT_INSPIRATION_REFLECTION_PROMPT,
+      ...shell,
       source: null,
       progress: {
         currentQuestion: null,
         answeredQuestionCount: 0,
         specificDetailCount: 0,
-        requiredSpecificDetailCount: CONSULT_INSPIRATION_REQUIRED_DETAIL_COUNT,
+        requiredSpecificDetailCount,
         canComplete: false,
         blocker: 'SOURCE_DECISION_REQUIRED',
       },
@@ -592,16 +725,14 @@ async function buildState(
     (review.source === 'NONE' || review.inspirationId === sourceState?.inspirationId)
       ? review
       : null
-  const progress = activeReview
-    ? evaluateConsultInspirationProgress(activeReview.answers)
-    : evaluateConsultInspirationProgress([])
+  const answers = activeReview?.answers ?? []
+  const progress = pack
+    ? evaluateConsultInspirationProgressV2(pack, answerMap(answers))
+    : evaluateConsultInspirationProgress(answers)
   return {
     consultId: session.id,
     status: session.status,
-    schemaVersion: CONSULT_INSPIRATION_SCHEMA_VERSION,
-    introduction: CONSULT_INSPIRATION_INTRODUCTION,
-    referenceNote: CONSULT_INSPIRATION_REFERENCE_NOTE,
-    reflectionPrompt: CONSULT_INSPIRATION_REFLECTION_PROMPT,
+    ...shell,
     source: sourceState,
     progress:
       activeReview?.source === 'NONE'
@@ -609,17 +740,27 @@ async function buildState(
             currentQuestion: null,
             answeredQuestionCount: 0,
             specificDetailCount: 0,
-            requiredSpecificDetailCount: CONSULT_INSPIRATION_REQUIRED_DETAIL_COUNT,
+            requiredSpecificDetailCount,
             canComplete: true,
             blocker: null,
           }
         : {
             ...progress,
-            requiredSpecificDetailCount: CONSULT_INSPIRATION_REQUIRED_DETAIL_COUNT,
+            requiredSpecificDetailCount,
           },
     latestReview: activeReview,
   }
 }
+
+/**
+ * What a guided-inspiration write puts in the row: contract v1's payload for a
+ * consult that started on it, contract v2's for everyone else. The two are
+ * carried as a discriminated union rather than a wide object so a caller
+ * cannot build half of each.
+ */
+type InspirationWrite =
+  | { contract: 1; payload: InspirationReviewPayload }
+  | { contract: 2; payload: ConsultInspirationPayloadV2 }
 
 async function appendReview(
   tx: Prisma.TransactionClient,
@@ -628,13 +769,24 @@ async function appendReview(
     actor: ClientActor
     idempotencyKey: string
     requestHash: string
-    payload: InspirationReviewPayload
+    write: InspirationWrite
   },
 ) {
+  const { write } = args
   return appendLockedConsultInspirationRevision(tx, {
     consultSessionId: args.session.id,
-    payload: toInspirationJsonPayload(args.payload),
-    schemaVersion: CONSULT_INSPIRATION_SCHEMA_VERSION,
+    payload:
+      write.contract === 1
+        ? toInspirationJsonPayload(write.payload)
+        : (toConsultInspirationJsonPayloadV2(
+            write.payload,
+          ) as Prisma.InputJsonValue),
+    // The ROW's schema version, which the database guard branches on to pick
+    // which contract's rules to apply.
+    schemaVersion:
+      write.contract === 1
+        ? CONSULT_INSPIRATION_SCHEMA_VERSION
+        : write.payload.schemaVersion,
     idempotencyKey: args.idempotencyKey,
     requestHash: args.requestHash,
     actor: args.actor,
@@ -675,6 +827,7 @@ export async function loadConsultInspirationState(args: {
   clientId: string
   actorUserId: string
   now?: Date
+  copy?: BrandClientConsultInspirationCopy
 }): Promise<ConsultInspirationStateDTO> {
   const now = args.now ?? new Date()
   return prisma.$transaction(
@@ -682,7 +835,12 @@ export async function loadConsultInspirationState(args: {
       await lockConsultSessionRow(tx, args.consultSessionId, 'SHARE')
       const session = await requireScope(tx, { ...args, now, mutation: false })
       await requireCurrentConsultAgreementAcceptances(tx, session.id)
-      return buildState(tx, session, now)
+      return buildState(
+        tx,
+        session,
+        now,
+        await inspirationStateContext(tx, session, args.copy),
+      )
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
   )
@@ -693,6 +851,8 @@ export async function chooseConsultInspirationLook(args: {
   clientId: string
   actor: ClientActor
   now?: Date
+  /** The tenant's inspiration copy. Defaults to the brand default table. */
+  copy?: BrandClientConsultInspirationCopy
   input: {
     idempotencyKey: string
     schemaVersion: number
@@ -711,7 +871,8 @@ export async function chooseConsultInspirationLook(args: {
       mutation: true,
     })
     await requireCurrentConsultAgreementAcceptances(tx, session.id)
-    requireSchemaVersion(args.input.schemaVersion)
+    const ctx = await inspirationStateContext(tx, session, args.copy)
+    requireSchemaVersion(args.input.schemaVersion, ctx.pack)
     const idempotencyKey = key(args.input.idempotencyKey)
     const lookPostId = args.input.lookPostId.trim()
     if (!lookPostId) throw new ConsultWriteError('INVALID_REQUEST', 'Invalid Look.')
@@ -727,7 +888,7 @@ export async function chooseConsultInspirationLook(args: {
       if (existing.sourceRequestHash !== requestHash) {
         throw new ConsultWriteError('IDEMPOTENCY_CONFLICT', 'Idempotency conflict.')
       }
-      return { state: await buildState(tx, session, now), replayed: true }
+      return { state: await buildState(tx, session, now, ctx), replayed: true }
     }
     const access = await lookAvailableToBoth(tx, {
       lookPostId,
@@ -757,7 +918,7 @@ export async function chooseConsultInspirationLook(args: {
         inspirationId: created.id,
       },
     })
-    return { state: await buildState(tx, session, now), replayed: false }
+    return { state: await buildState(tx, session, now, ctx), replayed: false }
   })
 }
 
@@ -766,6 +927,8 @@ export async function skipConsultInspiration(args: {
   clientId: string
   actor: ClientActor
   now?: Date
+  /** The tenant's inspiration copy. Defaults to the brand default table. */
+  copy?: BrandClientConsultInspirationCopy
   input: { idempotencyKey: string; schemaVersion: number }
 }): Promise<{ state: ConsultInspirationStateDTO; replayed: boolean }> {
   const now = args.now ?? new Date()
@@ -779,7 +942,8 @@ export async function skipConsultInspiration(args: {
       mutation: true,
     })
     await requireCurrentConsultAgreementAcceptances(tx, session.id)
-    requireSchemaVersion(args.input.schemaVersion)
+    const ctx = await inspirationStateContext(tx, session, args.copy)
+    requireSchemaVersion(args.input.schemaVersion, ctx.pack)
     const idempotencyKey = key(args.input.idempotencyKey)
     const requestHash = hash({ source: 'NONE', schemaVersion: args.input.schemaVersion })
     const existing = await tx.consultRevision.findFirst({
@@ -793,29 +957,49 @@ export async function skipConsultInspiration(args: {
         throw new ConsultWriteError('IDEMPOTENCY_CONFLICT', 'Idempotency conflict.')
       }
       return {
-        state: await buildState(tx, session, now),
+        state: await buildState(tx, session, now, ctx),
         replayed: true,
         previous: null,
       }
     }
     const previous = await replaceActiveSource(tx, session.id, now, args.actor)
+    // A skipped reference is complete the moment she skips it, under whichever
+    // contract this consult is on. Both shapes say the same thing: no source,
+    // no answers, done.
     const appended = await appendReview(tx, {
       session,
       actor: args.actor,
       idempotencyKey,
       requestHash,
-      payload: {
-        contractId: 'hair-color-guided-inspiration',
-        contractVersion: 1,
-        schemaVersion: 1,
-        source: 'NONE',
-        inspirationId: null,
-        complete: true,
-        answers: [],
-        exactClientDetails: [],
-        possibleProfessionalInterpretation: [],
-        catalogGuidance: [],
-      },
+      write: ctx.pack
+        ? {
+            contract: 2,
+            payload: {
+              packId: ctx.pack.id,
+              packVersion: ctx.pack.version,
+              schemaVersion: ctx.pack.schemaVersion,
+              source: 'NONE',
+              inspirationId: null,
+              complete: true,
+              answers: {},
+              catalogGuidance: [],
+            },
+          }
+        : {
+            contract: 1,
+            payload: {
+              contractId: 'hair-color-guided-inspiration',
+              contractVersion: 1,
+              schemaVersion: 1,
+              source: 'NONE',
+              inspirationId: null,
+              complete: true,
+              answers: [],
+              exactClientDetails: [],
+              possibleProfessionalInterpretation: [],
+              catalogGuidance: [],
+            },
+          },
     })
     const advanced = await advanceLockedConsultToAnalysisIfReady(tx, {
       consultSessionId: session.id,
@@ -831,6 +1015,7 @@ export async function skipConsultInspiration(args: {
           ? { ...session, status: ConsultSessionStatus.ANALYSIS_PENDING }
           : session,
         now,
+        ctx,
       ),
       replayed: appended.replayed,
       previous,
@@ -847,6 +1032,8 @@ export async function issueConsultInspirationUpload(args: {
   clientId: string
   actor: ClientActor
   now?: Date
+  /** The tenant's inspiration copy. Defaults to the brand default table. */
+  copy?: BrandClientConsultInspirationCopy
   input: {
     idempotencyKey: string
     schemaVersion: number
@@ -868,7 +1055,8 @@ export async function issueConsultInspirationUpload(args: {
       mutation: true,
     })
     await requireCurrentConsultAgreementAcceptances(tx, session.id)
-    requireSchemaVersion(args.input.schemaVersion)
+    const ctx = await inspirationStateContext(tx, session, args.copy)
+    requireSchemaVersion(args.input.schemaVersion, ctx.pack)
     const idempotencyKey = key(args.input.idempotencyKey)
     const contentType = mediaType(args.input.contentType)
     if (
@@ -965,6 +1153,8 @@ export async function attachConsultInspirationUpload(args: {
   clientId: string
   actor: ClientActor
   now?: Date
+  /** The tenant's inspiration copy. Defaults to the brand default table. */
+  copy?: BrandClientConsultInspirationCopy
   input: { idempotencyKey: string; inspirationId: string; schemaVersion: number }
   storage?: ConsultInspirationStorage
 }): Promise<{ state: ConsultInspirationStateDTO; replayed: boolean }> {
@@ -980,7 +1170,8 @@ export async function attachConsultInspirationUpload(args: {
       mutation: true,
     })
     await requireCurrentConsultAgreementAcceptances(tx, session.id)
-    requireSchemaVersion(args.input.schemaVersion)
+    const ctx = await inspirationStateContext(tx, session, args.copy)
+    requireSchemaVersion(args.input.schemaVersion, ctx.pack)
     const idempotencyKey = key(args.input.idempotencyKey)
     const inspirationId = args.input.inspirationId.trim()
     const requestHash = hash({ inspirationId, schemaVersion: args.input.schemaVersion })
@@ -995,7 +1186,7 @@ export async function attachConsultInspirationUpload(args: {
       ) {
         throw new ConsultWriteError('IDEMPOTENCY_CONFLICT', 'Attach conflict.')
       }
-      return { state: await buildState(tx, session, now), replayed: true }
+      return { state: await buildState(tx, session, now, ctx), replayed: true }
     }
     if (
       inspiration.source !== ConsultInspirationSource.EXTERNAL_UPLOAD ||
@@ -1049,32 +1240,26 @@ export async function attachConsultInspirationUpload(args: {
         inspirationId: updated.id,
       },
     })
-    return { state: await buildState(tx, session, now), replayed: false }
+    return { state: await buildState(tx, session, now, ctx), replayed: false }
   })
 }
 
-const GUIDANCE_COPY =
-  'This part of the complete look may involve a separate service your professional already offers. Ask what applies; nothing was added to this booking.'
-
-async function catalogGuidance(
+/**
+ * Which of the catalogue details she pointed at this professional could
+ * actually mean — matched against her LIVE menu, so the note is never shown
+ * for a service she does not offer.
+ *
+ * Returns ENUMS. The sentence that goes with them is brand copy
+ * (`catalogGuidanceNote`), filled in on READ: a contract-v2 payload stores the
+ * enums alone, which is what lets that sentence be edited — or white-labelled —
+ * without rewriting stored rows.
+ */
+async function catalogDetailsOfferedByPro(
   tx: Prisma.TransactionClient,
   session: InspirationScope,
-  answers: readonly ConsultInspirationAnswerDTO[],
-): Promise<ConsultInspirationCatalogGuidanceDTO[]> {
-  const details = buildExactClientDetails(answers)
-  const requested = new Set<'LENGTH' | 'FULLNESS' | 'STYLING'>()
-  if (details.some((detail) => detail.questionKey === 'length_goal')) requested.add('LENGTH')
-  if (details.some((detail) => detail.questionKey === 'fullness_goal')) requested.add('FULLNESS')
-  if (
-    details.some(
-      (detail) =>
-        detail.questionKey === 'current_styling' ||
-        detail.questionKey === 'styling_walkthrough',
-    )
-  ) {
-    requested.add('STYLING')
-  }
-  if (requested.size === 0) return []
+  requested: readonly ConsultInspirationCatalogDetail[],
+): Promise<ConsultInspirationCatalogDetail[]> {
+  if (requested.length === 0) return []
   const offerings = await tx.professionalServiceOffering.findMany({
     where: {
       professionalId: session.professionalId,
@@ -1088,16 +1273,89 @@ async function catalogGuidance(
   const text = offerings.map((offering) =>
     `${offering.service.name} ${offering.service.description ?? ''} ${offering.service.category.name} ${offering.service.category.slug}`,
   )
-  const patterns: Readonly<Record<'LENGTH' | 'FULLNESS' | 'STYLING', RegExp>> = {
+  const patterns: Readonly<Record<ConsultInspirationCatalogDetail, RegExp>> = {
     LENGTH: /\b(cut|trim|length|extension)\b/i,
     FULLNESS: /\b(extension|volume|fullness|thick)\b/i,
     STYLING: /\b(style|styling|blowout|finish|curl|wave)\b/i,
   }
-  return [...requested].flatMap((detail) =>
-    text.some((value) => patterns[detail].test(value))
-      ? [{ detail, message: GUIDANCE_COPY, contextOnly: true, automaticallyAdded: false }]
-      : [],
+  return requested.filter((detail) =>
+    text.some((value) => patterns[detail].test(value)),
   )
+}
+
+/** The contract-v1 catalogue block: the same details, with the sentence in the row. */
+async function catalogGuidance(
+  tx: Prisma.TransactionClient,
+  session: InspirationScope,
+  answers: readonly ConsultInspirationAnswerDTO[],
+  copy: BrandClientConsultInspirationCopy,
+): Promise<ConsultInspirationCatalogGuidanceDTO[]> {
+  const details = buildExactClientDetails(answers)
+  const requested: ConsultInspirationCatalogDetail[] = []
+  if (details.some((detail) => detail.questionKey === 'length_goal')) requested.push('LENGTH')
+  if (details.some((detail) => detail.questionKey === 'fullness_goal')) requested.push('FULLNESS')
+  if (
+    details.some(
+      (detail) =>
+        detail.questionKey === 'current_styling' ||
+        detail.questionKey === 'styling_walkthrough',
+    )
+  ) {
+    requested.push('STYLING')
+  }
+  const offered = await catalogDetailsOfferedByPro(tx, session, requested)
+  return offered.map((detail) => ({
+    detail,
+    message: copy.catalogGuidanceNote,
+    contextOnly: true as const,
+    automaticallyAdded: false as const,
+  }))
+}
+
+/**
+ * One answer, validated against the contract THIS consult is on.
+ *
+ * The two contracts disagree about what an answer even is: v1 carries free
+ * text and a sentiment on its `other_detail` question, v2 carries keys and
+ * enum values and nothing else. Deciding once, here, is what keeps the write
+ * path from growing two half-parallel branches that could each drift.
+ */
+type ValidatedInspirationAnswer =
+  | { contract: 1; answer: ConsultInspirationAnswerDTO }
+  | { contract: 2; questionKey: string; selectedValues: string[] }
+
+function validateAnswerForContract(
+  pack: ConsultInspirationPackDefinition | null,
+  input: {
+    questionKey: unknown
+    selectedValues: unknown
+    text?: unknown
+    sentiment?: unknown
+  },
+): ValidatedInspirationAnswer {
+  if (!pack) {
+    try {
+      return { contract: 1, answer: validateConsultInspirationAnswer(input) }
+    } catch {
+      throw new ConsultWriteError('INSPIRATION_INVALID_ANSWER', 'Invalid answer.')
+    }
+  }
+  // 🔴 Contract v2 records no free text at all, so text or a sentiment on the
+  // wire is refused rather than dropped: silently discarding something a
+  // client believed she had said is worse than telling her it did not go
+  // through.
+  const validated =
+    input.text == null && input.sentiment == null
+      ? validateConsultInspirationAnswerV2(pack, input)
+      : ({ ok: false } as const)
+  if (!validated.ok) {
+    throw new ConsultWriteError('INSPIRATION_INVALID_ANSWER', 'Invalid answer.')
+  }
+  return {
+    contract: 2,
+    questionKey: validated.questionKey,
+    selectedValues: validated.selectedValues,
+  }
 }
 
 export async function answerConsultInspirationQuestion(args: {
@@ -1105,6 +1363,8 @@ export async function answerConsultInspirationQuestion(args: {
   clientId: string
   actor: ClientActor
   now?: Date
+  /** The tenant's inspiration copy. Defaults to the brand default table. */
+  copy?: BrandClientConsultInspirationCopy
   input: {
     idempotencyKey: string
     schemaVersion: number
@@ -1125,7 +1385,8 @@ export async function answerConsultInspirationQuestion(args: {
       mutation: true,
     })
     await requireCurrentConsultAgreementAcceptances(tx, session.id)
-    requireSchemaVersion(args.input.schemaVersion)
+    const ctx = await inspirationStateContext(tx, session, args.copy)
+    requireSchemaVersion(args.input.schemaVersion, ctx.pack)
     const source = await activeSource(tx, session.id)
     if (!source || source.status !== ConsultInspirationStatus.ATTACHED) {
       throw new ConsultWriteError('INSPIRATION_SOURCE_REQUIRED', 'Select a source first.')
@@ -1133,16 +1394,20 @@ export async function answerConsultInspirationQuestion(args: {
     if (!(await imageAvailable(tx, source, session, now))) {
       throw new ConsultWriteError('INSPIRATION_SOURCE_UNAVAILABLE', 'Source unavailable.')
     }
-    let answer: ConsultInspirationAnswerDTO
-    try {
-      answer = validateConsultInspirationAnswer(args.input)
-    } catch {
-      throw new ConsultWriteError('INSPIRATION_INVALID_ANSWER', 'Invalid answer.')
-    }
+    const validated = validateAnswerForContract(ctx.pack, args.input)
     const idempotencyKey = key(args.input.idempotencyKey)
+    // 🔴 The v1 hash input is byte-identical to what it has always been. A
+    // client retrying an answer she sent before this shipped must replay, not
+    // collide.
     const requestHash = hash({
       schemaVersion: args.input.schemaVersion,
-      answer,
+      answer:
+        validated.contract === 1
+          ? validated.answer
+          : {
+              questionKey: validated.questionKey,
+              selectedValues: validated.selectedValues,
+            },
     })
     const existing = await tx.consultRevision.findFirst({
       where: { consultSessionId: session.id, idempotencyKey },
@@ -1154,62 +1419,115 @@ export async function answerConsultInspirationQuestion(args: {
       ) {
         throw new ConsultWriteError('IDEMPOTENCY_CONFLICT', 'Idempotency conflict.')
       }
-      return { state: await buildState(tx, session, now), replayed: true }
+      return { state: await buildState(tx, session, now, ctx), replayed: true }
     }
-    const previous = await latestReview(tx, session.id)
-    const previousPayload = previous
-      ? normalizeStoredInspirationPayload(
-          (
-            await tx.consultRevision.findUnique({
-              where: { id: previous.revisionId },
-              select: { payload: true },
-            })
-          )?.payload ?? null,
+    // `latestReview` already normalized this row; re-reading the payload to
+    // normalize it a second time was one query and one code path more than the
+    // answer needs.
+    //
+    // ⚠️ One behaviour changed with that simplification, deliberately. The
+    // previous review only counts when it is about THIS reference: the old
+    // code took its answers only on an id match but read `complete` off it
+    // either way, so a client who had skipped, or who had finished a review of
+    // a picture she then REPLACED, could answer any question first and store a
+    // review holding one arbitrary answer. She is now asked the pack's first
+    // question, which is what the empty answer set already implied.
+    const previous = await latestReview(tx, session.id, ctx.copy)
+    const previousReview = previous?.inspirationId === source.id ? previous : null
+    const previousAnswers = previousReview?.answers ?? []
+
+    let write: InspirationWrite
+    if (validated.contract === 2 && ctx.pack) {
+      const pack = ctx.pack
+      const previousMap = answerMap(previousAnswers)
+      const progress = evaluateConsultInspirationProgressV2(pack, previousMap)
+      if (
+        !previousReview?.complete &&
+        progress.currentQuestion?.key !== validated.questionKey
+      ) {
+        throw new ConsultWriteError(
+          'INSPIRATION_QUESTION_OUT_OF_ORDER',
+          'Answer the current question first.',
         )
-      : null
-    const previousAnswers =
-      previousPayload?.inspirationId === source.id ? previousPayload.answers : []
-    const progress = evaluateConsultInspirationProgress(previousAnswers)
-    if (!previousPayload?.complete && progress.currentQuestion?.key !== answer.questionKey) {
-      throw new ConsultWriteError(
-        'INSPIRATION_QUESTION_OUT_OF_ORDER',
-        'Answer the current question first.',
+      }
+      const answers: Record<string, readonly string[]> = {
+        ...previousMap,
+        [validated.questionKey]: validated.selectedValues,
+      }
+      write = {
+        contract: 2,
+        payload: {
+          packId: pack.id,
+          packVersion: pack.version,
+          schemaVersion: pack.schemaVersion,
+          source: source.source,
+          inspirationId: source.id,
+          complete: evaluateConsultInspirationProgressV2(pack, answers).canComplete,
+          answers,
+          // Enums only. The sentence is filled in on read from brand copy.
+          catalogGuidance: await catalogDetailsOfferedByPro(
+            tx,
+            session,
+            deriveConsultInspirationCatalogDetails(pack, answers),
+          ),
+        },
+      }
+    } else if (validated.contract === 1) {
+      const answer = validated.answer
+      const progress = evaluateConsultInspirationProgress(previousAnswers)
+      if (
+        !previousReview?.complete &&
+        progress.currentQuestion?.key !== answer.questionKey
+      ) {
+        throw new ConsultWriteError(
+          'INSPIRATION_QUESTION_OUT_OF_ORDER',
+          'Answer the current question first.',
+        )
+      }
+      const answers = previousAnswers.filter(
+        (candidate) => candidate.questionKey !== answer.questionKey,
       )
+      const order = new Map(
+        CONSULT_INSPIRATION_QUESTIONS.map((question, index) => [question.key, index]),
+      )
+      answers.push(answer)
+      answers.sort(
+        (left, right) =>
+          (order.get(left.questionKey) ?? 0) - (order.get(right.questionKey) ?? 0),
+      )
+      const exactClientDetails = buildExactClientDetails(answers)
+      write = {
+        contract: 1,
+        payload: {
+          contractId: 'hair-color-guided-inspiration',
+          contractVersion: 1,
+          schemaVersion: 1,
+          source: source.source,
+          inspirationId: source.id,
+          complete: evaluateConsultInspirationProgress(answers).canComplete,
+          answers,
+          exactClientDetails,
+          possibleProfessionalInterpretation:
+            buildPossibleProfessionalInterpretation(exactClientDetails),
+          catalogGuidance: await catalogGuidance(tx, session, answers, ctx.copy),
+        },
+      }
+    } else {
+      // Unreachable: `validateAnswerForContract` returns contract 2 only when a
+      // pack was passed. Refusing rather than assuming, because an unreachable
+      // state that silently passes is the shape of every guard that stopped
+      // guarding.
+      throw new ConsultWriteError('INSPIRATION_INVALID_ANSWER', 'Invalid answer.')
     }
-    const answers = previousAnswers.filter(
-      (candidate) => candidate.questionKey !== answer.questionKey,
-    )
-    const order = new Map(
-      CONSULT_INSPIRATION_QUESTIONS.map((question, index) => [question.key, index]),
-    )
-    answers.push(answer)
-    answers.sort(
-      (left, right) =>
-        (order.get(left.questionKey) ?? 0) - (order.get(right.questionKey) ?? 0),
-    )
-    const nextProgress = evaluateConsultInspirationProgress(answers)
-    const exactClientDetails = buildExactClientDetails(answers)
-    const payload: InspirationReviewPayload = {
-      contractId: 'hair-color-guided-inspiration',
-      contractVersion: 1,
-      schemaVersion: 1,
-      source: source.source,
-      inspirationId: source.id,
-      complete: nextProgress.canComplete,
-      answers,
-      exactClientDetails,
-      possibleProfessionalInterpretation:
-        buildPossibleProfessionalInterpretation(exactClientDetails),
-      catalogGuidance: await catalogGuidance(tx, session, answers),
-    }
+
     const appended = await appendReview(tx, {
       session,
       actor: args.actor,
       idempotencyKey,
       requestHash,
-      payload,
+      write,
     })
-    const advanced = payload.complete
+    const advanced = write.payload.complete
       ? await advanceLockedConsultToAnalysisIfReady(tx, {
           consultSessionId: session.id,
           clientId: session.clientId,
@@ -1225,6 +1543,7 @@ export async function answerConsultInspirationQuestion(args: {
           ? { ...session, status: ConsultSessionStatus.ANALYSIS_PENDING }
           : session,
         now,
+        ctx,
       ),
       replayed: appended.replayed,
     }

@@ -841,6 +841,36 @@ export type BrandClientConsultBookingCopy = {
   sheetUnnamedLookTitle: string
 }
 
+/**
+ * P5c — the guided-inspiration step's own sentences.
+ *
+ * Question and option LABELS are not here: they belong to the pack a service
+ * family serves (lib/consult/inspiration/packs/), and a pack's question is
+ * data the payload is validated against, not copy. What is here is everything
+ * the step says AROUND the questions.
+ */
+export type BrandClientConsultInspirationCopy = {
+  /** What a reference picture is for, shown before she is asked for one. */
+  introduction: string
+  /** 🔴 That it is a reference and not a promise. Shown with the picture. */
+  referenceNote: string
+  /**
+   * The steadying line before the questions, for a pack whose subject is not
+   * hair. Packs choose between this and the hair variant by name
+   * (`reflectionPromptKey`), so the copy stays in one file and the choice
+   * stays with the pack.
+   */
+  reflectionPrompt: string
+  /** The hair variant, which can afford to name colour, length and fullness. */
+  reflectionPromptHair: string
+  /**
+   * The note attached to a detail that may be a separate service. Filled in on
+   * READ: a contract-v2 payload stores which details it applies to as enums,
+   * never the sentence, so editing this line changes every consult at once.
+   */
+  catalogGuidanceNote: string
+}
+
 export type BrandConfig = {
   id: BrandId
   displayName: string // "TOVIS" — used anywhere the brand name appears in UI
@@ -854,4 +884,5 @@ export type BrandConfig = {
   clientConsultCapture: BrandClientConsultCaptureCopy
   clientConsultBooking: BrandClientConsultBookingCopy
   clientConsultThread: BrandClientConsultThreadCopy
+  clientConsultInspiration: BrandClientConsultInspirationCopy
 }

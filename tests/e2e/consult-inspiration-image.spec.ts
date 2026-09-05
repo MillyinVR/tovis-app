@@ -35,6 +35,7 @@ import { expect, test, type Page, type Route } from '@playwright/test'
 
 import {
   CONSULT_FIXTURE_ID,
+  generalServiceInspiration,
   lookSourceInspiration,
   threadFixture,
   uploadSourceInspiration,
@@ -266,6 +267,35 @@ test.describe('consult thread', () => {
 
     // Every prompt is a tappable card. A textarea or a text input anywhere here
     // means the deterministic-and-free property has quietly been given up.
+    await expect(page.locator('textarea')).toHaveCount(0)
+    await expect(page.locator('input[type="text"]')).toHaveCount(0)
+  })
+
+  test('renders a CONTRACT-V2 pack card — its own question, its own options, no text box', async ({
+    page,
+  }) => {
+    // P5c. The card is built from whatever question the server sent, so a pack
+    // for a family that is not hair has to render with nothing colour-specific
+    // left on screen. Driven in a browser because the failure it guards — a
+    // client that switches on the seven v1 question keys and renders nothing —
+    // is invisible to every test that asserts on the DTO.
+    await stubConsult(page, {
+      inspiration: generalServiceInspiration,
+      media: (route) => route.fulfill({ json: signedRead(600) }),
+    })
+
+    await page.goto(`/client/consult/${CONSULT_FIXTURE_ID}`)
+
+    await expect(
+      page.getByRole('heading', { name: 'What do you like most about this picture?' }),
+    ).toBeVisible()
+    for (const option of ['The color', 'The shape', 'The finish', 'The overall look']) {
+      await expect(page.getByRole('button', { name: option, exact: true })).toBeVisible()
+    }
+    // Not one colour question, and no way to type: v2 stores keys and enums.
+    await expect(
+      page.getByText('Which color or colors in this picture are your favorite?'),
+    ).toHaveCount(0)
     await expect(page.locator('textarea')).toHaveCount(0)
     await expect(page.locator('input[type="text"]')).toHaveCount(0)
   })

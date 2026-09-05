@@ -11,22 +11,45 @@ import type {
   ConsultInspirationReviewDTO,
   ConsultInspirationSourceDTO,
 } from '@/lib/dto/consult'
+import { defaultClientConsultInspirationCopy } from '@/lib/brand/defaultClientConsultInspirationCopy'
+import type { BrandClientConsultInspirationCopy } from '@/lib/brand/types'
 import { isRecord } from '@/lib/guards'
+
+import {
+  resolveConsultInspirationPayloadV2,
+  toConsultInspirationReviewV2,
+} from './inspiration/registry'
+import {
+  CONSULT_INSPIRATION_CONTRACT_V1,
+  type ConsultInspirationReview,
+} from './inspiration/types'
 
 import {
   CONSULT_INSPIRATION_TEXT_MAX_CHARS,
   CONSULT_INSPIRATION_UNSUPPORTED_TRAIT_LANGUAGE,
 } from './inspirationTextRules'
 
+// 🔴 CONTRACT v1 — FROZEN.
+//
+// This module is the guided-inspiration questionnaire as it shipped: seven
+// hair-colour questions, a three-detail completion gate, and a stored payload
+// carrying the client's own words plus three derived arrays. P5c did NOT
+// rewrite it. It is kept, whole, because consults written under it are still
+// being read — and a v1 consult that is mid-flow is still being WRITTEN to,
+// since a session keeps the contract it started on.
+//
+// New consults are served contract v2 (lib/consult/inspiration/). The only
+// function here that knows about both is `normalizeStoredInspirationPayload`,
+// which is deliberately the ONE door every reader already comes through.
 export const CONSULT_INSPIRATION_SCHEMA_VERSION = 1
 export const CONSULT_INSPIRATION_REQUIRED_DETAIL_COUNT = 3 as const
 
-export const CONSULT_INSPIRATION_INTRODUCTION =
-  'An inspiration picture is optional. It can help you and your professional get visually on the same page.'
-export const CONSULT_INSPIRATION_REFERENCE_NOTE =
-  'Use it as a reference, not a guarantee or something that can be copied directly onto you.'
-export const CONSULT_INSPIRATION_REFLECTION_PROMPT =
-  'A complete look can include color, length, fullness, and styling. Take a moment to choose what actually stands out to you.'
+// The step's three sentences MOVED to lib/brand/defaultClientConsultInspirationCopy.ts
+// in P5c (`introduction`, `referenceNote`, `reflectionPromptHair`) — word for
+// word, so a brief written before the move still reproduces byte-for-byte in
+// lib/consult/immutableResult.ts. User-facing copy comes from lib/brand; this
+// module keeps only the v1 question list, which is data the payload is
+// validated against.
 
 function options(
   values: ReadonlyArray<readonly [string, string]>,
@@ -431,7 +454,7 @@ function exactKeys(value: Record<string, unknown>, expected: readonly string[]) 
   )
 }
 
-export function normalizeStoredInspirationPayload(
+export function normalizeStoredInspirationPayloadV1(
   raw: Prisma.JsonValue,
 ): InspirationReviewPayload | null {
   if (
@@ -542,18 +565,72 @@ export function normalizeStoredInspirationPayload(
   }
 }
 
-export function mapStoredInspirationRevision(revision: {
-  id: string
-  revision: number
-  payload: Prisma.JsonValue
-  createdAt: Date
-}): ConsultInspirationReviewDTO | null {
-  const payload = normalizeStoredInspirationPayload(revision.payload)
+/**
+ * The ONE door every reader of a stored guided inspiration comes through,
+ * whichever contract wrote the row.
+ *
+ * 🔴 v1 is tried FIRST and is unchanged. That ordering is not an optimisation:
+ * the two shapes are disjoint (v1 carries `contractId`, v2 carries `packId`,
+ * and each normalizer requires its own exact key set), so a row can only ever
+ * satisfy one arm — but reading v1 first makes it structurally impossible for
+ * a v2 change to alter how an existing consult reads.
+ *
+ * `copy` fills the catalogue note that a v2 payload stores as an ENUM. It
+ * defaults to the brand's default table, and two readers deliberately keep
+ * that default rather than a tenant's: the pro-brief writer
+ * (lib/consult/writeBoundary.ts) and the brief REPRODUCER
+ * (lib/consult/immutableResult.ts), which compares a freshly built payload
+ * byte-for-byte against the stored one. If those two could see different
+ * sentences, an immutable brief would stop reproducing.
+ */
+export function normalizeStoredInspirationPayload(
+  raw: Prisma.JsonValue,
+  copy: BrandClientConsultInspirationCopy = defaultClientConsultInspirationCopy,
+): ConsultInspirationReview | null {
+  const v1 = normalizeStoredInspirationPayloadV1(raw)
+  if (v1) {
+    return {
+      contractVersion: CONSULT_INSPIRATION_CONTRACT_V1,
+      schemaVersion: v1.schemaVersion,
+      packId: null,
+      packVersion: null,
+      source: v1.source,
+      inspirationId: v1.inspirationId,
+      complete: v1.complete,
+      answers: v1.answers,
+      exactClientDetails: v1.exactClientDetails,
+      possibleProfessionalInterpretation: v1.possibleProfessionalInterpretation,
+      catalogGuidance: v1.catalogGuidance,
+    }
+  }
+  const v2 = resolveConsultInspirationPayloadV2(raw)
+  return v2 ? toConsultInspirationReviewV2(v2.pack, v2.payload, copy) : null
+}
+
+export function mapStoredInspirationRevision(
+  revision: {
+    id: string
+    revision: number
+    payload: Prisma.JsonValue
+    createdAt: Date
+  },
+  copy: BrandClientConsultInspirationCopy = defaultClientConsultInspirationCopy,
+): ConsultInspirationReviewDTO | null {
+  const payload = normalizeStoredInspirationPayload(revision.payload, copy)
   if (!payload) return null
   return {
     revisionId: revision.id,
     revision: revision.revision,
-    ...payload,
+    schemaVersion: payload.schemaVersion,
+    packId: payload.packId,
+    packVersion: payload.packVersion,
+    source: payload.source,
+    inspirationId: payload.inspirationId,
+    complete: payload.complete,
+    answers: payload.answers,
+    exactClientDetails: payload.exactClientDetails,
+    possibleProfessionalInterpretation: payload.possibleProfessionalInterpretation,
+    catalogGuidance: payload.catalogGuidance,
     createdAt: revision.createdAt.toISOString(),
   }
 }

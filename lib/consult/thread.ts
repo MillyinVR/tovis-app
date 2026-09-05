@@ -29,6 +29,7 @@ import { BookingStatus, ConsultSessionStatus } from '@prisma/client'
 
 import type {
   BrandClientConsultCaptureCopy,
+  BrandClientConsultInspirationCopy,
   BrandClientConsultThreadCopy,
 } from '@/lib/brand/types'
 import type {
@@ -189,6 +190,13 @@ export async function loadConsultThread(args: {
    * be rewritten per surface.
    */
   captureCopy: BrandClientConsultCaptureCopy
+  /**
+   * The inspiration step's own copy table. Separate for the same reason as the
+   * capture one: the step's sentences belong to the step, and its catalogue
+   * note is filled in on READ from a contract-v2 payload that stores only
+   * enums.
+   */
+  inspirationCopy: BrandClientConsultInspirationCopy
   now?: Date
 }): Promise<ConsultThreadDTO> {
   const now = args.now ?? new Date()
@@ -357,7 +365,7 @@ export async function loadConsultThread(args: {
 
   // ── Inspiration ──────────────────────────────────────────────────────────
   const inspiration = await optionalStage(() =>
-    loadConsultInspirationState(stageArgs),
+    loadConsultInspirationState({ ...stageArgs, copy: args.inspirationCopy }),
   )
   if (inspiration) {
     const { progress } = inspiration

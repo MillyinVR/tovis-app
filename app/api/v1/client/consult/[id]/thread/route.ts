@@ -61,6 +61,7 @@ export async function GET(request: Request, ctx: RouteContext) {
       actorUserId: auth.user.id,
       copy: brand.clientConsultThread,
       captureCopy: brand.clientConsultCapture,
+      inspirationCopy: brand.clientConsultInspiration,
     })
 
     return jsonOk<ConsultThreadResponseDTO>({ thread })

@@ -338,6 +338,52 @@ function threadPhotoMessages(
  * (every other fixture here) means a server with no read stage, which the page
  * must leave alone.
  */
+/**
+ * P5c — the same consult on CONTRACT v2, served the general-service pack.
+ *
+ * Derived from the upload fixture rather than re-typed, so only the things
+ * that actually differ between the contracts appear here: the schema version
+ * the client echoes, the reflection prompt (no colour/length/fullness for a
+ * service that is not hair), the pack's own first question, and a required
+ * detail count of ZERO — v2 has no gate.
+ *
+ * Values are lifted from lib/consult/inspiration/packs/generalService.ts. It is
+ * a fixture, so it is a copy by construction; the registry test is what holds
+ * the pack itself honest.
+ */
+export const generalServiceInspiration: ConsultInspirationStateDTO = {
+  ...uploadSourceInspiration,
+  schemaVersion: 2,
+  reflectionPrompt:
+    'A picture can be about several things at once. Take a moment to choose what actually stands out to you.',
+  progress: {
+    ...uploadSourceInspiration.progress,
+    currentQuestion: {
+      key: 'favorite_details',
+      label: 'What do you like most about this picture?',
+      helpText: null,
+      kind: 'MULTI_SELECT',
+      options: [
+        { value: 'the-color', label: 'The color' },
+        { value: 'the-shape', label: 'The shape' },
+        { value: 'the-length', label: 'The length' },
+        { value: 'the-finish', label: 'The finish' },
+        { value: 'the-overall-look', label: 'The overall look' },
+        { value: 'not-sure', label: 'Not sure' },
+      ],
+      minSelections: 1,
+      maxSelections: 4,
+      // 🔴 v2 records no free text at all. The card must offer no way to type.
+      allowText: false,
+    },
+    answeredQuestionCount: 0,
+    specificDetailCount: 0,
+    requiredSpecificDetailCount: 0,
+    canComplete: false,
+    blocker: 'QUESTIONS_REMAINING',
+  },
+}
+
 export function withAnalysisReady(
   inspiration: ConsultInspirationStateDTO,
   analysisReady: boolean,

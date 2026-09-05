@@ -83,6 +83,7 @@ vi.mock('@/lib/consult/analysisEngine', async (importOriginal) => {
 
 import { POST as startLookConsult } from '@/app/api/v1/client/consult/look/route'
 import { defaultClientConsultCaptureCopy } from '@/lib/brand/defaultClientConsultCaptureCopy'
+import { defaultClientConsultInspirationCopy } from '@/lib/brand/defaultClientConsultInspirationCopy'
 import { defaultClientConsultThreadCopy } from '@/lib/brand/defaultClientConsultThreadCopy'
 import { answerConsultInspirationQuestion } from '@/lib/consult/inspirationContract'
 import {
@@ -112,6 +113,15 @@ import {
   seedLookConsultFixture,
   teardownLookConsultFixture,
 } from './_support/lookConsultFixture'
+import { CONSULT_INSPIRATION_V2_SCHEMA_VERSION } from '@/lib/consult/inspiration/types'
+
+/**
+ * P5c — the guided inspiration a NEW consult is served is contract v2, whatever
+ * its family. Clients echo the version the server just gave them
+ * (`ConsultInspirationStateDTO.schemaVersion`); these fixtures name the constant
+ * rather than a literal so the next contract bump moves them all at once.
+ */
+const INSPIRATION_SCHEMA_VERSION = CONSULT_INSPIRATION_V2_SCHEMA_VERSION
 
 const databaseUrl = process.env.DATABASE_URL
 if (!databaseUrl) throw new Error('Run with pnpm test:integration')
@@ -155,6 +165,7 @@ function thread(consultSessionId: string) {
     actorUserId: fx.clientUserId,
     copy,
     captureCopy: defaultClientConsultCaptureCopy,
+    inspirationCopy: defaultClientConsultInspirationCopy,
   })
 }
 
@@ -526,20 +537,21 @@ describe('consult thread projection', () => {
     expect(inspiration[0]?.sourceDecisionRequired).toBe(false)
     expect(inspiration[0]?.source).not.toBeNull()
     expect(inspiration[0]?.question).not.toBeNull()
-    expect(inspiration[0]?.requiredSpecificDetailCount).toBe(3)
+    // 🔴 P5c: contract v2 has NO detail gate, so the card asks for the pack's
+    // questions and nothing more. Under v1 this was 3, and a client who
+    // genuinely did not mind could not finish the step at all.
+    expect(inspiration[0]?.requiredSpecificDetailCount).toBe(0)
 
-    for (const [questionKey, selectedValues, text, sentiment] of INSPIRATION_ANSWERS) {
+    for (const [questionKey, selectedValues] of INSPIRATION_ANSWERS) {
       await answerConsultInspirationQuestion({
         consultSessionId: sessionId,
         clientId: fx.clientId,
         actor: { type: ConsultActorType.CLIENT, id: fx.clientUserId },
         input: {
           idempotencyKey: `thread-inspo-${questionKey}`,
-          schemaVersion: 1,
+          schemaVersion: INSPIRATION_SCHEMA_VERSION,
           questionKey,
           selectedValues,
-          ...(text ? { text } : {}),
-          ...(sentiment ? { sentiment } : {}),
         },
       })
     }

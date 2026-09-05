@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest'
 
+import { defaultClientConsultInspirationCopy } from '@/lib/brand/defaultClientConsultInspirationCopy'
+
+import { resolveConsultInspirationPayloadV2 } from './inspiration/registry'
 import type { ConsultInspirationAnswerDTO } from '@/lib/dto/consult'
 
 import {
   buildExactClientDetails,
   buildPossibleProfessionalInterpretation,
   CONSULT_INSPIRATION_QUESTIONS,
-  CONSULT_INSPIRATION_REFERENCE_NOTE,
   evaluateConsultInspirationProgress,
+  normalizeStoredInspirationPayload,
+  normalizeStoredInspirationPayloadV1,
   validateConsultInspirationAnswer,
 } from './inspirationPack'
 
@@ -40,8 +44,10 @@ describe('guided inspiration pack', () => {
     expect(JSON.stringify(CONSULT_INSPIRATION_QUESTIONS).toLowerCase()).not.toMatch(
       /\b(face|facial|skin|undertone|identity|ethnic|race|health|attractive)\b|\beye\s+(color|shape)\b/,
     )
-    expect(CONSULT_INSPIRATION_REFERENCE_NOTE.toLowerCase()).toContain('reference')
-    expect(CONSULT_INSPIRATION_REFERENCE_NOTE.toLowerCase()).toContain('not a guarantee')
+    const referenceNote =
+      defaultClientConsultInspirationCopy.referenceNote.toLowerCase()
+    expect(referenceNote).toContain('reference')
+    expect(referenceNote).toContain('not a guarantee')
   })
 
   it('advances one question at a time and requires three specific details', () => {
@@ -125,5 +131,112 @@ describe('guided inspiration pack', () => {
     expect(() =>
       answer('favorite_colors', ['not-sure', 'warm-golden']),
     ).toThrow('Invalid inspiration answer.')
+  })
+})
+
+/**
+ * P5c — the ONE door every reader of a stored guided inspiration comes
+ * through. It must keep answering for contract-v1 rows exactly as it did
+ * before packs existed, and answer for contract-v2 rows as well.
+ */
+describe('normalizeStoredInspirationPayload across both contracts', () => {
+  const v1Row = {
+    contractId: 'hair-color-guided-inspiration',
+    contractVersion: 1,
+    schemaVersion: 1,
+    source: 'PLATFORM_LOOK',
+    inspirationId: 'insp_1',
+    complete: false,
+    answers: [
+      {
+        questionKey: 'favorite_colors',
+        selectedValues: ['warm-golden'],
+        text: null,
+        sentiment: null,
+      },
+    ],
+    exactClientDetails: [
+      {
+        questionKey: 'favorite_colors',
+        value: 'warm-golden',
+        clientWords: 'The warm or golden colors',
+        sentiment: 'LIKE',
+      },
+    ],
+    possibleProfessionalInterpretation: [
+      {
+        clientDetailValue: 'warm-golden',
+        possibleMeaning:
+          'May point to a preference for warmer or golden-looking hair color.',
+        confidence: 'POSSIBLE',
+        evidence: 'CLIENT_SELECTION',
+      },
+    ],
+    catalogGuidance: [],
+  }
+
+  const v2Row = {
+    packId: 'hair-color-inspiration',
+    packVersion: 1,
+    schemaVersion: 2,
+    source: 'PLATFORM_LOOK',
+    inspirationId: 'insp_1',
+    complete: false,
+    answers: { favorite_colors: ['warm-golden'] },
+    catalogGuidance: [],
+  }
+
+  it('🔴 still reads a contract-v1 row, unchanged', () => {
+    const review = normalizeStoredInspirationPayload(v1Row)
+    expect(review).toMatchObject({
+      contractVersion: 1,
+      schemaVersion: 1,
+      packId: null,
+      packVersion: null,
+      source: 'PLATFORM_LOOK',
+      inspirationId: 'insp_1',
+      complete: false,
+    })
+    expect(review?.exactClientDetails).toEqual(v1Row.exactClientDetails)
+    expect(review?.possibleProfessionalInterpretation).toEqual(
+      v1Row.possibleProfessionalInterpretation,
+    )
+    // v1's own words survive: they are IN the row.
+    expect(review?.answers[0]?.text).toBeNull()
+  })
+
+  it('reads a contract-v2 row, deriving what v1 stored', () => {
+    const review = normalizeStoredInspirationPayload(v2Row)
+    expect(review).toMatchObject({
+      contractVersion: 2,
+      schemaVersion: 2,
+      packId: 'hair-color-inspiration',
+      packVersion: 1,
+      source: 'PLATFORM_LOOK',
+      complete: false,
+    })
+    // The SAME derived arrays the v1 row carried in the row itself.
+    expect(review?.exactClientDetails).toEqual(v1Row.exactClientDetails)
+    expect(review?.possibleProfessionalInterpretation).toEqual(
+      v1Row.possibleProfessionalInterpretation,
+    )
+  })
+
+  it('🔴 the two contracts are DISJOINT, which is what the arm order rests on', () => {
+    // The migration and the dispatcher both say a stored row can satisfy only
+    // one contract, so trying v1 first can never change how a v2 row reads (or
+    // the reverse). Asserted rather than assumed.
+    expect(normalizeStoredInspirationPayloadV1(v1Row)).not.toBeNull()
+    expect(resolveConsultInspirationPayloadV2(v1Row)).toBeNull()
+    expect(resolveConsultInspirationPayloadV2(v2Row)).not.toBeNull()
+    expect(normalizeStoredInspirationPayloadV1(v2Row)).toBeNull()
+  })
+
+  it('refuses a row that is neither', () => {
+    expect(normalizeStoredInspirationPayload({ ...v1Row, contractId: 'other' })).toBeNull()
+    expect(normalizeStoredInspirationPayload({ ...v2Row, packId: 'other' })).toBeNull()
+    // A row carrying BOTH contracts' marker keys satisfies neither exact shape.
+    expect(normalizeStoredInspirationPayload({ ...v1Row, ...v2Row })).toBeNull()
+    expect(normalizeStoredInspirationPayload(null)).toBeNull()
   })
 })

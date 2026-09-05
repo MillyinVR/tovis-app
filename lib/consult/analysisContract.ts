@@ -19,7 +19,6 @@ import type {
   ConsultAnalysisStateDTO,
   ConsultCaptureQualityWarningCodeDTO,
   ConsultCaptureShotKeyDTO,
-  ConsultInspirationAnswerDTO,
 } from '@/lib/dto/consult'
 import { safeError } from '@/lib/security/logging'
 import { decimalToCents } from '@/lib/money'
@@ -71,10 +70,6 @@ import {
   flushConsultProviderMeter,
   type ConsultProviderMeterSink,
 } from './providerMeter'
-import {
-  buildExactClientDetails,
-  CONSULT_INSPIRATION_QUESTIONS,
-} from './inspirationPack'
 import type { ConsultInspirationStorage } from './inspirationStorage'
 import type { ConsultInspirationVisionProvider } from './inspirationVision'
 import { CONSULT_ANCHOR_SELECT, evaluateConsultAnchor } from './anchor'
@@ -97,7 +92,10 @@ import {
   loadProLocationCapability,
   type ProLocationCapability,
 } from '@/lib/offerings/locationCapability'
-import { requireCompletedConsultInspiration } from './inspirationContract'
+import {
+  requireCompletedConsultInspiration,
+  type CompletedConsultInspiration,
+} from './inspirationContract'
 import { purgeConsultCaptureRawObject } from './capturePurge'
 import { copyConsultCapturesToChart } from './chartCopy'
 import {
@@ -391,16 +389,23 @@ function consultCaptureWarningCode(
 
 /**
  * The client's guided-inspiration answers as the prompt reads them: her own
- * words, from the SAME `buildExactClientDetails` the pro brief renders — so
- * the model and the professional are looking at one list, not two.
+ * words, from the SAME derivation the pro brief renders — so the model and the
+ * professional are looking at one list, not two.
+ *
+ * 🔴 P5c: both halves now arrive already derived, from whichever contract
+ * wrote the row (`requireCompletedConsultInspiration`). This function used to
+ * re-derive them against the hard-coded hair-colour question list, which meant
+ * a consult on any other pack contributed an EMPTY inspiration block to the
+ * prompt — every label lookup missed and every detail was dropped.
  */
 function consultInspirationPromptAnswers(
-  answers: readonly ConsultInspirationAnswerDTO[],
+  inspiration: Pick<
+    CompletedConsultInspiration,
+    'exactClientDetails' | 'questionLabels'
+  >,
 ): { question: string; answer: string }[] {
-  return buildExactClientDetails(answers).map((detail) => ({
-    question:
-      CONSULT_INSPIRATION_QUESTIONS.find((question) => question.key === detail.questionKey)
-        ?.label ?? detail.questionKey,
+  return inspiration.exactClientDetails.map((detail) => ({
+    question: inspiration.questionLabels[detail.questionKey] ?? detail.questionKey,
     answer: `${detail.clientWords} (${detail.sentiment})`,
   }))
 }
@@ -1401,7 +1406,7 @@ export async function executeConsultAnalysisRun(args: {
           inspiration: {
             source: context.inspiration.source,
             analysis: inspirationAnalysis,
-            answers: consultInspirationPromptAnswers(context.inspiration.answers),
+            answers: consultInspirationPromptAnswers(context.inspiration),
           },
           // The codes this intake can support, narrowing the provider's enum
           // BEFORE the call rather than refusing the answer after it.

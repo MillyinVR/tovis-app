@@ -3,6 +3,7 @@ import 'server-only'
 import { isDeepStrictEqual } from 'node:util'
 import { ConsultRevisionKind, type Prisma } from '@prisma/client'
 
+import { defaultClientConsultInspirationCopy } from '@/lib/brand/defaultClientConsultInspirationCopy'
 import { isRecord } from '@/lib/guards'
 
 import { normalizeStoredConsultAnalysisPayload } from './analysisRevision'
@@ -19,7 +20,6 @@ import {
 } from './briefContract'
 import { normalizeConsultIntakePayload } from './intake/registry'
 import {
-  CONSULT_INSPIRATION_REFERENCE_NOTE,
   normalizeStoredInspirationPayload,
 } from './inspirationPack'
 
@@ -140,7 +140,10 @@ export async function loadLatestImmutableConsultResult(
           inspirationId: null,
           lookPostId: null,
           mediaEndpoint: null,
-          referenceNote: CONSULT_INSPIRATION_REFERENCE_NOTE,
+          // The brand DEFAULT, matching the writer in
+          // lib/consult/writeBoundary.ts — this payload is compared
+          // byte-for-byte against the stored brief.
+          referenceNote: defaultClientConsultInspirationCopy.referenceNote,
           exactClientDetails: [],
           possibleProfessionalInterpretation: [],
           catalogGuidance: [],
@@ -181,7 +184,10 @@ export async function loadLatestImmutableConsultResult(
             inspiration.source === 'EXTERNAL_UPLOAD'
               ? `/api/v1/pro/consults/${encodeURIComponent(consultSessionId)}/inspiration/media`
               : null,
-          referenceNote: CONSULT_INSPIRATION_REFERENCE_NOTE,
+          // The brand DEFAULT, matching the writer in
+          // lib/consult/writeBoundary.ts — this payload is compared
+          // byte-for-byte against the stored brief.
+          referenceNote: defaultClientConsultInspirationCopy.referenceNote,
           exactClientDetails: inspiration.exactClientDetails,
           possibleProfessionalInterpretation:
             inspiration.possibleProfessionalInterpretation,
