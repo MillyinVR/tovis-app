@@ -1,55 +1,113 @@
 name: migrate-deploy
 
-# Applies pending Prisma migrations to the production database on every merge to
-# main, so the schema can never drift behind the deployed code.
+# Production migrations: REPORTED on merge, APPLIED only by a deploy.
 #
-# ⚠️ The paragraph that used to be here said the Vercel build "never runs
-# `prisma migrate deploy`". That is FALSE and has been for as long as
-# `vercel.json` has carried:
+# ─── What applies migrations to production ──────────────────────────────────
 #
-#     "buildCommand": "if [ \"$VERCEL_ENV\" = \"production\" ]; then prisma migrate deploy; fi && next build"
+# Exactly one thing, and it is not this workflow:
 #
-# A production `vercel --prod` DOES apply pending migrations, before the build,
-# and fails the whole deploy if they fail (the `if` block's status feeds the
-# `&&`). That is what actually applied 20260919010000 on 2026-08-25.
+#     vercel.json → "buildCommand":
+#       if [ "$VERCEL_ENV" = "production" ]; then prisma migrate deploy; fi && next build
 #
-# Why this workflow still exists: deploys are MANUAL here
-# (`git.deploymentEnabled: false`), so code can sit merged and undeployed for
-# days. Applying expand-phase migrations at MERGE time keeps the schema from
-# lagging the moment someone does deploy, and is the belt to Vercel's braces —
-# `migrate deploy` is idempotent and advisory-locked, so both running is safe.
-# Without either, a migration merged alongside the code that needs it silently
-# misses production until the deployed code hits the missing column/enum and
-# 500s (the 2026-06-13 `proTenantId` MediaAsset outage).
+# A production `vercel --prod` applies pending migrations BEFORE the build, and
+# fails the whole deploy if they fail (the `if` block's status feeds the `&&`),
+# so code and schema move together in one pipeline. Deploys are manual here
+# (`git.deploymentEnabled: false`, PR #237) and require Tori's explicit
+# authorization for that specific deploy — that is deliberate and stays.
 #
-# 🔴 Read the JOB LOG, not the check's colour. When the secrets below are unset
-# this job SKIPS the migrate step and still reports SUCCESS — deliberately, see
-# the preflight step — so a green "Deploy DB migrations (production)" is NOT
-# evidence that anything was applied. Verify with the STEP list, which names the
-# skip that the check's colour hides:
+# ─── Why this workflow no longer applies them (P4c, 2026-09-05) ─────────────
+#
+# Until now this job ran `prisma migrate deploy` against production on EVERY
+# merge to main, while the deploy stayed manual. That opened a window on every
+# schema- or version-pinned change in which production's DATABASE was ahead of
+# production's CODE — for as long as the merge sat undeployed. Measured on the
+# five most recent migration-bearing merges (migrate-step log timestamp → the
+# `ready` timestamp of the deployment that first served the matching code):
+#
+#   540ebd72  P4a  3 migrations   09-04 19:43Z → 09-05 03:31Z    7h 48m
+#   3b4509ba  P4b  2 migrations   09-05 03:15Z → 09-05 03:31Z       16m
+#   f611e248  P6   1 migration    09-05 05:41Z → 09-05 22:38Z   16h 57m
+#   0f8e5e0a  P5b  1 migration    09-05 20:40Z → 09-05 22:38Z    1h 58m
+#   5bb7acc4  P5c  1 migration    09-05 22:31Z → 09-05 22:38Z     7m 35s
+#
+# Seventeen hours is not a race condition, it is a state. `lib/consult/
+# analysisEngine.ts` documents a hard cutover (`CONSULT_ANALYSIS_PROMPT_VERSION`
+# + `consult_analysis_payload_guard`) that a window of that length turns from a
+# build-length blip into a whole day of the old code writing a version the
+# database already refuses.
+#
+# Moving the apply into the deploy build only shrinks that window to the build
+# itself — measured 2m 30s on `5bb7acc4` (buildingAt → ready) — because the new
+# build's migrate runs while the PREVIOUS deployment is still serving. That
+# residue is irreducible on Vercel: the build is the only hook, there is no
+# post-promotion one. Expand-phase discipline (additive, backward-compatible
+# migrations) is what makes those ~2m safe, and it is now the ONLY thing that
+# has to hold — not a discipline stretched across an unbounded manual gap.
+#
+# The direction of the window matters and is unchanged: the database leads the
+# code, never the reverse. Applying migrations from a GitHub runner AFTER the
+# alias swap would invert it, which expand-phase discipline does not cover.
+#
+# What was given up, stated plainly: this workflow used to be a belt to Vercel's
+# braces, and applying at merge meant a migration that FAILS failed at merge,
+# with the deploy build's migrate then a no-op that could not fail. Now a bad
+# migration fails the production build instead, and nothing ships until it is
+# fixed. The `report` step below keeps the early warning about WHAT is pending,
+# but it cannot prove a pending migration will apply cleanly — `migrate status`
+# only compares `_prisma_migrations` against the migrations directory; it never
+# executes the SQL. Proving that needs a throwaway copy of the production
+# schema, which CI does not have. Review migration SQL before merge, as the
+# pre-deploy checklist already requires.
+#
+# ─── 🔴 Read the STEP LIST, not the check's colour ──────────────────────────
+#
+# This convention is now MORE load-bearing, not less. The push job is green by
+# construction: it reports, it does not change anything, and it stays green
+# whether there are pending migrations or none. It is also still green when the
+# secrets below are unset, because it SKIPS rather than fails (see the preflight
+# step). A green `migrate-deploy` has never been evidence that a migration
+# reached production and now cannot be. Verify with the step list:
 #
 #   gh api repos/MillyinVR/tovis-app/actions/runs/<id>/jobs \
 #     --jq '.jobs[].steps[] | "\(.conclusion)\t\(.name)"'
 #
-# 2026-08-28: both secrets are now SET, so the step runs for real. Every run
-# before that date skipped — do not read an old green run as evidence that its
-# migration reached prod.
+# and read the job summary, which names each pending migration. The ONLY
+# evidence that a migration reached production is the migrate step inside a
+# production Vercel build log, or a manual dispatch of this workflow.
 #
-# Scope: runs ONLY on push to main (and manual dispatch) — never on
-# pull_request — so it cannot touch preview/branch databases. It applies
-# whatever is pending; with the team's expand→contract discipline, expand
-# (additive) migrations are backward-compatible, and contract migrations are
-# only merged once their expand phase is fully deployed, so auto-applying on
-# merge is safe in both cases.
+# 2026-08-28: both secrets are SET, so the DB steps run for real. Every run
+# before that date skipped entirely — do not read an old green run as evidence
+# that its migration reached prod.
+#
+# ─── Manual escape hatch: apply a migration WITHOUT a deploy ────────────────
+#
+# Sometimes the schema legitimately has to move on its own — an expand phase
+# landed ahead of the code that uses it, a hotfix index, a migration that needs
+# to be in place before a long deploy starts. Run this workflow by hand:
+#
+#   gh workflow run migrate-deploy.yml -f confirm=apply-to-production
+#   # or: Actions → migrate-deploy → Run workflow → confirm: apply-to-production
+#
+# The typed confirmation is required; any other value fails the job without
+# connecting to the database. A dispatch applies whatever is pending on `main`
+# at that moment — it is `migrate deploy`, so committed migrations only, never
+# an inferred one. Record it in `docs/reference/runbooks/deploy-log.md` the way
+# a deploy is recorded, or the next session cannot tell what production's schema
+# is from the deploy history alone.
+#
+# ─── Scope ──────────────────────────────────────────────────────────────────
+#
+# Runs ONLY on push to main and manual dispatch — never on pull_request — so it
+# cannot touch preview/branch databases, and a fork can never reach the apply
+# path.
 #
 # Required repo secrets (Settings → Secrets and variables → Actions):
 #   PRODUCTION_DATABASE_URL  – pooled connection string (the app's DATABASE_URL)
 #   PRODUCTION_DIRECT_URL    – direct connection string (DIRECT_URL); this is
-#                              what `migrate deploy` actually connects through.
-# Until both are set, the job SKIPS `migrate deploy` and surfaces a loud
-# `::warning::` annotation plus a job-summary note on every main push — the
-# signal that migrations are NOT being auto-applied yet, without a permanently
-# red check that erodes trust in CI. Add both secrets to enable auto-migration.
+#                              what `migrate deploy`/`migrate status` actually
+#                              connect through.
+# Until both are set, the DB steps SKIP and surface a loud `::warning::` plus a
+# job-summary note, rather than a permanently red check that erodes trust in CI.
 # (Set 2026-08-28 from the prod Supabase project's pooled + session URLs.)
 
 on:
@@ -57,22 +115,46 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type apply-to-production to APPLY pending migrations to prod without a deploy.'
+        required: true
+        default: ''
 
 permissions:
   contents: read
 
-# Serialize runs and NEVER cancel an in-flight migration — queue instead.
+# Serialize runs and NEVER cancel an in-flight migration — queue instead. A
+# manual apply and a merge report share this group on purpose: the report
+# should not read the schema while an apply is halfway through it.
 concurrency:
   group: migrate-deploy-production
   cancel-in-progress: false
 
 jobs:
   migrate-deploy:
-    name: Deploy DB migrations (production)
+    name: Production migrations (report on merge · apply on dispatch)
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
     steps:
+      # Fail an unconfirmed dispatch BEFORE checkout, so a fat-fingered "Run
+      # workflow" costs nothing and reaches nothing.
+      #
+      # The input reaches the shell through `env:`, never through `${{ }}` inside
+      # the script. A `${{ }}` interpolation is pasted into the script body
+      # BEFORE bash parses it, so a dispatcher could close the quote and append
+      # commands — to a job that holds the production database credentials. The
+      # `if:` below is an expression the Actions engine evaluates, not shell, so
+      # it is safe there.
+      - name: Require the typed confirmation for a manual apply
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.confirm != 'apply-to-production'
+        env:
+          CONFIRM: ${{ github.event.inputs.confirm }}
+        run: |
+          echo "::error::A manual apply must be confirmed. Re-run with confirm=apply-to-production (got: '$CONFIRM')."
+          exit 1
+
       - name: Check out repository
         uses: actions/checkout@v6
 
@@ -99,14 +181,15 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
-      # --ignore-scripts skips the postinstall `prisma generate`; migrate deploy
-      # needs only the prisma CLI + migration files + schema, not the client.
+      # --ignore-scripts skips the postinstall `prisma generate`; both migrate
+      # subcommands below need only the prisma CLI + migration files + schema,
+      # not the generated client.
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
 
       # Detect whether the production DB secrets are configured. When they are
-      # absent we SKIP the migrate step (and warn) instead of failing the job,
-      # so an unconfigured repo does not leave a permanently red check on main.
+      # absent we SKIP the DB steps (and warn) instead of failing the job, so an
+      # unconfigured repo does not leave a permanently red check on main.
       - name: Check for production DB secrets
         id: preflight
         env:
@@ -115,39 +198,111 @@ jobs:
         run: |
           if [ -z "$DATABASE_URL" ] || [ -z "$DIRECT_URL" ]; then
             echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::PRODUCTION_DATABASE_URL and/or PRODUCTION_DIRECT_URL is not set — skipping prisma migrate deploy. Production migrations are NOT being auto-applied. Add both in Settings → Secrets and variables → Actions to enable."
+            echo "::warning::PRODUCTION_DATABASE_URL and/or PRODUCTION_DIRECT_URL is not set — skipping the production migration steps. Add both in Settings → Secrets and variables → Actions to enable."
             {
-              echo "### ⚠️ Production migrations NOT applied"
+              echo "### ⚠️ Production migration state NOT checked"
               echo ""
-              echo "\`PRODUCTION_DATABASE_URL\` and/or \`PRODUCTION_DIRECT_URL\` secrets are not configured, so this run skipped \`prisma migrate deploy\`."
+              echo "\`PRODUCTION_DATABASE_URL\` and/or \`PRODUCTION_DIRECT_URL\` secrets are not configured, so this run skipped every step that connects to production."
               echo ""
-              echo "Add both in **Settings → Secrets and variables → Actions** to enable automatic production migrations on merge to main."
+              echo "Add both in **Settings → Secrets and variables → Actions**."
             } >> "$GITHUB_STEP_SUMMARY"
           else
             echo "configured=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # ALLOW_PROD_DB is REQUIRED here, not optional. `prisma.config.ts` refuses
-      # any db-touching Prisma CLI command whose URL carries the prod project ref
-      # — the guard added after the 2026-06-17 stray `prisma db push` against
-      # prod — and it exempts only `process.env.VERCEL`. A GitHub runner is not
-      # Vercel, so without this the step dies on the guard before it connects.
+      # ALLOW_PROD_DB is REQUIRED for both DB steps, not optional.
+      # `prisma.config.ts` refuses any db-touching Prisma CLI command whose URL
+      # carries the prod project ref — the guard added after the 2026-06-17
+      # stray `prisma db push` against prod — and it exempts only
+      # `process.env.VERCEL`. A GitHub runner is not Vercel, so without this the
+      # step dies on the guard before it connects. That is exactly what happened
+      # the first time this workflow ever executed (run 33131000416,
+      # 2026-08-28): the secrets had just been added, the preflight passed, and
+      # the migrate step failed on the guard. Until then it had always SKIPPED
+      # for want of secrets, so the missing opt-in had never been reachable.
       #
-      # That is exactly what happened the first time this step ever executed
-      # (run 33131000416, 2026-08-28): the secrets had just been added, the
-      # preflight passed, and the migrate step failed on the guard. Until then
-      # the step had always SKIPPED for want of secrets, so the missing opt-in
-      # had never been reachable — the workflow had never once worked.
-      #
-      # Setting it is deliberate: targeting production IS this job's whole
-      # purpose, it runs only on push to main / manual dispatch (never on a PR,
-      # so a fork can never reach it), and `migrate deploy` applies committed
-      # migrations only — it can never generate or infer one the way `db push`
-      # can. The guard still protects every OTHER caller, which is the point.
-      - name: Apply pending migrations
-        if: steps.preflight.outputs.configured == 'true'
+      # `migrate status` is READ-ONLY — verified 2026-09-05 against a scratch
+      # copy of the production migration set: `_prisma_migrations` was
+      # byte-identical (row count + md5 over name/finished_at/steps) before and
+      # after. It also exits **1** whenever anything is pending, which is a
+      # normal state here, not a failure — hence the explicit exit-code handling
+      # below rather than letting `set -e` decide.
+      - name: Report pending migrations (no changes)
+        if: github.event_name == 'push' && steps.preflight.outputs.configured == 'true'
         env:
           DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
           DIRECT_URL: ${{ secrets.PRODUCTION_DIRECT_URL }}
           ALLOW_PROD_DB: '1'
-        run: pnpm exec prisma migrate deploy
+        run: |
+          set +e
+          output="$(pnpm exec prisma migrate status 2>&1)"
+          code=$?
+          set -e
+          echo "$output"
+
+          if [ "$code" -eq 0 ]; then
+            {
+              echo "### ✅ Production schema is level with \`main\`"
+              echo ""
+              echo "No pending migrations. The next production deploy has no schema work to do."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # Both singular and plural wordings observed from the Prisma CLI
+          # (6.19.3): one pending migration says "Following migration have not
+          # yet been applied:", several say "Following migrations …".
+          pending="$(printf '%s\n' "$output" | awk '
+            /^Following migrations? have not yet been applied:$/ { grab = 1; next }
+            grab && /^[[:space:]]*$/ { grab = 0 }
+            grab { print }
+          ')"
+
+          if [ -z "$pending" ]; then
+            echo "::error::prisma migrate status failed for a reason other than pending migrations (exit $code). Read the output above — this is drift, an unreachable database, or a bad connection string, and none of those get better on their own."
+            exit "$code"
+          fi
+
+          count="$(printf '%s\n' "$pending" | grep -c .)"
+          echo "::notice::$count migration(s) are committed on main but NOT applied to production. They apply during the next production deploy (\`vercel --prod\`), together with the code that needs them."
+          {
+            echo "### ⏳ $count migration(s) pending on production"
+            echo ""
+            echo "Committed on \`main\`, **not applied**:"
+            echo ""
+            # `read -r` strips the leading/trailing whitespace Prisma may indent
+            # a pending migration name with.
+            printf '%s\n' "$pending" | head -n 25 | while read -r name; do
+              echo "- \`$name\`"
+            done
+            if [ "$count" -gt 25 ]; then
+              echo "- …and $((count - 25)) more (full list in the step output above)"
+            fi
+            echo ""
+            echo "These apply inside the next **production** Vercel build (\`prisma migrate deploy\` → \`next build\`), so the schema and the code that needs it land together."
+            echo ""
+            echo "To apply them on their own, without shipping code, dispatch this workflow with \`confirm=apply-to-production\` — and log it in \`deploy-log.md\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Apply pending migrations (MANUAL — dispatch only)
+        if: github.event_name == 'workflow_dispatch' && steps.preflight.outputs.configured == 'true'
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.PRODUCTION_DIRECT_URL }}
+          ALLOW_PROD_DB: '1'
+          # Same rule as the confirmation step: nothing reaches this script
+          # through `${{ }}`. A branch name is attacker-shaped in a way a sha
+          # is not, and this job holds the production credentials.
+          REF_NAME: ${{ github.ref_name }}
+          COMMIT_SHA: ${{ github.sha }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          echo "::warning::Applying migrations to PRODUCTION without a deploy. The production code is whatever is currently aliased, not necessarily this commit."
+          pnpm exec prisma migrate deploy
+          {
+            echo "### 🚀 Migrations applied to production by manual dispatch"
+            echo ""
+            echo "Ref: \`$REF_NAME\` @ \`$COMMIT_SHA\` · actor: \`$ACTOR\`"
+            echo ""
+            echo "Production **code** was not changed by this run. Record it in \`docs/reference/runbooks/deploy-log.md\`."
+          } >> "$GITHUB_STEP_SUMMARY"

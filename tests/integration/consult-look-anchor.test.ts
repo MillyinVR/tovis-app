@@ -2360,12 +2360,16 @@ describe('P4 — the inspiration reference is read, stored, and reaches both aud
   })
 
   it('still accepts the SHIPPED v2 artefact, so the migrate-before-deploy window does not break production', async () => {
-    // 🔴 `migrate-deploy.yml` migrates production on every push to `main`,
-    // while deploys are manual and wait on Tori. Production therefore runs the
-    // NEW schema against the OLD code for as long as that gap lasts. A guard
-    // that took schema 3 alone would refuse every artefact the still-deployed
-    // code writes — 23514, raised AFTER the vision call was billed — and every
-    // consult analysis in the window would fail.
+    // 🔴 A production deploy applies pending migrations INSIDE the Vercel build
+    // (`vercel.json` → `buildCommand`), and that build completes while the
+    // PREVIOUS deployment is still serving. Production therefore runs the NEW
+    // schema against the OLD code for the length of the build — measured 2m 30s
+    // on `5bb7acc4`. Until P4c (2026-09-05) `migrate-deploy.yml` also applied on
+    // every push to `main` while deploys waited on Tori, which stretched the
+    // same window to 17 hours; that half is closed, the build-length half is
+    // irreducible on Vercel. A guard that took schema 3 alone would refuse every
+    // artefact the still-deployed code writes — 23514, raised AFTER the vision
+    // call was billed — and every consult analysis in the window would fail.
     //
     // So the v2 arm is load-bearing, and this is the test that says so. It
     // writes exactly what the shipped code writes: schema 2, ANALYZING, and
