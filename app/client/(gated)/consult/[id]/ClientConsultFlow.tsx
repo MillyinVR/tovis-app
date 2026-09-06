@@ -1513,7 +1513,26 @@ function bookTheLookHref(thread: ConsultThreadDTO): string {
   if (thread.book.serviceId) params.set('serviceId', thread.book.serviceId)
   if (thread.book.lookMediaId) params.set('mediaId', thread.book.lookMediaId)
   params.set('source', 'DISCOVERY')
-  return `/looks/${encodeURIComponent(thread.book.lookPostId ?? '')}?${params.toString()}#book`
+
+  // 🔴 `book=1` is what actually opens the availability drawer — the look page
+  // reads that ONE param (LookDetailClient). This used to end in `#book`, a
+  // fragment nothing reads and the server never sees, so the sticky CTA landed
+  // on the look page with no drawer and the spark simply died there. Verified
+  // in a browser before the fix: at the old href the drawer stayed closed.
+  params.set('book', '1')
+
+  // P7a-2 — the consult id travels with the tap. The look page passes it into
+  // the drawer, the drawer into the finalize body, and the write boundary
+  // validates it before stamping the link. It is a CLAIM on the wire: the
+  // server re-derives ownership, the pro and the look before believing it.
+  //
+  // Its presence is also what tells the look page NOT to re-ask
+  // `resolveLookConsultEntry`: that helper resolves a live consult back to
+  // `/client/consult/[id]`, which is the page we are leaving — arriving with it
+  // would bounce straight back here and the client would never reach a drawer.
+  params.set('sparkConsultId', thread.consultId)
+
+  return `/looks/${encodeURIComponent(thread.book.lookPostId ?? '')}?${params.toString()}`
 }
 
 /**

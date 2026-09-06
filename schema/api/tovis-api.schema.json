@@ -569,149 +569,7 @@
     "AftercareRebookMode": {
       "$ref": "#/definitions/%24Enums.AftercareRebookMode"
     },
-    "ApiOk<(def-alias-1643606088-4709-5101-1643606088-0-138532041664248&structure-1643606088-12078-12690-1643606088-12052-12690-1643606088-12045-12692-1643606088-11920-12692-1643606088-0-13853)>": {
-      "properties": {
-        "adjacencyBufferMinutes": {
-          "type": "number"
-        },
-        "availabilityVersion": {
-          "description": "Client-visible freshness token for the exact request context. Exact slots are reusable only when this matches.",
-          "type": "string"
-        },
-        "date": {
-          "type": "string"
-        },
-        "dayEndExclusiveUtc": {
-          "type": "string"
-        },
-        "dayStartUtc": {
-          "type": "string"
-        },
-        "debug": {},
-        "durationMinutes": {
-          "type": "number"
-        },
-        "generatedAt": {
-          "description": "ISO timestamp for when the payload was generated.",
-          "type": "string"
-        },
-        "leadTimeMinutes": {
-          "type": "number"
-        },
-        "locationBufferMinutes": {
-          "type": "number"
-        },
-        "locationId": {
-          "type": "string"
-        },
-        "locationType": {
-          "$ref": "#/definitions/ServiceLocationType"
-        },
-        "maxDaysAhead": {
-          "type": "number"
-        },
-        "mode": {
-          "const": "DAY",
-          "type": "string"
-        },
-        "offering": {
-          "$ref": "#/definitions/AvailabilityOffering"
-        },
-        "ok": {
-          "const": true,
-          "type": "boolean"
-        },
-        "professionalId": {
-          "description": "Transitional duplicate fields. Prefer `request.*` in all new code.",
-          "type": "string"
-        },
-        "request": {
-          "$ref": "#/definitions/AvailabilityDayRequest"
-        },
-        "serviceId": {
-          "type": "string"
-        },
-        "slots": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "stepMinutes": {
-          "type": "number"
-        },
-        "timeZone": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "adjacencyBufferMinutes",
-        "availabilityVersion",
-        "date",
-        "dayEndExclusiveUtc",
-        "dayStartUtc",
-        "durationMinutes",
-        "generatedAt",
-        "leadTimeMinutes",
-        "locationBufferMinutes",
-        "locationId",
-        "locationType",
-        "maxDaysAhead",
-        "mode",
-        "ok",
-        "professionalId",
-        "request",
-        "serviceId",
-        "slots",
-        "stepMinutes",
-        "timeZone"
-      ],
-      "type": "object"
-    },
-    "ApiOk<(def-alias-1643606088-4709-5101-1643606088-0-138532041664248&structure-1643606088-13223-13384-1643606088-13197-13384-1643606088-13190-13386-1643606088-13150-13386-1643606088-0-13853)>": {
-      "properties": {
-        "alternates": {
-          "items": {
-            "$ref": "#/definitions/AvailabilityAlternateSlots"
-          },
-          "type": "array"
-        },
-        "availabilityVersion": {
-          "description": "Client-visible freshness token for the exact request context. Exact slots are reusable only when this matches.",
-          "type": "string"
-        },
-        "debug": {},
-        "generatedAt": {
-          "description": "ISO timestamp for when the payload was generated.",
-          "type": "string"
-        },
-        "mode": {
-          "const": "ALTERNATES",
-          "type": "string"
-        },
-        "ok": {
-          "const": true,
-          "type": "boolean"
-        },
-        "request": {
-          "$ref": "#/definitions/AvailabilityAlternatesRequest"
-        },
-        "selectedDay": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "alternates",
-        "availabilityVersion",
-        "generatedAt",
-        "mode",
-        "ok",
-        "request",
-        "selectedDay"
-      ],
-      "type": "object"
-    },
-    "ApiOk<(def-alias-1643606088-4709-5101-1643606088-0-138532041664248&structure-1643606088-9669-11410-1643606088-9643-11410-1643606088-9636-11412-1643606088-9597-11412-1643606088-0-13853)>": {
+    "ApiOk<(def-alias-1643606088-5482-5874-1643606088-0-146262041664248&structure-1643606088-10442-12183-1643606088-10416-12183-1643606088-10409-12185-1643606088-10370-12185-1643606088-0-14626)>": {
       "properties": {
         "adjacencyBufferMinutes": {
           "type": "number"
@@ -900,6 +758,148 @@
         "waitlistSupported",
         "windowEndDate",
         "windowStartDate"
+      ],
+      "type": "object"
+    },
+    "ApiOk<(def-alias-1643606088-5482-5874-1643606088-0-146262041664248&structure-1643606088-12851-13463-1643606088-12825-13463-1643606088-12818-13465-1643606088-12693-13465-1643606088-0-14626)>": {
+      "properties": {
+        "adjacencyBufferMinutes": {
+          "type": "number"
+        },
+        "availabilityVersion": {
+          "description": "Client-visible freshness token for the exact request context. Exact slots are reusable only when this matches.",
+          "type": "string"
+        },
+        "date": {
+          "type": "string"
+        },
+        "dayEndExclusiveUtc": {
+          "type": "string"
+        },
+        "dayStartUtc": {
+          "type": "string"
+        },
+        "debug": {},
+        "durationMinutes": {
+          "type": "number"
+        },
+        "generatedAt": {
+          "description": "ISO timestamp for when the payload was generated.",
+          "type": "string"
+        },
+        "leadTimeMinutes": {
+          "type": "number"
+        },
+        "locationBufferMinutes": {
+          "type": "number"
+        },
+        "locationId": {
+          "type": "string"
+        },
+        "locationType": {
+          "$ref": "#/definitions/ServiceLocationType"
+        },
+        "maxDaysAhead": {
+          "type": "number"
+        },
+        "mode": {
+          "const": "DAY",
+          "type": "string"
+        },
+        "offering": {
+          "$ref": "#/definitions/AvailabilityOffering"
+        },
+        "ok": {
+          "const": true,
+          "type": "boolean"
+        },
+        "professionalId": {
+          "description": "Transitional duplicate fields. Prefer `request.*` in all new code.",
+          "type": "string"
+        },
+        "request": {
+          "$ref": "#/definitions/AvailabilityDayRequest"
+        },
+        "serviceId": {
+          "type": "string"
+        },
+        "slots": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "stepMinutes": {
+          "type": "number"
+        },
+        "timeZone": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "adjacencyBufferMinutes",
+        "availabilityVersion",
+        "date",
+        "dayEndExclusiveUtc",
+        "dayStartUtc",
+        "durationMinutes",
+        "generatedAt",
+        "leadTimeMinutes",
+        "locationBufferMinutes",
+        "locationId",
+        "locationType",
+        "maxDaysAhead",
+        "mode",
+        "ok",
+        "professionalId",
+        "request",
+        "serviceId",
+        "slots",
+        "stepMinutes",
+        "timeZone"
+      ],
+      "type": "object"
+    },
+    "ApiOk<(def-alias-1643606088-5482-5874-1643606088-0-146262041664248&structure-1643606088-13996-14157-1643606088-13970-14157-1643606088-13963-14159-1643606088-13923-14159-1643606088-0-14626)>": {
+      "properties": {
+        "alternates": {
+          "items": {
+            "$ref": "#/definitions/AvailabilityAlternateSlots"
+          },
+          "type": "array"
+        },
+        "availabilityVersion": {
+          "description": "Client-visible freshness token for the exact request context. Exact slots are reusable only when this matches.",
+          "type": "string"
+        },
+        "debug": {},
+        "generatedAt": {
+          "description": "ISO timestamp for when the payload was generated.",
+          "type": "string"
+        },
+        "mode": {
+          "const": "ALTERNATES",
+          "type": "string"
+        },
+        "ok": {
+          "const": true,
+          "type": "boolean"
+        },
+        "request": {
+          "$ref": "#/definitions/AvailabilityAlternatesRequest"
+        },
+        "selectedDay": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "alternates",
+        "availabilityVersion",
+        "generatedAt",
+        "mode",
+        "ok",
+        "request",
+        "selectedDay"
       ],
       "type": "object"
     },
@@ -1172,7 +1172,7 @@
       "type": "object"
     },
     "AvailabilityAlternatesOk": {
-      "$ref": "#/definitions/ApiOk%3C(def-alias-1643606088-4709-5101-1643606088-0-138532041664248%26structure-1643606088-13223-13384-1643606088-13197-13384-1643606088-13190-13386-1643606088-13150-13386-1643606088-0-13853)%3E"
+      "$ref": "#/definitions/ApiOk%3C(def-alias-1643606088-5482-5874-1643606088-0-146262041664248%26structure-1643606088-13996-14157-1643606088-13970-14157-1643606088-13963-14159-1643606088-13923-14159-1643606088-0-14626)%3E"
     },
     "AvailabilityAlternatesRequest": {
       "properties": {
@@ -1240,7 +1240,7 @@
       "type": "object"
     },
     "AvailabilityBootstrapOk": {
-      "$ref": "#/definitions/ApiOk%3C(def-alias-1643606088-4709-5101-1643606088-0-138532041664248%26structure-1643606088-9669-11410-1643606088-9643-11410-1643606088-9636-11412-1643606088-9597-11412-1643606088-0-13853)%3E"
+      "$ref": "#/definitions/ApiOk%3C(def-alias-1643606088-5482-5874-1643606088-0-146262041664248%26structure-1643606088-10442-12183-1643606088-10416-12183-1643606088-10409-12185-1643606088-10370-12185-1643606088-0-14626)%3E"
     },
     "AvailabilityCover": {
       "description": "Wire twin of `BookingCover` (lib/booking/bookingCover.ts) — see there for the fields.",
@@ -1272,7 +1272,7 @@
       "type": "object"
     },
     "AvailabilityDayOk": {
-      "$ref": "#/definitions/ApiOk%3C(def-alias-1643606088-4709-5101-1643606088-0-138532041664248%26structure-1643606088-12078-12690-1643606088-12052-12690-1643606088-12045-12692-1643606088-11920-12692-1643606088-0-13853)%3E",
+      "$ref": "#/definitions/ApiOk%3C(def-alias-1643606088-5482-5874-1643606088-0-146262041664248%26structure-1643606088-12851-13463-1643606088-12825-13463-1643606088-12818-13465-1643606088-12693-13465-1643606088-0-14626)%3E",
       "description": "--------------------------- Availability: DAY mode\n--------------------------"
     },
     "AvailabilityDayRequest": {

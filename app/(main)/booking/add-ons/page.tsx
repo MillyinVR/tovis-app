@@ -263,6 +263,11 @@ export default async function BookingAddOnsPage({
   const mediaId = cleanString(pickOne(sp.mediaId) ?? null)
   const lookPostId = cleanString(pickOne(sp.lookPostId) ?? null)
   const consultId = cleanString(pickOne(sp.consultId) ?? null)
+  // P7a-2 — the spark link, carried through to the finalize body. Unlike
+  // `consultId` it does not change this page at all: a spark booking reviews
+  // ADD-ONS like any other, because it is an ordinary look booking that happens
+  // to know which consult it came from.
+  const sparkConsultId = cleanString(pickOne(sp.sparkConsultId) ?? null)
   // Book the Look, B7 — the enhancements she has ticked so far. Comma-separated
   // like every other id list in this codebase's query strings, capped the same
   // way the finalize caps them.
@@ -388,6 +393,7 @@ export default async function BookingAddOnsPage({
       mediaId={mediaId}
       lookPostId={lookPostId}
       consultId={consultId}
+      sparkConsultId={sparkConsultId}
       consultProposal={consultProposal}
       consultCopy={brand.clientConsultBooking}
       addOns={addOns}

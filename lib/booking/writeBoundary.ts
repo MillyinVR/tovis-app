@@ -242,6 +242,7 @@ import {
 } from '@/lib/notifications/clientNotifications'
 import { maybeCreateAiConsultInvitation } from '@/lib/notifications/aiConsultInvitation'
 import { resolveConsultCommitScope } from '@/lib/consult/commitScope'
+import { resolveConsultSparkLink } from '@/lib/consult/sparkLink'
 import {
   persistConsultBookingProposal,
   resolveConsultProposalForCommit,
@@ -676,6 +677,21 @@ type FinalizeBookingFromHoldArgs = {
   locationType: ServiceLocationType
   source: BookingSource
   consultId?: string | null
+  /**
+   * P7a-2 — the consult this booking is being made AT THE SPARK from.
+   *
+   * A different thing from `consultId` above, and deliberately a different
+   * field rather than a mode of it. `consultId` means "size and price this
+   * booking from the consult's proposal", which requires a COMPLETED consult
+   * with a committed estimate; the spark has neither, and booking waits for
+   * neither. This one means only: "stamp the link, book the ordinary way, at
+   * the pro's menu starting price."
+   *
+   * Mutually exclusive with `consultId` — a caller sending both is asking for
+   * two different bookings and gets a refusal rather than whichever the code
+   * happens to check first.
+   */
+  sparkConsultId?: string | null
   /**
    * Book the Look, B7 — the estimate lines the client opted into on the review
    * step (decision 10). Absent or empty means the FLOOR alone, which is the
@@ -10057,6 +10073,48 @@ async function resolveFinalizeConsultAttribution(args: {
   return scope.session.id
 }
 
+/**
+ * P7a-2 — the consult to LINK to a booking made at the spark.
+ *
+ * The proposal twin above asks `resolveConsultCommitScope`, which requires a
+ * COMPLETED consult. This asks `resolveConsultSparkLink`, which does not — and
+ * that is the entire reason the two are separate functions rather than one with
+ * a flag. The rules that do still apply (session lock, ownership, the thread's
+ * own anchor-scope gate, pro/look identity, one live booking per consult) live
+ * in `lib/consult/sparkLink.ts` so there is one spelling of them.
+ *
+ * `lookPostId` is the SERVER-resolved discovery source, never the client claim.
+ */
+async function resolveFinalizeConsultSparkLink(args: {
+  tx: Prisma.TransactionClient
+  sparkConsultId: string | null
+  clientId: string
+  professionalId: string
+  lookPostId: string | null
+}): Promise<string | null> {
+  if (!args.sparkConsultId) return null
+
+  const link = await resolveConsultSparkLink(args.tx, {
+    consultId: args.sparkConsultId,
+    clientId: args.clientId,
+    professionalId: args.professionalId,
+    lookPostId: args.lookPostId,
+  })
+
+  if (!link.ok) {
+    // HIDDEN stays a no-leak 404 exactly as the proposal path's does. The other
+    // two are tellable: they describe the client's own booking, not the
+    // existence of someone else's consult.
+    if (link.reason === 'HIDDEN') throw bookingError('CONSULT_NOT_FOUND')
+    if (link.reason === 'ALREADY_LINKED') {
+      throw bookingError('CONSULT_ALREADY_BOOKED')
+    }
+    throw bookingError('CONSULT_LINK_MISMATCH')
+  }
+
+  return link.consultSessionId
+}
+
 async function performLockedFinalizeBookingFromHold(args: {
   tx: Prisma.TransactionClient
   now: Date
@@ -10071,6 +10129,8 @@ async function performLockedFinalizeBookingFromHold(args: {
   locationType: ServiceLocationType
   source: BookingSource
   consultId: string | null
+  /** P7a-2 — see `FinalizeBookingFromHoldArgs.sparkConsultId`. */
+  sparkConsultId: string | null
   initialStatus: BookingStatus
   rebookOfBookingId: string | null
   fallbackTimeZone: string
@@ -10111,7 +10171,16 @@ async function performLockedFinalizeBookingFromHold(args: {
     bookingEntryPoint: args.bookingEntryPoint,
   })
 
-  const sourceConsultSessionId = await resolveFinalizeConsultAttribution({
+  // 🔴 P7a-2 — the two consult fields are mutually exclusive, and the refusal is
+  // here rather than at the route so every caller of the boundary gets it. They
+  // mean different bookings: `consultId` sizes and prices from the proposal,
+  // `sparkConsultId` books the ordinary look path and only stamps the link.
+  // Silently preferring one would book at a price the client never saw.
+  if (args.consultId && args.sparkConsultId) {
+    throw bookingError('CONSULT_LINK_MISMATCH')
+  }
+
+  const proposalConsultSessionId = await resolveFinalizeConsultAttribution({
     tx: args.tx,
     now: args.now,
     consultId: args.consultId,
@@ -10119,6 +10188,21 @@ async function performLockedFinalizeBookingFromHold(args: {
     professionalId: args.offering.professionalId,
     serviceCategoryId: args.offering.serviceCategoryId ?? null,
   })
+
+  const sparkConsultSessionId = await resolveFinalizeConsultSparkLink({
+    tx: args.tx,
+    sparkConsultId: args.sparkConsultId ?? null,
+    clientId: args.clientId,
+    professionalId: args.offering.professionalId,
+    // The SERVER's resolved look, not the client's claim — see
+    // `resolveDiscoveryFinalize`, whose `sourceLookPostId` is null unless the
+    // look was named, published, approved and viewable.
+    lookPostId: args.discovery?.sourceLookPostId ?? null,
+  })
+
+  // Exactly one can be set (refused above), so this is a choice, not a merge.
+  const sourceConsultSessionId =
+    proposalConsultSessionId ?? sparkConsultSessionId
 
   // K16: the card-on-file requirement is enforced HERE and not at hold creation,
   // on purpose. Refusing at the hold would cost the client their slot while they
@@ -10423,11 +10507,17 @@ async function performLockedFinalizeBookingFromHold(args: {
   //
   // Null for a booking-anchored consult (#1016), which has nothing to
   // translate — that path keeps its ordinary sizing untouched.
-  const consultProposal = sourceConsultSessionId
+  //
+  // 🔴 P7a-2: keyed off the PROPOSAL id, never the merged link. A spark booking
+  // also stamps `sourceConsultSessionId`, but it is mid-flow by definition —
+  // deriving a proposal from it would refuse (no estimate exists yet) and take
+  // the whole spark booking down with it. The spark books the ordinary way;
+  // that is the point of it.
+  const consultProposal = proposalConsultSessionId
     ? await resolveConsultProposalForBookingCommit({
         tx: args.tx,
         now: args.now,
-        consultId: sourceConsultSessionId,
+        consultId: proposalConsultSessionId,
         clientId: args.clientId,
         professionalId: args.offering.professionalId,
         serviceCategoryId: args.offering.serviceCategoryId ?? null,
@@ -16912,6 +17002,7 @@ export async function finalizeBookingFromHold(
         locationType: args.locationType,
         source: args.source,
         consultId: args.consultId ?? null,
+        sparkConsultId: args.sparkConsultId ?? null,
         initialStatus: args.initialStatus,
         rebookOfBookingId: args.rebookOfBookingId,
         fallbackTimeZone: args.fallbackTimeZone ?? 'UTC',

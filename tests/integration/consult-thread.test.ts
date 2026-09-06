@@ -631,6 +631,202 @@ describe('consult thread projection', () => {
     await db.booking.deleteMany({ where: { id: booking.id } })
   })
 
+  // ── P7a-2: the link, not the inference ──────────────────────────────────
+
+  /**
+   * A booking as the ordinary look path leaves it, optionally linked.
+   *
+   * Every one gets its OWN slot: `Booking_no_active_professional_overlap` is a
+   * real exclusion constraint on (professional, time range), so two fixtures at
+   * the same instant collide before any assertion runs.
+   */
+  let bookLookSlot = 0
+  async function bookLook(args: {
+    lookPostId: string
+    sourceConsultSessionId?: string | null
+    status?: BookingStatus
+    createdAt?: Date
+  }) {
+    bookLookSlot += 1
+    return db.booking.create({
+      data: {
+        clientId: fx.clientId,
+        professionalId: fx.professionalId,
+        serviceId: fx.balayageServiceId,
+        offeringId: fx.balayageOfferingId,
+        status: args.status ?? BookingStatus.ACCEPTED,
+        sourceLookPostId: args.lookPostId,
+        sourceConsultSessionId: args.sourceConsultSessionId ?? null,
+        scheduledFor: new Date(Date.now() + (7 + bookLookSlot) * 86_400_000),
+        locationType: ServiceLocationType.SALON,
+        locationId: fx.locationId,
+        locationTimeZone: ZONE,
+        subtotalSnapshot: new Prisma.Decimal(BALAYAGE_PRICE),
+        totalAmount: new Prisma.Decimal(BALAYAGE_PRICE),
+        totalDurationMinutes: 60,
+        proTenantId: fx.tenantId,
+        clientHomeTenantId: fx.tenantId,
+        ...(args.createdAt ? { createdAt: args.createdAt } : {}),
+      },
+      select: { id: true },
+    })
+  }
+
+  // 🔴 The point of the slice. The link is read off the booking row, so the
+  // thread does not have to guess from (client, pro, look, time) — and it finds
+  // the booking even when the inference could NOT have: this one is created
+  // BEFORE the consult, which the legacy window excludes.
+  it('resolves the booking from the explicit link, not from inference', async () => {
+    const sessionId = await startConsult()
+    await acceptBothAgreements(sessionId)
+    const before = await thread(sessionId)
+
+    const booking = await bookLook({
+      lookPostId: before.book.lookPostId!,
+      sourceConsultSessionId: sessionId,
+      // Older than the consult: the P5a inference window (createdAt >= consult)
+      // would refuse this, so a pass here can only come from the link.
+      createdAt: new Date(Date.now() - 30 * 86_400_000),
+    })
+
+    const after = await thread(sessionId)
+    const confirmation = ofKind(after.messages, 'BOOKING')
+    expect(confirmation).toHaveLength(1)
+    expect(confirmation[0]?.bookingId).toBe(booking.id)
+    expect(after.book.reason).toBe('ALREADY_BOOKED')
+
+    await db.booking.deleteMany({ where: { id: booking.id } })
+  })
+
+  // Tori's scenario, in the only shape that is reachable: ConsultSession is
+  // unique per (clientId, professionalId, anchorLookPostId), so ONE client
+  // cannot have two consults on the SAME look. Two looks with the same pro is
+  // the real case — and the one where an inference on (client, pro) would
+  // cross the wires.
+  it('keeps two consults on two looks with one pro correctly separated', async () => {
+    const sessionA = await startConsult()
+    const sessionB = await startConsult()
+    expect(sessionA).not.toBe(sessionB)
+
+    await acceptBothAgreements(sessionA)
+    await acceptBothAgreements(sessionB)
+
+    const beforeA = await thread(sessionA)
+    const beforeB = await thread(sessionB)
+    expect(beforeA.book.lookPostId).not.toBe(beforeB.book.lookPostId)
+
+    const bookingA = await bookLook({
+      lookPostId: beforeA.book.lookPostId!,
+      sourceConsultSessionId: sessionA,
+    })
+    const bookingB = await bookLook({
+      lookPostId: beforeB.book.lookPostId!,
+      sourceConsultSessionId: sessionB,
+    })
+
+    const afterA = await thread(sessionA)
+    const afterB = await thread(sessionB)
+
+    expect(ofKind(afterA.messages, 'BOOKING')[0]?.bookingId).toBe(bookingA.id)
+    expect(ofKind(afterB.messages, 'BOOKING')[0]?.bookingId).toBe(bookingB.id)
+    // Neither thread claims the other's appointment.
+    expect(ofKind(afterA.messages, 'BOOKING')[0]?.bookingId).not.toBe(bookingB.id)
+    expect(ofKind(afterB.messages, 'BOOKING')[0]?.bookingId).not.toBe(bookingA.id)
+
+    await db.booking.deleteMany({
+      where: { id: { in: [bookingA.id, bookingB.id] } },
+    })
+  })
+
+  // A booking linked to ANOTHER consult is that consult's, never this one's —
+  // and the legacy fallback must not pick it up either (it excludes linked
+  // rows). Without that exclusion the fallback would quietly re-create the
+  // cross-wiring the link exists to end.
+  it('never claims a booking that is linked to a different consult', async () => {
+    const sessionA = await startConsult()
+    const sessionB = await startConsult()
+    await acceptBothAgreements(sessionA)
+    await acceptBothAgreements(sessionB)
+
+    const a = await thread(sessionA)
+
+    // Sourced from A's look but linked to B. A must not show it.
+    const booking = await bookLook({
+      lookPostId: a.book.lookPostId!,
+      sourceConsultSessionId: sessionB,
+    })
+
+    const afterA = await thread(sessionA)
+    expect(ofKind(afterA.messages, 'BOOKING')).toHaveLength(0)
+    expect(afterA.book.reason).toBe('SELFIE_REQUIRED')
+
+    await db.booking.deleteMany({ where: { id: booking.id } })
+  })
+
+  // The link is RELEASED by a cancelled or completed booking (Tori,
+  // 2026-09-06) — she can book that look again from the same consult. A
+  // cancelled-only rule would strand her after an appointment simply happened,
+  // because she cannot open a second consult for the same look either.
+  it.each([
+    ['CANCELLED', BookingStatus.CANCELLED],
+    ['COMPLETED', BookingStatus.COMPLETED],
+  ])('releases the link when the booking is %s', async (_label, status) => {
+    const sessionId = await startConsult()
+    await acceptBothAgreements(sessionId)
+    const before = await thread(sessionId)
+
+    const booking = await bookLook({
+      lookPostId: before.book.lookPostId!,
+      sourceConsultSessionId: sessionId,
+      status,
+    })
+
+    const after = await thread(sessionId)
+    expect(ofKind(after.messages, 'BOOKING')).toHaveLength(0)
+    // The Book button comes BACK rather than being held by a dead appointment.
+    expect(after.book.reason).toBe('SELFIE_REQUIRED')
+
+    await db.booking.deleteMany({ where: { id: booking.id } })
+  })
+
+  // 🔴 The DATABASE enforces one live link, not just the application read.
+  // Written by inserting straight through Prisma — deliberately BYPASSING
+  // `resolveConsultSparkLink`, because a guard that is only enforced by the
+  // code path that checks it is not enforced under a race. Both directions are
+  // asserted: it refuses a second LIVE row, and it PERMITS one once the first
+  // is cancelled — an index that refused both would pass a one-sided test.
+  it('the partial unique index holds the link, and releases it on cancel', async () => {
+    const sessionId = await startConsult()
+    await acceptBothAgreements(sessionId)
+    const before = await thread(sessionId)
+    const lookPostId = before.book.lookPostId!
+
+    const first = await bookLook({
+      lookPostId,
+      sourceConsultSessionId: sessionId,
+    })
+
+    await expect(
+      bookLook({ lookPostId, sourceConsultSessionId: sessionId }),
+    ).rejects.toMatchObject({ code: 'P2002' })
+
+    // Cancel the holder — the link is released and a new one is allowed.
+    await db.booking.update({
+      where: { id: first.id },
+      data: { status: BookingStatus.CANCELLED },
+    })
+
+    const second = await bookLook({
+      lookPostId,
+      sourceConsultSessionId: sessionId,
+    })
+    expect(second.id).not.toBe(first.id)
+
+    await db.booking.deleteMany({
+      where: { id: { in: [first.id, second.id] } },
+    })
+  })
+
   it('renders the plan card once the analysis has committed a result', async () => {
     const lookPostId = await createLook(db, fx.balayageServiceId)
     const sessionId = await runConsultToCompletion(db, lookPostId, 'thread-plan')

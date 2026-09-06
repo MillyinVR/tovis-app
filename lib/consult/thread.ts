@@ -86,6 +86,115 @@ const LIVE_BOOKING_STATUSES: BookingStatus[] = [
   BookingStatus.IN_PROGRESS,
 ]
 
+/**
+ * The instant the explicit link went live, if it has been configured.
+ *
+ * Unset is the honest default: before the deploy there IS no cutover, and
+ * inventing one would either blind the fallback to real legacy bookings or
+ * pretend the link existed before it did. Once P7a-2 is deployed, set
+ * `CONSULT_SPARK_LINK_CUTOVER_AT` to that deploy's instant (ISO-8601) and the
+ * fallback narrows to exactly the pre-existing population it is for.
+ *
+ * A malformed value is treated as unset rather than throwing — the thread is a
+ * read path, and a typo in an env var must not take the client's consult down.
+ * It is logged so the typo is findable.
+ */
+function consultSparkLinkCutoverAt(): Date | null {
+  const raw = process.env.CONSULT_SPARK_LINK_CUTOVER_AT?.trim()
+  if (!raw) return null
+  const parsed = new Date(raw)
+  if (Number.isNaN(parsed.getTime())) {
+    console.warn('CONSULT_SPARK_LINK_CUTOVER_AT is not a valid date', { raw })
+    return null
+  }
+  return parsed
+}
+
+/**
+ * Which booking is this consult's — asked of the LINK first, the old inference
+ * second.
+ *
+ * P7a-2. The link is `Booking.sourceConsultSessionId`, stamped by the write
+ * boundary after `resolveConsultSparkLink` checked that the booking's pro, look
+ * and client actually match the consult. A partial unique index makes at most
+ * one LIVE booking hold it, so there is nothing to disambiguate and no
+ * `orderBy` that could quietly pick the wrong row.
+ *
+ * 🔴 The fallback exists for ONE population: bookings created before this
+ * shipped, which carry no link and never will. It is P5a's inference with two
+ * deliberate narrowings — its `sourceConsultSessionId` OR arm is gone (the link
+ * query above owns that case now) and it matches only rows where that column is
+ * NULL, so it can never take a booking that belongs to a different consult.
+ *
+ * It is NOT a safety net for the new path: a spark booking that failed to link
+ * is a bug that must stay visible. Set `CONSULT_SPARK_LINK_CUTOVER_AT` to the
+ * deploy instant once this is live and the fallback additionally stops being
+ * able to see anything the link path could have handled — see
+ * `consultSparkLinkCutoverAt`.
+ *
+ * Every fallback hit is logged so the retirement has a date rather than a
+ * feeling. When this stops firing in prod, delete everything below the link
+ * query. (`LIVE_BOOKING_STATUSES` stays — the link query uses it too.)
+ */
+async function resolveThreadBooking(
+  db: typeof prisma,
+  args: {
+    consultSessionId: string
+    clientId: string
+    professionalId: string
+    anchorLookPostId: string | null
+    consultCreatedAt: Date
+  },
+): Promise<{ id: string } | null> {
+  const linked = await db.booking.findFirst({
+    where: {
+      sourceConsultSessionId: args.consultSessionId,
+      status: { in: LIVE_BOOKING_STATUSES },
+    },
+    select: { id: true },
+  })
+  if (linked) return linked
+
+  // No link. Only a LOOK-anchored consult ever had an inference to fall back
+  // to; a booking-anchored one reads its appointment off its own anchor.
+  if (!args.anchorLookPostId) return null
+
+  const cutover = consultSparkLinkCutoverAt()
+
+  const legacy = await db.booking.findFirst({
+    where: {
+      clientId: args.clientId,
+      professionalId: args.professionalId,
+      status: { in: LIVE_BOOKING_STATUSES },
+      sourceLookPostId: args.anchorLookPostId,
+      // Unlinked only. A booking that HAS a link belongs to whichever consult
+      // the boundary validated it against, and it is not this one.
+      sourceConsultSessionId: null,
+      // The P5a window, unchanged: at or after this consult began. Plus, when
+      // the cutover is configured, strictly before the link path shipped — so
+      // the fallback can never quietly cover for a spark booking that should
+      // have linked and didn't.
+      createdAt: cutover
+        ? { gte: args.consultCreatedAt, lt: cutover }
+        : { gte: args.consultCreatedAt },
+    },
+    select: { id: true },
+    orderBy: { createdAt: 'desc' },
+  })
+
+  if (legacy) {
+    // Telemetry, not an error: this is the retirement signal for the fallback.
+    console.warn('consult-thread booking resolved by LEGACY inference', {
+      consultSessionId: args.consultSessionId,
+      bookingId: legacy.id,
+      anchorLookPostId: args.anchorLookPostId,
+      cutoverConfigured: cutover !== null,
+    })
+  }
+
+  return legacy
+}
+
 type MessageBuilder = {
   push: (message: ConsultThreadMessageDTO) => void
 }
@@ -283,32 +392,18 @@ export async function loadConsultThread(args: {
 
   // ── The booking, if she already took the spark ───────────────────────────
   //
-  // Booking at the spark runs the ORDINARY look-booking path, which stamps
-  // `sourceLookPostId` and knows nothing about this consult, so the join is on
-  // the look. `sourceConsultSessionId` is honored too for the day the booking
-  // side starts attaching itself — either linkage means the same thing here.
-  //
-  // 🔴 Scoped to bookings made AT OR AFTER this consult started. The look-sourced
-  // join is otherwise satisfied by an appointment she booked from the same look
-  // months ago — which would open a brand-new consult by telling her she is
-  // already on the calendar, and hide the Book button over an appointment that
-  // has nothing to do with this consult.
-  const booking = session.anchorLookPostId
-    ? await prisma.booking.findFirst({
-        where: {
-          clientId: args.clientId,
-          professionalId: session.professionalId,
-          status: { in: LIVE_BOOKING_STATUSES },
-          createdAt: { gte: session.createdAt },
-          OR: [
-            { sourceLookPostId: session.anchorLookPostId },
-            { sourceConsultSessionId: session.id },
-          ],
-        },
-        select: { id: true },
-        orderBy: { createdAt: 'desc' },
-      })
-    : null
+  // P7a-2: this is a LINK now, not a guess. The spark CTA carries the consult
+  // id through the look-booking path and the write boundary stamps
+  // `sourceConsultSessionId` after validating it (lib/consult/sparkLink.ts), so
+  // the question "which booking is this consult's?" has an answer stored on the
+  // row instead of being re-derived from four columns that only USUALLY agree.
+  const booking = await resolveThreadBooking(prisma, {
+    consultSessionId: session.id,
+    clientId: args.clientId,
+    professionalId: session.professionalId,
+    anchorLookPostId: session.anchorLookPostId,
+    consultCreatedAt: session.createdAt,
+  })
 
   // ── Stopped ──────────────────────────────────────────────────────────────
   if (STOPPED_STATUSES.has(session.status)) {

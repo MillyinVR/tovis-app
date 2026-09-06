@@ -60,6 +60,8 @@ function getNavigatorShare() {
 function buildAvailabilityDrawerContext(args: {
   item: LooksDetailItemDto
   viewerLoc: ViewerLocation | null
+  /** P7a-2 — the consult this booking is being made at the spark from. */
+  sparkConsultId?: string | null
 }): AvailabilityDrawerContext | null {
   const professionalId = args.item.professional?.id
   if (!professionalId) return null
@@ -70,6 +72,7 @@ function buildAvailabilityDrawerContext(args: {
     mediaId: args.item.primaryMedia?.id ?? null,
     serviceId: args.item.service?.id ?? null,
     source: 'DISCOVERY',
+    sparkConsultId: args.sparkConsultId ?? null,
     ...viewerLocationToDrawerContextFields(args.viewerLoc),
   }
 }
@@ -83,6 +86,15 @@ export default function LookDetailClient({
   const { brand } = useBrand()
 
   const [item, setItem] = useState(initialItem)
+
+  // P7a-2 — arriving FROM the consult thread's sticky Book CTA. Its presence
+  // means the consult decision has already been made: this tap must go straight
+  // to the drawer, carrying the id, and must NOT re-ask
+  // `resolveLookConsultEntry` (which would resolve the live consult back to the
+  // page we just left). Read up here because both `openAvailability` and
+  // `handleBook` close over it.
+  const searchParams = useSearchParams()
+  const sparkConsultId = searchParams?.get('sparkConsultId')?.trim() || null
 
   // Record the detail open as a sampled view (B2). The tracker dedupes per
   // session, so a back-and-forth to the same look only counts once.
@@ -141,12 +153,13 @@ export default function LookDetailClient({
     const context = buildAvailabilityDrawerContext({
       item,
       viewerLoc,
+      sparkConsultId,
     })
     if (!context) return
 
     setDrawerCtx(context)
     setAvailabilityOpen(true)
-  }, [item, viewerLoc])
+  }, [item, viewerLoc, sparkConsultId])
 
   /**
    * Book the Look, B4b — what "Book" does now.
@@ -161,6 +174,16 @@ export default function LookDetailClient({
    */
   const handleBook = useCallback(async () => {
     if (bookInFlightRef.current) return
+
+    // 🔴 P7a-2 — the consult thread already decided. Asking
+    // `resolveLookConsultEntry` here would find that same live consult and push
+    // back to `/client/consult/[id]`, so the client would bounce between the
+    // thread and this page and never see a drawer. Straight to booking.
+    if (sparkConsultId) {
+      openAvailability()
+      return
+    }
+
     bookInFlightRef.current = true
     setBookPending(true)
 
@@ -175,7 +198,7 @@ export default function LookDetailClient({
       bookInFlightRef.current = false
       setBookPending(false)
     }
-  }, [item.id, openAvailability, router])
+  }, [item.id, openAvailability, router, sparkConsultId])
 
   // `?book=1` — arrive with the availability drawer already open. This is what
   // makes "Recreate this look" on a public creator profile a booking action
@@ -190,7 +213,7 @@ export default function LookDetailClient({
   // from localStorage. Seeding it during render would produce a null context on
   // the server and a populated one on the client — hydration drift inside the
   // drawer. Opening after mount reads one consistent value.
-  const autoBookRequested = useSearchParams()?.get('book') === '1'
+  const autoBookRequested = searchParams?.get('book') === '1'
   const autoBookedRef = useRef(false)
   useEffect(() => {
     if (!autoBookRequested || autoBookedRef.current) return

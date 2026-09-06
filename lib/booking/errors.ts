@@ -56,6 +56,8 @@ export type BookingErrorCode =
   | "CONSULT_UNAVAILABLE"
   | "CONSULT_PROPOSAL_UNAVAILABLE"
   | "CONSULT_PROPOSAL_OFFERING_MISMATCH"
+  | "CONSULT_ALREADY_BOOKED"
+  | "CONSULT_LINK_MISMATCH"
   | "MISSING_MEDIA_ID"
   | "OPENING_NOT_AVAILABLE"
   | "BOOKING_NOT_RESCHEDULABLE"
@@ -562,6 +564,28 @@ const BOOKING_ERROR_CATALOG: Record<BookingErrorCode, BookingErrorMeta> = {
     uiAction: "NONE",
     message: "Consult is unavailable for this booking.",
     userMessage: "This consult cannot be attached to that booking.",
+  },
+  // P7a-2. The consult already holds a LIVE booking (pending, accepted or in
+  // progress). Its link is released when that booking is cancelled or
+  // completed, which is why this is not terminal from the client's side: the
+  // honest next step is to look at the appointment she already has.
+  CONSULT_ALREADY_BOOKED: {
+    httpStatus: 409,
+    retryable: false,
+    uiAction: "NONE",
+    message: "Consult already has a live booking.",
+    userMessage: "You’re already booked for this look.",
+  },
+  // P7a-2. The booking's professional or source look disagrees with the
+  // consult's own anchor. Refused rather than linked on trust — an unchecked
+  // link is how a consult ends up attached to an appointment it knows nothing
+  // about, which is the inference bug this slice replaces.
+  CONSULT_LINK_MISMATCH: {
+    httpStatus: 409,
+    retryable: false,
+    uiAction: "NONE",
+    message: "Consult does not match this booking.",
+    userMessage: "That consultation doesn’t match this appointment.",
   },
   // Book the Look, B4. The estimate could not be turned into a proposal for the
   // mode being booked — the analysis routed to safety prerequisites, the pro
