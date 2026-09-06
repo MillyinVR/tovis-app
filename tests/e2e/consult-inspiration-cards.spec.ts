@@ -90,7 +90,11 @@ test.describe('consult inspiration cards', () => {
     const nameBox = await name.boundingBox()
     const promptBox = await prompt.boundingBox()
     expect(cropBox).not.toBeNull()
-    expect(nameBox!.y).toBeGreaterThan(cropBox!.y + cropBox!.height - 1)
+    // Measured against the crop's MIDPOINT, not its bottom edge. The defect
+    // this guards is a name rendered ABOVE its picture, which is half a card
+    // away; a bottom-edge comparison is a half-pixel away, and CI's renderer
+    // lands the name exactly on `bottom - 1` where a local Chrome does not.
+    expect(nameBox!.y).toBeGreaterThan(cropBox!.y + cropBox!.height / 2)
     expect(promptBox!.y).toBeGreaterThan(nameBox!.y)
 
     // The three answers, and no way to type.
