@@ -58,6 +58,9 @@
 
 .tv-word {
   display: inline-block;
+  /* Extend the gradient paint box below descenders without changing line spacing. */
+  padding-bottom: 0.16em;
+  margin-bottom: -0.16em;
   transition:
     opacity 0.7s cubic-bezier(0.2, 0.7, 0.2, 1),
     transform 0.7s cubic-bezier(0.2, 0.7, 0.2, 1);
@@ -199,4 +202,52 @@
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   background-repeat: repeat;
   background-size: 128px 128px;
+}
+
+/* Engraved card concepts: brand tokens control both metal finishes and modes. */
+.tv-card-concept {
+  color: rgb(var(--text-primary));
+  background-image:
+    repeating-linear-gradient(100deg, rgb(var(--text-primary) / 0.04) 0 1px, transparent 1px 3px),
+    linear-gradient(125deg, rgb(var(--surface-glass) / 0.12), rgb(var(--bg-primary)) 38%, rgb(var(--surface-glass) / 0.25) 66%, rgb(var(--bg-primary)));
+  border-color: rgb(var(--text-primary) / 0.3);
+  box-shadow: inset 0 1px 1px rgb(var(--text-primary) / 0.25), inset 0 -2px 3px rgb(var(--scrim) / 0.2);
+}
+.tv-card-concept--gold {
+  background-image:
+    repeating-linear-gradient(100deg, rgb(var(--micro-accent) / 0.1) 0 1px, transparent 1px 3px),
+    linear-gradient(125deg, rgb(var(--micro-accent) / 0.55), rgb(var(--micro-accent) / 0.18) 38%, rgb(var(--micro-accent) / 0.65) 66%, rgb(var(--micro-accent) / 0.25));
+  border-color: rgb(var(--micro-accent) / 0.6);
+}
+.tv-card-engraving {
+  text-shadow: 0 1px 0 rgb(var(--bg-primary) / 0.8), 0 -1px 1px rgb(var(--scrim) / 0.35);
+}
+
+.tv-card-stage { perspective: 900px; }
+.tv-card-turn {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  animation: tvCardTurn 9s ease-in-out infinite;
+}
+.tv-card-face {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+.tv-card-back { transform: rotateY(180deg); }
+@keyframes tvCardTurn {
+  0%, 18% { transform: rotateY(0deg) rotateX(3deg); }
+  43%, 65% { transform: rotateY(180deg) rotateX(-3deg); }
+  90%, 100% { transform: rotateY(360deg) rotateX(3deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tv-card-turn { animation: none; }
+}
+
+.tv-card-mark {
+  filter: grayscale(1) contrast(1.5) drop-shadow(0 1px 0 rgb(var(--bg-primary) / 0.8));
+  opacity: 0.85;
 }

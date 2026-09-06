@@ -1,43 +1,11 @@
-// app/page.tsx
-//
-// The public homepage. Two things had to be true at once, and this file is
-// where they meet.
-//
-//   1. It is CHECKABLE marketing (#1096). Every feature it names comes from
-//      lib/brand/defaultHomeCopy.ts carrying a state ('live' or 'rolling-out')
-//      and a never-rendered `evidence` line, the page shows that state as a
-//      chip, and the SoftwareApplication JSON-LD lists only the live ones. The
-//      page renders the copy; it never invents a claim of its own.
-//
-//   2. It is the "Home Page Live" artboard from the brand's Claude Design
-//      project (522be682): the atmospheric hero with a word-by-word gradient
-//      headline, the buzz marquee, sticky section heads over numbered rows,
-//      the two-card spotlight, and the closer.
-//
-// The artboard is a .dc.html, so it carries three things a real page should
-// not, all undone here rather than copied:
-//
-//   • Raw hex. Every colour in it is already a Peacock Plume value (#0A1413,
-//     #F2EFE7, #C7D2CF, #8FA39E, #15C9A8, #F2B43E, #6B4BE6, #1574C4), so each
-//     maps 1:1 onto the token that owns it and the page rebrands per tenant
-//     and flips with [data-mode] for free.
-//   • JavaScript breakpoints (it has no media queries), replaced by real ones,
-//     so the layout is right in the first paint rather than the second.
-//   • Its own top bar, replaced by the shared PublicTopBar given the page's
-//     section anchors. The artboard's bar had no Log in at all.
-//
-// ⚠️ The artboard's own marketing copy is NOT used. Its proof band (41,208
-// looks booked, "trailing twelve months") and its three named testimonials are
-// specimen content, and its feature lists make unlabelled claims. Copy comes
-// from the brand instead; the marquee is built from live feature titles rather
-// than a hand-written phrase list, so it cannot drift from what shipped. The
-// two social-proof slots are kept as structure and gated off in
-// lib/homepage/socialProof.ts.
+// Public homepage: tenant copy, explicit editorial placeholders, and gated feature claims.
 import { Fragment } from 'react'
 import Link from 'next/link'
+import Image from 'next/image'
 import { buildTransactionalSmsPageCopy } from '@/lib/transactionalSmsPolicy'
 import JsonLdScript from '@/app/_components/seo/JsonLdScript'
 import PublicTopBar from '@/app/_components/PublicTopBar/PublicTopBar'
+import CardPreview from '@/app/_components/home/CardPreview'
 import HomeMotion from '@/app/_components/home/HomeMotion'
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import type {
@@ -47,7 +15,7 @@ import type {
   BrandHomeSpotlightFeature,
 } from '@/lib/brand/types'
 import { absoluteUrl } from '@/lib/seo/absoluteUrl'
-import { buildHomeJsonLd, liveHomeFeatures } from '@/lib/seo/homeJsonLd'
+import { buildHomeJsonLd } from '@/lib/seo/homeJsonLd'
 import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 import {
   HOMEPAGE_PROOF_CAPTION,
@@ -82,16 +50,6 @@ const CHIP_CLASS: Record<BrandHomeFeatureState, string> = {
   live: 'border-toneSuccess/30 bg-toneSuccess/10 text-toneSuccess',
   'rolling-out': 'border-tonePending/30 bg-tonePending/10 text-tonePending',
 }
-
-// Cycled through the marquee separators and nowhere else. Written out as
-// literal class strings because Tailwind scans for whole class names — a
-// computed `text-${tone}` would emit no CSS at all.
-const diamondTones = [
-  'text-accentPrimary',
-  'text-microAccent',
-  'text-iris',
-  'text-peacock',
-] as const
 
 const proofToneClass: Record<HomepageProofTone, string> = {
   paper: 'text-textPrimary',
@@ -295,12 +253,6 @@ export default async function Home() {
   const { stats, voices } = homepageSocialProof()
   const lastBeat = copy.manifesto.length - 1
 
-  // The artboard's marquee was a hand-written phrase list, which is a second
-  // place for a claim to live and drift from what shipped. It reads the live
-  // feature titles instead: everything scrolling past is, by construction,
-  // something with a receipt behind it.
-  const marqueePhrases = liveHomeFeatures(copy).map((feature) => feature.title)
-
   return (
     <main className="relative overflow-x-hidden bg-bgPrimary font-sans text-textPrimary">
       <JsonLdScript
@@ -311,7 +263,7 @@ export default async function Home() {
       {/* ── Hero ──────────────────────────────────────────────────── */}
       <section
         id={HERO_ID}
-        className="relative flex min-h-screen flex-col overflow-hidden px-[clamp(20px,5vw,72px)]"
+        className="relative flex flex-col overflow-hidden px-[clamp(20px,5vw,72px)]"
       >
         {/* Atmospheric depth — drifting plume orbs over a film grain. */}
         <div aria-hidden="true" className="pointer-events-none absolute inset-0">
@@ -327,63 +279,71 @@ export default async function Home() {
           className="relative z-10 mx-auto w-full max-w-[1240px] px-0 py-[26px] sm:px-0 lg:px-0"
         />
 
-        <div className="relative z-10 mx-auto my-auto flex w-full max-w-[1240px] flex-col gap-[clamp(20px,3.2vh,34px)] pb-[clamp(24px,5vh,56px)] pt-[clamp(32px,7vh,88px)]">
-          <div className="tv-reveal flex items-center gap-3">
-            <span className="h-px w-[26px] bg-accentPrimary" />
-            <Eyebrow className="whitespace-nowrap text-accentPrimary">{copy.hero.eyebrow}</Eyebrow>
-            <span className="tv-pulse h-1.5 w-1.5 rounded-full bg-microAccent" />
-          </div>
+        <div className="relative z-10 mx-auto grid w-full max-w-[1240px] items-center gap-10 pb-12 pt-8 lg:grid-cols-[1fr_1fr] lg:py-16">
+          <div className="flex min-w-0 flex-col gap-7">
+            <div className="tv-reveal flex items-center gap-3">
+              <span className="h-px w-[26px] bg-accentPrimary" />
+              <Eyebrow className="whitespace-nowrap text-accentPrimary">{copy.hero.eyebrow}</Eyebrow>
+              <span className="tv-pulse h-1.5 w-1.5 rounded-full bg-microAccent" />
+            </div>
 
-          {/* The headline arrives word by word (see HomeMotion), with the
-              second line in the brand gradient. Splitting on spaces keeps that
-              treatment working for whatever copy a tenant supplies.
+            {/* The headline arrives word by word (see HomeMotion), with the
+                second line in the brand gradient. Splitting on spaces keeps that
+                treatment working for whatever copy a tenant supplies.
 
-              🔴 The separator has to sit OUTSIDE the span. `.tv-word` is an
-              inline-block so it can be transformed, and a trailing space
-              *inside* an inline-block is trimmed at the end of its line box —
-              which rendered "Beautybooking" with the words jammed together.
-              As a sibling text node it is a real space between two boxes. */}
-          <h1 className="m-0 max-w-[18ch] text-balance font-display text-[clamp(44px,8.4vw,116px)] font-bold leading-[0.94] tracking-[-0.05em]">
-            {/* Each half is its own block so the copy's own split is the line
-                break. Left to flow, "finally" rode up onto the first line and
-                the gradient started mid-sentence. */}
-            <span className="block">
-              {copy.hero.headlineTop.split(' ').map((word, index) => (
-                <Fragment key={`top-${index}`}>
-                  <span className="tv-word">{word}</span>{' '}
-                </Fragment>
-              ))}
-            </span>
-            <span className="block">
-              {copy.hero.headlineBottom.split(' ').map((word, index) => (
-                <Fragment key={`bottom-${index}`}>
-                  <span className="tv-word tv-plume-text">{word}</span>{' '}
-                </Fragment>
-              ))}
-            </span>
-          </h1>
+                🔴 The separator has to sit OUTSIDE the span. `.tv-word` is an
+                inline-block so it can be transformed, and a trailing space
+                *inside* an inline-block is trimmed at the end of its line box —
+                which rendered "Beautybooking" with the words jammed together.
+                As a sibling text node it is a real space between two boxes. */}
+            <h1 className="m-0 max-w-[18ch] text-balance font-display text-[clamp(48px,6.7vw,96px)] font-bold leading-[0.94] tracking-[-0.05em]">
+              {/* Each half is its own block so the copy's own split is the line
+                  break. Left to flow, "finally" rode up onto the first line and
+                  the gradient started mid-sentence. */}
+              <span className="block">
+                {copy.hero.headlineTop.split(' ').map((word, index) => (
+                  <Fragment key={`top-${index}`}>
+                    <span className="tv-word">{word}</span>{' '}
+                  </Fragment>
+                ))}
+              </span>
+              <span className="block">
+                {copy.hero.headlineBottom.split(' ').map((word, index) => (
+                  <Fragment key={`bottom-${index}`}>
+                    <span className="tv-word tv-plume-text">{word}</span>{' '}
+                  </Fragment>
+                ))}
+              </span>
+            </h1>
 
-          <p className="tv-reveal tv-delay-1 m-0 max-w-[56ch] text-[clamp(15px,1.35vw,19px)] leading-[1.6] text-textSecondary">
-            {copy.hero.intro}
-          </p>
+            <p className="tv-reveal tv-delay-1 m-0 max-w-[56ch] text-[clamp(15px,1.35vw,19px)] leading-[1.6] text-textSecondary">
+              {copy.hero.intro}
+            </p>
 
-          <div className="tv-reveal tv-delay-2 flex flex-col gap-4">
-            <CallsToAction copy={copy.hero} />
-            <div className="flex flex-wrap gap-x-6 gap-y-2">
-              <Link
-                href="/looks"
-                className="text-[13px] font-semibold text-textMuted transition hover:text-textPrimary"
-              >
-                {copy.hero.ctaBrowse}
-              </Link>
-              <Link
-                href="/why"
-                className="text-[13px] font-semibold text-textMuted transition hover:text-textPrimary"
-              >
-                {copy.hero.ctaWhy}
-              </Link>
+            <div className="tv-reveal tv-delay-2 flex flex-col gap-4">
+              <CallsToAction copy={copy.hero} />
+              <div className="flex flex-wrap gap-x-6 gap-y-2">
+                <Link
+                  href="/looks"
+                  className="text-[13px] font-semibold text-textMuted transition hover:text-textPrimary"
+                >
+                  {copy.hero.ctaBrowse}
+                </Link>
+                <Link
+                  href="/why"
+                  className="text-[13px] font-semibold text-textMuted transition hover:text-textPrimary"
+                >
+                  {copy.hero.ctaWhy}
+                </Link>
+              </div>
             </div>
           </div>
+          <figure className="m-0 min-w-0">
+            <div className="relative aspect-[3/2] overflow-hidden rounded-[24px]">
+              <Image src={copy.editorial.heroImage.src} alt={copy.editorial.heroImage.alt} fill priority sizes="(min-width: 1024px) 50vw, 100vw" className="object-cover" />
+            </div>
+            <figcaption className="mt-3 text-[11px] leading-relaxed text-textMuted">{copy.editorial.placeholderLabel}</figcaption>
+          </figure>
         </div>
 
         {/* Scroll nudge */}
@@ -395,30 +355,29 @@ export default async function Home() {
         </div>
       </section>
 
-      {/* ── Buzz marquee ──────────────────────────────────────────────
-          Decorative: it is the live feature titles, every one of which is
-          already stated in full further down, so it is hidden from assistive
-          tech rather than read out twice. */}
-      <div
-        aria-hidden="true"
-        className="tv-marquee-track relative overflow-hidden border-y border-surfaceGlass/10 bg-surfaceGlass/[0.02] py-4"
-      >
-        <div className="tv-marquee">
-          {[0, 1].map((copyIndex) => (
-            <div
-              key={copyIndex}
-              className="flex items-center gap-[34px] whitespace-nowrap pr-[34px] font-mono text-[12px] font-bold uppercase tracking-[0.2em] text-textPrimary/55"
-            >
-              {marqueePhrases.map((phrase, index) => (
-                <span key={phrase} className="flex items-center gap-[34px]">
-                  <span>{phrase}</span>
-                  <span className={diamondTones[index % diamondTones.length]}>◆</span>
-                </span>
-              ))}
-            </div>
+      <section id="discovery" className={`${SECTION} py-16`}>
+        <Eyebrow className="text-accentPrimary">{copy.editorial.location}</Eyebrow>
+        <div className="mb-8 mt-4 flex flex-wrap items-end justify-between gap-5">
+          <h2 className="max-w-[20ch] font-display text-[clamp(36px,4.6vw,64px)] font-bold leading-[1.02] tracking-[-0.04em]">{copy.editorial.discoveryTitle}</h2>
+          <Link href="/looks" className="text-sm font-semibold underline underline-offset-4">{copy.hero.ctaBrowse}</Link>
+        </div>
+        <div className="mb-8 flex flex-wrap gap-2" aria-label="Editorial inspiration categories">
+          {copy.editorial.categories.map((category) => (
+            <span key={category} className="rounded-full border border-surfaceGlass/20 px-4 py-2 text-sm text-textSecondary">{category}</span>
           ))}
         </div>
-      </div>
+        <div className="grid grid-cols-2 gap-5 lg:grid-cols-4">
+          {copy.editorial.looks.map((look) => (
+            <figure key={look.src} className="m-0">
+            <div className="relative aspect-[3/4] overflow-hidden rounded-[18px] bg-surfaceGlass/5">
+              <Image src={look.src} alt={look.alt} fill sizes="(min-width: 1024px) 25vw, 50vw" className="object-cover" />
+            </div>
+            <figcaption className="mt-3 font-display text-xl">{look.label}</figcaption>
+          </figure>
+          ))}
+        </div>
+        <p className="mt-5 text-xs leading-relaxed text-textMuted">{copy.editorial.placeholderLabel}</p>
+      </section>
 
       {/* ── Manifesto band ────────────────────────────────────────── */}
       <section
@@ -486,41 +445,43 @@ export default async function Home() {
         </div>
       </section>
 
-      {/* ── One account replaces ──────────────────────────────────── */}
-      <section className="border-y border-surfaceGlass/10 bg-[linear-gradient(160deg,rgb(var(--accent-primary)/0.05),rgb(var(--iris)/0.05))]">
-        <div className={`${SECTION} py-[clamp(48px,7vw,88px)]`}>
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] items-start gap-[clamp(28px,4vw,64px)]">
-            <div className="tv-reveal">
-              <Eyebrow className="mb-3.5">{copy.replaces.label}</Eyebrow>
-              <h2 className="m-0 text-balance font-display text-[clamp(30px,3.6vw,52px)] font-bold leading-[1.02] tracking-[-0.045em]">
-                {copy.replaces.title}
-              </h2>
-              <p className="mb-0 mt-[18px] max-w-[44ch] text-[15px] leading-[1.6] text-textMuted">
-                {copy.replaces.body}
-              </p>
-            </div>
+      {/* ── Spotlight ─────────────────────────────────────────────── */}
+      <section className={`relative overflow-hidden ${SECTION} py-[clamp(52px,8vw,110px)]`}>
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0">
+          <div className="tv-drift absolute right-[-12%] top-[10%] h-[min(560px,85vw)] w-[min(560px,85vw)] rounded-full bg-[radial-gradient(circle,rgb(var(--accent-primary)/0.13),transparent_64%)] blur-[36px]" />
+        </div>
 
-            <dl className="m-0 flex flex-col">
-              {copy.replaces.items.map((item, index) => (
-                <div
-                  key={item.tool}
-                  className={[
-                    'tv-reveal grid gap-x-6 gap-y-1 border-t border-surfaceGlass/10 py-4 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]',
-                    index === copy.replaces.items.length - 1
-                      ? 'border-b border-surfaceGlass/10'
-                      : '',
-                  ].join(' ')}
-                >
-                  <dt className="font-mono text-[11px] uppercase tracking-[0.12em] text-textMuted">
-                    {item.tool}
-                  </dt>
-                  <dd className="m-0 text-[15px] font-medium leading-snug text-textPrimary">
-                    {item.withWhat}
-                  </dd>
-                </div>
-              ))}
-            </dl>
+        <div className="tv-reveal relative mb-[clamp(32px,5vw,58px)]">
+          <div className="mb-4 flex items-center gap-3">
+            <span className="h-px w-[26px] bg-iris" />
+            <Eyebrow>{copy.spotlight.label}</Eyebrow>
           </div>
+          <h2 className="m-0 max-w-[24ch] text-balance font-display text-[clamp(32px,4.6vw,66px)] font-bold leading-none tracking-[-0.048em]">
+            {copy.spotlight.title}{' '}
+            <span className="tv-plume-text">{copy.spotlight.titleAccent}</span>
+          </h2>
+        </div>
+
+        <ol className="mb-8 grid gap-6 md:grid-cols-3">
+          {copy.editorial.journey.map((step, index) => (
+            <li key={step.title} className="border-t border-accentPrimary/30 pt-5">
+            <span className="font-mono text-xs text-accentPrimary">0{index + 1}</span>
+            <h3 className="my-3 font-display text-xl font-semibold">{step.title}</h3>
+            <p className="text-sm leading-relaxed text-textSecondary">{step.body}</p>
+          </li>
+          ))}
+        </ol>
+        <p className="mb-8 max-w-[80ch] text-sm leading-relaxed text-textMuted">{copy.editorial.journeyNote}</p>
+        <div className="relative grid grid-cols-[repeat(auto-fit,minmax(min(100%,300px),1fr))] gap-[clamp(20px,3vw,34px)]">
+          {copy.spotlight.features.map((feature, index) => (
+            <SpotlightCard
+              key={feature.title}
+              feature={feature}
+              legend={copy.legend}
+              tone={index % 2 === 0 ? 'teal' : 'gold'}
+              delayClass={index === 1 ? 'tv-delay-1' : undefined}
+            />
+          ))}
         </div>
       </section>
 
@@ -531,15 +492,15 @@ export default async function Home() {
             <div className="tv-reveal">
               <Eyebrow className="mb-3.5 text-accentPrimary">{copy.clients.label}</Eyebrow>
               <h2 className="m-0 text-balance font-display text-[clamp(30px,3.6vw,52px)] font-bold leading-[1.02] tracking-[-0.045em]">
-                {copy.clients.title}
+                {copy.editorial.trustTitle}
               </h2>
               <p className="mb-0 mt-[18px] max-w-[38ch] text-[15px] leading-[1.6] text-textMuted">
-                {copy.clients.intro}
+                {copy.editorial.trustBody}
               </p>
             </div>
           </div>
 
-          <FeatureRows features={copy.clients.features} legend={copy.legend} tone="teal" />
+          <FeatureRows features={copy.clients.features.slice(0, 2)} legend={copy.legend} tone="teal" />
         </div>
       </section>
 
@@ -595,36 +556,6 @@ export default async function Home() {
         </div>
       </section>
 
-      {/* ── Spotlight ─────────────────────────────────────────────── */}
-      <section className={`relative overflow-hidden ${SECTION} py-[clamp(52px,8vw,110px)]`}>
-        <div aria-hidden="true" className="pointer-events-none absolute inset-0">
-          <div className="tv-drift absolute right-[-12%] top-[10%] h-[min(560px,85vw)] w-[min(560px,85vw)] rounded-full bg-[radial-gradient(circle,rgb(var(--accent-primary)/0.13),transparent_64%)] blur-[36px]" />
-        </div>
-
-        <div className="tv-reveal relative mb-[clamp(32px,5vw,58px)]">
-          <div className="mb-4 flex items-center gap-3">
-            <span className="h-px w-[26px] bg-iris" />
-            <Eyebrow>{copy.spotlight.label}</Eyebrow>
-          </div>
-          <h2 className="m-0 max-w-[24ch] text-balance font-display text-[clamp(32px,4.6vw,66px)] font-bold leading-none tracking-[-0.048em]">
-            {copy.spotlight.title}{' '}
-            <span className="tv-plume-text">{copy.spotlight.titleAccent}</span>
-          </h2>
-        </div>
-
-        <div className="relative grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-[clamp(20px,3vw,34px)]">
-          {copy.spotlight.features.map((feature, index) => (
-            <SpotlightCard
-              key={feature.title}
-              feature={feature}
-              legend={copy.legend}
-              tone={index % 2 === 0 ? 'teal' : 'gold'}
-              delayClass={index === 1 ? 'tv-delay-1' : undefined}
-            />
-          ))}
-        </div>
-      </section>
-
       {/* ── Professionals ─────────────────────────────────────────── */}
       <section id="pros" className={`${SECTION} scroll-mt-8 py-[clamp(48px,7vw,90px)]`}>
         <div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] items-start gap-[clamp(28px,4vw,64px)]">
@@ -643,6 +574,33 @@ export default async function Home() {
           <FeatureRows features={copy.pros.features} legend={copy.legend} tone="gold" />
         </div>
       </section>
+
+      {copy.editorial.progression.length > 0 && (
+        <section className="border-y border-microAccent/20 bg-microAccent/[0.05]">
+          <div className={`${SECTION} py-16`}>
+            <Eyebrow className="text-microAccent">{copy.editorial.upcomingLabel}</Eyebrow>
+            <h2 className="mt-5 max-w-[25ch] font-display text-[clamp(32px,4vw,56px)] font-bold leading-tight tracking-[-0.04em]">{copy.editorial.foundingTitle}</h2>
+            <p className="mt-5 max-w-[65ch] leading-relaxed text-textSecondary">{copy.editorial.foundingBody}</p>
+            {copy.editorial.foundingCard && (
+              <div className="mt-6 max-w-[65ch] rounded-[18px] border border-surfaceGlass/20 p-6 text-sm leading-relaxed text-textSecondary">
+                <p>{copy.editorial.foundingCard}</p>
+                {copy.editorial.foundingPreview && <CardPreview card={copy.editorial.foundingPreview} />}
+              </div>
+            )}
+            <ol className="my-10 grid gap-4 md:grid-cols-3">
+              {copy.editorial.progression.map((stage, index) => (
+                <li key={stage} className="rounded-[18px] border border-microAccent/25 p-6">
+                <span className="font-mono text-xs text-microAccent">0{index + 1}</span>
+                <h3 className="mt-5 font-display text-2xl font-semibold">{stage}</h3>
+                {copy.editorial.progressionCards[stage] && <CardPreview card={copy.editorial.progressionCards[stage]} />}
+              </li>
+          ))}
+            </ol>
+            <p className="mb-7 max-w-[75ch] text-sm leading-relaxed text-textMuted">{copy.editorial.progressionBody}</p>
+            <Link href="/signup/pro" className="inline-flex rounded-full border border-microAccent/50 px-6 py-3 font-semibold">{copy.hero.ctaPro} →</Link>
+          </div>
+        </section>
+      )}
 
       {/* ── The money ─────────────────────────────────────────────── */}
       <section className="border-y border-surfaceGlass/10 bg-microAccent/[0.08]">

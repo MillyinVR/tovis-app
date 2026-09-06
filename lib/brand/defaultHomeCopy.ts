@@ -14,10 +14,9 @@
 //                    pilot, an iPhone beta, or a payments account still in
 //                    test mode. Built is not the same as reachable.
 //
-// There is deliberately NO third state. Anything decided but not built stays
-// off this page; the "what's next" section says so in one sentence instead of
-// listing a roadmap (Tori, 2026-09-05). A page that promises is what a
-// competitor's pitch deck does; this one reports.
+// Live feature rows retain two states. The separately labelled editorial
+// preview describes upcoming concepts at the user's request (2026-09-06);
+// those concepts are never included in the live feature list or JSON-LD.
 //
 // `evidence` is never rendered. It exists so the next session re-verifies a
 // row instead of trusting it: name the file, the deploy, or the runtime probe
@@ -36,17 +35,46 @@ import type { BrandHomeCopy } from './types'
  */
 export function defaultHomeCopy(brandName: string): BrandHomeCopy {
   return {
+    editorial: {
+      heroImage: { src: '/editorial/placeholders/next-self-inclusive-hero.webp', alt: 'Generated editorial portrait of two men and two women with textured cuts, a groomed beard, natural curls, and copper waves' },
+      looks: [
+        { src: '/editorial/placeholders/golden-hour-blonde.webp', label: 'Blonde', alt: 'Generated editorial portrait featuring long honey blonde waves' },
+        { src: '/editorial/placeholders/precision-barbering.webp', label: 'Barbering', alt: 'Generated editorial portrait featuring a textured short haircut and a shaped salt-and-pepper beard' },
+        { src: '/editorial/placeholders/silk-glaze-nails.webp', label: 'Nails', alt: 'Generated editorial close-up of champagne glazed almond nails' },
+        { src: '/editorial/placeholders/soft-focus-brows.webp', label: 'Brows & lashes', alt: 'Generated editorial beauty portrait highlighting natural brows and lifted lashes' },
+      ],
+      location: 'Discover your next look',
+      discoveryTitle: 'What are you becoming next?',
+      placeholderLabel: 'Generated editorial imagery · Placeholder inspiration, not professional results',
+      categories: ['Barbering', 'Cuts & color', 'Beards', 'Curls', 'Extensions', 'Nails', 'Brows & lashes', 'Skin & makeup', 'Bridal'],
+      journey: [
+        { title: 'Bring the inspiration', body: 'Start with a saved photo and tell us what you love about it.' },
+        { title: 'Make it personal', body: 'Share your starting point, beauty history, and how much upkeep fits your life.' },
+        { title: 'Meet your Look Brief', body: 'A starting point for a conversation with your professional about the look and the path to it.' },
+      ],
+      journeyNote: 'Journey preview. Consultation and Look Brief access is currently limited to the founder pilot. Your professional confirms suitability, services, and the final plan.',
+      trustTitle: 'Know before you book',
+      trustBody: 'Explore the work. Meet the professional. Check the starting price and discuss what your look will take. A starting price is not a personalized quote.',
+      // Brand-specific launch programs are opt-in through the brand config.
+      foundingTitle: '',
+      foundingBody: '',
+      foundingCard: '',
+      progressionCards: {},
+      upcomingLabel: 'Coming soon · Program preview',
+      progression: [],
+      progressionBody: '',
+    },
     verifiedOn: '2026-09-05',
     // Rendered as literal prose, not formatted from a Date, so it needs no
     // timezone and never drifts with the server clock.
     verifiedOnLabel: 'September 5, 2026',
 
     hero: {
-      eyebrow: 'BEAUTY · BOOKING · REINVENTED',
-      headlineTop: 'Beauty booking',
-      headlineBottom: 'finally got its upgrade.',
+      eyebrow: 'BEAUTY, REIMAGINED',
+      headlineTop: 'See the look.',
+      headlineBottom: 'Make it yours.',
       intro:
-        `Rides, food, flights, banking: everything in your life got smarter. Booking a beauty pro? Still phone tag, "text me a picture," and a paper card file. ${brandName} brings the chair into the modern world: a feed of real looks from real pros near you, where every look is bookable, by a professional who keeps every dollar you pay.`,
+        `Start with what inspires you. Discover looks, find the professional behind them, and take the next step toward your next version of you with ${brandName}.`,
       ctaClient: 'Find your look',
       ctaPro: "I'm a professional",
       ctaBrowse: 'Browse looks without an account →',
@@ -58,11 +86,11 @@ export function defaultHomeCopy(brandName: string): BrandHomeCopy {
       rollingOut: 'Rolling out',
     },
 
-    manifesto: ['See it.', 'Book it.', 'Keep it.'],
+    manifesto: ['Find inspiration.', 'Become you.'],
 
     loop: {
       label: 'The loop',
-      title: 'From a look you love to a time that is yours, in two taps.',
+      title: 'Inspiration. Meet your next appointment.',
       steps: [
         {
           title: 'Bookable Looks',
@@ -216,9 +244,9 @@ export function defaultHomeCopy(brandName: string): BrandHomeCopy {
     // loudest thing on a page, so it is the last place a caveat should be
     // quiet.
     spotlight: {
-      label: 'Not on the menu anywhere else',
-      title: 'Two things that make the guesswork',
-      titleAccent: 'disappear.',
+      label: 'Consultation · Founder pilot',
+      title: 'You don’t need to know',
+      titleAccent: 'what it’s called.',
       features: [
         {
           eyebrow: 'Smart consultation',
@@ -254,74 +282,26 @@ export function defaultHomeCopy(brandName: string): BrandHomeCopy {
 
     pros: {
       label: 'For professionals',
-      title: 'Run the chair. We’ll run everything else.',
-      intro: 'Every look you post is bookable. Everything after the tap is handled.',
+      title: 'Your work deserves to be seen.',
+      intro: 'Get discovered for your craft. Build relationships that last. Give your reputation room to grow.',
       features: [
         {
-          title: 'Looks that book themselves',
-          body: 'Post a result, it carries a starting price and a Book button. Clients book the look; you see exactly what they are asking for.',
+          title: 'Discovery that starts with your work',
+          body: 'Let clients find the looks you create, explore your profile, and book with you.',
           state: 'live',
-          evidence: 'Book the Look B1–B8 merged and web-deployed 2026-09-01; pro sees the proposal line items (B4/B5).',
+          evidence: 'Book the Look B1–B8 merged and web-deployed 2026-09-01; public /u/[handle] profile and Looks feed.',
         },
         {
-          title: 'Held, not hoped',
-          body: 'A request holds the time the moment it lands. Confirm every one, or switch on instant booking and let the calendar fill itself.',
+          title: 'Relationships beyond one appointment',
+          body: 'Keep notes, visit history, photos, and consent together so you can build on every visit.',
           state: 'live',
-          evidence: 'PENDING owns its slot (BOOKING_BLOCKING_STATUSES, DB EXCLUDE-backed); Professional.autoAcceptBookings toggle (docs/product/BOOK-THE-LOOK-DIRECTION.md decision 4).',
+          evidence: 'Client charts + technical records + consent forms (Aug 2026 code audit); current chart band evidence below.',
         },
         {
-          title: 'A cancellation is never a lost hour',
-          body: 'The last-minute engine works your openings for you: your waitlist first, then clients who have drifted, then nearby fans of your work.',
+          title: 'A reputation that grows with you',
+          body: 'Build your public portfolio and share credited exports of your work wherever your audience lives.',
           state: 'live',
-          evidence: 'LastMinuteTier WAITLIST → REACTIVATION → DISCOVERY (prisma/schema.prisma:199); last-minute job app/api/internal/jobs/last-minute; lib/lastMinute/pickTierPlan.ts.',
-        },
-        {
-          title: 'Their place or yours',
-          body: 'Take appointments at the salon, the suite, or at the client’s door. The calendar knows the difference.',
-          state: 'live',
-          evidence: 'ProfessionalLocationType SALON | SUITE | MOBILE_BASE; Booking.clientAddressId (prisma/schema.prisma).',
-        },
-        {
-          title: 'Your work, everywhere your audience lives',
-          body: 'One tap turns any look into a post-ready export, always credited to you. Grow where you already post.',
-          state: 'live',
-          evidence: 'Social export on web: app/_components/media/ClientMediaExportButton.tsx, lib/pro/socialExportMark.ts (Aug 2026 code audit: 4:5 / 9:16 / video, pro-credited).',
-        },
-        {
-          title: 'Charts and consent, built in',
-          body: 'Notes, allergies, visit history, photos, and signed consent on every client. Not in a notes app.',
-          state: 'live',
-          evidence: 'Client charts + technical records + consent forms (Aug 2026 code audit).',
-        },
-        {
-          title: 'Run it from the chair',
-          body: 'Photos, notes, and the final bill in a live session, synced between the web and the app as you work.',
-          state: 'live',
-          evidence: 'Live session hub, realtime web ⇄ iOS sync (Aug 2026 code audit). Web half reachable today.',
-        },
-        {
-          title: 'True-net finance',
-          body: 'Expenses, write-offs, mileage, and a money trail that ends in a Schedule C. What you keep, not just what you billed.',
-          state: 'live',
-          evidence: 'Pro finance suite: expenses, Schedule-C write-offs, mileage, money trail (Aug 2026 code audit).',
-        },
-        {
-          title: 'Bring your book with you',
-          body: 'Import your services and clients from the app you use now. Nothing to re-type.',
-          state: 'live',
-          evidence: 'Migration import wizard; prod runtime probe 2026-08-25 GET /api/v1/pro/capabilities → importFromAnotherApp: true.',
-        },
-        {
-          title: 'Ranked by bookings, not followers',
-          body: 'The feed lifts a look by the appointments it produced. A great professional with a small following outranks a big account nobody books.',
-          state: 'rolling-out',
-          evidence: 'Booking-conversion boost in lib/looks/personalizedRanking.ts fed by the look-conversion-stats job; ENABLE_PERSONALIZED_FEED is set in prod but its value is Hidden and UNVERIFIED (2026-09-05). Do not promote to live without a runtime probe.',
-        },
-        {
-          title: 'Deposits that enforce themselves',
-          body: 'A deposit at booking and a late-cancel policy that does the awkward part for you.',
-          state: 'rolling-out',
-          evidence: 'No-show protection built, ENABLE_NO_SHOW_PROTECTION → noShowFees: false in prod (probe 2026-08-25); Stripe on hold, prod Stripe in test mode.',
+          evidence: 'Social export on web: app/_components/media/ClientMediaExportButton.tsx, lib/pro/socialExportMark.ts (Aug 2026 code audit).',
         },
       ],
     },
@@ -339,15 +319,15 @@ export function defaultHomeCopy(brandName: string): BrandHomeCopy {
     // Makes no capability claim, so it carries no state: it repeats the hero's
     // two buttons and nothing else.
     closer: {
-      title: 'The chair is open.',
-      titleAccent: 'Take it.',
+      title: 'Your next look',
+      titleAccent: 'starts here.',
     },
 
     next: {
       label: 'What’s next',
-      title: 'We publish what is built, not what is promised.',
-      body: 'Everything marked rolling out is in the product today, behind a switch or a beta. Everything else we are working on stays off this page until it is real.',
-      verifiedPrefix: 'Every claim on this page was checked against the product on',
+      title: 'A little clarity goes a long way.',
+      body: 'Live features are available today. Rolling out means access is limited. Coming-soon concepts are previews, with details still to be confirmed.',
+      verifiedPrefix: 'Existing feature review:',
     },
   }
 }

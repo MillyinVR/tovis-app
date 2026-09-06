@@ -1113,8 +1113,40 @@ export type BrandHomeChartBand = BrandHomeFeature & {
   points: { label: string; body: string }[]
 }
 
+export type BrandHomeCardPreview = {
+  trigger: string
+  previewLabel: string
+  brandName: string
+  tier: string
+  markSrc: string
+  serial: string
+  note: string
+  finish: 'neutral' | 'gold'
+}
+
 /** Public homepage copy (app/page.tsx). See lib/brand/defaultHomeCopy.ts. */
 export type BrandHomeCopy = {
+  /** Brand-owned imagery and clearly labelled previews; never live feature claims. */
+  editorial: {
+    heroImage: { src: string; alt: string }
+    looks: { src: string; alt: string; label: string }[]
+    location: string
+    discoveryTitle: string
+    placeholderLabel: string
+    categories: string[]
+    journey: { title: string; body: string }[]
+    journeyNote: string
+    trustTitle: string
+    trustBody: string
+    foundingTitle: string
+    foundingBody: string
+    foundingCard: string
+    foundingPreview?: BrandHomeCardPreview
+    progressionCards: Record<string, BrandHomeCardPreview>
+    upcomingLabel: string
+    progression: string[]
+    progressionBody: string
+  }
   /** ISO date of the last pass that re-verified EVERY feature row. */
   verifiedOn: string
   /** The same date as literal prose — no Date formatting, no timezone. */

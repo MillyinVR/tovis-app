@@ -5,18 +5,45 @@
 // the factory fills in effects, typography (the Grotesk trio), layout, and the
 // shared pro-calendar copy. White-label brands follow the same shape — see
 // lib/brand/brands/_template.ts and docs/design/white-label-runbook.md.
-import type { BrandConfig } from '../types'
+import type { BrandConfig, BrandHomeCardPreview } from '../types'
 import { createBrandConfig } from '../createBrand'
+import { defaultHomeCopy } from '../defaultHomeCopy'
 import { TOVIS_EYE_SVG } from '../eyeSvg'
+
+const mark = { src: '/brand/tovis/mark.svg', alt: 'tovis', svg: TOVIS_EYE_SVG }
+
+const cardPreview = {
+  trigger: 'Preview the engraved card',
+  previewLabel: 'Design concept · Coming soon',
+  brandName: 'Tovis',
+  markSrc: mark.src,
+  note: 'Illustrative engraving. Final design and eligibility to be confirmed.',
+} satisfies Pick<BrandHomeCardPreview, 'trigger' | 'previewLabel' | 'brandName' | 'markSrc' | 'note'>
+
+const home = defaultHomeCopy('TOVIS')
+home.editorial = {
+  ...home.editorial,
+  location: 'Starting in San Diego',
+  foundingTitle: 'San Diego first. A new beauty community, from the beginning.',
+  foundingBody: 'We’re building toward the Founding 100: the first 100 professionals helping shape what comes next. Explore the professional signup to get started; program launch details are still to be announced.',
+  foundingCard: 'Coming soon: the Founding Member Card. Only the first 100 professionals will ever receive one. It sits below Gold and recognizes founding membership; it does not replace the professional recognition path below.',
+  foundingPreview: { ...cardPreview, tier: 'FOUNDING MEMBER', serial: 'No. — / 100', finish: 'neutral' },
+  progressionCards: {
+    'Numbered Gold TOVIS Card': { ...cardPreview, tier: 'ELITE MEMBER', serial: 'No. —', finish: 'gold' },
+  },
+  progression: ['TOVIS Verified', 'TOVIS Elite', 'Numbered Gold TOVIS Card'],
+  progressionBody: 'A future path for professional recognition, from Verified to Elite to a numbered Gold Card. These programs are not live credentials or protections. Criteria, availability, and card details are still being developed.',
+}
 
 export const tovisBrand: BrandConfig = createBrandConfig({
   id: 'tovis',
   displayName: 'TOVIS',
   tagline: 'The New Age of Self Care',
+  home,
   defaultMode: 'dark',
 
   assets: {
-    mark: { src: '/brand/tovis/mark.svg', alt: 'tovis', svg: TOVIS_EYE_SVG },
+    mark,
     wordmark: { text: 'tovis' },
   },
 

@@ -62,6 +62,19 @@ describe('defaultHomeCopy', () => {
     expect(rendered).not.toMatch(/tovis/i)
   })
 
+  it('does not give another brand the root launch market or recognition programs', () => {
+    expect(JSON.stringify(copy)).not.toContain('San Diego')
+    expect(JSON.stringify(copy)).not.toContain('Founding 100')
+    expect(copy.editorial.progression).toEqual([])
+  })
+
+  it('uses plain consultation language and honest generated-image labels', () => {
+    const rendered = JSON.stringify(copy, (key, value) => key === 'evidence' ? undefined : value)
+    expect(rendered).not.toMatch(/\bAI\b/)
+    expect(copy.editorial.placeholderLabel).toContain('Generated editorial imagery')
+    expect(copy.editorial.placeholderLabel).toContain('not professional results')
+  })
+
   it('counts the tools it claims to replace honestly and carries a receipt for the claim', () => {
     expect(copy.replaces.items.length).toBeLessThanOrEqual(6)
     expect(copy.replaces.title).toContain(String(copy.replaces.items.length === 6 ? 'Six' : ''))
@@ -89,10 +102,11 @@ describe('defaultHomeCopy', () => {
     expect(copy.spotlight.features.length).toBe(2)
   })
 
-  it('names no single beauty trade, because the page is for all of them', () => {
+  it('keeps benefit copy inclusive across trades, outside the discovery categories', () => {
     // Tori, 2026-09-06: the product serves the whole beauty industry (nails,
     // lashes, brows, skin, makeup, barbering, hair), so homepage copy must not
-    // read as a hair app. The words below each name ONE trade's vocabulary and
+    // read as a hair app. Discovery categories and image descriptions can name
+    // trades; the user explicitly requested that mix. The words below each name ONE trade's vocabulary and
     // quietly exclude the rest; they slipped in three times before this test.
     //
     // "chair" is deliberately absent from this list: it is the brand's own
@@ -119,7 +133,7 @@ describe('defaultHomeCopy', () => {
       'waxing',
     ]
     const rendered = JSON.stringify(copy, (key, value) =>
-      key === 'evidence' ? undefined : value,
+      key === 'evidence' || key === 'categories' || key === 'looks' || key === 'heroImage' ? undefined : value,
     )
 
     for (const word of singleTrade) {

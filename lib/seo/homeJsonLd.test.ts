@@ -1,4 +1,5 @@
 // lib/seo/homeJsonLd.test.ts
+import { tovisBrand } from '@/lib/brand/brands/tovis'
 import { describe, expect, it } from 'vitest'
 
 import { defaultHomeCopy } from '@/lib/brand/defaultHomeCopy'
@@ -27,6 +28,16 @@ describe('buildHomeJsonLd', () => {
     }
     expect(featureList).toEqual(liveHomeFeatures(copy).map((f) => f.title))
     expect(featureList.length).toBeGreaterThan(0)
+  })
+
+  it('keeps editorial program previews out of live capabilities', () => {
+    const copy = tovisBrand.home
+    const ld = buildHomeJsonLd({ brandDisplayName: tovisBrand.displayName, url: 'https://example.test/', copy })
+    const featureList = ld.featureList as string[]
+    for (const stage of copy.editorial.progression) expect(featureList).not.toContain(stage)
+    expect(featureList).not.toContain('Look Brief')
+    expect(copy.editorial.journeyNote).toContain('founder pilot')
+    expect(copy.editorial.progressionBody).toContain('not live')
   })
 
   it('drops the money row from the feature list while it is rolling out', () => {
