@@ -1,0 +1,202 @@
+/* ============================================================
+   Homepage motion & texture — shared CSS
+   Imported once from app/globals.css:  @import "./styles/home.css";
+
+   Every colour here resolves through a brand token (rgb(var(--…))), so the
+   page rebrands per tenant and flips with [data-mode] for free. The source
+   design (Claude Design, "Tovis Home Page Live") was authored with inline
+   styles only, so it carried raw hex and adapted breakpoints in JavaScript.
+   Both become CSS here: the palette is already the Peacock Plume token set
+   (#0A1413 → --bg-primary, #15C9A8 → --accent-primary, #F2B43E →
+   --micro-accent, #6B4BE6 → --iris, #1574C4 → --peacock-blue), and real
+   media queries replace the design's resize listener.
+
+   MOTION SAFETY. app/globals.css already disables every animation and
+   transition under prefers-reduced-motion, so nothing below needs its own
+   opt-out. The scroll reveals need one more guarantee though — see
+   .tv-reveal.
+   ============================================================ */
+
+/* ===== Scroll reveal =====
+   The hidden state is scoped to [data-tv-motion="on"], which HomeMotion sets
+   on mount. Without JavaScript (or if the component throws) the attribute is
+   never written, so every revealed element renders at its natural opacity
+   instead of an invisible page. Starting visible and hiding in JS would flash
+   the content first; this way the only cost of no-JS is no animation. */
+.tv-reveal {
+  transition:
+    opacity 0.8s cubic-bezier(0.2, 0.7, 0.2, 1),
+    transform 0.8s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+[data-tv-motion='on'] .tv-reveal {
+  opacity: 0;
+  transform: translateY(18px);
+}
+
+[data-tv-motion='on'] .tv-reveal.tv-in {
+  opacity: 1;
+  transform: none;
+}
+
+/* Stagger steps. Applied to siblings so a row of cards arrives in sequence
+   rather than all at once. */
+.tv-delay-1 { transition-delay: 0.08s; }
+.tv-delay-2 { transition-delay: 0.16s; }
+.tv-delay-3 { transition-delay: 0.24s; }
+
+/* The hero headline arrives word by word. Same mechanism, tighter travel. */
+[data-tv-motion='on'] .tv-word {
+  opacity: 0;
+  transform: translateY(26px);
+}
+
+[data-tv-motion='on'] .tv-word.tv-in {
+  opacity: 1;
+  transform: none;
+}
+
+.tv-word {
+  display: inline-block;
+  transition:
+    opacity 0.7s cubic-bezier(0.2, 0.7, 0.2, 1),
+    transform 0.7s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+/* ===== Plume gradient text =====
+   The signature brand gradient painted through the glyphs. Oversized
+   background + shimmer keeps it moving. `color: transparent` is the fallback
+   that matters: if background-clip:text is unsupported the text would
+   otherwise sit invisible on the ink canvas, so the @supports block below only
+   strips the paint where the clip actually works.
+
+   🔴 TWO gradients, because --plume is a CONSTANT (raw hex in
+   lib/brand/brand.css, deliberately, so the wordmark keeps its iridescence on
+   the dark app-coin in both modes). A constant is blind to the mode it was not
+   drawn for, and this is headline TEXT, not a mark. Measured against the light
+   canvas (#F3F0E7): plume's two brightest stops read 1.62 (#f2b43e) and 1.85
+   (#15c9a8) — below the 3.0 that AA asks of even large text, so the H1 would
+   half-disappear on paper. On ink every plume stop clears (3.36 worst).
+
+   So light mode gets --cta instead, which is DERIVED from --micro-accent →
+   --accent-primary and therefore flips: 6.07 and 5.63 on paper. It trades
+   plume's blue/iris stops for a two-stop ramp, which is the right trade — a
+   headline that cannot be read is not a headline. Dark keeps the full plume. */
+.tv-plume-text {
+  background-image: var(--plume);
+  background-size: 200% auto;
+  animation: tvShimmer 7s linear infinite alternate;
+}
+
+[data-mode='light'] .tv-plume-text {
+  background-image: var(--cta);
+}
+
+@supports (background-clip: text) or (-webkit-background-clip: text) {
+  .tv-plume-text {
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+}
+
+@keyframes tvShimmer {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+
+/* ===== Atmospheric glows =====
+   Two counter-drifting orbs behind the hero and the closer. Sized in the
+   markup; only the motion lives here. */
+@keyframes tvDrift {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(4%, -3%, 0) scale(1.08); }
+  100% { transform: translate3d(0, 0, 0) scale(1); }
+}
+
+@keyframes tvDrift2 {
+  0% { transform: translate3d(0, 0, 0) scale(1.05); }
+  50% { transform: translate3d(-5%, 4%, 0) scale(1); }
+  100% { transform: translate3d(0, 0, 0) scale(1.05); }
+}
+
+.tv-drift { animation: tvDrift 22s ease-in-out infinite; }
+.tv-drift-slow { animation: tvDrift 31s ease-in-out infinite; }
+.tv-drift-alt { animation: tvDrift2 27s ease-in-out infinite; }
+
+/* ===== Cursor glow =====
+   Follows a fine pointer across the hero. HomeMotion writes --tv-cursor-x/y;
+   until it does, the orb stays at opacity 0 and costs nothing. Coarse pointers
+   (touch) never get it — there is no cursor to follow. */
+.tv-cursor-glow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 640px;
+  height: 640px;
+  margin: -320px 0 0 -320px;
+  border-radius: 999px;
+  background: radial-gradient(
+    circle,
+    rgb(var(--accent-primary) / 0.1),
+    transparent 60%
+  );
+  opacity: 0;
+  transform: translate3d(var(--tv-cursor-x, 0px), var(--tv-cursor-y, 0px), 0);
+  transition: opacity 0.6s ease;
+}
+
+@media (pointer: coarse) {
+  .tv-cursor-glow { display: none; }
+}
+
+/* ===== Pulse dot ===== */
+@keyframes tvPulse {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 1; }
+}
+
+.tv-pulse { animation: tvPulse 2.6s ease-in-out infinite; }
+
+/* ===== Scroll nudge ===== */
+@keyframes tvScrollLine {
+  0% { transform: scaleY(0); transform-origin: top; opacity: 0; }
+  40% { opacity: 1; }
+  100% { transform: scaleY(1); transform-origin: top; opacity: 0; }
+}
+
+.tv-scroll-line { animation: tvScrollLine 2.8s ease-in-out infinite; }
+
+/* ===== Buzz marquee =====
+   The track holds the phrase list TWICE; translating it -50% lands the copy
+   exactly where the original started, so the loop is seamless. Duplicating in
+   the markup (rather than here) is what makes that arithmetic true — the
+   aria-hidden copy must stay. */
+@keyframes tvMarquee {
+  0% { transform: translate3d(0, 0, 0); }
+  100% { transform: translate3d(-50%, 0, 0); }
+}
+
+.tv-marquee {
+  display: flex;
+  width: max-content;
+  animation: tvMarquee 42s linear infinite;
+}
+
+/* Reduced motion parks the marquee mid-scroll via the global animation reset.
+   Without a scroll affordance the overflow would then be unreachable, so hand
+   it back to the user. */
+@media (prefers-reduced-motion: reduce) {
+  .tv-marquee-track {
+    overflow-x: auto;
+  }
+}
+
+/* ===== Film grain =====
+   A tiled fractal-noise SVG that breaks up the large flat gradients. Inlined
+   as a data URI so it costs no request. */
+.tv-grain {
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 128px 128px;
+}

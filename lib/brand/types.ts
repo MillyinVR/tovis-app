@@ -955,6 +955,23 @@ export type BrandHomeFeature = {
   evidence: string
 }
 
+/**
+ * A feature given the spotlight treatment: the same checkable row, plus the
+ * label above the card and the chips beneath it.
+ *
+ * ⚠️ A chip is rendered copy, so it is a CLAIM at the smallest size on the
+ * page, where it is least likely to be re-read. Every chip must be covered by
+ * the row's own `evidence`, and where a row is `rolling-out` the last chip
+ * names the limit (the beta, the pilot) rather than leaving the caveat to the
+ * state pill alone.
+ */
+export type BrandHomeSpotlightFeature = BrandHomeFeature & {
+  eyebrow: string
+  /** Second paragraph, set quieter than `body`. */
+  aside: string
+  chips: string[]
+}
+
 /** Public homepage copy (app/page.tsx). See lib/brand/defaultHomeCopy.ts. */
 export type BrandHomeCopy = {
   /** ISO date of the last pass that re-verified EVERY feature row. */
@@ -992,8 +1009,23 @@ export type BrandHomeCopy = {
     evidence: string
   }
   clients: { label: string; title: string; intro: string; features: BrandHomeFeature[] }
+  /**
+   * The two-card feature spotlight. A promoted pair, not a third list: a
+   * spotlight row is a full feature (state + evidence, held to the same tests)
+   * that has been LIFTED out of `clients`/`pros` rather than copied, so no
+   * title appears twice and the counts stay honest.
+   */
+  spotlight: {
+    label: string
+    title: string
+    /** Tail of the title, painted in the brand gradient. */
+    titleAccent: string
+    features: BrandHomeSpotlightFeature[]
+  }
   pros: { label: string; title: string; intro: string; features: BrandHomeFeature[] }
   money: BrandHomeFeature & { label: string; cta: string }
+  /** Closing call to action. Repeats the hero's buttons; makes no new claim. */
+  closer: { title: string; titleAccent: string }
   next: { label: string; title: string; body: string; verifiedPrefix: string }
 }
 

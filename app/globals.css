@@ -2,6 +2,7 @@
 @import "tailwindcss";
 @import "leaflet/dist/leaflet.css";
 @import "./styles/footers.css";
+@import "./styles/home.css";
 @config "../tailwind.config.js";
 
 /* Tailwind v4 auto-detects sources by walking the repo, so it also scans the
