@@ -317,7 +317,12 @@ export type ConsultPlanVersion = {
   revisionId: string
   revision: number
   createdAt: Date
-  analysis: ConsultAnalysisPayloadDTO
+  /**
+   * Null when this consult holds only ONE version: there is nothing to diff it
+   * against, so the payload is never read. Callers that diff must skip a null
+   * — and with one version there is no pair to skip.
+   */
+  analysis: ConsultAnalysisPayloadDTO | null
 }
 
 /**
@@ -335,6 +340,30 @@ export type ConsultPlanVersion = {
 export async function loadConsultPlanVersions(
   consultSessionId: string,
 ): Promise<ConsultPlanVersion[]> {
+  // 🔴 Count before reading. The thread is POLLED while a run is going, and an
+  // analysis payload is several KB of JSON — loading and normalizing up to four
+  // of them on every poll to discover there is only one, and therefore nothing
+  // to diff, is the whole cost for none of the benefit. The overwhelmingly
+  // common shape is exactly one version.
+  const versionCount = await countConsultPlanVersions(prisma, consultSessionId)
+  if (versionCount < 2) {
+    if (versionCount === 0) return []
+    const only = await prisma.consultRevision.findFirstOrThrow({
+      where: { consultSessionId, kind: ConsultRevisionKind.ANALYSIS },
+      select: { id: true, revision: true, createdAt: true },
+    })
+    // The payload is deliberately NOT read: with one version there is nothing
+    // to compare it against, and the plan card renders from its own state.
+    return [
+      {
+        revisionId: only.id,
+        revision: only.revision,
+        createdAt: only.createdAt,
+        analysis: null,
+      },
+    ]
+  }
+
   const rows = await prisma.consultRevision.findMany({
     where: { consultSessionId, kind: ConsultRevisionKind.ANALYSIS },
     orderBy: [{ revision: 'asc' }, { id: 'asc' }],

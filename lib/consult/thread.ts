@@ -293,7 +293,16 @@ const THREAD_SESSION_SELECT = {
     select: {
       ...CONSULT_OPEN_WINDOW_SELECT.booking.select,
       serviceId: true,
-      service: { select: { name: true } },
+      // 🔴 The nested select is MERGED, not replaced. Spreading the outer one
+      // and then writing `service:` again silently drops the category fields
+      // the anchor rule reads — the compiler caught it, which is the whole
+      // reason these selects are spread rather than hand-listed.
+      service: {
+        select: {
+          ...CONSULT_OPEN_WINDOW_SELECT.booking.select.service.select,
+          name: true,
+        },
+      },
     },
   },
   // The SSOT's OWN select, not a copy of its field list: the display-name rule
@@ -795,7 +804,9 @@ export async function loadConsultThread(args: {
     for (let index = 1; index < versions.length; index += 1) {
       const previous = versions[index - 1]
       const current = versions[index]
-      if (!previous || !current) continue
+      // A null payload only happens on the single-version fast path, which this
+      // loop never enters — but skipping is the honest guard, not a cast.
+      if (!previous?.analysis || !current?.analysis) continue
       const changes = diffConsultPlans({
         previous: previous.analysis,
         next: current.analysis,

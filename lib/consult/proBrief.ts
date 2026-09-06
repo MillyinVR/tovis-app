@@ -131,7 +131,7 @@ async function loadBriefPlanDiff(
   const versions = await loadConsultPlanVersions(consultSessionId)
   const current = versions[versions.length - 1]
   const previous = versions[versions.length - 2]
-  if (!current || !previous) {
+  if (!current?.analysis || !previous?.analysis) {
     return { planVersion: Math.max(versions.length, 1), planChanges: [] }
   }
   return {

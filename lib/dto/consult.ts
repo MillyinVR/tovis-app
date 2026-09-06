@@ -2006,14 +2006,25 @@ export type ConsultThreadPlanMessageDTO = {
   /**
    * P7a-3: which plan version `results` is. 1 for the first analysis, 2 after
    * the first rerun. Zero while none exists.
+   *
+   * 🔴 OPTIONAL on the wire, like `serviceEstimate` and `inspirationAnalysis`
+   * before it, and for a reason that is not cosmetic: the generator marks a
+   * required field REQUIRED, and tovis-ios CI validates its fixtures against
+   * this repo's schema on `main`. A required field here reddens iOS main the
+   * instant this merges — and since the same change adds a new message KIND
+   * (which cannot validate against the OLD schema either), the two repos
+   * deadlock: neither can land first. Optional breaks the cycle, and it is the
+   * convention every field added since P5a already follows.
+   *
+   * The server always sends both.
    */
-  planVersion: number
+  planVersion?: number
   /**
    * P7a-3: an input changed after this version was built, so a new one is
    * coming. The card says so instead of showing a plan the client already knows
-   * is out of date.
+   * is out of date. Optional on the wire for the reason above.
    */
-  updatePending: boolean
+  updatePending?: boolean
 }
 
 /**
