@@ -60,6 +60,10 @@ export const CONSULT_INSPIRATION_NEUTRAL_VALUES: ReadonlySet<string> = new Set([
   // give and it must not become a detail on the brief, which is exactly what
   // this set means.
   'nothing-in-particular',
+  // P5g — the region cards' own "nothing here". "Not sure what I love" and
+  // "nothing I'd change" are both real answers and neither is a detail on the
+  // brief, which is exactly what membership of this set means.
+  'nothing-to-change',
 ])
 
 /**
@@ -171,6 +175,22 @@ export type ConsultInspirationPackQuestion = Omit<
    * question has no `prompts` entry to look up and never asserts one.
    */
   readonly composedPrompt: boolean
+  /**
+   * P5g — the question OFFERS only the options its `regionGroup` attributes
+   * were actually read as, plus any neutral value.
+   *
+   * The pack still declares all of them, and that is the point: which options
+   * a client sees depends on HER photograph, but what a stored payload may
+   * legally contain must not, or her answers would stop validating the moment
+   * she swapped the picture. So the pack is the full vocabulary, the write
+   * path validates against the pack, and this flag narrows only what is SHOWN
+   * and what is derived (./cards.ts).
+   *
+   * 🔴 This is B5 restated for the region cards: a light-blonde reference
+   * offers no copper region to tap, because no option exists that the reading
+   * did not produce.
+   */
+  readonly optionsFromReading: boolean
   /** How a non-neutral selection here reads on the professional's brief. */
   readonly detailSentiment: ConsultInspirationExactDetailDTO['sentiment']
   /**
@@ -330,6 +350,7 @@ export function inspirationQuestion(args: {
     reopens: null,
     valueSentiments: null,
     composedPrompt: false,
+    optionsFromReading: false,
   }
 }
 
@@ -362,6 +383,8 @@ export function inspirationCard(args: {
   catalogDetail?: ConsultInspirationCatalogDetail | null
   countsAsDetail?: boolean
   composedPrompt?: boolean
+  /** P5g — offer only the options this client's own reading supports. */
+  optionsFromReading?: boolean
 }): ConsultInspirationPackQuestion {
   return {
     key: args.key,
@@ -381,5 +404,6 @@ export function inspirationCard(args: {
     reopens: args.reopens ?? null,
     valueSentiments: args.valueSentiments ?? null,
     composedPrompt: args.composedPrompt ?? false,
+    optionsFromReading: args.optionsFromReading ?? false,
   }
 }

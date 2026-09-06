@@ -51,6 +51,16 @@ export const defaultClientConsultThreadCopy: BrandClientConsultThreadCopy = {
   estimateReady:
     'Your plan firmed up, so the price on your appointment has too. {pro} confirms the final number at your visit.',
 
+  followUpIntro:
+    'A couple of things I want to check with you, now that I’ve had a proper look. They’re quick, and they change what {pro} plans.',
+  // 🔴 Honest, not apologetic. She is told the clever questions did not happen
+  // AND that the ones below are the ones that actually matter — which is true,
+  // because a fallback only ever asks the safety questions.
+  followUpFallback:
+    'I couldn’t think of the next question just now — so here are the essentials, the ones {pro} needs either way.',
+  followUpDone:
+    'That’s everything I need. {pro} has the rest — see you at your appointment.',
+
   chartCopyLabel:
     'Keep these photos on my chart with {pro}, so we can come back to them — and so I can rework your plan if you change anything before your appointment. Untick this and they’re deleted as soon as your plan is built.',
 

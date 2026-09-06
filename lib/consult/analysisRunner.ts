@@ -24,7 +24,9 @@
 import 'server-only'
 
 import { waitUntil } from '@vercel/functions'
+import { ConsultActorType } from '@prisma/client'
 
+import { prisma } from '@/lib/prisma'
 import { safeError } from '@/lib/security/logging'
 
 import {
@@ -35,6 +37,7 @@ import {
 import { dueConsultRerunSessionIds } from './analysisRerun'
 import { dueConsultAnalysisRunIds } from './analysisRun'
 import { notifyConsultAnalysisRunSettled } from './analysisNotifications'
+import { generateConsultFollowUpRound } from './followUpContract'
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 
 export type ProcessConsultAnalysisRunsResult = {
@@ -67,6 +70,46 @@ async function promoteDueConsultReruns(now: Date, take: number): Promise<number>
 }
 
 /**
+ * P5g — buy the FIRST follow-up round for a plan that just published.
+ *
+ * Here, and not on the thread read, for two reasons. This is a background
+ * context with the budget for a provider call, so nobody waits on it; and a GET
+ * that spends money is a GET a retry or a poll can spend twice.
+ *
+ * "After the photos" in the P5g brief is this instant: the guided pack is what
+ * produced the plan, so a plan existing IS the photos being in. Rounds two and
+ * three are bought by the answer that closes the round before them
+ * (lib/consult/followUpContract.ts).
+ *
+ * 🔴 Never allowed to fail the run. The analysis is finished and published by
+ * the time this is called; throwing here would turn a completed plan into a
+ * FAILED tick and re-run three paid calls for the sake of a follow-up question.
+ * Every failure inside `generateConsultFollowUpRound` already has a designed
+ * answer (the safety fallback), so what is caught here is only the unexpected.
+ */
+async function openFollowUpRound(runId: string, now: Date): Promise<void> {
+  try {
+    const run = await prisma.consultAnalysisRun.findUnique({
+      where: { id: runId },
+      select: { consultSessionId: true },
+    })
+    if (!run) return
+    await generateConsultFollowUpRound(
+      {
+        consultSessionId: run.consultSessionId,
+        actor: { type: ConsultActorType.SYSTEM, id: null },
+      },
+      { now },
+    )
+  } catch (error) {
+    console.error('consult follow-up round could not be opened', {
+      runId,
+      error: safeError(error),
+    })
+  }
+}
+
+/**
  * Drain due runs. `take` defaults to 1 — see the header before raising it.
  */
 export async function processConsultAnalysisRuns(args?: {
@@ -89,6 +132,9 @@ export async function processConsultAnalysisRuns(args?: {
     if (outcome.result === 'COMPLETED' || outcome.result === 'FAILED_FINAL') {
       await notifyConsultAnalysisRunSettled({ runId: outcome.runId })
       settled = true
+    }
+    if (outcome.result === 'COMPLETED') {
+      await openFollowUpRound(outcome.runId, now)
     }
   }
 

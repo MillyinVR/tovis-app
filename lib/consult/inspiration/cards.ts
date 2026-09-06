@@ -28,11 +28,13 @@ import type {
   ConsultInspirationAnalysisFieldDTO,
   ConsultInspirationAnalysisRegionDTO,
   ConsultInspirationCardDTO,
+  ConsultInspirationCardOptionDTO,
   ConsultInspirationCardTierDTO,
 } from '@/lib/dto/consult'
 import type { BrandClientConsultInspirationCopy } from '@/lib/brand/types'
 
 import {
+  attributeFromOptionValue,
   KEEP_AS_IS_KEY,
   SPARK_FOCUS_KEY,
   UNDERSTANDING_CHECK_KEY,
@@ -98,14 +100,28 @@ export function unionConsultInspirationRegions(
   const top = Math.min(...boxes.map((box) => box.y))
   const right = Math.max(...boxes.map((box) => box.x + box.w))
   const bottom = Math.max(...boxes.map((box) => box.y + box.h))
-  const x = Math.max(0, Math.min(1, left))
-  const y = Math.max(0, Math.min(1, top))
+  const x = round4(Math.max(0, Math.min(1, left)))
+  const y = round4(Math.max(0, Math.min(1, top)))
   return {
     x,
     y,
-    w: Math.max(0, Math.min(1, right) - x),
-    h: Math.max(0, Math.min(1, bottom) - y),
+    w: round4(Math.max(0, Math.min(1, right) - x)),
+    h: round4(Math.max(0, Math.min(1, bottom) - y)),
   }
+}
+
+/**
+ * Four decimal places — the SAME precision the stored regions carry.
+ *
+ * `right - x` is a floating-point subtraction, so the union of a single box
+ * came back as `w: 0.29999999999999993` for a stored `0.3`. It rendered
+ * identically and it was still wrong: the union of one box is that box, and a
+ * helper that cannot say so makes every test of it approximate. The vision
+ * sanitizer rounds its regions to four places on the way in
+ * (lib/consult/inspirationVision.ts), so this is the same grid, not a new one.
+ */
+function round4(value: number): number {
+  return Math.round(value * 10_000) / 10_000
 }
 
 /** Is this attribute worth showing the client as a card of its own? */
@@ -132,6 +148,27 @@ function attributeShortName(
   value: string,
 ): string | null {
   return copy.cards.attributeShortNames[`${attribute}:${value}`] ?? null
+}
+
+/**
+ * P5g — what a tappable REGION is called.
+ *
+ * The reading's own short name where there is one ("cool, silvery cast"), so
+ * the label describes THIS photograph rather than naming a category. The
+ * per-attribute fallback covers a value the copy table has not been given a
+ * phrase for yet — a label that says "the warmth in it" is worse than one that
+ * says "cool, silvery cast" and far better than one that says `tone:COOL`.
+ */
+function regionOptionLabel(
+  copy: BrandClientConsultInspirationCopy,
+  attribute: ConsultInspirationAnalysisFieldDTO,
+  value: string,
+): string {
+  return (
+    attributeShortName(copy, attribute, value) ??
+    copy.cards.attributeFallbackNames[attribute] ??
+    attribute
+  )
 }
 
 /**
@@ -280,8 +317,82 @@ export function buildConsultInspirationCard(args: {
       attributeValue: observed.value,
       name: attributeName(copy, attribute, observed.value),
       region: observed.region,
+      presentation: 'CROP',
       optionRegions: [],
       question: toConsultInspirationQuestionDTO(args.pack, question, copy),
+      selectedValues: [...(args.answers[question.key] ?? [])],
+    }
+  }
+
+  // ── P5g — a REGION PICKER ────────────────────────────────────────────────
+  //
+  // One picture, every attribute the reading settled drawn on it as a tappable
+  // area, multi-select. The options are built from HER reading, not from the
+  // pack's full list, which is what makes "a blonde reference offers no copper
+  // region" structural rather than remembered.
+  //
+  // 🔴 A neutral option ("not sure", "nothing to change") is ALWAYS offered
+  // and never carries a region. It is what a client whose reference could not
+  // be read at all still gets to answer, and it is why this card — unlike a
+  // prep card — is never suppressed.
+  if (question.optionsFromReading) {
+    const options: ConsultInspirationCardOptionDTO[] = []
+    for (const option of question.options) {
+      const group = question.regionGroup?.[option.value] ?? []
+      if (group.length === 0) {
+        // The neutral value: no attribute behind it, so no reading to check
+        // and no box to draw.
+        options.push({
+          value: option.value,
+          label: consultInspirationOptionLabel(question, option, copy),
+          region: null,
+        })
+        continue
+      }
+      const readable = group.filter((field) =>
+        consultInspirationAttributeIsCardworthy(reading, field),
+      )
+      if (readable.length !== group.length) continue
+      const [attribute] = readable
+      // One attribute per option on this card, so the label is that
+      // attribute's own reading rather than a group name.
+      options.push({
+        value: option.value,
+        label:
+          readable.length === 1 && attribute
+            ? regionOptionLabel(copy, attribute, reading![attribute].value)
+            : consultInspirationOptionLabel(question, option, copy),
+        region: unionConsultInspirationRegions(
+          readable.map((field) => reading![field].region),
+        ),
+      })
+    }
+    return {
+      questionKey: question.key,
+      tier: question.tier,
+      attribute: null,
+      attributeValue: null,
+      name: null,
+      // 🔴 Null on purpose: the picker shows the WHOLE reference and draws the
+      // options on top of it. A `region` here would crop the picture the boxes
+      // are measured against, and every box would then point somewhere else.
+      region: null,
+      presentation: 'REGION_PICKER',
+      optionRegions: options,
+      question: {
+        ...toConsultInspirationQuestionDTO(args.pack, question, copy),
+        // The wire question must offer exactly what the picker draws, so the
+        // "you chose…" summary and the buttons a non-picker client falls back
+        // to cannot name an option this photograph never produced.
+        options: options.map((option) => ({
+          value: option.value,
+          label: option.label,
+        })),
+        maxSelections: Math.max(
+          1,
+          options.filter((option) => option.region !== null).length,
+        ),
+      },
       selectedValues: [...(args.answers[question.key] ?? [])],
     }
   }
@@ -303,6 +414,7 @@ export function buildConsultInspirationCard(args: {
     attributeValue: null,
     name: null,
     region: null,
+    presentation: 'CROP',
     // Per-option crops: "the color" and "the shape of it" are two visibly
     // different parts of one photograph, and an option whose group the reading
     // did not settle falls back to the whole image rather than to a wrong box.
@@ -409,6 +521,38 @@ export function deriveConsultInspirationPreferences(args: {
         if (value === 'yes') preferences.wants.push(pair)
         else if (value === 'not-this') preferences.avoids.push(pair)
         else if (value === 'not-sure') preferences.unsure.push(pair)
+      }
+      continue
+    }
+
+    // ── P5g — a REGION card's taps ─────────────────────────────────────────
+    //
+    // Each tap names an ATTRIBUTE; what she said about it is the card's own
+    // sentiment — love or change. The pair that lands in `wants`/`avoids` is
+    // `attribute:VALUE`, byte-identical to what the eight prep cards produced,
+    // so the analysis prompt, the brief and Stage 4's tier 2 read exactly what
+    // they read before. Two moves replaced eight cards; nothing downstream can
+    // tell the difference.
+    //
+    // 🔴 An answer about an attribute this reading did not settle is DROPPED,
+    // not guessed at — the same rule the card follows, so what the analysis is
+    // told and what she was shown cannot disagree. That is not hypothetical:
+    // the write path validates against the PACK (all eight), while the picker
+    // only ever offered her the readable ones, so the two lists differ by
+    // construction and a swapped reference makes a stored answer stale.
+    if (question.optionsFromReading) {
+      for (const value of selected) {
+        if (CONSULT_INSPIRATION_NEUTRAL_VALUES.has(value)) continue
+        const attribute = attributeFromOptionValue(value)
+        if (!attribute) continue
+        if (!consultInspirationAttributeIsCardworthy(args.reading, attribute)) {
+          continue
+        }
+        const pair = `${attribute}:${args.reading![attribute].value}`
+        const sentiment =
+          question.valueSentiments?.[value] ?? question.detailSentiment
+        if (sentiment === 'DISLIKE') preferences.avoids.push(pair)
+        else preferences.wants.push(pair)
       }
       continue
     }

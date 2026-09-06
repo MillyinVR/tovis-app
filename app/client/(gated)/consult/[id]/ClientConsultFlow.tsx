@@ -48,6 +48,7 @@ import type {
   ConsultThreadMessageDTO,
   ConsultThreadPhotoRequestMessageDTO,
   ConsultThreadPlanMessageDTO,
+  ConsultThreadFollowUpMessageDTO,
   ConsultThreadPlanUpdateMessageDTO,
   ConsultThreadQuestionMessageDTO,
 } from '@/lib/dto/consult'
@@ -572,6 +573,29 @@ export default function ClientConsultFlow({
       })
     })
 
+  /**
+   * P5g — one adaptive follow-up answer.
+   *
+   * The client posts a key and an enum and nothing else. WHERE the answer is
+   * filed (the intake revision, or the round) is the server's decision, made
+   * from the home the round already recorded — a client that had to know the
+   * routing is a client that can get it wrong, on two platforms, in two ways.
+   */
+  const answerFollowUp = (
+    message: ConsultThreadFollowUpMessageDTO,
+    selectedValues: string[],
+  ) =>
+    run(async () => {
+      await api(`${base}/follow-up`, {
+        method: 'POST',
+        body: JSON.stringify({
+          idempotencyKey: newKey(),
+          questionKey: message.questionKey,
+          selectedValues,
+        }),
+      })
+    })
+
   // ── Photos ────────────────────────────────────────────────────────────────
   const setSlotPreview = useCallback((shotKey: string, blob: Blob) => {
     setSlotPreviews((current) => {
@@ -792,6 +816,7 @@ export default function ClientConsultFlow({
             onSkipInspiration={skipInspiration}
             onUploadInspiration={uploadInspiration}
             onAnswerInspiration={answerInspiration}
+            onAnswerFollowUp={answerFollowUp}
             copy={copy}
             inspirationImage={inspirationImage}
             onOpenInspirationFull={() => setInspirationFullscreen(true)}
@@ -834,6 +859,7 @@ function ConsultThreadMessage({
   onSkipInspiration,
   onUploadInspiration,
   onAnswerInspiration,
+  onAnswerFollowUp,
   copy,
   inspirationImage,
   onOpenInspirationFull,
@@ -866,6 +892,10 @@ function ConsultThreadMessage({
   readingInspiration: boolean
   inspirationReadError: string | null
   onRetryInspirationRead: (inspirationId: string) => void
+  onAnswerFollowUp: (
+    message: ConsultThreadFollowUpMessageDTO,
+    selectedValues: string[],
+  ) => void
   onAnswerInspiration: (
     message: ConsultThreadInspirationMessageDTO,
     question: ConsultInspirationQuestionDTO,
@@ -956,6 +986,15 @@ function ConsultThreadMessage({
 
     case 'PLAN_UPDATE':
       return <PlanUpdateMessage message={message} />
+
+    case 'FOLLOW_UP':
+      return (
+        <FollowUpMessage
+          message={message}
+          busy={busy}
+          onAnswer={onAnswerFollowUp}
+        />
+      )
   }
 }
 
@@ -2093,6 +2132,23 @@ function InspirationCardMessage({
 }) {
   const answered = card.selectedValues.length > 0
   const optionCrops = card.optionRegions.filter((option) => option.region !== null)
+
+  // P5g — the two region moves render as a picker over the whole photograph.
+  // Everything else is P5d's crop card, unchanged.
+  if (card.presentation === 'REGION_PICKER' && !answered) {
+    return (
+      <ThreadCard>
+        <InspirationRegionPicker
+          card={card}
+          busy={busy}
+          image={image}
+          onAnswer={(values) => onAnswer(message, card.question, values)}
+          onOpenFull={onOpenFull}
+        />
+      </ThreadCard>
+    )
+  }
+
   return (
     <ThreadCard dimmed={answered}>
       {image.url ? (
@@ -2178,6 +2234,273 @@ function InspirationCardMessage({
           showLabel={false}
           onAnswer={(question, values) => onAnswer(message, question, values)}
         />
+      )}
+    </ThreadCard>
+  )
+}
+
+/**
+ * P5g — "Tap what you love", and its twin "Anything you'd change?".
+ *
+ * The WHOLE reference with every readable attribute drawn on it as a tappable
+ * area, multi-select. Two moves replace the eight one-question cards P5d shipped
+ * — same reading, same regions, same stored vocabulary, a fifth of the taps.
+ *
+ * 🔴 The boxes are positioned as PERCENTAGES of the rendered image, so they
+ * track it at any width without measuring anything. The image is drawn with
+ * `object-contain` inside a fixed aspect box and the overlay is that same box,
+ * which is what keeps a region over the part of the photograph it was measured
+ * against — an overlay sized to the CONTAINER instead would drift the moment the
+ * photo's aspect differed from it.
+ *
+ * 🔴 Tapping a region zooms to it and names it. That is the Stage 2 rule
+ * surviving the redesign: she sees the part of her own picture before anything
+ * calls it "ash", and the word arrives under the zoom, not over the button.
+ */
+function InspirationRegionPicker({
+  card,
+  busy,
+  image,
+  onAnswer,
+  onOpenFull,
+}: {
+  card: ConsultInspirationCardDTO
+  busy: boolean
+  image: ReturnType<typeof useConsultInspirationImage>
+  onAnswer: (values: string[]) => void
+  onOpenFull: () => void
+}) {
+  const [selected, setSelected] = useState<string[]>([])
+  const [zoomed, setZoomed] = useState<string | null>(null)
+
+  const regions = card.optionRegions.filter((option) => option.region !== null)
+  const neutral = card.optionRegions.filter((option) => option.region === null)
+  const zoomedOption = regions.find((option) => option.value === zoomed) ?? null
+
+  const toggle = (value: string) => {
+    setSelected((current) =>
+      current.includes(value)
+        ? current.filter((entry) => entry !== value)
+        : [...current, value],
+    )
+  }
+
+  return (
+    <div className="grid gap-3">
+      {/* 🔴 ABOVE the picture, and that is not a break with Stage 2's rule —
+          it is the rule read properly. What must come after its picture is the
+          NAME of a thing she has never heard of ("some people call it ash"),
+          and that still does: it appears under the zoom, on tap. This is an
+          INSTRUCTION, and a grid of unlabelled boxes with no instruction above
+          it is a picture she does not know she is allowed to touch. */}
+      <p
+        className="text-sm font-bold text-textPrimary"
+        data-testid="consult-inspiration-card-prompt"
+      >
+        {card.question.label}
+      </p>
+      {image.url ? (
+        <div className="relative">
+          {/* The zoom is a REPLACEMENT for the picker, not an overlay on it:
+              she is looking at one thing at a time, and a box drawn over a
+              zoomed crop would point at the wrong part of it. */}
+          {zoomedOption?.region ? (
+            <div className="grid gap-2">
+              <InspirationRegionCrop
+                src={image.url}
+                region={zoomedOption.region}
+                alt={zoomedOption.label}
+                onOpen={onOpenFull}
+              />
+              {/* 🔴 UNDER the crop. Never above it. */}
+              <p
+                className="text-sm leading-6 text-textPrimary"
+                data-testid="consult-region-zoom-name"
+              >
+                {zoomedOption.label}
+              </p>
+              <button
+                type="button"
+                className={`${BUTTON_SECONDARY} justify-self-start`}
+                onClick={() => setZoomed(null)}
+              >
+                Back to the whole photo
+              </button>
+            </div>
+          ) : (
+            <div
+              // 🔴 Width-capped and centred. A portrait reference rendered at
+              // the card's full width is ~1.5x the viewport tall on a desktop
+              // browser, which puts "Tap what you love." and every answer below
+              // the fold — she is asked a question she cannot see while looking
+              // at a photograph she cannot fit on screen. Caught by taking a
+              // screenshot; every assertion about the boxes passed.
+              //
+              // ⚠️ The cap is on WIDTH, not height. The boxes are percentages
+              // of this element, and it is sized by the image's own aspect —
+              // capping the height instead would letterbox the picture inside a
+              // box the percentages still refer to, and every region would
+              // drift off the part it was measured against.
+              className="relative mx-auto w-full max-w-[22rem] overflow-hidden rounded-xl border border-surfaceGlass/10 bg-bgSurface"
+              data-testid="consult-region-picker"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={image.url}
+                alt="Your inspiration photo"
+                className="block w-full"
+              />
+              {regions.map((option) => {
+                const region = option.region!
+                const active = selected.includes(option.value)
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    disabled={busy}
+                    data-testid={`consult-region-${option.value}`}
+                    aria-pressed={active}
+                    aria-label={option.label}
+                    onClick={() => {
+                      toggle(option.value)
+                      setZoomed(option.value)
+                    }}
+                    // A box sits on an arbitrary photograph, so an unselected
+                    // one needs more than a mid-tone outline to read as a
+                    // control — it gets a ring and a shadow, the same call Tori
+                    // made for the rail icons over a photo.
+                    className={`absolute rounded-lg border-2 shadow-md transition ${
+                      active
+                        ? 'border-accent bg-accent/30 ring-2 ring-accent/40'
+                        : 'border-surfaceGlass/80 bg-scrim/25 ring-1 ring-bgSurface/70'
+                    }`}
+                    style={{
+                      left: `${region.x * 100}%`,
+                      top: `${region.y * 100}%`,
+                      width: `${region.w * 100}%`,
+                      height: `${region.h * 100}%`,
+                    }}
+                  />
+                )
+              })}
+            </div>
+          )}
+        </div>
+      ) : image.failed ? (
+        <div
+          role="alert"
+          data-testid="consult-inspiration-card-image-error"
+          className="rounded-lg border border-toneWarn/30 bg-toneWarn/10 px-3 py-2"
+        >
+          <p className="text-xs leading-5 text-textPrimary">
+            We couldn’t load your inspiration photo for this one.
+          </p>
+          <button
+            type="button"
+            className={`${BUTTON_SECONDARY} mt-2`}
+            onClick={image.retry}
+          >
+            Retry
+          </button>
+        </div>
+      ) : null}
+
+      {/* What she has tapped so far, in words. A row of highlighted boxes is
+          not a receipt — she should be able to read back what she said. */}
+      {selected.length > 0 ? (
+        <p
+          className="text-xs leading-5 text-textSecondary"
+          data-testid="consult-region-selection"
+        >
+          {regions
+            .filter((option) => selected.includes(option.value))
+            .map((option) => option.label)
+            .join(', ')}
+        </p>
+      ) : null}
+
+      <div className="grid gap-2">
+        {neutral.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            disabled={busy}
+            className={`${BUTTON_SECONDARY} text-left`}
+            onClick={() => onAnswer([option.value])}
+          >
+            {option.label}
+          </button>
+        ))}
+        <button
+          type="button"
+          disabled={busy || selected.length === 0}
+          className={`${BUTTON_PRIMARY} justify-self-start`}
+          onClick={() => onAnswer(selected)}
+        >
+          Next
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * P5g — one adaptive follow-up question.
+ *
+ * A plain card: the model's sentence, then its options as buttons. No crop,
+ * because this question is not about the picture — it is about what everything
+ * read so far implies, which is exactly why it could not have been asked
+ * earlier.
+ *
+ * 🔴 The fallback says so. A round the model could not write renders the
+ * server's own sentence above it (`follow-up-fallback`, a TEXT message) and
+ * every card in it is marked — Part 0 rule 4 forbids a fallback the client
+ * cannot see.
+ */
+function FollowUpMessage({
+  message,
+  busy,
+  onAnswer,
+}: {
+  message: ConsultThreadFollowUpMessageDTO
+  busy: boolean
+  onAnswer: (
+    message: ConsultThreadFollowUpMessageDTO,
+    selectedValues: string[],
+  ) => void
+}) {
+  const answered = message.selectedValues.length > 0
+  return (
+    <ThreadCard dimmed={answered}>
+      <p
+        className="text-sm font-bold leading-6 text-textPrimary"
+        data-testid="consult-follow-up-question"
+        data-fallback={message.fallback ? 'true' : 'false'}
+      >
+        {message.text}
+      </p>
+      {answered ? (
+        <p className="mt-2 text-xs leading-5 text-textSecondary">
+          {message.options
+            .filter((option) => message.selectedValues.includes(option.value))
+            .map((option) => option.label)
+            .join(', ')}
+        </p>
+      ) : (
+        <div className="mt-4 grid gap-2">
+          {message.options.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              disabled={busy}
+              data-testid={`consult-follow-up-option-${option.value}`}
+              className={`${BUTTON_SECONDARY} text-left`}
+              onClick={() => onAnswer(message, [option.value])}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
       )}
     </ThreadCard>
   )

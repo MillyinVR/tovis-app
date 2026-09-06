@@ -14,7 +14,10 @@
 // vocabularies. That was already the rule for the shared v1 option lists
 // (./sharedOptions.ts); cards make it structural.
 
-import type { ConsultInspirationAnalysisFieldDTO } from '@/lib/dto/consult'
+import type {
+  ConsultInspirationAnalysisFieldDTO,
+  ConsultInspirationExactDetailDTO,
+} from '@/lib/dto/consult'
 
 import { inspirationCard, type ConsultInspirationPackQuestion } from './types'
 
@@ -175,4 +178,128 @@ export function coarseCards(
 /** The eight prep cards, in colourist order. */
 export function prepCards(): ConsultInspirationPackQuestion[] {
   return PREP_CARD_ATTRIBUTES.map(prepCard)
+}
+
+// ── P5g — the two region cards ──────────────────────────────────────────────
+//
+// The prep tier stops being eight repetitions of "is this part of what you
+// like?" and becomes two moves over ONE picture: tap what you love, then tap
+// anything you'd change. Same reading, same regions, same vocabulary — a
+// different number of taps to say the same thing.
+//
+// 🔴 The eight prep cards are NOT deleted. `prepCards()` still exists and the
+// v2 card pack that uses it is archived rather than removed, because a consult
+// that answered `attr_tone: ['yes']` is read against the pack that asked it
+// forever (registry.ts, CONSULT_INSPIRATION_PACK_ARCHIVE). What changes is
+// which pack a NEW consult gets.
+
+/** Move 1 — "Tap what you love." */
+export const LOVE_REGIONS_KEY = 'love_regions' as const
+/** Move 2 — "Anything you'd change?" */
+export const CHANGE_REGIONS_KEY = 'change_regions' as const
+
+/** The honest "nothing here" answer on each move. Both are neutral values. */
+export const LOVE_REGIONS_NEUTRAL_VALUE = 'not-sure' as const
+export const CHANGE_REGIONS_NEUTRAL_VALUE = 'nothing-to-change' as const
+
+/**
+ * `baseLevel` → `base-level`. The option VALUE a region tap stores.
+ *
+ * Token-shaped (`^[a-z0-9][a-z0-9-]{0,63}$`) so the database guard accepts it,
+ * and deliberately DIFFERENT from `prepCardKey`'s `attr_base_level`, which is
+ * a question key and lives in a different namespace with a different pattern.
+ *
+ * 🔴 No attribute name is a forbidden word. The guard's content regex refuses
+ * `face|eyes?|skin|undertone|identity|ethnic|ethnicity|race|health` as WHOLE
+ * words and a hyphen is a POSIX word boundary, so a value like `face-framing`
+ * would be refused after passing every TypeScript check. None of the eight
+ * attribute names contains one — and `assertConsultInspirationPackWritable`
+ * proves it for every registered pack rather than leaving it to this comment.
+ * The reading's own VALUES (FACE_FRAMING and friends) never enter a payload:
+ * what is stored is which attribute she tapped, not what it was read as.
+ */
+export function attributeOptionValue(
+  attribute: ConsultInspirationAnalysisFieldDTO,
+): string {
+  return attribute.replace(/[A-Z]/g, (upper) => `-${upper.toLowerCase()}`)
+}
+
+/** `base-level` → `baseLevel`, or null for a value that is not an attribute. */
+export function attributeFromOptionValue(
+  value: string,
+): ConsultInspirationAnalysisFieldDTO | null {
+  return (
+    PREP_CARD_ATTRIBUTES.find(
+      (attribute) => attributeOptionValue(attribute) === value,
+    ) ?? null
+  )
+}
+
+/**
+ * One region card: every attribute the reading settled, as a tappable area on
+ * the whole reference, multi-select.
+ *
+ * `regionGroup` is what turns the option list into boxes — the same field the
+ * coarse spark card already uses, one attribute per option instead of five.
+ * `optionsFromReading` is what keeps B5 fixed: the pack carries all eight, and
+ * a client is only ever OFFERED the ones her own photograph actually answered.
+ *
+ * The neutral value is always offered and never carries a region: "not sure"
+ * and "nothing to change" are about the whole picture, and they are the answer
+ * a client whose reference could not be read at all still gets to give.
+ */
+function regionCard(args: {
+  key: string
+  neutralValue: string
+  sentiment: ConsultInspirationExactDetailDTO['sentiment']
+  countsAsDetail: boolean
+}): ConsultInspirationPackQuestion {
+  const values = [
+    ...PREP_CARD_ATTRIBUTES.map(attributeOptionValue),
+    args.neutralValue,
+  ]
+  return inspirationCard({
+    key: args.key,
+    tier: 'PREP',
+    kind: 'MULTI_SELECT',
+    values,
+    minSelections: 1,
+    // Every attribute at once is a real answer ("I love all of it"), so the
+    // ceiling is the attribute count — the neutral value can never join them.
+    maxSelections: PREP_CARD_ATTRIBUTES.length,
+    detailSentiment: args.sentiment,
+    regionGroup: Object.fromEntries([
+      ...PREP_CARD_ATTRIBUTES.map(
+        (attribute) => [attributeOptionValue(attribute), [attribute]] as const,
+      ),
+      [args.neutralValue, []] as const,
+    ]),
+    optionsFromReading: true,
+    countsAsDetail: args.countsAsDetail,
+  })
+}
+
+export function loveRegionsCard(): ConsultInspirationPackQuestion {
+  return regionCard({
+    key: LOVE_REGIONS_KEY,
+    neutralValue: LOVE_REGIONS_NEUTRAL_VALUE,
+    sentiment: 'LIKE',
+    countsAsDetail: true,
+  })
+}
+
+export function changeRegionsCard(): ConsultInspirationPackQuestion {
+  return regionCard({
+    key: CHANGE_REGIONS_KEY,
+    neutralValue: CHANGE_REGIONS_NEUTRAL_VALUE,
+    // What she would CHANGE about the reference is a dislike, and Stage 4's
+    // tier 2 depends on the dislikes being dislikes.
+    sentiment: 'DISLIKE',
+    countsAsDetail: true,
+  })
+}
+
+/** The two region cards, in thread order. P5g's whole prep tier. */
+export function regionCards(): ConsultInspirationPackQuestion[] {
+  return [loveRegionsCard(), changeRegionsCard()]
 }

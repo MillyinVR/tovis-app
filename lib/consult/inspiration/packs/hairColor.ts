@@ -22,6 +22,7 @@ import {
   coarseCards,
   HAIR_COLOR_KEEP_VALUES,
   prepCards,
+  regionCards,
 } from '../cardQuestions'
 import {
   CURRENT_UPKEEP_OPTIONS,
@@ -164,7 +165,7 @@ export const HAIR_COLOR_INSPIRATION_PACK: ConsultInspirationPackDefinition = {
  *     about her, not about the picture, and they belong to the intake diet
  *     (P6) rather than to a step that is looking at a photograph.
  */
-export const HAIR_COLOR_INSPIRATION_CARD_PACK: ConsultInspirationPackDefinition = {
+export const HAIR_COLOR_INSPIRATION_CARD_PACK_V2: ConsultInspirationPackDefinition = {
   id: HAIR_COLOR_INSPIRATION_PACK_ID,
   categorySlug: HAIR_COLOR_INSPIRATION_CATEGORY_SLUG,
   version: 2,
@@ -194,5 +195,73 @@ export const HAIR_COLOR_INSPIRATION_CARD_PACK: ConsultInspirationPackDefinition 
     'attr_finish:not-this': 'The client said how much the colour shines is NOT what she wants.',
     'attr_dimension:yes': 'The client confirmed how much light and dark the colour has is part of what she likes.',
     'attr_dimension:not-this': 'The client said how much light and dark the colour has is NOT what she wants.',
+  },
+}
+
+/**
+ * P5g — v3, and the prep tier is TWO MOVES.
+ *
+ * v2's eight `attr_*` cards asked "is this part of what you like?" eight times
+ * over eight crops of one photograph. Every card was correct and the sequence
+ * was a form. v3 asks the same thing twice, over the whole picture: tap what
+ * you love, then tap anything you'd change.
+ *
+ * 🔴 The three COARSE cards are byte-identical to v2's. They are the
+ * pre-booking tier and P5g does not touch them — `coarseCards()` is the same
+ * call with the same values, so a spark that started on v2 and one that starts
+ * today ask the same three questions in the same words.
+ *
+ * 🔴 v2 is ARCHIVED, not deleted (registry.ts). A consult that answered
+ * `attr_tone: ['yes']` is served, read and briefed against v2's eleven
+ * questions forever; `resolveConsultSessionInspirationPack` pins by version on
+ * the first stored payload, so nobody's prep tier changes shape underneath her.
+ *
+ * What the two moves produce is byte-identical to what the eight cards
+ * produced: `wants`/`avoids` as `attribute:VALUE` pairs, derived from the
+ * reading (./cards.ts). Nothing downstream — the analysis prompt, the brief,
+ * Stage 4's tier 2 — can tell which pack version answered.
+ *
+ * One thing v2 could say that v3 cannot: "not sure" about ONE attribute.
+ * v2 offered it per card; v3's neutral values are about the whole move. That
+ * is the trade the two-tap design makes, and it is the right one — a client
+ * who is unsure about the root blend specifically simply taps neither move,
+ * and an untapped attribute already means "she did not point at this".
+ */
+export const HAIR_COLOR_INSPIRATION_CARD_PACK: ConsultInspirationPackDefinition = {
+  id: HAIR_COLOR_INSPIRATION_PACK_ID,
+  categorySlug: HAIR_COLOR_INSPIRATION_CATEGORY_SLUG,
+  version: 3,
+  schemaVersion: 2,
+  reflectionPromptKey: 'reflectionPromptHair',
+  questions: [...coarseCards(HAIR_COLOR_KEEP_VALUES), ...regionCards()],
+  possibleMeanings: {
+    // The three coarse pairs, word for word from v2 — a brief written against
+    // either version reads the same sentence for the same tap.
+    'spark_focus:the-color': 'The colour itself is what stopped her — read the reference’s colour attributes as the goal.',
+    'spark_focus:the-shape': 'How the colour is arranged is what stopped her — the technique, placement and root blend matter more here than the exact shade.',
+    'spark_focus:the-whole-thing': 'She pointed at the reference as a whole rather than at one part of it.',
+    'keep_as_is:my-length': 'The client asked for her length to be left alone.',
+    'keep_as_is:my-natural-roots': 'The client asked for her natural roots to be left alone.',
+    'understanding_check:thats-right': 'The client confirmed the summary of what she is after.',
+    // The region taps. One meaning per attribute per move, saying what she
+    // pointed at rather than what it was read as — the reading itself is in
+    // the artefact, and repeating it here would be a second copy that goes
+    // stale the day she swaps the picture.
+    'love_regions:base-level': 'The client pointed at where the colour starts at the roots as something she loves.',
+    'love_regions:lightest-level': 'The client pointed at how light the colour gets as something she loves.',
+    'love_regions:tone': 'The client pointed at the warmth or coolness of the colour as something she loves.',
+    'love_regions:technique': 'The client pointed at how the colour was placed as something she loves.',
+    'love_regions:placement': 'The client pointed at where the colour sits as something she loves.',
+    'love_regions:root-blend': 'The client pointed at what the roots do as something she loves.',
+    'love_regions:finish': 'The client pointed at how much the colour shines as something she loves.',
+    'love_regions:dimension': 'The client pointed at how much light and dark the colour has as something she loves.',
+    'change_regions:base-level': 'The client asked to change where the colour starts at the roots.',
+    'change_regions:lightest-level': 'The client asked to change how light the colour gets.',
+    'change_regions:tone': 'The client asked to change the warmth or coolness of the colour.',
+    'change_regions:technique': 'The client asked to change how the colour is placed.',
+    'change_regions:placement': 'The client asked to change where the colour sits.',
+    'change_regions:root-blend': 'The client asked to change what the roots do.',
+    'change_regions:finish': 'The client asked to change how much the colour shines.',
+    'change_regions:dimension': 'The client asked to change how much light and dark the colour has.',
   },
 }

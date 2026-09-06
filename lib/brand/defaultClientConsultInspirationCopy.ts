@@ -55,6 +55,11 @@ export const defaultClientConsultInspirationCopy: BrandClientConsultInspirationC
         'attr_root_blend': 'Is this part of what you like?',
         'attr_finish': 'Is this part of what you like?',
         'attr_dimension': 'Is this part of what you like?',
+        // P5g — the two moves that replaced the eight cards above. Short,
+        // warm, and an instruction rather than a test: she is looking at her
+        // own picture with the parts already drawn on it.
+        'love_regions': 'Tap what you love.',
+        'change_regions': 'Anything you’d change?',
       },
 
       optionLabels: {
@@ -93,6 +98,12 @@ export const defaultClientConsultInspirationCopy: BrandClientConsultInspirationC
         'attr_dimension:yes': 'Yes',
         'attr_dimension:not-this': 'Not this',
         'attr_dimension:not-sure': 'Not sure',
+        // 🔴 Only the NEUTRAL values of the region cards are here. Every other
+        // option is labelled from the reading itself ("cool, silvery cast"),
+        // because a region's name is a description of THIS photograph and a
+        // fixed label would be the static list P5g exists to remove.
+        'love_regions:not-sure': 'Not sure yet',
+        'change_regions:nothing-to-change': 'Nothing — I’d keep all of it',
       },
 
       // 🔴 Shown AFTER the crop, never before it. Each one names the thing she
@@ -169,6 +180,20 @@ export const defaultClientConsultInspirationCopy: BrandClientConsultInspirationC
         'dimension:MEDIUM': 'This is how much light and dark it has — a clear mix of the two.',
         'dimension:HIGH_CONTRAST':
           'This is how much light and dark it has — a strong difference between them.',
+      },
+
+      // P5g — what a tappable region is called when the reading's own short
+      // name is missing. Names the attribute, never the reading: vaguer than
+      // "cool, silvery cast" and never wrong about the picture.
+      attributeFallbackNames: {
+        baseLevel: 'where the color starts',
+        lightestLevel: 'how light it gets',
+        tone: 'the warmth of it',
+        technique: 'how it was done',
+        placement: 'where the color sits',
+        rootBlend: 'what the roots do',
+        finish: 'how much it shines',
+        dimension: 'the light and dark in it',
       },
 
       // The same readings as a noun phrase, for dropping inside a sentence.

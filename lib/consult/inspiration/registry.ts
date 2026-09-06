@@ -37,6 +37,7 @@ import {
 } from './packs/generalService'
 import {
   HAIR_COLOR_INSPIRATION_CARD_PACK,
+  HAIR_COLOR_INSPIRATION_CARD_PACK_V2,
   HAIR_COLOR_INSPIRATION_PACK,
 } from './packs/hairColor'
 import {
@@ -80,6 +81,9 @@ export const CONSULT_INSPIRATION_PACK_ARCHIVE: readonly ConsultInspirationPackDe
     HAIR_COLOR_INSPIRATION_PACK,
     HAIR_GENERAL_INSPIRATION_PACK,
     GENERAL_SERVICE_INSPIRATION_PACK,
+    // P5g: v2's eight per-attribute prep cards. A consult that answered one is
+    // read against them forever — see HAIR_COLOR_INSPIRATION_CARD_PACK's note.
+    HAIR_COLOR_INSPIRATION_CARD_PACK_V2,
   ]
 
 const PACKS_BY_ID = new Map(CONSULT_INSPIRATION_PACKS.map((pack) => [pack.id, pack]))
@@ -706,11 +710,46 @@ export function assertConsultInspirationCardCopy(
     }
     for (const option of question.options) {
       if (option.label !== null) continue
+      // P5g — a REGION card labels each attribute option from the READING
+      // ("cool, silvery cast"), not from a fixed table, which is the whole
+      // point: the label describes this photograph. Only the neutral value
+      // (the one with no attribute behind it) has a fixed label to look up.
+      if (
+        question.optionsFromReading &&
+        (question.regionGroup?.[option.value]?.length ?? 0) > 0
+      ) {
+        continue
+      }
       const label = copy.cards.optionLabels[`${question.key}:${option.value}`]
       if (!label?.trim()) {
         fail(
           `card "${question.key}" option "${option.value}" has no label in the brand copy table.`,
         )
+      }
+    }
+
+    // 🔴 P5g — every attribute a region card can OFFER needs a fallback name
+    // and a short name for every value it can be read as. Without this the
+    // assertion would pass a pack whose picker renders a box labelled
+    // `tone:COOL`, which is exactly the failure the rest of this function
+    // exists to make impossible for the crop cards.
+    if (question.optionsFromReading) {
+      for (const [value, attributes] of Object.entries(question.regionGroup ?? {})) {
+        for (const attribute of attributes) {
+          if (!copy.cards.attributeFallbackNames[attribute]?.trim()) {
+            fail(
+              `card "${question.key}" option "${value}" names attribute "${attribute}", which has no fallback name.`,
+            )
+          }
+          for (const reading of CONSULT_INSPIRATION_FIELD_VALUES[attribute]) {
+            if (reading === 'UNKNOWN') continue
+            if (
+              !copy.cards.attributeShortNames[`${attribute}:${reading}`]?.trim()
+            ) {
+              fail(`attribute "${attribute}" value "${reading}" has no short name.`)
+            }
+          }
+        }
       }
     }
     // A prep card names an attribute, and its plain-language name is looked up

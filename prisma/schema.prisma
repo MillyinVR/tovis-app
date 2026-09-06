@@ -7435,6 +7435,19 @@ enum ConsultProviderCallKind {
   ANALYSIS_PROFILE
   /// lib/consult/analysisEngine.ts, call 2 — the direction.
   ANALYSIS_DIRECTION
+  /// lib/consult/followUpEngine.ts — P5g, the adaptive follow-up questions.
+  /// Text only: no image is sent, so this is the one consult call that costs
+  /// pennies rather than cents.
+  FOLLOW_UP_QUESTIONS
+}
+
+/// How one adaptive follow-up round was produced. A FALLBACK round is the
+/// intake pack's own remaining SAFETY questions, asked because the model call
+/// failed — never a generic list (Part 0 rule 4).
+enum ConsultFollowUpRoundStatus {
+  GENERATED
+  FALLBACK
+  REFUSED
 }
 
 /// How a metered call ended. A call that failed still cost money whenever the
@@ -7528,6 +7541,7 @@ model ConsultSession {
   bookingProposals     ConsultBookingProposal[]
   analysisRuns         ConsultAnalysisRun[]
   providerCalls        ConsultProviderCall[]
+  followUpRounds       ConsultFollowUpRound[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -7678,6 +7692,55 @@ model ConsultRevision {
 
   @@unique([consultSessionId, revision])
   @@unique([consultSessionId, idempotencyKey])
+  @@index([consultSessionId, createdAt])
+}
+
+/// P5g — one round of adaptive follow-up questions.
+///
+/// 🔴 NOT a ConsultRevision, and the reason is the point: every revision
+/// payload is keys and enums, and this artefact's whole content is a SENTENCE
+/// the model wrote. Its own CHECK constraints carry the identity-word and
+/// secret-key regexes the revision guards carry, plus length caps, so prose is
+/// fenced without widening a guard that protects five other kinds.
+///
+/// 🔴 `answers` holds ONLY the follow-up pack's own vocabulary
+/// (lib/consult/intake/followUp.ts) — the questions P6's diet moved out of the
+/// intake and which had nowhere to be stored until now. An answer keyed in the
+/// INTAKE pack is written to the intake revision instead, because that is what
+/// the safety policy and `consult_analysis_payload_guard` read. One home per
+/// vocabulary, enforced in `consult_follow_up_round_guard`.
+model ConsultFollowUpRound {
+  id String @id @default(cuid())
+
+  consultSessionId String
+  consultSession   ConsultSession @relation(fields: [consultSessionId], references: [id], onDelete: Cascade)
+
+  /// The plan this round is about. The three-round cap is per version.
+  planVersion Int
+  round       Int
+
+  status ConsultFollowUpRoundStatus
+
+  schemaVersion Int
+  promptVersion String
+  /// Null exactly when the round is a FALLBACK — no model wrote those.
+  model         String?
+
+  /// `[{key, text, home, evidence, options: [{value, label}]}]`.
+  questions Json
+  /// `{key: [values]}`, follow-up-pack keys only. Empty until she answers.
+  answers   Json @default("{}")
+
+  createdAt DateTime @default(now())
+
+  /// 🔴 TELEMETRY, not the completion signal. Whether a round is finished is
+  /// derived from each question's own home: an INTAKE-home answer lives in the
+  /// intake revision and never appears in `answers` here.
+  answeredAt DateTime?
+
+  /// The cap AND the anti-double-bill: a retried POST or two concurrent
+  /// requests lose this insert rather than each buying a paid call.
+  @@unique([consultSessionId, planVersion, round], map: "ConsultFollowUpRound_session_version_round_key")
   @@index([consultSessionId, createdAt])
 }
 

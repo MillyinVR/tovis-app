@@ -9847,6 +9847,10 @@
           },
           "type": "array"
         },
+        "presentation": {
+          "$ref": "#/definitions/ConsultInspirationCardPresentationDTO",
+          "description": "P5g — HOW this card is drawn.\n\n`CROP` is P5d's card: one crop of the reference (or the whole thing), a plain word under it, and buttons.\n\n`REGION_PICKER` is the P5g move: the WHOLE reference with every readable attribute drawn on it as a tappable area, multi-select. `region` is always null on one — the boxes in `optionRegions` are measured against the whole picture, so cropping it would send every box somewhere else.\n\nA client that does not know a value renders the card as `CROP`, which is correct rather than merely safe: the question and its options are on the wire either way, so an older build asks the same question with buttons."
+        },
         "question": {
           "$ref": "#/definitions/ConsultInspirationQuestionDTO",
           "description": "The question itself, in the shape the answer route already accepts."
@@ -9884,6 +9888,7 @@
         "attributeValue",
         "name",
         "region",
+        "presentation",
         "optionRegions",
         "question",
         "selectedValues"
@@ -9916,6 +9921,14 @@
         "region"
       ],
       "type": "object"
+    },
+    "ConsultInspirationCardPresentationDTO": {
+      "description": "P5g — whether a card is one crop with buttons, or the whole reference with tappable areas drawn on it. See `ConsultInspirationCardDTO.presentation`.",
+      "enum": [
+        "CROP",
+        "REGION_PICKER"
+      ],
+      "type": "string"
     },
     "ConsultInspirationCardTierDTO": {
       "description": "P5d — which tier a card belongs to. COARSE is the three asked before the booking; PREP is the fine per-attribute cards asked after it.",
@@ -12029,6 +12042,65 @@
       ],
       "type": "object"
     },
+    "ConsultThreadFollowUpMessageDTO": {
+      "description": "P5g — one adaptive follow-up question, as a card in the thread.\n\n🔴 `text` on this message is the only prose in the consult a MODEL wrote and a client reads. It is generated per client from the reference reading, her own photo reading, the regions she tapped and every answer so far, and it must name something specific it saw — a question that would be the same for everybody is the question P5g exists to delete.\n\n🔴 `options` are enums from a vocabulary that already exists (lib/consult/followUpVocabulary.ts), re-worded by the model but never invented: a value outside the key's real options throws the whole round away on the server, so a client can echo any of these back and know it will file.\n\n`fallback` is true when the model call failed and these are the intake pack's OWN remaining safety questions instead. It is on the wire because the client says so out loud (\"couldn't think of the next question — here are the essentials\"): Part 0 rule 4 forbids a silent fallback, and a fallback the client cannot see is a silent one.",
+      "properties": {
+        "author": {
+          "const": "APP",
+          "type": "string"
+        },
+        "fallback": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "FOLLOW_UP",
+          "type": "string"
+        },
+        "options": {
+          "items": {
+            "$ref": "#/definitions/ConsultInspirationQuestionOptionDTO"
+          },
+          "type": "array"
+        },
+        "questionKey": {
+          "type": "string"
+        },
+        "round": {
+          "description": "Which round of at most three this is, for the client's own ordering.",
+          "type": "number"
+        },
+        "selectedValues": {
+          "description": "What she chose, or empty while it is open — the thread's own history.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "state": {
+          "$ref": "#/definitions/ConsultThreadMessageStateDTO"
+        },
+        "text": {
+          "description": "The question itself.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "author",
+        "state",
+        "text",
+        "questionKey",
+        "options",
+        "selectedValues",
+        "fallback",
+        "round"
+      ],
+      "type": "object"
+    },
     "ConsultThreadInspirationMessageDTO": {
       "description": "The inspiration step as a card.\n\nP5a renders the CURRENT v1 questions; P5 replaces the content with the zoom-card script (a crop of the attribute's region + \"is this part of what you like?\"). The card shape is what P5a is fixing in place, not the wording.\n\n`sourceDecisionRequired` is the state before any reference exists at all — the client either adds one photo or continues without.",
       "properties": {
@@ -12142,6 +12214,9 @@
         },
         {
           "$ref": "#/definitions/ConsultThreadBookingMessageDTO"
+        },
+        {
+          "$ref": "#/definitions/ConsultThreadFollowUpMessageDTO"
         }
       ]
     },
