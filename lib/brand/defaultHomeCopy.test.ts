@@ -89,6 +89,58 @@ describe('defaultHomeCopy', () => {
     expect(copy.spotlight.features.length).toBe(2)
   })
 
+  it('names no single beauty trade, because the page is for all of them', () => {
+    // Tori, 2026-09-06: the product serves the whole beauty industry (nails,
+    // lashes, brows, skin, makeup, barbering, hair), so homepage copy must not
+    // read as a hair app. The words below each name ONE trade's vocabulary and
+    // quietly exclude the rest; they slipped in three times before this test.
+    //
+    // "chair" is deliberately absent from this list: it is the brand's own
+    // metaphor across the hero, the pros heading and the closer, and retiring
+    // it is a branding decision rather than a copy fix.
+    // 🔴 Matched on WORD BOUNDARIES, not substrings. A plain `toContain`
+    // check fails on this very page: "chair" contains "hair", and "browse
+    // looks without an account" contains "brow". A guard that flags the
+    // brand's own metaphor gets deleted rather than obeyed.
+    const singleTrade = [
+      'hair',
+      'stylist',
+      'formula',
+      'balayage',
+      'blowout',
+      'highlight',
+      'barber',
+      'manicure',
+      'pedicure',
+      'lash',
+      'eyelash',
+      'brow',
+      'facial',
+      'waxing',
+    ]
+    const rendered = JSON.stringify(copy, (key, value) =>
+      key === 'evidence' ? undefined : value,
+    )
+
+    for (const word of singleTrade) {
+      expect(
+        rendered,
+        `"${word}" names one trade; say it in a way that fits all of them`,
+      ).not.toMatch(new RegExp(`\\b${word}s?\\b`, 'i'))
+    }
+  })
+
+  it('claims only chart tabs that are not flag-gated', () => {
+    // The chart band is `live`, and lib/clients/chartTabs.ts gates the
+    // technical-record tab behind ENABLE_CLIENT_TECHNICAL_RECORD (off, with a
+    // one-id founder allowlist, while the surface is legal-gated). Naming it
+    // would promise a dark feature from a live row.
+    const rendered = [copy.chart.body, copy.chart.aside, ...copy.chart.points.map((p) => p.body)]
+      .join(' ')
+      .toLowerCase()
+    expect(rendered).not.toContain('technical record')
+  })
+
   it('never tells a client that an explicit chart grant expires on its own', () => {
     // 🔴 The row this band replaced said "Share it with a new pro for 30 days,
     // then it closes on its own", welding two mechanisms together and getting

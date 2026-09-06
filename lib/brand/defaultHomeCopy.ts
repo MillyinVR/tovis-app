@@ -87,7 +87,7 @@ export function defaultHomeCopy(brandName: string): BrandHomeCopy {
       body: 'The things a professional pays for, juggles, or keeps in a notes app today, and what stands in for each of them here.',
       items: [
         { tool: 'A booking app', withWhat: 'Services, calendar, real availability, held slots' },
-        { tool: 'A notes app for formulas', withWhat: 'A chart on every client: notes, allergies, visit history, photos' },
+        { tool: 'A notes app for client details', withWhat: 'A chart on every client: notes, allergies, visit history, photos' },
         { tool: 'Consent forms on paper', withWhat: 'Signed consent, stored with the client' },
         { tool: 'Aftercare by text', withWhat: 'An aftercare inbox with the products used and a one-tap rebook' },
         { tool: 'A tax spreadsheet', withWhat: 'Expenses, mileage, write-offs, a Schedule C at the end' },
@@ -181,12 +181,12 @@ export function defaultHomeCopy(brandName: string): BrandHomeCopy {
       label: 'The chart',
       title: 'The only appointment that starts from scratch is',
       titleAccent: 'your first.',
-      body: 'Every visit writes to your chart: the formula, the products, the notes on what worked and what did not. Book again and your professional opens it before you arrive, so you start where you left off instead of describing your hair from memory.',
+      body: 'Every visit writes to your chart: the products used, the notes on what worked and what did not, and the photos from the day. Book again and your professional opens it before you arrive, so you start where you left off instead of describing your last appointment from memory.',
       aside: 'You decide who sees it. A booking opens your chart to that professional and closes it thirty days after the visit, on its own. Anything past that is a grant you make, and you can take it back whenever you want.',
       points: [
         {
           label: 'What it holds',
-          body: 'Notes, allergies, every visit, the products used, and the technical record with your formulas.',
+          body: 'Notes, allergies, every visit with its photos, the products used, and the feedback your professional left.',
         },
         {
           label: 'When they read it',
@@ -198,8 +198,15 @@ export function defaultHomeCopy(brandName: string): BrandHomeCopy {
         },
       ],
       state: 'live',
+      // 🔴 The technical record (formulas) is NOT claimed here and must not be
+      // added. lib/clients/chartTabs.ts marks that tab "Flag-gated
+      // (ENABLE_CLIENT_TECHNICAL_RECORD); only shown/queried when on", and
+      // lib/clients/technicalRecord.ts keeps the flag off with a one-id founder
+      // allowlist while the surface is legal-gated. This row is `live`, so it
+      // may only name the tabs that are live: notes, allergies, visits with
+      // their photos, products, and pro feedback.
       evidence:
-        'lib/clients/chartTabs.ts holds notes, allergies, visits, products and the technical record. lib/clientVisibility.ts proClientVisibilityWhere grants the chart on PENDING and upcoming ACCEPTED bookings, so access precedes the appointment, and RECENT_COMPLETED_WINDOW_DAYS = 30 closes it after a completed visit. Explicit sharing is client-granted and client-revocable (lib/clients/chartShare.ts, app/api/v1/client/chart-shares). Read from source 2026-09-06.',
+        'lib/clients/chartTabs.ts: notes, allergies, visits (each visit card carries its frames), products, reviews and pro feedback are unflagged; the technical-record tab is gated on ENABLE_CLIENT_TECHNICAL_RECORD and is deliberately not named above. lib/clientVisibility.ts proClientVisibilityWhere grants the chart on PENDING and upcoming ACCEPTED bookings, so access precedes the appointment, and RECENT_COMPLETED_WINDOW_DAYS = 30 closes it after a completed visit. Explicit sharing is client-granted and client-revocable (lib/clients/chartShare.ts, app/api/v1/client/chart-shares). Read from source 2026-09-06.',
     },
 
     // Two rows LIFTED out of the lists below, not copied into a third one.
@@ -306,7 +313,7 @@ export function defaultHomeCopy(brandName: string): BrandHomeCopy {
         },
         {
           title: 'Ranked by bookings, not followers',
-          body: 'The feed lifts a look by the appointments it produced. A great stylist with a small following outranks a big account nobody books.',
+          body: 'The feed lifts a look by the appointments it produced. A great professional with a small following outranks a big account nobody books.',
           state: 'rolling-out',
           evidence: 'Booking-conversion boost in lib/looks/personalizedRanking.ts fed by the look-conversion-stats job; ENABLE_PERSONALIZED_FEED is set in prod but its value is Hidden and UNVERIFIED (2026-09-05). Do not promote to live without a runtime probe.',
         },
