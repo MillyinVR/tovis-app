@@ -62,6 +62,7 @@ export async function GET(request: Request, ctx: RouteContext) {
       copy: brand.clientConsultThread,
       captureCopy: brand.clientConsultCapture,
       inspirationCopy: brand.clientConsultInspiration,
+      planDiffCopy: brand.clientConsultPlanDiff,
     })
 
     return jsonOk<ConsultThreadResponseDTO>({ thread })

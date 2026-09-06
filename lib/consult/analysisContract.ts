@@ -76,8 +76,16 @@ import {
 } from './providerMeter'
 import type { ConsultInspirationStorage } from './inspirationStorage'
 import type { ConsultInspirationVisionProvider } from './inspirationVision'
-import { CONSULT_ANCHOR_SELECT, evaluateConsultAnchor } from './anchor'
-import { ConsultWriteError } from './errors'
+import { evaluateConsultAnchorScope } from './anchor'
+import {
+  countConsultPlanVersions,
+  resolveConsultRerunState,
+} from './analysisRerun'
+import {
+  assertConsultInputOpen,
+  CONSULT_OPEN_WINDOW_SELECT,
+} from './openWindow'
+import { ConsultWriteError, type ConsultWriteErrorCode } from './errors'
 import {
   consultLookLocationType,
   loadConsultProMenu,
@@ -139,17 +147,17 @@ const ANALYSIS_SCOPE_SELECT = {
   professional: {
     select: { homeTenantId: true, homeTenant: { select: { isActive: true } } },
   },
-  ...CONSULT_ANCHOR_SELECT,
+  ...CONSULT_OPEN_WINDOW_SELECT,
   serviceCategory: { select: CONSULT_SERVICE_PROFILE_CATEGORY_SELECT },
   booking: {
     select: {
       proTenantId: true,
       locationType: true,
-      ...CONSULT_ANCHOR_SELECT.booking.select,
+      ...CONSULT_OPEN_WINDOW_SELECT.booking.select,
       ...CONSULT_SERVICE_IDENTITY_BOOKING_SELECT,
       service: {
         select: {
-          ...CONSULT_ANCHOR_SELECT.booking.select.service.select,
+          ...CONSULT_OPEN_WINDOW_SELECT.booking.select.service.select,
           ...CONSULT_SERVICE_IDENTITY_BOOKING_SELECT.service.select,
         },
       },
@@ -334,10 +342,15 @@ async function requireScope(
   }
   // Which categories are consultable is the anchor rule's question
   // (lib/consult/serviceScope.ts), asked once, just below.
-  const anchor = evaluateConsultAnchor(session, args.now)
-  if (!anchor.eligible || !session.serviceCategory.isActive || !session.professional.homeTenant.isActive) {
+  //
+  // P7a-3: SCOPE only. The analysis scope is shared by the READ
+  // (`loadConsultAnalysisState`, which the thread's plan card hangs off) and by
+  // the run, so applying the appointment rule here would blank the plan the
+  // moment the client sat down. Starting a run asserts the input window itself.
+  const scope = evaluateConsultAnchorScope(session)
+  if (!scope.eligible || !session.serviceCategory.isActive || !session.professional.homeTenant.isActive) {
     throw new ConsultWriteError(
-      anchor.eligible || !anchor.hidden ? 'BOOKING_INELIGIBLE' : 'NOT_FOUND',
+      scope.eligible || !scope.hidden ? 'BOOKING_INELIGIBLE' : 'NOT_FOUND',
       'Consult is unavailable for this booking.',
     )
   }
@@ -1109,13 +1122,18 @@ export async function startConsultAnalysis(args: {
       const input = validInput(await args.loadInput())
 
       // 🔴 The replay checks come BEFORE the prerequisite load, and the order
-      // is load-bearing. A completed analysis has already purged its raw
-      // captures, so `loadConsultAnalysisRunContext` would refuse it with
+      // is load-bearing. A completed analysis may have purged its raw captures
+      // (the client did not opt into chart copy), so
+      // `loadConsultAnalysisRunContext` would refuse it with
       // ANALYSIS_PREREQUISITES_REQUIRED — turning a replay of a finished
       // consult into a spurious "your photos changed", and masking the
       // IDEMPOTENCY_CONFLICT a mismatched key is supposed to raise.
+      //
+      // P7a-3: the LATEST analysis, not "the" analysis. A consult may hold
+      // several plan versions now, and a replay is a replay of the newest.
       const existing = await tx.consultRevision.findFirst({
         where: { consultSessionId: session.id, kind: ConsultRevisionKind.ANALYSIS },
+        orderBy: [{ revision: 'desc' }, { id: 'desc' }],
         select: {
           id: true,
           revision: true,
@@ -1182,6 +1200,11 @@ export async function startConsultAnalysis(args: {
         visibleCondition: 'UNKNOWN',
       })
 
+      // P7a-3: spending money on a consult whose appointment has already begun
+      // is the one thing the living document must never do. The scope check
+      // above is deliberately read-only now, so the write asks for itself.
+      assertConsultInputOpen(session, startedAt)
+
       if (session.status === ConsultSessionStatus.ANALYSIS_PENDING) {
         await transitionLockedConsultSession(tx, {
           consultSessionId: session.id,
@@ -1200,6 +1223,9 @@ export async function startConsultAnalysis(args: {
         promptVersion: input.promptVersion,
         requestHash: context.requestHash,
         photoCount: context.captures.length,
+        // The first analysis, by construction: this branch is only reached
+        // with no ANALYSIS revision in the consult.
+        planVersion: 1,
         now: startedAt,
       })
 
@@ -1221,6 +1247,135 @@ export async function startConsultAnalysis(args: {
     // property the old 115-second budget did not have.
     { maxWait: 10_000, timeout: 30_000 },
   )
+}
+
+/**
+ * P7a-3 — start the rerun a burst of edits asked for.
+ *
+ * Called by the cron once the debounce has elapsed (never by a client
+ * directly): the client's part is editing, and this is the system noticing.
+ *
+ * 🔴 NO lifecycle transition. The session is COMPLETED and stays COMPLETED —
+ * which is what leaves the two once-per-consult transition audit indexes
+ * meaning exactly what they meant before this step. A rerun is a RUN, and the
+ * run row carries every bit of state it needs.
+ *
+ * Refusals, all of which are ordinary and none of which are errors:
+ *   * `ANALYSIS_PHOTOS_EXPIRED` — she did not opt into chart copy, so
+ *     completion purged the raw captures and there is nothing to look at. The
+ *     thread asks for a new photo rather than reusing stale observations
+ *     (Part 0 rule 4). Adding one clears this by itself.
+ *   * `ANALYSIS_RERUN_LIMIT_REACHED` — the consult has spent its allowance.
+ *   * `APPOINTMENT_STARTED` — the document closed while the debounce ran.
+ */
+export async function startConsultAnalysisRerun(args: {
+  consultSessionId: string
+  now?: Date
+}): Promise<
+  | { started: true; run: ConsultAnalysisRunDTO; planVersion: number }
+  | { started: false; reason: ConsultWriteErrorCode }
+> {
+  const startedAt = args.now ?? new Date()
+
+  try {
+    return await prisma.$transaction(
+      async (tx) => {
+        await lockSession(tx, args.consultSessionId, 'UPDATE')
+        const session = await tx.consultSession.findUnique({
+          where: { id: args.consultSessionId },
+          select: ANALYSIS_SCOPE_SELECT,
+        })
+        if (!session) {
+          throw new ConsultWriteError('NOT_FOUND', 'Consult session not found.')
+        }
+        if (session.status !== ConsultSessionStatus.COMPLETED) {
+          throw new ConsultWriteError('INVALID_STATE', 'Consult has no plan to update.')
+        }
+        assertConsultInputOpen(session, startedAt)
+        await requireCurrentConsultAgreementAcceptances(tx, session.id)
+
+        const state = await resolveConsultRerunState(tx, session.id)
+        // 🔴 The CAP is asked first, and the order is the whole difference
+        // between a useful refusal and a misleading one. Once the allowance is
+        // spent, `recordLockedConsultRerunRequest` stops writing the audit row
+        // that makes a rerun "pending" — so a pending-first check answers "you
+        // changed nothing" to a client who has just changed something and is
+        // out of updates, which is both wrong and unactionable.
+        if (!state.moreVersionsAvailable) {
+          throw new ConsultWriteError(
+            'ANALYSIS_RERUN_LIMIT_REACHED',
+            'This consult has had its allowance of plan updates.',
+          )
+        }
+        if (!state.pending) {
+          throw new ConsultWriteError('INVALID_STATE', 'Nothing changed since the last plan.')
+        }
+
+        // The prerequisite read is what discovers a purged photo set: it counts
+        // only captures that are unexpired and NOT purge-marked, which is
+        // exactly the retention rule expressed as a query. Its refusal is
+        // translated here into the one the client can act on.
+        let context: Awaited<ReturnType<typeof loadConsultAnalysisRunContext>>
+        try {
+          context = await loadConsultAnalysisRunContext(tx, {
+            session,
+            schemaVersion: CONSULT_ANALYSIS_SCHEMA_VERSION,
+            promptVersion: CONSULT_ANALYSIS_PROMPT_VERSION,
+            now: startedAt,
+          })
+        } catch (error: unknown) {
+          if (
+            error instanceof ConsultWriteError &&
+            (error.code === 'ANALYSIS_CAPTURES_REQUIRED' ||
+              error.code === 'ANALYSIS_PREREQUISITES_REQUIRED')
+          ) {
+            throw new ConsultWriteError(
+              'ANALYSIS_PHOTOS_EXPIRED',
+              'The photos this plan was built from are no longer available.',
+            )
+          }
+          throw error
+        }
+
+        await requireConsultSafetyOfferings(tx, {
+          session,
+          intake: context.intake,
+          visibleCondition: 'UNKNOWN',
+        })
+
+        const planVersion = (await countConsultPlanVersions(tx, session.id)) + 1
+        const run = await createLockedConsultAnalysisRun(tx, {
+          consultSessionId: session.id,
+          // Server-owned, and derived from the version rather than random: a
+          // retried promotion of the same version replays onto the same key
+          // instead of paying twice.
+          idempotencyKey: `rerun:${session.id}:v${planVersion}`,
+          schemaVersion: CONSULT_ANALYSIS_SCHEMA_VERSION,
+          promptVersion: CONSULT_ANALYSIS_PROMPT_VERSION,
+          requestHash: context.requestHash,
+          photoCount: context.captures.length,
+          planVersion,
+          now: startedAt,
+        })
+        // Deliberately NO audit row here. Nothing transitioned — writing a
+        // LIFECYCLE_TRANSITIONED COMPLETED -> COMPLETED would be a log line
+        // dressed as a state change, and this trail is content-free evidence
+        // of decisions. The decision was the client's edit, and
+        // ANALYSIS_RERUN_REQUESTED already records it.
+        return {
+          started: true as const,
+          run: mapConsultAnalysisRun(run),
+          planVersion,
+        }
+      },
+      { maxWait: 10_000, timeout: 30_000 },
+    )
+  } catch (error: unknown) {
+    if (error instanceof ConsultWriteError) {
+      return { started: false, reason: error.code }
+    }
+    throw error
+  }
 }
 
 export type ConsultAnalysisRunOutcome =
@@ -1325,6 +1480,9 @@ function consultAnalysisFailureCode(error: unknown): {
   // APIConnectionTimeoutError and the engines convert to
   // ConsultAnalysisProviderError('unavailable') → ANALYSIS_UNAVAILABLE above.
   // Anything reaching here is unclassified, so it is retryable and loud.
+  if (process.env.VITEST) {
+    console.warn('UNCLASSIFIED', error instanceof Error ? error.stack?.slice(0, 900) : String(error))
+  }
   return {
     code: 'ANALYSIS_UNAVAILABLE',
     terminal: false,
@@ -1367,18 +1525,35 @@ export async function executeConsultAnalysisRun(args: {
     }
 
     // ── Phase A: read, with NO lock and NO transaction ───────────────────
+    const runScope = await requireConsultAnalysisScope(prisma, {
+      consultSessionId: claimed.consultSessionId,
+      clientId: identity.clientId,
+      actorUserId: identity.actorUserId,
+      now,
+    })
+    // 🔴 P7a-3: asked HERE, and asked before the context load.
+    //
+    // The shared scope check is read-only now (so a finished consult can still
+    // be read after its appointment), which means the run has to ask the write
+    // question for itself — a run is the most expensive write in the product.
+    // Before the context load, because a booking cancelled mid-flight ALSO
+    // purge-marks the captures: let that land first and the run fails with
+    // "your inputs changed", which is true but useless to whoever is reading
+    // failure codes at three in the morning.
+    assertConsultInputOpen(runScope, now)
     const context = await loadConsultAnalysisRunContext(prisma, {
-      session: await requireConsultAnalysisScope(prisma, {
-        consultSessionId: claimed.consultSessionId,
-        clientId: identity.clientId,
-        actorUserId: identity.actorUserId,
-        now,
-      }),
+      session: runScope,
       schemaVersion: claimed.schemaVersion,
       promptVersion: claimed.promptVersion,
       now,
     })
-    if (context.session.status !== ConsultSessionStatus.ANALYZING) {
+    // P7a-3: COMPLETED is a running state now — a RERUN never leaves it, which
+    // is what keeps the once-per-consult claim index meaning what it meant. The
+    // finalize applies the same pair.
+    if (
+      context.session.status !== ConsultSessionStatus.ANALYZING &&
+      context.session.status !== ConsultSessionStatus.COMPLETED
+    ) {
       throw new ConsultWriteError('INVALID_STATE', 'Analysis was cancelled.')
     }
     if (context.requestHash !== claimed.requestHash) {
@@ -1491,18 +1666,29 @@ export async function executeConsultAnalysisRun(args: {
       async (tx) => {
         await lockSession(tx, claimed.consultSessionId, 'UPDATE')
         const finalizedAt = new Date(Math.max(now.getTime(), Date.now()))
+        const finalScope = await requireConsultAnalysisScope(tx, {
+          consultSessionId: claimed.consultSessionId,
+          clientId: identity.clientId,
+          actorUserId: identity.actorUserId,
+          now: finalizedAt,
+        })
+        // The window can close during the ~120s of provider time this run just
+        // spent. Publishing into a consult whose appointment has since started
+        // would put a plan in front of a pro who is already working from the
+        // last one.
+        assertConsultInputOpen(finalScope, finalizedAt)
         const finalContext = await loadConsultAnalysisRunContext(tx, {
-          session: await requireConsultAnalysisScope(tx, {
-            consultSessionId: claimed.consultSessionId,
-            clientId: identity.clientId,
-            actorUserId: identity.actorUserId,
-            now: finalizedAt,
-          }),
+          session: finalScope,
           schemaVersion: claimed.schemaVersion,
           promptVersion: claimed.promptVersion,
           now: finalizedAt,
         })
-        if (finalContext.session.status !== ConsultSessionStatus.ANALYZING) {
+        // P7a-3: COMPLETED is a finalize state now — a rerun publishes into a
+        // consult that is already complete and never leaves it.
+        if (
+          finalContext.session.status !== ConsultSessionStatus.ANALYZING &&
+          finalContext.session.status !== ConsultSessionStatus.COMPLETED
+        ) {
           throw new ConsultWriteError('INVALID_STATE', 'Analysis was cancelled.')
         }
         // The client may have re-answered her intake or swapped a photo while
@@ -1512,6 +1698,28 @@ export async function executeConsultAnalysisRun(args: {
           throw new ConsultWriteError(
             'ANALYSIS_PREREQUISITES_REQUIRED',
             'Analysis inputs changed.',
+          )
+        }
+        // 🔴 P7a-3 — the ORDERING pin, and it is a different question from the
+        // hash above.
+        //
+        // `requestHash` says "the inputs are not what I claimed". It cannot say
+        // WHICH of two runs is older, because a hash only ever differs. When a
+        // stale lease is stolen and two workers reach here believing they own
+        // the same run, or when a debounced rerun overtakes a slow predecessor,
+        // the one holding the older version must lose — deterministically, and
+        // for a reason a reader can name.
+        //
+        // The version a run may publish is the one after the newest that
+        // exists. `ConsultAnalysisRun_one_completed_run_per_plan_version`
+        // catches the same race a microsecond later at the database; this check
+        // is what turns that constraint violation into a typed refusal the
+        // runner records against the right run.
+        const publishedVersions = await countConsultPlanVersions(tx, finalContext.session.id)
+        if (claimed.planVersion !== publishedVersions + 1) {
+          throw new ConsultWriteError(
+            'ANALYSIS_SUPERSEDED',
+            `Plan v${claimed.planVersion} was superseded; v${publishedVersions} is current.`,
           )
         }
 
@@ -1649,6 +1857,26 @@ async function settleConsultAnalysisCaptures(args: {
   } catch {
     // The raw purge below still runs.
   }
+
+  // 🔴 P7a-3 — retention decides whether the raw objects go NOW.
+  //
+  // This tail is a SECOND purge path, independent of the markers the finalize
+  // transaction writes: `purgeConsultCaptureRawObject` stamps its own. Teaching
+  // only the transaction about retention would therefore have kept the row and
+  // deleted the photograph — a capture that looks retained in the database and
+  // is gone from storage, which is the worst of both and would have surfaced as
+  // a rerun that failed on a missing object rather than as a refusal she could
+  // act on.
+  //
+  // With chart-copy consent the raw objects stay until `rawExpiresAt` (the
+  // appointment plus fourteen days, written by the finalize) and the ordinary
+  // sweep takes them then. The chart copy above still runs either way — that is
+  // what the consent was FOR.
+  const session = await prisma.consultSession.findUnique({
+    where: { id: args.consultSessionId },
+    select: { chartCopyOptIn: true },
+  })
+  if (session?.chartCopyOptIn) return
 
   await Promise.all(
     args.captureIds.map(async (captureId) => {

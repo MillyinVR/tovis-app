@@ -110,6 +110,34 @@ export function consultWriteErrorResponse(error: unknown): Response | null {
         'The consult is unavailable for this booking.',
         'CONSULT_BOOKING_INELIGIBLE',
       )
+    // P7a-3. Its own code, not BOOKING_INELIGIBLE: "unavailable" is what the
+    // pilot's scope rule says, and this is a consult that worked perfectly and
+    // has simply reached its appointment. Both clients key their copy off the
+    // code, so sharing one would make the two say the same wrong thing.
+    case 'APPOINTMENT_STARTED':
+      return consultAgreementFail(
+        409,
+        'This consult closed when the appointment started.',
+        'CONSULT_APPOINTMENT_STARTED',
+      )
+    case 'ANALYSIS_PHOTOS_EXPIRED':
+      return consultAgreementFail(
+        409,
+        'The photos this plan was built from are no longer available.',
+        'CONSULT_ANALYSIS_PHOTOS_EXPIRED',
+      )
+    case 'ANALYSIS_RERUN_LIMIT_REACHED':
+      return consultAgreementFail(
+        429,
+        'This consult has had its allowance of plan updates.',
+        'CONSULT_ANALYSIS_RERUN_LIMIT_REACHED',
+      )
+    case 'ANALYSIS_SUPERSEDED':
+      return consultAgreementFail(
+        409,
+        'A newer plan version was published while this one was running.',
+        'CONSULT_ANALYSIS_SUPERSEDED',
+      )
     case 'CAPTURE_PACK_VERSION_MISMATCH':
       return consultAgreementFail(
         409,

@@ -58,7 +58,12 @@ import {
   flushConsultProviderMeter,
   type ConsultProviderMeterSink,
 } from './providerMeter'
-import { CONSULT_ANCHOR_SELECT, evaluateConsultAnchor } from './anchor'
+import { recordLockedConsultRerunRequest } from './analysisRerun'
+import {
+  assertConsultInputOpen,
+  assertConsultReadableScope,
+  CONSULT_OPEN_WINDOW_SELECT,
+} from './openWindow'
 import {
   CONSULT_SERVICE_PROFILE_CATEGORY_SELECT,
   resolveConsultServiceProfile,
@@ -103,6 +108,13 @@ const CAPTURE_STATES = new Set<ConsultSessionStatus>([
   ConsultSessionStatus.EARLY_PHOTO_READY,
   ConsultSessionStatus.MEDIA_READY,
   ConsultSessionStatus.ANALYSIS_PENDING,
+  // P7a-3: readable while the plan is being built and after it exists.
+  // 🔴 These two absences are why the thread ate its own history: the loader
+  // threw INVALID_STATE from ANALYZING onward, `optionalStage` turned that into
+  // "no photos to show", and every photo message — the early one that unlocked
+  // the booking included — disappeared the moment the run started.
+  ConsultSessionStatus.ANALYZING,
+  ConsultSessionStatus.COMPLETED,
 ])
 
 const QUALITY_REASON_CODES = new Set<ConsultCaptureQualityReasonCodeDTO>([
@@ -140,7 +152,7 @@ const CAPTURE_SCOPE_SELECT = {
   chartCopyOptIn: true,
   chartCopyDecidedAt: true,
   client: { select: { userId: true } },
-  ...CONSULT_ANCHOR_SELECT,
+  ...CONSULT_OPEN_WINDOW_SELECT,
   serviceCategory: { select: CONSULT_SERVICE_PROFILE_CATEGORY_SELECT },
 } satisfies Prisma.ConsultSessionSelect
 
@@ -306,13 +318,11 @@ async function requireScope(
   ) {
     throw new ConsultWriteError('NOT_FOUND', 'Consult session not found.')
   }
-  const anchor = evaluateConsultAnchor(session, args.now)
-  if (!anchor.eligible) {
-    throw new ConsultWriteError(
-      anchor.hidden ? 'NOT_FOUND' : 'BOOKING_INELIGIBLE',
-      'Consult is unavailable for this booking.',
-    )
-  }
+  // P7a-3: SCOPE only. The appointment rule moved to the WRITE paths
+  // (`assertConsultInputOpen`) so that a consult which can no longer be changed
+  // can still be read — before this split, a passed appointment threw out of
+  // every stage loader and `optionalStage` erased the thread's own history.
+  assertConsultReadableScope(session)
   return session
 }
 
@@ -330,19 +340,40 @@ async function requireScope(
  *     thread is a living document and she can replace it until the appointment;
  *   - every guided shot stays exactly where it was, in MEDIA_READY.
  */
+/**
+ * P7a-3: the states a GUIDED shot may be written in, and the states the early
+ * photo may be REPLACED in.
+ *
+ * MEDIA_READY was the whole list. The consult is a living document until the
+ * appointment now, so a client who sees her plan and wants a better photo in it
+ * can send one — and the rerun that follows reads it.
+ */
+const POST_INTAKE_CAPTURE_WRITE_STATES = new Set<ConsultSessionStatus>([
+  ConsultSessionStatus.MEDIA_READY,
+  ConsultSessionStatus.ANALYSIS_PENDING,
+  ConsultSessionStatus.ANALYZING,
+  ConsultSessionStatus.COMPLETED,
+])
+
 function assertCaptureWriteState(
   session: CaptureScope,
   shotKey: string,
   action: string,
+  now: Date,
 ): void {
   const allowed =
     shotKey === CONSULT_EARLY_PHOTO_SHOT_KEY
       ? session.status === ConsultSessionStatus.EARLY_PHOTO_READY ||
-        session.status === ConsultSessionStatus.MEDIA_READY
-      : session.status === ConsultSessionStatus.MEDIA_READY
+        POST_INTAKE_CAPTURE_WRITE_STATES.has(session.status)
+      : POST_INTAKE_CAPTURE_WRITE_STATES.has(session.status)
   if (!allowed) {
     throw new ConsultWriteError('INVALID_STATE', `Capture ${action} is unavailable.`)
   }
+  // P7a-3: and the consult must still be open. What closes it is the
+  // APPOINTMENT, not the analysis — a spark consult had no timing rule at all
+  // until now, so this is the only thing standing between a client in the chair
+  // and a plan that changes under her pro.
+  assertConsultInputOpen(session, now)
 }
 
 function assertCaptureState(session: CaptureScope): void {
@@ -559,7 +590,7 @@ export async function issueConsultCaptureUpload(args: {
         input.shotPackVersion,
         input.schemaVersion,
       )
-      assertCaptureWriteState(session, String(input.shotKey), 'upload')
+      assertCaptureWriteState(session, String(input.shotKey), 'upload', now)
       const idempotencyKey = validKey(input.idempotencyKey)
       const contentType = validMediaType(input.contentType)
       if (
@@ -727,7 +758,7 @@ export async function attachConsultCaptureUpload(args: {
         }
         return { captureId: existing.id, replayed: true }
       }
-      assertCaptureWriteState(session, input.shotKey, 'attach')
+      assertCaptureWriteState(session, input.shotKey, 'attach', now)
 
       const upload = await tx.uploadSession.findUnique({
         where: { id: input.uploadSessionId },
@@ -938,7 +969,7 @@ export async function checkConsultCaptureQuality(args: {
       if (capture.qualityCheckedAt) {
         return { quality: qualityDto(capture), replayed: true, rejectedId: null }
       }
-      assertCaptureWriteState(session, capture.shotKey, 'quality')
+      assertCaptureWriteState(session, capture.shotKey, 'quality', now)
       if (
         capture.status !== ConsultCaptureStatus.ATTACHED ||
         capture.purgedAt ||
@@ -1084,6 +1115,14 @@ export async function checkConsultCaptureQuality(args: {
       })
 
       if (quality.accepted) {
+        // P7a-3: a new photo on a consult whose plan already exists asks for a
+        // new plan version. Only an ACCEPTED one — a rejected shot changed
+        // nothing the analysis would read, so paying for a rerun over it would
+        // be spending money on a photo the client is about to retake.
+        await recordLockedConsultRerunRequest(tx, {
+          consultSessionId: session.id,
+          actor: args.actor,
+        })
         // A full pack is THIS session's pack — resolved inside the advance,
         // so the inspiration step's two callers cannot disagree with this one.
         await advanceLockedConsultToAnalysisIfReady(tx, {

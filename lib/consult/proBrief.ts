@@ -9,21 +9,26 @@ import {
   Prisma,
 } from '@prisma/client'
 
+import { defaultClientConsultPlanDiffCopy } from '@/lib/brand/defaultClientConsultPlanDiffCopy'
+import type { BrandClientConsultPlanDiffCopy } from '@/lib/brand/types'
 import { assertProCanViewClient } from '@/lib/clientVisibility'
 import type {
   ConsultBriefFeedbackRatingDTO,
   ConsultInspirationAnalysisDTO,
+  ConsultPlanDiffEntryDTO,
   ConsultProBriefDTO,
   ConsultServiceEstimateDTO,
 } from '@/lib/dto/consult'
 import { prisma } from '@/lib/prisma'
 
 import { isAiConsultC6ExposureEnabledForPro } from './access'
+import { loadConsultPlanVersions } from './analysisRerun'
 import {
   ImmutableConsultResultError,
   loadLatestImmutableConsultResult,
 } from './immutableResult'
 import { normalizeStoredConsultInspirationAnalysis } from './inspirationAnalysisRead'
+import { diffConsultPlans } from './planDiff'
 import { loadConsultServiceEstimatesByConsultId } from './serviceEstimate'
 
 export { selectLatestConsultRevision } from './immutableResult'
@@ -106,10 +111,44 @@ async function loadBriefInspirationAnalysis(
   return analysis?.inspirationId === inspirationId ? analysis : null
 }
 
+/**
+ * P7a-3 — which plan version this brief is, and what the client changed.
+ *
+ * Read as a SIBLING, exactly like the inspiration analysis above and for the
+ * same reason: the brief payload is re-derived and byte-compared on every read,
+ * so a diff folded into it would let a later version invalidate a finished
+ * brief.
+ *
+ * The comparison is v(n-1) → v(n), which is what "what changed since you last
+ * looked?" means when the pro is looking at the newest. A pro who acknowledged
+ * v1 and comes back to v3 sees the v2→v3 line only; per-version acknowledgment
+ * is P10's, and inventing half of it here would be the wrong half.
+ */
+async function loadBriefPlanDiff(
+  consultSessionId: string,
+  copy: BrandClientConsultPlanDiffCopy,
+): Promise<{ planVersion: number; planChanges: ConsultPlanDiffEntryDTO[] }> {
+  const versions = await loadConsultPlanVersions(consultSessionId)
+  const current = versions[versions.length - 1]
+  const previous = versions[versions.length - 2]
+  if (!current || !previous) {
+    return { planVersion: Math.max(versions.length, 1), planChanges: [] }
+  }
+  return {
+    planVersion: versions.length,
+    planChanges: diffConsultPlans({
+      previous: previous.analysis,
+      next: current.analysis,
+      copy,
+    }),
+  }
+}
+
 async function loadSessionBrief(
   tx: Prisma.TransactionClient,
   session: BriefSession,
   serviceEstimate: ConsultServiceEstimateDTO | null,
+  planDiffCopy: BrandClientConsultPlanDiffCopy,
 ): Promise<ConsultProBriefDTO> {
   let result
   try {
@@ -154,6 +193,7 @@ async function loadSessionBrief(
       session.id,
       payload.inspiration.inspirationId,
     ),
+    ...(await loadBriefPlanDiff(session.id, planDiffCopy)),
     feedback: feedback
       ? { rating: feedback.rating, createdAt: feedback.createdAt.toISOString() }
       : null,
@@ -161,9 +201,19 @@ async function loadSessionBrief(
   }
 }
 
-export type AuthorizedProConsultBriefRequest =
+export type AuthorizedProConsultBriefRequest = (
   | { professionalId: string; bookingId: string; clientId?: never }
   | { professionalId: string; clientId: string; bookingId?: never }
+) & {
+  /**
+   * P7a-3: the plan-diff labels. Optional so every shipped caller keeps
+   * compiling, and defaulted to the brand DEFAULT rather than the tenant's —
+   * the same reason `referenceNote` is (lib/consult/writeBoundary.ts): these
+   * words are compared across surfaces, and two readers seeing two sentences
+   * would be a diff that disagrees with itself.
+   */
+  planDiffCopy?: BrandClientConsultPlanDiffCopy
+}
 
 /** Shared authorization and render loader for both RSC surfaces and API twins. */
 export async function loadAuthorizedProConsultBriefs(
@@ -172,6 +222,7 @@ export async function loadAuthorizedProConsultBriefs(
   if (!isAiConsultC6ExposureEnabledForPro(args.professionalId)) {
     throw new ProConsultBriefError('HIDDEN')
   }
+  const planDiffCopy = args.planDiffCopy ?? defaultClientConsultPlanDiffCopy
 
   let clientId: string
   let bookingId: string | null = null
@@ -221,7 +272,12 @@ export async function loadAuthorizedProConsultBriefs(
     const briefs: ConsultProBriefDTO[] = []
     for (const session of sessions) {
       briefs.push(
-        await loadSessionBrief(tx, session, estimates.get(session.id) ?? null),
+        await loadSessionBrief(
+          tx,
+          session,
+          estimates.get(session.id) ?? null,
+          planDiffCopy,
+        ),
       )
     }
     return sortConsultBriefHistory(briefs)

@@ -28,7 +28,12 @@ import {
   CONSULT_PRO_BRIEF_SCHEMA_VERSION,
   toBriefJsonPayload,
 } from './briefContract'
-import { CONSULT_ANCHOR_SELECT, evaluateConsultAnchor } from './anchor'
+import { recordLockedConsultRerunRequest } from './analysisRerun'
+import {
+  assertConsultInputOpen,
+  consultCaptureRetentionExpiresAt,
+  CONSULT_OPEN_WINDOW_SELECT,
+} from './openWindow'
 import { CONSULT_MAX_ANALYSIS_CAPTURES } from './capture/registry'
 import { ConsultWriteError } from './errors'
 import {
@@ -86,6 +91,25 @@ const ACTIVE_CONTENT_STATES = new Set<ConsultSessionStatus>([
 
 const REVOCABLE_STATES = new Set<ConsultSessionStatus>([
   ...ACTIVE_CONTENT_STATES,
+  ConsultSessionStatus.COMPLETED,
+])
+
+/**
+ * P7a-3: where an intake revision may land once the early stage is behind her.
+ *
+ * The three post-analysis states are the new ones. Editing an answer while a
+ * run is in flight is deliberately ALLOWED rather than refused: the run's
+ * `requestHash` pin then refuses that run's finalize, which is precisely the
+ * "an older job cannot publish over a newer revision" rule doing its job, and
+ * the debounced rerun picks the new answer up. Refusing the edit instead would
+ * mean the client's honest correction lost a race with a spinner.
+ */
+const POST_EARLY_INTAKE_WRITE_STATES = new Set<ConsultSessionStatus>([
+  ConsultSessionStatus.INTAKE_READY,
+  ConsultSessionStatus.INTAKE_IN_PROGRESS,
+  ConsultSessionStatus.MEDIA_READY,
+  ConsultSessionStatus.ANALYSIS_PENDING,
+  ConsultSessionStatus.ANALYZING,
   ConsultSessionStatus.COMPLETED,
 ])
 
@@ -161,25 +185,22 @@ async function requireClientIntakeEligibility(
   tx: Prisma.TransactionClient,
   consultSessionId: string,
   actor: ClientActor,
+  now: Date,
 ) {
   const session = await tx.consultSession.findUnique({
     where: { id: consultSessionId },
     select: {
       client: { select: { userId: true } },
-      ...CONSULT_ANCHOR_SELECT,
+      ...CONSULT_OPEN_WINDOW_SELECT,
       serviceCategory: { select: CONSULT_SERVICE_PROFILE_CATEGORY_SELECT },
     },
   })
   if (!session || session.client.userId !== actor.id) {
     throw new ConsultWriteError('NOT_FOUND', 'Consult session not found.')
   }
-  const anchor = evaluateConsultAnchor(session)
-  if (!anchor.eligible) {
-    throw new ConsultWriteError(
-      anchor.hidden ? 'NOT_FOUND' : 'BOOKING_INELIGIBLE',
-      'Consult is unavailable for this booking.',
-    )
-  }
+  // P7a-3: this helper gates the intake WRITE, so it takes the full input
+  // window — scope plus the appointment, for both anchors.
+  assertConsultInputOpen(session, now)
   return session
 }
 
@@ -612,6 +633,12 @@ export async function appendLockedConsultInspirationRevision(
       revisionId: revision.id,
     },
   })
+  // P7a-3: same rule as the intake — a changed card on a finished consult asks
+  // for a new plan version. Debounced and capped in analysisRerun.ts.
+  await recordLockedConsultRerunRequest(tx, {
+    consultSessionId: args.consultSessionId,
+    actor: args.actor,
+  })
   return { revision, replayed: false }
 }
 
@@ -726,32 +753,100 @@ export async function finalizeLockedHairColorAnalysis(
       revisionId: revision.id,
     },
   })
-  const marked = await tx.consultCapture.updateMany({
-    where: {
-      id: { in: [...args.captureIds] },
-      consultSessionId: args.consultSessionId,
-      status: ConsultCaptureStatus.ACCEPTED,
-      purgedAt: null,
-      purgeRequestedAt: null,
-      rawExpiresAt: { gt: args.finalizedAt },
-    },
-    data: {
-      purgeEligibleAt: args.finalizedAt,
-      purgeRequestedAt: args.finalizedAt,
+  // ── P7a-3: what completion does to the photos ─────────────────────────────
+  //
+  // Before this step, finalize purge-marked every capture it had just read, and
+  // the lifecycle guard REQUIRED that before it would let the session reach
+  // COMPLETED. Completion therefore disarmed its own inputs: an ANALYSIS
+  // revision needs at least one capture that is NOT purge-marked, so a rerun
+  // had nothing to read even once every window was widened.
+  //
+  // Minimum retention (Tori, 2026-09-06): with chart-copy consent the captures
+  // are KEPT and their expiry moves out to the end of the appointment plus
+  // fourteen days. Without it, this is byte-for-byte the shipped behaviour and
+  // a card-only rerun is refused in the app's own voice rather than answered
+  // from stale observations (Part 0 rule 4).
+  const session = await tx.consultSession.findUniqueOrThrow({
+    where: { id: args.consultSessionId },
+    select: {
+      status: true,
+      chartCopyOptIn: true,
+      ...CONSULT_OPEN_WINDOW_SELECT,
     },
   })
-  if (marked.count !== args.captureIds.length) {
-    throw new ConsultWriteError(
-      'ANALYSIS_PREREQUISITES_REQUIRED',
-      'Analysis captures changed.',
-    )
+
+  if (session.chartCopyOptIn) {
+    // The same predicate the purge-marking arm uses, so "these captures are
+    // still the ones the run read" is checked identically on both paths.
+    const live = await tx.consultCapture.count({
+      where: {
+        id: { in: [...args.captureIds] },
+        consultSessionId: args.consultSessionId,
+        status: ConsultCaptureStatus.ACCEPTED,
+        purgedAt: null,
+        purgeRequestedAt: null,
+        rawExpiresAt: { gt: args.finalizedAt },
+      },
+    })
+    if (live !== args.captureIds.length) {
+      throw new ConsultWriteError(
+        'ANALYSIS_PREREQUISITES_REQUIRED',
+        'Analysis captures changed.',
+      )
+    }
+    // 🔴 `lt` in the WHERE, not a bare set. The guard permits `rawExpiresAt` to
+    // move FORWARD only, and a capture that already outlives the deadline —
+    // an appointment tomorrow on a photo taken for one next month — must not
+    // be SHORTENED to it. A null deadline means "not booked yet": she keeps
+    // the 24h clock until there is an appointment to measure from, and the
+    // spark stamps one within seconds of this running.
+    const retainUntil = consultCaptureRetentionExpiresAt(session)
+    if (retainUntil) {
+      await tx.consultCapture.updateMany({
+        where: {
+          id: { in: [...args.captureIds] },
+          consultSessionId: args.consultSessionId,
+          rawExpiresAt: { lt: retainUntil },
+        },
+        data: { rawExpiresAt: retainUntil },
+      })
+    }
+  } else {
+    const marked = await tx.consultCapture.updateMany({
+      where: {
+        id: { in: [...args.captureIds] },
+        consultSessionId: args.consultSessionId,
+        status: ConsultCaptureStatus.ACCEPTED,
+        purgedAt: null,
+        purgeRequestedAt: null,
+        rawExpiresAt: { gt: args.finalizedAt },
+      },
+      data: {
+        purgeEligibleAt: args.finalizedAt,
+        purgeRequestedAt: args.finalizedAt,
+      },
+    })
+    if (marked.count !== args.captureIds.length) {
+      throw new ConsultWriteError(
+        'ANALYSIS_PREREQUISITES_REQUIRED',
+        'Analysis captures changed.',
+      )
+    }
   }
-  await transitionLockedConsultSession(tx, {
-    consultSessionId: args.consultSessionId,
-    actor: args.actor,
-    fromStatus: ConsultSessionStatus.ANALYZING,
-    toStatus: ConsultSessionStatus.COMPLETED,
-  })
+
+  // 🔴 A RERUN performs no lifecycle transition. The session is already
+  // COMPLETED and stays there — which is what keeps the two once-per-consult
+  // audit indexes (`..._one_analysis_claim_transition`,
+  // `..._one_analysis_complete_transition`) meaning exactly what they meant
+  // before P7a-3. Only the FIRST completion moves the session.
+  if (session.status === ConsultSessionStatus.ANALYZING) {
+    await transitionLockedConsultSession(tx, {
+      consultSessionId: args.consultSessionId,
+      actor: args.actor,
+      fromStatus: ConsultSessionStatus.ANALYZING,
+      toStatus: ConsultSessionStatus.COMPLETED,
+    })
+  }
 
   const intakeRevision = await tx.consultRevision.findFirst({
     where: {
@@ -977,6 +1072,7 @@ function intakeRequestHash(args: {
 export async function appendConsultIntakeRevision(args: {
   consultSessionId: string
   actor: ClientActor
+  now?: Date
   loadInput: () => Promise<{
     packVersion: number
     schemaVersion: number
@@ -985,12 +1081,14 @@ export async function appendConsultIntakeRevision(args: {
     idempotencyKey: string
   }>
 }) {
+  const now = args.now ?? new Date()
   return prisma.$transaction(async (tx) => {
     await lockSession(tx, args.consultSessionId)
     const scope = await requireClientIntakeEligibility(
       tx,
       args.consultSessionId,
       args.actor,
+      now,
     )
     const currentPack: ConsultIntakePackDefinition = resolveConsultServiceProfile(
       scope.serviceCategory,
@@ -1017,11 +1115,12 @@ export async function appendConsultIntakeRevision(args: {
     })
     await requireCurrentConsultAgreementAcceptances(tx, args.consultSessionId)
 
+    // P7a-3: the intake is revisable until the appointment. The states after
+    // MEDIA_READY are new; EARLY_PHOTO_READY stays because answering the first
+    // question is what CLOSES that stage (P7a-1, handled just below).
     if (
       session.status !== ConsultSessionStatus.EARLY_PHOTO_READY &&
-      session.status !== ConsultSessionStatus.INTAKE_READY &&
-      session.status !== ConsultSessionStatus.INTAKE_IN_PROGRESS &&
-      session.status !== ConsultSessionStatus.MEDIA_READY
+      !POST_EARLY_INTAKE_WRITE_STATES.has(session.status)
     ) {
       throw new ConsultWriteError(
         'INVALID_STATE',
@@ -1164,6 +1263,15 @@ export async function appendConsultIntakeRevision(args: {
         actorId: args.actor.id,
         revisionId: revision.id,
       },
+    })
+
+    // P7a-3: an answer changed on a consult whose plan already exists is a
+    // rerun request. Debounced and capped in lib/consult/analysisRerun.ts; a
+    // no-op on every consult that has not completed its first analysis, which
+    // is every consult reaching this line before the plan exists.
+    await recordLockedConsultRerunRequest(tx, {
+      consultSessionId: args.consultSessionId,
+      actor: args.actor,
     })
 
     if (input.complete && status === ConsultSessionStatus.INTAKE_IN_PROGRESS) {

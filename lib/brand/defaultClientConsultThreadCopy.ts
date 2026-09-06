@@ -51,10 +51,27 @@ export const defaultClientConsultThreadCopy: BrandClientConsultThreadCopy = {
   estimateReady:
     'Your plan firmed up, so the price on your appointment has too. {pro} confirms the final number at your visit.',
 
+  chartCopyLabel:
+    'Keep these photos on my chart with {pro}, so we can come back to them — and so I can rework your plan if you change anything before your appointment. Untick this and they’re deleted as soon as your plan is built.',
+
   bookCtaLabel: 'Book the look',
   bookCtaSelfieRequired: 'Send one photo of yourself and this opens up.',
   bookCtaNotBookable:
     'This look isn’t bookable on its own — message your professional and she can set it up.',
+
+  // P7a-3 — the consult stays open until the appointment, so these are the
+  // sentences of a document that is still alive.
+  planUpdating:
+    'You changed something, so I’m having another look. One minute.',
+  planUpdated: 'Your plan moved. Here’s what changed:',
+  planUnchanged:
+    'I looked again with what you added — the plan still holds. Nothing to change.',
+  planNeedsPhoto:
+    'I’d love to look again, but your photos have expired. Send me one more and I’ll take another look.',
+  planUpdateLimitReached:
+    'That’s as far as I can take this one. Anything else you want changed, tell {pro} at your visit — she’ll have all of this in front of her.',
+  appointmentStarted:
+    'You’re in {pro}’s chair now, so this is closed. Everything you added is with her.',
 
   stopped: 'This consult was stopped. Nothing more can be added to it.',
   stoppedRevoked:

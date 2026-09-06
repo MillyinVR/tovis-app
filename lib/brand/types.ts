@@ -698,6 +698,29 @@ export type BrandClientConsultCaptureCopy = {
  * the client's own language. A slot is filled by lib/consult/threadCopy.ts,
  * never by a caller assembling the sentence itself.
  */
+/**
+ * P7a-3 — the words a plan diff is said in, for BOTH audiences.
+ *
+ * The client's "plan updated" bubble and the pro's Brief diff read the same
+ * labels from here, because the one failure a versioned Brief exists to prevent
+ * is the two of them describing the same change differently.
+ */
+export type BrandClientConsultPlanDiffCopy = {
+  /** Row labels. Plain nouns — never a field path. */
+  achievabilityLabel: string
+  stepsLabel: string
+  safetyLabel: string
+  baseLevelLabel: string
+  lightestLevelLabel: string
+  /** What joins the ordered steps when they are shown as one line. */
+  stepSeparator: string
+  /** The four achievability values, as sentences. */
+  achievabilitySingle: string
+  achievabilityMulti: string
+  achievabilityAssessment: string
+  achievabilityUnknown: string
+}
+
 export type BrandClientConsultThreadCopy = {
   /** The first bubble, when the service is known / when it is not. */
   openingWithService: string
@@ -752,10 +775,46 @@ export type BrandClientConsultThreadCopy = {
    */
   estimateReady: string
 
+  /**
+   * The keep-my-photos choice, above the Book button.
+   *
+   * 🔴 P7a-3 rewrote this because the shipped sentence became FALSE: it told
+   * every client "photos are deleted after analysis either way", and with the
+   * box ticked they are now kept through the appointment so the plan can be
+   * reworked. A consent control that misdescribes what it consents to is worse
+   * than no control.
+   */
+  chartCopyLabel: string
+
   /** The sticky CTA's label, and the hints under it while it is not live. */
   bookCtaLabel: string
   bookCtaSelfieRequired: string
   bookCtaNotBookable: string
+
+  /**
+   * P7a-3 — the consult is a living document until the appointment.
+   *
+   * `planUpdating` is the plan card while a rerun she asked for is queued or
+   * running; `planUpdated` heads the diff bubble; `planUnchanged` is the same
+   * bubble when the rerun produced the same answer, which is a real and
+   * reassuring outcome rather than something to hide.
+   */
+  planUpdating: string
+  planUpdated: string
+  planUnchanged: string
+  /**
+   * She changed something but her raw photos are gone — she did not opt into
+   * keeping them, so completion purged them at the 24h mark. Never a silent
+   * reuse of the old observations (Part 0 rule 4).
+   */
+  planNeedsPhoto: string
+  /** The consult has spent its allowance of plan updates. */
+  planUpdateLimitReached: string
+  /**
+   * The appointment started (or is over), so nothing more can be added. Warm,
+   * not a shutter coming down: this is the consult having worked.
+   */
+  appointmentStarted: string
 
   /** A consult that was stopped server-side, and one the client revoked. */
   stopped: string
@@ -1042,6 +1101,7 @@ export type BrandConfig = {
   clientConsultCapture: BrandClientConsultCaptureCopy
   clientConsultBooking: BrandClientConsultBookingCopy
   clientConsultThread: BrandClientConsultThreadCopy
+  clientConsultPlanDiff: BrandClientConsultPlanDiffCopy
   clientConsultInspiration: BrandClientConsultInspirationCopy
   home: BrandHomeCopy
 }

@@ -191,6 +191,61 @@ function ServiceEstimate({
   )
 }
 
+/**
+ * P7a-3 — "this is v2, and here is what your client changed".
+ *
+ * At the TOP of the brief, above the client's own words, because it is the only
+ * thing on this screen a pro who already read v1 does not know. Everything
+ * below it she has seen.
+ *
+ * Rendered only from v2 onward: a first-version brief has nothing to differ
+ * from, and a "version 1 of 1" chip on every brief in the queue would be noise
+ * that teaches her to stop reading the banner by the time it matters.
+ *
+ * Tone tokens only — `toneInfo` for the frame, `--` tokens for the ink — so it
+ * follows [data-mode] like everything else on this screen.
+ */
+function PlanVersionBanner({ brief }: { brief: ConsultProBriefDTO }) {
+  const version = brief.planVersion ?? 1
+  const changes = brief.planChanges ?? []
+  if (version < 2) return null
+
+  return (
+    <section
+      aria-labelledby={`${brief.consultId}-plan-version`}
+      className="rounded-2xl border border-toneInfo/30 bg-toneInfo/10 p-3"
+    >
+      <h3
+        id={`${brief.consultId}-plan-version`}
+        className="text-[12.5px] font-black text-textPrimary"
+      >
+        Updated plan &middot; version {version}
+      </h3>
+      {changes.length === 0 ? (
+        <p className="mt-1 text-[12px] text-textSecondary">
+          Your client added something. Nothing in the plan moved.
+        </p>
+      ) : (
+        <dl className="mt-2 grid gap-1.5">
+          {changes.map((change) => (
+            <div key={change.key} className="grid gap-0.5">
+              <dt className="text-[11px] font-semibold text-textMuted">
+                {change.label}
+              </dt>
+              <dd className="text-[12.5px] font-semibold text-textPrimary">
+                <span className="text-textMuted line-through">
+                  {change.from ?? '—'}
+                </span>{' '}
+                &rarr; {change.to ?? '—'}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </section>
+  )
+}
+
 export default function ProConsultBrief({
   brief,
   timeZone,
@@ -215,6 +270,8 @@ export default function ProConsultBrief({
           })}
         </div>
       ) : null}
+
+      <PlanVersionBanner brief={brief} />
 
       <section aria-labelledby={`${brief.consultId}-client-words`}>
         <h3

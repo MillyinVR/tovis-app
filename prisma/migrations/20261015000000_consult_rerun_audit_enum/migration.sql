@@ -1,0 +1,12 @@
+-- P7a-3, slice 1 of 2: the audit label only.
+--
+-- PostgreSQL requires a new enum label to COMMIT before any later migration may
+-- name it in a table, constraint, trigger, or function, and Prisma wraps each
+-- migration in a transaction. Same reason and same shape as
+-- 20261013000000_consult_early_photo_enum and
+-- 20261007000000_consult_inspiration_analysis_enum; this keeps that convention.
+--
+-- ANALYSIS_RERUN_REQUESTED is one content-free row per rerun the client asks
+-- for. It is what the per-consult rerun cap counts and what the debounce window
+-- is measured from, so it is the record of a DECISION rather than a log line.
+ALTER TYPE "ConsultAuditAction" ADD VALUE 'ANALYSIS_RERUN_REQUESTED' AFTER 'BRIEF_FEEDBACK_RECORDED';

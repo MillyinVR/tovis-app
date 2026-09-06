@@ -180,8 +180,13 @@ export async function loadProposalDerivationInputs(
   estimate: ConsultProposalEstimateRow | null
   analysisRecommendations: ConsultBookingProposalAnalysisInput
 }> {
-  const estimate = await tx.consultServiceEstimate.findUnique({
+  // P7a-3: the LATEST estimate, not "the" estimate. A consult now holds one per
+  // analysis version, because a rerun reprices — so the proposal must be built
+  // from the newest plan the client has actually been shown, and `findUnique`
+  // on `consultSessionId` has stopped being a question with one answer.
+  const estimate = await tx.consultServiceEstimate.findFirst({
     where: { consultSessionId },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     select: PROPOSAL_ESTIMATE_SELECT,
   })
 

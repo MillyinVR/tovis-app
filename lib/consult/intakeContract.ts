@@ -27,7 +27,10 @@ import { normalizeSelfProfile } from '@/lib/personalization/selfProfile'
 import { prisma } from '@/lib/prisma'
 
 import { requireCurrentConsultAgreementAcceptances } from './agreementContract'
-import { CONSULT_ANCHOR_SELECT, evaluateConsultAnchor } from './anchor'
+import {
+  assertConsultReadableScope,
+  CONSULT_OPEN_WINDOW_SELECT,
+} from './openWindow'
 import { ConsultWriteError } from './errors'
 import {
   evaluateConsultIntakeProgress,
@@ -57,12 +60,19 @@ const INTAKE_READABLE_STATES = new Set<ConsultSessionStatus>([
   ConsultSessionStatus.INTAKE_READY,
   ConsultSessionStatus.INTAKE_IN_PROGRESS,
   ConsultSessionStatus.MEDIA_READY,
+  // P7a-3: and everything after it. 🔴 These three absences are half of the
+  // thread's lost history — the loader threw INVALID_STATE from
+  // ANALYSIS_PENDING onward and every answered question vanished off the
+  // screen the instant the plan started building.
+  ConsultSessionStatus.ANALYSIS_PENDING,
+  ConsultSessionStatus.ANALYZING,
+  ConsultSessionStatus.COMPLETED,
 ])
 
 const INTAKE_SCOPE_SELECT = {
   id: true,
   status: true,
-  ...CONSULT_ANCHOR_SELECT,
+  ...CONSULT_OPEN_WINDOW_SELECT,
   // The anchor rule reads the slug; the service profile reads the family and
   // the name as well, so the wider select replaces the anchor's narrower one.
   serviceCategory: { select: CONSULT_SERVICE_PROFILE_CATEGORY_SELECT },
@@ -70,11 +80,11 @@ const INTAKE_SCOPE_SELECT = {
   // state needs the SERVICE the client is here about.
   booking: {
     select: {
-      ...CONSULT_ANCHOR_SELECT.booking.select,
+      ...CONSULT_OPEN_WINDOW_SELECT.booking.select,
       ...CONSULT_SERVICE_IDENTITY_BOOKING_SELECT,
       service: {
         select: {
-          ...CONSULT_ANCHOR_SELECT.booking.select.service.select,
+          ...CONSULT_OPEN_WINDOW_SELECT.booking.select.service.select,
           ...CONSULT_SERVICE_IDENTITY_BOOKING_SELECT.service.select,
         },
       },
@@ -113,13 +123,11 @@ async function requireOwnedEligibleScope(
     throw new ConsultWriteError('NOT_FOUND', 'Consult session not found.')
   }
 
-  const anchor = evaluateConsultAnchor(session, args.now)
-  if (!anchor.eligible) {
-    throw new ConsultWriteError(
-      anchor.hidden ? 'NOT_FOUND' : 'BOOKING_INELIGIBLE',
-      'Consult is unavailable for this booking.',
-    )
-  }
+  // P7a-3: SCOPE only. The appointment rule moved to the WRITE paths
+  // (`assertConsultInputOpen`) so that a consult which can no longer be changed
+  // can still be read — before this split, a passed appointment threw out of
+  // every stage loader and `optionalStage` erased the thread's own history.
+  assertConsultReadableScope(session)
   return session
 }
 

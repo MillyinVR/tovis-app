@@ -984,24 +984,39 @@ describe('client hair-color consult intake API against PostgreSQL', () => {
     })
   })
 
-  it('returns stable booking-ineligible errors before parsing answer data', async () => {
+  it('stays READABLE after the appointment and refuses the write before parsing it', async () => {
     await db.booking.update({
       where: { id: bookingId },
       data: { status: BookingStatus.COMPLETED },
     })
+    // P7a-3 — 🔴 this used to be a 409, and that was the bug. The stage loaders
+    // applied the booking WINDOW to reads as well as writes, so a consult whose
+    // appointment had happened threw out of every loader — and the thread's
+    // `optionalStage`, which swallows exactly that refusal, rendered the whole
+    // intake as a step that had never happened. Her own answers vanished off
+    // her screen the day she sat in the chair.
+    //
+    // Scope still refuses (another client's consult is still a 404). What no
+    // longer refuses is the passage of time.
     const getResponse = await getIntake(
       new Request(`http://test/api/v1/client/consult/${sessionId}/intake`),
       context(),
     )
-    expect(getResponse.status).toBe(409)
+    expect(getResponse.status).toBe(200)
     await expect(json(getResponse)).resolves.toMatchObject({
-      code: 'CONSULT_BOOKING_INELIGIBLE',
+      intake: { status: ConsultSessionStatus.MEDIA_READY },
     })
 
+    // The WRITE still refuses, before the body is parsed, and now with its own
+    // code: "your appointment started" is one event and both anchors say it the
+    // same way (lib/consult/openWindow.ts).
     const request = intakeRequest('booking-ineligible', completeAnswers, true)
     const jsonSpy = vi.spyOn(request, 'json')
     const postResponse = await postIntake(request, context())
     expect(postResponse.status).toBe(409)
+    await expect(json(postResponse)).resolves.toMatchObject({
+      code: 'CONSULT_APPOINTMENT_STARTED',
+    })
     expect(jsonSpy).not.toHaveBeenCalled()
 
     const beforeDirect = await db.consultSession.findUniqueOrThrow({

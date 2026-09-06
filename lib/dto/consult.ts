@@ -1642,6 +1642,21 @@ export type ConsultProBriefDTO = {
   // DIFFERENT inspiration revision than this brief — a stale read is the wrong
   // photograph's colour, so the brief shows nothing rather than the wrong thing.
   inspirationAnalysis?: ConsultInspirationAnalysisDTO | null
+  /**
+   * P7a-3 — which plan version this brief is, and what changed to get here.
+   *
+   * OPTIONAL on the wire for the same reason `serviceEstimate` is: the
+   * published schema grows by addition only and shipped iOS fixtures stay
+   * valid. `planVersion` is 1 for a consult that has never been reworked, and
+   * `planChanges` is then empty — there is nothing before it to differ from.
+   *
+   * 🔴 The diff is against the PREVIOUS version, not against the pro's own
+   * adjustments. Carrying those forward is P10's job and is a different
+   * question; this one answers "what did your client change since you last
+   * looked?".
+   */
+  planVersion?: number
+  planChanges?: ConsultPlanDiffEntryDTO[]
   feedback: ConsultBriefFeedbackDTO | null
   createdAt: string
 }
@@ -1793,6 +1808,12 @@ export type ConsultAgreementErrorCode =
   | 'CONSULT_INSPIRATION_ANALYSIS_UNAVAILABLE'
   | 'CONSULT_INSPIRATION_ANALYSIS_UNREADABLE'
   | 'CONSULT_LOOK_NOT_CONSULTABLE'
+  // P7a-3. The consult stayed open after its analysis completed; what closes
+  // it is the APPOINTMENT. These four are the ends of that longer life.
+  | 'CONSULT_APPOINTMENT_STARTED'
+  | 'CONSULT_ANALYSIS_PHOTOS_EXPIRED'
+  | 'CONSULT_ANALYSIS_RERUN_LIMIT_REACHED'
+  | 'CONSULT_ANALYSIS_SUPERSEDED'
 
 export type ConsultAgreementErrorDTO = {
   ok: false
@@ -1982,6 +2003,57 @@ export type ConsultThreadPlanMessageDTO = {
   /** The versions the start-analysis call must echo. Null once it has run. */
   schemaVersion: number | null
   promptVersion: string | null
+  /**
+   * P7a-3: which plan version `results` is. 1 for the first analysis, 2 after
+   * the first rerun. Zero while none exists.
+   */
+  planVersion: number
+  /**
+   * P7a-3: an input changed after this version was built, so a new one is
+   * coming. The card says so instead of showing a plan the client already knows
+   * is out of date.
+   */
+  updatePending: boolean
+}
+
+/**
+ * P7a-3 — "your plan changed, and here is what changed".
+ *
+ * One bubble per version after the first. It carries the DIFF rather than the
+ * new plan: the plan card above already shows the current version, and a client
+ * scrolling back needs to know what moved, not to read the whole thing again.
+ *
+ * 🔴 `changes` is empty on a rerun that produced the same answer, and the copy
+ * says so. A rerun that changes nothing is a real and reassuring outcome —
+ * "we looked again and it still holds" — and hiding it would make the thread
+ * look like it ignored her edit.
+ */
+export type ConsultThreadPlanUpdateMessageDTO = {
+  kind: 'PLAN_UPDATE'
+  id: string
+  author: 'APP'
+  state: ConsultThreadMessageStateDTO
+  text: string
+  /** The version this bubble announces. Always >= 2. */
+  planVersion: number
+  /** The version it is being compared against. */
+  previousPlanVersion: number
+  changes: ConsultPlanDiffEntryDTO[]
+  createdAt: string
+}
+
+/**
+ * One line of a plan diff, in the client's language.
+ *
+ * `label` is the thing that changed ("Sessions", "What we'd do first"), `from`
+ * and `to` are its values. Never a field path: this is read by a person in bed
+ * at eleven at night, not by an engineer reading a changelog.
+ */
+export type ConsultPlanDiffEntryDTO = {
+  key: string
+  label: string
+  from: string | null
+  to: string | null
 }
 
 /**
@@ -2006,6 +2078,7 @@ export type ConsultThreadMessageDTO =
   | ConsultThreadInspirationMessageDTO
   | ConsultThreadPhotoRequestMessageDTO
   | ConsultThreadPlanMessageDTO
+  | ConsultThreadPlanUpdateMessageDTO
   | ConsultThreadBookingMessageDTO
 
 /**

@@ -7356,6 +7356,10 @@ enum ConsultAuditAction {
   INSPIRATION_REMOVED
   INSPIRATION_RAW_PURGED
   BRIEF_FEEDBACK_RECORDED
+  /// P7a-3. One row per rerun the client asks for, which is what the
+  /// per-consult cap counts and what the debounce window is measured from.
+  /// Content-free, like every other action here.
+  ANALYSIS_RERUN_REQUESTED
   // C7 singular client measurement facts. A partial unique index in the C7
   // migration permits each action at most once per consult; the session lock
   // in lib/consult/clientResults.ts makes retries deterministic.
@@ -7520,7 +7524,7 @@ model ConsultSession {
   captures             ConsultCapture[]
   inspirations         ConsultInspiration[]
   uploadSessions       UploadSession[]
-  serviceEstimate      ConsultServiceEstimate?
+  serviceEstimates     ConsultServiceEstimate[]
   bookingProposals     ConsultBookingProposal[]
   analysisRuns         ConsultAnalysisRun[]
   providerCalls        ConsultProviderCall[]
@@ -7839,6 +7843,16 @@ model ConsultAnalysisRun {
   /// screen ("reading 4 photos"), so it is a product field, not a debug one.
   photoCount Int @default(0)
 
+  /// P7a-3: which PLAN VERSION this run intends to publish — 1 for the first
+  /// analysis, 2 for the first rerun, and so on.
+  ///
+  /// The explicit ordering pin. `requestHash` already refuses a finalize whose
+  /// inputs moved, but a hash only says "different", never "older": two runs
+  /// racing to publish are indistinguishable by it. This says which one is
+  /// next, and a partial unique index on (consultSessionId, planVersion) over
+  /// COMPLETED runs makes the answer singular even under a stolen lease.
+  planVersion Int @default(1)
+
   /// Lease + timing. `runAt` is when the run becomes claimable (retry
   /// backoff); `claimedAt` is the lease stamp a stale-claim sweep reads.
   runAt      DateTime  @default(now())
@@ -7953,7 +7967,12 @@ enum ConsultServiceEstimateLineSource {
 model ConsultServiceEstimate {
   id String @id @default(cuid())
 
-  consultSessionId String         @unique
+  /// P7a-3: no longer unique on its own. A consult keeps ONE estimate per
+  /// analysis version — the reruns the living document permits each price
+  /// themselves — and readers take the newest. The uniqueness that remains is
+  /// (consultSessionId, sourceAnalysisRevisionId) below, which is the fact that
+  /// actually matters: an analysis revision is priced exactly once.
+  consultSessionId String
   consultSession   ConsultSession @relation(fields: [consultSessionId], references: [id], onDelete: Cascade)
 
   professionalId String
@@ -7997,6 +8016,9 @@ model ConsultServiceEstimate {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@unique([consultSessionId, sourceAnalysisRevisionId])
+  /// "The latest estimate for this consult" — the read every consumer makes.
+  @@index([consultSessionId, createdAt])
   @@index([professionalId, createdAt])
   @@index([sourceAnalysisRevisionId])
 }
