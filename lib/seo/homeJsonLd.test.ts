@@ -15,6 +15,7 @@ describe('buildHomeJsonLd', () => {
     const rollingOut = [
       ...copy.loop.steps,
       ...copy.clients.features,
+      ...copy.spotlight.features,
       ...copy.pros.features,
       copy.money,
     ].filter((f) => f.state === 'rolling-out')

@@ -6,7 +6,12 @@
 import Link from 'next/link'
 import BrandWordmark from '@/lib/brand/BrandWordmark'
 
-const navLinks = [
+export type PublicTopBarLink = {
+  href: string
+  label: string
+}
+
+const defaultNavLinks: readonly PublicTopBarLink[] = [
   { href: '/about', label: 'About' },
   { href: '/support', label: 'Support' },
   { href: '/privacy', label: 'Privacy' },
@@ -16,9 +21,19 @@ const navLinks = [
 type Props = {
   /** Optional Tailwind classes applied to the <header> wrapper */
   className?: string
+  /**
+   * Replaces the default About/Support/Privacy/Terms set. The homepage passes
+   * its own in-page section anchors instead — those links are what a landing
+   * page's bar is for, and the policy pages it displaces are still one tap
+   * away in the footer and the mobile GuestSessionFooter. Log in is never
+   * part of this list, so no caller can drop it.
+   */
+  links?: readonly PublicTopBarLink[]
 }
 
-export default function PublicTopBar({ className }: Props) {
+export default function PublicTopBar({ className, links }: Props) {
+  const navLinks = links ?? defaultNavLinks
+
   return (
     <header
       className={[

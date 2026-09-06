@@ -8,9 +8,18 @@
 import type { BrandHomeCopy, BrandHomeFeature } from '@/lib/brand/types'
 
 export function liveHomeFeatures(copy: BrandHomeCopy): BrandHomeFeature[] {
-  return [...copy.loop.steps, ...copy.clients.features, ...copy.pros.features, copy.money].filter(
-    (feature) => feature.state === 'live',
-  )
+  return [
+    ...copy.loop.steps,
+    ...copy.clients.features,
+    // Spotlight rows are ordinary feature rows that have been promoted, so
+    // they answer to this filter like any other. Both are rolling out today,
+    // which is exactly why they must be listed here rather than skipped: the
+    // day one is promoted to live, it reaches the featureList automatically
+    // instead of waiting for someone to remember this file.
+    ...copy.spotlight.features,
+    ...copy.pros.features,
+    copy.money,
+  ].filter((feature) => feature.state === 'live')
 }
 
 export function buildHomeJsonLd(args: {

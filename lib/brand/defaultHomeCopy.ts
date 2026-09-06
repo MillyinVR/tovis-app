@@ -159,6 +159,49 @@ export function defaultHomeCopy(brandName: string): BrandHomeCopy {
       ],
     },
 
+    // Two rows LIFTED out of the lists below, not copied into a third one.
+    // The camera used to sit in `pros.features`; the consult has never been on
+    // this page at all. Both are rolling out, and both say so twice: the state
+    // pill, and the last chip naming the actual limit. A spotlight is the
+    // loudest thing on a page, so it is the last place a caveat should be
+    // quiet.
+    spotlight: {
+      label: 'Not on the menu anywhere else',
+      title: 'Two things that make the guesswork',
+      titleAccent: 'disappear.',
+      features: [
+        {
+          eyebrow: 'Smart consultation',
+          title: 'You bring the photo. We name the service.',
+          body: 'Answer a handful of quick questions and drop in the shots you saved. Instead of picking a menu item and hoping it means the picture in your camera roll, you get told which service actually gets you there.',
+          aside: 'Running with one professional today while the results are checked by hand.',
+          chips: ['Bring your own photos', 'Names the service', 'Founder pilot'],
+          state: 'rolling-out',
+          // The allowlist is the limit this row claims, because it is the one
+          // that can be READ here: lib/consult/access.ts gates on
+          // ENABLE_AI_CONSULT (absent reads as off) OR a hardcoded array that
+          // holds exactly one id. The category kill switch is deliberately NOT
+          // claimed — lib/consult/serviceScope.ts defaults to ALL_SERVICES and
+          // only narrows when AI_CONSULT_SERVICE_SCOPE is set, and this
+          // repository cannot read prod's environment. Do not describe the
+          // consult as colour-only on the strength of that switch without a
+          // runtime probe saying so.
+          evidence:
+            'lib/consult/access.ts: ENABLE_AI_CONSULT defaults OFF and AI_CONSULT_PRO_ALLOWLIST holds exactly one id (founder testing account), read from source 2026-09-06. Analysis deployed 2026-09-05 (P4a/P4b). Prod value of AI_CONSULT_SERVICE_SCOPE is UNVERIFIED; the code default is ALL_SERVICES.',
+        },
+        {
+          eyebrow: 'Smart camera',
+          title: 'A photographer in your pocket.',
+          body: 'It reads the light, finds the angle, and talks you through the shot the way a photographer standing next to you would, then catches the retake before it ever reaches your grid. The finished work looks as good as the work.',
+          aside: 'Five coaching personalities, from Calm Mentor to Hype Bestie. Practice mode sharpens your off days.',
+          chips: ['Reads the light', 'Guides the angle', 'Catches the retake', 'iPhone beta'],
+          state: 'rolling-out',
+          evidence:
+            'Camera subsystem (capture coaching, QC retakes, personality packs) is iOS-only (Aug 2026 code audit); iOS is in TestFlight, not the App Store (build 63 archived 2026-09-01; checked 2026-09-05).',
+        },
+      ],
+    },
+
     pros: {
       label: 'For professionals',
       title: 'Run the chair. We’ll run everything else.',
@@ -225,12 +268,6 @@ export function defaultHomeCopy(brandName: string): BrandHomeCopy {
           evidence: 'Booking-conversion boost in lib/looks/personalizedRanking.ts fed by the look-conversion-stats job; ENABLE_PERSONALIZED_FEED is set in prod but its value is Hidden and UNVERIFIED (2026-09-05). Do not promote to live without a runtime probe.',
         },
         {
-          title: 'A camera that coaches like a mentor',
-          body: 'It reads the light, catches the retake before you post it, and speaks in your choice of five personalities. In the iPhone beta today.',
-          state: 'rolling-out',
-          evidence: 'Camera subsystem (capture coaching, QC retakes, personality packs) is iOS-only (Aug 2026 code audit); iOS is in TestFlight, not the App Store (build 63 archived 2026-09-01; checked 2026-09-05).',
-        },
-        {
           title: 'Deposits that enforce themselves',
           body: 'A deposit at booking and a late-cancel policy that does the awkward part for you.',
           state: 'rolling-out',
@@ -247,6 +284,13 @@ export function defaultHomeCopy(brandName: string): BrandHomeCopy {
       evidence:
         'Fee model per /why (checked against payments code); Stripe Connect destination charges; ENABLE_PLATFORM_FEES absent in prod; Stripe ON HOLD, prod keys in test mode (memory: stripe-is-on-hold-until-pro-journey-proven; checked 2026-09-05). Promote only when live keys are on.',
       cta: 'Read exactly how the money works →',
+    },
+
+    // Makes no capability claim, so it carries no state: it repeats the hero's
+    // two buttons and nothing else.
+    closer: {
+      title: 'The chair is open.',
+      titleAccent: 'Take it.',
     },
 
     next: {

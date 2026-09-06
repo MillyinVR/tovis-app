@@ -12,7 +12,13 @@ import type { BrandHomeFeature } from './types'
 const copy = defaultHomeCopy('ACME')
 
 function everyFeature(): BrandHomeFeature[] {
-  return [...copy.loop.steps, ...copy.clients.features, ...copy.pros.features, copy.money]
+  return [
+    ...copy.loop.steps,
+    ...copy.clients.features,
+    ...copy.spotlight.features,
+    ...copy.pros.features,
+    copy.money,
+  ]
 }
 
 describe('defaultHomeCopy', () => {
@@ -68,5 +74,28 @@ describe('defaultHomeCopy', () => {
 
   it('has at least one rolling-out row — the page is honest, not a brochure', () => {
     expect(everyFeature().some((f) => f.state === 'rolling-out')).toBe(true)
+  })
+
+  it('promotes spotlight rows rather than duplicating them', () => {
+    // A spotlight row is LIFTED out of clients/pros, never copied into both —
+    // otherwise the page states a capability twice and the honest counts drift.
+    const listed = [...copy.loop.steps, ...copy.clients.features, ...copy.pros.features].map(
+      (f) => f.title,
+    )
+    for (const feature of copy.spotlight.features) {
+      expect(listed, feature.title).not.toContain(feature.title)
+    }
+    expect(copy.spotlight.features.length).toBe(2)
+  })
+
+  it('makes a rolling-out spotlight name its limit in a chip, not only in the pill', () => {
+    // Chips are the smallest rendered copy on the page and sit under the
+    // loudest section. A caveat carried only by the state pill is one glance
+    // away from being missed, so the last chip has to carry it too.
+    for (const feature of copy.spotlight.features) {
+      expect(feature.chips.length, feature.title).toBeGreaterThan(0)
+      if (feature.state !== 'rolling-out') continue
+      expect(feature.chips.at(-1), feature.title).toMatch(/beta|pilot|soon|test|invite/i)
+    }
   })
 })
