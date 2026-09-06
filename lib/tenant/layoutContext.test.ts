@@ -14,6 +14,7 @@ vi.mock('./resolveTenant', () => ({
 }))
 
 import { TOVIS_ROOT_TENANT_SLUG } from './constants'
+import { DEGRADED_ROOT_TENANT_ID } from './degradedResolution'
 import { resolveTenantContextForLayout } from './layoutContext'
 
 beforeEach(() => {
@@ -73,7 +74,12 @@ describe('resolveTenantContextForLayout', () => {
 
       expect(ctx.isRoot).toBe(true)
       expect(ctx.slug).toBe(TOVIS_ROOT_TENANT_SLUG)
+      expect(ctx.tenantId).toBe(DEGRADED_ROOT_TENANT_ID)
       expect(consoleError).toHaveBeenCalledTimes(1)
+      expect(consoleError).toHaveBeenCalledWith(
+        'resolveTenantContextForLayout: falling back to root',
+        { error: 'database connection refused' },
+      )
     } finally {
       consoleError.mockRestore()
     }

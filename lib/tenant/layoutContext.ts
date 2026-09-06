@@ -6,23 +6,16 @@
 // context share one resolution per render pass.
 //
 // Failure mode: page rendering must not hard-down on a DB blip (marketing
-// pages have no other DB dependency), so resolution errors fall back to a
-// degraded root context instead of throwing. On a white-label domain that
-// means root branding for the duration of the outage — acceptable next to
-// serving a 500 on every page. This is an error path only; normal white-label
-// resolution never falls back by host or env (see lib/brand/forTenant.ts).
+// pages have no other DB dependency), so resolution errors degrade to the
+// root context — see lib/tenant/degradedResolution.ts for the rule and the
+// sentinel id. Anything that needs a real tenant id resolves its own context
+// and keeps the loud-failure behavior.
 
 import { cache } from 'react'
 import { headers } from 'next/headers'
 
-import { rootTenantContext, type TenantContext } from './context'
-import { resolveTenantByHost } from './resolveTenant'
-
-// Sentinel id for the degraded fallback context. It is only ever used for
-// brand resolution (a root context short-circuits to the root brand without
-// touching the id); anything that needs a real tenant id resolves its own
-// context and keeps the loud-failure behavior.
-const DEGRADED_ROOT_TENANT_ID = 'tenant-root-unresolved'
+import type { TenantContext } from './context'
+import { resolveTenantByHostOrDegraded } from './degradedResolution'
 
 export const resolveTenantContextForLayout = cache(
   async (): Promise<TenantContext> => {
@@ -30,14 +23,6 @@ export const resolveTenantContextForLayout = cache(
     const host =
       requestHeaders.get('x-forwarded-host') ?? requestHeaders.get('host')
 
-    try {
-      return await resolveTenantByHost(host)
-    } catch (error) {
-      console.error('resolveTenantContextForLayout: falling back to root', {
-        error: error instanceof Error ? error.message : String(error),
-      })
-
-      return rootTenantContext(DEGRADED_ROOT_TENANT_ID)
-    }
+    return resolveTenantByHostOrDegraded(host, 'resolveTenantContextForLayout')
   },
 )
