@@ -53,7 +53,10 @@ import {
   sanitizeConsultFollowUpQuestions,
 } from '@/lib/consult/followUpEngine'
 import { defaultClientConsultInspirationCopy } from '@/lib/brand/defaultClientConsultInspirationCopy'
-import { renderConsultFollowUpContext } from '@/lib/consult/followUpContext'
+import {
+  consultStartingPointPhrase,
+  renderConsultFollowUpContext,
+} from '@/lib/consult/followUpContext'
 import type { ConsultAnalysisCore } from '@/lib/consult/analysisEngine'
 import type {
   ConsultAnalysisEvidenceDTO,
@@ -310,8 +313,17 @@ describe('the consult schemas compile and answer against the live model', () => 
   // ── P5g — the adaptive follow-up call ─────────────────────────────────────
 
   /**
-   * The vocabulary of a real hair-colour consult mid-prep: the two safety
-   * questions she has not answered, and the follow-up pack's own keys.
+   * The vocabulary of a real hair-COLOUR consult mid-prep: two unanswered
+   * safety questions from intake v3, and keys from that pack's own follow-up
+   * (lib/consult/intake/followUp.ts — `last_color_service_timing`,
+   * `event_timing`, `budget`).
+   *
+   * 🔴 Every key here is one `resolveConsultFollowUpVocabulary` can actually
+   * produce for this family. The first version used `maintenance_tolerance`,
+   * which the hair-colour follow-up pack does NOT carry (it is hair-general's)
+   * — so this suite was exercising a vocabulary no client can be served, and
+   * its output read like a bug in a rule the product does keep. A live test
+   * that sends what production cannot send proves nothing about production.
    */
   const FOLLOW_UP_ENTRIES: ConsultFollowUpVocabularyEntry[] = [
     {
@@ -341,14 +353,16 @@ describe('the consult schemas compile and answer against the live model', () => 
       ],
     },
     {
-      key: 'maintenance_tolerance',
+      key: 'last_color_service_timing',
       home: 'FOLLOW_UP',
-      packLabel: 'How much upkeep are you happy with?',
+      packLabel: 'When was your last color service?',
       safety: false,
       options: [
-        { value: 'low', label: 'As little as possible' },
-        { value: 'medium', label: 'Some upkeep is fine' },
-        { value: 'high', label: 'I do not mind regular upkeep' },
+        { value: 'never', label: 'Never' },
+        { value: 'within-4-weeks', label: 'Within 4 weeks' },
+        { value: '4-6-months', label: '4–6 months ago' },
+        { value: 'over-12-months', label: 'Over 12 months ago' },
+        { value: 'not-sure', label: 'Not sure' },
       ],
     },
     {
@@ -499,14 +513,24 @@ describe('the consult schemas compile and answer against the live model', () => 
    * and the safety-order rule above would prove less than two do.
    */
   it('P5g — a follow-up references something it was actually told', async () => {
+    // 🔴 Round 2's vocabulary is round 1's MINUS what she answered, and its
+    // context carries those answers. The first version of this test dropped
+    // only the safety entries and passed `followUpAnswers: {}` — so it offered
+    // a key round 1 had just asked and told the model nothing about it, and the
+    // model duly asked it twice. That was the FIXTURE contradicting the
+    // product's own rule, not the product breaking it
+    // (`consult-follow-up.test.ts` proves the rule on a real consult), but a
+    // live test whose output reads like a bug is worse than no live test.
+    const answered = {
+      prior_lightening: ['over-12-months'],
+      last_color_service_timing: ['4-6-months'],
+    }
+    const remaining = FOLLOW_UP_ENTRIES.filter(
+      (entry) => !entry.safety && !(entry.key in answered),
+    )
     const withSafetyAnswered: ConsultFollowUpVocabulary = {
-      entries: FOLLOW_UP_ENTRIES.filter((entry) => !entry.safety),
-      byKey: new Map(
-        FOLLOW_UP_ENTRIES.filter((entry) => !entry.safety).map((entry) => [
-          entry.key,
-          entry,
-        ]),
-      ),
+      entries: remaining,
+      byKey: new Map(remaining.map((entry) => [entry.key, entry])),
     }
     const context = renderConsultFollowUpContext({
       professionalDisplayName: 'Susie',
@@ -519,8 +543,12 @@ describe('the consult schemas compile and answer against the live model', () => 
         unsure: [],
         keep: ['My length'],
       },
-      intakeAnswers: { change_scale: 'noticeable' },
-      followUpAnswers: {},
+      intakeAnswers: {
+        change_scale: 'noticeable',
+        prior_lightening: 'over-12-months',
+        henna_plant_dye_history: 'never',
+      },
+      followUpAnswers: { last_color_service_timing: ['4-6-months'] },
       vocabulary: withSafetyAnswered,
       copy: defaultClientConsultInspirationCopy,
       roundNumber: 2,
@@ -544,6 +572,33 @@ describe('the consult schemas compile and answer against the live model', () => 
     expect(prose).not.toMatch(
       /\b(face|eyes?|skin|undertone|identity|ethnic|ethnicity|race|health)\b/i,
     )
+
+    // 🔴 It cannot re-ask what round 1 got: the key is not in the vocabulary,
+    // so this is the grammar refusing rather than the prompt being trusted.
+    for (const question of questions) {
+      expect(Object.keys(answered)).not.toContain(question.key)
+    }
+
+    // 🔴 US spelling (Tori, 2026-09-06). The model answered "colour" because
+    // the prompt asked in British English; both now say "color".
+    const clientFacing = questions
+      .map((q) => `${q.text} ${q.options.map((o) => o.label).join(' ')}`)
+      .join(' ')
+    expect(clientFacing).not.toMatch(/\bcolour\b/i)
+    expect(clientFacing).not.toMatch(/\bgrey\b/i)
+
+    // 🔴 And where it names her starting point, it uses THE phrase — one
+    // description per plan version, not a fresh one each round.
+    const phrase = consultStartingPointPhrase(
+      HER_OWN_HAIR,
+      defaultClientConsultInspirationCopy,
+    )
+    expect(phrase).toBe('your light brown, golden base')
+    for (const question of questions) {
+      if (/starting from|you'?re at|base\b/i.test(question.text)) {
+        expect(question.text.toLowerCase()).toContain(phrase!.toLowerCase())
+      }
+    }
 
     console.log(
       '\nP5g follow-up — round 2, safety already answered:\n' +

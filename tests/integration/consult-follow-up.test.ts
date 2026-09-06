@@ -477,6 +477,113 @@ describe('🔴 the fallback, forced', () => {
   })
 })
 
+describe('🔴 a round never re-asks what an earlier round got', () => {
+  it('excludes the answered key from round 2, and hands round 2 the answer', async () => {
+    const sessionId = await completedConsult('p5g-carry')
+
+    // Round 1 asks a FOLLOW_UP-home question and she answers it.
+    const roundTwoInputs: { context: string; keys: string[] }[] = []
+    await generateConsultFollowUpRound(
+      { consultSessionId: sessionId, actor: client() },
+      { provider: providerAnswering('event_timing', ['no-deadline', '1-3-months']) },
+    )
+    await answerConsultFollowUpQuestion(
+      {
+        consultSessionId: sessionId,
+        clientId: fx.clientId,
+        actor: client(),
+        questionKey: 'event_timing',
+        selectedValues: ['1-3-months'],
+        idempotencyKey: `p5g-carry-1-${sessionId}`,
+      },
+      {
+        // Answering the LAST open question buys the next round inside this
+        // call, so this provider IS round 2's — captured rather than mocked
+        // away, because what it was GIVEN is the whole assertion.
+        provider: async ({ context, vocabulary }) => {
+          roundTwoInputs.push({
+            context,
+            keys: vocabulary.entries.map((entry) => entry.key),
+          })
+          const [first] = vocabulary.entries
+          return {
+            model: 'claude-sonnet-5',
+            questions: [
+              {
+                key: first!.key,
+                home: first!.home,
+                text: 'One more thing, and then you are done.',
+                evidence: 'round two',
+                options: first!.options.slice(0, 2).map((option) => ({ ...option })),
+              },
+            ],
+          }
+        },
+      },
+    )
+
+    const [roundTwo] = roundTwoInputs
+    expect(roundTwo).toBeDefined()
+    // 🔴 The key she just answered is GONE from round 2's vocabulary, so the
+    // model cannot ask it again — it is not a rule the prompt is trusted with.
+    expect(roundTwo!.keys).not.toContain('event_timing')
+    expect(roundTwo!.keys.length).toBeGreaterThan(0)
+    // 🔴 …and round 2 is TOLD the answer, under the heading that forbids
+    // re-asking. Exclusion alone would leave the model reasoning without it.
+    expect(roundTwo!.context).toContain('NEVER ask any of these again')
+    expect(roundTwo!.context).toContain('- event_timing: 1-3-months')
+  })
+
+  it('excludes an INTAKE-home answer too, which lands in a different table', async () => {
+    const sessionId = await completedConsult('p5g-carry-intake')
+    await unanswerIntakeQuestion(sessionId, 'henna_plant_dye_history')
+
+    const seen: string[][] = []
+    await generateConsultFollowUpRound(
+      { consultSessionId: sessionId, actor: client() },
+      {
+        provider: providerAnswering('henna_plant_dye_history', [
+          'never',
+          'within-6-months',
+        ]),
+      },
+    )
+    await answerConsultFollowUpQuestion(
+      {
+        consultSessionId: sessionId,
+        clientId: fx.clientId,
+        actor: client(),
+        questionKey: 'henna_plant_dye_history',
+        selectedValues: ['never'],
+        idempotencyKey: `p5g-carry-2-${sessionId}`,
+      },
+      {
+        provider: async ({ vocabulary }) => {
+          seen.push(vocabulary.entries.map((entry) => entry.key))
+          const [first] = vocabulary.entries
+          return {
+            model: 'claude-sonnet-5',
+            questions: [
+              {
+                key: first!.key,
+                home: first!.home,
+                text: 'One more thing.',
+                evidence: 'round two',
+                options: first!.options.slice(0, 2).map((option) => ({ ...option })),
+              },
+            ],
+          }
+        },
+      },
+    )
+    // The answer went to the INTAKE revision, and the vocabulary reads it from
+    // there — the two homes are checked against their OWN stores, so an answer
+    // filed correctly is still an answer that retires its question.
+    expect(seen[0]).toBeDefined()
+    expect(seen[0]).not.toContain('henna_plant_dye_history')
+  })
+})
+
 describe('🔴 the appointment closes the document', () => {
   it('refuses a follow-up answer once the appointment has started', async () => {
     const sessionId = await completedConsult('p5g-appt')

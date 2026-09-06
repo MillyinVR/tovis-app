@@ -42,7 +42,7 @@ import type { ConsultFollowUpVocabulary } from './followUpVocabulary'
  * describe it.
  *
  * This is what "the follow-up names the client's own photo" means in practice:
- * the evidence label on an observation becomes a phrase she recognises.
+ * the evidence label on an observation becomes a phrase she recognizes.
  */
 export const CONSULT_FOLLOW_UP_SHOT_PHRASES: Readonly<Record<string, string>> = {
   hair_back: 'the photo of the back of your hair',
@@ -73,7 +73,7 @@ function inspirationBlock(
     return 'The reference picture she chose has not been read (no analysis available). Do not describe it; you have not seen it.'
   }
   const lines = [
-    'The reference picture she chose, as a colourist read it (settled — do not re-derive):',
+    'The reference picture she chose, as a colorist read it (settled — do not re-derive):',
   ]
   for (const field of CONSULT_INSPIRATION_ANALYSIS_FIELDS) {
     const observed = attributes[field as ConsultInspirationAnalysisFieldDTO]
@@ -131,6 +131,58 @@ function inPlainWords(
   if (!subject && !value) return pair
   if (!value) return subject!
   return subject ? `${subject}: ${value}` : value
+}
+
+/**
+ * P5g — ONE description of where she is starting from, per plan version.
+ *
+ * 🔴 Composed here, deterministically, and handed to the model as the phrase to
+ * USE rather than as two codes to describe. Left to the model, round 1 said
+ * "your current light brown base" and round 2 said "a golden base" about the
+ * same head of hair — the same fact, described twice, in two questions she
+ * reads minutes apart. It is derived from the plan, so every round of a plan
+ * version gets a byte-identical phrase and a new plan version composes a new
+ * one from its own reading.
+ *
+ * Null when the plan settled neither the level nor the tone: there is then
+ * nothing honest to call her starting point, and the prompt says so rather than
+ * handing the model a half-sentence to finish.
+ */
+export function consultStartingPointPhrase(
+  core: ConsultAnalysisCore | null,
+  copy: BrandClientConsultInspirationCopy,
+): string | null {
+  if (!core) return null
+  const { startingPoint } = copy.cards
+  const level =
+    core.baseLevel.value === 'UNKNOWN'
+      ? null
+      : (copy.cards.attributeShortNames[`baseLevel:${core.baseLevel.value}`] ?? null)
+  const tone =
+    core.currentTone.value === 'UNKNOWN'
+      ? null
+      : (startingPoint.toneNames[core.currentTone.value] ?? null)
+
+  if (level && tone) {
+    return startingPoint.withLevelAndTone
+      .split('{level}')
+      .join(level)
+      .split('{tone}')
+      .join(tone)
+  }
+  if (level) return startingPoint.levelOnly.split('{level}').join(level)
+  if (tone) return startingPoint.toneOnly.split('{tone}').join(tone)
+  return null
+}
+
+function startingPointBlock(phrase: string | null): string {
+  if (!phrase) {
+    return 'Her own starting point could not be described from these photographs. Do not invent a description of it.'
+  }
+  return [
+    `Where she is starting from, in the words to use: "${phrase}".`,
+    'When you refer to where she is starting from, use that phrase EXACTLY as written. Do not re-describe it in your own words and do not shorten it — she is asked more than one question about the same head of hair, and two descriptions of it read as two different starting points.',
+  ].join(' ')
 }
 
 function preferencesBlock(
@@ -224,6 +276,8 @@ export function renderConsultFollowUpContext(
     inspirationBlock(input.inspiration),
     '',
     coreBlock(input.core),
+    '',
+    startingPointBlock(consultStartingPointPhrase(input.core, input.copy)),
     '',
     preferencesBlock(input.preferences, input.copy),
     '',

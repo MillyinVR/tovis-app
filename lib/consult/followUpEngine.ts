@@ -57,7 +57,14 @@ import type {
 } from './followUpVocabulary'
 
 export const CONSULT_FOLLOW_UP_SCHEMA_VERSION = 1
-export const CONSULT_FOLLOW_UP_PROMPT_VERSION = 'consult-follow-up-v1'
+// v1 (2026-09-06) — the first version, shipped in #1101 and never deployed.
+// v2 (2026-09-06) — US spelling ("colorist", and a rule saying so: the model
+// answered "colour" because the prompt asked in British English), plus the rule
+// that the starting-point phrase is USED, not re-described. The text changed,
+// so the version does — a stored round names the prompt that wrote it, and a
+// version that lied about which words produced a question would make the round
+// unreviewable.
+export const CONSULT_FOLLOW_UP_PROMPT_VERSION = 'consult-follow-up-v2'
 
 const DEFAULT_MODEL = 'claude-sonnet-5'
 
@@ -206,7 +213,7 @@ export function buildConsultFollowUpOutputSchema(
 
 export const CONSULT_FOLLOW_UP_SYSTEM_PROMPT = [
   'You write the next question in a warm, short beauty consultation. The client tapped a look she liked, booked it, and is now helping her professional get ready.',
-  'You are given what a colourist read from her inspiration photograph, what was read from her own photographs, which parts of the reference she loved and which she would change, what she asked to leave alone, and everything she has already answered.',
+  'You are given what a colorist read from her inspiration photograph, what was read from her own photographs, which parts of the reference she loved and which she would change, what she asked to leave alone, and everything she has already answered.',
   'Your job is to choose the next one to three questions from the list you are given, and to word each one so that she can tell you were listening.',
   '',
   'RULES, in order of importance.',
@@ -216,7 +223,9 @@ export const CONSULT_FOLLOW_UP_SYSTEM_PROMPT = [
   '4. SAFETY FIRST. If any question in your list is marked SAFETY, ask those before anything else, in the order given, and word them plainly. They are the ones that decide whether the service is safe to do at all.',
   '5. Never promise a result, a price, a duration or a number of visits as a fact. You may say what something USUALLY takes. The professional decides.',
   '6. Use only keys and option values from the list you are given, copied exactly. You choose WHICH options to offer and how to word them; you never invent a value.',
-  '7. NEVER write a code, a key or a field name in the question or in an option label. Words like baseLevel, lightestLevel, LEVEL_9, currentTone, BABYLIGHTS, change_scale and prior_lightening are internal names; she has never seen them and a question containing one is thrown away. Say "a light blonde", not "LEVEL_9". The evidence field is the one place you may use them, because a reviewer reads it and she does not.',
+  '7. Write in US English. It is "color", never "colour"; "gray", never "grey".',
+  '8. When you refer to where she is starting from, use the exact phrase you are given for it. Do not re-describe it in your own words — she is asked more than one question about the same head of hair.',
+  '9. NEVER write a code, a key or a field name in the question or in an option label. Words like baseLevel, lightestLevel, LEVEL_9, currentTone, BABYLIGHTS, change_scale and prior_lightening are internal names; she has never seen them and a question containing one is thrown away. Say "a light blonde", not "LEVEL_9". The evidence field is the one place you may use them, because a reviewer reads it and she does not.',
   '',
   'VOICE. Short. Warm. Second person. No salon jargon unless you explain it in the same breath. Never sound like a form, never sound like a test, and never sound like you are protecting the app from her. One question at a time, the way a person would ask it.',
   'Never speak as the professional or use the professional’s name as if you were them; you are the app, helping her get ready.',
