@@ -14,6 +14,86 @@ const footerLinks = [
   { href: '/terms', label: 'Terms' },
 ] as const
 
+type Feature = { lead: string; text: string }
+
+// Every line below maps to a shipped, all-users-live capability. Nothing
+// pilot-gated or flag-gated-dark appears here. Copy rules (2026-09-05):
+// never the word "AI" — "smart" / "learns with you" / "coaches like a
+// mentor" instead — and the page leads on the industry-upgrade story.
+const clientFeatures: Feature[] = [
+  {
+    lead: 'Scroll like you already know how.',
+    text: 'A feed of real looks from real pros near you — browse balayages, not service lists.',
+  },
+  {
+    lead: 'Book the look in the same breath.',
+    text: 'Every look comes from a pro who can actually give it to you. No DMs, no phone tag — you see it, you book it.',
+  },
+  {
+    lead: 'The pro you want is booked? Get in line.',
+    text: 'Join the waitlist and get notified the minute a last-minute spot opens up.',
+  },
+  {
+    lead: 'New in town — or just visiting?',
+    text: 'Discover who’s available in your new area before you get there.',
+  },
+  {
+    lead: 'Show off your looks. Inspire others. Earn credit.',
+    text: 'Share the looks you love, and referring friends earns you credit toward your next booking — the easiest referral bonus you’ll ever get.',
+  },
+  {
+    lead: 'Never forget the upkeep.',
+    text: 'Aftercare keeps your at-home instructions, your rebook timing, and the exact products your pro recommended — all in one place, so nothing slips.',
+  },
+]
+
+const proFeatures: Feature[] = [
+  {
+    lead: 'A cancellation is never a lost hour.',
+    text: 'The last-minute engine works your openings automatically — your waitlist first, then clients who’ve drifted, then nearby fans of your work.',
+  },
+  {
+    lead: 'A waitlist that wants you.',
+    text: 'Clients get notified the second a spot opens — and can book mobile appointments where you come to them.',
+  },
+  {
+    lead: 'A camera that coaches like a mentor.',
+    text: 'It reads the light, catches the retake before you post it, and speaks in your choice of five personalities — from Calm Mentor to Hype Bestie. Practice mode sharpens your off days.',
+  },
+  {
+    lead: 'Your client’s whole story, in one chart.',
+    text: 'Every visit, every note, consent-first sharing — the card file, reinvented.',
+  },
+  {
+    lead: 'A money trail that does your taxes.',
+    text: 'Expenses, write-offs, and mileage — organized all year, not just in April.',
+  },
+  {
+    lead: 'Your work, everywhere your audience lives.',
+    text: 'One tap turns any look into an IG-ready or TikTok-ready export, always credited to you. Grow where you already post.',
+  },
+  {
+    lead: 'Deposits that protect your time.',
+    text: 'Booked means booked — deposits, tipping, and refunds handled cleanly.',
+  },
+]
+
+function FeatureList({ features }: { features: Feature[] }) {
+  return (
+    <ul className="grid gap-x-16 gap-y-7 md:grid-cols-2">
+      {features.map((feature) => (
+        <li
+          key={feature.lead}
+          className="text-[14px] leading-relaxed text-textSecondary"
+        >
+          <span className="font-bold text-textPrimary">{feature.lead}</span>{' '}
+          {feature.text}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 export default async function Home() {
   const brand = getBrandForTenantContext(await resolveTenantContextForLayout())
 
@@ -51,20 +131,23 @@ export default async function Home() {
           <div className="flex items-center gap-3">
             <div className="h-px w-6 bg-accentPrimary" />
             <span className="whitespace-nowrap text-[10px] font-black tracking-[0.22em] text-accentPrimary">
-              BEAUTY · BOOKING
+              BEAUTY · BOOKING · REINVENTED
             </span>
           </div>
 
           {/* Headline — the only large text on this page */}
           <h1 className="font-display text-[52px] font-semibold leading-[1.08] tracking-tight sm:text-[68px] lg:text-[84px] xl:text-[96px]">
-            The New Age<br />
-            <span className="text-textPrimary/50">of Self Care</span>
+            Beauty booking<br />
+            <span className="text-textPrimary/50">finally got its upgrade.</span>
           </h1>
 
           {/* Subtitle */}
           <p className="max-w-sm text-[14px] leading-relaxed text-textSecondary sm:max-w-md sm:text-[15px]">
-            Booking and client management for beauty professionals —
-            with a seamless experience for clients to discover looks and make bookings.
+            Rides, food, flights, banking — everything in your life got smarter.
+            Booking a beauty pro? Still phone tag, “text me a picture,” and a
+            paper card file. {brand.displayName} brings the chair into the
+            modern world — a feed of real looks from real pros near you, where
+            every look is bookable.
           </p>
 
           {/* Primary CTAs */}
@@ -73,7 +156,7 @@ export default async function Home() {
               href="/signup/client"
               className="inline-flex items-center justify-center rounded-full bg-accentPrimary px-7 py-3 text-[13px] font-bold text-textPrimary shadow-[0_0_32px_rgb(var(--accent-primary)/0.30)] transition hover:bg-accentPrimaryHover hover:shadow-[0_0_44px_rgb(var(--accent-primary-hover)/0.42)] active:scale-[0.98]"
             >
-              Create Client Account
+              Find your look
             </Link>
 
             <Link
@@ -99,38 +182,30 @@ export default async function Home() {
         </div>
       </section>
 
-      {/* ── Who it's for ─────────────────────────────────────────── */}
+      {/* ── Clients ──────────────────────────────────────────────── */}
+      <section className="mx-auto max-w-5xl px-6 pb-20 sm:px-10 lg:px-16">
+
+        <div className="mb-3 text-[10px] font-black tracking-[0.20em] text-accentPrimary">
+          CLIENTS
+        </div>
+        <h2 className="font-display mb-8 text-[26px] font-semibold leading-tight">
+          Shop the look, not the service list.
+        </h2>
+
+        <FeatureList features={clientFeatures} />
+      </section>
+
+      {/* ── Professionals ─────────────────────────────────────────── */}
       <section className="mx-auto max-w-5xl px-6 pb-24 sm:px-10 lg:px-16">
 
-        <div className="tovis-section-label mb-10">Who {brand.displayName} is for</div>
-
-        <div className="grid gap-x-16 gap-y-10 md:grid-cols-2">
-          <div>
-            <div className="mb-3 text-[10px] font-black tracking-[0.20em] text-accentPrimary">
-              CLIENTS
-            </div>
-            <h2 className="font-display mb-3 text-[26px] font-semibold leading-tight">
-              Find your perfect look
-            </h2>
-            <p className="text-[14px] leading-relaxed text-textSecondary">
-              Discover beauty professionals near you, explore curated looks,
-              and manage all your bookings in one place.
-            </p>
-          </div>
-
-          <div>
-            <div className="mb-3 text-[10px] font-black tracking-[0.20em] text-microAccent/70">
-              PROFESSIONALS
-            </div>
-            <h2 className="font-display mb-3 text-[26px] font-semibold leading-tight">
-              Run your business
-            </h2>
-            <p className="text-[14px] leading-relaxed text-textSecondary">
-              Manage services, handle bookings, build your portfolio, and grow your
-              client base — from one clean dashboard.
-            </p>
-          </div>
+        <div className="mb-3 text-[10px] font-black tracking-[0.20em] text-microAccent/70">
+          PROFESSIONALS
         </div>
+        <h2 className="font-display mb-8 text-[26px] font-semibold leading-tight">
+          Run the chair. We&apos;ll run everything else.
+        </h2>
+
+        <FeatureList features={proFeatures} />
       </section>
 
       {/* ── Footer strip ─────────────────────────────────────────── */}
