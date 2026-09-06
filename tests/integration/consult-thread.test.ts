@@ -100,6 +100,7 @@ import { loadConsultThread } from '@/lib/consult/thread'
 import {
   acceptConsultAgreement,
   appendConsultIntakeRevision,
+  transitionConsultSession,
 } from '@/lib/consult/writeBoundary'
 import type { ConsultThreadMessageDTO } from '@/lib/dto/consult'
 
@@ -430,6 +431,74 @@ describe('consult thread projection', () => {
     expect(ids.indexOf(`photo:${CONSULT_EARLY_PHOTO_SHOT_KEY}`)).toBeLessThan(
       ids.findIndex((id) => id.startsWith('intake:')),
     )
+  })
+
+  // 🔴 THE MERGE-WINDOW TEST. P4c narrowed the gap between "schema migrated"
+  // and "code deployed" to the ~2m30s of the deploy build, but it did not close
+  // it — and consults created by the STILL-DEPLOYED code walk the old path:
+  // CONSENT_REQUIRED -> INTAKE_READY, with no early photo and no early stage.
+  //
+  // Every arm of P7a-1's guards is additive precisely so those sessions keep
+  // working, and "additive" is a claim worth executing rather than asserting.
+  // This walks a consult the OLD way and then reads it with the NEW code.
+  it('a session stored BEFORE this change still loads and still finishes', async () => {
+    const sessionId = await startConsult()
+
+    // Reproduce what the OLD code left behind, rather than rewinding a new
+    // session — the lifecycle guard correctly refuses to walk backwards, and a
+    // test that had to disable a guard to set itself up would be proving
+    // nothing. So: accept one agreement through the boundary (which leaves the
+    // session in CONSENT_REQUIRED), record the second directly, and then take
+    // the OLD edge straight to the intake.
+    await acceptConsultAgreement({
+      consultSessionId: sessionId,
+      agreementVersionId: fx.consentVersionId,
+      expectedKind: ConsultAgreementKind.SENSITIVE_DATA_CONSENT,
+      actor: { type: ConsultActorType.CLIENT, id: fx.clientUserId },
+    })
+    await db.consultAgreementAcceptance.create({
+      data: {
+        consultSessionId: sessionId,
+        agreementVersionId: fx.adultVersionId,
+        kind: ConsultAgreementKind.ADULT_18_PLUS_ATTESTATION,
+        acceptedByType: ConsultActorType.CLIENT,
+        acceptedById: fx.clientUserId,
+      },
+    })
+    await transitionConsultSession({
+      consultSessionId: sessionId,
+      fromStatus: 'CONSENT_REQUIRED',
+      toStatus: 'INTAKE_READY',
+      actor: { type: ConsultActorType.CLIENT, id: fx.clientUserId },
+    })
+
+    // It LOADS — no crash on a session with no `earlyPhoto` anywhere.
+    const before = await thread(sessionId)
+    expect(before.status).toBe('INTAKE_READY')
+    // And it is honest about the CTA: this consult has no early photo, so the
+    // gate is closed and says why, rather than silently enabling.
+    expect(before.book.enabled).toBe(false)
+    expect(before.book.reason).toBe('SELFIE_REQUIRED')
+
+    // And it still FINISHES: the intake is answerable from the old state and
+    // carries the session on to MEDIA_READY exactly as it always did.
+    await appendConsultIntakeRevision({
+      consultSessionId: sessionId,
+      actor: { type: ConsultActorType.CLIENT, id: fx.clientUserId },
+      loadInput: async () => ({
+        idempotencyKey: 'legacy-session-intake',
+        packVersion: HAIR_COLOR_INTAKE_PACK_VERSION,
+        schemaVersion: HAIR_COLOR_INTAKE_SCHEMA_VERSION,
+        complete: true,
+        answers: completeAnswers,
+      }),
+    })
+    const after = await thread(sessionId)
+    expect(after.status).toBe('MEDIA_READY')
+    expect(
+      after.messages.some((m) => m.id.startsWith('intake:')),
+      'the intake it already answered is still on the thread',
+    ).toBe(true)
   })
 
   // The unlocking shot must resolve for EVERY family, including one nobody has

@@ -26,6 +26,7 @@ import * as Sentry from '@sentry/nextjs'
 import { useRouter } from 'next/navigation'
 
 import type { BrandClientConsultThreadCopy } from '@/lib/brand/types'
+import { CONSULT_EARLY_PHOTO_SHOT_KEY } from '@/lib/consult/capture/earlyPhoto'
 import { CONSULT_CAPTURE_MAX_BYTES } from '@/lib/consult/capturePack'
 import {
   CONSULT_ANALYSIS_POLL_INTERVAL_MS,
@@ -1437,9 +1438,18 @@ function CapturePrepControls({
   onChartCopy: (optIn: boolean) => void
   onProceed: () => void
 }) {
+  // 🔴 The EARLY photo is excluded, and it is the same correction the server
+  // makes in `advanceLockedConsultToAnalysisIfReady` (P7a-1): this card is
+  // about the GUIDED pack — "you have some of your photos in, run it anyway" —
+  // so counting a photograph that is not one of its slots would report a
+  // seven-shot pack as 8-of-8 complete after seven guided shots, and would
+  // offer "proceed with a partial pack" to a client who has taken no guided
+  // photo at all. The server still permits an analysis on the early photo
+  // alone; this is the card that describes the pack.
   const photos = thread.messages.filter(
     (entry): entry is ConsultThreadPhotoRequestMessageDTO =>
-      entry.kind === 'PHOTO_REQUEST',
+      entry.kind === 'PHOTO_REQUEST' &&
+      entry.shot.key !== CONSULT_EARLY_PHOTO_SHOT_KEY,
   )
   if (photos.length === 0 || !thread.chartCopy) return null
 
@@ -1536,6 +1546,7 @@ function BookTheLookCta({
     <div className="grid gap-2">
       <button
         type="button"
+        data-testid="consult-thread-book-cta"
         className={`${BUTTON_PRIMARY} w-full`}
         disabled={!book.enabled || busy}
         onClick={onBook}
