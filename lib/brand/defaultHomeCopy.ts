@@ -42,12 +42,12 @@ export function defaultHomeCopy(brandName: string): BrandHomeCopy {
     verifiedOnLabel: 'September 5, 2026',
 
     hero: {
-      eyebrow: 'BEAUTY · BOOKING',
-      headlineTop: 'The New Age',
-      headlineBottom: 'of Self Care',
+      eyebrow: 'BEAUTY · BOOKING · REINVENTED',
+      headlineTop: 'Beauty booking',
+      headlineBottom: 'finally got its upgrade.',
       intro:
-        'See a look you love. Get a consultation from your own photos. Book it, with a professional who keeps every dollar you pay.',
-      ctaClient: 'Create Client Account',
+        `Rides, food, flights, banking: everything in your life got smarter. Booking a beauty pro? Still phone tag, "text me a picture," and a paper card file. ${brandName} brings the chair into the modern world: a feed of real looks from real pros near you, where every look is bookable, by a professional who keeps every dollar you pay.`,
+      ctaClient: 'Find your look',
       ctaPro: "I'm a professional",
       ctaBrowse: 'Browse looks without an account →',
       ctaWhy: 'How the money works →',
@@ -58,11 +58,11 @@ export function defaultHomeCopy(brandName: string): BrandHomeCopy {
       rollingOut: 'Rolling out',
     },
 
-    manifesto: ['See it.', 'Understand it.', 'Book it.', 'Keep it.'],
+    manifesto: ['See it.', 'Book it.', 'Keep it.'],
 
     loop: {
       label: 'The loop',
-      title: 'From a look you love to a time that is yours.',
+      title: 'From a look you love to a time that is yours, in two taps.',
       steps: [
         {
           title: 'Bookable Looks',
@@ -70,13 +70,6 @@ export function defaultHomeCopy(brandName: string): BrandHomeCopy {
           state: 'live',
           evidence:
             'Book the Look B1–B8 merged and web-deployed 2026-09-01; starting price from lib/looks/startingPrice.ts; Book CTA on the feed card.',
-        },
-        {
-          title: 'Consult from a photo',
-          body: 'Before you commit, a short consultation reads your photos and the look you chose, then builds the appointment from your professional’s own services and prices. Your professional makes the final call. Live with our founding professionals; opening wider as it proves itself.',
-          state: 'rolling-out',
-          evidence:
-            'AI consult web deployed 2026-09-03/05 (#1067–#1071, #1080–#1086); founder-only pilot; scope kill switch AI_CONSULT_SERVICE_SCOPE; iOS in build 66, not yet uploaded.',
         },
         {
           title: 'Held the moment you tap',
@@ -168,7 +161,7 @@ export function defaultHomeCopy(brandName: string): BrandHomeCopy {
 
     pros: {
       label: 'For professionals',
-      title: 'Your work is the storefront.',
+      title: 'Run the chair. We’ll run everything else.',
       intro: 'Every look you post is bookable. Everything after the tap is handled.',
       features: [
         {
@@ -178,22 +171,28 @@ export function defaultHomeCopy(brandName: string): BrandHomeCopy {
           evidence: 'Book the Look B1–B8 merged and web-deployed 2026-09-01; pro sees the proposal line items (B4/B5).',
         },
         {
-          title: 'Consult before the chair',
-          body: 'A brief from the client’s own photos, matched to your menu and your prices, before they sit down. You make the final call.',
-          state: 'rolling-out',
-          evidence: 'AI consult web deployed 2026-09-03/05 (#1067–#1071, #1080–#1086); founder-only pilot; scope kill switch AI_CONSULT_SERVICE_SCOPE.',
-        },
-        {
           title: 'Held, not hoped',
           body: 'A request holds the time the moment it lands. Confirm every one, or switch on instant booking and let the calendar fill itself.',
           state: 'live',
           evidence: 'PENDING owns its slot (BOOKING_BLOCKING_STATUSES, DB EXCLUDE-backed); Professional.autoAcceptBookings toggle (docs/product/BOOK-THE-LOOK-DIRECTION.md decision 4).',
         },
         {
-          title: 'Fill the gap',
-          body: 'A cancellation becomes a last-minute opening. Offer it to your waitlist first and watch it go.',
+          title: 'A cancellation is never a lost hour',
+          body: 'The last-minute engine works your openings for you: your waitlist first, then clients who have drifted, then nearby fans of your work.',
           state: 'live',
-          evidence: 'Last-minute openings feed + priority offers (lib/lastMinute); waitlist offers (app/api/v1/pro/waitlist/[entryId]/offer).',
+          evidence: 'LastMinuteTier WAITLIST → REACTIVATION → DISCOVERY (prisma/schema.prisma:199); last-minute job app/api/internal/jobs/last-minute; lib/lastMinute/pickTierPlan.ts.',
+        },
+        {
+          title: 'Their place or yours',
+          body: 'Take appointments at the salon, the suite, or at the client’s door. The calendar knows the difference.',
+          state: 'live',
+          evidence: 'ProfessionalLocationType SALON | SUITE | MOBILE_BASE; Booking.clientAddressId (prisma/schema.prisma).',
+        },
+        {
+          title: 'Your work, everywhere your audience lives',
+          body: 'One tap turns any look into a post-ready export, always credited to you. Grow where you already post.',
+          state: 'live',
+          evidence: 'Social export on web: app/_components/media/ClientMediaExportButton.tsx, lib/pro/socialExportMark.ts (Aug 2026 code audit: 4:5 / 9:16 / video, pro-credited).',
         },
         {
           title: 'Charts and consent, built in',
@@ -226,10 +225,10 @@ export function defaultHomeCopy(brandName: string): BrandHomeCopy {
           evidence: 'Booking-conversion boost in lib/looks/personalizedRanking.ts fed by the look-conversion-stats job; ENABLE_PERSONALIZED_FEED is set in prod but its value is Hidden and UNVERIFIED (2026-09-05). Do not promote to live without a runtime probe.',
         },
         {
-          title: 'A camera that coaches the shot',
-          body: 'Capture guidance, quality checks, and retakes, so every before-and-after is one you would post.',
+          title: 'A camera that coaches like a mentor',
+          body: 'It reads the light, catches the retake before you post it, and speaks in your choice of five personalities. In the iPhone beta today.',
           state: 'rolling-out',
-          evidence: 'AI camera subsystem is iOS-only (Aug 2026 code audit); iOS is in TestFlight, not the App Store (build 63 archived 2026-09-01; checked 2026-09-05).',
+          evidence: 'Camera subsystem (capture coaching, QC retakes, personality packs) is iOS-only (Aug 2026 code audit); iOS is in TestFlight, not the App Store (build 63 archived 2026-09-01; checked 2026-09-05).',
         },
         {
           title: 'Deposits that enforce themselves',

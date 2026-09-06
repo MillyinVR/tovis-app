@@ -6,7 +6,7 @@
 // lists only the live ones. The page renders the copy; it never invents a
 // claim of its own.
 //
-// Shape: one scroll, everything a visitor needs. A hero, a four-beat
+// Shape: one scroll, everything a visitor needs. A hero, a three-beat
 // manifesto band, the loop as a numbered column, what one account replaces,
 // a section each for clients and for pros, the money on its own tinted band, and a dated
 // "what's next". Rhythm comes from alternating full-bleed bands with quiet
