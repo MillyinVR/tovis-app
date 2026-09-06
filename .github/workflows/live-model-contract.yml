@@ -1,7 +1,7 @@
 name: live-model-contract
 
-# Sends the consult's REAL structured-output schemas to the REAL Messages API
-# and checks they compile, answer, and parse.
+# Sends the consult's REAL structured-output schemas — and REAL oversized
+# images — to the REAL Messages API, and checks they compile, answer, and parse.
 #
 # Why this workflow exists: `runConsultAnalysis` shipped for two schema
 # versions unable to make one successful request — the API refused its
@@ -34,7 +34,7 @@ concurrency:
 
 jobs:
   consult-schema:
-    name: Consult schemas against the live model
+    name: Consult schemas and images against the live model
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -67,5 +67,19 @@ jobs:
       # the failure mode that let the broken schema ship in the first place.
       - name: Consult provider schema contract
         run: pnpm test:live:consult-schema
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      # P2e. Same reasoning one layer down: the schemas compiling says nothing
+      # about the IMAGES. A production run failed six times on a reference 32 KB
+      # over the consult's own ceiling, and every test mocked the provider, so
+      # nothing could tell "an oversized image is handled" from "an oversized
+      # image has never been tried". This sends one through each entry path.
+      #
+      # Runs even if the step above fails: a schema refusal and an image
+      # refusal are different findings and the nightly should report both.
+      - name: Consult image normalization contract
+        if: ${{ !cancelled() }}
+        run: pnpm test:live:consult-normalization
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

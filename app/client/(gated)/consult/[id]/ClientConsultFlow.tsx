@@ -335,7 +335,14 @@ export default function ClientConsultFlow({
         await refresh()
       } catch (caught) {
         setError(
-          caught instanceof ConsultFlowApiError
+          // ImagePreparationError is named alongside the API error because it
+          // already words itself for the client ("try a JPG or PNG") and now
+          // reaches this wrapper: P2e routes the inspiration upload through
+          // `prepareImageForUpload` too, and folding its sentence into a
+          // generic "something went wrong" would hide the one instruction that
+          // fixes it.
+          caught instanceof ConsultFlowApiError ||
+            caught instanceof ImagePreparationError
             ? caught.message
             : 'Something went wrong. Please try again.',
         )
@@ -432,7 +439,14 @@ export default function ClientConsultFlow({
     file: File,
   ) =>
     run(async () => {
-      const bytes = await file.arrayBuffer()
+      // P2e — the inspiration upload was the one entry path that shipped a
+      // camera-roll file's RAW bytes: full resolution, EXIF orientation
+      // intact, all metadata attached, and refused outright at presign the
+      // moment the file crossed 5 MB. The capture path next door has always
+      // prepared its photo; this now uses the same helper, so both web entry
+      // paths hand the server a 1568px, metadata-free JPEG.
+      const prepared = await prepareImageForUpload(file, CONSULT_CAPTURE_MAX_BYTES)
+      const bytes = await prepared.arrayBuffer()
       const issued = await api<{
         upload: { inspirationId: string; signedUrl: string | null }
       }>(`${base}/inspiration/uploads`, {
@@ -440,8 +454,8 @@ export default function ClientConsultFlow({
         body: JSON.stringify({
           idempotencyKey: newKey(),
           schemaVersion: message.schemaVersion,
-          contentType: file.type,
-          sizeBytes: file.size,
+          contentType: 'image/jpeg',
+          sizeBytes: prepared.size,
           checksumSha256: await browserSha256Hex(bytes),
         }),
       })
@@ -450,7 +464,7 @@ export default function ClientConsultFlow({
       }
       const put = await fetch(issued.upload.signedUrl, {
         method: 'PUT',
-        headers: { 'content-type': file.type, 'x-upsert': 'false' },
+        headers: { 'content-type': 'image/jpeg', 'x-upsert': 'false' },
         body: bytes,
       })
       if (!put.ok) {

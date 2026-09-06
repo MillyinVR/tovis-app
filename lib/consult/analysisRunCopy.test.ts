@@ -83,6 +83,53 @@ describe('consult analysis run copy', () => {
     )
   })
 
+  // P2e. The 2026-09-06 production failure: a reference the server refused six
+  // times across two runs, and the client told only that the plan could not be
+  // finished. The sentence has to name the picture that is the problem.
+  it.each([
+    'INSPIRATION_OBJECT_INVALID',
+    'INSPIRATION_IMAGE_UNREADABLE',
+    'INSPIRATION_ANALYSIS_UNREADABLE',
+  ])('names the inspiration photo when %s is what failed', (failureCode) => {
+    const failed = consultAnalysisRunProgress(
+      run({
+        status: 'FAILED',
+        stage: 'UNDERSTANDING_REFERENCE',
+        retryable: true,
+        failureCode,
+      }),
+    )
+    expect(failed.headline).toBe('We couldn’t read your inspiration photo.')
+    expect(failed.detail).toContain('Swap in a different picture')
+    // Still leaks nothing: the code is branched on, never rendered.
+    expect(`${failed.headline} ${failed.detail}`).not.toContain(failureCode)
+  })
+
+  it('names a capture when that is what failed', () => {
+    const failed = consultAnalysisRunProgress(
+      run({
+        status: 'FAILED',
+        stage: 'READING_PHOTOS',
+        retryable: true,
+        failureCode: 'CAPTURE_OBJECT_INVALID',
+      }),
+    )
+    expect(failed.headline).toBe('We couldn’t read one of your photos.')
+    expect(failed.detail).toContain('Retake that one')
+  })
+
+  it('keeps the general wording for a failure a retry could fix', () => {
+    const failed = consultAnalysisRunProgress(
+      run({
+        status: 'FAILED',
+        stage: 'BUILDING_PLAN',
+        retryable: true,
+        failureCode: 'ANALYSIS_TRANSACTION_EXPIRED',
+      }),
+    )
+    expect(failed.headline).toBe('We couldn’t finish your plan.')
+  })
+
   it('counts only QUEUED and RUNNING as still worth polling', () => {
     expect(isConsultAnalysisRunLive(run({ status: 'QUEUED' }))).toBe(true)
     expect(isConsultAnalysisRunLive(run({ status: 'RUNNING' }))).toBe(true)

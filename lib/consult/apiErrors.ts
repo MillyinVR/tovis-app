@@ -230,6 +230,8 @@ export function consultWriteErrorResponse(error: unknown): Response | null {
       return consultAgreementFail(410, 'The inspiration upload has expired.', 'CONSULT_INSPIRATION_UPLOAD_EXPIRED')
     case 'INSPIRATION_UPLOAD_MISMATCH':
       return consultAgreementFail(409, 'The inspiration upload does not match this request.', 'CONSULT_INSPIRATION_UPLOAD_MISMATCH')
+    case 'INSPIRATION_IMAGE_UNREADABLE':
+      return consultAgreementFail(422, 'We couldn’t read that picture — try a different one.', 'CONSULT_INSPIRATION_IMAGE_UNREADABLE')
     case 'INSPIRATION_OBJECT_INVALID':
       return consultAgreementFail(422, 'The uploaded inspiration is missing or malformed.', 'CONSULT_INSPIRATION_OBJECT_INVALID')
     case 'INSPIRATION_STORAGE_UNAVAILABLE':
