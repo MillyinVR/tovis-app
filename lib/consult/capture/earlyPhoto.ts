@@ -73,4 +73,8 @@ export const EARLY_PHOTO_SHOT_DTO: ConsultCaptureShotDTO = Object.freeze({
   title: EARLY_PHOTO_SHOT.title,
   instruction: EARLY_PHOTO_SHOT.instruction,
   requirement: EARLY_PHOTO_SHOT.requirement,
+  // FULL_VIEW, so the camera uploads this one as framed (P3). The honest
+  // reading of the instruction, and the same value the definition carries —
+  // taken from it rather than retyped, like every other field here.
+  framing: EARLY_PHOTO_SHOT.framing,
 })
