@@ -1113,6 +1113,17 @@ export type BrandHomeChartBand = BrandHomeFeature & {
   points: { label: string; body: string }[]
 }
 
+export type BrandHomeCardPreview = {
+  trigger: string
+  previewLabel: string
+  brandName: string
+  tier: string
+  markSrc: string
+  serial: string
+  note: string
+  finish: 'neutral' | 'gold'
+}
+
 /** Public homepage copy (app/page.tsx). See lib/brand/defaultHomeCopy.ts. */
 export type BrandHomeCopy = {
   /** Brand-owned imagery and clearly labelled previews; never live feature claims. */
@@ -1130,6 +1141,8 @@ export type BrandHomeCopy = {
     foundingTitle: string
     foundingBody: string
     foundingCard: string
+    foundingPreview?: BrandHomeCardPreview
+    progressionCards: Record<string, BrandHomeCardPreview>
     upcomingLabel: string
     progression: string[]
     progressionBody: string

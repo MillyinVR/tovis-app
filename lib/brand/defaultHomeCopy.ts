@@ -59,6 +59,7 @@ export function defaultHomeCopy(brandName: string): BrandHomeCopy {
       foundingTitle: '',
       foundingBody: '',
       foundingCard: '',
+      progressionCards: {},
       upcomingLabel: 'Coming soon · Program preview',
       progression: [],
       progressionBody: '',

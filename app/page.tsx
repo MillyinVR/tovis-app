@@ -5,6 +5,7 @@ import Image from 'next/image'
 import { buildTransactionalSmsPageCopy } from '@/lib/transactionalSmsPolicy'
 import JsonLdScript from '@/app/_components/seo/JsonLdScript'
 import PublicTopBar from '@/app/_components/PublicTopBar/PublicTopBar'
+import CardPreview from '@/app/_components/home/CardPreview'
 import HomeMotion from '@/app/_components/home/HomeMotion'
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import type {
@@ -580,12 +581,18 @@ export default async function Home() {
             <Eyebrow className="text-microAccent">{copy.editorial.upcomingLabel}</Eyebrow>
             <h2 className="mt-5 max-w-[25ch] font-display text-[clamp(32px,4vw,56px)] font-bold leading-tight tracking-[-0.04em]">{copy.editorial.foundingTitle}</h2>
             <p className="mt-5 max-w-[65ch] leading-relaxed text-textSecondary">{copy.editorial.foundingBody}</p>
-            {copy.editorial.foundingCard && <p className="mt-6 max-w-[65ch] rounded-[18px] border border-surfaceGlass/20 p-6 text-sm leading-relaxed text-textSecondary">{copy.editorial.foundingCard}</p>}
+            {copy.editorial.foundingCard && (
+              <div className="mt-6 max-w-[65ch] rounded-[18px] border border-surfaceGlass/20 p-6 text-sm leading-relaxed text-textSecondary">
+                <p>{copy.editorial.foundingCard}</p>
+                {copy.editorial.foundingPreview && <CardPreview card={copy.editorial.foundingPreview} />}
+              </div>
+            )}
             <ol className="my-10 grid gap-4 md:grid-cols-3">
               {copy.editorial.progression.map((stage, index) => (
                 <li key={stage} className="rounded-[18px] border border-microAccent/25 p-6">
                 <span className="font-mono text-xs text-microAccent">0{index + 1}</span>
                 <h3 className="mt-5 font-display text-2xl font-semibold">{stage}</h3>
+                {copy.editorial.progressionCards[stage] && <CardPreview card={copy.editorial.progressionCards[stage]} />}
               </li>
           ))}
             </ol>
