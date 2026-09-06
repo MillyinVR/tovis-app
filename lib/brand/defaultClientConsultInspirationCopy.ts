@@ -182,6 +182,22 @@ export const defaultClientConsultInspirationCopy: BrandClientConsultInspirationC
           'This is how much light and dark it has — a strong difference between them.',
       },
 
+      // P5g — where SHE is starting from, said one way and reused verbatim by
+      // every round of a plan. "your light brown, golden base".
+      startingPoint: {
+        toneNames: {
+          ASHY: 'ashy',
+          NEUTRAL: 'neutral',
+          GOLDEN: 'golden',
+          COPPER: 'coppery',
+          RED: 'red',
+          MIXED: 'mixed',
+        },
+        withLevelAndTone: 'your {level}, {tone} base',
+        levelOnly: 'your {level} base',
+        toneOnly: 'your {tone} base',
+      },
+
       // P5g — what a tappable region is called when the reading's own short
       // name is missing. Names the attribute, never the reading: vaguer than
       // "cool, silvery cast" and never wrong about the picture.

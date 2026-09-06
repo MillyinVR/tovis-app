@@ -18,6 +18,7 @@ import type {
 } from '@/lib/dto/consult'
 
 import {
+  consultStartingPointPhrase,
   CONSULT_FOLLOW_UP_SHOT_PHRASES,
   renderConsultFollowUpContext,
 } from './followUpContext'
@@ -145,6 +146,50 @@ describe('the follow-up context', () => {
 
   it('marks the safety questions so they are asked first', () => {
     expect(render()).toContain('[SAFETY — ask before anything else]')
+  })
+
+  it('🔴 gives ONE starting-point phrase, and the same one every round', () => {
+    // Left to the model, round 1 said "your current light brown base" and round
+    // 2 said "a golden base" about the same head of hair (Tori, 2026-09-06).
+    // It is composed here, from the plan, so every round of a plan version gets
+    // a byte-identical phrase.
+    const phrase = consultStartingPointPhrase(CORE, defaultClientConsultInspirationCopy)
+    expect(phrase).toBe('your light brown, golden base')
+    for (const round of [1, 2, 3]) {
+      const context = render({ roundNumber: round })
+      expect(context).toContain('"your light brown, golden base"')
+      expect(context).toContain('use that phrase EXACTLY as written')
+    }
+  })
+
+  it('falls back to whichever half the plan settled, and says nothing when neither', () => {
+    const toneOnly = { ...CORE, baseLevel: core('UNKNOWN', ['hair_back']) }
+    expect(
+      consultStartingPointPhrase(toneOnly, defaultClientConsultInspirationCopy),
+    ).toBe('your golden base')
+    const levelOnly = { ...CORE, currentTone: core('UNKNOWN', ['hair_back']) }
+    expect(
+      consultStartingPointPhrase(levelOnly, defaultClientConsultInspirationCopy),
+    ).toBe('your light brown base')
+    const neither = {
+      ...CORE,
+      baseLevel: core('UNKNOWN', ['hair_back']),
+      currentTone: core('UNKNOWN', ['hair_back']),
+    }
+    // 🔴 Null, not a half-sentence. There is nothing honest to call her
+    // starting point, and the prompt is told so rather than being handed
+    // something to finish.
+    expect(
+      consultStartingPointPhrase(neither, defaultClientConsultInspirationCopy),
+    ).toBeNull()
+    expect(render({ core: neither })).toContain('Do not invent a description of it')
+  })
+
+  it('🔴 asks in US English', () => {
+    // The model answered "colour" because the prompt asked in British English.
+    const context = render()
+    expect(context).not.toMatch(/\bcolour(ist)?\b/i)
+    expect(context).toContain('as a colorist read it')
   })
 
   it('says which round it is, so the model can stop', () => {

@@ -1000,6 +1000,37 @@ export type BrandClientConsultInspirationCardCopy = {
    * `assertConsultInspirationPackWritable` gives the packs.
    */
   attributeFallbackNames: Readonly<Record<string, string>>
+  /**
+   * P5g — ONE way to say where she is starting from, e.g. "your light brown,
+   * golden base".
+   *
+   * 🔴 Composed once per plan version and reused VERBATIM by every follow-up
+   * round. Left to the model, round 1 said "your current light brown base" and
+   * round 2 said "a golden base" about the same head of hair — two descriptions
+   * of one fact, in two questions she reads minutes apart.
+   *
+   * ⚠️ It describes HER hair, not the reference, and it still lives in the
+   * inspiration card copy — because the LEVEL half is `attributeShortNames`
+   * ("light brown" for `baseLevel:LEVEL_6`) and one vocabulary for hair levels
+   * is the point. A second copy of those ten words would be the thing that
+   * drifts.
+   */
+  startingPoint: BrandClientConsultStartingPointCopy
+}
+
+/** See `BrandClientConsultInspirationCardCopy.startingPoint`. */
+export type BrandClientConsultStartingPointCopy = {
+  /**
+   * The ANALYSIS tone enum → the word a question may say. Distinct from
+   * `attributeShortNames`' `tone:` entries, which describe the REFERENCE on a
+   * different (three-value) vocabulary.
+   */
+  toneNames: Readonly<Record<string, string>>
+  /** `{level}` and `{tone}`, when the plan settled both. */
+  withLevelAndTone: string
+  /** When only one of them was read. Both are filled from the same maps. */
+  levelOnly: string
+  toneOnly: string
 }
 
 /**
