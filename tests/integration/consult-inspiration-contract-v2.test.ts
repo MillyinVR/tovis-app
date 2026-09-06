@@ -51,8 +51,8 @@ import {
   loadConsultInspirationState,
   skipConsultInspiration,
 } from '@/lib/consult/inspirationContract'
-import { GENERAL_SERVICE_INSPIRATION_PACK } from '@/lib/consult/inspiration/packs/generalService'
-import { HAIR_GENERAL_INSPIRATION_PACK } from '@/lib/consult/inspiration/packs/hairGeneral'
+import { GENERAL_SERVICE_INSPIRATION_CARD_PACK as GENERAL_SERVICE_INSPIRATION_PACK } from '@/lib/consult/inspiration/packs/generalService'
+import { HAIR_GENERAL_INSPIRATION_CARD_PACK as HAIR_GENERAL_INSPIRATION_PACK } from '@/lib/consult/inspiration/packs/hairGeneral'
 import { GENERAL_SERVICE_INTAKE_PACK } from '@/lib/consult/intake/packs/generalService'
 import { HAIR_GENERAL_INTAKE_PACK } from '@/lib/consult/intake/packs/hairGeneral'
 import { acceptConsultAgreement } from '@/lib/consult/writeBoundary'
@@ -485,6 +485,8 @@ describe('the guided inspiration is per-family now', () => {
         actorUserId: userId,
       })
       expect(asked.progress.currentQuestion?.key).toBe(question.key)
+      // The first option of every card, which is never a neutral value — so
+      // the payload carries real details through the live guard.
       const selectedValues = [question.options[0]!.value]
       answers[question.key] = selectedValues
       await answerConsultInspirationQuestion({

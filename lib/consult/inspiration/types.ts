@@ -29,6 +29,7 @@
 
 import type { BrandClientConsultInspirationCopy } from '@/lib/brand/types'
 import type {
+  ConsultInspirationAnalysisFieldDTO,
   ConsultInspirationAnswerDTO,
   ConsultInspirationCatalogGuidanceDTO,
   ConsultInspirationExactDetailDTO,
@@ -55,6 +56,10 @@ export const CONSULT_INSPIRATION_NEUTRAL_VALUES: ReadonlySet<string> = new Set([
   'none',
   'not-sure',
   'not-part-of-goal',
+  // P5d — the keep card's "nothing in particular". It is a real answer she can
+  // give and it must not become a detail on the brief, which is exactly what
+  // this set means.
+  'nothing-in-particular',
 ])
 
 /**
@@ -85,7 +90,87 @@ export const CONSULT_INSPIRATION_OPTION_VALUE_PATTERN = /^[a-z0-9][a-z0-9-]{0,63
 export const CONSULT_INSPIRATION_FORBIDDEN_WORDS =
   /\b(face|eyes?|skin|undertone|identity|ethnic|ethnicity|race|health)\b/i
 
-export type ConsultInspirationPackQuestion = ConsultInspirationQuestionDTO & {
+/**
+ * P5d — which TIER a card belongs to.
+ *
+ * COARSE is the three cards that come before any photograph of the client and
+ * before the booking: fast, four options at most, no salon vocabulary. PREP is
+ * the fine per-attribute zoom cards that come AFTER the booking, as "help
+ * <pro> get ready".
+ *
+ * 🔴 Only COARSE decides completion. A prep card exists only where the reading
+ * actually saw something, so requiring one would make a consult whose
+ * reference could not be read — or whose family has no reading at all —
+ * impossible to finish.
+ */
+export type ConsultInspirationCardTier = 'COARSE' | 'PREP'
+
+/** One option, whose label may live in brand copy rather than in the pack. */
+export type ConsultInspirationPackOption = {
+  readonly value: string
+  /**
+   * Null when the label is brand copy, keyed `${questionKey}:${value}` in
+   * `BrandClientConsultInspirationCardCopy.optionLabels`. Contract-v1 packs
+   * carry their labels inline; card packs do not.
+   */
+  readonly label: string | null
+}
+
+export type ConsultInspirationPackQuestion = Omit<
+  ConsultInspirationQuestionDTO,
+  'label' | 'options'
+> & {
+  /** Null when the question text is brand copy — see `ConsultInspirationPackOption`. */
+  readonly label: string | null
+  readonly options: readonly ConsultInspirationPackOption[]
+  readonly tier: ConsultInspirationCardTier
+  /**
+   * The analysis attribute this card is about, and therefore the region it
+   * crops to. Null for a card that is not about one attribute (the coarse
+   * three) — those either group several attributes per OPTION (`regionGroup`)
+   * or show the whole reference.
+   */
+  readonly attribute: ConsultInspirationAnalysisFieldDTO | null
+  /**
+   * Option value → the attributes whose regions that option's crop covers.
+   * This is how "the color" and "the shape" become two visibly different crops
+   * of one photograph without the coarse card knowing any salon vocabulary: it
+   * names a GROUP, and the reading supplies the boxes.
+   *
+   * An option with no entry, or whose attributes were all read as UNKNOWN,
+   * shows the whole reference — the same thing the client sees when there is
+   * no reading at all.
+   */
+  readonly regionGroup: Readonly<
+    Record<string, readonly ConsultInspirationAnalysisFieldDTO[]>
+  > | null
+  /**
+   * Option value → the question keys that choosing it CLEARS.
+   *
+   * The understanding check's "Change something" is the only user of this, and
+   * it clears itself along with the two cards it reopens. Clearing itself is
+   * the load-bearing half: leave it stored and the pack reads as complete
+   * again the moment she re-answers the first card, so the check would never
+   * come back around.
+   */
+  readonly reopens: Readonly<Record<string, readonly string[]>> | null
+  /**
+   * Option value → how THAT value reads on the brief, overriding
+   * `detailSentiment`.
+   *
+   * A prep card asks one question with two opposite answers — "Yes" is a
+   * like, "Not this" is a dislike — and a single per-question sentiment cannot
+   * say that. Stage 4's tier 2 depends on the dislikes being dislikes.
+   */
+  readonly valueSentiments: Readonly<
+    Record<string, ConsultInspirationExactDetailDTO['sentiment']>
+  > | null
+  /**
+   * True when the SERVER composes this question's text per client, from her
+   * own earlier answers and the reading (the understanding check). Such a
+   * question has no `prompts` entry to look up and never asserts one.
+   */
+  readonly composedPrompt: boolean
   /** How a non-neutral selection here reads on the professional's brief. */
   readonly detailSentiment: ConsultInspirationExactDetailDTO['sentiment']
   /**
@@ -185,6 +270,15 @@ export type ConsultInspirationPossibleInterpretation = {
 
 export type ConsultInspirationProgress = {
   currentQuestion: ConsultInspirationQuestionDTO | null
+  /**
+   * P5d — the first unanswered PREP card, or null.
+   *
+   * Separate from `currentQuestion` because the two are not the same kind of
+   * thing: `currentQuestion` is what the client still has to answer before the
+   * step is complete, and a prep card never is. It is what the thread serves
+   * as the open prep card AFTER the booking.
+   */
+  nextPrepQuestionKey: string | null
   answeredQuestionCount: number
   specificDetailCount: number
   canComplete: boolean
@@ -197,7 +291,7 @@ export type ConsultInspirationOptionValues = ReadonlyArray<
 
 export function inspirationOptions(
   values: ConsultInspirationOptionValues,
-): ConsultInspirationQuestionDTO['options'] {
+): ConsultInspirationPackOption[] {
   return values.map(([value, label]) => ({ value, label }))
 }
 
@@ -230,5 +324,62 @@ export function inspirationQuestion(args: {
     detailSentiment: args.detailSentiment,
     catalogDetail: args.catalogDetail ?? null,
     countsAsDetail: args.countsAsDetail ?? true,
+    tier: 'COARSE',
+    attribute: null,
+    regionGroup: null,
+    reopens: null,
+    valueSentiments: null,
+    composedPrompt: false,
+  }
+}
+
+/**
+ * P5d — one CARD. Same question shape, none of the words.
+ *
+ * A card declares only what it is ABOUT: which values it offers, which
+ * attribute (or group of attributes) its crop comes from, and how each answer
+ * reads on the brief. The question text and every option label are brand copy,
+ * resolved on read — which is what lets a stored payload hold keys and enums
+ * only and still put a sentence on a screen.
+ */
+export function inspirationCard(args: {
+  key: string
+  tier: ConsultInspirationCardTier
+  kind: 'SINGLE_SELECT' | 'MULTI_SELECT'
+  /** Option VALUES, in the order she sees them. Labels come from brand copy. */
+  values: readonly string[]
+  minSelections?: number
+  maxSelections?: number
+  detailSentiment: ConsultInspirationExactDetailDTO['sentiment']
+  valueSentiments?: Readonly<
+    Record<string, ConsultInspirationExactDetailDTO['sentiment']>
+  >
+  attribute?: ConsultInspirationAnalysisFieldDTO | null
+  regionGroup?: Readonly<
+    Record<string, readonly ConsultInspirationAnalysisFieldDTO[]>
+  > | null
+  reopens?: Readonly<Record<string, readonly string[]>> | null
+  catalogDetail?: ConsultInspirationCatalogDetail | null
+  countsAsDetail?: boolean
+  composedPrompt?: boolean
+}): ConsultInspirationPackQuestion {
+  return {
+    key: args.key,
+    label: null,
+    helpText: null,
+    kind: args.kind,
+    options: args.values.map((value) => ({ value, label: null })),
+    minSelections: args.minSelections ?? 1,
+    maxSelections: args.maxSelections ?? (args.kind === 'SINGLE_SELECT' ? 1 : args.values.length),
+    allowText: false,
+    detailSentiment: args.detailSentiment,
+    catalogDetail: args.catalogDetail ?? null,
+    countsAsDetail: args.countsAsDetail ?? true,
+    tier: args.tier,
+    attribute: args.attribute ?? null,
+    regionGroup: args.regionGroup ?? null,
+    reopens: args.reopens ?? null,
+    valueSentiments: args.valueSentiments ?? null,
+    composedPrompt: args.composedPrompt ?? false,
   }
 }

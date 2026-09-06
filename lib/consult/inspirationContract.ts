@@ -17,12 +17,17 @@ import { defaultClientConsultInspirationCopy } from '@/lib/brand/defaultClientCo
 import type { BrandClientConsultInspirationCopy } from '@/lib/brand/types'
 import type {
   ConsultInspirationAnswerDTO,
+  ConsultInspirationCardDTO,
   ConsultInspirationCatalogGuidanceDTO,
   ConsultInspirationExactDetailDTO,
   ConsultInspirationSourceDTO,
   ConsultInspirationStateDTO,
   ConsultInspirationUploadDTO,
 } from '@/lib/dto/consult'
+import {
+  formatProfessionalPublicDisplayName,
+  professionalPublicDisplayNameSelect,
+} from '@/lib/privacy/professionalDisplayName'
 import { buildLookPolicyInput, loadLookAccess } from '@/lib/looks/access'
 import { canViewLookPost } from '@/lib/looks/guards'
 import { MEDIA_SIGNED_URL_TTL_SECONDS, renderMediaUrls } from '@/lib/media/renderUrls'
@@ -33,6 +38,8 @@ import { isAiConsultC6ExposureEnabledForPro } from './access'
 import { CONSULT_ANCHOR_SELECT, evaluateConsultAnchor } from './anchor'
 import { ConsultWriteError } from './errors'
 import {
+  applyConsultInspirationReopen,
+  consultInspirationQuestionLabel,
   deriveConsultInspirationCatalogDetails,
   evaluateConsultInspirationProgress as evaluateConsultInspirationProgressV2,
   findConsultInspirationPack,
@@ -41,6 +48,14 @@ import {
   toConsultInspirationJsonPayloadV2,
   validateConsultInspirationAnswer as validateConsultInspirationAnswerV2,
 } from './inspiration/registry'
+import {
+  buildConsultInspirationCards,
+  composeConsultInspirationUnderstanding,
+  deriveConsultInspirationPreferences,
+  findConsultInspirationCardQuestion,
+  type ConsultInspirationCardReading,
+  type ConsultInspirationClientPreferences,
+} from './inspiration/cards'
 import type {
   ConsultInspirationCatalogDetail,
   ConsultInspirationPackDefinition,
@@ -73,6 +88,7 @@ import {
   CONSULT_INSPIRATION_ANALYSIS_PROMPT_VERSION,
   CONSULT_INSPIRATION_ANALYSIS_SCHEMA_VERSION,
 } from './inspirationVision'
+import { normalizeStoredConsultInspirationAnalysis } from './inspirationAnalysisRead'
 import { CONSULT_MAX_CAPTURE_SHOTS } from './capture/registry'
 import {
   CONSULT_SERVICE_PROFILE_CATEGORY_SELECT,
@@ -97,6 +113,12 @@ const SCOPE_SELECT = {
   id: true,
   status: true,
   client: { select: { userId: true } },
+  // P5d: the understanding check names the professional ("We'll help Susie
+  // work out the details"), so the step needs her public display name. Read
+  // through the display-name SSOT's OWN select, never a hand-rolled twin —
+  // that is how a pro who chose to show as @handle ends up named by her
+  // business name on one screen out of ten.
+  professional: { select: professionalPublicDisplayNameSelect },
   ...CONSULT_ANCHOR_SELECT,
   // The anchor rule reads the slug; the service profile — which decides WHICH
   // inspiration pack this consult serves — reads the family and the name as
@@ -292,6 +314,17 @@ export type CompletedConsultInspiration = {
   exactClientDetails: readonly ConsultInspirationExactDetailDTO[]
   /** Question key -> the label the client actually saw. */
   questionLabels: Readonly<Record<string, string>>
+  /**
+   * P5d — what her CARD taps said, as four lists the analysis prompt reads:
+   * what she wants, what she does not, what she was unsure about, and what she
+   * asked to be left alone.
+   *
+   * Derived here, from her answers and the reading they were about, because
+   * this is where the contract that wrote the row is known. A contract-v1
+   * consult produces four empty lists — it had no cards — and the prompt falls
+   * back to the same `answers` block it has always rendered.
+   */
+  preferences: ConsultInspirationClientPreferences
 }
 
 export async function requireCompletedConsultInspiration(
@@ -329,9 +362,29 @@ export async function requireCompletedConsultInspiration(
     typeof review.packId === 'string' && typeof review.packVersion === 'number'
       ? findConsultInspirationPack(review.packId, review.packVersion)
       : null
-  for (const question of pack ? pack.questions : CONSULT_INSPIRATION_QUESTIONS) {
-    questionLabels[question.key] = question.label
+  if (pack) {
+    for (const question of pack.questions) {
+      // A card carries no inline label — its words are brand copy, resolved by
+      // the same function that put them on the client's screen, so the brief
+      // and the prompt quote the question she was actually asked.
+      questionLabels[question.key] = consultInspirationQuestionLabel(
+        pack,
+        question,
+        defaultClientConsultInspirationCopy,
+      )
+    }
+  } else {
+    for (const question of CONSULT_INSPIRATION_QUESTIONS) {
+      questionLabels[question.key] = question.label
+    }
   }
+  // The reading her card answers were about. Read here rather than passed in
+  // because the caller (the analysis prerequisites) has no reason to know that
+  // a want is an attribute and a value rather than a word.
+  const reading =
+    pack && review.inspirationId
+      ? await inspirationAnalysisReading(tx, args.consultSessionId, review.inspirationId)
+      : null
   const completed: CompletedConsultInspiration = {
     revisionId: review.revisionId,
     source: review.source,
@@ -339,6 +392,14 @@ export async function requireCompletedConsultInspiration(
     answers: review.answers,
     exactClientDetails: review.exactClientDetails,
     questionLabels,
+    preferences: pack
+      ? deriveConsultInspirationPreferences({
+          pack,
+          reading,
+          copy: defaultClientConsultInspirationCopy,
+          answers: answerMap(review.answers),
+        })
+      : { wants: [], avoids: [], unsure: [], keep: [] },
   }
   if (review.source === 'NONE') return completed
   const source = await tx.consultInspiration.findFirst({
@@ -554,25 +615,31 @@ async function imageAvailable(
 }
 
 /**
- * P5b — has THIS reference already been read by the vision model?
+ * P5b — the reading of THIS reference, if the vision model has made one.
  *
  * Matched on the inspiration ROW plus the artefact's two version columns, so a
- * reading stored under a superseded schema or prompt reads as "not read" and
- * the client asks for a current one. Those are the same two constants
+ * reading stored under a superseded schema or prompt reads as absent and the
+ * client asks for a current one. Those are the same two constants
  * `normalizeStoredConsultInspirationAnalysis` checks.
  *
+ * 🔴 P5d widened it from a boolean to the artefact itself, and that is what
+ * makes the cards possible: a card's crop is one of these attributes' regions
+ * and its words are looked up by the attribute's VALUE. `analysisReady` on the
+ * wire is still just "is there one" — the raw enums stay server-side, because
+ * they are a colourist's description of somebody else's hair and the client
+ * has no use for them.
+ *
  * Deliberately a column-and-payload query here rather than a call into
- * `inspirationAnalysisContract`: that module imports this one, and answering a
- * boolean is not worth a cycle between them. The narrow gap that leaves — a
- * row whose columns are current but whose payload the normalizer would refuse
- * — cannot arise through the app, because the database's own payload guard is
- * strictly stricter than the normalizer.
+ * `inspirationAnalysisContract`: that module imports this one, and reading a
+ * row is not worth a cycle between them. `normalizeStoredConsultInspirationAnalysis`
+ * is shared (./inspirationAnalysisRead), so the two callers cannot drift about
+ * what a valid artefact is.
  */
-async function inspirationAnalysisStored(
+async function inspirationAnalysisReading(
   tx: Prisma.TransactionClient,
   consultSessionId: string,
   inspirationId: string,
-): Promise<boolean> {
+): Promise<ConsultInspirationCardReading | null> {
   const stored = await tx.consultRevision.findFirst({
     where: {
       consultSessionId,
@@ -581,9 +648,18 @@ async function inspirationAnalysisStored(
       promptVersion: CONSULT_INSPIRATION_ANALYSIS_PROMPT_VERSION,
       payload: { path: ['inspirationId'], equals: inspirationId },
     },
-    select: { id: true },
+    select: {
+      id: true,
+      payload: true,
+      schemaVersion: true,
+      promptVersion: true,
+      model: true,
+      createdAt: true,
+    },
+    orderBy: [{ revision: 'desc' }, { id: 'desc' }],
   })
-  return Boolean(stored)
+  if (!stored) return null
+  return normalizeStoredConsultInspirationAnalysis(stored)?.attributes ?? null
 }
 
 /**
@@ -631,6 +707,11 @@ type InspirationStateContext = {
   /** Null when this consult is on contract v1. */
   pack: ConsultInspirationPackDefinition | null
   copy: BrandClientConsultInspirationCopy
+  /**
+   * P5d — the professional's public display name, for the understanding
+   * check's closing line. Resolved through the display-name SSOT.
+   */
+  professionalDisplayName: string
 }
 
 /**
@@ -652,6 +733,12 @@ async function inspirationStateContext(
   return {
     pack: await sessionInspirationPack(tx, session),
     copy: copy ?? defaultClientConsultInspirationCopy,
+    professionalDisplayName: formatProfessionalPublicDisplayName(
+      session.professional,
+      // The step's own warm fallback, matching the thread's: a pro with no
+      // usable name token reads as "your professional", never "Professional".
+      'your professional',
+    ),
   }
 }
 
@@ -667,6 +754,12 @@ async function buildState(
     activeSource(tx, session.id),
     latestReview(tx, session.id, copy),
   ])
+  // 🔴 The reading, not just "is there one". Every card below is a crop of it,
+  // and a card is built ONLY where it settled something — which is what makes
+  // a light-blonde reference incapable of producing a copper question.
+  const reading = source
+    ? await inspirationAnalysisReading(tx, session.id, source.id)
+    : null
   const sourceState = source
     ? {
         inspirationId: source.id,
@@ -685,7 +778,7 @@ async function buildState(
         imageReadEndpoint: `/api/v1/client/consult/${encodeURIComponent(session.id)}/inspiration/media`,
         imageAvailable: await imageAvailable(tx, source, session, now),
         useExpiresAt: source.useExpiresAt?.toISOString() ?? null,
-        analysisReady: await inspirationAnalysisStored(tx, session.id, source.id),
+        analysisReady: reading !== null,
       }
     : null
 
@@ -726,9 +819,30 @@ async function buildState(
       ? review
       : null
   const answers = activeReview?.answers ?? []
+  const answersByKey = answerMap(answers)
+  // The understanding check's text is composed per client from her own taps
+  // and what the photograph did not settle, so it has to be built before the
+  // progress that serves it as the current question.
+  const understanding = pack
+    ? composeConsultInspirationUnderstanding({
+        answers: answersByKey,
+        reading,
+        copy,
+        professionalDisplayName: ctx.professionalDisplayName,
+      })
+    : null
   const progress = pack
-    ? evaluateConsultInspirationProgressV2(pack, answerMap(answers))
+    ? evaluateConsultInspirationProgressV2(pack, answersByKey, copy, understanding)
     : evaluateConsultInspirationProgress(answers)
+  const cards = pack
+    ? buildConsultInspirationCards({
+        pack,
+        reading,
+        copy,
+        professionalDisplayName: ctx.professionalDisplayName,
+        answers: answersByKey,
+      })
+    : { coarse: [], prep: [] }
   return {
     consultId: session.id,
     status: session.status,
@@ -738,6 +852,7 @@ async function buildState(
       activeReview?.source === 'NONE'
         ? {
             currentQuestion: null,
+            nextPrepQuestionKey: null,
             answeredQuestionCount: 0,
             specificDetailCount: 0,
             requiredSpecificDetailCount,
@@ -748,6 +863,9 @@ async function buildState(
             ...progress,
             requiredSpecificDetailCount,
           },
+    // A consult that skipped the reference has nothing to crop, so it has no
+    // cards — the same reason it has no questions.
+    cards: activeReview?.source === 'NONE' ? [] : [...cards.coarse, ...cards.prep],
     latestReview: activeReview,
   }
 }
@@ -1440,9 +1558,18 @@ export async function answerConsultInspirationQuestion(args: {
     if (validated.contract === 2 && ctx.pack) {
       const pack = ctx.pack
       const previousMap = answerMap(previousAnswers)
-      const progress = evaluateConsultInspirationProgressV2(pack, previousMap)
+      const progress = evaluateConsultInspirationProgressV2(pack, previousMap, ctx.copy)
+      const question = findConsultInspirationCardQuestion(pack, validated.questionKey)
+      // 🔴 The order rule is the COARSE tier's, and only its. Prep cards are
+      // asked after the booking, they never gate completion, and she may
+      // answer them in any order or not at all — so holding them to "answer
+      // the current question first" would refuse the second card she taps.
+      // A coarse card is still strictly ordered until the tier is complete;
+      // after that any card, coarse or prep, is answerable again (which is
+      // what "living document until the appointment" means here).
       if (
         !previousReview?.complete &&
+        question?.tier !== 'PREP' &&
         progress.currentQuestion?.key !== validated.questionKey
       ) {
         throw new ConsultWriteError(
@@ -1450,10 +1577,12 @@ export async function answerConsultInspirationQuestion(args: {
           'Answer the current question first.',
         )
       }
-      const answers: Record<string, readonly string[]> = {
-        ...previousMap,
-        [validated.questionKey]: validated.selectedValues,
-      }
+      // "Change something" on the understanding check clears the cards it
+      // reopens AND itself, so the check comes back around with the corrected
+      // summary instead of standing as an agreement she withdrew.
+      const answers: Record<string, readonly string[]> = question
+        ? applyConsultInspirationReopen(question, validated.selectedValues, previousMap)
+        : { ...previousMap, [validated.questionKey]: validated.selectedValues }
       write = {
         contract: 2,
         payload: {
@@ -1462,7 +1591,8 @@ export async function answerConsultInspirationQuestion(args: {
           schemaVersion: pack.schemaVersion,
           source: source.source,
           inspirationId: source.id,
-          complete: evaluateConsultInspirationProgressV2(pack, answers).canComplete,
+          complete: evaluateConsultInspirationProgressV2(pack, answers, ctx.copy)
+            .canComplete,
           answers,
           // Enums only. The sentence is filled in on read from brand copy.
           catalogGuidance: await catalogDetailsOfferedByPro(

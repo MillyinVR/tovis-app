@@ -6,6 +6,8 @@ import { GENERAL_SERVICE_INSPIRATION_PACK } from './packs/generalService'
 import { HAIR_COLOR_INSPIRATION_PACK } from './packs/hairColor'
 import { HAIR_GENERAL_INSPIRATION_PACK } from './packs/hairGeneral'
 import {
+  applyConsultInspirationReopen,
+  assertConsultInspirationCardCopy,
   assertConsultInspirationPackWritable,
   buildConsultInspirationExactDetails,
   buildConsultInspirationPossibleInterpretation,
@@ -21,7 +23,11 @@ import {
   toConsultInspirationReviewV2,
   validateConsultInspirationAnswer,
 } from './registry'
-import { inspirationQuestion, type ConsultInspirationPackDefinition } from './types'
+import {
+  inspirationCard,
+  inspirationQuestion,
+  type ConsultInspirationPackDefinition,
+} from './types'
 
 const copy = defaultClientConsultInspirationCopy
 
@@ -53,6 +59,21 @@ function payload(pack: ConsultInspirationPackDefinition, extra: Record<string, u
 }
 
 describe('inspiration pack registry', () => {
+  it('🔴 serves the CURRENT version of every pack, by slug and by family', () => {
+    // The regression this pins: the family fallbacks once named the pack
+    // CONSTANTS rather than resolving through the registry, so registering a
+    // new version served it to the slug-matched family only and left every
+    // other family on the old one — silently, with every "is it registered?"
+    // test still green.
+    for (const family of ['HAIR', 'NAILS', 'SKIN', 'BROWS_LASHES', 'MAKEUP', 'BODY', 'OTHER'] as const) {
+      const resolved = resolveConsultInspirationPack({ categorySlug: 'anything-new', family })
+      expect(CONSULT_INSPIRATION_PACKS).toContain(resolved)
+    }
+    expect(
+      CONSULT_INSPIRATION_PACKS,
+    ).toContain(resolveConsultInspirationPack({ categorySlug: 'hair-color', family: 'HAIR' }))
+  })
+
   it('serves the colour pack by slug, the hair pack by family, and the general pack to everything else', () => {
     expect(
       resolveConsultInspirationPack({ categorySlug: 'hair-color', family: 'HAIR' }).id,
@@ -68,10 +89,12 @@ describe('inspiration pack registry', () => {
   })
 
   it('looks a pack up by id, and by id AND version', () => {
-    expect(findConsultInspirationPack(HAIR_COLOR_INSPIRATION_PACK.id)?.version).toBe(1)
-    expect(findConsultInspirationPack(HAIR_COLOR_INSPIRATION_PACK.id, 1)?.id).toBe(
-      HAIR_COLOR_INSPIRATION_PACK.id,
-    )
+    // Unversioned resolves to the CURRENT pack — P5d's cards — while the
+    // archived v1 is still reachable by version, which is what keeps a consult
+    // that started before cards readable.
+    expect(findConsultInspirationPack(HAIR_COLOR_INSPIRATION_PACK.id)?.version).toBe(2)
+    expect(findConsultInspirationPack(HAIR_COLOR_INSPIRATION_PACK.id, 1)?.version).toBe(1)
+    expect(findConsultInspirationPack(HAIR_COLOR_INSPIRATION_PACK.id, 2)?.version).toBe(2)
     expect(findConsultInspirationPack(HAIR_COLOR_INSPIRATION_PACK.id, 99)).toBeNull()
     expect(findConsultInspirationPack('no-such-pack')).toBeNull()
   })
@@ -80,6 +103,50 @@ describe('inspiration pack registry', () => {
     for (const pack of [...CONSULT_INSPIRATION_PACKS, ...CONSULT_INSPIRATION_PACK_ARCHIVE]) {
       expect(() => assertConsultInspirationPackWritable(pack)).not.toThrow()
     }
+  })
+
+  it('🔴 every registered pack has WORDS — the brand copy table covers it', () => {
+    for (const pack of [...CONSULT_INSPIRATION_PACKS, ...CONSULT_INSPIRATION_PACK_ARCHIVE]) {
+      expect(() => assertConsultInspirationCardCopy(pack, copy)).not.toThrow()
+    }
+  })
+
+  it('🔴 refuses a card the copy table has no words for', () => {
+    const trap: ConsultInspirationPackDefinition = {
+      ...CONSULT_INSPIRATION_PACKS[0]!,
+      id: 'trap-pack',
+      questions: [
+        inspirationCard({
+          key: 'nobody_wrote_this',
+          tier: 'COARSE',
+          kind: 'SINGLE_SELECT',
+          values: ['yes', 'no'],
+          detailSentiment: 'LIKE',
+        }),
+      ],
+      possibleMeanings: {},
+    }
+    expect(() => assertConsultInspirationCardCopy(trap, copy)).toThrow(/no prompt/)
+  })
+
+  it('🔴 "Change something" clears the cards it reopens AND itself', () => {
+    const pack = CONSULT_INSPIRATION_PACKS[0]!
+    const check = pack.questions.find((entry) => entry.key === 'understanding_check')!
+    const answered = {
+      spark_focus: ['the-color'],
+      keep_as_is: ['my-length'],
+    }
+    // Confirming it stores the answer and leaves the rest alone.
+    expect(applyConsultInspirationReopen(check, ['thats-right'], answered)).toEqual({
+      ...answered,
+      understanding_check: ['thats-right'],
+    })
+    // Changing something empties the coarse tier, INCLUDING the check — leave
+    // it stored and the pack reads as complete again the moment she re-answers
+    // card one, and she never sees the corrected summary.
+    expect(applyConsultInspirationReopen(check, ['change-something'], answered)).toEqual(
+      {},
+    )
   })
 
   it('🔴 refuses a pack whose value the database guard would reject', () => {

@@ -384,6 +384,90 @@ export const generalServiceInspiration: ConsultInspirationStateDTO = {
   },
 }
 
+/**
+ * P5d — the same consult with a READING behind it, so the client gets CARDS.
+ *
+ * The reading is a light blonde: a level 6 base melting to a level 9, cool,
+ * babylights through the mids and ends. The regions are in two different parts
+ * of the frame on purpose — the colour attributes low and central, the
+ * arrangement attributes high and wide — because "the coarse crops visibly
+ * correspond to colour vs shape" is a claim about geometry, and a fixture that
+ * used one box everywhere could not prove it in a browser.
+ *
+ * Values lifted from lib/consult/inspiration/cardQuestions.ts and the brand's
+ * card copy table; the registry's own test is what holds those honest.
+ */
+export const cardInspiration: ConsultInspirationStateDTO = {
+  ...uploadSourceInspiration,
+  schemaVersion: 2,
+  progress: {
+    ...uploadSourceInspiration.progress,
+    currentQuestion: null,
+    nextPrepQuestionKey: 'attr_tone',
+    answeredQuestionCount: 3,
+    specificDetailCount: 2,
+    requiredSpecificDetailCount: 0,
+    canComplete: true,
+    blocker: null,
+  },
+  cards: [
+    {
+      questionKey: 'spark_focus',
+      tier: 'COARSE',
+      attribute: null,
+      attributeValue: null,
+      name: null,
+      region: null,
+      optionRegions: [
+        { value: 'the-color', label: 'The color', region: { x: 0.3, y: 0.5, w: 0.4, h: 0.4 } },
+        { value: 'the-shape', label: 'The shape of it', region: { x: 0.1, y: 0.2, w: 0.8, h: 0.6 } },
+        { value: 'the-whole-thing', label: 'The whole thing', region: null },
+        { value: 'not-sure', label: 'Not sure', region: null },
+      ],
+      question: {
+        key: 'spark_focus',
+        label: 'What made you stop scrolling?',
+        helpText: null,
+        kind: 'SINGLE_SELECT',
+        options: [
+          { value: 'the-color', label: 'The color' },
+          { value: 'the-shape', label: 'The shape of it' },
+          { value: 'the-whole-thing', label: 'The whole thing' },
+          { value: 'not-sure', label: 'Not sure' },
+        ],
+        minSelections: 1,
+        maxSelections: 1,
+        allowText: false,
+      },
+      selectedValues: [],
+    },
+    {
+      questionKey: 'attr_tone',
+      tier: 'PREP',
+      attribute: 'tone',
+      attributeValue: 'COOL',
+      name: 'This is the cooler, silvery cast in it — some people call it ash.',
+      region: { x: 0.32, y: 0.5, w: 0.36, h: 0.25 },
+      optionRegions: [],
+      question: {
+        key: 'attr_tone',
+        label: 'Is this part of what you like?',
+        helpText: null,
+        kind: 'SINGLE_SELECT',
+        options: [
+          { value: 'yes', label: 'Yes' },
+          { value: 'not-this', label: 'Not this' },
+          { value: 'not-sure', label: 'Not sure' },
+        ],
+        minSelections: 1,
+        maxSelections: 1,
+        allowText: false,
+      },
+      selectedValues: [],
+    },
+  ],
+}
+
 export function withAnalysisReady(
   inspiration: ConsultInspirationStateDTO,
   analysisReady: boolean,
@@ -402,6 +486,24 @@ export function threadFixture(args: {
   bookEnabled?: boolean
 }): ConsultThreadDTO {
   const photos = threadPhotoMessages(captureState, args.slotOverrides)
+  const cards = args.inspiration.cards ?? []
+  // P5d — one message per card, exactly as lib/consult/thread.ts projects them.
+  const cardMessages: ConsultThreadMessageDTO[] = cards.map((card, index) => ({
+    kind: 'INSPIRATION',
+    id: `inspiration:${card.questionKey}`,
+    author: 'APP',
+    state: card.selectedValues.length > 0 ? 'DONE' : index === 0 ? 'OPEN' : 'BLOCKED',
+    // 🔴 A card says its piece on the card, so no bubble above it.
+    text: null,
+    sourceDecisionRequired: false,
+    source: args.inspiration.source,
+    question: card.question,
+    card,
+    answeredQuestionCount: args.inspiration.progress.answeredQuestionCount,
+    specificDetailCount: args.inspiration.progress.specificDetailCount,
+    requiredSpecificDetailCount: args.inspiration.progress.requiredSpecificDetailCount,
+    schemaVersion: args.inspiration.schemaVersion,
+  }))
   const messages: ConsultThreadMessageDTO[] = [
     {
       kind: 'TEXT',
@@ -414,17 +516,21 @@ export function threadFixture(args: {
       kind: 'INSPIRATION',
       id: 'inspiration',
       author: 'APP',
-      state: 'OPEN',
+      // A card consult's step message is the bubble and the reference; the
+      // OPEN step is the card.
+      state: cards.length > 0 ? 'DONE' : 'OPEN',
       text: 'Now tell me what you like about it — tap what catches your eye.',
       sourceDecisionRequired: false,
       source: args.inspiration.source,
-      question: args.inspiration.progress.currentQuestion,
+      question: cards.length > 0 ? null : args.inspiration.progress.currentQuestion,
+      card: null,
       answeredQuestionCount: args.inspiration.progress.answeredQuestionCount,
       specificDetailCount: args.inspiration.progress.specificDetailCount,
       requiredSpecificDetailCount:
         args.inspiration.progress.requiredSpecificDetailCount,
       schemaVersion: args.inspiration.schemaVersion,
     },
+    ...cardMessages,
     {
       kind: 'TEXT',
       id: 'capture-intro',

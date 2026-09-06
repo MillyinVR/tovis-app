@@ -1407,6 +1407,11 @@ export async function executeConsultAnalysisRun(args: {
             source: context.inspiration.source,
             analysis: inspirationAnalysis,
             answers: consultInspirationPromptAnswers(context.inspiration),
+            // P5d — her card taps, already paired with the attribute values
+            // they were about by the inspiration contract. Nothing is derived
+            // here: a prompt that re-derived what a "yes" meant would be a
+            // second place for that pairing to be wrong.
+            ...context.inspiration.preferences,
           },
           // The codes this intake can support, narrowing the provider's enum
           // BEFORE the call rather than refusing the answer after it.

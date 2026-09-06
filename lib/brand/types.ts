@@ -842,12 +842,77 @@ export type BrandClientConsultBookingCopy = {
 }
 
 /**
+ * P5d — every word an inspiration CARD says, keyed by what it is about.
+ *
+ * A card is a crop of the client's reference plus a plain-language name for
+ * what is in the crop plus a question. None of those three are stored: the
+ * payload holds question keys and option enums only (P5c), so the sentence a
+ * card shows is resolved HERE at read time, from the pack's key and the
+ * reading's enum. Editing a line changes every consult at once, including the
+ * ones already answered.
+ *
+ * 🔴 Keyed by ATTRIBUTE AND VALUE, never by service family. `tone:COOL` reads
+ * the same whichever pack asked it, and the reason a light-blonde reference
+ * never produces a copper card is that no card exists for a value the model
+ * did not read — not that a family's list happens to omit one.
+ *
+ * A pack question whose entries are missing here fails
+ * `assertConsultInspirationCardCopy` in the registry's own test, so a card
+ * with no words is a red build rather than a blank card on a client's screen.
+ */
+export type BrandClientConsultInspirationCardCopy = {
+  /** Question key → the question, as the client is asked it. */
+  prompts: Readonly<Record<string, string>>
+  /** `${questionKey}:${optionValue}` → the option's label. */
+  optionLabels: Readonly<Record<string, string>>
+  /**
+   * `${analysisAttribute}:${value}` → the plain-language name shown AFTER the
+   * crop, never before it. "This is the cooler, silvery cast in the blonde —
+   * some people call it ash": the picture first, the word second, and the word
+   * is offered rather than assumed.
+   */
+  attributeNames: Readonly<Record<string, string>>
+  /**
+   * `${analysisAttribute}` → the clause the understanding check uses for
+   * something the photograph could not settle ("aren’t sure how bright yet").
+   * Part 0 rule 8: the consult says what it could not see.
+   */
+  unsureClauses: Readonly<Record<string, string>>
+  /**
+   * `${optionValue}` of the spark card → its clause in the understanding
+   * check, with no reading to lean on ("like the color in it").
+   */
+  sparkClauses: Readonly<Record<string, string>>
+  /**
+   * The same clauses with a `{subject}` slot, used when the reading CAN name
+   * what she pointed at — "like the light blonde" rather than "like the color
+   * in it". The subject comes from `attributeShortNames`.
+   */
+  sparkClausesWithSubject: Readonly<Record<string, string>>
+  /**
+   * `${analysisAttribute}:${value}` → the same thing as a NOUN PHRASE, for
+   * dropping into a sentence. `attributeNames` is a whole sentence shown under
+   * a crop; this is the two or three words that fit inside another one.
+   */
+  attributeShortNames: Readonly<Record<string, string>>
+  /** `${optionValue}` of the keep card → its clause ("want to keep your length"). */
+  keepClauses: Readonly<Record<string, string>>
+  /** The understanding check's opening word, before the clauses. */
+  understandingLead: string
+  /** The conjunction before the last clause. */
+  understandingConjunction: string
+  /** The closing sentence. `{pro}` is filled with the professional's name. */
+  understandingClose: string
+  /** Used when she answered nothing the sentence could describe. */
+  understandingFallback: string
+}
+
+/**
  * P5c — the guided-inspiration step's own sentences.
  *
- * Question and option LABELS are not here: they belong to the pack a service
- * family serves (lib/consult/inspiration/packs/), and a pack's question is
- * data the payload is validated against, not copy. What is here is everything
- * the step says AROUND the questions.
+ * Question and option LABELS for a contract-v1 consult are not here: they
+ * belong to the pack it serves (lib/consult/inspiration/packs/). A contract-v2
+ * CARD pack's labels ARE here, in `cards` — see the type above for why.
  */
 export type BrandClientConsultInspirationCopy = {
   /** What a reference picture is for, shown before she is asked for one. */
@@ -869,6 +934,8 @@ export type BrandClientConsultInspirationCopy = {
    * never the sentence, so editing this line changes every consult at once.
    */
   catalogGuidanceNote: string
+  /** P5d — the cards' own words, keyed by attribute and value. */
+  cards: BrandClientConsultInspirationCardCopy
 }
 
 export type BrandConfig = {

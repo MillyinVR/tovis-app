@@ -110,6 +110,10 @@ const noInspiration: ConsultAnalysisInput['inspiration'] = {
   source: 'NONE',
   analysis: null,
   answers: [],
+  wants: [],
+  avoids: [],
+  unsure: [],
+  keep: [],
 }
 
 const captures = [
@@ -917,6 +921,10 @@ describe('P4 — the inspiration reference in the analysis prompt', () => {
       answers: [
         { question: 'Which color or colors in this picture are your favorite?', answer: 'The lightest pieces (LIKE)' },
       ],
+      wants: ['lightestLevel:LEVEL_9'],
+      avoids: ['tone:COOL'],
+      unsure: ['finish:HIGH_SHINE'],
+      keep: ['My length'],
     })
     expect(block).toContain('source: EXTERNAL_UPLOAD')
     expect(block).toContain('- baseLevel: LEVEL_5 (confidence 0.4–0.6)')
@@ -931,10 +939,24 @@ describe('P4 — the inspiration reference in the analysis prompt', () => {
     expect(block).toContain('The lightest pieces (LIKE)')
     // And the reference is never presented as an observation about the client.
     expect(block).toContain('this describes the DESIRED result, not the client')
+    // P5d — her card taps, paired with the attribute VALUES they were about.
+    // A bare "yes" is not an answer to anything; the pair is.
+    expect(block).toContain('she confirmed she WANTS from the reference: lightestLevel:LEVEL_9')
+    expect(block).toContain('never recommend these: tone:COOL')
+    expect(block).toContain('do not decide it for her: finish:HIGH_SHINE')
+    expect(block).toContain('keep unchanged about her own hair: My length')
   })
 
   it('says the client brought nothing rather than leaving the model to assume', () => {
-    const block = consultInspirationBlock({ source: 'NONE', analysis: null, answers: [] })
+    const block = consultInspirationBlock({
+      source: 'NONE',
+      analysis: null,
+      answers: [],
+      wants: [],
+      avoids: [],
+      unsure: [],
+      keep: [],
+    })
     expect(block).toContain('brought no reference photograph')
     expect(block).toContain('do not invent a reference')
   })
@@ -945,7 +967,15 @@ describe('P4 — the inspiration reference in the analysis prompt', () => {
       capturePack,
       intake: {},
       intakeItems: [],
-      inspiration: { source: 'PLATFORM_LOOK', analysis, answers: [] },
+      inspiration: {
+        source: 'PLATFORM_LOOK',
+        analysis,
+        answers: [],
+        wants: [],
+        avoids: [],
+        unsure: [],
+        keep: [],
+      },
     })
     expect(blocks.inspiration).toContain('Client inspiration reference')
   })

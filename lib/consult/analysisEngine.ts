@@ -560,6 +560,24 @@ export type ConsultAnalysisInspirationInput = {
   source: ConsultInspirationSourceDTO
   analysis: ConsultInspirationAnalysis | null
   answers: readonly { question: string; answer: string }[]
+  /**
+   * P5d — what her CARD taps said, keyed to the reading they were about.
+   *
+   * `wants` / `avoids` / `unsure` are `attribute:VALUE` pairs from the prep
+   * cards (plus the coarse card's own words), and `keep` is what she asked to
+   * be left alone on her OWN hair. They are what replaces v1's `answers` for a
+   * card consult: an answer of "yes" to "is this part of what you like?" means
+   * nothing without the attribute it was asked about, and the derivation that
+   * pairs the two belongs to the inspiration contract, not to a prompt.
+   *
+   * All four are empty for a contract-v1 consult, which had no cards; the
+   * `answers` block below still renders its wizard answers, so no consult in
+   * flight loses what it already said.
+   */
+  wants: readonly string[]
+  avoids: readonly string[]
+  unsure: readonly string[]
+  keep: readonly string[]
 }
 
 export type ConsultAnalysisProviderResult = {
@@ -1724,13 +1742,47 @@ export function consultInspirationBlock(
       )
     }
   }
-  lines.push(
-    inspiration.answers.length > 0
-      ? 'What the client said she liked about it (her own words, from the guided inspiration step):'
-      : 'The client did not record what she liked about it.',
-  )
-  for (const answer of inspiration.answers) {
-    lines.push(`- ${answer.question} → ${answer.answer}`)
+  // 🔴 The card answers come FIRST and are stated as facts about specific
+  // attributes, because they are the only part of this block that says which
+  // half of the reference she actually wants. `avoids` in particular is what
+  // Stage 4's tier 2 excludes by, so it is named rather than left implicit in
+  // a list of her taps.
+  const cardLines: string[] = []
+  if (inspiration.wants.length > 0) {
+    cardLines.push(
+      `What she confirmed she WANTS from the reference: ${inspiration.wants.join('; ')}.`,
+    )
+  }
+  if (inspiration.avoids.length > 0) {
+    cardLines.push(
+      `What she said she does NOT want from it — never recommend these: ${inspiration.avoids.join('; ')}.`,
+    )
+  }
+  if (inspiration.unsure.length > 0) {
+    cardLines.push(
+      `What she was UNSURE about — treat as open, do not decide it for her: ${inspiration.unsure.join('; ')}.`,
+    )
+  }
+  if (inspiration.keep.length > 0) {
+    cardLines.push(
+      `What she asked to keep unchanged about her own hair: ${inspiration.keep.join('; ')}.`,
+    )
+  }
+  if (cardLines.length > 0) {
+    lines.push(
+      'What the client said about the reference, attribute by attribute (she was shown a crop of each and asked):',
+    )
+    lines.push(...cardLines)
+  }
+  if (inspiration.answers.length > 0) {
+    lines.push(
+      'What the client said she liked about it (her own words, from the guided inspiration step):',
+    )
+    for (const answer of inspiration.answers) {
+      lines.push(`- ${answer.question} → ${answer.answer}`)
+    }
+  } else if (cardLines.length === 0) {
+    lines.push('The client did not record what she liked about it.')
   }
   return lines.join('\n')
 }

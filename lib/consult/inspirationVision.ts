@@ -107,85 +107,38 @@ export type ConsultInspirationEvidence =
 // placement, root blend, finish, dimension. Every enum carries an honest
 // UNKNOWN; none carries identity, ethnicity, age or medical meaning.
 
-export const CONSULT_INSPIRATION_TONES = ['WARM', 'COOL', 'NEUTRAL', 'UNKNOWN'] as const
-export const CONSULT_INSPIRATION_TECHNIQUES = [
-  'SINGLE_PROCESS',
-  'BALAYAGE',
-  'FOIL_HIGHLIGHTS',
-  'BABYLIGHTS',
-  'LOWLIGHTS',
-  'COLOR_MELT',
-  'GLOSS_ONLY',
-  'DOUBLE_PROCESS',
-  'NATURAL_UNCOLORED',
-  'UNKNOWN',
-] as const
-export const CONSULT_INSPIRATION_PLACEMENTS = [
-  'ALL_OVER',
-  'FACE_FRAMING',
-  'MIDS_TO_ENDS',
-  'ENDS_ONLY',
-  'SURFACE_ONLY',
-  'UNDERNEATH',
-  'PANELS',
-  'UNKNOWN',
-] as const
-export const CONSULT_INSPIRATION_ROOT_BLENDS = [
-  'SOLID_TO_ROOT',
-  'SHADOW_ROOT',
-  'SEAMLESS_MELT',
-  'GROWN_OUT',
-  'UNKNOWN',
-] as const
-export const CONSULT_INSPIRATION_FINISHES = [
-  'HIGH_SHINE',
-  'SATIN',
-  'MATTE',
-  'UNKNOWN',
-] as const
-export const CONSULT_INSPIRATION_DIMENSIONS = [
-  'FLAT',
-  'SUBTLE',
-  'MEDIUM',
-  'HIGH_CONTRAST',
-  'UNKNOWN',
-] as const
-
-export const CONSULT_INSPIRATION_ANALYSIS_FIELDS = [
-  'baseLevel',
-  'lightestLevel',
-  'tone',
-  'technique',
-  'placement',
-  'rootBlend',
-  'finish',
-  'dimension',
-] as const
-export type ConsultInspirationAnalysisField =
-  (typeof CONSULT_INSPIRATION_ANALYSIS_FIELDS)[number]
-
-export const CONSULT_INSPIRATION_FIELD_VALUES: Readonly<
-  Record<ConsultInspirationAnalysisField, readonly string[]>
-> = {
-  baseLevel: CONSULT_HAIR_LEVELS,
-  lightestLevel: CONSULT_HAIR_LEVELS,
-  tone: CONSULT_INSPIRATION_TONES,
-  technique: CONSULT_INSPIRATION_TECHNIQUES,
-  placement: CONSULT_INSPIRATION_PLACEMENTS,
-  rootBlend: CONSULT_INSPIRATION_ROOT_BLENDS,
-  finish: CONSULT_INSPIRATION_FINISHES,
-  dimension: CONSULT_INSPIRATION_DIMENSIONS,
-}
+export {
+  CONSULT_INSPIRATION_TONES,
+  CONSULT_INSPIRATION_TECHNIQUES,
+  CONSULT_INSPIRATION_PLACEMENTS,
+  CONSULT_INSPIRATION_ROOT_BLENDS,
+  CONSULT_INSPIRATION_FINISHES,
+  CONSULT_INSPIRATION_DIMENSIONS,
+  CONSULT_INSPIRATION_ANALYSIS_FIELDS,
+  CONSULT_INSPIRATION_FIELD_VALUES,
+  type ConsultInspirationAnalysisField,
+} from './inspirationAttributes'
+import {
+  CONSULT_INSPIRATION_ANALYSIS_FIELDS,
+  CONSULT_INSPIRATION_DIMENSIONS,
+  CONSULT_INSPIRATION_FIELD_VALUES,
+  CONSULT_INSPIRATION_FINISHES,
+  CONSULT_INSPIRATION_PLACEMENTS,
+  CONSULT_INSPIRATION_ROOT_BLENDS,
+  CONSULT_INSPIRATION_TECHNIQUES,
+  CONSULT_INSPIRATION_TONES,
+  type ConsultInspirationAnalysisField,
+} from './inspirationAttributes'
 
 /**
  * Where on the reference the attribute is most visible, normalized to the
  * image: `x`/`y` are the top-left corner, `w`/`h` the size, all in 0..1.
  *
- * Nothing consumes it yet (Tori, 2026-09-04) — P5 will, to show the client
- * WHICH part of her reference an attribute came from. It is captured now
- * because it is free at read time and impossible to backfill: the raw
- * inspiration object is purge-fenced, so a later pass would have no image to
- * measure.
+ * P5d consumes it: an inspiration CARD is a crop of this box, and the client
+ * sees which part of her own reference an attribute came from before she is
+ * told a word for it. It was captured a slice early because it is free at read
+ * time and impossible to backfill — the raw inspiration object is purge-fenced,
+ * so a later pass would have no image left to measure.
  */
 export type ConsultInspirationRegion = {
   x: number

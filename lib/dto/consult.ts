@@ -346,6 +346,67 @@ export type ConsultInspirationCatalogGuidanceDTO = {
   automaticallyAdded: false
 }
 
+/**
+ * P5d — which tier a card belongs to. COARSE is the three asked before the
+ * booking; PREP is the fine per-attribute cards asked after it.
+ */
+export type ConsultInspirationCardTierDTO = 'COARSE' | 'PREP'
+
+/**
+ * One option of a card whose OPTIONS crop to different parts of the reference.
+ *
+ * The coarse "what made you stop scrolling?" card is the only user today: "the
+ * color" and "the shape of it" are two visibly different crops of one
+ * photograph, and being able to SEE the difference is what makes the question
+ * answerable by someone who has never been asked it before.
+ *
+ * A null `region` means show the whole reference — either because the option is
+ * about the whole picture ("the whole thing"), or because the reading did not
+ * settle the attributes that option groups. Both are the same instruction to
+ * the client, on purpose: a fallback that looks like a feature.
+ */
+export type ConsultInspirationCardOptionDTO = {
+  value: string
+  label: string
+  region: ConsultInspirationAnalysisRegionDTO | null
+}
+
+/**
+ * P5d — an inspiration CARD: a crop of the client's own reference, a plain
+ * word for what is in the crop, and a question about it.
+ *
+ * 🔴 Nothing here is stored. The crop comes from the reading
+ * (`ConsultInspirationAnalysisDTO`), the words come from the brand's copy
+ * table, and the client's payload holds only the question key and the option
+ * enum she tapped. A client renders this; it never composes one.
+ *
+ * 🔴 A card exists only where the reading saw something. There is no fixed list
+ * of cards to fall back to, which is what makes "a light-blonde reference never
+ * produces a copper question" structural rather than a rule someone remembered.
+ */
+export type ConsultInspirationCardDTO = {
+  /** The pack question this card asks — what an answer echoes back. */
+  questionKey: ConsultInspirationQuestionKeyDTO
+  tier: ConsultInspirationCardTierDTO
+  /** The reading attribute this card is about, or null for a coarse card. */
+  attribute: ConsultInspirationAnalysisFieldDTO | null
+  /** That attribute's read value, so the client and the brief agree. */
+  attributeValue: string | null
+  /**
+   * 🔴 The plain-language name, shown UNDER the crop and never above it. Null
+   * on a card with no single subject.
+   */
+  name: string | null
+  /** The crop for the card. Null means show the whole reference. */
+  region: ConsultInspirationAnalysisRegionDTO | null
+  /** Per-option crops, when the card's options point at different parts. */
+  optionRegions: ConsultInspirationCardOptionDTO[]
+  /** The question itself, in the shape the answer route already accepts. */
+  question: ConsultInspirationQuestionDTO
+  /** What she has already chosen here — the thread's own history. */
+  selectedValues: string[]
+}
+
 export type ConsultInspirationSourceStateDTO = {
   inspirationId: string
   source: Exclude<ConsultInspirationSourceDTO, 'NONE'>
@@ -421,6 +482,14 @@ export type ConsultInspirationStateDTO = {
   source: ConsultInspirationSourceStateDTO | null
   progress: {
     currentQuestion: ConsultInspirationQuestionDTO | null
+    /**
+     * P5d — the first unanswered PREP card, once the coarse tier is done.
+     *
+     * Not the same thing as `currentQuestion`, which is what still blocks
+     * completion; a prep card never blocks anything. ABSENT means a server (or
+     * a contract-v1 consult) with no prep tier at all.
+     */
+    nextPrepQuestionKey?: string | null
     answeredQuestionCount: number
     specificDetailCount: number
     /**
@@ -441,6 +510,15 @@ export type ConsultInspirationStateDTO = {
       | 'AT_LEAST_THREE_DETAILS_REQUIRED'
       | null
   }
+  /**
+   * P5d — every card this client is shown, coarse first then prep, in pack
+   * order. Empty for a contract-v1 consult (which has a question wizard, not
+   * cards) and for one that brought no reference.
+   *
+   * OPTIONAL on the wire, like every field added since: the published schema
+   * grows by addition only, so shipped fixtures and shipped clients stay valid.
+   */
+  cards?: ConsultInspirationCardDTO[]
   latestReview: ConsultInspirationReviewDTO | null
 }
 
@@ -1098,6 +1176,16 @@ export type ConsultInspirationAnalysisAttributesDTO = {
   finish: ConsultInspirationAnalysisObservationDTO<ConsultInspirationAnalysisFinishDTO>
   dimension: ConsultInspirationAnalysisObservationDTO<ConsultInspirationAnalysisDimensionDTO>
 }
+
+/**
+ * One of the eight attributes above, by name.
+ *
+ * P5d: an inspiration CARD is about exactly one of these, and its crop is that
+ * attribute's `region`. Named here rather than in the vision module so a pack
+ * definition can point at an attribute without importing the provider client.
+ */
+export type ConsultInspirationAnalysisFieldDTO =
+  keyof ConsultInspirationAnalysisAttributesDTO
 
 /**
  * The stored artefact, identified by the inspiration ROW it read: a SWAPPED
@@ -1788,10 +1876,26 @@ export type ConsultThreadInspirationMessageDTO = {
   id: string
   author: 'APP'
   state: ConsultThreadMessageStateDTO
-  text: string
+  /**
+   * 🔴 NULLABLE since P5d. The step's own bubble belongs to the message that
+   * asks for a reference; a CARD says its piece on the card itself, and a
+   * bubble above every one of eleven cards would be eleven sentences nobody
+   * asked for. Clients render the bubble only when there is one.
+   */
+  text: string | null
   sourceDecisionRequired: boolean
   source: ConsultInspirationSourceStateDTO | null
   question: ConsultInspirationQuestionDTO | null
+  /**
+   * P5d — the card this message IS, when it is one.
+   *
+   * Additive and optional on the wire: a client that predates cards keeps
+   * rendering `question` and simply shows no crop, which is the same thing it
+   * shows a client whose reference could not be read. `question` is carried
+   * alongside deliberately — answering has not changed, and a card that made
+   * its own answer route would be a second write path to keep in step.
+   */
+  card?: ConsultInspirationCardDTO | null
   answeredQuestionCount: number
   specificDetailCount: number
   requiredSpecificDetailCount: number
