@@ -776,6 +776,26 @@ export type BrandClientConsultThreadCopy = {
   estimateReady: string
 
   /**
+   * P5g — the bubble above the adaptive follow-up questions. `{pro}`.
+   *
+   * Said once, before the first one. A sentence above each of up to nine
+   * questions would be nine sentences nobody asked for — the same rule the
+   * inspiration cards follow.
+   */
+  followUpIntro: string
+  /**
+   * 🔴 P5g — said out loud when the follow-up call FAILED and she is being
+   * asked the pack's own remaining safety questions instead.
+   *
+   * Part 0 rule 4 forbids a silent fallback, and a fallback the client cannot
+   * see is a silent one. It must not apologise its way into sounding broken,
+   * and it must not pretend the questions below are the clever ones.
+   */
+  followUpFallback: string
+  /** Said when there is nothing left worth asking — the honest end of prep. */
+  followUpDone: string
+
+  /**
    * The keep-my-photos choice, above the Book button.
    *
    * 🔴 P7a-3 rewrote this because the shipped sentence became FALSE: it told
@@ -964,6 +984,22 @@ export type BrandClientConsultInspirationCardCopy = {
   understandingClose: string
   /** Used when she answered nothing the sentence could describe. */
   understandingFallback: string
+  /**
+   * P5g — `${analysisAttribute}` → what to call a tappable REGION when the
+   * reading's own short name is missing.
+   *
+   * A region picker labels each area with the phrase for what was actually
+   * read there ("cool, silvery cast"), which describes THIS photograph. This
+   * map is the per-attribute fallback for a value no short name covers yet: it
+   * names the attribute rather than the reading, which is vaguer but never
+   * wrong, and it is what stops a label rendering as `tone:COOL`.
+   *
+   * ⚠️ String-keyed like every sibling map in this type, so a missing
+   * attribute is not a type error. `cards.test.ts` asserts one entry per
+   * analysis attribute instead — the same shape of proof
+   * `assertConsultInspirationPackWritable` gives the packs.
+   */
+  attributeFallbackNames: Readonly<Record<string, string>>
 }
 
 /**

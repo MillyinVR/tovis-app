@@ -44,6 +44,26 @@ import {
   ConsultInspirationVisionError,
   sanitizeConsultInspirationAnalysis,
 } from '@/lib/consult/inspirationVision'
+import {
+  buildConsultFollowUpOutputSchema,
+  CONSULT_FOLLOW_UP_EFFORT,
+  CONSULT_FOLLOW_UP_MAX_QUESTIONS,
+  CONSULT_FOLLOW_UP_MAX_TOKENS,
+  CONSULT_FOLLOW_UP_SYSTEM_PROMPT,
+  sanitizeConsultFollowUpQuestions,
+} from '@/lib/consult/followUpEngine'
+import { defaultClientConsultInspirationCopy } from '@/lib/brand/defaultClientConsultInspirationCopy'
+import { renderConsultFollowUpContext } from '@/lib/consult/followUpContext'
+import type { ConsultAnalysisCore } from '@/lib/consult/analysisEngine'
+import type {
+  ConsultAnalysisEvidenceDTO,
+  ConsultInspirationAnalysisAttributesDTO,
+  ConsultInspirationAnalysisObservationDTO,
+} from '@/lib/dto/consult'
+import type {
+  ConsultFollowUpVocabulary,
+  ConsultFollowUpVocabularyEntry,
+} from '@/lib/consult/followUpVocabulary'
 import { toProviderOutputSchema } from '@/lib/consult/providerSchema'
 
 /**
@@ -122,6 +142,8 @@ async function send(args: {
   content: Content
   schema: Record<string, unknown>
   maxTokens: number
+  /** Defaults to the analysis calls' level; the follow-up sets its own. */
+  effort?: 'low' | 'medium' | 'high'
 }): Promise<unknown> {
   let message: Anthropic.Message
   try {
@@ -133,7 +155,7 @@ async function send(args: {
       output_config: {
         // Production's effort level, not a level typed here — the two calls'
         // token and latency behaviour is entirely different at the default.
-        effort: CONSULT_ANALYSIS_EFFORT,
+        effort: args.effort ?? CONSULT_ANALYSIS_EFFORT,
         format: { type: 'json_schema', schema: toProviderOutputSchema(args.schema) },
       },
     })
@@ -283,5 +305,251 @@ describe('the consult schemas compile and answer against the live model', () => 
       expect(error).toBeInstanceOf(ConsultInspirationVisionError)
       expect((error as ConsultInspirationVisionError).kind).toBe('unreadable')
     }
+  })
+
+  // ── P5g — the adaptive follow-up call ─────────────────────────────────────
+
+  /**
+   * The vocabulary of a real hair-colour consult mid-prep: the two safety
+   * questions she has not answered, and the follow-up pack's own keys.
+   */
+  const FOLLOW_UP_ENTRIES: ConsultFollowUpVocabularyEntry[] = [
+    {
+      key: 'prior_lightening',
+      home: 'INTAKE',
+      packLabel: 'When was your hair last lightened?',
+      safety: true,
+      options: [
+        { value: 'never', label: 'Never' },
+        { value: 'within-3-months', label: 'Within 3 months' },
+        { value: '3-6-months', label: '3–6 months ago' },
+        { value: 'over-12-months', label: 'Over 12 months ago' },
+        { value: 'not-sure', label: 'Not sure' },
+      ],
+    },
+    {
+      key: 'henna_plant_dye_history',
+      home: 'INTAKE',
+      packLabel:
+        'When did you last use henna or another plant-based hair dye?',
+      safety: true,
+      options: [
+        { value: 'never', label: 'Never' },
+        { value: 'within-6-months', label: 'Within 6 months' },
+        { value: 'over-12-months', label: 'Over 12 months ago' },
+        { value: 'not-sure', label: 'Not sure' },
+      ],
+    },
+    {
+      key: 'maintenance_tolerance',
+      home: 'FOLLOW_UP',
+      packLabel: 'How much upkeep are you happy with?',
+      safety: false,
+      options: [
+        { value: 'low', label: 'As little as possible' },
+        { value: 'medium', label: 'Some upkeep is fine' },
+        { value: 'high', label: 'I do not mind regular upkeep' },
+      ],
+    },
+    {
+      key: 'event_timing',
+      home: 'FOLLOW_UP',
+      packLabel: 'Do you have an event or deadline?',
+      safety: false,
+      options: [
+        { value: 'no-deadline', label: 'No deadline' },
+        { value: 'within-2-weeks', label: 'Within 2 weeks' },
+        { value: '1-3-months', label: '1–3 months' },
+      ],
+    },
+  ]
+
+  const FOLLOW_UP_VOCABULARY: ConsultFollowUpVocabulary = {
+    entries: FOLLOW_UP_ENTRIES,
+    byKey: new Map(FOLLOW_UP_ENTRIES.map((entry) => [entry.key, entry])),
+  }
+
+  // 🔴 Typed helpers, not casts. A type escape here would let a renamed or
+  // re-shaped field compile and then send the model a context block production
+  // could never produce — precisely the class of bug this live suite exists to
+  // catch, papered over in the test that catches it.
+  //
+  // ⚠️ This comment does not spell the escape out, and that is deliberate:
+  // `check:no-type-escape` is a substring match over the file, so naming the
+  // pattern in PROSE fails the build exactly as writing one would.
+  function observation<const T extends string>(
+    value: T,
+    min: number,
+    max: number,
+  ): ConsultInspirationAnalysisObservationDTO<T> {
+    return { value, confidence: { min, max }, evidence: ['inspiration'], region: null }
+  }
+
+  function coreObservation<const T extends string>(
+    value: T,
+    evidence: ConsultAnalysisEvidenceDTO[],
+  ) {
+    return { value, confidence: { min: 0.45, max: 0.7 }, evidence }
+  }
+
+  const BLONDE_INSPIRATION: ConsultInspirationAnalysisAttributesDTO = {
+    baseLevel: observation('LEVEL_6', 0.45, 0.7),
+    lightestLevel: observation('LEVEL_9', 0.5, 0.75),
+    tone: observation('COOL', 0.45, 0.7),
+    technique: observation('BABYLIGHTS', 0.4, 0.65),
+    placement: observation('MIDS_TO_ENDS', 0.4, 0.65),
+    rootBlend: observation('SEAMLESS_MELT', 0.4, 0.65),
+    finish: observation('HIGH_SHINE', 0.4, 0.6),
+    // Unread on purpose — the prompt is told so, and told not to lean on it.
+    dimension: observation('UNKNOWN', 0.05, 0.3),
+  }
+
+  const HER_OWN_HAIR: ConsultAnalysisCore = {
+    baseLevel: coreObservation('LEVEL_6', ['hair_back', 'hair_crown']),
+    lightestLevel: coreObservation('LEVEL_7', ['hair_left']),
+    currentTone: coreObservation('GOLDEN', ['hair_back']),
+    visibleCondition: coreObservation('NO_VISIBLE_CONCERN', ['hair_right']),
+    density: coreObservation('MEDIUM', ['hair_crown']),
+    texture: coreObservation('WAVY', ['hair_left']),
+  }
+
+  /** The blonde case, exactly as the thread would render it. */
+  const FOLLOW_UP_CONTEXT = renderConsultFollowUpContext({
+    professionalDisplayName: 'Susie',
+    serviceName: 'Signature Balayage',
+    inspiration: BLONDE_INSPIRATION,
+    core: HER_OWN_HAIR,
+    preferences: {
+      wants: ['lightestLevel:LEVEL_9', 'tone:COOL'],
+      avoids: ['baseLevel:LEVEL_6'],
+      unsure: [],
+      keep: ['My length'],
+    },
+    intakeAnswers: { change_scale: 'noticeable', box_dye_history: 'never' },
+    followUpAnswers: {},
+    vocabulary: FOLLOW_UP_VOCABULARY,
+    copy: defaultClientConsultInspirationCopy,
+    roundNumber: 1,
+    maxRounds: 3,
+  })
+
+  /**
+   * 🔴 THE REQUIRED-SUCCESS FIXTURE (Part 0 rule 10).
+   *
+   * This one may not degrade into "the sanitizer refused, which is also the
+   * sanitizer working" — that escape is legitimate for an unreadable
+   * PHOTOGRAPH and meaningless here, where the input is text this repo wrote.
+   * A refusal is the feature not working, and the whole point of rule 10 is a
+   * case that says so.
+   */
+  it('P5g — the follow-up schema returns questions the sanitizer ACCEPTS', async () => {
+    const raw = await send({
+      system: CONSULT_FOLLOW_UP_SYSTEM_PROMPT,
+      content: [{ type: 'text', text: FOLLOW_UP_CONTEXT }],
+      schema: buildConsultFollowUpOutputSchema(FOLLOW_UP_VOCABULARY),
+      maxTokens: CONSULT_FOLLOW_UP_MAX_TOKENS,
+      effort: CONSULT_FOLLOW_UP_EFFORT,
+    })
+
+    const questions = sanitizeConsultFollowUpQuestions(raw, FOLLOW_UP_VOCABULARY)
+    expect(questions.length).toBeGreaterThan(0)
+    expect(questions.length).toBeLessThanOrEqual(CONSULT_FOLLOW_UP_MAX_QUESTIONS)
+
+    // 🔴 SAFETY FIRST is a prompt rule with no grammar behind it, so it is
+    // asserted against the live model rather than assumed. Both unanswered
+    // safety keys are in the vocabulary; the first question must be one of
+    // them.
+    expect(['prior_lightening', 'henna_plant_dye_history']).toContain(
+      questions[0]!.key,
+    )
+
+    for (const question of questions) {
+      // Every option maps to a real enum — proven by the sanitizer above, and
+      // restated here because it is the claim the whole feature rests on.
+      const entry = FOLLOW_UP_VOCABULARY.byKey.get(question.key)!
+      const allowed = new Set(entry.options.map((option) => option.value))
+      for (const option of question.options) {
+        expect(allowed.has(option.value)).toBe(true)
+      }
+      expect(question.evidence.trim()).not.toBe('')
+    }
+
+    // Report every generated question verbatim, so a person can grade whether
+    // it sounds like listening. That judgement is Tori's and no assertion can
+    // make it.
+    console.log(
+      '\nP5g follow-up — the blonde case:\n' +
+        questions
+          .map(
+            (question, index) =>
+              `  ${index + 1}. [${question.key} → ${question.home}] ${question.text}\n` +
+              `     evidence: ${question.evidence}\n` +
+              `     options: ${question.options
+                .map((option) => `${option.label} (${option.value})`)
+                .join(' · ')}`,
+          )
+          .join('\n'),
+    )
+  })
+
+  /**
+   * A question that would be the same for everybody is the question P5g exists
+   * to delete, so "it referenced something specific" is asserted rather than
+   * hoped for. Deliberately a SEPARATE call: one response satisfying both this
+   * and the safety-order rule above would prove less than two do.
+   */
+  it('P5g — a follow-up references something it was actually told', async () => {
+    const withSafetyAnswered: ConsultFollowUpVocabulary = {
+      entries: FOLLOW_UP_ENTRIES.filter((entry) => !entry.safety),
+      byKey: new Map(
+        FOLLOW_UP_ENTRIES.filter((entry) => !entry.safety).map((entry) => [
+          entry.key,
+          entry,
+        ]),
+      ),
+    }
+    const context = renderConsultFollowUpContext({
+      professionalDisplayName: 'Susie',
+      serviceName: 'Signature Balayage',
+      inspiration: null,
+      core: HER_OWN_HAIR,
+      preferences: {
+        wants: ['lightestLevel:LEVEL_9', 'tone:COOL'],
+        avoids: [],
+        unsure: [],
+        keep: ['My length'],
+      },
+      intakeAnswers: { change_scale: 'noticeable' },
+      followUpAnswers: {},
+      vocabulary: withSafetyAnswered,
+      copy: defaultClientConsultInspirationCopy,
+      roundNumber: 2,
+      maxRounds: 3,
+    })
+
+    const raw = await send({
+      system: CONSULT_FOLLOW_UP_SYSTEM_PROMPT,
+      content: [{ type: 'text', text: context }],
+      schema: buildConsultFollowUpOutputSchema(withSafetyAnswered),
+      maxTokens: CONSULT_FOLLOW_UP_MAX_TOKENS,
+      effort: CONSULT_FOLLOW_UP_EFFORT,
+    })
+    const questions = sanitizeConsultFollowUpQuestions(raw, withSafetyAnswered)
+    expect(questions.length).toBeGreaterThan(0)
+
+    // 🔴 It must not have described the person — the same rule the database
+    // CHECK enforces, asserted against the live model because the prompt is
+    // the only thing steering it.
+    const prose = questions.map((q) => `${q.text} ${q.evidence}`).join(' ')
+    expect(prose).not.toMatch(
+      /\b(face|eyes?|skin|undertone|identity|ethnic|ethnicity|race|health)\b/i,
+    )
+
+    console.log(
+      '\nP5g follow-up — round 2, safety already answered:\n' +
+        questions
+          .map((q, i) => `  ${i + 1}. [${q.key}] ${q.text}\n     evidence: ${q.evidence}`)
+          .join('\n'),
+    )
   })
 })

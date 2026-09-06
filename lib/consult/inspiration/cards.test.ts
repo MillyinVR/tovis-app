@@ -11,11 +11,22 @@ import {
   unionConsultInspirationRegions,
 } from './cards'
 import { GENERAL_SERVICE_INSPIRATION_CARD_PACK } from './packs/generalService'
-import { HAIR_COLOR_INSPIRATION_CARD_PACK } from './packs/hairColor'
+import {
+  HAIR_COLOR_INSPIRATION_CARD_PACK,
+  HAIR_COLOR_INSPIRATION_CARD_PACK_V2,
+} from './packs/hairColor'
 import { evaluateConsultInspirationProgress } from './registry'
 
 const copy = defaultClientConsultInspirationCopy
+/**
+ * 🔴 TWO packs, and both are current in the sense that matters: v3 is what a
+ * new consult is served, and v2 is what a consult that started before P5g is
+ * PINNED to for the rest of its life (`resolveConsultSessionInspirationPack`).
+ * A test suite that only exercised the newest pack would let the archived one
+ * rot silently, which is the one failure archiving exists to prevent.
+ */
 const pack = HAIR_COLOR_INSPIRATION_CARD_PACK
+const packV2 = HAIR_COLOR_INSPIRATION_CARD_PACK_V2
 const PRO = 'Susie'
 
 /**
@@ -71,8 +82,8 @@ function cards(
 }
 
 describe('inspiration cards', () => {
-  it('🔴 builds a card only for an attribute the reading actually settled', () => {
-    const { coarse, prep } = cards()
+  it('🔴 v2 builds a card only for an attribute the reading actually settled', () => {
+    const { coarse, prep } = cards({}, BLONDE, packV2)
     expect(coarse.map((card) => card.questionKey)).toEqual([
       'spark_focus',
       'keep_as_is',
@@ -92,8 +103,8 @@ describe('inspiration cards', () => {
     expect(prep.some((card) => card.attribute === 'dimension')).toBe(false)
   })
 
-  it('🔴 a light-blonde reference produces blonde cards and NO copper card (B5)', () => {
-    const { prep } = cards()
+  it('🔴 v2: a light-blonde reference produces blonde cards and NO copper card (B5)', () => {
+    const { prep } = cards({}, BLONDE, packV2)
     const names = prep.map((card) => card.name ?? '')
     expect(names.join(' ')).toContain('light blonde')
     expect(names.join(' ')).toContain('cooler, silvery cast')
@@ -118,7 +129,9 @@ describe('inspiration cards', () => {
         max: 0.9,
       }),
     } as ConsultInspirationAnalysisAttributesDTO
-    expect(cards({}, hedged).prep.some((card) => card.attribute === 'tone')).toBe(false)
+    expect(
+      cards({}, hedged, packV2).prep.some((card) => card.attribute === 'tone'),
+    ).toBe(false)
   })
 
   it('🔴 the coarse crops for colour and shape are different parts of the picture', () => {
@@ -139,7 +152,7 @@ describe('inspiration cards', () => {
   })
 
   it('falls back to the whole reference when there is no reading at all', () => {
-    const { coarse, prep } = cards({}, null)
+    const { coarse, prep } = cards({}, null, packV2)
     expect(prep).toHaveLength(0)
     expect(coarse).toHaveLength(3)
     for (const option of coarse[0]!.optionRegions) {
@@ -180,6 +193,155 @@ describe('inspiration cards', () => {
       'My natural roots',
       'Nothing in particular',
     ])
+  })
+
+  // ── P5g — the two region moves ───────────────────────────────────────────
+
+  describe('the region moves (P5g)', () => {
+    it('🔴 offers only the attributes THIS photograph was read as (B5)', () => {
+      const { prep } = cards()
+      expect(prep.map((card) => card.questionKey)).toEqual([
+        'love_regions',
+        'change_regions',
+      ])
+      const love = prep[0]!
+      expect(love.presentation).toBe('REGION_PICKER')
+      // 🔴 Seven read attributes → seven tappable regions. `dimension` was
+      // UNKNOWN, so there is no box for it and no way to tap it: the fixed
+      // list is gone, which is B5 restated for the picker.
+      expect(
+        love.optionRegions.filter((option) => option.region !== null).map((o) => o.value),
+      ).toEqual([
+        'base-level',
+        'lightest-level',
+        'tone',
+        'technique',
+        'placement',
+        'root-blend',
+        'finish',
+      ])
+      expect(love.optionRegions.some((option) => option.value === 'dimension')).toBe(
+        false,
+      )
+      // The neutral option is always offered and never carries a region.
+      const neutral = love.optionRegions.find((option) => option.value === 'not-sure')!
+      expect(neutral.region).toBeNull()
+      expect(neutral.label).toBe('Not sure yet')
+    })
+
+    it('🔴 the card itself has no crop — the boxes are measured against the whole photo', () => {
+      for (const card of cards().prep) {
+        expect(card.region).toBeNull()
+      }
+    })
+
+    it('names each region from the READING, not from a fixed table', () => {
+      const love = cards().prep[0]!
+      const labels = new Map(
+        love.optionRegions.map((option) => [option.value, option.label]),
+      )
+      expect(labels.get('lightest-level')).toBe('light blonde')
+      expect(labels.get('tone')).toBe('cool, silvery cast')
+      expect(labels.get('technique')).toBe('very fine light pieces')
+      // And nothing anywhere names a colour this photograph does not have.
+      expect([...labels.values()].join(' ').toLowerCase()).not.toContain('copper')
+    })
+
+    it('each region points at the part of the picture it was read from', () => {
+      const love = cards().prep[0]!
+      const byValue = new Map(love.optionRegions.map((o) => [o.value, o.region]))
+      // The root reading is high in the frame; the lightest pieces are low.
+      // Two boxes that were the same would be two areas she cannot tell apart.
+      expect(byValue.get('base-level')).toEqual({ x: 0.35, y: 0.05, w: 0.3, h: 0.15 })
+      expect(byValue.get('lightest-level')).toEqual({ x: 0.3, y: 0.6, w: 0.4, h: 0.3 })
+      expect(byValue.get('base-level')).not.toEqual(byValue.get('lightest-level'))
+    })
+
+    it('🔴 both moves offer the same regions, and mean opposite things', () => {
+      const [love, change] = cards().prep
+      expect(love!.optionRegions.map((o) => o.value)).toEqual(
+        change!.optionRegions.map((o) => o.value).map((v) =>
+          v === 'nothing-to-change' ? 'not-sure' : v,
+        ),
+      )
+      const preferences = deriveConsultInspirationPreferences({
+        pack,
+        reading: BLONDE,
+        copy,
+        answers: {
+          love_regions: ['lightest-level', 'tone'],
+          change_regions: ['base-level'],
+        },
+      })
+      // 🔴 Byte-identical to what v2's eight cards produced: `attribute:VALUE`
+      // pairs, derived from the reading. Nothing downstream — the analysis
+      // prompt, the brief, Stage 4's tier 2 — can tell which pack answered.
+      expect(preferences.wants).toEqual(['lightestLevel:LEVEL_9', 'tone:COOL'])
+      expect(preferences.avoids).toEqual(['baseLevel:LEVEL_6'])
+    })
+
+    it('🔴 drops a tap whose attribute the reading never settled', () => {
+      const preferences = deriveConsultInspirationPreferences({
+        pack,
+        reading: BLONDE,
+        copy,
+        // `dimension` was UNKNOWN, so she was never offered it. The write path
+        // validates against the PACK (all eight), so a stale or forged value
+        // can arrive — and says nothing rather than asserting a reading that
+        // does not exist.
+        answers: { love_regions: ['dimension'] },
+      })
+      expect(preferences.wants).toEqual([])
+      expect(preferences.avoids).toEqual([])
+    })
+
+    it('a neutral answer is never a detail', () => {
+      const preferences = deriveConsultInspirationPreferences({
+        pack,
+        reading: BLONDE,
+        copy,
+        answers: {
+          love_regions: ['not-sure'],
+          change_regions: ['nothing-to-change'],
+        },
+      })
+      expect(preferences.wants).toEqual([])
+      expect(preferences.avoids).toEqual([])
+      expect(preferences.unsure).toEqual([])
+    })
+
+    it('🔴 asks NEITHER move when the photograph could not be read at all', () => {
+      // A picker with no boxes is a question about an absence: "Tap what you
+      // love." over a plain photograph, with one button reading "Not sure yet".
+      // The eight prep cards it replaces were suppressed for the same reason,
+      // and this shipped the other way for one CI run before
+      // `consult-look-anchor` caught it.
+      expect(cards({}, null).prep).toEqual([])
+      // The coarse tier is untouched — those are answerable with no reading at
+      // all, which is exactly why they are the PRE-booking tier.
+      expect(cards({}, null).coarse).toHaveLength(3)
+    })
+
+    it('asks a move with whatever the reading DID settle, and no more', () => {
+      const onlyTone = {
+        ...BLONDE,
+        baseLevel: UNREAD,
+        lightestLevel: UNREAD,
+        technique: UNREAD,
+        placement: UNREAD,
+        rootBlend: UNREAD,
+        finish: UNREAD,
+      } as ConsultInspirationAnalysisAttributesDTO
+      const { prep } = cards({}, onlyTone)
+      expect(prep.map((card) => card.questionKey)).toEqual([
+        'love_regions',
+        'change_regions',
+      ])
+      expect(prep[0]!.optionRegions.map((option) => option.value)).toEqual([
+        'tone',
+        'not-sure',
+      ])
+    })
   })
 
   describe('the understanding check', () => {
@@ -267,7 +429,14 @@ describe('inspiration cards', () => {
       const progress = evaluateConsultInspirationProgress(pack, coarseDone, copy)
       expect(progress.canComplete).toBe(true)
       expect(progress.currentQuestion).toBeNull()
-      expect(progress.nextPrepQuestionKey).toBe('attr_base_level')
+      // P5g: the first open prep card is the first region MOVE. On a v2-pinned
+      // consult it is still the first per-attribute card — both are prep, and
+      // neither blocks completion.
+      expect(progress.nextPrepQuestionKey).toBe('love_regions')
+      expect(
+        evaluateConsultInspirationProgress(packV2, coarseDone, copy)
+          .nextPrepQuestionKey,
+      ).toBe('attr_base_level')
     })
 
     it('🔴 all-unsure is a valid completion', () => {
@@ -286,9 +455,9 @@ describe('inspiration cards', () => {
   })
 
   describe('what the analysis is told', () => {
-    it('pairs each tap with the attribute VALUE it was asked about', () => {
+    it('v2 pairs each tap with the attribute VALUE it was asked about', () => {
       const preferences = deriveConsultInspirationPreferences({
-        pack,
+        pack: packV2,
         reading: BLONDE,
         copy,
         answers: {

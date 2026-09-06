@@ -25,7 +25,7 @@ import 'server-only'
 // with the booking confirmation slotted in wherever the booking actually
 // happened. The client renders the list; it does not decide the order.
 
-import { BookingStatus, ConsultSessionStatus } from '@prisma/client'
+import { ConsultSessionStatus } from '@prisma/client'
 
 import type {
   BrandClientConsultCaptureCopy,
@@ -69,6 +69,8 @@ import { formatConsultCaptureIntro } from './captureCopy'
 import { loadConsultAnalysisState } from './analysisContract'
 import { loadConsultCaptureState } from './captureContract'
 import { loadAuthorizedClientConsultResults } from './clientResults'
+import { resolveThreadBooking } from './bookingLink'
+import { loadConsultFollowUpState } from './followUpContract'
 import { loadConsultInspirationState } from './inspirationContract'
 import { loadConsultIntakeState } from './intakeContract'
 import { resolveConsultServiceIdentity } from './serviceIdentity'
@@ -80,131 +82,6 @@ import { consultThreadOpening, fillConsultThreadCopy } from './threadCopy'
 const STOPPED_STATUSES = new Set<ConsultSessionStatus>([
   ConsultSessionStatus.CANCELLED,
 ])
-
-/**
- * Bookings that count as "she booked this look, and it is still ahead of her".
- *
- * 🔴 CANCELLED and COMPLETED are both excluded, for the same reason and it is
- * not tidiness. The booking message says "you're on Susie's calendar" and the
- * sticky CTA hides itself on `ALREADY_BOOKED` — so counting an appointment that
- * no longer exists, or one that already happened, tells her something false AND
- * takes the Book button away with no way to get it back. A consult whose
- * appointment is over is a consult she can book from again.
- */
-const LIVE_BOOKING_STATUSES: BookingStatus[] = [
-  BookingStatus.PENDING,
-  BookingStatus.ACCEPTED,
-  BookingStatus.IN_PROGRESS,
-]
-
-/**
- * The instant the explicit link went live, if it has been configured.
- *
- * Unset is the honest default: before the deploy there IS no cutover, and
- * inventing one would either blind the fallback to real legacy bookings or
- * pretend the link existed before it did. Once P7a-2 is deployed, set
- * `CONSULT_SPARK_LINK_CUTOVER_AT` to that deploy's instant (ISO-8601) and the
- * fallback narrows to exactly the pre-existing population it is for.
- *
- * A malformed value is treated as unset rather than throwing — the thread is a
- * read path, and a typo in an env var must not take the client's consult down.
- * It is logged so the typo is findable.
- */
-function consultSparkLinkCutoverAt(): Date | null {
-  const raw = process.env.CONSULT_SPARK_LINK_CUTOVER_AT?.trim()
-  if (!raw) return null
-  const parsed = new Date(raw)
-  if (Number.isNaN(parsed.getTime())) {
-    console.warn('CONSULT_SPARK_LINK_CUTOVER_AT is not a valid date', { raw })
-    return null
-  }
-  return parsed
-}
-
-/**
- * Which booking is this consult's — asked of the LINK first, the old inference
- * second.
- *
- * P7a-2. The link is `Booking.sourceConsultSessionId`, stamped by the write
- * boundary after `resolveConsultSparkLink` checked that the booking's pro, look
- * and client actually match the consult. A partial unique index makes at most
- * one LIVE booking hold it, so there is nothing to disambiguate and no
- * `orderBy` that could quietly pick the wrong row.
- *
- * 🔴 The fallback exists for ONE population: bookings created before this
- * shipped, which carry no link and never will. It is P5a's inference with two
- * deliberate narrowings — its `sourceConsultSessionId` OR arm is gone (the link
- * query above owns that case now) and it matches only rows where that column is
- * NULL, so it can never take a booking that belongs to a different consult.
- *
- * It is NOT a safety net for the new path: a spark booking that failed to link
- * is a bug that must stay visible. Set `CONSULT_SPARK_LINK_CUTOVER_AT` to the
- * deploy instant once this is live and the fallback additionally stops being
- * able to see anything the link path could have handled — see
- * `consultSparkLinkCutoverAt`.
- *
- * Every fallback hit is logged so the retirement has a date rather than a
- * feeling. When this stops firing in prod, delete everything below the link
- * query. (`LIVE_BOOKING_STATUSES` stays — the link query uses it too.)
- */
-async function resolveThreadBooking(
-  db: typeof prisma,
-  args: {
-    consultSessionId: string
-    clientId: string
-    professionalId: string
-    anchorLookPostId: string | null
-    consultCreatedAt: Date
-  },
-): Promise<{ id: string } | null> {
-  const linked = await db.booking.findFirst({
-    where: {
-      sourceConsultSessionId: args.consultSessionId,
-      status: { in: LIVE_BOOKING_STATUSES },
-    },
-    select: { id: true },
-  })
-  if (linked) return linked
-
-  // No link. Only a LOOK-anchored consult ever had an inference to fall back
-  // to; a booking-anchored one reads its appointment off its own anchor.
-  if (!args.anchorLookPostId) return null
-
-  const cutover = consultSparkLinkCutoverAt()
-
-  const legacy = await db.booking.findFirst({
-    where: {
-      clientId: args.clientId,
-      professionalId: args.professionalId,
-      status: { in: LIVE_BOOKING_STATUSES },
-      sourceLookPostId: args.anchorLookPostId,
-      // Unlinked only. A booking that HAS a link belongs to whichever consult
-      // the boundary validated it against, and it is not this one.
-      sourceConsultSessionId: null,
-      // The P5a window, unchanged: at or after this consult began. Plus, when
-      // the cutover is configured, strictly before the link path shipped — so
-      // the fallback can never quietly cover for a spark booking that should
-      // have linked and didn't.
-      createdAt: cutover
-        ? { gte: args.consultCreatedAt, lt: cutover }
-        : { gte: args.consultCreatedAt },
-    },
-    select: { id: true },
-    orderBy: { createdAt: 'desc' },
-  })
-
-  if (legacy) {
-    // Telemetry, not an error: this is the retirement signal for the fallback.
-    console.warn('consult-thread booking resolved by LEGACY inference', {
-      consultSessionId: args.consultSessionId,
-      bookingId: legacy.id,
-      anchorLookPostId: args.anchorLookPostId,
-      cutoverConfigured: cutover !== null,
-    })
-  }
-
-  return legacy
-}
 
 type MessageBuilder = {
   push: (message: ConsultThreadMessageDTO) => void
@@ -891,6 +768,62 @@ export async function loadConsultThread(args: {
           fillConsultThreadCopy(copy.estimateReady, { pro }),
         ),
       )
+    }
+
+    // ── The adaptive follow-ups ────────────────────────────────────────────
+    //
+    // P5g, and they sit LAST because that is what they are made of: a follow-up
+    // is generated from the reference reading, her own photo reading and every
+    // answer above it, so a question here could not have been asked earlier
+    // even in principle.
+    //
+    // 🔴 One card at a time. The generated round holds up to three questions
+    // and the thread opens only the FIRST unanswered one — the rest render as
+    // history she has not reached, the same rule the photo pack follows. A
+    // round is BOUGHT when its last question is answered, so showing all three
+    // at once would let her answer them out of order and spend the next round
+    // on a question the model wrote before it had her answer.
+    const followUp = await optionalStage(() => loadConsultFollowUpState(session.id))
+    if (followUp && followUp.rounds.length > 0) {
+      out.push(text('follow-up-intro', fillConsultThreadCopy(copy.followUpIntro, { pro })))
+      let saidFallback = false
+      for (const round of followUp.rounds) {
+        // 🔴 Said out loud, once, above the round it explains. A client being
+        // asked the essentials instead of the clever question is told why —
+        // Part 0 rule 4, which forbids a fallback she cannot see.
+        if (round.status === 'FALLBACK' && !saidFallback) {
+          saidFallback = true
+          out.push(
+            text(
+              `follow-up-fallback:${round.round}`,
+              fillConsultThreadCopy(copy.followUpFallback, { pro }),
+            ),
+          )
+        }
+        for (const question of round.questions) {
+          const open = followUp.openQuestionKey === question.key
+          out.push({
+            kind: 'FOLLOW_UP',
+            id: `follow-up:${round.round}:${question.key}`,
+            author: 'APP',
+            state:
+              question.selectedValues !== null ? 'DONE' : open ? 'OPEN' : 'BLOCKED',
+            text: question.text,
+            questionKey: question.key,
+            options: question.options.map((option) => ({ ...option })),
+            selectedValues: question.selectedValues ?? [],
+            fallback: round.status === 'FALLBACK',
+            round: round.round,
+          })
+        }
+      }
+      // Why nothing more is coming, when that is the case. Said at the bottom
+      // rather than left as an absence she has to interpret.
+      if (!followUp.openQuestionKey && !followUp.moreRoundsAvailable) {
+        out.push(
+          text('follow-up-done', fillConsultThreadCopy(copy.followUpDone, { pro })),
+        )
+      }
     }
   }
 

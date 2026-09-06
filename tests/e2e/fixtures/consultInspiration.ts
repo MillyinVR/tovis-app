@@ -423,6 +423,7 @@ export const cardInspiration: ConsultInspirationStateDTO = {
       attributeValue: null,
       name: null,
       region: null,
+      presentation: 'CROP',
       optionRegions: [
         { value: 'the-color', label: 'The color', region: { x: 0.3, y: 0.5, w: 0.4, h: 0.4 } },
         { value: 'the-shape', label: 'The shape of it', region: { x: 0.1, y: 0.2, w: 0.8, h: 0.6 } },
@@ -453,6 +454,7 @@ export const cardInspiration: ConsultInspirationStateDTO = {
       attributeValue: 'COOL',
       name: 'This is the cooler, silvery cast in it — some people call it ash.',
       region: { x: 0.32, y: 0.5, w: 0.36, h: 0.25 },
+      presentation: 'CROP',
       optionRegions: [],
       question: {
         key: 'attr_tone',
@@ -471,6 +473,121 @@ export const cardInspiration: ConsultInspirationStateDTO = {
       selectedValues: [],
     },
   ],
+}
+
+/**
+ * P5g — the "Tap what you love" move, as the server projects it for the blonde
+ * reference: the whole photograph with every readable attribute drawn on it.
+ *
+ * The regions are deliberately in DIFFERENT parts of the frame, because "each
+ * region points at the part of the picture it was read from" is a claim about
+ * pixels, and a fixture that used one box everywhere could not prove it.
+ */
+export const regionPickerInspiration: ConsultInspirationStateDTO = {
+  ...cardInspiration,
+  progress: {
+    ...cardInspiration.progress,
+    nextPrepQuestionKey: 'love_regions',
+  },
+  cards: [
+    ...(cardInspiration.cards ?? []).filter((card) => card.tier === 'COARSE'),
+    {
+      questionKey: 'love_regions',
+      tier: 'PREP',
+      attribute: null,
+      attributeValue: null,
+      name: null,
+      // 🔴 Null: the boxes are measured against the WHOLE photograph, so a crop
+      // here would move every one of them.
+      region: null,
+      presentation: 'REGION_PICKER',
+      optionRegions: [
+        {
+          value: 'base-level',
+          label: 'light brown',
+          region: { x: 0.35, y: 0.05, w: 0.3, h: 0.15 },
+        },
+        {
+          value: 'lightest-level',
+          label: 'light blonde',
+          region: { x: 0.3, y: 0.6, w: 0.4, h: 0.3 },
+        },
+        {
+          value: 'tone',
+          label: 'cool, silvery cast',
+          region: { x: 0.32, y: 0.42, w: 0.36, h: 0.16 },
+        },
+        { value: 'not-sure', label: 'Not sure yet', region: null },
+      ],
+      question: {
+        key: 'love_regions',
+        label: 'Tap what you love.',
+        helpText: null,
+        kind: 'MULTI_SELECT',
+        options: [
+          { value: 'base-level', label: 'light brown' },
+          { value: 'lightest-level', label: 'light blonde' },
+          { value: 'tone', label: 'cool, silvery cast' },
+          { value: 'not-sure', label: 'Not sure yet' },
+        ],
+        minSelections: 1,
+        maxSelections: 3,
+        allowText: false,
+      },
+      selectedValues: [],
+    },
+  ],
+}
+
+/** P5g — the follow-up messages, generated and fallback. */
+export function threadFollowUpMessages(): ConsultThreadMessageDTO[] {
+  return [
+    {
+      kind: 'TEXT',
+      id: 'follow-up-intro',
+      author: 'APP',
+      state: 'DONE',
+      text: 'A couple of things I want to check with you, now that I’ve had a proper look.',
+    },
+    {
+      kind: 'FOLLOW_UP',
+      id: 'follow-up:1:prior_lightening',
+      author: 'APP',
+      state: 'OPEN',
+      text: 'You’re at a light brown now and you loved the ash — that’s usually two visits. When was your hair last lightened?',
+      questionKey: 'prior_lightening',
+      options: [
+        { value: 'never', label: 'Never' },
+        { value: 'within-3-months', label: 'In the last few months' },
+        { value: 'not-sure', label: 'I don’t remember' },
+      ],
+      selectedValues: [],
+      fallback: false,
+      round: 1,
+    },
+    {
+      kind: 'TEXT',
+      id: 'follow-up-fallback:2',
+      author: 'APP',
+      state: 'DONE',
+      text: 'I couldn’t think of the next question just now — so here are the essentials, the ones Susie needs either way.',
+    },
+    {
+      kind: 'FOLLOW_UP',
+      id: 'follow-up:2:henna_plant_dye_history',
+      author: 'APP',
+      state: 'BLOCKED',
+      text: 'When did you last use henna or another plant-based hair dye?',
+      questionKey: 'henna_plant_dye_history',
+      options: [
+        { value: 'never', label: 'Never' },
+        { value: 'within-6-months', label: 'Within 6 months' },
+      ],
+      selectedValues: [],
+      fallback: true,
+      round: 2,
+    },
+  ]
 }
 
 export function withAnalysisReady(
@@ -572,6 +689,8 @@ export function threadFixture(args: {
   /** P7a-1: the early photo's slot, or null for "not taken yet". */
   earlyPhoto?: ConsultCaptureStateDTO['earlyPhoto']
   status?: ConsultThreadDTO['status']
+  /** P5g — append the adaptive follow-up messages after the plan. */
+  followUps?: boolean
   /**
    * P7a-3: a finished, VERSIONED plan.
    *
@@ -650,6 +769,7 @@ export function threadFixture(args: {
     // Appended only when the caller asks for a plan, so every existing spec
     // keeps the thread it had: those describe a consult that has not run yet.
     ...(args.plan ? planMessages(args.plan) : []),
+    ...(args.followUps ? threadFollowUpMessages() : []),
   ]
 
   return {

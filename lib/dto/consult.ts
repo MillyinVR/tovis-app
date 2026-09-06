@@ -353,6 +353,12 @@ export type ConsultInspirationCatalogGuidanceDTO = {
 export type ConsultInspirationCardTierDTO = 'COARSE' | 'PREP'
 
 /**
+ * P5g — whether a card is one crop with buttons, or the whole reference with
+ * tappable areas drawn on it. See `ConsultInspirationCardDTO.presentation`.
+ */
+export type ConsultInspirationCardPresentationDTO = 'CROP' | 'REGION_PICKER'
+
+/**
  * One option of a card whose OPTIONS crop to different parts of the reference.
  *
  * The coarse "what made you stop scrolling?" card is the only user today: "the
@@ -399,6 +405,22 @@ export type ConsultInspirationCardDTO = {
   name: string | null
   /** The crop for the card. Null means show the whole reference. */
   region: ConsultInspirationAnalysisRegionDTO | null
+  /**
+   * P5g — HOW this card is drawn.
+   *
+   * `CROP` is P5d's card: one crop of the reference (or the whole thing), a
+   * plain word under it, and buttons.
+   *
+   * `REGION_PICKER` is the P5g move: the WHOLE reference with every readable
+   * attribute drawn on it as a tappable area, multi-select. `region` is always
+   * null on one — the boxes in `optionRegions` are measured against the whole
+   * picture, so cropping it would send every box somewhere else.
+   *
+   * A client that does not know a value renders the card as `CROP`, which is
+   * correct rather than merely safe: the question and its options are on the
+   * wire either way, so an older build asks the same question with buttons.
+   */
+  presentation: ConsultInspirationCardPresentationDTO
   /** Per-option crops, when the card's options point at different parts. */
   optionRegions: ConsultInspirationCardOptionDTO[]
   /** The question itself, in the shape the answer route already accepts. */
@@ -2082,6 +2104,42 @@ export type ConsultThreadBookingMessageDTO = {
   bookingId: string
 }
 
+/**
+ * P5g — one adaptive follow-up question, as a card in the thread.
+ *
+ * 🔴 `text` on this message is the only prose in the consult a MODEL wrote and
+ * a client reads. It is generated per client from the reference reading, her
+ * own photo reading, the regions she tapped and every answer so far, and it
+ * must name something specific it saw — a question that would be the same for
+ * everybody is the question P5g exists to delete.
+ *
+ * 🔴 `options` are enums from a vocabulary that already exists
+ * (lib/consult/followUpVocabulary.ts), re-worded by the model but never
+ * invented: a value outside the key's real options throws the whole round away
+ * on the server, so a client can echo any of these back and know it will file.
+ *
+ * `fallback` is true when the model call failed and these are the intake pack's
+ * OWN remaining safety questions instead. It is on the wire because the client
+ * says so out loud ("couldn't think of the next question — here are the
+ * essentials"): Part 0 rule 4 forbids a silent fallback, and a fallback the
+ * client cannot see is a silent one.
+ */
+export type ConsultThreadFollowUpMessageDTO = {
+  kind: 'FOLLOW_UP'
+  id: string
+  author: 'APP'
+  state: ConsultThreadMessageStateDTO
+  /** The question itself. */
+  text: string
+  questionKey: string
+  options: ConsultInspirationQuestionOptionDTO[]
+  /** What she chose, or empty while it is open — the thread's own history. */
+  selectedValues: string[]
+  fallback: boolean
+  /** Which round of at most three this is, for the client's own ordering. */
+  round: number
+}
+
 export type ConsultThreadMessageDTO =
   | ConsultThreadTextMessageDTO
   | ConsultThreadConsentMessageDTO
@@ -2091,6 +2149,7 @@ export type ConsultThreadMessageDTO =
   | ConsultThreadPlanMessageDTO
   | ConsultThreadPlanUpdateMessageDTO
   | ConsultThreadBookingMessageDTO
+  | ConsultThreadFollowUpMessageDTO
 
 /**
  * Why the sticky Book the look button is not live yet.
