@@ -938,6 +938,65 @@ export type BrandClientConsultInspirationCopy = {
   cards: BrandClientConsultInspirationCardCopy
 }
 
+/**
+ * Homepage feature state. Exactly two values on purpose — see
+ * lib/brand/defaultHomeCopy.ts for what each means and why there is no third.
+ */
+export type BrandHomeFeatureState = 'live' | 'rolling-out'
+
+export type BrandHomeFeature = {
+  title: string
+  body: string
+  state: BrandHomeFeatureState
+  /**
+   * Never rendered. Names the file, deploy, or runtime probe (and its date)
+   * that makes `state` true, so the next session re-checks instead of trusting.
+   */
+  evidence: string
+}
+
+/** Public homepage copy (app/page.tsx). See lib/brand/defaultHomeCopy.ts. */
+export type BrandHomeCopy = {
+  /** ISO date of the last pass that re-verified EVERY feature row. */
+  verifiedOn: string
+  /** The same date as literal prose — no Date formatting, no timezone. */
+  verifiedOnLabel: string
+  hero: {
+    eyebrow: string
+    headlineTop: string
+    headlineBottom: string
+    intro: string
+    ctaClient: string
+    ctaPro: string
+    ctaBrowse: string
+    ctaWhy: string
+  }
+  /** Chip labels only. The chips explain themselves; there is no legend prose (Tori, 2026-09-05). */
+  legend: {
+    live: string
+    rollingOut: string
+  }
+  /** One typographic band: the thesis in four beats, rendered large. */
+  manifesto: string[]
+  loop: { label: string; title: string; steps: BrandHomeFeature[] }
+  /**
+   * What one account replaces. Every row names a tool a pro pays for or
+   * juggles today and the shipped thing that stands in for it; the section is
+   * a single claim, so it carries one evidence line rather than one per row.
+   */
+  replaces: {
+    label: string
+    title: string
+    body: string
+    items: { tool: string; withWhat: string }[]
+    evidence: string
+  }
+  clients: { label: string; title: string; intro: string; features: BrandHomeFeature[] }
+  pros: { label: string; title: string; intro: string; features: BrandHomeFeature[] }
+  money: BrandHomeFeature & { label: string; cta: string }
+  next: { label: string; title: string; body: string; verifiedPrefix: string }
+}
+
 export type BrandConfig = {
   id: BrandId
   displayName: string // "TOVIS" — used anywhere the brand name appears in UI
@@ -952,4 +1011,5 @@ export type BrandConfig = {
   clientConsultBooking: BrandClientConsultBookingCopy
   clientConsultThread: BrandClientConsultThreadCopy
   clientConsultInspiration: BrandClientConsultInspirationCopy
+  home: BrandHomeCopy
 }

@@ -29,7 +29,9 @@ export function buildLlmsText(args: {
 
 ## For clients
 
-- Browse real before/after transformations: ${url('/looks')}
+- Browse real before/after transformations: ${url('/looks')}. Every look is
+  a bookable look: it carries a starting price and a Book button, so
+  discovery and booking are one step, not a DM.
 - Find professionals near you: ${url('/search')}
 - Book, reschedule, join waitlists, and get aftercare in one place.
 
