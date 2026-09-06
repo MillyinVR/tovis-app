@@ -39,6 +39,7 @@ export const FACE_FRONT_SHOT = {
   acceptance:
     'Accept only when one full front-facing face is clearly represented with hairline, brows, both eyes, and jawline visible and unobstructed, focus and exposure are usable, no beauty filter is apparent, and indirect daylight preserves color. Use VIEW_MISMATCH when the face is missing, obstructed, or not front-facing.',
   framing: 'FULL_VIEW',
+  gate: 'GUIDED',
 } as const
 
 export const FACE_SIDE_SHOT = {
@@ -50,6 +51,7 @@ export const FACE_SIDE_SHOT = {
   acceptance:
     'Accept only when a full side profile is clearly represented with forehead, nose, lips, chin, and jawline visible in silhouette, focus and exposure are usable, no beauty filter is apparent, and indirect daylight preserves color. Use VIEW_MISMATCH when the profile is missing or partial.',
   framing: 'FULL_VIEW',
+  gate: 'GUIDED',
 } as const
 
 export const EYES_CLOSEUP_SHOT = {
@@ -63,6 +65,7 @@ export const EYES_CLOSEUP_SHOT = {
   // Its own instruction says "fill the frame": almost nothing but skin is
   // left to read the light off, so a cast here is a warning, not a refusal.
   framing: 'TIGHT_CROP',
+  gate: 'GUIDED',
 } as const
 
 export const HAIR_COLOR_CAPTURE_PACK: ConsultCapturePackDefinition = Object.freeze({
@@ -80,6 +83,7 @@ export const HAIR_COLOR_CAPTURE_PACK: ConsultCapturePackDefinition = Object.free
       acceptance:
         'Accept only when the full back of the hair is clearly represented, the relevant hair and roots are sufficiently visible, focus and exposure are usable, and indirect daylight preserves color.',
       framing: 'FULL_VIEW',
+      gate: 'GUIDED',
     },
     {
       key: 'hair_left',
@@ -90,6 +94,7 @@ export const HAIR_COLOR_CAPTURE_PACK: ConsultCapturePackDefinition = Object.free
       acceptance:
         'Accept only when the left side of the hair is clearly represented, the relevant hair and roots are sufficiently visible, focus and exposure are usable, and indirect daylight preserves color.',
       framing: 'FULL_VIEW',
+      gate: 'GUIDED',
     },
     {
       key: 'hair_right',
@@ -100,6 +105,7 @@ export const HAIR_COLOR_CAPTURE_PACK: ConsultCapturePackDefinition = Object.free
       acceptance:
         'Accept only when the right side of the hair is clearly represented, the relevant hair and roots are sufficiently visible, focus and exposure are usable, and indirect daylight preserves color.',
       framing: 'FULL_VIEW',
+      gate: 'GUIDED',
     },
     {
       key: 'hair_crown',
@@ -110,6 +116,7 @@ export const HAIR_COLOR_CAPTURE_PACK: ConsultCapturePackDefinition = Object.free
       acceptance:
         'Accept only when the crown, part, and surrounding roots are clearly represented, focus and exposure are usable, and indirect daylight preserves color.',
       framing: 'FULL_VIEW',
+      gate: 'GUIDED',
     },
     FACE_FRONT_SHOT,
     FACE_SIDE_SHOT,

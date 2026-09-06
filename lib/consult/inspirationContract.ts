@@ -101,8 +101,16 @@ import {
 
 type ClientActor = { type: typeof ConsultActorType.CLIENT; id: string }
 
-const MUTABLE_STATUS = ConsultSessionStatus.MEDIA_READY
+// P7a-1: the coarse cards moved to their intended position — after consent,
+// before the early photo — so the window opens one state earlier. MEDIA_READY
+// stays in it: the fine PREP cards are answered there, and a consult that was
+// already past the early stage when this shipped must keep working.
+const MUTABLE_STATUSES = new Set<ConsultSessionStatus>([
+  ConsultSessionStatus.EARLY_PHOTO_READY,
+  ConsultSessionStatus.MEDIA_READY,
+])
 const READABLE_STATUSES = new Set<ConsultSessionStatus>([
+  ConsultSessionStatus.EARLY_PHOTO_READY,
   ConsultSessionStatus.MEDIA_READY,
   ConsultSessionStatus.ANALYSIS_PENDING,
   ConsultSessionStatus.ANALYZING,
@@ -236,7 +244,7 @@ async function requireScope(
     )
   }
   if (
-    (args.mutation && session.status !== MUTABLE_STATUS) ||
+    (args.mutation && !MUTABLE_STATUSES.has(session.status)) ||
     (!args.mutation && !READABLE_STATUSES.has(session.status))
   ) {
     throw new ConsultWriteError('INVALID_STATE', 'Inspiration is unavailable.')
@@ -465,20 +473,34 @@ export async function requireLockedConsultInspirationStageScope(
  * Auto-advance (the default) still requires the full accepted pack; the
  * client-initiated partial submission (Tori, 2026-08-27) passes
  * minimumAcceptedShots: 1 through proceedConsultCaptureToAnalysis. */
-/** The slot count of the pack the session serves (lib/consult/capture/registry.ts). */
-async function requiredAcceptedShotsForSession(
+/**
+ * The SLOT KEYS of the pack the session serves (lib/consult/capture/registry.ts).
+ *
+ * Both readiness questions are answered from this one resolution — how many
+ * accepted shots are required, and which accepted shots count towards that.
+ * They were one number before P7a-1; the early photo made the second question
+ * real, and deriving both from the same place is what stops them disagreeing.
+ */
+async function packShotKeysForSession(
   tx: Prisma.TransactionClient,
   consultSessionId: string,
-): Promise<number> {
+): Promise<ReadonlySet<string>> {
   const session = await tx.consultSession.findUnique({
     where: { id: consultSessionId },
     select: {
       serviceCategory: { select: CONSULT_SERVICE_PROFILE_CATEGORY_SELECT },
     },
   })
-  if (!session) return CONSULT_MAX_CAPTURE_SHOTS
-  return resolveConsultServiceProfile(session.serviceCategory).capturePack.shots
-    .length
+  if (!session) {
+    // Unreachable through the locked callers, and fail-safe if it ever is: an
+    // empty set requires nothing to match, so the count below still gates.
+    return new Set()
+  }
+  return new Set(
+    resolveConsultServiceProfile(session.serviceCategory).capturePack.shots.map(
+      (shot) => shot.key,
+    ),
+  )
 }
 
 export async function advanceLockedConsultToAnalysisIfReady(
@@ -512,7 +534,19 @@ export async function advanceLockedConsultToAnalysisIfReady(
     },
     select: { shotKey: true },
   })
-  const accepted = new Set(captures.map(({ shotKey }) => shotKey))
+  // 🔴 The EARLY PHOTO is excluded, and it is the reason this is a filter and
+  // not a plain Set (P7a-1). It is an accepted capture and a legitimate
+  // analysis input, but it is not one of the pack's slots — counting it made a
+  // seven-shot hair consult "complete" after SIX guided photos, which advanced
+  // the session to ANALYSIS_PENDING and then refused the seventh. Pack
+  // completeness counts pack slots; "is there anything analysable at all" is a
+  // different question, asked elsewhere.
+  const packShotKeys = await packShotKeysForSession(tx, args.consultSessionId)
+  const accepted = new Set(
+    captures
+      .map(({ shotKey }) => shotKey)
+      .filter((shotKey) => packShotKeys.has(shotKey)),
+  )
   // A full pack is THIS session's pack — the seven hair views, or the three of
   // the face and area packs. The default used to be the LARGEST pack (seven),
   // which is fail-safe for the hair pilot and wrong for every other family: a
@@ -522,7 +556,7 @@ export async function advanceLockedConsultToAnalysisIfReady(
   // its own (smaller) threshold.
   const minimumAcceptedShots =
     options?.minimumAcceptedShots ??
-    (await requiredAcceptedShotsForSession(tx, args.consultSessionId))
+    (packShotKeys.size || CONSULT_MAX_CAPTURE_SHOTS)
   if (accepted.size < minimumAcceptedShots) {
     return false
   }

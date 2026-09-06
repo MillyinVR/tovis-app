@@ -49,6 +49,11 @@ import {
 import { prisma } from '@/lib/prisma'
 
 import { loadConsultAgreementState } from './agreementContract'
+import {
+  CONSULT_EARLY_PHOTO_PACK_VERSION,
+  CONSULT_EARLY_PHOTO_SHOT_KEY,
+  EARLY_PHOTO_SHOT_DTO,
+} from './capture/earlyPhoto'
 import { formatConsultCaptureIntro } from './captureCopy'
 import { loadConsultAnalysisState } from './analysisContract'
 import { loadConsultCaptureState } from './captureContract'
@@ -58,16 +63,7 @@ import { loadConsultIntakeState } from './intakeContract'
 import { resolveConsultServiceIdentity } from './serviceIdentity'
 import { consultThreadOpening, fillConsultThreadCopy } from './threadCopy'
 
-/**
- * The shot that unlocks the sticky CTA.
- *
- * The handoff unlocks booking "once one selfie is in", and `face_front` is the
- * selfie in every pack the server serves (hair, face and area packs all include
- * it). A WARNED shot counts because a warning only ever rides on an ACCEPTED
- * capture — `qualityWarningCode` is documented as non-null only on an accepted
- * tight-crop shot — so "accepted or warned" is one condition, not two.
- */
-const SELFIE_SHOT_KEY = 'face_front'
+
 
 /** Statuses that mean a consult can no longer be worked on at all. */
 const STOPPED_STATUSES = new Set<ConsultSessionStatus>([
@@ -442,6 +438,39 @@ export async function loadConsultThread(args: {
     }
   }
 
+  // ── The early photo ──────────────────────────────────────────────────────
+  //
+  // P7a-1, and it sits HERE — after the coarse cards, before the intake —
+  // because this is the photo that unlocks the booking. Everything below it is
+  // prep. The capture state is loaded once, at this point, and reused by the
+  // guided pack further down; it is the same stage endpoint either way.
+  const capture = await optionalStage(() => loadConsultCaptureState(stageArgs))
+  if (capture) {
+    const early = capture.earlyPhoto
+    const settled = early?.state === 'ACCEPTED'
+    out.push({
+      kind: 'PHOTO_REQUEST',
+      id: `photo:${CONSULT_EARLY_PHOTO_SHOT_KEY}`,
+      author: 'APP',
+      // The only step that can be open before the booking. It is never BLOCKED:
+      // there is nothing ahead of it to wait for.
+      state: settled ? 'DONE' : 'OPEN',
+      shot: EARLY_PHOTO_SHOT_DTO,
+      shotPackVersion: CONSULT_EARLY_PHOTO_PACK_VERSION,
+      schemaVersion: capture.shotPack.schemaVersion,
+      slot: early ?? {
+        shotKey: CONSULT_EARLY_PHOTO_SHOT_KEY,
+        state: 'EMPTY' as const,
+        captureId: null,
+        qualityReasonCode: null,
+        qualityWarningCode: null,
+        retakeTip: null,
+        rawExpiresAt: null,
+        purgedAt: null,
+      },
+    })
+  }
+
   // ── Intake ───────────────────────────────────────────────────────────────
   const intake = await optionalStage(() => loadConsultIntakeState(stageArgs))
   if (intake) {
@@ -484,8 +513,8 @@ export async function loadConsultThread(args: {
     }
   }
 
-  // ── Photos ───────────────────────────────────────────────────────────────
-  const capture = await optionalStage(() => loadConsultCaptureState(stageArgs))
+  // ── Photos, the guided pack ──────────────────────────────────────────────
+  // Prep. Uses the capture state already loaded above the intake.
   if (capture) {
     // 🔴 The intro names the PACK's own counts, and it must keep doing so. The
     // thread shows every photo request as its own message, so she can see them —
@@ -647,11 +676,21 @@ function finish(args: {
    */
   capture?: ConsultCaptureStateDTO | null
 }): ConsultThreadDTO {
-  const selfieIn = Boolean(
-    args.capture?.slots.some(
-      (slot) => slot.shotKey === SELFIE_SHOT_KEY && slot.state === 'ACCEPTED',
-    ),
-  )
+  // What unlocks the sticky CTA: one accepted early photo (P7a-1).
+  //
+  // Read off its own field, not out of `slots` — the early photo belongs to no
+  // pack. A WARNED photo counts: a warning only ever rides on an ACCEPTED
+  // capture, so "accepted or warned" is one condition, and for this shot
+  // warnings are the NORMAL outcome (dim room, warm lamp, odd crop).
+  //
+  // This was `face_front` out of `slots` before P7a. That worked — every pack
+  // does contain `face_front`, the area pack included (it imports the hair
+  // pack's shot object rather than declaring one, which is easy to miss when
+  // reading the file). It moved because the guided pack is PREP now: it is not
+  // served until the intake is done, so gating the booking on one of its slots
+  // would have put the whole intake in front of the spark, which is the exact
+  // ordering P7a exists to undo.
+  const selfieIn = args.capture?.earlyPhoto?.state === 'ACCEPTED'
 
   return {
     consultId: args.session.id,

@@ -25,6 +25,11 @@ import {
   HAIR_COLOR_INTAKE_SCHEMA_VERSION,
 } from '@/lib/consult/intakePack'
 
+import {
+  purgeSeededConsultObjects,
+  seedAcceptedEarlyPhoto,
+} from './_support/earlyPhoto'
+
 const databaseUrl = process.env.DATABASE_URL
 if (!databaseUrl) {
   throw new Error('Missing DATABASE_URL. Run with: pnpm test:integration')
@@ -197,6 +202,9 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (sessionId) {
+    // P7a-1: the seeded early photo is a raw object, and the delete guard
+    // refuses a session that still holds one.
+    await purgeSeededConsultObjects(db, sessionId)
     await db.consultSession.deleteMany({ where: { id: sessionId } })
   }
   if (consentVersionId && adultVersionId) {
@@ -310,7 +318,10 @@ describe('AI consult lifecycle and legal foundation', () => {
       expectedKind: ConsultAgreementKind.ADULT_18_PLUS_ATTESTATION,
       actor: actor(),
     })
-    expect(accepted.status).toBe(ConsultSessionStatus.INTAKE_READY)
+    // P7a-1: accepting both agreements now lands on the EARLY PHOTO, not the
+    // intake — the photo is what unlocks the booking, and the intake follows
+    // as prep.
+    expect(accepted.status).toBe(ConsultSessionStatus.EARLY_PHOTO_READY)
   })
 
   it('pins exact legal versions and keeps published wording immutable', async () => {
@@ -348,6 +359,21 @@ describe('AI consult lifecycle and legal foundation', () => {
   })
 
   it('appends numbered immutable revisions with matching audit events', async () => {
+    // P7a-1: the session is in EARLY_PHOTO_READY after consent, and leaving it
+    // is guarded by the early photo. This test is about REVISIONS, not about
+    // that gate, so it walks the lifecycle explicitly from where consent left
+    // it — seeding the photo first, because the database requires one.
+    await seedAcceptedEarlyPhoto(db, {
+      consultSessionId: sessionId,
+      actorUserId: userId,
+      label: `${sessionId}-revisions`,
+    })
+    await transitionConsultSession({
+      consultSessionId: sessionId,
+      fromStatus: ConsultSessionStatus.EARLY_PHOTO_READY,
+      toStatus: ConsultSessionStatus.INTAKE_READY,
+      actor: actor(),
+    })
     await transitionConsultSession({
       consultSessionId: sessionId,
       fromStatus: ConsultSessionStatus.INTAKE_READY,

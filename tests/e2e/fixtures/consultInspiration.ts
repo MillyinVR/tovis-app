@@ -169,6 +169,10 @@ export const lookSourceInspiration: ConsultInspirationStateDTO = {
 export const captureState: ConsultCaptureStateDTO = {
   "consultId": "consult_fixture_1",
   "status": "ANALYSIS_PENDING",
+  // P7a-1: this fixture is a consult already past the early stage (it is at
+  // ANALYSIS_PENDING), so it holds no early photo. The stage's own coverage is
+  // in tests/integration/consult-early-photo.test.ts.
+  "earlyPhoto": null,
   "shotPack": {
     "id": "hair-color-daylight",
     "categorySlug": "hair-color",
@@ -479,11 +483,51 @@ export function withAnalysisReady(
   }
 }
 
+/**
+ * P7a-1 — the early photo message, in its own position: after the coarse cards
+ * and BEFORE the intake and the guided pack. A member of no pack, so it is
+ * built here rather than by `threadPhotoMessages`.
+ */
+function threadEarlyPhotoMessage(
+  early: ConsultCaptureStateDTO['earlyPhoto'],
+): ConsultThreadMessageDTO {
+  const settled = early?.state === 'ACCEPTED'
+  return {
+    kind: 'PHOTO_REQUEST',
+    id: 'photo:early_photo',
+    author: 'APP',
+    // Never BLOCKED: there is nothing ahead of it to wait for.
+    state: settled ? 'DONE' : 'OPEN',
+    shot: {
+      key: 'early_photo',
+      title: 'What you have right now',
+      instruction:
+        'One photo of you as you are — camera or camera roll, whatever light you are in. It does not need to be a good photo.',
+      requirement: 'REQUIRED',
+    },
+    shotPackVersion: 1,
+    schemaVersion: 1,
+    slot: early ?? {
+      shotKey: 'early_photo',
+      state: 'EMPTY',
+      captureId: null,
+      qualityReasonCode: null,
+      qualityWarningCode: null,
+      retakeTip: null,
+      rawExpiresAt: null,
+      purgedAt: null,
+    },
+  }
+}
+
 export function threadFixture(args: {
   inspiration: ConsultInspirationStateDTO
   /** Force particular slots to a state, e.g. the selfie not yet sent. */
   slotOverrides?: Partial<Record<string, ConsultCaptureStateDTO['slots'][number]['state']>>
   bookEnabled?: boolean
+  /** P7a-1: the early photo's slot, or null for "not taken yet". */
+  earlyPhoto?: ConsultCaptureStateDTO['earlyPhoto']
+  status?: ConsultThreadDTO['status']
 }): ConsultThreadDTO {
   const photos = threadPhotoMessages(captureState, args.slotOverrides)
   const cards = args.inspiration.cards ?? []
@@ -531,6 +575,9 @@ export function threadFixture(args: {
       schemaVersion: args.inspiration.schemaVersion,
     },
     ...cardMessages,
+    // P7a-1: the early photo sits HERE — after the coarse cards, before the
+    // intake and the guided pack. This is the photo that unlocks the booking.
+    threadEarlyPhotoMessage(args.earlyPhoto ?? null),
     {
       kind: 'TEXT',
       id: 'capture-intro',
@@ -543,7 +590,7 @@ export function threadFixture(args: {
 
   return {
     consultId: CONSULT_FIXTURE_ID,
-    status: 'MEDIA_READY',
+    status: args.status ?? 'MEDIA_READY',
     professionalId: 'cmq9p645v0002jp04fttoatlq',
     professionalDisplayName: 'Susie',
     nextOpenMessageId:

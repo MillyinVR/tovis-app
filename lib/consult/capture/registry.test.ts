@@ -104,6 +104,10 @@ describe('consult capture registry', () => {
       'eyes_closeup',
       'area_wide',
       'area_closeup',
+      // P7a-1: a member of no pack, but a stored capture and an analysis
+      // input, so it is part of the evidence vocabulary. Appended last so the
+      // hair pack's seven keep the order the analysis engine has always sent.
+      'early_photo',
     ])
     expect(CONSULT_MAX_CAPTURE_SHOTS).toBe(7)
     expect(isConsultCaptureShotKey('area_wide')).toBe(true)

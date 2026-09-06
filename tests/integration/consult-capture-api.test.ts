@@ -327,6 +327,10 @@ import {
   type HairColorCaptureShotKey,
 } from '@/lib/consult/capturePack'
 import {
+  CONSULT_EARLY_PHOTO_PACK_VERSION,
+  CONSULT_EARLY_PHOTO_SHOT_KEY,
+} from '@/lib/consult/capture/earlyPhoto'
+import {
   attachConsultCaptureUpload,
   CONSULT_CAPTURE_MAX_QUALITY_CHECKS_PER_SESSION,
 } from '@/lib/consult/captureContract'
@@ -513,6 +517,10 @@ async function createReadyConsult(
     expectedKind: ConsultAgreementKind.ADULT_18_PLUS_ATTESTATION,
     actor: { type: ConsultActorType.CLIENT, id: user.id },
   })
+  await takeEarlyPhoto(
+    { userId: user.id, clientId: client.id, bookingId: booking.id, sessionId: session.id },
+    label,
+  )
   await appendConsultIntakeRevision({
     consultSessionId: session.id,
     actor: { type: ConsultActorType.CLIENT, id: user.id },
@@ -571,6 +579,64 @@ function authenticate(consult: ReadyConsult) {
     clientId: consult.clientId,
     user: { id: consult.userId },
   })
+}
+
+/**
+ * P7a-1. The step between consent and the intake: one photo of the client, any
+ * light, camera or roll. The database enforces it — a consult cannot leave
+ * EARLY_PHOTO_READY without one accepted, unexpired `early_photo` capture — so
+ * every consult these tests build takes one, exactly as a client does.
+ *
+ * Drives the real routes rather than inserting rows: this suite exists to test
+ * that ingest path, and the early photo runs the SAME one.
+ */
+async function takeEarlyPhoto(
+  consult: ReadyConsult,
+  label: string,
+) {
+  // `authenticate` is called by each TEST, after createReadyConsult returns —
+  // so this helper, which runs inside it, authenticates as the same client
+  // itself. Same value the test is about to set.
+  authenticate(consult)
+  const { sessionId } = consult
+  const issued = await issueUpload(
+    jsonRequest(`/api/v1/client/consult/${sessionId}/capture/uploads`, {
+      idempotencyKey: `early-issue-${label}`,
+      shotKey: CONSULT_EARLY_PHOTO_SHOT_KEY,
+      shotPackVersion: CONSULT_EARLY_PHOTO_PACK_VERSION,
+      schemaVersion: HAIR_COLOR_CAPTURE_SCHEMA_VERSION,
+      contentType: 'image/jpeg',
+      sizeBytes: 100,
+    }),
+    context(sessionId),
+  )
+  expect(issued.status).toBe(200)
+  const upload = (await body(issued)).upload as { uploadSessionId: string }
+  await putIssuedObject(upload.uploadSessionId)
+  const attached = await attachCapture(
+    jsonRequest(`/api/v1/client/consult/${sessionId}/capture/attach`, {
+      idempotencyKey: `early-attach-${label}`,
+      uploadSessionId: upload.uploadSessionId,
+      shotKey: CONSULT_EARLY_PHOTO_SHOT_KEY,
+      shotPackVersion: CONSULT_EARLY_PHOTO_PACK_VERSION,
+      schemaVersion: HAIR_COLOR_CAPTURE_SCHEMA_VERSION,
+    }),
+    context(sessionId),
+  )
+  expect(attached.status).toBe(200)
+  const captureId = (await body(attached)).captureId as string
+  const judged = await checkQuality(
+    jsonRequest(
+      `/api/v1/client/consult/${sessionId}/capture/${captureId}/quality`,
+      {
+        idempotencyKey: `early-quality-${label}`,
+        shotPackVersion: CONSULT_EARLY_PHOTO_PACK_VERSION,
+        schemaVersion: HAIR_COLOR_CAPTURE_SCHEMA_VERSION,
+      },
+    ),
+    captureContext(sessionId, captureId),
+  )
+  expect(judged.status).toBe(200)
 }
 
 async function issue(
@@ -934,16 +1000,20 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
     expect(
       await db.consultCapture.count({ where: { uploadSessionId: upload.id } }),
     ).toBe(1)
+    // 2, not 1: every consult now also holds its early photo, which was issued
+    // and attached through this same path before the intake (P7a-1). The point
+    // of the assertion is that the CONCURRENT pair produced exactly one each,
+    // which is still what the +1 measures.
     expect(
       await db.consultAuditEvent.count({
         where: { consultSessionId: consult.sessionId, action: ConsultAuditAction.CAPTURE_UPLOAD_ISSUED },
       }),
-    ).toBe(1)
+    ).toBe(2)
     expect(
       await db.consultAuditEvent.count({
         where: { consultSessionId: consult.sessionId, action: ConsultAuditAction.CAPTURE_ATTACHED },
       }),
-    ).toBe(1)
+    ).toBe(2)
 
     const secondIssue = await issue(consult, 'hair_back', 'different-live-issue')
     const secondUploadId = ((await body(secondIssue)).upload as {
@@ -1095,7 +1165,8 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
     ])
     expect(first.status).toBe(200)
     expect(retry.status).toBe(200)
-    expect(fake.modelCalls).toEqual(['hair_left'])
+    // The early photo was judged first, by the same gate (P7a-1).
+    expect(fake.modelCalls).toEqual(['early_photo', 'hair_left'])
     expect(await body(first)).toMatchObject({
       quality: {
         accepted: false,
@@ -1177,7 +1248,9 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
       expect(first.status).toBe(200)
       expect(retry.status).toBe(200)
     }
-    expect(fake.modelCalls.sort()).toEqual([...shotKeys].sort())
+    expect(fake.modelCalls.sort()).toEqual(
+      [...shotKeys, CONSULT_EARLY_PHOTO_SHOT_KEY].sort(),
+    )
     expect(
       await db.consultSession.findUniqueOrThrow({ where: { id: consult.sessionId }, select: { status: true } }),
     ).toEqual({ status: ConsultSessionStatus.ANALYSIS_PENDING })
@@ -1219,7 +1292,8 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
     const response = await quality(consult, captureId, 'after-revoke')
     expect(response.status).toBe(409)
     expect(await body(response)).toMatchObject({ code: 'CONSULT_PREREQUISITES_REQUIRED' })
-    expect(fake.modelCalls).toHaveLength(0)
+    // Only the early photo's, from before the revocation — no NEW paid call.
+    expect(fake.modelCalls).toEqual([CONSULT_EARLY_PHOTO_SHOT_KEY])
     expect(
       await db.consultCapture.findUniqueOrThrow({ where: { id: captureId }, select: { purgedAt: true, storagePath: true } }),
     ).toMatchObject({ storagePath: null, purgedAt: expect.any(Date) })
@@ -1260,7 +1334,12 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
         select: { purgedAt: true, storagePath: true },
       }),
     ).toMatchObject({ storagePath: null, purgedAt: expect.any(Date) })
-    expect(fake.modelCalls.length).toBeLessThanOrEqual(1)
+    // The RACE may spend at most one paid call. The early photo's own check,
+    // from before this test's first line, is not part of the race (P7a-1).
+    expect(
+      fake.modelCalls.filter((key) => key !== CONSULT_EARLY_PHOTO_SHOT_KEY)
+        .length,
+    ).toBeLessThanOrEqual(1)
   })
 
   it('re-consent requires a fresh intake and permits only fresh raw captures', async () => {
@@ -1287,9 +1366,13 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
       expectedKind: ConsultAgreementKind.SENSITIVE_DATA_CONSENT,
       actor: { type: ConsultActorType.CLIENT, id: consult.userId },
     })
+    // P7a-1: re-consenting returns her to the EARLY PHOTO, not to the intake —
+    // her old captures were purged with the revocation, so the consult needs a
+    // current photo of her before it is a consult again.
     expect(
       await db.consultSession.findUniqueOrThrow({ where: { id: consult.sessionId }, select: { status: true } }),
-    ).toEqual({ status: ConsultSessionStatus.INTAKE_READY })
+    ).toEqual({ status: ConsultSessionStatus.EARLY_PHOTO_READY })
+    await takeEarlyPhoto(consult, 'after-reconsent')
     await appendConsultIntakeRevision({
       consultSessionId: consult.sessionId,
       actor: { type: ConsultActorType.CLIENT, id: consult.userId },
@@ -1365,9 +1448,11 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
         select: { purgeEligibleAt: true },
       }),
     ).toMatchObject({ purgeEligibleAt: expect.any(Date) })
+    // 2: this consult's early photo is purge-eligible alongside the unattached
+    // upload once the booking is cancelled (P7a-1).
     expect(await runConsultCapturePurgeSweep(new Date())).toMatchObject({
-      considered: 1,
-      purged: 1,
+      considered: 2,
+      purged: 2,
       failed: 0,
     })
     expect(fake.objects.has(upload.storagePath)).toBe(false)
@@ -1467,10 +1552,18 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
       }),
     ).rejects.toThrow()
 
+    // 🔴 Was ANALYSIS_PENDING. That transition is now LEGITIMATELY reachable
+    // from MEDIA_READY: the early photo is an accepted capture and an analysis
+    // input, so the guard's "at least one accepted unexpired capture"
+    // prerequisite is satisfied by it alone, and partial-pack analysis has been
+    // permitted since 2026-08-27. The assertion was passing on the prerequisite
+    // failing, not on the lifecycle guard refusing a forged write — so it now
+    // names an edge the transition table has never contained, which is what it
+    // was always trying to prove.
     await expect(
       db.consultSession.update({
         where: { id: consult.sessionId },
-        data: { status: ConsultSessionStatus.ANALYSIS_PENDING },
+        data: { status: ConsultSessionStatus.COMPLETED },
       }),
     ).rejects.toThrow()
 
@@ -1624,7 +1717,8 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
       where: { consultSessionId: consult.sessionId, status: ConsultCaptureStatus.ACCEPTED },
       select: { purgedAt: true, storagePath: true, storageBucket: true },
     })
-    expect(captures).toHaveLength(7)
+    // 8 = the pack's 7 + the early photo (P7a-1).
+    expect(captures).toHaveLength(8)
     expect(captures).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1634,7 +1728,8 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
         }),
       ]),
     )
-    expect(fake.purgedPaths).toHaveLength(7)
+    // 8 = the pack's 7 + the early photo (P7a-1).
+    expect(fake.purgedPaths).toHaveLength(8)
 
     const audits = await db.consultAuditEvent.findMany({
       where: { consultSessionId: consult.sessionId },
@@ -2115,7 +2210,9 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
           purgeRequestedAt: { not: null },
         },
       }),
-    ).toBe(7)
+      // 8 = the pack's 7 + the early photo (P7a-1). It is a client photograph
+      // like any other, so it is purge-marked with them.
+    ).toBe(8)
   })
 
   it('rejects a structurally incomplete analysis payload at the direct database guard', async () => {
@@ -2969,8 +3066,19 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
         model: 'fake-quality-model',
       })
 
+      // The cap counts EVERY paid check in the session, and this consult has
+      // already spent one on its early photo (P7a-1) — so the loop runs the
+      // remainder. Measured rather than hard-coded to 1, so that adding another
+      // pre-intake check later fails the cap arithmetic here instead of
+      // silently shortening the loop.
+      const alreadySpent = fake.modelCalls.length
+      expect(alreadySpent).toBe(1)
       let lastCheckedId = ''
-      for (let i = 0; i < CONSULT_CAPTURE_MAX_QUALITY_CHECKS_PER_SESSION; i += 1) {
+      for (
+        let i = 0;
+        i < CONSULT_CAPTURE_MAX_QUALITY_CHECKS_PER_SESSION - alreadySpent;
+        i += 1
+      ) {
         lastCheckedId = await issueAttach(consult, 'hair_left', `cap-${i}`)
         const checked = await quality(consult, lastCheckedId, `cap-q-${i}`)
         expect(checked.status).toBe(200)
@@ -3080,7 +3188,7 @@ describe('consult partial capture submission against PostgreSQL (Tori, 2026-08-2
         select: { shotKey: true, purgeRequestedAt: true, purgedAt: true },
       })
       expect(accepted.map(({ shotKey }) => shotKey).sort()).toEqual(
-        [...PARTIAL_SHOTS].sort(),
+        [...PARTIAL_SHOTS, CONSULT_EARLY_PHOTO_SHOT_KEY].sort(),
       )
       for (const capture of accepted) {
         expect(capture.purgeRequestedAt).not.toBeNull()

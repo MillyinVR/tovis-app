@@ -475,6 +475,7 @@ vi.mock('@/lib/consult/analysisEngine', async (importOriginal) => {
   }
 })
 
+import { seedAcceptedEarlyPhoto } from './_support/earlyPhoto'
 import { POST as attachCapture } from '@/app/api/v1/client/consult/[id]/capture/attach/route'
 import { POST as checkQuality } from '@/app/api/v1/client/consult/[id]/capture/[captureId]/quality/route'
 import { POST as proceedCapture } from '@/app/api/v1/client/consult/[id]/capture/proceed/route'
@@ -693,6 +694,14 @@ async function consentAndCompleteIntake(sessionId: string, label: string) {
     agreementVersionId: adultVersionId,
     expectedKind: ConsultAgreementKind.ADULT_18_PLUS_ATTESTATION,
     actor: { type: ConsultActorType.CLIENT, id: clientUserId },
+  })
+  // P7a-1: consent lands on the early-photo stage, and the database refuses to
+  // leave it without one accepted early photo.
+  await seedAcceptedEarlyPhoto(db, {
+    consultSessionId: sessionId,
+    actorUserId: clientUserId,
+    label: sessionId,
+    objects: fake.objects,
   })
   await appendConsultIntakeRevision({
     consultSessionId: sessionId,
@@ -1223,9 +1232,11 @@ describe('inspiration seeded from the anchoring look', () => {
       useExpiresAt: null,
       purgedAt: null,
     })
-    // Referenced, not copied: no new MediaAsset, no storage traffic at all.
+    // Referenced, not copied: no new MediaAsset, and no storage object beyond
+    // the client's own early photo (P7a-1), which every consult now takes
+    // before the intake. The INSPIRATION added none, which is the claim.
     expect(await db.mediaAsset.count()).toBe(mediaBefore)
-    expect(fake.objects.size).toBe(0)
+    expect([...fake.objects.keys()]).toHaveLength(1)
 
     expect(
       await db.consultAuditEvent.count({
@@ -1284,8 +1295,10 @@ describe('inspiration seeded from the anchoring look', () => {
     expect(read.url).toContain(media.storagePath!)
     expect(Number.isFinite(read.expiresInSeconds)).toBe(true)
     expect(read.expiresInSeconds).toBeGreaterThan(0)
-    // No storage traffic: this is the LOOK's own object, never a copy.
-    expect(fake.objects.size).toBe(0)
+    // No storage traffic: this is the LOOK's own object, never a copy. The one
+    // object present is the client's early photo (P7a-1), not a copy of the
+    // look's bytes — the read route created nothing.
+    expect([...fake.objects.keys()]).toHaveLength(1)
 
     // Unpublish the look and the very next read refuses. This is why the
     // endpoint is a route and not a URL baked into the state DTO — a URL
@@ -1878,6 +1891,12 @@ describe('purge lifecycles stay separate', () => {
     const created = await startLook(lookPostId)
     const sessionId = ((await body(created)).consult as { id: string }).id
     await consentAndCompleteIntake(sessionId, 'delete')
+
+    // P7a-1: the consult now holds the client's early photo, and
+    // `consult_session_delete_requires_purge` refuses to drop a session with an
+    // unpurged raw object — correctly. Purging first is what a real deletion
+    // does; this test is about what survives the delete, not about skipping it.
+    await purgeConsultSessionRawObjects(sessionId)
 
     await db.consultSession.delete({ where: { id: sessionId } })
 

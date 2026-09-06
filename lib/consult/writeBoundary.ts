@@ -21,6 +21,7 @@ import {
   CONSULT_ANALYSIS_SCHEMA_VERSION,
 } from './analysisEngine'
 import { normalizeStoredConsultAnalysisPayload } from './analysisRevision'
+import { CONSULT_EARLY_PHOTO_SHOT_KEY } from './capture/earlyPhoto'
 import {
   buildHairColorProBriefPayload,
   CONSULT_PRO_BRIEF_PROMPT_VERSION,
@@ -28,7 +29,7 @@ import {
   toBriefJsonPayload,
 } from './briefContract'
 import { CONSULT_ANCHOR_SELECT, evaluateConsultAnchor } from './anchor'
-import { CONSULT_MAX_CAPTURE_SHOTS } from './capture/registry'
+import { CONSULT_MAX_ANALYSIS_CAPTURES } from './capture/registry'
 import { ConsultWriteError } from './errors'
 import {
   normalizeConsultIntakePayload,
@@ -73,6 +74,9 @@ type NonIntakeRevisionKind = Exclude<
 export { ConsultWriteError } from './errors'
 
 const ACTIVE_CONTENT_STATES = new Set<ConsultSessionStatus>([
+  // P7a-1: the first state with content in it. A consult here already holds
+  // her coarse card answers and her early photo, so revocation must reach it.
+  ConsultSessionStatus.EARLY_PHOTO_READY,
   ConsultSessionStatus.INTAKE_READY,
   ConsultSessionStatus.INTAKE_IN_PROGRESS,
   ConsultSessionStatus.MEDIA_READY,
@@ -84,6 +88,35 @@ const REVOCABLE_STATES = new Set<ConsultSessionStatus>([
   ...ACTIVE_CONTENT_STATES,
   ConsultSessionStatus.COMPLETED,
 ])
+
+/**
+ * The early photo readiness rule (P7a-1): does this consult hold one accepted,
+ * unexpired early photo?
+ *
+ * The SAME predicate the database enforces on EARLY_PHOTO_READY -> INTAKE_READY
+ * (consult_lifecycle_guard) and the same one the thread's sticky Book CTA reads
+ * through the capture state. Written once here because "one accepted early
+ * photo" is the rule the whole stage exists to express, and three hand-rolled
+ * copies of it is how a client ends up bookable on one screen and not on
+ * another.
+ */
+export async function hasAcceptedEarlyConsultPhoto(
+  tx: Prisma.TransactionClient,
+  consultSessionId: string,
+  now: Date = new Date(),
+): Promise<boolean> {
+  const accepted = await tx.consultCapture.findFirst({
+    where: {
+      consultSessionId,
+      shotKey: CONSULT_EARLY_PHOTO_SHOT_KEY,
+      status: ConsultCaptureStatus.ACCEPTED,
+      purgedAt: null,
+      rawExpiresAt: { gt: now },
+    },
+    select: { id: true },
+  })
+  return accepted !== null
+}
 
 async function lockSession(
   tx: Prisma.TransactionClient,
@@ -315,12 +348,38 @@ export async function acceptConsultAgreement(args: {
     const activeKinds = await activeAgreementKinds(tx, args.consultSessionId)
     let status: ConsultSessionStatus = currentStatus
     if (hasBothRequiredAgreements(activeKinds)) {
-      status = ConsultSessionStatus.INTAKE_READY
+      // P7a-1: consent now lands on the EARLY PHOTO, not on the intake. This is
+      // the Sept 5 flow order — the spark, "what do you have right now?", the
+      // booking — and the intake becomes prep on the far side of it.
+      status = ConsultSessionStatus.EARLY_PHOTO_READY
       await transitionLockedConsultSession(tx, {
         consultSessionId: args.consultSessionId,
         actor: args.actor,
         fromStatus: currentStatus,
         toStatus: status,
+      })
+
+      // Book the Look: she tapped a picture to get here, so she is never asked
+      // for one. Seeded at THIS transition now rather than at the old
+      // intake -> MEDIA_READY one, because the coarse cards have moved in front
+      // of the photo and the database refuses an inspiration row before the
+      // session is in a state that permits one (consult_inspiration_guard,
+      // widened to EARLY_PHOTO_READY by P7a-1). A booking-anchored consult has
+      // no look anchor and no-ops here.
+      const anchors = await tx.consultSession.findUniqueOrThrow({
+        where: { id: args.consultSessionId },
+        select: {
+          clientId: true,
+          professionalId: true,
+          anchorLookPostId: true,
+        },
+      })
+      await seedLockedConsultAnchorInspiration(tx, {
+        consultSessionId: args.consultSessionId,
+        clientId: anchors.clientId,
+        professionalId: anchors.professionalId,
+        anchorLookPostId: anchors.anchorLookPostId,
+        actor: args.actor,
       })
     }
 
@@ -632,7 +691,7 @@ export async function finalizeLockedHairColorAnalysis(
   // purge-marked below — the count equality keeps that exact.
   if (
     args.captureIds.length < 1 ||
-    args.captureIds.length > CONSULT_MAX_CAPTURE_SHOTS ||
+    args.captureIds.length > CONSULT_MAX_ANALYSIS_CAPTURES ||
     new Set(args.captureIds).size !== args.captureIds.length
   ) {
     throw new ConsultWriteError(
@@ -959,6 +1018,7 @@ export async function appendConsultIntakeRevision(args: {
     await requireCurrentConsultAgreementAcceptances(tx, args.consultSessionId)
 
     if (
+      session.status !== ConsultSessionStatus.EARLY_PHOTO_READY &&
       session.status !== ConsultSessionStatus.INTAKE_READY &&
       session.status !== ConsultSessionStatus.INTAKE_IN_PROGRESS &&
       session.status !== ConsultSessionStatus.MEDIA_READY
@@ -1035,6 +1095,35 @@ export async function appendConsultIntakeRevision(args: {
     }
 
     let status = session.status
+
+    // P7a-1: the intake is PREP now — it happens on the far side of the early
+    // photo — so answering its first question is what closes the early stage.
+    //
+    // Deliberately lazy. Advancing the moment the photo is accepted would have
+    // shut the inspiration window (EARLY_PHOTO_READY, MEDIA_READY) between the
+    // photo and the end of intake, so she could no longer change a coarse card
+    // answer she had just given. Leaving her in EARLY_PHOTO_READY until she
+    // actually starts prep keeps the thread a living document, and the Book CTA
+    // never depended on the status — it depends on the accepted photo.
+    if (status === ConsultSessionStatus.EARLY_PHOTO_READY) {
+      if (!(await hasAcceptedEarlyConsultPhoto(tx, args.consultSessionId))) {
+        // The same rule the database enforces on this transition, asked first
+        // so it reaches the client as a refusal it can act on instead of a
+        // 23514 surfacing as a 500.
+        throw new ConsultWriteError(
+          'INVALID_STATE',
+          'The early photo is required before the rest of the consult.',
+        )
+      }
+      await transitionLockedConsultSession(tx, {
+        consultSessionId: args.consultSessionId,
+        actor: args.actor,
+        fromStatus: status,
+        toStatus: ConsultSessionStatus.INTAKE_READY,
+      })
+      status = ConsultSessionStatus.INTAKE_READY
+    }
+
     if (status === ConsultSessionStatus.INTAKE_READY) {
       await transitionLockedConsultSession(tx, {
         consultSessionId: args.consultSessionId,

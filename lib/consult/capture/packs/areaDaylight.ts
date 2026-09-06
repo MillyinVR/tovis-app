@@ -38,6 +38,7 @@ export const AREA_CAPTURE_PACK: ConsultCapturePackDefinition = Object.freeze({
       // "In context" — the surroundings are part of what is asked for, so
       // there is room in the frame and the light reading is the room's.
       framing: 'FULL_VIEW',
+      gate: 'GUIDED',
     },
     {
       key: 'area_closeup',
@@ -50,6 +51,7 @@ export const AREA_CAPTURE_PACK: ConsultCapturePackDefinition = Object.freeze({
       // "Fills most of the frame" — the same skin-filled close-up as the
       // eyes shot, for hands, brows or a patch of skin.
       framing: 'TIGHT_CROP',
+      gate: 'GUIDED',
     },
     FACE_FRONT_SHOT,
   ]),

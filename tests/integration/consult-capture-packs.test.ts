@@ -259,6 +259,7 @@ import {
   GENERAL_SERVICE_INTAKE_PACK_VERSION,
   GENERAL_SERVICE_INTAKE_SCHEMA_VERSION,
 } from '@/lib/consult/intake/packs/generalService'
+import { seedAcceptedEarlyPhoto } from './_support/earlyPhoto'
 import {
   acceptConsultAgreement,
   appendConsultIntakeRevision,
@@ -409,6 +410,15 @@ async function createConsult(args: {
       actor,
     })
   }
+  // P7a-1: consent lands on the early-photo stage, and the database refuses to
+  // leave it without one accepted early photo. Registered with the storage fake
+  // because these consults go on to run an analysis, which reads its object.
+  await seedAcceptedEarlyPhoto(db, {
+    consultSessionId: session.id,
+    actorUserId: user.id,
+    label: session.id,
+    objects: fake.objects,
+  })
   await appendConsultIntakeRevision({
     consultSessionId: session.id,
     actor,
@@ -819,7 +829,14 @@ describe('the area pack (NAILS) against PostgreSQL', () => {
     expect(response.status).toBe(200)
     expect(fake.analysisCalls).toBe(1)
     expect(fake.capturePackIds).toEqual([AREA_CAPTURE_PACK.id])
-    expect(fake.suppliedShotKeys[0]).toEqual(['area_wide', 'area_closeup', 'face_front'])
+    // The early photo is supplied LAST — pack order first, then the lowest
+    // evidence tier (P7a-1), so a guided view always outranks it.
+    expect(fake.suppliedShotKeys[0]).toEqual([
+      'area_wide',
+      'area_closeup',
+      'face_front',
+      'early_photo',
+    ])
     expect(await status(consult.sessionId)).toBe(ConsultSessionStatus.COMPLETED)
 
     const revision = await db.consultRevision.findFirstOrThrow({
@@ -1016,7 +1033,14 @@ describe('the face pack (SKIN) against PostgreSQL', () => {
     const response = await runAnalysis(consult, 'skin-an')
     expect(response.status).toBe(200)
     expect(fake.capturePackIds).toEqual([FACE_CAPTURE_PACK.id])
-    expect(fake.suppliedShotKeys[0]).toEqual(['face_front', 'face_side', 'eyes_closeup'])
+    // The early photo is supplied LAST — pack order first, then the lowest
+    // evidence tier (P7a-1), so a guided view always outranks it.
+    expect(fake.suppliedShotKeys[0]).toEqual([
+      'face_front',
+      'face_side',
+      'eyes_closeup',
+      'early_photo',
+    ])
     expect(await status(consult.sessionId)).toBe(ConsultSessionStatus.COMPLETED)
     await expect(
       db.consultRevision.count({

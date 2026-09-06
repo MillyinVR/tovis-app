@@ -9,7 +9,10 @@ import type {
 } from '@/lib/dto/consult'
 
 import { findConsultCaptureShot } from './capture/registry'
-import { shotToleratesColorCast } from './capture/types'
+import {
+  CONSULT_WARN_ONLY_REJECTING_REASON_CODE,
+  shotToleratesColorCast,
+} from './capture/types'
 import {
   meterConsultProviderCall,
   type ConsultProviderMeterSink,
@@ -43,10 +46,37 @@ export const CONSULT_CAPTURE_QUALITY_PROMPT_VERSION = 'full-analysis-capture-v3'
  * Mirrored by the database prerequisite guard
  * (`consult_revision_requires_agreements`); the two must agree.
  */
+/**
+ * P7a-1. The early photo is judged under a DIFFERENT rule set (accept anything
+ * with a person in it), so it carries its own version rather than riding on the
+ * guided one.
+ *
+ * Two reasons it is not a bump of `CONSULT_CAPTURE_QUALITY_PROMPT_VERSION`:
+ * the guided prompt genuinely did not change — its branch of `instructions()`
+ * is byte-identical — so bumping it would restate a policy nobody altered and
+ * invalidate nothing truthfully; and a stored row must say which rule set
+ * judged it, which is exactly what a shared version cannot express.
+ */
+export const CONSULT_EARLY_PHOTO_QUALITY_PROMPT_VERSION = 'early-photo-capture-v1'
+
 export const CONSULT_ANALYZABLE_CAPTURE_PROMPT_VERSIONS = [
   'full-analysis-capture-v2',
   CONSULT_CAPTURE_QUALITY_PROMPT_VERSION,
+  CONSULT_EARLY_PHOTO_QUALITY_PROMPT_VERSION,
 ] as const
+
+/**
+ * The version a capture of THIS shot is judged and stored under. One function,
+ * so the value written to the row and the value the analysis gate accepts can
+ * never be derived two different ways.
+ */
+export function consultCaptureQualityPromptVersion(shotKey: string): string {
+  const shot = findConsultCaptureShot(shotKey)
+  if (!shot) throw new ConsultCaptureVisionError('bad_output')
+  return shot.gate === 'WARN_ONLY'
+    ? CONSULT_EARLY_PHOTO_QUALITY_PROMPT_VERSION
+    : CONSULT_CAPTURE_QUALITY_PROMPT_VERSION
+}
 
 export function isAnalyzableConsultCapturePromptVersion(
   value: string | null,
@@ -194,6 +224,21 @@ const SYSTEM =
 function instructions(shotKey: string): string {
   const shot = findConsultCaptureShot(shotKey)
   if (!shot) throw new ConsultCaptureVisionError('bad_output')
+
+  // P7a-1. A WARN_ONLY shot gets its own rule instead of the colour rule,
+  // because for it the colour question does not arise: nothing here is
+  // rejected for how it looks. The instruction still asks for the finding —
+  // the warnings are what tells the later analysis to discount this frame, so
+  // a model that answers a bare PASS on a dim photo has cost us the signal.
+  if (shot.gate === 'WARN_ONLY') {
+    return [
+      `Requested view: ${shotKey}.`,
+      shot.acceptance,
+      `Report the single most significant finding as the reason code even though the photo is being accepted: it is stored as a warning, not a refusal. Use PASS only when there is genuinely nothing to note. ${CONSULT_WARN_ONLY_REJECTING_REASON_CODE} is the ONLY code that refuses this photo.`,
+      'retakeTip: give zero or one concrete sentence, max 160 characters, whenever the reason code is not PASS.',
+    ].join('\n')
+  }
+
   // The colour-fidelity line is the shot's own `framing`, not a list of keys
   // this file keeps: a new pack brings its answer with it.
   const colorRule = shotToleratesColorCast(shot)
@@ -240,6 +285,26 @@ export function sanitizeConsultCaptureQuality(
   // `accepted: false` (the honest reading of "this light is warm") and one
   // that answers `accepted: true` land on the same stored result, and no
   // provider wobble can turn a full-view cast into an acceptance.
+  //
+  // P7a-1, the early photo: the same principle, one rung wider. Every finding
+  // except "there is no person here" becomes a warning on an accepted capture,
+  // whatever the provider answered — so a model that refuses a dim bedroom
+  // selfie cannot cost the client her booking. `SUBJECT_NOT_VISIBLE` falls
+  // through to the normal rejection path below and keeps its retake tip.
+  if (
+    shot.gate === 'WARN_ONLY' &&
+    reasonCode !== 'PASS' &&
+    reasonCode !== CONSULT_WARN_ONLY_REJECTING_REASON_CODE
+  ) {
+    return {
+      accepted: true,
+      reasonCode: 'PASS',
+      warningCode: reasonCode,
+      retakeTip: null,
+      model,
+    }
+  }
+
   if (isColorFinding(reasonCode) && shotToleratesColorCast(shot)) {
     return {
       accepted: true,

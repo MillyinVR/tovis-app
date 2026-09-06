@@ -1,0 +1,21 @@
+-- P7a-1, slice 1 of 3: the lifecycle label only.
+--
+-- PostgreSQL requires a new enum label to COMMIT before any later migration may
+-- name it in a table, constraint, trigger, or function. Verified here rather
+-- than remembered — against the fully-migrated local database, 2026-09-05:
+--
+--   BEGIN;
+--   ALTER TYPE "ConsultSessionStatus" ADD VALUE 'EARLY_PHOTO_READY';
+--   SELECT 'EARLY_PHOTO_READY'::"ConsultSessionStatus";
+--   -- ERROR: 55000: unsafe use of new value "EARLY_PHOTO_READY" of enum type
+--   -- HINT: New enum values must be committed before they can be used.
+--
+-- Same reason as 20261007000000_consult_inspiration_analysis_enum and
+-- 20260913000000_ai_consult_c10_w2_enums; this keeps that convention.
+--
+-- EARLY_PHOTO_READY is the state a consult is in between accepting consent and
+-- answering anything: she is looking at the three coarse inspiration cards and
+-- taking one photo of herself. It sits BEFORE INTAKE_READY, which is the whole
+-- point of P7a — the booking is unlocked by that photo, and the intake becomes
+-- prep that happens after.
+ALTER TYPE "ConsultSessionStatus" ADD VALUE 'EARLY_PHOTO_READY' AFTER 'CONSENT_REQUIRED';
