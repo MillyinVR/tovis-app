@@ -7,12 +7,25 @@
 // lib/brand/brands/_template.ts and docs/design/white-label-runbook.md.
 import type { BrandConfig } from '../types'
 import { createBrandConfig } from '../createBrand'
+import { defaultHomeCopy } from '../defaultHomeCopy'
 import { TOVIS_EYE_SVG } from '../eyeSvg'
+
+const home = defaultHomeCopy('TOVIS')
+home.editorial = {
+  ...home.editorial,
+  location: 'Starting in San Diego',
+  foundingTitle: 'San Diego first. A new beauty community, from the beginning.',
+  foundingBody: 'We’re building toward the Founding 100: the first 100 professionals helping shape what comes next. Explore the professional signup to get started; program launch details are still to be announced.',
+  foundingCard: 'Coming soon: the Founding Member Card. Only the first 100 professionals will ever receive one. It sits below Gold and recognizes founding membership; it does not replace the professional recognition path below.',
+  progression: ['TOVIS Verified', 'TOVIS Elite', 'Numbered Gold TOVIS Card'],
+  progressionBody: 'A future path for professional recognition, from Verified to Elite to a numbered Gold Card. These programs are not live credentials or protections. Criteria, availability, and card details are still being developed.',
+}
 
 export const tovisBrand: BrandConfig = createBrandConfig({
   id: 'tovis',
   displayName: 'TOVIS',
   tagline: 'The New Age of Self Care',
+  home,
   defaultMode: 'dark',
 
   assets: {
