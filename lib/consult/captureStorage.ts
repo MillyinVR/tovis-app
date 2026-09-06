@@ -3,6 +3,10 @@ import 'server-only'
 import { createHash, randomUUID } from 'node:crypto'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
+import {
+  ImageUnreadableError,
+  normalizeImageForVision,
+} from '@/lib/media/normalizeImage'
 import { BUCKETS } from '@/lib/storageBuckets'
 
 import type { ConsultCaptureMediaType } from './captureVision'
@@ -220,11 +224,39 @@ export const consultCaptureStorage: ConsultCaptureStorage = {
     return { contentType, sizeBytes, checksumSha256 }
   },
 
+  /**
+   * P2e — the ONE place a stored capture becomes base64 for a model, and so
+   * the only place the vision envelope can be guaranteed rather than trusted.
+   *
+   * Both clients already downscale to 1568px before upload, so in the normal
+   * case `normalizeImageForVision` finds the image conformant and hands the
+   * bytes back untouched. It is the abnormal case this is here for: an object
+   * that arrived by any other route, or one carrying an EXIF orientation that
+   * would otherwise reach the model sideways.
+   *
+   * 🔴 Normalized HERE and not in `downloadVerified`, which `inspectObject`
+   * also uses — that path checksums the STORED bytes, and hashing a normalized
+   * copy would fail every attach.
+   */
   async readObject(args) {
     const downloaded = await downloadVerified(args)
+    let normalized
+    try {
+      normalized = await normalizeImageForVision(
+        downloaded.bytes,
+        downloaded.contentType,
+      )
+    } catch (error) {
+      if (error instanceof ImageUnreadableError) {
+        // 'invalid' becomes CAPTURE_OBJECT_INVALID at the contract boundary —
+        // already terminal, already surfaced to the client as a retake.
+        throw new ConsultCaptureStorageError('invalid')
+      }
+      throw error
+    }
     return {
-      base64: Buffer.from(downloaded.bytes).toString('base64'),
-      mediaType: downloaded.contentType,
+      base64: normalized.bytes.toString('base64'),
+      mediaType: normalized.contentType,
     }
   },
 

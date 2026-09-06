@@ -46,6 +46,65 @@ const STAGE_FRACTION: Readonly<Record<ConsultAnalysisRunDTO['stage'], number>> =
   DONE: 1,
 }
 
+/**
+ * P2e — what a FAILED run says, by what actually failed.
+ *
+ * Before this, every failure produced one sentence and one "Try again"
+ * button. On 2026-09-06 that button was offered for a reference photograph
+ * the server had already refused twice and would refuse every time; Tori
+ * pressed it, and the second run burned three more attempts reaching the same
+ * refusal. A retry the app knows cannot succeed is not a kindness.
+ *
+ * So the codes whose cause is the REFERENCE say so, and point at the one
+ * action that changes the outcome — bringing a different picture. Everything
+ * else keeps the general wording, because for everything else trying again is
+ * genuinely the right move.
+ *
+ * The retry button itself STAYS on every failure, and deliberately: once a run
+ * exists, that button is the only way back into the analysis from the thread,
+ * so hiding it on a reference failure would strand the consult with no way to
+ * re-run after she swaps the picture. Changing the sentence is the fix;
+ * removing the exit is not. The wasted-money half is already gone — these
+ * codes are terminal now, so a pointless retry costs one attempt that fails
+ * before any provider call, not three that each pay for one.
+ *
+ * The codes are the analysis run's own vocabulary (`ConsultWriteErrorCode`),
+ * mapped to copy here rather than sent as text: `failureCode` is a code the
+ * client maps, never a message to render (see `ConsultAnalysisRunDTO`).
+ */
+const REFERENCE_FAILURE_CODES: ReadonlySet<string> = new Set([
+  'INSPIRATION_OBJECT_INVALID',
+  'INSPIRATION_IMAGE_UNREADABLE',
+  'INSPIRATION_ANALYSIS_UNREADABLE',
+])
+
+const PHOTO_FAILURE_CODES: ReadonlySet<string> = new Set(['CAPTURE_OBJECT_INVALID'])
+
+function failureCopy(failureCode: string | null): {
+  headline: string
+  detail: string
+} {
+  if (failureCode && REFERENCE_FAILURE_CODES.has(failureCode)) {
+    return {
+      headline: 'We couldn’t read your inspiration photo.',
+      detail:
+        'Everything else you’ve added is saved. Swap in a different picture and we’ll pick this back up.',
+    }
+  }
+  if (failureCode && PHOTO_FAILURE_CODES.has(failureCode)) {
+    return {
+      headline: 'We couldn’t read one of your photos.',
+      detail:
+        'Everything else you’ve added is saved. Retake that one and we’ll pick this back up.',
+    }
+  }
+  return {
+    headline: 'We couldn’t finish your plan.',
+    detail:
+      'Your photos and answers are still saved — you can try again from here.',
+  }
+}
+
 function photosPhrase(photoCount: number): string {
   if (photoCount <= 0) return 'your photos'
   return photoCount === 1 ? 'your photo' : `your ${photoCount} photos`
@@ -59,9 +118,7 @@ export function consultAnalysisRunProgress(
   }
   if (run.status === 'FAILED') {
     return {
-      headline: 'We couldn’t finish your plan.',
-      detail:
-        'Your photos and answers are still saved — you can try again from here.',
+      ...failureCopy(run.failureCode),
       fraction: STAGE_FRACTION[run.stage],
     }
   }

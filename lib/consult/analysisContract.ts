@@ -1224,6 +1224,16 @@ const TERMINAL_ANALYSIS_FAILURE_CODES: ReadonlySet<string> = new Set([
   'ANALYSIS_PREREQUISITES_REQUIRED',
   'SAFETY_OFFERING_REQUIRED',
   'CAPTURE_OBJECT_INVALID',
+  // 🔴 P2e — INSPIRATION_OBJECT_INVALID belongs here for exactly the reason
+  // CAPTURE_OBJECT_INVALID does, and its absence cost Tori's 2026-09-06 run
+  // six attempts across two runs against a Look that was never going to
+  // change. A stored object that does not match what was recorded, or is not
+  // served from this project's storage, is the same object on the next
+  // attempt. The pair are siblings; keep them together.
+  'INSPIRATION_OBJECT_INVALID',
+  // P2e — and this one is the reference that could not be decoded or brought
+  // inside the vision envelope at all. Retrying re-downloads the same bytes.
+  'INSPIRATION_IMAGE_UNREADABLE',
   // The model named nothing at all in this photograph. Reading the SAME
   // photograph twice more buys the same answer and two more paid calls; what
   // the client needs is the "we couldn't read this one" state and a chance to

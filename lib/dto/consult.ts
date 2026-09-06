@@ -1753,6 +1753,9 @@ export type ConsultAgreementErrorCode =
   | 'CONSULT_INSPIRATION_UPLOAD_EXPIRED'
   | 'CONSULT_INSPIRATION_UPLOAD_MISMATCH'
   | 'CONSULT_INSPIRATION_OBJECT_INVALID'
+  // P2e. The reference could not be decoded or brought inside the vision
+  // envelope — a 422 whose one useful action is a different picture.
+  | 'CONSULT_INSPIRATION_IMAGE_UNREADABLE'
   | 'CONSULT_INSPIRATION_STORAGE_UNAVAILABLE'
   | 'CONSULT_INSPIRATION_INVALID_ANSWER'
   | 'CONSULT_INSPIRATION_QUESTION_OUT_OF_ORDER'

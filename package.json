@@ -135,7 +135,8 @@
     "backfill:portfolio-looks": "tsx scripts/backfill-portfolio-looks.ts",
     "import:license-permissions": "tsx scripts/importLicensePermissions.ts",
     "smoke": "tsx scripts/smoke.ts",
-    "eval:consult": "tsx scripts/run-consult-evaluation.ts"
+    "eval:consult": "tsx scripts/run-consult-evaluation.ts",
+    "test:live:consult-normalization": "vitest run --config vitest.live.config.mts tests/live/consult-image-normalization.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.109.1",
@@ -167,6 +168,7 @@
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "react-leaflet": "^5.0.0",
+    "sharp": "^0.35.4",
     "stripe": "^22.1.0",
     "tailwind-merge": "^3.4.0",
     "twilio": "^5.12.0",

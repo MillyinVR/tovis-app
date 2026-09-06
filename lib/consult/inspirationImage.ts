@@ -1,11 +1,15 @@
 import 'server-only'
 
 import { readOptionalEnv } from '@/lib/env'
+import {
+  ImageUnreadableError,
+  normalizeImageForVision,
+} from '@/lib/media/normalizeImage'
 
 import type { ConsultCaptureImage } from './captureStorage'
 import { CONSULT_CAPTURE_MEDIA_TYPES, type ConsultCaptureMediaType } from './captureVision'
 import { ConsultWriteError } from './errors'
-import { CONSULT_INSPIRATION_MAX_BYTES } from './inspirationStorage'
+import { CONSULT_INSPIRATION_FETCH_MAX_BYTES } from './inspirationStorage'
 
 /**
  * The bytes behind an inspiration reference, fetched through the SAME URL the
@@ -94,28 +98,65 @@ export async function fetchConsultInspirationImage(
     )
   }
   if (!response.ok) {
+    // 🔴 P2e made INSPIRATION_OBJECT_INVALID a TERMINAL analysis failure, which
+    // makes this branch load-bearing: it used to fold storage being briefly
+    // unhappy (502, 503, 429) in with the object genuinely being gone, and a
+    // terminal code on a transient 5xx would kill a run that a retry would
+    // have completed. Split by what the status actually means.
+    const transient = response.status >= 500 || response.status === 429
     throw new ConsultWriteError(
-      'INSPIRATION_OBJECT_INVALID',
-      'The inspiration reference is missing.',
+      transient ? 'INSPIRATION_STORAGE_UNAVAILABLE' : 'INSPIRATION_OBJECT_INVALID',
+      transient
+        ? 'The inspiration reference could not be read.'
+        : 'The inspiration reference is missing.',
     )
   }
-  const contentType = mediaType(response.headers.get('content-type'))
-  // Check the advertised length first so an oversized object is refused before
-  // it is buffered, then check the real length — a missing or lying header must
-  // not become an unbounded read.
+  // Still refused up front on an unsupported content type — the normalizer
+  // below decides the OUTPUT type from the real bytes, but a reference served
+  // as something we never accept should not be downloaded at all.
+  const declaredContentType = mediaType(response.headers.get('content-type'))
+  // Check the advertised length first so an over-ceiling object is refused
+  // before it is buffered, then check the real length — a missing or lying
+  // header must not become an unbounded read.
   const advertised = Number(response.headers.get('content-length'))
-  if (Number.isFinite(advertised) && advertised > CONSULT_INSPIRATION_MAX_BYTES) {
+  if (Number.isFinite(advertised) && advertised > CONSULT_INSPIRATION_FETCH_MAX_BYTES) {
     throw new ConsultWriteError(
       'INSPIRATION_OBJECT_INVALID',
       'The inspiration reference is too large.',
     )
   }
   const bytes = new Uint8Array(await response.arrayBuffer())
-  if (bytes.byteLength < 1 || bytes.byteLength > CONSULT_INSPIRATION_MAX_BYTES) {
+  if (bytes.byteLength < 1 || bytes.byteLength > CONSULT_INSPIRATION_FETCH_MAX_BYTES) {
     throw new ConsultWriteError(
       'INSPIRATION_OBJECT_INVALID',
       'The inspiration reference is empty or too large.',
     )
   }
-  return { base64: Buffer.from(bytes).toString('base64'), mediaType: contentType }
+  // P2e — normalize rather than refuse. This is the choke point that Tori's
+  // 2026-09-06 run died at: a Look whose published original is 5,032,646 bytes
+  // was refused for being 32,646 bytes over a 5,000,000-byte ceiling, three
+  // stages after she chose it. A Look's bytes are the professional's published
+  // portfolio asset — they are never ingested by the consult and must never be
+  // rewritten by it — so the reference is brought inside the envelope HERE, on
+  // the way to the model, and the stored object is left alone.
+  let normalized
+  try {
+    normalized = await normalizeImageForVision(bytes, declaredContentType)
+  } catch (error) {
+    if (error instanceof ImageUnreadableError) {
+      // Distinct from OBJECT_INVALID on purpose: this one is "we genuinely
+      // could not read this picture", which the client is told and offered a
+      // different reference for. Both are terminal; only this one is her
+      // photograph's fault.
+      throw new ConsultWriteError(
+        'INSPIRATION_IMAGE_UNREADABLE',
+        'The inspiration reference could not be read.',
+      )
+    }
+    throw error
+  }
+  return {
+    base64: normalized.bytes.toString('base64'),
+    mediaType: normalized.contentType,
+  }
 }

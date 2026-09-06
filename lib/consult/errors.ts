@@ -45,6 +45,12 @@ export type ConsultWriteErrorCode =
   | 'INSPIRATION_UPLOAD_EXPIRED'
   | 'INSPIRATION_UPLOAD_MISMATCH'
   | 'INSPIRATION_OBJECT_INVALID'
+  // P2e. The reference decoded to nothing a model could be shown — a
+  // truncated file, an unsupported format, an image that will not compress
+  // into the vision envelope. Distinct from OBJECT_INVALID (the object is
+  // missing or does not match what was recorded) because the client-facing
+  // answer is different: bring a different picture.
+  | 'INSPIRATION_IMAGE_UNREADABLE'
   | 'INSPIRATION_STORAGE_UNAVAILABLE'
   | 'INSPIRATION_INVALID_ANSWER'
   | 'INSPIRATION_QUESTION_OUT_OF_ORDER'
