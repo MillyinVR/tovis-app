@@ -18,6 +18,7 @@ import { defaultClientConsultInspirationCopy } from './defaultClientConsultInspi
 import { defaultClientConsultThreadCopy } from './defaultClientConsultThreadCopy'
 import { defaultClientConsultResultsCopy } from './defaultClientConsultResultsCopy'
 import { defaultClientConsultCaptureCopy } from './defaultClientConsultCaptureCopy'
+import { defaultHomeCopy } from './defaultHomeCopy'
 
 export type CreateBrandInput = {
   id: string
@@ -59,6 +60,8 @@ export type CreateBrandInput = {
   clientConsultBooking?: BrandConfig['clientConsultBooking']
   clientConsultThread?: BrandConfig['clientConsultThread']
   clientConsultInspiration?: BrandConfig['clientConsultInspiration']
+  /** Override the public homepage copy (defaults to the checkable product copy). */
+  home?: BrandConfig['home']
 }
 
 export function createBrandConfig(input: CreateBrandInput): BrandConfig {
@@ -114,6 +117,7 @@ export function createBrandConfig(input: CreateBrandInput): BrandConfig {
       input.clientConsultThread ?? defaultClientConsultThreadCopy,
     clientConsultInspiration:
       input.clientConsultInspiration ?? defaultClientConsultInspirationCopy,
+    home: input.home ?? defaultHomeCopy(input.displayName),
     tokensByMode: {
       dark: buildTokens('dark'),
       light: buildTokens('light'),
