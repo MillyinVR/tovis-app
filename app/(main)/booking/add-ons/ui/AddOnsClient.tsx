@@ -48,6 +48,8 @@ type Props = {
    * hold-resize effect below never fires.
    */
   consultId: string | null
+  /** P7a-2 — the spark link; see `DrawerContext.sparkConsultId`. */
+  sparkConsultId: string | null
   consultProposal: ConsultBookingProposalDTO | null
   consultCopy: BrandClientConsultBookingCopy
   /**
@@ -259,6 +261,7 @@ export default function AddOnsClient({
   mediaId,
   lookPostId,
   consultId,
+  sparkConsultId,
   consultProposal,
   consultCopy,
   enhancementLineIds,
@@ -635,6 +638,10 @@ export default function AddOnsClient({
           // produced it, and the write boundary re-derives the proposal under
           // the session lock before it sizes or prices anything.
           consultId,
+          // P7a-2: the spark link. Mutually exclusive with `consultId` above —
+          // the write boundary refuses a body carrying both, because they mean
+          // two different bookings at two different prices.
+          sparkConsultId,
           // B7: the enhancements she ticked, as ids. The write boundary
           // re-derives what each one costs and how long it takes from the pro's
           // menu — this list decides WHICH, never HOW MUCH.
@@ -670,6 +677,12 @@ export default function AddOnsClient({
         // lands back on a cheaper booking than the one she was about to make.
         if (consultId) {
           fromQuery.set('consultId', consultId)
+        }
+
+        // Same reason as the line above: losing the spark id across a login
+        // round-trip would silently unlink the booking she is about to make.
+        if (sparkConsultId) {
+          fromQuery.set('sparkConsultId', sparkConsultId)
         }
 
         if (enhancementLineIds.length > 0) {

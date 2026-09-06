@@ -1067,3 +1067,236 @@ describe('the proximity expiry', () => {
     ).toEqual({ status: BookingStatus.PENDING })
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// P7a-2 — the SPARK link
+//
+// The spark is the other consult↔booking door, and it is deliberately not this
+// file's proposal door: it books ~100s before any analysis exists, so it must
+// stamp a link WITHOUT a completed consult, an estimate or a proposal. These
+// prove the link is checked before it is believed, and that the two doors
+// cannot be walked through at once.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('P7a-2 — the spark link', () => {
+  /** The discovery directive the finalize boundary gets for a look booking. */
+  function lookDiscovery(sourceLookPostId: string | null) {
+    return {
+      provenance: 'LOOKS_FEED' as const,
+      relationshipLabel: 'NNR' as const,
+      feeEligible: false,
+      depositRequirement: {
+        required: false,
+        scopeRequired: false,
+        prepayScope: null,
+      },
+      depositSettings: {
+        depositEnabled: false,
+        depositType: 'FLAT' as const,
+        depositFlatAmountCents: null,
+        depositPercent: null,
+      },
+      feesEnabled: false,
+      proFeeWaived: false,
+      sourceLookPostId,
+    }
+  }
+
+  async function sparkCommit(args: {
+    holdId: string
+    sparkConsultId: string | null
+    consultId?: string | null
+    sourceLookPostId: string | null
+  }) {
+    return finalizeBookingFromHold({
+      clientId: fx.clientId,
+      bookingEntryPoint: 'DIRECT_PROFILE',
+      holdId: args.holdId,
+      openingId: null,
+      addOnIds: [],
+      consultEnhancementLineIds: [],
+      locationType: ServiceLocationType.SALON,
+      source: BookingSource.DISCOVERY,
+      consultId: args.consultId ?? null,
+      sparkConsultId: args.sparkConsultId,
+      initialStatus: getClientSubmittedBookingStatus(true),
+      rebookOfBookingId: null,
+      offering: proposalOffering(),
+      discovery: lookDiscovery(args.sourceLookPostId),
+      cancellationPolicySnapshot: null,
+      cancellationPolicyAcceptedAt: null,
+      fallbackTimeZone: 'UTC',
+      idempotencyKey: `p7a2-${Math.random().toString(36).slice(2)}`,
+    })
+  }
+
+  /** A MID-FLOW look-anchored consult — the spark's actual state. */
+  async function startSparkConsult(): Promise<{
+    consultId: string
+    lookPostId: string
+  }> {
+    const lookPostId = await createLook(db, fx.balayageServiceId)
+    const session = await db.consultSession.create({
+      data: {
+        clientId: fx.clientId,
+        professionalId: fx.professionalId,
+        serviceCategoryId: fx.categoryId,
+        anchorLookPostId: lookPostId,
+      },
+      select: { id: true },
+    })
+    return { consultId: session.id, lookPostId }
+  }
+
+  // 🔴 The whole slice: a consult that is NOT completed, with no estimate and
+  // no proposal, still links. The proposal door refuses exactly this consult
+  // (`isFinalizeConsultAttributionOwned` requires COMPLETED), which is why the
+  // spark needed its own.
+  it('links a MID-FLOW consult and books at the ordinary path', async () => {
+    const { consultId, lookPostId } = await startSparkConsult()
+    const held = await holdFromConsult({
+      start: futureLocal(11, 10),
+      consultId: null,
+    })
+
+    const finalized = await sparkCommit({
+      holdId: held.hold.id,
+      sparkConsultId: consultId,
+      sourceLookPostId: lookPostId,
+    })
+    bookingIds.push(finalized.booking.id)
+
+    const booking = await db.booking.findUniqueOrThrow({
+      where: { id: finalized.booking.id },
+      select: {
+        sourceConsultSessionId: true,
+        sourceConsultServiceEstimateId: true,
+        totalDurationMinutes: true,
+      },
+    })
+    expect(booking.sourceConsultSessionId).toBe(consultId)
+    // 🔴 No proposal was derived: the booking is the OFFERING's own width, not
+    // an estimate's. Repricing is P9 — the spark books the menu price.
+    expect(booking.sourceConsultServiceEstimateId).toBeNull()
+
+    await db.consultSession.deleteMany({ where: { id: consultId } })
+  })
+
+  it('refuses a link whose LOOK does not match the consult', async () => {
+    const { consultId } = await startSparkConsult()
+    const otherLookPostId = await createLook(db, fx.balayageServiceId)
+    const held = await holdFromConsult({
+      start: futureLocal(12, 10),
+      consultId: null,
+    })
+
+    const code = await refusalCode(() =>
+      sparkCommit({
+        holdId: held.hold.id,
+        sparkConsultId: consultId,
+        // A real, published look — just not THIS consult's.
+        sourceLookPostId: otherLookPostId,
+      }),
+    )
+    expect(code).toBe('CONSULT_LINK_MISMATCH')
+
+    await db.consultSession.deleteMany({ where: { id: consultId } })
+  })
+
+  // A booking with no server-resolved look cannot prove it came from the
+  // consult's look, so it is refused rather than linked on trust. This is the
+  // iOS defect made unrepresentable: media-only bodies carry no look.
+  it('refuses a link when the booking has NO resolved source look', async () => {
+    const { consultId } = await startSparkConsult()
+    const held = await holdFromConsult({
+      start: futureLocal(13, 10),
+      consultId: null,
+    })
+
+    const code = await refusalCode(() =>
+      sparkCommit({
+        holdId: held.hold.id,
+        sparkConsultId: consultId,
+        sourceLookPostId: null,
+      }),
+    )
+    expect(code).toBe('CONSULT_LINK_MISMATCH')
+
+    await db.consultSession.deleteMany({ where: { id: consultId } })
+  })
+
+  // One live booking per consult. The second attempt is refused with a reason
+  // rather than colliding with the partial unique index.
+  it('refuses a SECOND live booking for the same consult', async () => {
+    const { consultId, lookPostId } = await startSparkConsult()
+
+    const first = await sparkCommit({
+      holdId: (
+        await holdFromConsult({ start: futureLocal(14, 10), consultId: null })
+      ).hold.id,
+      sparkConsultId: consultId,
+      sourceLookPostId: lookPostId,
+    })
+    bookingIds.push(first.booking.id)
+
+    const code = await refusalCode(async () =>
+      sparkCommit({
+        holdId: (
+          await holdFromConsult({ start: futureLocal(15, 10), consultId: null })
+        ).hold.id,
+        sparkConsultId: consultId,
+        sourceLookPostId: lookPostId,
+      }),
+    )
+    expect(code).toBe('CONSULT_ALREADY_BOOKED')
+
+    await db.consultSession.deleteMany({ where: { id: consultId } })
+  })
+
+  // A consult nobody can reopen must not acquire a booking. The thread already
+  // hides the CTA for these; this is the control a hand-made request meets.
+  it('refuses to link a CANCELLED consult', async () => {
+    const { consultId, lookPostId } = await startSparkConsult()
+    await db.consultSession.update({
+      where: { id: consultId },
+      data: { status: 'CANCELLED' },
+    })
+    const held = await holdFromConsult({
+      start: futureLocal(17, 10),
+      consultId: null,
+    })
+
+    const code = await refusalCode(() =>
+      sparkCommit({
+        holdId: held.hold.id,
+        sparkConsultId: consultId,
+        sourceLookPostId: lookPostId,
+      }),
+    )
+    expect(code).toBe('CONSULT_LINK_MISMATCH')
+
+    await db.consultSession.deleteMany({ where: { id: consultId } })
+  })
+
+  // 🔴 The two doors mean different bookings at different prices. A body
+  // carrying both is refused rather than silently resolved to whichever the
+  // code checks first.
+  it('refuses a body carrying BOTH consultId and sparkConsultId', async () => {
+    const { consultId, lookPostId } = await startSparkConsult()
+    const held = await holdFromConsult({
+      start: futureLocal(16, 10),
+      consultId: null,
+    })
+
+    const code = await refusalCode(() =>
+      sparkCommit({
+        holdId: held.hold.id,
+        sparkConsultId: consultId,
+        consultId,
+        sourceLookPostId: lookPostId,
+      }),
+    )
+    expect(code).toBe('CONSULT_LINK_MISMATCH')
+
+    await db.consultSession.deleteMany({ where: { id: consultId } })
+  })
+})

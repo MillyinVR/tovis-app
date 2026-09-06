@@ -134,6 +134,13 @@ type ParsedFinalizeBody = {
   mediaId: string | null
   lookPostId: string | null
   consultId: string | null
+  /**
+   * P7a-2 — the consult this booking is being made AT THE SPARK from.
+   * Distinct from `consultId`, which means the proposal path; the two are
+   * refused together at the write boundary. See
+   * `FinalizeBookingFromHoldArgs.sparkConsultId`.
+   */
+  sparkConsultId: string | null
   openingId: string | null
   aftercareToken: string | null
   requestedRebookOfBookingId: string | null
@@ -157,6 +164,13 @@ type ValidatedFinalizeBody = {
   mediaId: string | null
   lookPostId: string | null
   consultId: string | null
+  /**
+   * P7a-2 — the consult this booking is being made AT THE SPARK from.
+   * Distinct from `consultId`, which means the proposal path; the two are
+   * refused together at the write boundary. See
+   * `FinalizeBookingFromHoldArgs.sparkConsultId`.
+   */
+  sparkConsultId: string | null
   openingId: string | null
   aftercareToken: string | null
   requestedRebookOfBookingId: string | null
@@ -241,6 +255,7 @@ function parseFinalizeBody(body: UnknownRecord): ParsedFinalizeBody {
   const mediaId = pickString(body.mediaId)
   const lookPostId = pickString(body.lookPostId)
   const consultId = pickString(body.consultId)
+  const sparkConsultId = pickString(body.sparkConsultId)
   const openingId = pickString(body.openingId)
   const aftercareToken = pickString(body.aftercareToken)
   const requestedRebookOfBookingId = pickString(body.rebookOfBookingId)
@@ -264,6 +279,7 @@ function parseFinalizeBody(body: UnknownRecord): ParsedFinalizeBody {
     mediaId,
     lookPostId,
     consultId,
+    sparkConsultId,
     openingId,
     aftercareToken,
     requestedRebookOfBookingId,
@@ -330,6 +346,7 @@ function validateParsedFinalizeBody(
       mediaId: body.mediaId,
       lookPostId: body.lookPostId,
       consultId: body.consultId,
+      sparkConsultId: body.sparkConsultId,
       openingId: body.openingId,
       aftercareToken: body.aftercareToken,
       requestedRebookOfBookingId: body.requestedRebookOfBookingId,
@@ -618,6 +635,7 @@ function buildFinalizeIdempotencyRequestBody(args: {
     mediaId: args.body.mediaId,
     lookPostId: args.body.lookPostId,
     consultId: args.body.consultId,
+    sparkConsultId: args.body.sparkConsultId,
     aftercareToken: args.body.aftercareToken,
     rebookOfBookingId: args.rebookOfBookingId,
   }
@@ -820,6 +838,7 @@ export async function POST(request: Request) {
           locationType: body.locationType,
           source: body.source,
           consultId: body.consultId,
+          sparkConsultId: body.sparkConsultId,
           initialStatus,
           rebookOfBookingId: ownership.rebookOfBookingId,
           offering: toFinalizeOffering(offering),

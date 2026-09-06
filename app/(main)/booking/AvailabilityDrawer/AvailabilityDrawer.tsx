@@ -745,6 +745,11 @@ export default function AvailabilityDrawer(props: {
   // proposal (B4b); the grid, the hold and the finalize are then all sized by
   // the whole estimate rather than by the offering's base.
   const consultId = asTrimmedString(context.consultId)
+  // P7a-2 — the spark link. It changes NOTHING about this sheet (no price
+  // suppression, no estimate sizing, no proposal review); it is carried to the
+  // add-ons step and on into the finalize body, where the server validates it
+  // and stamps the consult ↔ booking link. See `DrawerContext.sparkConsultId`.
+  const sparkConsultId = asTrimmedString(context.sparkConsultId)
   const bookingSource = useMemo(() => resolveBookingSource(context), [context])
 
   const canWaitlist = Boolean(
@@ -1744,6 +1749,13 @@ export default function AvailabilityDrawer(props: {
     // re-derives the proposal server-side before rendering a single number.
     if (consultId) {
       qs.set('consultId', consultId)
+    }
+
+    // P7a-2 — the spark link rides to the review step and into finalize. Unlike
+    // `consultId` above it does not change what that page shows: the add-ons
+    // step is the ordinary one, because a spark booking IS an ordinary booking.
+    if (sparkConsultId) {
+      qs.set('sparkConsultId', sparkConsultId)
     }
 
     if (activeLocationType === 'MOBILE' && selectedClientAddressId) {

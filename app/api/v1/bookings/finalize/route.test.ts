@@ -319,6 +319,7 @@ function makeExpectedFinalizeArgs(
     locationType: ServiceLocationType
     source: BookingSource
     consultId: string | null
+    sparkConsultId: string | null
     initialStatus: BookingStatus
     rebookOfBookingId: string | null
     fallbackTimeZone: string
@@ -342,6 +343,9 @@ function makeExpectedFinalizeArgs(
     locationType: overrides.locationType ?? ServiceLocationType.SALON,
     source,
     consultId: overrides.consultId ?? null,
+    // P7a-2 — the SPARK link, distinct from `consultId` above and mutually
+    // exclusive with it. Null on every ordinary booking.
+    sparkConsultId: overrides.sparkConsultId ?? null,
     initialStatus: overrides.initialStatus ?? BookingStatus.PENDING,
     rebookOfBookingId: overrides.rebookOfBookingId ?? null,
     offering: finalizeOffering,
@@ -752,6 +756,35 @@ describe('POST /api/v1/bookings/finalize', () => {
     )
   })
 
+  // P7a-2 — the SPARK link is its own field on the wire. It reaches the write
+  // boundary untouched, and it is part of the idempotency fingerprint so two
+  // finalizes differing only by which consult they link to cannot replay each
+  // other.
+  it('passes sparkConsultId to the boundary and into the idempotency body', async () => {
+    await POST(
+      makeIdempotentRequest({
+        offeringId: 'offering_1',
+        holdId: 'hold_1',
+        locationType: 'SALON',
+        source: 'REQUESTED',
+        sparkConsultId: 'consult_spark_1',
+      }),
+    )
+
+    expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestBody: expect.objectContaining({
+          sparkConsultId: 'consult_spark_1',
+          // 🔴 The proposal field stays null: these are different bookings.
+          consultId: null,
+        }),
+      }),
+    )
+    expect(mocks.finalizeBookingFromHold).toHaveBeenCalledWith(
+      makeExpectedFinalizeArgs({ sparkConsultId: 'consult_spark_1' }),
+    )
+  })
+
   it('returns OFFERING_NOT_FOUND when offering is missing before idempotency starts', async () => {
     const descriptor = getBookingErrorDescriptor('OFFERING_NOT_FOUND')
     mocks.professionalServiceOfferingFindUnique.mockResolvedValueOnce(null)
@@ -959,6 +992,10 @@ describe('POST /api/v1/bookings/finalize', () => {
         mediaId: null,
         lookPostId: null,
         consultId: null,
+        // P7a-2 — in the idempotency BODY for the same reason the enhancements
+        // are: two finalizes that differ only by which consult they link to are
+        // two different bookings, and the second must not replay the first.
+        sparkConsultId: null,
         aftercareToken: null,
         rebookOfBookingId: null,
       },

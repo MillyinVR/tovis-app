@@ -75,6 +75,22 @@ export type DrawerContext = {
   consultId?: string | null
 
   /**
+   * P7a-2 — set when this drawer is booking a look AT THE SPARK, from inside a
+   * consult thread.
+   *
+   * 🔴 Deliberately NOT `consultId`. That one means the consult's PROPOSAL: it
+   * suppresses the menu price, retitles the sheet, sizes the grid and hold by
+   * the whole estimate and sends the client to a proposal review. A spark
+   * booking has no estimate (the analysis takes ~100s and does not gate the
+   * spark), so it books the ordinary way at the pro's menu starting price —
+   * "from $X — <pro> confirms" — and this id changes NOTHING about the sheet.
+   * It only travels to the finalize body so the server can stamp the link.
+   *
+   * The two are mutually exclusive and the write boundary refuses both.
+   */
+  sparkConsultId?: string | null
+
+  /**
    * Pins the drawer to ONE mode, hiding the salon/mobile toggle.
    *
    * Book the Look, B4b: a consult's proposal is derived FOR a mode — its price,

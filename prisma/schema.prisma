@@ -3615,6 +3615,16 @@ model Booking {
   // AI-consult attribution: the completed, client-owned consult that informed
   // this booking. This is distinct from ConsultSession.bookingId, which remains
   // the required one-to-one anchor for the consult itself.
+  ///
+  /// P7a-2: also written by the SPARK path (lib/consult/sparkLink.ts), where it
+  /// is the explicit consult ↔ booking link that replaced thread.ts's inference.
+  /// A hand-written PARTIAL UNIQUE INDEX enforces one LIVE booking per consult
+  /// — `Booking_sourceConsultSessionId_live_key`, over
+  /// (PENDING, ACCEPTED, IN_PROGRESS) — so the link is released when a booking
+  /// is cancelled or completed. Prisma cannot express a partial unique index,
+  /// so `prisma migrate diff` reports drift for it; the index is deliberate and
+  /// lives in migration 20261014000000_consult_spark_booking_link. Do not
+  /// "resolve" that drift by dropping it.
   sourceConsultSessionId String?
   sourceConsultSession   ConsultSession? @relation("ConsultInspiredBookings", fields: [sourceConsultSessionId], references: [id], onDelete: SetNull)
 
