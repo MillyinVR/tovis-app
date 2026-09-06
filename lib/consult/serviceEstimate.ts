@@ -459,12 +459,20 @@ export async function loadConsultServiceEstimatesByConsultId(
 ): Promise<Map<string, ConsultServiceEstimateDTO>> {
   if (consultSessionIds.length === 0) return new Map()
 
+  // P7a-3: NEWEST first, and the first one wins. A consult keeps one estimate
+  // per analysis version now, and the pro's queue shows the plan the client is
+  // actually looking at — so an older version must never win a Map collision
+  // just by being read second.
   const rows = await tx.consultServiceEstimate.findMany({
     where: { consultSessionId: { in: [...consultSessionIds] } },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     select: CONSULT_SERVICE_ESTIMATE_SELECT,
   })
 
-  return new Map(
-    rows.map((row) => [row.consultSessionId, toConsultServiceEstimateDTO(row)]),
-  )
+  const latest = new Map<string, ConsultServiceEstimateDTO>()
+  for (const row of rows) {
+    if (latest.has(row.consultSessionId)) continue
+    latest.set(row.consultSessionId, toConsultServiceEstimateDTO(row))
+  }
+  return latest
 }

@@ -59,11 +59,31 @@ const state = {
     summary: string
     discussWithProfessional: true
   }>,
+  /**
+   * P7a-3 — what the faked analysis says about achievability.
+   *
+   * A knob rather than a second mock, for the same reason `safetyFlags` is one:
+   * a RERUN has to be able to produce a DIFFERENT plan from the first run, or
+   * the diff under test is always empty and a broken differ passes.
+   */
+  achievability: 'REQUIRES_PRO_ASSESSMENT' as
+    | 'LIKELY_SINGLE_APPOINTMENT'
+    | 'LIKELY_MULTI_APPOINTMENT'
+    | 'REQUIRES_PRO_ASSESSMENT'
+    | 'UNKNOWN',
 }
 
 export function resetConsultLookFakes(): void {
   fakeStorageObjects.clear()
   state.safetyFlags = []
+  state.achievability = 'REQUIRES_PRO_ASSESSMENT'
+}
+
+/** P7a-3 — make the NEXT analysis run reach a different conclusion. */
+export function setFakeAnalysisAchievability(
+  value: 'LIKELY_SINGLE_APPOINTMENT' | 'LIKELY_MULTI_APPOINTMENT',
+): void {
+  state.achievability = value
 }
 
 /** Route the faked analysis to safety prerequisites on its next run. */
@@ -222,7 +242,7 @@ export async function fakeRunConsultAnalysis(input: {
         maintenance: 'Maintenance tolerance was not collected and is unknown.',
         appointmentContext:
           'Appointment context uses the intake timing and budget.',
-        achievability: 'REQUIRES_PRO_ASSESSMENT',
+        achievability: state.achievability,
         achievabilityReason:
           'The professional should assess condition and history.',
         discussWithProfessional: true,

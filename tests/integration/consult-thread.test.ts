@@ -84,6 +84,7 @@ vi.mock('@/lib/consult/analysisEngine', async (importOriginal) => {
 import { POST as startLookConsult } from '@/app/api/v1/client/consult/look/route'
 import { defaultClientConsultCaptureCopy } from '@/lib/brand/defaultClientConsultCaptureCopy'
 import { defaultClientConsultInspirationCopy } from '@/lib/brand/defaultClientConsultInspirationCopy'
+import { defaultClientConsultPlanDiffCopy } from '@/lib/brand/defaultClientConsultPlanDiffCopy'
 import { defaultClientConsultThreadCopy } from '@/lib/brand/defaultClientConsultThreadCopy'
 import { answerConsultInspirationQuestion } from '@/lib/consult/inspirationContract'
 import {
@@ -172,6 +173,7 @@ function thread(consultSessionId: string) {
     copy,
     captureCopy: defaultClientConsultCaptureCopy,
     inspirationCopy: defaultClientConsultInspirationCopy,
+    planDiffCopy: defaultClientConsultPlanDiffCopy,
   })
 }
 

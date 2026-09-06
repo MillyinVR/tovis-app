@@ -15,6 +15,7 @@
 import type {
   ConsultCaptureStateDTO,
   ConsultInspirationStateDTO,
+  ConsultPlanDiffEntryDTO,
   ConsultSessionLookupDTO,
   ConsultThreadDTO,
   ConsultThreadMessageDTO,
@@ -520,6 +521,49 @@ function threadEarlyPhotoMessage(
   }
 }
 
+/** P7a-3 — the plan card and one PLAN_UPDATE bubble per version after the first. */
+function planMessages(plan: {
+  version: number
+  updatePending?: boolean
+  updates?: Array<{ version: number; changes: ConsultPlanDiffEntryDTO[] }>
+}): ConsultThreadMessageDTO[] {
+  const updating = plan.updatePending === true
+  return [
+    {
+      kind: 'PLAN',
+      id: 'plan',
+      author: 'APP',
+      state: 'DONE',
+      text: updating
+        ? 'You changed something, so I’m having another look. One minute.'
+        : 'Here’s where you’re starting from and what it would take. These are things to talk through with Susie, not promises.',
+      run: null,
+      results: null,
+      awaitingStart: false,
+      schemaVersion: 4,
+      promptVersion: 'service-analysis-v5',
+      planVersion: plan.version,
+      updatePending: updating,
+    },
+    ...(plan.updates ?? []).map(
+      (update): ConsultThreadMessageDTO => ({
+        kind: 'PLAN_UPDATE',
+        id: `plan-update:rev_${update.version}`,
+        author: 'APP',
+        state: 'DONE',
+        text:
+          update.changes.length > 0
+            ? 'Your plan moved. Here’s what changed:'
+            : 'I looked again with what you added — the plan still holds. Nothing to change.',
+        planVersion: update.version,
+        previousPlanVersion: update.version - 1,
+        changes: update.changes,
+        createdAt: '2026-09-06T10:14:00.000Z',
+      }),
+    ),
+  ]
+}
+
 export function threadFixture(args: {
   inspiration: ConsultInspirationStateDTO
   /** Force particular slots to a state, e.g. the selfie not yet sent. */
@@ -528,6 +572,21 @@ export function threadFixture(args: {
   /** P7a-1: the early photo's slot, or null for "not taken yet". */
   earlyPhoto?: ConsultCaptureStateDTO['earlyPhoto']
   status?: ConsultThreadDTO['status']
+  /**
+   * P7a-3: a finished, VERSIONED plan.
+   *
+   * `changes` empty is a real case with its own copy — a rerun that reached the
+   * same answer — so it is representable here rather than being conflated with
+   * "no bubble".
+   */
+  plan?: {
+    version: number
+    updatePending?: boolean
+    updates?: Array<{
+      version: number
+      changes: ConsultPlanDiffEntryDTO[]
+    }>
+  }
 }): ConsultThreadDTO {
   const photos = threadPhotoMessages(captureState, args.slotOverrides)
   const cards = args.inspiration.cards ?? []
@@ -586,6 +645,11 @@ export function threadFixture(args: {
       text: 'Now a few of you, in daylight if you can.',
     },
     ...photos,
+    // P7a-3 — the finished plan, and the version bubbles after it.
+    //
+    // Appended only when the caller asks for a plan, so every existing spec
+    // keeps the thread it had: those describe a consult that has not run yet.
+    ...(args.plan ? planMessages(args.plan) : []),
   ]
 
   return {

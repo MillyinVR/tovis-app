@@ -498,7 +498,7 @@ describe('the proposal a client is shown', () => {
 
     // The estimate itself is unchanged and still priced — B3's honest
     // pro-facing answer.
-    const estimate = await db.consultServiceEstimate.findUniqueOrThrow({
+    const estimate = await db.consultServiceEstimate.findFirstOrThrow({
       where: { consultSessionId: consultId },
       select: { status: true },
     })

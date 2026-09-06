@@ -29,8 +29,10 @@ import { safeError } from '@/lib/security/logging'
 
 import {
   executeConsultAnalysisRun,
+  startConsultAnalysisRerun,
   type ConsultAnalysisRunOutcome,
 } from './analysisContract'
+import { dueConsultRerunSessionIds } from './analysisRerun'
 import { dueConsultAnalysisRunIds } from './analysisRun'
 import { notifyConsultAnalysisRunSettled } from './analysisNotifications'
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
@@ -38,6 +40,30 @@ import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotifica
 export type ProcessConsultAnalysisRunsResult = {
   scannedCount: number
   outcomes: ConsultAnalysisRunOutcome[]
+  /** P7a-3: debounced reruns this tick turned into queued runs. */
+  promotedRerunCount: number
+}
+
+/**
+ * P7a-3: turn debounced rerun requests into runs, before draining.
+ *
+ * Before, not after, and that is the whole reason it lives here: a run
+ * promoted at the top of this function is due at the bottom of it, so a client
+ * who stopped editing ninety seconds ago gets her update on THIS tick rather
+ * than waiting a second minute for the next one.
+ *
+ * Every refusal is ordinary — she is out of versions, her photos expired, her
+ * appointment started while the debounce ran — so none of them is an error
+ * here. The thread reads the same state and says which one it is.
+ */
+async function promoteDueConsultReruns(now: Date, take: number): Promise<number> {
+  const sessionIds = await dueConsultRerunSessionIds({ now, take })
+  let promoted = 0
+  for (const consultSessionId of sessionIds) {
+    const result = await startConsultAnalysisRerun({ consultSessionId, now })
+    if (result.started) promoted += 1
+  }
+  return promoted
 }
 
 /**
@@ -49,6 +75,7 @@ export async function processConsultAnalysisRuns(args?: {
 }): Promise<ProcessConsultAnalysisRunsResult> {
   const now = args?.now ?? new Date()
   const take = Math.max(1, Math.min(3, Math.trunc(args?.take ?? 1)))
+  const promotedRerunCount = await promoteDueConsultReruns(now, take)
   const runIds = await dueConsultAnalysisRunIds({ now, take })
 
   const outcomes: ConsultAnalysisRunOutcome[] = []
@@ -71,7 +98,7 @@ export async function processConsultAnalysisRuns(args?: {
   // whole reason those rows exist.
   if (settled) kickNotificationDrain()
 
-  return { scannedCount: runIds.length, outcomes }
+  return { scannedCount: runIds.length, outcomes, promotedRerunCount }
 }
 
 /**

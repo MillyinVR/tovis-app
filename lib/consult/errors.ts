@@ -15,6 +15,20 @@ export type ConsultWriteErrorCode =
   | 'GOAL_DIRECTION_UNRESOLVED'
   | 'IDEMPOTENCY_CONFLICT'
   | 'BOOKING_INELIGIBLE'
+  // P7a-3. The consult's appointment has started (or is over), so nothing more
+  // may be added to it. Distinct from BOOKING_INELIGIBLE, which is the pilot's
+  // scope rule and reads as "unavailable"; this one is the ordinary end of a
+  // living document's life and the client is told so in the app's own voice.
+  | 'APPOINTMENT_STARTED'
+  // P7a-3. A rerun was asked for on a consult whose raw photos are gone — the
+  // client did not opt into chart copy, so completion purged them. Nothing is
+  // silently reused (Part 0 rule 4): she is asked for a new photo instead.
+  | 'ANALYSIS_PHOTOS_EXPIRED'
+  // P7a-3. This consult has already had its allowance of reruns.
+  | 'ANALYSIS_RERUN_LIMIT_REACHED'
+  // P7a-3. A finalize whose plan version is no longer the next one — a newer
+  // run published while this one was still with the provider.
+  | 'ANALYSIS_SUPERSEDED'
   | 'CAPTURE_PACK_VERSION_MISMATCH'
   | 'CAPTURE_SCHEMA_VERSION_MISMATCH'
   | 'CAPTURE_INVALID_SLOT'

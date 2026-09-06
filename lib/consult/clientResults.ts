@@ -14,7 +14,8 @@ import { prisma } from '@/lib/prisma'
 
 import { isAiConsultC7ExposureEnabledForPro } from './access'
 import { requireCurrentConsultAgreementAcceptances } from './agreementContract'
-import { CONSULT_ANCHOR_SELECT, evaluateConsultAnchor } from './anchor'
+import { evaluateConsultAnchorScope } from './anchor'
+import { CONSULT_OPEN_WINDOW_SELECT } from './openWindow'
 import {
   ImmutableConsultResultError,
   loadLatestImmutableConsultResult,
@@ -43,7 +44,7 @@ const CLIENT_RESULT_SCOPE_SELECT = {
   id: true,
   status: true,
   client: { select: { userId: true } },
-  ...CONSULT_ANCHOR_SELECT,
+  ...CONSULT_OPEN_WINDOW_SELECT,
 } satisfies Prisma.ConsultSessionSelect
 
 type ClientResultScope = Prisma.ConsultSessionGetPayload<{
@@ -84,9 +85,12 @@ async function requireAuthorizedClientResultScope(
   if (session.status !== ConsultSessionStatus.COMPLETED) {
     throw new ClientConsultResultsError('UNAVAILABLE')
   }
-  const anchor = evaluateConsultAnchor(session, args.now ?? new Date())
-  if (!anchor.eligible) {
-    throw new ClientConsultResultsError(anchor.hidden ? 'HIDDEN' : 'UNAVAILABLE')
+  // P7a-3: SCOPE only. Her plan stays readable after the appointment — the
+  // consult stops taking INPUT then, which is a different question and is
+  // asked on the write paths.
+  const scope = evaluateConsultAnchorScope(session)
+  if (!scope.eligible) {
+    throw new ClientConsultResultsError(scope.hidden ? 'HIDDEN' : 'UNAVAILABLE')
   }
   try {
     await requireCurrentConsultAgreementAcceptances(tx, session.id)

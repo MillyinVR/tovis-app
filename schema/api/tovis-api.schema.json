@@ -7114,7 +7114,11 @@
         "CONSULT_INSPIRATION_QUESTION_OUT_OF_ORDER",
         "CONSULT_INSPIRATION_ANALYSIS_UNAVAILABLE",
         "CONSULT_INSPIRATION_ANALYSIS_UNREADABLE",
-        "CONSULT_LOOK_NOT_CONSULTABLE"
+        "CONSULT_LOOK_NOT_CONSULTABLE",
+        "CONSULT_APPOINTMENT_STARTED",
+        "CONSULT_ANALYSIS_PHOTOS_EXPIRED",
+        "CONSULT_ANALYSIS_RERUN_LIMIT_REACHED",
+        "CONSULT_ANALYSIS_SUPERSEDED"
       ],
       "type": "string"
     },
@@ -10924,6 +10928,36 @@
       ],
       "type": "object"
     },
+    "ConsultPlanDiffEntryDTO": {
+      "description": "One line of a plan diff, in the client's language.\n\n`label` is the thing that changed (\"Sessions\", \"What we'd do first\"), `from` and `to` are its values. Never a field path: this is read by a person in bed at eleven at night, not by an engineer reading a changelog.",
+      "properties": {
+        "from": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "key": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "to": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "key",
+        "label",
+        "from",
+        "to"
+      ],
+      "type": "object"
+    },
     "ConsultProBriefDTO": {
       "properties": {
         "achievabilityDirection": {
@@ -10987,6 +11021,16 @@
             "string",
             "null"
           ]
+        },
+        "planChanges": {
+          "items": {
+            "$ref": "#/definitions/ConsultPlanDiffEntryDTO"
+          },
+          "type": "array"
+        },
+        "planVersion": {
+          "description": "P7a-3 — which plan version this brief is, and what changed to get here.\n\nOPTIONAL on the wire for the same reason `serviceEstimate` is: the published schema grows by addition only and shipped iOS fixtures stay valid. `planVersion` is 1 for a consult that has never been reworked, and `planChanges` is then empty — there is nothing before it to differ from.\n\n🔴 The diff is against the PREVIOUS version, not against the pro's own adjustments. Carrying those forward is P10's job and is a different question; this one answers \"what did your client change since you last looked?\".",
+          "type": "number"
         },
         "professionalId": {
           "type": "string"
@@ -12094,6 +12138,9 @@
           "$ref": "#/definitions/ConsultThreadPlanMessageDTO"
         },
         {
+          "$ref": "#/definitions/ConsultThreadPlanUpdateMessageDTO"
+        },
+        {
           "$ref": "#/definitions/ConsultThreadBookingMessageDTO"
         }
       ]
@@ -12169,6 +12216,10 @@
           "const": "PLAN",
           "type": "string"
         },
+        "planVersion": {
+          "description": "P7a-3: which plan version `results` is. 1 for the first analysis, 2 after the first rerun. Zero while none exists.\n\n🔴 OPTIONAL on the wire, like `serviceEstimate` and `inspirationAnalysis` before it, and for a reason that is not cosmetic: the generator marks a required field REQUIRED, and tovis-ios CI validates its fixtures against this repo's schema on `main`. A required field here reddens iOS main the instant this merges — and since the same change adds a new message KIND (which cannot validate against the OLD schema either), the two repos deadlock: neither can land first. Optional breaks the cycle, and it is the convention every field added since P5a already follows.\n\nThe server always sends both.",
+          "type": "number"
+        },
         "promptVersion": {
           "type": [
             "string",
@@ -12209,6 +12260,10 @@
         },
         "text": {
           "type": "string"
+        },
+        "updatePending": {
+          "description": "P7a-3: an input changed after this version was built, so a new one is coming. The card says so instead of showing a plan the client already knows is out of date. Optional on the wire for the reason above.",
+          "type": "boolean"
         }
       },
       "required": [
@@ -12222,6 +12277,57 @@
         "awaitingStart",
         "schemaVersion",
         "promptVersion"
+      ],
+      "type": "object"
+    },
+    "ConsultThreadPlanUpdateMessageDTO": {
+      "description": "P7a-3 — \"your plan changed, and here is what changed\".\n\nOne bubble per version after the first. It carries the DIFF rather than the new plan: the plan card above already shows the current version, and a client scrolling back needs to know what moved, not to read the whole thing again.\n\n🔴 `changes` is empty on a rerun that produced the same answer, and the copy says so. A rerun that changes nothing is a real and reassuring outcome — \"we looked again and it still holds\" — and hiding it would make the thread look like it ignored her edit.",
+      "properties": {
+        "author": {
+          "const": "APP",
+          "type": "string"
+        },
+        "changes": {
+          "items": {
+            "$ref": "#/definitions/ConsultPlanDiffEntryDTO"
+          },
+          "type": "array"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "PLAN_UPDATE",
+          "type": "string"
+        },
+        "planVersion": {
+          "description": "The version this bubble announces. Always >= 2.",
+          "type": "number"
+        },
+        "previousPlanVersion": {
+          "description": "The version it is being compared against.",
+          "type": "number"
+        },
+        "state": {
+          "$ref": "#/definitions/ConsultThreadMessageStateDTO"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "author",
+        "state",
+        "text",
+        "planVersion",
+        "previousPlanVersion",
+        "changes",
+        "createdAt"
       ],
       "type": "object"
     },

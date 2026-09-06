@@ -46,6 +46,31 @@ function sourceAnalysisId(payload: Prisma.JsonValue): string | null {
     : null
 }
 
+/**
+ * The INTAKE revision a stored brief was built from.
+ *
+ * P7a-3: this used to be "the latest intake", and that was only ever right
+ * because a consult could hold one plan. 🔴 The moment a client edits an answer
+ * on a completed consult — which is the entire point of the living document —
+ * "latest" stops being the revision this brief was pinned to, the byte
+ * comparison below fails, and her whole plan disappears off both screens until
+ * the rerun lands. It is pinned IN the payload; read it from there.
+ */
+function briefIntakeRevisionId(payload: Prisma.JsonValue): string | null {
+  return isRecord(payload) && typeof payload.intakeRevisionId === 'string'
+    ? payload.intakeRevisionId
+    : null
+}
+
+/** The INSPIRATION revision a stored brief was built from. Same rule. */
+function briefInspirationRevisionId(payload: Prisma.JsonValue): string | null {
+  if (!isRecord(payload)) return null
+  const inspiration = payload.inspiration
+  return isRecord(inspiration) && typeof inspiration.revisionId === 'string'
+    ? inspiration.revisionId
+    : null
+}
+
 export type ImmutableConsultResult = {
   briefRevisionId: string
   briefRevision: number
@@ -92,10 +117,7 @@ export async function loadLatestImmutableConsultResult(
   const analysis = selectLatestConsultRevision(
     revisions.filter((revision) => revision.kind === ConsultRevisionKind.ANALYSIS),
   )
-  const intake = selectLatestConsultRevision(
-    revisions.filter((revision) => revision.kind === ConsultRevisionKind.INTAKE),
-  )
-  if (!analysis || !intake) throw new ImmutableConsultResultError()
+  if (!analysis) throw new ImmutableConsultResultError()
 
   const brief = selectLatestConsultRevision(
     revisions.filter(
@@ -109,6 +131,19 @@ export async function loadLatestImmutableConsultResult(
     ),
   )
   if (!brief) throw new ImmutableConsultResultError()
+
+  // The intake this BRIEF was built from — not the newest one the client has
+  // since written. A brief is an immutable artefact and must be interpreted
+  // against its own inputs; falling back to the latest keeps every brief
+  // written before the pin existed projecting exactly as it did.
+  const pinnedIntakeId = briefIntakeRevisionId(brief.payload)
+  const intakeRevisions = revisions.filter(
+    (revision) => revision.kind === ConsultRevisionKind.INTAKE,
+  )
+  const intake = pinnedIntakeId
+    ? (intakeRevisions.find((revision) => revision.id === pinnedIntakeId) ?? null)
+    : selectLatestConsultRevision(intakeRevisions)
+  if (!intake) throw new ImmutableConsultResultError()
 
   const normalizedIntake = normalizeConsultIntakePayload(intake.payload)
   if (!normalizedIntake?.complete) throw new ImmutableConsultResultError()
@@ -150,11 +185,17 @@ export async function loadLatestImmutableConsultResult(
         },
       }
     } else {
-      const inspirationRevision = selectLatestConsultRevision(
-        revisions.filter(
-          (revision) => revision.kind === ConsultRevisionKind.INSPIRATION,
-        ),
+      // Pinned, for the same reason the intake is: answering another card on
+      // a finished consult must not take her plan off the screen.
+      const pinnedInspirationId = briefInspirationRevisionId(brief.payload)
+      const inspirationRevisions = revisions.filter(
+        (revision) => revision.kind === ConsultRevisionKind.INSPIRATION,
       )
+      const inspirationRevision = pinnedInspirationId
+        ? (inspirationRevisions.find(
+            (revision) => revision.id === pinnedInspirationId,
+          ) ?? null)
+        : selectLatestConsultRevision(inspirationRevisions)
       if (!inspirationRevision) throw new ImmutableConsultResultError()
       const inspiration = normalizeStoredInspirationPayload(
         inspirationRevision.payload,

@@ -74,6 +74,9 @@ export const CONSULT_ANALYSIS_RUN_SELECT = {
   promptVersion: true,
   requestHash: true,
   photoCount: true,
+  /// P7a-3: which plan version this run publishes. On the wire too — the
+  /// thread's "plan updated" bubble names it.
+  planVersion: true,
   runAt: true,
   claimedAt: true,
   startedAt: true,
@@ -148,7 +151,15 @@ export async function createLockedConsultAnalysisRun(
     promptVersion: string
     requestHash: string
     photoCount: number
+    /** P7a-3: 1 for the first analysis, N for the (N-1)th rerun. */
+    planVersion: number
     now: Date
+    /**
+     * P7a-3: when the run becomes claimable. The first analysis is immediate;
+     * a debounced rerun is deliberately later, so a burst of edits collapses
+     * into one paid call.
+     */
+    runAt?: Date
   },
 ): Promise<ConsultAnalysisRunRow> {
   return tx.consultAnalysisRun.create({
@@ -159,7 +170,8 @@ export async function createLockedConsultAnalysisRun(
       promptVersion: args.promptVersion,
       requestHash: args.requestHash,
       photoCount: args.photoCount,
-      runAt: args.now,
+      planVersion: args.planVersion,
+      runAt: args.runAt ?? args.now,
     },
     select: CONSULT_ANALYSIS_RUN_SELECT,
   })
@@ -274,7 +286,17 @@ export async function completeLockedConsultAnalysisRun(
   if (updated.count !== 1) {
     // The lease was stolen mid-finalize. Rolling the whole transaction back is
     // the only safe answer: the other worker is about to write the same
-    // artefact, and `one_analysis_per_session` will let exactly one of us win.
+    // artefact and exactly one of us may win.
+    //
+    // 🔴 P7a-3 changed WHICH constraint decides that. It used to be
+    // `ConsultRevision_one_analysis_per_session`, which a consult that may hold
+    // several plan versions can no longer have. The winner is now picked by
+    // `ConsultAnalysisRun_one_completed_run_per_plan_version` — unique over
+    // (consultSessionId, planVersion) among COMPLETED runs — plus the explicit
+    // version pin `executeConsultAnalysisRun` applies before it writes. Two
+    // workers on one stolen lease still produce one artefact; a worker holding
+    // an OLDER version now loses on the pin instead of on a hash that only
+    // happened to differ.
     throw new Error(
       `consult analysis run ${args.runId} was not RUNNING at finalize`,
     )

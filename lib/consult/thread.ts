@@ -30,6 +30,7 @@ import { BookingStatus, ConsultSessionStatus } from '@prisma/client'
 import type {
   BrandClientConsultCaptureCopy,
   BrandClientConsultInspirationCopy,
+  BrandClientConsultPlanDiffCopy,
   BrandClientConsultThreadCopy,
 } from '@/lib/brand/types'
 import type {
@@ -47,6 +48,16 @@ import {
   professionalPublicDisplayNameSelect,
 } from '@/lib/privacy/professionalDisplayName'
 import { prisma } from '@/lib/prisma'
+
+import {
+  loadConsultPlanVersions,
+  resolveConsultRerunState,
+} from './analysisRerun'
+import {
+  CONSULT_OPEN_WINDOW_SELECT,
+  resolveConsultInputWindow,
+} from './openWindow'
+import { diffConsultPlans } from './planDiff'
 
 import { loadConsultAgreementState } from './agreementContract'
 import {
@@ -263,6 +274,10 @@ function inspirationCardMessage(args: {
  * her business name because the consult wrote its own branch.
  */
 const THREAD_SESSION_SELECT = {
+  // P7a-3: the input-window rule's own select, so the thread can SAY that the
+  // appointment closed the document rather than only refusing a tap. Spread
+  // first — the narrower `booking` below is widened by it, not the reverse.
+  ...CONSULT_OPEN_WINDOW_SELECT,
   id: true,
   status: true,
   clientId: true,
@@ -274,7 +289,22 @@ const THREAD_SESSION_SELECT = {
   // B6: the look-based flow never did, so the client could not answer questions
   // about it), and that has to work at CONSENT_REQUIRED — before any intake
   // state exists to carry it.
-  booking: { select: { serviceId: true, service: { select: { name: true } } } },
+  booking: {
+    select: {
+      ...CONSULT_OPEN_WINDOW_SELECT.booking.select,
+      serviceId: true,
+      // 🔴 The nested select is MERGED, not replaced. Spreading the outer one
+      // and then writing `service:` again silently drops the category fields
+      // the anchor rule reads — the compiler caught it, which is the whole
+      // reason these selects are spread rather than hand-listed.
+      service: {
+        select: {
+          ...CONSULT_OPEN_WINDOW_SELECT.booking.select.service.select,
+          name: true,
+        },
+      },
+    },
+  },
   // The SSOT's OWN select, not a copy of its field list: the display-name rule
   // and the columns it needs travel together, and a hand-rolled twin here is
   // how a pro who shows as @handle ends up named by her business name.
@@ -341,6 +371,13 @@ export async function loadConsultThread(args: {
    * enums.
    */
   inspirationCopy: BrandClientConsultInspirationCopy
+  /**
+   * P7a-3: the plan-diff labels. Its own table because the PRO's Brief diff
+   * reads the same one — the client being told "one visit → two visits" while
+   * her pro reads something else is the failure a versioned Brief exists to
+   * prevent.
+   */
+  planDiffCopy: BrandClientConsultPlanDiffCopy
   now?: Date
 }): Promise<ConsultThreadDTO> {
   const now = args.now ?? new Date()
@@ -389,6 +426,39 @@ export async function loadConsultThread(args: {
     actorUserId: args.actorUserId,
     now,
   }
+
+  // P7a-3: the plan is VERSIONED now, and the thread has to say which version
+  // it is showing and whether a newer one is on its way. Read UP HERE because
+  // the steps above the plan need the answer too — see `hasPlan`.
+  const rerun = await resolveConsultRerunState(prisma, session.id)
+  const versions = await loadConsultPlanVersions(session.id)
+  /**
+   * P7a-3 — has the appointment closed the document?
+   *
+   * 🔴 The thread has to SAY this, not just refuse a tap with a 409. A client
+   * who opens her consult in the chair and finds every control silently inert
+   * has been given a broken screen; one who is told "you're in Susie's chair
+   * now, this is closed" has been given an ending. Same rule the writes use
+   * (lib/consult/openWindow.ts), so the sentence and the refusal cannot drift.
+   */
+  const inputWindow = resolveConsultInputWindow(session, now)
+  const appointmentStarted =
+    !inputWindow.open && inputWindow.reason === 'APPOINTMENT_STARTED'
+  /**
+   * 🔴 Once a plan exists, NOTHING earlier in the thread is still "open".
+   *
+   * P7a-3 made intake and capture readable after completion, which is what
+   * stopped the thread eating its own history — but the states those steps were
+   * given were written for a world where a completed consult never rendered
+   * them at all. Left alone, a finished consult resumed onto the photo request
+   * for a shot she skipped weeks ago, and `nextOpenMessageId` pointed at it.
+   *
+   * She can still act on any of them: BLOCKED renders and is tappable on both
+   * clients (see the photo-pack comment below). What it is not is the place
+   * reopening the thread lands — that is the plan, which is the thing she came
+   * back for.
+   */
+  const hasPlan = versions.length > 0
 
   // ── The booking, if she already took the spark ───────────────────────────
   //
@@ -542,14 +612,18 @@ export async function loadConsultThread(args: {
   const capture = await optionalStage(() => loadConsultCaptureState(stageArgs))
   if (capture) {
     const early = capture.earlyPhoto
-    const settled = early?.state === 'ACCEPTED'
+    // 🔴 PURGED counts as settled. A purged capture is one that WAS accepted and
+    // has since been swept — the retention window closed, or the client did not
+    // opt into chart copy — and rendering it as an outstanding request would ask
+    // her again for the photo that unlocked her booking.
+    const settled = early?.state === 'ACCEPTED' || early?.state === 'PURGED'
     out.push({
       kind: 'PHOTO_REQUEST',
       id: `photo:${CONSULT_EARLY_PHOTO_SHOT_KEY}`,
       author: 'APP',
-      // The only step that can be open before the booking. It is never BLOCKED:
-      // there is nothing ahead of it to wait for.
-      state: settled ? 'DONE' : 'OPEN',
+      // The only step that can be open before the booking; there is nothing
+      // ahead of it to wait for. Once a plan exists it is history, not a step.
+      state: settled ? 'DONE' : hasPlan ? 'BLOCKED' : 'OPEN',
       shot: EARLY_PHOTO_SHOT_DTO,
       shotPackVersion: CONSULT_EARLY_PHOTO_PACK_VERSION,
       schemaVersion: capture.shotPack.schemaVersion,
@@ -595,7 +669,14 @@ export async function loadConsultThread(args: {
         kind: 'QUESTION',
         id: `intake:${question.key}`,
         author: 'APP',
-        state: question.key === nextKey ? 'OPEN' : 'DONE',
+        // An unanswered OPTIONAL question on a consult that already has a plan
+        // is history she may still fill in, not a step she owes anyone.
+        state:
+          question.key !== nextKey
+            ? 'DONE'
+            : hasPlan
+              ? 'BLOCKED'
+              : 'OPEN',
         question,
         answer,
         packVersion: intake.questionPack.version,
@@ -640,11 +721,12 @@ export async function loadConsultThread(args: {
         rawExpiresAt: null,
         purgedAt: null,
       }
-      const settled = slot.state === 'ACCEPTED'
+      // PURGED is settled here for the same reason it is on the early photo.
+      const settled = slot.state === 'ACCEPTED' || slot.state === 'PURGED'
       // Only the FIRST outstanding photo is the open step. The rest are still
       // requests — they render, and she can jump to any of them, but resume
-      // lands on one place.
-      const open = !settled && firstOpenShot
+      // lands on one place. Once a plan exists, none of them is that place.
+      const open = !settled && firstOpenShot && !hasPlan
       if (open) firstOpenShot = false
       out.push({
         kind: 'PHOTO_REQUEST',
@@ -681,25 +763,92 @@ export async function loadConsultThread(args: {
   if (analysis || results) {
     const awaitingStart =
       analysis?.status === ConsultSessionStatus.ANALYSIS_PENDING
+    // 🔴 An update in flight outranks "here is your plan". Showing planReady
+    // over a plan she has already told us is out of date is the thread lying
+    // about the most expensive thing in it.
+    const updating = rerun.pending && Boolean(results)
     out.push({
       kind: 'PLAN',
       id: 'plan',
       author: 'APP',
       state: results ? 'DONE' : awaitingStart ? 'OPEN' : 'BLOCKED',
       text: fillConsultThreadCopy(
-        results
-          ? copy.planReady
-          : awaitingStart
-            ? copy.planAwaitingStart
-            : copy.planRunning,
+        updating
+          ? copy.planUpdating
+          : results
+            ? copy.planReady
+            : awaitingStart
+              ? copy.planAwaitingStart
+              : copy.planRunning,
         { pro },
       ),
       run: analysis?.run ?? null,
       results,
       awaitingStart,
+      planVersion: versions.length,
+      updatePending: rerun.pending,
       schemaVersion: analysis?.schemaVersion ?? null,
       promptVersion: analysis?.promptVersion ?? null,
     })
+
+    // ── "Plan updated", one bubble per version after the first ────────────
+    //
+    // AFTER the plan card, which is the thread's ordering rule everywhere: the
+    // card is the current state, and what follows it is what has happened
+    // since. Scrolling back through them reads as the history of a plan being
+    // worked out together, which is exactly what it is.
+    //
+    // 🔴 An empty diff still renders, with its own sentence. A rerun that
+    // changed nothing is a real outcome — "I looked again and it still holds"
+    // — and swallowing it would make her edit look ignored.
+    for (let index = 1; index < versions.length; index += 1) {
+      const previous = versions[index - 1]
+      const current = versions[index]
+      // A null payload only happens on the single-version fast path, which this
+      // loop never enters — but skipping is the honest guard, not a cast.
+      if (!previous?.analysis || !current?.analysis) continue
+      const changes = diffConsultPlans({
+        previous: previous.analysis,
+        next: current.analysis,
+        copy: args.planDiffCopy,
+      })
+      out.push({
+        kind: 'PLAN_UPDATE',
+        id: `plan-update:${current.revisionId}`,
+        author: 'APP',
+        state: 'DONE',
+        text: fillConsultThreadCopy(
+          changes.length > 0 ? copy.planUpdated : copy.planUnchanged,
+          { pro },
+        ),
+        planVersion: index + 1,
+        previousPlanVersion: index,
+        changes,
+        createdAt: current.createdAt.toISOString(),
+      })
+    }
+
+    // Why no more updates are coming, when that is the case. Said once, at the
+    // bottom, rather than as a disabled control she has to go looking for.
+    if (!rerun.moreVersionsAvailable && versions.length > 1) {
+      out.push(
+        text(
+          'plan-update-limit',
+          fillConsultThreadCopy(copy.planUpdateLimitReached, { pro }),
+        ),
+      )
+    } else if (rerun.pending && rerun.photosExpired) {
+      out.push(text('plan-needs-photo', copy.planNeedsPhoto))
+    }
+  }
+
+  if (appointmentStarted) {
+    out.push(
+      text(
+        'appointment-started',
+        fillConsultThreadCopy(copy.appointmentStarted, { pro }),
+      ),
+    )
   }
 
   // ── Booked, and everything after it is prep ──────────────────────────────

@@ -55,6 +55,8 @@ async function runJob(req: Request) {
 
   return jsonOk({
     scannedCount: result.scannedCount,
+    // P7a-3: debounced reruns this tick promoted into queued runs.
+    promotedRerunCount: result.promotedRerunCount,
     durationMs: Date.now() - startedAtMs,
     outcomes: result.outcomes.map((outcome) => ({
       runId: outcome.runId,

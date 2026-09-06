@@ -26,6 +26,7 @@ import * as Sentry from '@sentry/nextjs'
 import { useRouter } from 'next/navigation'
 
 import type { BrandClientConsultThreadCopy } from '@/lib/brand/types'
+import { fillConsultThreadCopy } from '@/lib/consult/threadCopy'
 import { CONSULT_EARLY_PHOTO_SHOT_KEY } from '@/lib/consult/capture/earlyPhoto'
 import { CONSULT_CAPTURE_MAX_BYTES } from '@/lib/consult/capturePack'
 import {
@@ -47,6 +48,7 @@ import type {
   ConsultThreadMessageDTO,
   ConsultThreadPhotoRequestMessageDTO,
   ConsultThreadPlanMessageDTO,
+  ConsultThreadPlanUpdateMessageDTO,
   ConsultThreadQuestionMessageDTO,
 } from '@/lib/dto/consult'
 import RemoteImage from '@/app/_components/media/RemoteImage'
@@ -805,6 +807,8 @@ export default function ClientConsultFlow({
       <CapturePrepControls
         thread={thread}
         busy={busy}
+        copy={copy}
+        pro={thread.professionalDisplayName}
         onChartCopy={setChartCopy}
         onProceed={proceedWithAccepted}
       />
@@ -949,7 +953,62 @@ function ConsultThreadMessage({
           onRefresh={onRefresh}
         />
       )
+
+    case 'PLAN_UPDATE':
+      return <PlanUpdateMessage message={message} />
   }
+}
+
+/**
+ * P7a-3 — "your plan moved, and here is what changed".
+ *
+ * A bubble, not a card: it is the app telling her something, not asking. The
+ * diff rows sit inside it as a small table so a change she cares about
+ * ("one visit → more than one visit") is legible at a glance, which is the
+ * whole reason the server sends labelled rows rather than prose.
+ *
+ * 🔴 An empty `changes` list still renders. The server sends its own sentence
+ * for that case ("I looked again — the plan still holds"), and swallowing the
+ * bubble would make her edit look ignored.
+ */
+function PlanUpdateMessage({
+  message,
+}: {
+  message: ConsultThreadPlanUpdateMessageDTO
+}) {
+  return (
+    <ThreadBubble author={message.author}>
+      <div
+        className="grid gap-2"
+        data-testid="consult-plan-update"
+        data-plan-version={message.planVersion}
+      >
+        <span>{message.text}</span>
+        {message.changes.length > 0 ? (
+          <dl className="grid gap-1.5 rounded-xl bg-surfaceGlass/10 p-2.5">
+            {message.changes.map((change) => (
+              <div
+                key={change.key}
+                className="grid gap-0.5"
+                data-testid="consult-plan-change"
+                data-change-key={change.key}
+              >
+                <dt className="text-[11px] font-semibold text-textMuted">
+                  {change.label}
+                </dt>
+                <dd className="text-[12.5px] font-semibold text-textPrimary">
+                  <span className="text-textMuted line-through">
+                    {change.from ?? '—'}
+                  </span>{' '}
+                  &rarr; {change.to ?? '—'}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        ) : null}
+      </div>
+    </ThreadBubble>
+  )
 }
 
 function ConsentMessage({
@@ -1352,6 +1411,14 @@ function PlanMessage({
   return (
     <div className="grid gap-2">
       <ThreadBubble author="APP">{message.text}</ThreadBubble>
+      {/*
+        🔴 Only when the card has something IN it. `run`, `awaitingStart` and
+        `results` can all be falsy at once — a completed consult whose results
+        the serve gate declines to show — and the card then rendered as an empty
+        white box between two bubbles. Caught in a browser; invisible to every
+        test that asserts on text, because there is no text to assert on.
+      */}
+      {message.run || message.awaitingStart || message.results ? (
       <ThreadCard>
         {message.run ? (
           <AnalysisRunProgress
@@ -1385,6 +1452,7 @@ function PlanMessage({
           </div>
         ) : null}
       </ThreadCard>
+      ) : null}
     </div>
   )
 }
@@ -1430,11 +1498,15 @@ function PlanSummary({
 function CapturePrepControls({
   thread,
   busy,
+  copy,
+  pro,
   onChartCopy,
   onProceed,
 }: {
   thread: ConsultThreadDTO
   busy: boolean
+  copy: BrandClientConsultThreadCopy
+  pro: string
   onChartCopy: (optIn: boolean) => void
   onProceed: () => void
 }) {
@@ -1470,11 +1542,15 @@ function CapturePrepControls({
             disabled={busy}
             onChange={(event) => onChartCopy(event.target.checked)}
           />
+          {/*
+            🔴 From the copy table, and REWRITTEN by P7a-3. The shipped sentence
+            said "photos are deleted after analysis either way", which stopped
+            being true the day retention shipped: with this ticked they are kept
+            through the appointment so the plan can be reworked. A consent
+            control that misdescribes what it consents to is worse than none.
+          */}
           <span className="text-sm leading-6 text-textPrimary">
-            Keep these photos on my chart with my professional, so future
-            appointments can refer back to them. You can turn this off any time
-            before the analysis runs; otherwise photos are deleted after
-            analysis either way.
+            {fillConsultThreadCopy(copy.chartCopyLabel, { pro })}
           </span>
         </label>
       </ThreadCard>

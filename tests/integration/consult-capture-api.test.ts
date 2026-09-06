@@ -446,6 +446,24 @@ function validIssue(idempotencyKey: string, shotKey: string) {
   }
 }
 
+/**
+ * P7a-3 — the NO-CONSENT retention branch, stated rather than inherited.
+ *
+ * `chartCopyOptIn` defaults TRUE, and with it a completed analysis now KEEPS
+ * the captures it read (through the appointment plus fourteen days) so a rerun
+ * has something to look at. Every assertion in this file about completion
+ * purging raw objects is therefore an assertion about a client who declined —
+ * which is a real client and a rule worth holding, so it is pinned here instead
+ * of being deleted. The consent branch is proved in
+ * tests/integration/consult-lifecycle-open.test.ts.
+ */
+async function optOutOfChartCopy(sessionId: string): Promise<void> {
+  await db.consultSession.update({
+    where: { id: sessionId },
+    data: { chartCopyOptIn: false, chartCopyDecidedAt: new Date() },
+  })
+}
+
 async function createReadyConsult(
   label: string,
   answerOverrides: Record<string, string> = {},
@@ -1607,6 +1625,8 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
   it('runs one canonical C4 analysis for concurrent retries, resolves an active offering, and verifies raw purge', async () => {
     const consult = await createReadyConsult('analysis-success')
     authenticate(consult)
+    // This test verifies the RAW PURGE, so it is the no-consent branch (P7a-3).
+    await optOutOfChartCopy(consult.sessionId)
     await completeCapturePack(consult, 'analysis-success')
     const before = await db.consultSession.findUniqueOrThrow({
       where: { id: consult.sessionId },
@@ -2035,6 +2055,7 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
   it('keeps completed analysis durable and lets cleanup retry a failed post-commit purge', async () => {
     const consult = await createReadyConsult('analysis-purge-retry')
     authenticate(consult)
+    await optOutOfChartCopy(consult.sessionId)
     await completeCapturePack(consult, 'analysis-purge-retry')
     const capture = await db.consultCapture.findFirstOrThrow({
       where: {
@@ -3151,6 +3172,8 @@ describe('consult partial capture submission against PostgreSQL (Tori, 2026-08-2
     async () => {
       const consult = await createReadyConsult('partial-proceed')
       authenticate(consult)
+      // Asserts the post-analysis purge, so it is the no-consent branch (P7a-3).
+      await optOutOfChartCopy(consult.sessionId)
       await acceptShots(consult, 'partial-proceed', PARTIAL_SHOTS)
 
       // Below seven accepted shots there is no auto-advance.

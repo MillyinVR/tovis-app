@@ -153,7 +153,7 @@ describe('a look-anchored consult persists a line-item estimate', () => {
     const lookPostId = await createLook(db, fx.balayageServiceId)
     const sessionId = await runConsultToCompletion(db, lookPostId, 'priced')
 
-    const estimate = await db.consultServiceEstimate.findUniqueOrThrow({
+    const estimate = await db.consultServiceEstimate.findFirstOrThrow({
       where: { consultSessionId: sessionId },
       select: {
         status: true,
@@ -292,7 +292,7 @@ describe('a menu that cannot express the look', () => {
     const lookPostId = await createLook(db, fx.offMenuServiceId)
     const sessionId = await runConsultToCompletion(db, lookPostId, 'off-menu')
 
-    const estimate = await db.consultServiceEstimate.findUniqueOrThrow({
+    const estimate = await db.consultServiceEstimate.findFirstOrThrow({
       where: { consultSessionId: sessionId },
       select: { status: true, refusalCode: true, lines: { select: { id: true } } },
     })
@@ -332,7 +332,7 @@ describe('a pro with nothing bookable to size a duration against', () => {
       const sessionId = await runConsultToCompletion(db, lookPostId, 'no-location')
 
       expect(
-        await db.consultServiceEstimate.findUniqueOrThrow({
+        await db.consultServiceEstimate.findFirstOrThrow({
           where: { consultSessionId: sessionId },
           select: {
             status: true,
@@ -390,7 +390,7 @@ describe('a pro who only travels (the founder’s shape in prod)', () => {
       const lookPostId = await createLook(db, fx.balayageServiceId)
       const sessionId = await runConsultToCompletion(db, lookPostId, 'mobile-only')
 
-      const estimate = await db.consultServiceEstimate.findUniqueOrThrow({
+      const estimate = await db.consultServiceEstimate.findFirstOrThrow({
         where: { consultSessionId: sessionId },
         select: {
           status: true,

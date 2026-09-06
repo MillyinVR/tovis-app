@@ -35,7 +35,11 @@ import { prisma } from '@/lib/prisma'
 
 import { requireCurrentConsultAgreementAcceptances } from './agreementContract'
 import { isAiConsultC6ExposureEnabledForPro } from './access'
-import { CONSULT_ANCHOR_SELECT, evaluateConsultAnchor } from './anchor'
+import {
+  assertConsultInputOpen,
+  assertConsultReadableScope,
+  CONSULT_OPEN_WINDOW_SELECT,
+} from './openWindow'
 import { ConsultWriteError } from './errors'
 import {
   applyConsultInspirationReopen,
@@ -108,6 +112,13 @@ type ClientActor = { type: typeof ConsultActorType.CLIENT; id: string }
 const MUTABLE_STATUSES = new Set<ConsultSessionStatus>([
   ConsultSessionStatus.EARLY_PHOTO_READY,
   ConsultSessionStatus.MEDIA_READY,
+  // P7a-3: the prep cards stay answerable after the plan exists. Changing one
+  // is exactly the input a rerun is FOR — "actually, not the length, just the
+  // colour" is the most valuable thing a client can tell a pro, and until now
+  // the only moment she could say it was before she had seen anything.
+  ConsultSessionStatus.ANALYSIS_PENDING,
+  ConsultSessionStatus.ANALYZING,
+  ConsultSessionStatus.COMPLETED,
 ])
 const READABLE_STATUSES = new Set<ConsultSessionStatus>([
   ConsultSessionStatus.EARLY_PHOTO_READY,
@@ -127,17 +138,16 @@ const SCOPE_SELECT = {
   // that is how a pro who chose to show as @handle ends up named by her
   // business name on one screen out of ten.
   professional: { select: professionalPublicDisplayNameSelect },
-  ...CONSULT_ANCHOR_SELECT,
+  ...CONSULT_OPEN_WINDOW_SELECT,
   // The anchor rule reads the slug; the service profile — which decides WHICH
   // inspiration pack this consult serves — reads the family and the name as
   // well, so the wider select replaces the anchor's narrower one.
   serviceCategory: { select: CONSULT_SERVICE_PROFILE_CATEGORY_SELECT },
-  booking: {
-    select: {
-      totalDurationMinutes: true,
-      ...CONSULT_ANCHOR_SELECT.booking.select,
-    },
-  },
+  // P7a-3: `totalDurationMinutes` used to be added here for the inspiration
+  // use-expiry; the open-window select carries it now (the retention deadline
+  // measures from the END of the appointment), so this is one field in one
+  // place rather than two selects that must agree.
+  booking: { select: CONSULT_OPEN_WINDOW_SELECT.booking.select },
 } satisfies Prisma.ConsultSessionSelect
 
 type InspirationScope = Prisma.ConsultSessionGetPayload<{
@@ -236,19 +246,19 @@ async function requireScope(
   ) {
     throw new ConsultWriteError('NOT_FOUND', 'Not found.')
   }
-  const anchor = evaluateConsultAnchor(session, args.now)
-  if (!anchor.eligible) {
-    throw new ConsultWriteError(
-      anchor.hidden ? 'NOT_FOUND' : 'BOOKING_INELIGIBLE',
-      'Consult is unavailable for this booking.',
-    )
-  }
+  // P7a-3: SCOPE only. The appointment rule moved to the WRITE paths
+  // (`assertConsultInputOpen`) so that a consult which can no longer be changed
+  // can still be read — before this split, a passed appointment threw out of
+  // every stage loader and `optionalStage` erased the thread's own history.
+  assertConsultReadableScope(session)
   if (
     (args.mutation && !MUTABLE_STATUSES.has(session.status)) ||
     (!args.mutation && !READABLE_STATUSES.has(session.status))
   ) {
     throw new ConsultWriteError('INVALID_STATE', 'Inspiration is unavailable.')
   }
+  // P7a-3: one place, because this function already knows which callers write.
+  if (args.mutation) assertConsultInputOpen(session, args.now)
   return session
 }
 
@@ -514,6 +524,22 @@ export async function advanceLockedConsultToAnalysisIfReady(
   },
   options?: { minimumAcceptedShots?: number },
 ): Promise<boolean> {
+  // 🔴 P7a-3: only a consult that is still ON ITS WAY to the analysis advances.
+  //
+  // This is called from the capture-accept path, which a COMPLETED consult can
+  // now reach — she added a better photo to a plan she already has. Left alone
+  // it tried to run MEDIA_READY -> ANALYSIS_PENDING on a session that is
+  // COMPLETED, and the write boundary refused with "no longer in MEDIA_READY",
+  // turning a perfectly good new photograph into a failed upload.
+  //
+  // What her photo triggers instead is a debounced RERUN, recorded by the same
+  // caller a few lines earlier (lib/consult/analysisRerun.ts).
+  const advancing = await tx.consultSession.findUnique({
+    where: { id: args.consultSessionId },
+    select: { status: true },
+  })
+  if (advancing?.status !== ConsultSessionStatus.MEDIA_READY) return false
+
   try {
     await requireCompletedConsultInspiration(tx, args)
   } catch (error) {
