@@ -11,6 +11,7 @@ export function liveHomeFeatures(copy: BrandHomeCopy): BrandHomeFeature[] {
   return [
     ...copy.loop.steps,
     ...copy.clients.features,
+    copy.chart,
     // Spotlight rows are ordinary feature rows that have been promoted, so
     // they answer to this filter like any other. Both are rolling out today,
     // which is exactly why they must be listed here rather than skipped: the

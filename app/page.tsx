@@ -543,6 +543,58 @@ export default async function Home() {
         </div>
       </section>
 
+      {/* ── The chart ─────────────────────────────────────────────────
+          The one row on the page that compounds, so it gets a band rather
+          than a line in a list. The consent rule sits in the same band as the
+          benefit on purpose: this is the section where a reader decides
+          whether the accumulating history is a good thing. */}
+      <section className="border-y border-surfaceGlass/10 bg-[linear-gradient(160deg,rgb(var(--iris)/0.07),rgb(var(--accent-primary)/0.05))]">
+        <div className={`${SECTION} py-[clamp(48px,7vw,90px)]`}>
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] items-start gap-[clamp(28px,4vw,64px)]">
+            <div className="tv-reveal">
+              <div className="mb-3.5 flex flex-wrap items-center gap-2.5">
+                <Eyebrow className="text-iris">{copy.chart.label}</Eyebrow>
+                <StateChip state={copy.chart.state} legend={copy.legend} />
+              </div>
+              <h2 className="m-0 text-balance font-display text-[clamp(30px,3.6vw,52px)] font-bold leading-[1.02] tracking-[-0.045em]">
+                {copy.chart.title}{' '}
+                <span className="tv-plume-text">{copy.chart.titleAccent}</span>
+              </h2>
+            </div>
+
+            <div className="tv-reveal tv-delay-1">
+              <p className="m-0 max-w-[56ch] text-[15px] leading-[1.62] text-textSecondary sm:text-[16px]">
+                {copy.chart.body}
+              </p>
+              <p className="mb-0 mt-4 max-w-[56ch] text-[14.5px] leading-[1.6] text-textMuted">
+                {copy.chart.aside}
+              </p>
+
+              <dl className="m-0 mt-8 flex flex-col">
+                {copy.chart.points.map((point, index) => (
+                  <div
+                    key={point.label}
+                    className={[
+                      'grid gap-x-6 gap-y-1 border-t border-surfaceGlass/10 py-4 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]',
+                      index === copy.chart.points.length - 1
+                        ? 'border-b border-surfaceGlass/10'
+                        : '',
+                    ].join(' ')}
+                  >
+                    <dt className="font-mono text-[11px] uppercase tracking-[0.12em] text-textMuted">
+                      {point.label}
+                    </dt>
+                    <dd className="m-0 text-[15px] font-medium leading-snug text-textPrimary">
+                      {point.body}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* ── Spotlight ─────────────────────────────────────────────── */}
       <section className={`relative overflow-hidden ${SECTION} py-[clamp(52px,8vw,110px)]`}>
         <div aria-hidden="true" className="pointer-events-none absolute inset-0">
