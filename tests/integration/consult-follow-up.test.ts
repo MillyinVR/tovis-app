@@ -477,6 +477,37 @@ describe('🔴 the fallback, forced', () => {
   })
 })
 
+describe('🔴 the appointment closes the document', () => {
+  it('refuses a follow-up answer once the appointment has started', async () => {
+    const sessionId = await completedConsult('p5g-appt')
+    await generateConsultFollowUpRound(
+      { consultSessionId: sessionId, actor: client() },
+      { provider: providerAnswering('event_timing', ['no-deadline', '1-3-months']) },
+    )
+    // P7a-3: the appointment closes the consult. The INTAKE branch inherits
+    // this from `appendConsultIntakeRevision`; the FOLLOW_UP branch writes its
+    // table directly, so without an explicit check a client could answer a
+    // follow-up from the chair.
+    await db.booking.updateMany({
+      where: { sourceConsultSessionId: sessionId },
+      data: {
+        status: BookingStatus.IN_PROGRESS,
+        scheduledFor: new Date(Date.now() - 60 * 60 * 1000),
+      },
+    })
+    await expect(
+      answerConsultFollowUpQuestion({
+        consultSessionId: sessionId,
+        clientId: fx.clientId,
+        actor: client(),
+        questionKey: 'event_timing',
+        selectedValues: ['1-3-months'],
+        idempotencyKey: `p5g-appt-${sessionId}`,
+      }),
+    ).rejects.toThrow(/appointment/i)
+  })
+})
+
 describe('the cap', () => {
   it('stops at three rounds for one plan version', async () => {
     const sessionId = await completedConsult('p5g-cap')

@@ -58,6 +58,11 @@ import { safeError } from '@/lib/security/logging'
 
 import { normalizeStoredConsultAnalysisPayload } from './analysisRevision'
 import { consultHasLiveBooking } from './bookingLink'
+import {
+  assertConsultInputOpen,
+  CONSULT_OPEN_WINDOW_SELECT,
+  type ConsultOpenWindowSession,
+} from './openWindow'
 import { countConsultPlanVersions } from './analysisRerun'
 import type { ConsultAnalysisCore } from './analysisEngine'
 import {
@@ -215,6 +220,8 @@ type FollowUpSituation = {
   professionalDisplayName: string
   rounds: ConsultFollowUpRoundView[]
   followUpAnswers: Record<string, string[]>
+  /** The session, in the shape the input-window rule reads. */
+  session: ConsultOpenWindowSession
   /** The reference as the vision model read it, or null when unread. */
   inspiration: ConsultInspirationAnalysisAttributesDTO | null
   /** Her own hair as the analysis read it, or null before the first plan. */
@@ -404,6 +411,9 @@ function fallbackQuestion(
 // ── Reading the situation ───────────────────────────────────────────────────
 
 const FOLLOW_UP_SESSION_SELECT = {
+  // 🔴 The input-window rule's own select, so this path can refuse a write
+  // after the appointment started rather than only the intake path doing it.
+  ...CONSULT_OPEN_WINDOW_SELECT,
   id: true,
   clientId: true,
   status: true,
@@ -555,6 +565,7 @@ async function readConsultFollowUpSituation(
   }
 
   return {
+    session,
     planVersion,
     intakePack,
     intakeAnswers,
@@ -750,6 +761,14 @@ export async function answerConsultFollowUpQuestion(
   const now = deps.now ?? new Date()
   const situation = await readConsultFollowUpSituation(args.consultSessionId)
   if (!situation) throw new ConsultFollowUpAnswerError('NOT_OPEN')
+
+  // 🔴 The appointment closes the document (P7a-3), and this path has to say so
+  // itself. The INTAKE branch below goes through `appendConsultIntakeRevision`,
+  // which enforces the window — but the FOLLOW_UP branch writes this table
+  // directly, so without this a client could answer a follow-up after she was
+  // already in the chair. Thrown, not swallowed: it is a real refusal with its
+  // own code, and the thread reads the same rule.
+  assertConsultInputOpen(situation.session, now)
 
   const round = situation.rounds.find((entry) =>
     entry.questions.some(
