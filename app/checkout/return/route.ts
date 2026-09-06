@@ -7,12 +7,15 @@
 // app intercepts (dismisses the in-app browser + refetches the booking).
 //
 // Public by design — Stripe redirects an unauthenticated browser to it. It
-// echoes only whitelisted, sanitized params and never touches the database.
+// echoes only whitelisted, sanitized params. Its one DB touch is the tenant
+// lookup behind the brand tokens, and that degrades to the root brand on
+// failure — a Stripe bounce must land the client back in the app even while
+// the database is unreachable.
 
 import type { NextRequest } from 'next/server'
 
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
-import { resolveTenantContextForRequest } from '@/lib/tenant'
+import { resolveBrandOnlyTenantContextForRequest } from '@/lib/tenant'
 
 export const dynamic = 'force-dynamic'
 
@@ -66,7 +69,7 @@ export async function GET(req: NextRequest): Promise<Response> {
   // config is what keeps this page white-label instead of the previous
   // off-brand purple.
   const brand = getBrandForTenantContext(
-    await resolveTenantContextForRequest(req),
+    await resolveBrandOnlyTenantContextForRequest(req),
   )
   const { colors } = brand.tokensByMode.dark
 

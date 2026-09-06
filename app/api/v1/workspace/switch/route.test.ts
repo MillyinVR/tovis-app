@@ -1,12 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Role } from '@prisma/client'
+import { PrismaClientInitializationError } from '@prisma/client/runtime/library'
 
 const mockGetCurrentUser = vi.hoisted(() => vi.fn())
 const mockCreateActiveToken = vi.hoisted(() => vi.fn())
 const mockSetSessionCookie = vi.hoisted(() => vi.fn())
-const mockResolveTenant = vi.hoisted(() => vi.fn())
+// The tenant resolver is REAL here (only prisma is mocked) so the suite
+// proves the whole chain: this handler stamps `tenantId` onto a row, so a
+// failed tenant lookup must throw out of the handler, never degrade.
 const mockPrisma = vi.hoisted(() => ({
   clientProfile: { findFirst: vi.fn(), create: vi.fn() },
+  tenant: { findUnique: vi.fn(), findFirst: vi.fn() },
 }))
 
 vi.mock('@/lib/currentUser', () => ({ getCurrentUser: mockGetCurrentUser }))
@@ -15,15 +19,14 @@ vi.mock('@/app/api/_utils/auth/sessionCookie', () => ({
   setSessionCookie: mockSetSessionCookie,
 }))
 vi.mock('@/lib/prisma', () => ({ prisma: mockPrisma }))
-vi.mock('@/lib/tenant/requestContext', () => ({
-  resolveTenantContextForRequest: mockResolveTenant,
-}))
 vi.mock('@/lib/security/contactLookup', () => ({
   buildClientProfileContactLookupData: () => ({}),
 }))
 vi.mock('@/lib/security/phonePrivacy', () => ({
   buildPhoneEncryptionWriteData: () => ({}),
 }))
+
+import { clearTenantResolutionCache } from '@/lib/tenant/resolveTenant'
 
 import { POST } from './route'
 
@@ -57,7 +60,9 @@ describe('POST /api/v1/workspace/switch', () => {
     mockGetCurrentUser.mockReset()
     mockCreateActiveToken.mockReset().mockReturnValue('minted_token')
     mockSetSessionCookie.mockReset()
-    mockResolveTenant.mockReset().mockResolvedValue({ tenantId: 'tenant_root' })
+    clearTenantResolutionCache()
+    mockPrisma.tenant.findUnique.mockReset().mockResolvedValue({ id: 'tenant_root' })
+    mockPrisma.tenant.findFirst.mockReset().mockResolvedValue(null)
     mockPrisma.clientProfile.findFirst.mockReset().mockResolvedValue(null)
     mockPrisma.clientProfile.create.mockReset().mockResolvedValue({ id: 'cp_new' })
   })
@@ -130,7 +135,32 @@ describe('POST /api/v1/workspace/switch', () => {
     expect(res.status).toBe(200)
     expect(mockPrisma.clientProfile.findFirst).toHaveBeenCalled()
     expect(mockPrisma.clientProfile.create).toHaveBeenCalledTimes(1)
+    expect(mockPrisma.clientProfile.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          homeTenant: { connect: { id: 'tenant_root' } },
+        }),
+      }),
+    )
     expect(mockSetSessionCookie).toHaveBeenCalled()
+  })
+
+  it('throws out of the handler when the tenant lookup fails (no degraded fallback)', async () => {
+    // The home tenant is WRITTEN here, so it must be a real row. A DB outage
+    // has to surface as a thrown error (Next → onRequestError → Sentry), not
+    // a profile silently stamped with the degraded sentinel id.
+    const outage = new PrismaClientInitializationError(
+      "Can't reach database server at `db.example.supabase.co:5432`",
+      '6.19.0',
+    )
+    mockPrisma.tenant.findUnique.mockRejectedValue(outage)
+    mockGetCurrentUser.mockResolvedValue(activeUser({ clientProfile: null }))
+
+    await expect(POST(request({ workspace: 'CLIENT' }))).rejects.toBe(outage)
+
+    expect(mockPrisma.clientProfile.create).not.toHaveBeenCalled()
+    expect(mockCreateActiveToken).not.toHaveBeenCalled()
+    expect(mockSetSessionCookie).not.toHaveBeenCalled()
   })
 
   it('switches a licensed admin to the pro workspace', async () => {

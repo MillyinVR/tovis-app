@@ -14,7 +14,10 @@ export {
   normalizeHost,
   resolveTenantByHost,
 } from './resolveTenant'
-export { resolveTenantContextForRequest } from './requestContext'
+export {
+  resolveBrandOnlyTenantContextForRequest,
+  resolveTenantContextForRequest,
+} from './requestContext'
 export {
   bookingTenantVisibilityFilter,
   nfcCardTenantVisibilityFilter,
