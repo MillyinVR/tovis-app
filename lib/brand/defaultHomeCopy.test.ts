@@ -15,6 +15,7 @@ function everyFeature(): BrandHomeFeature[] {
   return [
     ...copy.loop.steps,
     ...copy.clients.features,
+    copy.chart,
     ...copy.spotlight.features,
     ...copy.pros.features,
     copy.money,
@@ -76,16 +77,40 @@ describe('defaultHomeCopy', () => {
     expect(everyFeature().some((f) => f.state === 'rolling-out')).toBe(true)
   })
 
-  it('promotes spotlight rows rather than duplicating them', () => {
-    // A spotlight row is LIFTED out of clients/pros, never copied into both —
+  it('promotes the spotlight and chart rows rather than duplicating them', () => {
+    // A promoted row is LIFTED out of clients/pros, never copied into both —
     // otherwise the page states a capability twice and the honest counts drift.
     const listed = [...copy.loop.steps, ...copy.clients.features, ...copy.pros.features].map(
       (f) => f.title,
     )
-    for (const feature of copy.spotlight.features) {
+    for (const feature of [...copy.spotlight.features, copy.chart]) {
       expect(listed, feature.title).not.toContain(feature.title)
     }
     expect(copy.spotlight.features.length).toBe(2)
+  })
+
+  it('never tells a client that an explicit chart grant expires on its own', () => {
+    // 🔴 The row this band replaced said "Share it with a new pro for 30 days,
+    // then it closes on its own", welding two mechanisms together and getting
+    // the reassuring half backwards. A BOOKING's access closes after
+    // RECENT_COMPLETED_WINDOW_DAYS; a ClientChartShare GRANT is open-ended
+    // (lib/clientVisibility.ts returns accessUntil: null for it) and ends only
+    // when the client revokes. Overstating a privacy guarantee is the kind of
+    // sentence someone relies on, so it gets a test rather than a comment.
+    const rendered = [copy.chart.body, copy.chart.aside, ...copy.chart.points.map((p) => p.body)]
+      .join(' ')
+      .toLowerCase()
+
+    // If the copy mentions a self-closing window, it must attribute it to the
+    // booking, and it must still say the grant is revoked by hand.
+    if (/closes (it|itself|on its own)|expires/.test(rendered)) {
+      expect(rendered, 'a self-closing window must be attributed to the booking').toMatch(/booking/)
+      expect(rendered, 'the grant must be described as revocable by the client').toMatch(
+        /revoke|take it back|take that back/,
+      )
+    }
+    // The word "share"/"grant" must never sit next to a day count.
+    expect(rendered).not.toMatch(/(share|grant)[^.]{0,60}\b(thirty|30)\b/)
   })
 
   it('makes a rolling-out spotlight name its limit in a chip, not only in the pill', () => {

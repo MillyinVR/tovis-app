@@ -139,12 +139,6 @@ export function defaultHomeCopy(brandName: string): BrandHomeCopy {
           evidence: 'Client-authored looks via share-look (app/api/v1/client/bookings/[id]/share-look); creator credit 3% minted on COMPLETION (lib/credit/clientCredit.ts, #947); spend at checkout needs Stripe, which is on hold / test mode, and the settlement transfer leg has never run (memory: creator-credit-rate-and-trigger, checked 2026-09-05).',
         },
         {
-          title: 'A chart that travels with you',
-          body: 'Your history is yours. Share it with a new pro for 30 days, then it closes on its own.',
-          state: 'live',
-          evidence: 'Consent-gated client chart sharing with 30-day windows (Aug 2026 code audit).',
-        },
-        {
           title: 'Refer with a tap',
           body: 'Hold your phone to a friend’s. That is the whole referral.',
           state: 'live',
@@ -157,6 +151,55 @@ export function defaultHomeCopy(brandName: string): BrandHomeCopy {
           evidence: 'tovis-ios on TestFlight only, not in the App Store (app-store-submission-state, 2026-09-01: build 63 archived, TestFlight only).',
         },
       ],
+    },
+
+    // LIFTED out of clients.features (it was "A chart that travels with you"),
+    // because it is the one thing on this page that compounds: the value of
+    // every other row is the same on visit one and visit ten, and this one is
+    // not.
+    //
+    // 🔴 What this band must NOT say. The row it replaces read "Share it with a
+    // new pro for 30 days, then it closes on its own," which welded two
+    // different mechanisms together and got the reassuring half backwards:
+    //
+    //   • A BOOKING opens the chart (PENDING, upcoming ACCEPTED, in progress)
+    //     and closes it RECENT_COMPLETED_WINDOW_DAYS = 30 after the visit
+    //     completes. That one really does close on its own.
+    //   • A ClientChartShare GRANT is open-ended. lib/clientVisibility.ts
+    //     returns accessUntil: null for it. It ends when the client revokes and
+    //     not before.
+    //
+    // Telling someone an explicit grant expires when it does not is the
+    // dangerous direction of that error, so the two are stated separately below
+    // and neither borrows the other's guarantee.
+    //
+    // 🔴 And what it must not imply: nothing READS this history to improve a
+    // result automatically. The consult does not touch the chart (grepped
+    // 2026-09-06). The mechanism is a professional reading it, which is why the
+    // copy credits the person and never the platform.
+    chart: {
+      label: 'The chart',
+      title: 'The only appointment that starts from scratch is',
+      titleAccent: 'your first.',
+      body: 'Every visit writes to your chart: the formula, the products, the notes on what worked and what did not. Book again and your professional opens it before you arrive, so you start where you left off instead of describing your hair from memory.',
+      aside: 'You decide who sees it. A booking opens your chart to that professional and closes it thirty days after the visit, on its own. Anything past that is a grant you make, and you can take it back whenever you want.',
+      points: [
+        {
+          label: 'What it holds',
+          body: 'Notes, allergies, every visit, the products used, and the technical record with your formulas.',
+        },
+        {
+          label: 'When they read it',
+          body: 'From the moment you request the time, so your professional walks in already knowing.',
+        },
+        {
+          label: 'Who decides',
+          body: 'You do. Grant a new professional access, revoke it later, and the booking window closes itself.',
+        },
+      ],
+      state: 'live',
+      evidence:
+        'lib/clients/chartTabs.ts holds notes, allergies, visits, products and the technical record. lib/clientVisibility.ts proClientVisibilityWhere grants the chart on PENDING and upcoming ACCEPTED bookings, so access precedes the appointment, and RECENT_COMPLETED_WINDOW_DAYS = 30 closes it after a completed visit. Explicit sharing is client-granted and client-revocable (lib/clients/chartShare.ts, app/api/v1/client/chart-shares). Read from source 2026-09-06.',
     },
 
     // Two rows LIFTED out of the lists below, not copied into a third one.

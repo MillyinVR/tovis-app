@@ -1031,6 +1031,21 @@ export type BrandHomeSpotlightFeature = BrandHomeFeature & {
   chips: string[]
 }
 
+/**
+ * The chart band: one feature given a whole band because it is the thing that
+ * compounds. Promoted out of `clients.features` the same way a spotlight row
+ * is, so the claim still lives in exactly one place.
+ */
+export type BrandHomeChartBand = BrandHomeFeature & {
+  label: string
+  /** Tail of the title, painted in the brand gradient. */
+  titleAccent: string
+  /** Second paragraph, set quieter than `body`. Carries the consent rule. */
+  aside: string
+  /** Three short answers: what it holds, when it is read, who decides. */
+  points: { label: string; body: string }[]
+}
+
 /** Public homepage copy (app/page.tsx). See lib/brand/defaultHomeCopy.ts. */
 export type BrandHomeCopy = {
   /** ISO date of the last pass that re-verified EVERY feature row. */
@@ -1068,6 +1083,7 @@ export type BrandHomeCopy = {
     evidence: string
   }
   clients: { label: string; title: string; intro: string; features: BrandHomeFeature[] }
+  chart: BrandHomeChartBand
   /**
    * The two-card feature spotlight. A promoted pair, not a third list: a
    * spotlight row is a full feature (state + evidence, held to the same tests)
