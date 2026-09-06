@@ -39,6 +39,7 @@ import type {
   ConsultInspirationCardDTO,
   ConsultInspirationQuestionDTO,
   ConsultInspirationStateDTO,
+  ConsultIntakeSubmitResponseDTO,
   ConsultThreadConsentMessageDTO,
   ConsultThreadDTO,
   ConsultThreadInspirationMessageDTO,
@@ -373,26 +374,34 @@ export default function ClientConsultFlow({
       }
       answers[message.question.key] = value
 
-      // `complete` is the server's own judgement, echoed: every REQUIRED
-      // question now has an answer. Claiming completeness early is refused, and
-      // claiming it late leaves the client on a step with no way forward.
-      const required = thread.messages.filter(
-        (entry): entry is ConsultThreadQuestionMessageDTO =>
-          entry.kind === 'QUESTION' &&
-          entry.question.requirement === 'REQUIRED',
-      )
-      const complete = required.every((entry) => answers[entry.question.key])
-
-      await api(`${base}/intake`, {
+      const saved = await api<ConsultIntakeSubmitResponseDTO>(`${base}/intake`, {
         method: 'POST',
         body: JSON.stringify({
           idempotencyKey: newKey(),
           packVersion: message.packVersion,
           schemaVersion: message.schemaVersion,
-          complete,
+          complete: false,
           answers,
         }),
       })
+      if (
+        saved.intake.progress.canComplete &&
+        saved.intake.questionPack.questions.every(
+          (question) =>
+            question.requirement !== 'SKIPPABLE' || answers[question.key],
+        )
+      ) {
+        await api<ConsultIntakeSubmitResponseDTO>(`${base}/intake`, {
+          method: 'POST',
+          body: JSON.stringify({
+            idempotencyKey: newKey(),
+            packVersion: message.packVersion,
+            schemaVersion: message.schemaVersion,
+            complete: true,
+            answers,
+          }),
+        })
+      }
     })
 
   // ── Inspiration ───────────────────────────────────────────────────────────

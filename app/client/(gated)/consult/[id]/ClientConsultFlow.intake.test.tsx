@@ -27,6 +27,7 @@ import { HAIR_COLOR_INTAKE_PACK_V2 } from '@/lib/consult/intake/packs/hairColor'
 import {
   evaluateConsultIntakeProgress,
   toConsultIntakeQuestionPackDTO,
+  validateConsultIntakeAnswers,
 } from '@/lib/consult/intake/registry'
 import type { ConsultIntakePackDefinition } from '@/lib/consult/intake/types'
 import { resolveConsultIntakePack } from '@/lib/consult/intake/registry'
@@ -113,8 +114,12 @@ function threadFor(
  * question until there is none left, and returns the taps it took to reach the
  * photo step.
  */
-async function tapsToThePhotoStep(pack: ConsultIntakePackDefinition) {
+async function tapsToThePhotoStep(
+  pack: ConsultIntakePackDefinition,
+  changeScale?: string,
+) {
   let answers: Record<string, string> = {}
+  let completed = false
 
   vi.stubGlobal(
     'fetch',
@@ -128,9 +133,28 @@ async function tapsToThePhotoStep(pack: ConsultIntakePackDefinition) {
       if (url.endsWith('/intake') && init?.method === 'POST') {
         const sent = JSON.parse(String(init.body)) as {
           answers: Record<string, string>
+          complete: boolean
+        }
+        const validated = validateConsultIntakeAnswers(
+          pack,
+          sent.answers,
+          sent.complete,
+        )
+        expect(validated.ok).toBe(true)
+        if (!validated.ok) {
+          return new Response(JSON.stringify({ error: 'Invalid intake answers.' }), {
+            status: 400,
+          })
         }
         answers = sent.answers
-        return body({ ...threadFor(pack, answers), replayed: false })
+        completed = sent.complete
+        return body({
+          intake: {
+            progress: evaluateConsultIntakeProgress(pack, answers),
+            questionPack: toConsultIntakeQuestionPackDTO(pack),
+          },
+          replayed: false,
+        })
       }
       if (url.endsWith('/thread')) return body(threadFor(pack, answers))
       throw new Error(`unexpected fetch: ${url}`)
@@ -167,15 +191,20 @@ async function tapsToThePhotoStep(pack: ConsultIntakePackDefinition) {
     const card = tappable[0]!
     const key = card.getAttribute('data-thread-message')!.slice('intake:'.length)
     const question = pack.questions.find((entry) => entry.key === key)!
-    const option = question.options[0]!
+    const option =
+      (key === 'change_scale'
+        ? question.options.find((entry) => entry.value === changeScale)
+        : undefined) ?? question.options[0]!
     const button = Array.from(card.querySelectorAll('button')).find(
       (node) => node.textContent?.trim() === option.label,
     )!
     fireEvent.click(button)
     taps += 1
     await waitFor(() => expect(answers[question.key]).toBe(option.value))
+    await waitFor(() => expect(button.isConnected).toBe(false))
     expect(taps).toBeLessThanOrEqual(pack.questions.length)
   }
+  expect(completed).toBe(true)
   return taps
 }
 
@@ -185,6 +214,16 @@ afterEach(() => {
 })
 
 describe('the web consult intake, one question at a time', () => {
+  it.each(['subtle', 'noticeable', 'total'])(
+    'saves %s as a partial answer and completes only after the remaining questions',
+    async (changeScale) => {
+      await tapsToThePhotoStep(
+        resolveConsultIntakePack({ categorySlug: 'hair-color', family: 'HAIR' }),
+        changeScale,
+      )
+    },
+  )
+
   it('leaves every answered question on screen as history', async () => {
     const pack = resolveConsultIntakePack({
       categorySlug: 'hair-color',
