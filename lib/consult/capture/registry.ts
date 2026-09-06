@@ -14,6 +14,7 @@ import type { ConsultServiceFamily } from '@prisma/client'
 
 import type { ConsultCaptureShotKeyDTO } from '@/lib/dto/consult'
 
+import { EARLY_PHOTO_SHOT } from './earlyPhoto'
 import { AREA_CAPTURE_PACK } from './packs/areaDaylight'
 import { FACE_CAPTURE_PACK } from './packs/faceDaylight'
 import { HAIR_COLOR_CAPTURE_PACK } from './packs/hairColorDaylight'
@@ -71,6 +72,11 @@ export const CONSULT_ALL_CAPTURE_SHOT_KEYS: readonly ConsultCaptureShotKeyDTO[] 
       if (!keys.includes(shot.key)) keys.push(shot.key)
     }
   }
+  // P7a-1: the early photo belongs to no pack (see capture/earlyPhoto.ts) but
+  // it IS a stored capture and an analysis input, so it is part of the evidence
+  // vocabulary. Appended last so the hair pack's seven keep the order the
+  // analysis engine has always sent.
+  keys.push(EARLY_PHOTO_SHOT.key)
   return keys
 })()
 
@@ -82,10 +88,22 @@ export function isConsultCaptureShotKey(
   return typeof value === 'string' && ALL_SHOT_KEYS.has(value)
 }
 
-/** The largest pack: the ceiling on captures one analysis can consume. */
+/** The largest pack's slot count: the ceiling on a GUIDED checklist. */
 export const CONSULT_MAX_CAPTURE_SHOTS = Math.max(
   ...CONSULT_CAPTURE_PACKS.map((pack) => pack.shots.length),
 )
+
+/**
+ * The ceiling on captures ONE ANALYSIS can consume: the largest pack, plus the
+ * early photo (P7a-1).
+ *
+ * These were the same number until the early photo existed, and conflating them
+ * is not free — a full seven-shot hair consult that also holds its early photo
+ * hands the analysis EIGHT captures, and every ceiling still set to seven
+ * refuses the run outright. Mirrored by the `ConsultAnalysisRun_photoCount`
+ * CHECK; the two must agree.
+ */
+export const CONSULT_MAX_ANALYSIS_CAPTURES = CONSULT_MAX_CAPTURE_SHOTS + 1
 
 /**
  * A shot's definition by key, whichever pack defines it. A key shared between
@@ -95,6 +113,10 @@ export const CONSULT_MAX_CAPTURE_SHOTS = Math.max(
 export function findConsultCaptureShot(
   shotKey: string,
 ): ConsultCaptureShotDefinition | null {
+  // P7a-1: checked BEFORE the packs, and it is the reason the early photo can
+  // never be "missing from a pack" the way `face_front` is missing from the
+  // area pack. Every family resolves it; no pack lists it.
+  if (shotKey === EARLY_PHOTO_SHOT.key) return EARLY_PHOTO_SHOT
   for (const pack of CONSULT_CAPTURE_PACKS) {
     const shot = pack.shots.find((candidate) => candidate.key === shotKey)
     if (shot) return shot

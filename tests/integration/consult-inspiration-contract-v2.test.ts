@@ -44,6 +44,10 @@ vi.mock('@/app/api/_utils/auth/requireClient', () => ({
   requireClient: mockRequireClient,
 }))
 
+import {
+  purgeSeededConsultObjects,
+  seedAcceptedEarlyPhoto,
+} from './_support/earlyPhoto'
 import { POST as postIntake } from '@/app/api/v1/client/consult/[id]/intake/route'
 import { CONSULT_INSPIRATION_BUCKET } from '@/lib/consult/inspirationStorage'
 import {
@@ -141,6 +145,13 @@ async function acceptBoth(sessionId: string) {
       actor: { type: ConsultActorType.CLIENT, id: userId },
     })
   }
+  // P7a-1: consent lands on the early-photo stage, and the database refuses to
+  // leave it without one accepted early photo.
+  await seedAcceptedEarlyPhoto(db, {
+    consultSessionId: sessionId,
+    actorUserId: userId,
+    label: sessionId,
+  })
 }
 
 async function createSession(bookingId: string, serviceCategoryId: string) {
@@ -432,6 +443,13 @@ afterAll(async () => {
       purgedAt: new Date(),
     },
   })
+  // P7a-1: each session holds a seeded early photo, and the delete guard
+  // refuses a session with unpurged raw objects.
+  for (const id of [hairSessionId, nailsSessionId, legacySessionId].filter(
+    Boolean,
+  )) {
+    await purgeSeededConsultObjects(db, id)
+  }
   await db.consultSession.deleteMany({
     where: {
       id: { in: [hairSessionId, nailsSessionId, legacySessionId].filter(Boolean) },

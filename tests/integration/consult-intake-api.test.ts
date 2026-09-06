@@ -35,6 +35,10 @@ import {
   HAIR_COLOR_INTAKE_SCHEMA_VERSION,
 } from '@/lib/consult/intakePack'
 import {
+  purgeSeededConsultObjects,
+  seedAcceptedEarlyPhoto,
+} from './_support/earlyPhoto'
+import {
   acceptConsultAgreement,
   revokeConsultAgreement,
   transitionConsultSession,
@@ -111,6 +115,22 @@ function intakeRequest(
       complete,
       answers,
     }),
+  })
+}
+
+/**
+ * P7a-1. Consent now lands on EARLY_PHOTO_READY, and the database will not let
+ * a consult reach the intake without one accepted early photo. This suite is
+ * about the intake, not about capture ingest, so it seeds the photo through the
+ * shared support helper (which still runs every guard).
+ */
+let earlyPhotoSeq = 0
+async function takeEarlyPhoto() {
+  earlyPhotoSeq += 1
+  await seedAcceptedEarlyPhoto(db, {
+    consultSessionId: sessionId,
+    actorUserId: ownerUserId,
+    label: `${tag}-${earlyPhotoSeq}`,
   })
 }
 
@@ -264,6 +284,9 @@ beforeEach(() => {
 })
 
 afterAll(async () => {
+  // P7a-1: the seeded early photo is a raw object, and the database refuses to
+  // delete a session that still holds one.
+  if (sessionId) await purgeSeededConsultObjects(db, sessionId)
   if (sessionId) await db.consultSession.deleteMany({ where: { id: sessionId } })
   if (boardId) await db.board.deleteMany({ where: { id: boardId } })
   if (lookId) await db.lookPost.deleteMany({ where: { id: lookId } })
@@ -430,6 +453,7 @@ describe('client hair-color consult intake API against PostgreSQL', () => {
     )
     expect(oneAcceptance.status).toBe(409)
     await accept(ConsultAgreementKind.ADULT_18_PLUS_ATTESTATION, adultVersionId)
+    await takeEarlyPhoto()
   })
 
   it('returns the exact pack and bounded owned prefill without mutating sources', async () => {
@@ -553,7 +577,11 @@ describe('client hair-color consult intake API against PostgreSQL', () => {
       ok: true,
       intake: {
         consultId: sessionId,
-        status: ConsultSessionStatus.INTAKE_READY,
+        // P7a-1: the intake is READABLE from the early-photo stage — it renders
+        // below the Book CTA as prep — and the session only leaves that stage
+        // when she ANSWERS something. So a read before the first answer reports
+        // EARLY_PHOTO_READY, not INTAKE_READY.
+        status: ConsultSessionStatus.EARLY_PHOTO_READY,
         questionPack: {
           id: 'hair-color',
           categorySlug: 'hair-color',
@@ -858,7 +886,11 @@ describe('client hair-color consult intake API against PostgreSQL', () => {
     expect(resumed.status).toBe(200)
     await expect(json(resumed)).resolves.toMatchObject({
       intake: {
-        status: ConsultSessionStatus.INTAKE_READY,
+        // P7a-1: re-consenting returns her to the EARLY PHOTO stage, the same
+        // place a fresh consult starts — her prior revisions are still here and
+        // still readable, but the consult needs a current photo of her again
+        // (the old captures went with the revocation).
+        status: ConsultSessionStatus.EARLY_PHOTO_READY,
         latestRevision: { revision: 3, complete: true },
       },
     })

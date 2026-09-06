@@ -35,6 +35,10 @@ import {
   type ConsultAnalysisProviderOutput,
   type ConsultAnalysisServiceContext,
 } from './analysisEngine'
+import {
+  CONSULT_EARLY_PHOTO_PACK_VERSION,
+  CONSULT_EARLY_PHOTO_SHOT_KEY,
+} from './capture/earlyPhoto'
 import { isConsultCaptureShotKey, packHasShot } from './capture/registry'
 import type { ConsultCapturePackDefinition } from './capture/types'
 import {
@@ -438,7 +442,16 @@ async function currentCaptures(
   })
   const byShot = new Map<string, AnalysisCapture>()
   for (const capture of captures) {
-    if (!packHasShot(pack, capture.shotKey) || byShot.has(capture.shotKey)) {
+    // P7a-1: the early photo is a legitimate analysis input at the LOWEST
+    // evidence tier (Tori, 2026-09-05) — it is the one photograph a consult is
+    // guaranteed to have, so refusing it here would mean a consult that had
+    // only ever taken it could never be analysed at all. It is not a pack
+    // member, so the pack cannot answer whether it belongs.
+    const isEarly = capture.shotKey === CONSULT_EARLY_PHOTO_SHOT_KEY
+    if (
+      (!isEarly && !packHasShot(pack, capture.shotKey)) ||
+      byShot.has(capture.shotKey)
+    ) {
       throw new ConsultWriteError(
         'ANALYSIS_PREREQUISITES_REQUIRED',
         'The current capture pack is incomplete.',
@@ -446,7 +459,8 @@ async function currentCaptures(
     }
     const upload = capture.uploadSession
     if (
-      capture.shotPackVersion !== pack.version ||
+      capture.shotPackVersion !==
+        (isEarly ? CONSULT_EARLY_PHOTO_PACK_VERSION : pack.version) ||
       capture.schemaVersion !== pack.schemaVersion ||
       capture.storageBucket !== CONSULT_CAPTURE_BUCKET ||
       !capture.storagePath ||
@@ -488,11 +502,19 @@ async function currentCaptures(
       'At least one accepted, unexpired capture is required.',
     )
   }
-  // Pack order is the fixed evidence order the provider is sent.
-  return pack.shots.flatMap(({ key }) => {
-    const capture = byShot.get(key)
-    return capture ? [capture] : []
-  })
+  // Pack order is the fixed evidence order the provider is sent. The early
+  // photo goes LAST, which is what "lowest evidence tier" means on the wire:
+  // the guided views are read first, and a later guided `face_front` therefore
+  // supersedes it as the front-facing evidence rather than competing with it.
+  return [
+    ...pack.shots.flatMap(({ key }) => {
+      const capture = byShot.get(key)
+      return capture ? [capture] : []
+    }),
+    ...(byShot.get(CONSULT_EARLY_PHOTO_SHOT_KEY)
+      ? [byShot.get(CONSULT_EARLY_PHOTO_SHOT_KEY) as AnalysisCapture]
+      : []),
+  ]
 }
 
 async function readVerifiedImages(

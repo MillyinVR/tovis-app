@@ -38,6 +38,10 @@ import {
 import { GENERAL_SERVICE_INTAKE_PACK } from '@/lib/consult/intake/packs/generalService'
 import { HAIR_GENERAL_INTAKE_PACK } from '@/lib/consult/intake/packs/hairGeneral'
 import { acceptConsultAgreement } from '@/lib/consult/writeBoundary'
+import {
+  purgeSeededConsultObjects,
+  seedAcceptedEarlyPhoto,
+} from './_support/earlyPhoto'
 
 const databaseUrl = process.env.DATABASE_URL
 if (!databaseUrl) {
@@ -145,6 +149,13 @@ async function acceptBoth(sessionId: string) {
       actor: { type: ConsultActorType.CLIENT, id: userId },
     })
   }
+  // P7a-1: consent lands on the early-photo stage, and the database refuses to
+  // leave it without one accepted early photo.
+  await seedAcceptedEarlyPhoto(db, {
+    consultSessionId: sessionId,
+    actorUserId: userId,
+    label: sessionId,
+  })
 }
 
 async function createSession(bookingId: string, serviceCategoryId: string) {
@@ -354,6 +365,11 @@ beforeEach(() => {
 })
 
 afterAll(async () => {
+  // P7a-1: each session holds a seeded early photo; the delete guard refuses a
+  // session with unpurged raw objects.
+  for (const id of [hairSessionId, nailsSessionId].filter(Boolean)) {
+    await purgeSeededConsultObjects(db, id)
+  }
   await db.consultSession.deleteMany({
     where: { id: { in: [hairSessionId, nailsSessionId].filter(Boolean) } },
   })

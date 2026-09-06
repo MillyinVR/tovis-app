@@ -49,6 +49,10 @@ import {
   HAIR_COLOR_CAPTURE_SCHEMA_VERSION,
   type HairColorCaptureShotKey,
 } from '@/lib/consult/capturePack'
+import {
+  CONSULT_EARLY_PHOTO_PACK_VERSION,
+  CONSULT_EARLY_PHOTO_SHOT_KEY,
+} from '@/lib/consult/capture/earlyPhoto'
 import { purgeConsultSessionRawObjects } from '@/lib/consult/capturePurge'
 import { answerConsultInspirationQuestion } from '@/lib/consult/inspirationContract'
 import {
@@ -217,14 +221,21 @@ export async function createLook(
 export async function attachAcceptedCapture(
   db: PrismaClient,
   sessionId: string,
-  shotKey: HairColorCaptureShotKey,
+  shotKey: HairColorCaptureShotKey | typeof CONSULT_EARLY_PHOTO_SHOT_KEY,
   label: string,
 ) {
+  // P7a-1: the early photo rides the SAME ingest path as every guided shot —
+  // mint, attach, judge — and differs only in the pack version stored beside
+  // it, because it belongs to no pack.
+  const packVersion =
+    shotKey === CONSULT_EARLY_PHOTO_SHOT_KEY
+      ? CONSULT_EARLY_PHOTO_PACK_VERSION
+      : HAIR_COLOR_CAPTURE_PACK_VERSION
   const issued = await issueUpload(
     jsonRequest(`/api/v1/client/consult/${sessionId}/capture/uploads`, {
       idempotencyKey: `${label}-issue-${shotKey}`,
       shotKey,
-      shotPackVersion: HAIR_COLOR_CAPTURE_PACK_VERSION,
+      shotPackVersion: packVersion,
       schemaVersion: HAIR_COLOR_CAPTURE_SCHEMA_VERSION,
       contentType: 'image/jpeg',
       sizeBytes: 100,
@@ -250,7 +261,7 @@ export async function attachAcceptedCapture(
       idempotencyKey: `${label}-attach-${shotKey}`,
       uploadSessionId,
       shotKey,
-      shotPackVersion: HAIR_COLOR_CAPTURE_PACK_VERSION,
+      shotPackVersion: packVersion,
       schemaVersion: HAIR_COLOR_CAPTURE_SCHEMA_VERSION,
     }),
     context(sessionId),
@@ -263,7 +274,7 @@ export async function attachAcceptedCapture(
       `/api/v1/client/consult/${sessionId}/capture/${captureId}/quality`,
       {
         idempotencyKey: `${label}-quality-${shotKey}`,
-        shotPackVersion: HAIR_COLOR_CAPTURE_PACK_VERSION,
+        shotPackVersion: packVersion,
         schemaVersion: HAIR_COLOR_CAPTURE_SCHEMA_VERSION,
       },
     ),
@@ -272,7 +283,7 @@ export async function attachAcceptedCapture(
   expect(quality.status).toBe(200)
 }
 
-/** Create → consent → intake → inspiration → captures → analysis. */
+/** Create → consent → early photo → intake → inspiration → captures → analysis. */
 export async function runConsultToCompletion(
   db: PrismaClient,
   lookPostId: string,
@@ -298,6 +309,17 @@ export async function runConsultToCompletion(
     expectedKind: ConsultAgreementKind.ADULT_18_PLUS_ATTESTATION,
     actor: { type: ConsultActorType.CLIENT, id: fx.clientUserId },
   })
+  // P7a-1: the early photo is the step between consent and the intake, and the
+  // database enforces it — a consult cannot leave EARLY_PHOTO_READY without one
+  // accepted, unexpired `early_photo` capture. Every fixture that walks the
+  // whole flow therefore takes one, exactly as a client does.
+  await attachAcceptedCapture(
+    db,
+    sessionId,
+    CONSULT_EARLY_PHOTO_SHOT_KEY,
+    `early-${label}`,
+  )
+
   await appendConsultIntakeRevision({
     consultSessionId: sessionId,
     actor: { type: ConsultActorType.CLIENT, id: fx.clientUserId },

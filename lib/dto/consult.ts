@@ -623,6 +623,10 @@ export type ConsultCaptureShotKeyDTO =
   | 'eyes_closeup'
   | 'area_wide'
   | 'area_closeup'
+  // P7a-1: the early photo. Stored like any other capture and readable as
+  // analysis evidence, but a member of no pack — see
+  // lib/consult/capture/earlyPhoto.ts for why.
+  | 'early_photo'
 
 export type ConsultCaptureShotDTO = {
   key: ConsultCaptureShotKeyDTO
@@ -655,15 +659,28 @@ export type ConsultCaptureQualityReasonCodeDTO =
   | 'TOO_BRIGHT'
   | 'OTHER_QUALITY_FAILURE'
 
-// The colour-fidelity findings that are a REJECTION on a full view and only a
-// WARNING on a tight crop (a skin-filled close-up, where the frame is mostly
-// one subject and a warm reading is as likely to be the skin as the room —
-// see lib/consult/capture/types.ts `framing`). A warning never blocks the
-// slot: it rides along on the accepted result so the analysis, the pro brief
-// and any later audit know the colour on this frame is not fully trustworthy.
-export type ConsultCaptureQualityWarningCodeDTO =
-  | 'WARM_INDOOR_LIGHT'
-  | 'COLOR_CAST'
+// A finding that rode along on an ACCEPTED capture instead of blocking it. A
+// warning never blocks the slot: it is stored on the accepted result so the
+// analysis, the pro brief and any later audit know what is not fully
+// trustworthy about that frame.
+//
+// WHICH findings may be downgraded is the SHOT's decision, not this type's, and
+// the two answers differ (lib/consult/capture/types.ts):
+//   - a GUIDED shot downgrades the two colour findings, and only on a tight
+//     crop, where the frame is mostly one subject and a warm reading is as
+//     likely to be the skin as the room (B3);
+//   - the WARN_ONLY early photo downgrades everything except
+//     `SUBJECT_NOT_VISIBLE`, because it is taken in whatever light is on and is
+//     never the colour evidence (P7a-1).
+//
+// So the union is every reason code a capture can carry EXCEPT 'PASS' — 'PASS'
+// is the absence of a finding, and a warning is by definition a finding. The
+// narrow per-shot guarantee lives in `sanitizeConsultCaptureQuality` and in the
+// database CHECK, both of which key off the shot.
+export type ConsultCaptureQualityWarningCodeDTO = Exclude<
+  ConsultCaptureQualityReasonCodeDTO,
+  'PASS'
+>
 
 export type ConsultCaptureSlotStateDTO = {
   shotKey: ConsultCaptureShotKeyDTO
@@ -693,6 +710,16 @@ export type ConsultCaptureStateDTO = {
   status: ConsultSessionStatus
   shotPack: ConsultCaptureShotPackDTO
   slots: ConsultCaptureSlotStateDTO[]
+  /**
+   * P7a-1, the early photo — the one taken at the spark, before any intake.
+   *
+   * Its own field and deliberately NOT a member of `slots`: `slots` is this
+   * pack's guided checklist and drives every "N of M photos" the clients
+   * render, so an extra entry there would have read as an extra chore. `null`
+   * until she takes one. One accepted early photo is what unlocks the sticky
+   * Book CTA (`ConsultThreadBookCtaDTO`).
+   */
+  earlyPhoto: ConsultCaptureSlotStateDTO | null
   chartCopy: ConsultChartCopyStateDTO
 }
 

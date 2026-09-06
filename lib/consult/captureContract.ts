@@ -15,6 +15,7 @@ import type {
   ConsultCaptureQualityReasonCodeDTO,
   ConsultCaptureQualityResultDTO,
   ConsultCaptureQualityWarningCodeDTO,
+  ConsultCaptureShotKeyDTO,
   ConsultCaptureSlotStateDTO,
   ConsultCaptureStateDTO,
   ConsultCaptureUploadDTO,
@@ -22,9 +23,17 @@ import type {
 import { prisma } from '@/lib/prisma'
 
 import { requireCurrentConsultAgreementAcceptances } from './agreementContract'
-import { packHasShot } from './capture/registry'
 import {
-  shotToleratesColorCast,
+  CONSULT_EARLY_PHOTO_PACK_VERSION,
+  CONSULT_EARLY_PHOTO_SHOT_KEY,
+} from './capture/earlyPhoto'
+import {
+  CONSULT_MAX_ANALYSIS_CAPTURES,
+  findConsultCaptureShot,
+  packHasShot,
+} from './capture/registry'
+import {
+  shotMayWarn,
   type ConsultCapturePackDefinition,
 } from './capture/types'
 import { purgeConsultCaptureRawObject } from './capturePurge'
@@ -39,7 +48,7 @@ import {
 import {
   checkConsultCapture,
   CONSULT_CAPTURE_MEDIA_TYPES,
-  CONSULT_CAPTURE_QUALITY_PROMPT_VERSION,
+  consultCaptureQualityPromptVersion,
   CONSULT_CAPTURE_QUALITY_SCHEMA_VERSION,
   ConsultCaptureVisionError,
   type ConsultCaptureMediaType,
@@ -67,17 +76,31 @@ export const CONSULT_CAPTURE_UPLOAD_TTL_MS = 60 * 60 * 1000
 // Structural ceiling on paid quality checks per consult session. Each check is
 // a provider vision call, and retakes mint a fresh capture row each time, so
 // without a per-session bound a stuck client (or automation) could spend
-// without limit inside one consult. 42 = the 7 pack slots × 6 attempts each —
-// far beyond real use (a client failing six checks on one slot has a lighting
-// problem the retake tips address, not a reason for a seventh paid call), and
-// it holds when the redis-only route bucket fails open, because it is counted
-// in the same transaction that runs the check. Replays of an already-checked
-// capture return before this bound and stay free.
+// without limit inside one consult. 48 = the 8 shots a consult can hold — the
+// largest pack's 7, plus P7a-1's early photo — × 6 attempts each. Far beyond
+// real use (a client failing six checks on one slot has a lighting problem the
+// retake tips address, not a reason for a seventh paid call), and it holds when
+// the redis-only route bucket fails open, because it is counted in the same
+// transaction that runs the check. Replays of an already-checked capture return
+// before this bound and stay free.
+//
+// 🔴 Derived, not typed: leaving the literal at 42 while adding an eighth shot
+// silently cut the per-slot budget from six attempts to five for whoever hit it
+// last, which is the client having the worst time with her camera.
 export const CONSULT_CAPTURE_QUALITY_ATTEMPTS_PER_SLOT = 6
-/** The hair pack's ceiling (7 × 6); other packs scale by their own slot count. */
-export const CONSULT_CAPTURE_MAX_QUALITY_CHECKS_PER_SESSION = 42
+/**
+ * The LARGEST ceiling any session can have — the hair pack's seven slots plus
+ * the early photo, six attempts each. Other packs scale down by their own slot
+ * count; `maxQualityChecksFor` is the rule, and this is its maximum.
+ */
+export const CONSULT_CAPTURE_MAX_QUALITY_CHECKS_PER_SESSION =
+  CONSULT_MAX_ANALYSIS_CAPTURES * CONSULT_CAPTURE_QUALITY_ATTEMPTS_PER_SLOT
 
+// P7a-1: EARLY_PHOTO_READY is a capture state too. It is the SAME ingest path
+// — mint, attach, judge, the P2d durable queue — carrying one shot that is not
+// in any pack; only the gate's verdict differs (capture/earlyPhoto.ts).
 const CAPTURE_STATES = new Set<ConsultSessionStatus>([
+  ConsultSessionStatus.EARLY_PHOTO_READY,
   ConsultSessionStatus.MEDIA_READY,
   ConsultSessionStatus.ANALYSIS_PENDING,
 ])
@@ -95,12 +118,16 @@ const QUALITY_REASON_CODES = new Set<ConsultCaptureQualityReasonCodeDTO>([
   'OTHER_QUALITY_FAILURE',
 ])
 
-// A colour finding that rode along on an ACCEPTED tight-crop shot instead of
-// blocking it (B3). Never set on a rejection, never on a full view.
-const QUALITY_WARNING_CODES = new Set<ConsultCaptureQualityWarningCodeDTO>([
-  'WARM_INDOOR_LIGHT',
-  'COLOR_CAST',
-])
+// Every code that CAN be a warning — that is, every finding except 'PASS',
+// which is the absence of one. Whether a given shot may actually carry a given warning is
+// `shotMayWarn` — a colour finding on a tight crop (B3), or anything short of
+// "no person here" on the early photo (P7a-1). This set is only the vocabulary
+// check that comes first.
+const QUALITY_WARNING_CODES = new Set<ConsultCaptureQualityWarningCodeDTO>(
+  [...QUALITY_REASON_CODES].filter(
+    (code): code is ConsultCaptureQualityWarningCodeDTO => code !== 'PASS',
+  ),
+)
 
 type ClientActor = {
   type: typeof ConsultActorType.CLIENT
@@ -128,12 +155,19 @@ function packFor(session: CaptureScope): ConsultCapturePackDefinition {
 
 /**
  * Structural ceiling on paid quality checks per consult session: six attempts
- * per pack slot (see CONSULT_CAPTURE_QUALITY_ATTEMPTS_PER_SLOT). Sized by the
- * pack the session serves, so a three-shot pack does not inherit the hair
- * pack's headroom.
+ * per shot the session can hold (see CONSULT_CAPTURE_QUALITY_ATTEMPTS_PER_SLOT).
+ * Sized by the pack the session serves, so a three-shot pack does not inherit
+ * the hair pack's headroom.
+ *
+ * `+ 1` is the early photo (P7a-1). It is a paid check counted by the same
+ * `qualityCheckedAt IS NOT NULL` tally, so leaving it out of the budget would
+ * have silently taken one of the SIX attempts the client has on her last pack
+ * slot — the client having the worst time with her camera pays for it.
  */
 function maxQualityChecksFor(pack: ConsultCapturePackDefinition): number {
-  return pack.shots.length * CONSULT_CAPTURE_QUALITY_ATTEMPTS_PER_SLOT
+  return (
+    (pack.shots.length + 1) * CONSULT_CAPTURE_QUALITY_ATTEMPTS_PER_SLOT
+  )
 }
 
 function hash(value: Readonly<Record<string, unknown>>): string {
@@ -163,6 +197,59 @@ function validMediaType(value: unknown): ConsultCaptureMediaType {
     throw new ConsultWriteError('INVALID_REQUEST', 'Unsupported content type.')
   }
   return mediaType
+}
+
+/**
+ * The shot/version pair a capture write names, validated against whatever
+ * OWNS that shot (P7a-1).
+ *
+ * A guided shot is owned by the session's pack and keeps exactly the checks it
+ * had. The early photo is owned by nothing — it belongs to no pack — so it is
+ * checked against its own constants instead. Both arms still refuse an unknown
+ * key and a stale version; what changed is that "unknown" is no longer the same
+ * question as "not in this pack".
+ */
+/**
+ * Is this shot key one this CONSULT may write — its pack's, or the early photo?
+ *
+ * `packHasShot` alone is no longer that question (P7a-1): the early photo is a
+ * legitimate capture on every consult and a member of no pack, so every place
+ * that asked "is it in the pack" as a proxy for "is it ours" has to ask this
+ * instead. Missing one of them is how the early photo got minted an upload and
+ * then refused at the response, which is exactly what happened first time.
+ */
+function shotBelongsToConsult(
+  pack: ConsultCapturePackDefinition,
+  shotKey: unknown,
+): shotKey is ConsultCaptureShotKeyDTO {
+  return shotKey === CONSULT_EARLY_PHOTO_SHOT_KEY || packHasShot(pack, shotKey)
+}
+
+function requireShotAndVersions(
+  pack: ConsultCapturePackDefinition,
+  shotKey: unknown,
+  packVersion: number,
+  schemaVersion: number,
+): asserts shotKey is ConsultCaptureShotKeyDTO {
+  if (shotKey === CONSULT_EARLY_PHOTO_SHOT_KEY) {
+    if (packVersion !== CONSULT_EARLY_PHOTO_PACK_VERSION) {
+      throw new ConsultWriteError(
+        'CAPTURE_PACK_VERSION_MISMATCH',
+        'Capture pack version is stale.',
+      )
+    }
+    if (schemaVersion !== pack.schemaVersion) {
+      throw new ConsultWriteError(
+        'CAPTURE_SCHEMA_VERSION_MISMATCH',
+        'Capture schema version is stale.',
+      )
+    }
+    return
+  }
+  requireVersions(pack, packVersion, schemaVersion)
+  if (!packHasShot(pack, shotKey)) {
+    throw new ConsultWriteError('CAPTURE_INVALID_SLOT', 'Invalid capture slot.')
+  }
 }
 
 function requireVersions(
@@ -229,6 +316,35 @@ async function requireScope(
   return session
 }
 
+/**
+ * May THIS shot be written in THIS lifecycle state? (P7a-1.)
+ *
+ * Deliberately not a widening of the old `status !== MEDIA_READY` checks to
+ * "MEDIA_READY or EARLY_PHOTO_READY". That would have opened the whole guided
+ * pack in the early stage — a client at EARLY_PHOTO_READY could mint and attach
+ * a `hair_back` upload before she had answered anything, and the prep checklist
+ * would already be half-filled with photos taken in the wrong place in the
+ * flow. The two windows are different because the two shots are different:
+ *
+ *   - the early photo may be taken in the early stage AND later, because the
+ *     thread is a living document and she can replace it until the appointment;
+ *   - every guided shot stays exactly where it was, in MEDIA_READY.
+ */
+function assertCaptureWriteState(
+  session: CaptureScope,
+  shotKey: string,
+  action: string,
+): void {
+  const allowed =
+    shotKey === CONSULT_EARLY_PHOTO_SHOT_KEY
+      ? session.status === ConsultSessionStatus.EARLY_PHOTO_READY ||
+        session.status === ConsultSessionStatus.MEDIA_READY
+      : session.status === ConsultSessionStatus.MEDIA_READY
+  if (!allowed) {
+    throw new ConsultWriteError('INVALID_STATE', `Capture ${action} is unavailable.`)
+  }
+}
+
 function assertCaptureState(session: CaptureScope): void {
   if (!CAPTURE_STATES.has(session.status)) {
     throw new ConsultWriteError(
@@ -251,8 +367,10 @@ function stateForCapture(
     purgedAt: Date | null
   },
 ): ConsultCaptureSlotStateDTO {
-  const shotKey = pack.shots.find((shot) => shot.key === capture.shotKey)?.key
-  if (!shotKey) {
+  // Not `pack.shots.find` — the early photo is a capture of this consult and a
+  // member of no pack, so the pack is the wrong place to ask (P7a-1).
+  const shotKey = capture.shotKey
+  if (!shotBelongsToConsult(pack, shotKey)) {
     throw new ConsultWriteError('CAPTURE_INVALID_SLOT', 'Invalid capture slot.')
   }
   const reasonCode = capture.qualityReasonCode
@@ -293,8 +411,14 @@ async function buildState(
   const pack = packFor(session)
   // The durable audit trail may contain arbitrarily many rejected replacements,
   // but this read is intentionally fixed at one row per pack slot.
+  //
+  // P7a-1: the early photo is queried alongside them and lands in its own field
+  // — NOT in `slots`. It is not one of this pack's slots (it belongs to no
+  // pack), and putting it there would have added a phantom "todo" to the guided
+  // checklist and moved every N/M counter the client renders.
   const captures = await Promise.all(
-    pack.shots.map(({ key: shotKey }) =>
+    [...pack.shots.map((shot) => shot.key), CONSULT_EARLY_PHOTO_SHOT_KEY].map(
+      (shotKey) =>
       tx.consultCapture.findFirst({
         where: { consultSessionId: session.id, shotKey },
         select: {
@@ -318,6 +442,20 @@ async function buildState(
         : [],
     ),
   )
+  const earlyCapture =
+    captures.find(
+      (capture) => capture?.shotKey === CONSULT_EARLY_PHOTO_SHOT_KEY,
+    ) ?? null
+  const earlyPhoto = !earlyCapture
+    ? null
+    : !earlyCapture.purgedAt &&
+        earlyCapture.rawExpiresAt.getTime() <= now.getTime()
+      ? {
+          ...stateForCapture(pack, earlyCapture),
+          state: 'EXPIRED' as const,
+          rawExpiresAt: null,
+        }
+      : stateForCapture(pack, earlyCapture)
 
   return {
     consultId: session.id,
@@ -335,6 +473,7 @@ async function buildState(
         requirement,
       })),
     },
+    earlyPhoto,
     chartCopy: {
       optIn: session.chartCopyOptIn,
       decidedAt: session.chartCopyDecidedAt?.toISOString() ?? null,
@@ -412,16 +551,15 @@ export async function issueConsultCaptureUpload(args: {
         now,
       })
       await requireCurrentConsultAgreementAcceptances(tx, session.id)
-      if (session.status !== ConsultSessionStatus.MEDIA_READY) {
-        throw new ConsultWriteError('INVALID_STATE', 'Capture upload is unavailable.')
-      }
-
       const pack = packFor(session)
       const input = await args.loadInput()
-      requireVersions(pack, input.shotPackVersion, input.schemaVersion)
-      if (!packHasShot(pack, input.shotKey)) {
-        throw new ConsultWriteError('CAPTURE_INVALID_SLOT', 'Invalid capture slot.')
-      }
+      requireShotAndVersions(
+        pack,
+        input.shotKey,
+        input.shotPackVersion,
+        input.schemaVersion,
+      )
+      assertCaptureWriteState(session, String(input.shotKey), 'upload')
       const idempotencyKey = validKey(input.idempotencyKey)
       const contentType = validMediaType(input.contentType)
       if (
@@ -503,7 +641,7 @@ export async function issueConsultCaptureUpload(args: {
       await storage.assertReady()
       const signed = await storage.createSignedUpload(uploadSession.storagePath)
       if (
-        !packHasShot(pack, uploadSession.consultShotKey) ||
+        !shotBelongsToConsult(pack, uploadSession.consultShotKey) ||
         !uploadSession.rawExpiresAt
       ) {
         throw new ConsultWriteError(
@@ -567,10 +705,12 @@ export async function attachConsultCaptureUpload(args: {
       await requireCurrentConsultAgreementAcceptances(tx, session.id)
       const pack = packFor(session)
       const input = await args.loadInput()
-      requireVersions(pack, input.shotPackVersion, input.schemaVersion)
-      if (!packHasShot(pack, input.shotKey)) {
-        throw new ConsultWriteError('CAPTURE_INVALID_SLOT', 'Invalid capture slot.')
-      }
+      requireShotAndVersions(
+        pack,
+        input.shotKey,
+        input.shotPackVersion,
+        input.schemaVersion,
+      )
       const idempotencyKey = validKey(input.idempotencyKey)
       const requestHash = hash({
         uploadSessionId: input.uploadSessionId,
@@ -587,9 +727,7 @@ export async function attachConsultCaptureUpload(args: {
         }
         return { captureId: existing.id, replayed: true }
       }
-      if (session.status !== ConsultSessionStatus.MEDIA_READY) {
-        throw new ConsultWriteError('INVALID_STATE', 'Capture attach is unavailable.')
-      }
+      assertCaptureWriteState(session, input.shotKey, 'attach')
 
       const upload = await tx.uploadSession.findUnique({
         where: { id: input.uploadSessionId },
@@ -762,7 +900,6 @@ export async function checkConsultCaptureQuality(args: {
       await requireCurrentConsultAgreementAcceptances(tx, session.id)
       const pack = packFor(session)
       const input = await args.loadInput()
-      requireVersions(pack, input.shotPackVersion, input.schemaVersion)
       const idempotencyKey = validKey(input.idempotencyKey)
       const requestHash = hash({
         captureId: args.captureId,
@@ -772,15 +909,24 @@ export async function checkConsultCaptureQuality(args: {
       const capture = await tx.consultCapture.findFirst({
         where: { id: args.captureId, consultSessionId: session.id },
       })
-      if (!capture || !packHasShot(pack, capture.shotKey)) {
+      // Which shot this capture IS decides which versions are current for it
+      // and whether it belongs to this consult at all — the early photo is
+      // owned by no pack, so `packHasShot` is the wrong question for it.
+      if (!capture || !shotBelongsToConsult(pack, capture.shotKey)) {
         throw new ConsultWriteError('NOT_FOUND', 'Capture not found.')
       }
-      // The pack's own definition of this slot — what says whether a colour
-      // finding may ride along as a warning here (B3).
-      const shotForCapture = pack.shots.find(
-        (shot) => shot.key === capture.shotKey,
+      requireShotAndVersions(
+        pack,
+        capture.shotKey,
+        input.shotPackVersion,
+        input.schemaVersion,
       )
-      if (!shotForCapture) {
+      // This shot's own definition — what says whether a finding may ride
+      // along as a warning here (B3, and P7a-1's warning-only early photo).
+      // Resolved through the REGISTRY, not the pack: the early photo is not a
+      // pack member, and asking the pack would refuse to judge it at all.
+      const shotForCapture = findConsultCaptureShot(capture.shotKey)
+      if (!shotForCapture || !shotBelongsToConsult(pack, capture.shotKey)) {
         throw new ConsultWriteError('CAPTURE_INVALID_SLOT', 'Invalid capture slot.')
       }
       if (capture.qualityIdempotencyKey === idempotencyKey) {
@@ -792,9 +938,7 @@ export async function checkConsultCaptureQuality(args: {
       if (capture.qualityCheckedAt) {
         return { quality: qualityDto(capture), replayed: true, rejectedId: null }
       }
-      if (session.status !== ConsultSessionStatus.MEDIA_READY) {
-        throw new ConsultWriteError('INVALID_STATE', 'Capture quality is unavailable.')
-      }
+      assertCaptureWriteState(session, capture.shotKey, 'quality')
       if (
         capture.status !== ConsultCaptureStatus.ATTACHED ||
         capture.purgedAt ||
@@ -885,15 +1029,15 @@ export async function checkConsultCaptureQuality(args: {
         !QUALITY_REASON_CODES.has(quality.reasonCode) ||
         (quality.accepted && quality.reasonCode !== 'PASS') ||
         (!quality.accepted && quality.reasonCode === 'PASS') ||
-        // A warning is only ever a colour finding that was downgraded on an
-        // ACCEPTED tight-crop shot. On a rejection, on a full view, or with an
-        // unknown code it is inconsistent output, refused like any other —
-        // the shot's own spec decides, so this boundary cannot drift from the
-        // gate that produced the result.
+        // A warning only ever rides on an ACCEPTED capture, and only where
+        // THIS shot is allowed to downgrade THAT finding. On a rejection, or
+        // with a code this shot may not warn on, it is inconsistent output and
+        // is refused like any other — `shotMayWarn` is the same predicate the
+        // gate used, so this boundary cannot drift from what produced it.
         (quality.warningCode !== null &&
           (!quality.accepted ||
             !QUALITY_WARNING_CODES.has(quality.warningCode) ||
-            !shotToleratesColorCast(shotForCapture))) ||
+            !shotMayWarn(shotForCapture, quality.warningCode))) ||
         typeof quality.model !== 'string' ||
         !quality.model.trim() ||
         quality.model !== quality.model.trim() ||
@@ -917,7 +1061,9 @@ export async function checkConsultCaptureQuality(args: {
           qualityWarningCode: quality.warningCode,
           retakeTip: quality.retakeTip,
           qualitySchemaVersion: CONSULT_CAPTURE_QUALITY_SCHEMA_VERSION,
-          qualityPromptVersion: CONSULT_CAPTURE_QUALITY_PROMPT_VERSION,
+          qualityPromptVersion: consultCaptureQualityPromptVersion(
+            capture.shotKey,
+          ),
           qualityModel: quality.model,
           qualityCheckedAt: finalizedAt,
           qualityIdempotencyKey: idempotencyKey,

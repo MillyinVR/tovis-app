@@ -7290,6 +7290,13 @@ enum ConsultServiceFamily {
 
 enum ConsultSessionStatus {
   CONSENT_REQUIRED
+  /// P7a-1. Consent is in; nothing has been answered yet. She is looking at the
+  /// three coarse inspiration cards and taking one photo of herself, in
+  /// whatever light she is in. Leaving this state requires one ACCEPTED,
+  /// unexpired `early_photo` capture — the stage's own readiness rule, enforced
+  /// by consult_lifecycle_guard — and that same photo unlocks the sticky Book
+  /// CTA. The intake happens AFTER, as prep.
+  EARLY_PHOTO_READY
   INTAKE_READY
   INTAKE_IN_PROGRESS
   MEDIA_READY

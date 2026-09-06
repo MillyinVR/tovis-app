@@ -48,6 +48,12 @@ import {
 } from './serviceProfile'
 
 const INTAKE_READABLE_STATES = new Set<ConsultSessionStatus>([
+  // P7a-1: readable one state earlier than it is writable. The intake is prep
+  // now — it sits below the Book CTA in the thread and she can start it as soon
+  // as her photo is in — but ANSWERING the first question is what closes the
+  // early stage, so the write boundary still moves the session before the first
+  // revision lands. Readable-but-not-yet-writable is the honest shape of that.
+  ConsultSessionStatus.EARLY_PHOTO_READY,
   ConsultSessionStatus.INTAKE_READY,
   ConsultSessionStatus.INTAKE_IN_PROGRESS,
   ConsultSessionStatus.MEDIA_READY,

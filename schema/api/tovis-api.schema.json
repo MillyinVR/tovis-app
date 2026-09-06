@@ -159,6 +159,7 @@
     "$Enums.ConsultSessionStatus": {
       "enum": [
         "CONSENT_REQUIRED",
+        "EARLY_PHOTO_READY",
         "INTAKE_READY",
         "INTAKE_IN_PROGRESS",
         "MEDIA_READY",
@@ -8883,7 +8884,14 @@
     "ConsultCaptureQualityWarningCodeDTO": {
       "enum": [
         "WARM_INDOOR_LIGHT",
-        "COLOR_CAST"
+        "COLOR_CAST",
+        "VIEW_MISMATCH",
+        "HAIR_NOT_VISIBLE",
+        "SUBJECT_NOT_VISIBLE",
+        "BLURRY",
+        "TOO_DARK",
+        "TOO_BRIGHT",
+        "OTHER_QUALITY_FAILURE"
       ],
       "type": "string"
     },
@@ -8921,7 +8929,8 @@
         "face_side",
         "eyes_closeup",
         "area_wide",
-        "area_closeup"
+        "area_closeup",
+        "early_photo"
       ],
       "type": "string"
     },
@@ -9036,6 +9045,17 @@
         "consultId": {
           "type": "string"
         },
+        "earlyPhoto": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultCaptureSlotStateDTO"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "P7a-1, the early photo — the one taken at the spark, before any intake.\n\nIts own field and deliberately NOT a member of `slots`: `slots` is this pack's guided checklist and drives every \"N of M photos\" the clients render, so an extra entry there would have read as an extra chore. `null` until she takes one. One accepted early photo is what unlocks the sticky Book CTA (`ConsultThreadBookCtaDTO`)."
+        },
         "shotPack": {
           "$ref": "#/definitions/ConsultCaptureShotPackDTO"
         },
@@ -9054,6 +9074,7 @@
         "status",
         "shotPack",
         "slots",
+        "earlyPhoto",
         "chartCopy"
       ],
       "type": "object"

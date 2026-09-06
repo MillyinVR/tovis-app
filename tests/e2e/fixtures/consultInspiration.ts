@@ -169,6 +169,10 @@ export const lookSourceInspiration: ConsultInspirationStateDTO = {
 export const captureState: ConsultCaptureStateDTO = {
   "consultId": "consult_fixture_1",
   "status": "ANALYSIS_PENDING",
+  // P7a-1: this fixture is a consult already past the early stage (it is at
+  // ANALYSIS_PENDING), so it holds no early photo. The stage's own coverage is
+  // in tests/integration/consult-early-photo.test.ts.
+  "earlyPhoto": null,
   "shotPack": {
     "id": "hair-color-daylight",
     "categorySlug": "hair-color",

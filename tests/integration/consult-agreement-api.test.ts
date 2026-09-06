@@ -497,7 +497,9 @@ describe('client consult agreement API against PostgreSQL', () => {
     expect(adult.status).toBe(200)
     await expect(json(adult)).resolves.toMatchObject({
       replayed: false,
-      agreementState: { status: ConsultSessionStatus.INTAKE_READY },
+      // P7a-1: both agreements accepted lands on the EARLY PHOTO, not the
+      // intake — that photo is what unlocks the booking.
+      agreementState: { status: ConsultSessionStatus.EARLY_PHOTO_READY },
     })
     await expect(json(adultReplay)).resolves.toMatchObject({ replayed: true })
     await expect(
@@ -565,7 +567,8 @@ describe('client consult agreement API against PostgreSQL', () => {
       expect.objectContaining({
         replayed: false,
         agreementState: expect.objectContaining({
-          status: ConsultSessionStatus.INTAKE_READY,
+          // P7a-1: re-consent returns her to the early-photo stage.
+          status: ConsultSessionStatus.EARLY_PHOTO_READY,
           requirements: expect.arrayContaining([
             expect.objectContaining({
               kind: ConsultAgreementKind.SENSITIVE_DATA_CONSENT,
@@ -648,7 +651,7 @@ describe('client consult agreement API against PostgreSQL', () => {
 
     await transitionConsultSession({
       consultSessionId: sessionId,
-      fromStatus: ConsultSessionStatus.INTAKE_READY,
+      fromStatus: ConsultSessionStatus.EARLY_PHOTO_READY,
       toStatus: ConsultSessionStatus.CANCELLED,
       actor: { type: ConsultActorType.CLIENT, id: ownerUserId },
     })

@@ -12,7 +12,7 @@ import { isRecord } from '@/lib/guards'
 
 import {
   CONSULT_ALL_CAPTURE_SHOT_KEYS,
-  CONSULT_MAX_CAPTURE_SHOTS,
+  CONSULT_MAX_ANALYSIS_CAPTURES,
 } from './capture/registry'
 import {
   CONSULT_HAIR_LEVELS,
@@ -1953,7 +1953,7 @@ export const runConsultAnalysis: ConsultAnalysisProvider = async (input) => {
   const packKeys = input.capturePack.shotKeys
   if (
     input.captures.length < 1 ||
-    input.captures.length > CONSULT_MAX_CAPTURE_SHOTS ||
+    input.captures.length > CONSULT_MAX_ANALYSIS_CAPTURES ||
     packKeys.length < 1 ||
     capturesByShot.size !== input.captures.length ||
     input.captures.some((capture) => !packKeys.includes(capture.shotKey))

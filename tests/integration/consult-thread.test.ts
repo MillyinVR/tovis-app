@@ -90,6 +90,11 @@ import {
   HAIR_COLOR_INTAKE_PACK_VERSION,
   HAIR_COLOR_INTAKE_SCHEMA_VERSION,
 } from '@/lib/consult/intakePack'
+import { CONSULT_EARLY_PHOTO_SHOT_KEY } from '@/lib/consult/capture/earlyPhoto'
+import {
+  findConsultCaptureShot,
+  resolveConsultCapturePack,
+} from '@/lib/consult/capture/registry'
 import { purgeConsultSessionRawObjects } from '@/lib/consult/capturePurge'
 import { loadConsultThread } from '@/lib/consult/thread'
 import {
@@ -208,6 +213,35 @@ async function acceptBothAgreements(sessionId: string) {
   })
 }
 
+/**
+ * P7a-1. The step between consent and the intake: one photo of the client, any
+ * light, camera or roll. The database enforces it — a consult cannot leave
+ * EARLY_PHOTO_READY without one accepted, unexpired `early_photo` capture — so
+ * every test that reaches the intake takes one, exactly as a client does.
+ */
+let earlyPhotoLabel = 0
+async function takeEarlyPhoto(sessionId: string) {
+  // Idempotent, because several tests below write the intake twice (answering,
+  // then changing an answer) and a client does not retake her photo to do that.
+  // The stage is already satisfied the second time round.
+  const existing = await db.consultCapture.findFirst({
+    where: {
+      consultSessionId: sessionId,
+      shotKey: CONSULT_EARLY_PHOTO_SHOT_KEY,
+      status: 'ACCEPTED',
+    },
+    select: { id: true },
+  })
+  if (existing) return
+  earlyPhotoLabel += 1
+  await attachAcceptedCapture(
+    db,
+    sessionId,
+    CONSULT_EARLY_PHOTO_SHOT_KEY,
+    `thread-early-${earlyPhotoLabel}`,
+  )
+}
+
 describe('consult thread projection', () => {
   it('opens on consent, and consent is the one open step', async () => {
     const sessionId = await startConsult()
@@ -259,6 +293,9 @@ describe('consult thread projection', () => {
   it('asks intake ONE question at a time, and never renders the whole pack', async () => {
     const sessionId = await startConsult()
     await acceptBothAgreements(sessionId)
+    // P7a-1: the intake is PREP — it does not begin until the early photo is
+    // in, so the thread has no questions on it at all before this line.
+    await takeEarlyPhoto(sessionId)
 
     const t = await thread(sessionId)
     const questions = ofKind(t.messages, 'QUESTION')
@@ -267,10 +304,16 @@ describe('consult thread projection', () => {
     expect(questions).toHaveLength(1)
     expect(questions[0]?.state).toBe('OPEN')
     expect(questions[0]?.answer).toBeNull()
-    expect(t.nextOpenMessageId).toBe(questions[0]?.id)
+    // 🔴 The intake question is NOT the resume point any more, and that is the
+    // P7a order rather than a regression: the coarse inspiration cards come
+    // first (consent → cards → early photo → Book → intake as prep), so with
+    // the cards unanswered the thread resumes on a card. The intake still
+    // renders exactly one question, which is what this test is about.
+    expect(t.nextOpenMessageId).toMatch(/^inspiration:/)
 
     // Answering the pack turns every question into settled history carrying the
     // client's own answer, and moves the open step on.
+    await takeEarlyPhoto(sessionId)
     await appendConsultIntakeRevision({
       consultSessionId: sessionId,
       actor: { type: ConsultActorType.CLIENT, id: fx.clientUserId },
@@ -307,6 +350,7 @@ describe('consult thread projection', () => {
   it('emits one photo request per shot in the served pack, carrying the served slot', async () => {
     const sessionId = await startConsult()
     await acceptBothAgreements(sessionId)
+    await takeEarlyPhoto(sessionId)
     await appendConsultIntakeRevision({
       consultSessionId: sessionId,
       actor: { type: ConsultActorType.CLIENT, id: fx.clientUserId },
@@ -320,7 +364,15 @@ describe('consult thread projection', () => {
     })
 
     const t = await thread(sessionId)
-    const photos = ofKind(t.messages, 'PHOTO_REQUEST')
+    const allPhotos = ofKind(t.messages, 'PHOTO_REQUEST')
+    // Eight photo requests: the early photo, then the pack's seven. The early
+    // one is a separate stage that happens BEFORE the intake — it is not a
+    // guided slot and does not count towards the pack (P7a-1).
+    expect(allPhotos).toHaveLength(8)
+    expect(allPhotos[0]?.shot.key).toBe(CONSULT_EARLY_PHOTO_SHOT_KEY)
+    const photos = allPhotos.filter(
+      (photo) => photo.shot.key !== CONSULT_EARLY_PHOTO_SHOT_KEY,
+    )
     expect(photos).toHaveLength(7)
 
     // 🔴 The intro names the PACK's own counts. A fixed sentence here is what
@@ -347,21 +399,11 @@ describe('consult thread projection', () => {
     expect(settled?.slot?.state).toBe('ACCEPTED')
   })
 
-  it('unlocks Book on the SELFIE, not on the analysis', async () => {
+  it('unlocks Book on the EARLY PHOTO, not on the analysis or the intake', async () => {
     const sessionId = await startConsult()
     await acceptBothAgreements(sessionId)
-    await appendConsultIntakeRevision({
-      consultSessionId: sessionId,
-      actor: { type: ConsultActorType.CLIENT, id: fx.clientUserId },
-      loadInput: async () => ({
-        idempotencyKey: 'thread-gate-intake',
-        packVersion: HAIR_COLOR_INTAKE_PACK_VERSION,
-        schemaVersion: HAIR_COLOR_INTAKE_SCHEMA_VERSION,
-        complete: true,
-        answers: completeAnswers,
-      }),
-    })
 
+    // Consent is in, nothing else is. The CTA is locked and says why.
     const before = await thread(sessionId)
     expect(before.book.enabled).toBe(false)
     expect(before.book.reason).toBe('SELFIE_REQUIRED')
@@ -371,19 +413,48 @@ describe('consult thread projection', () => {
     expect(before.book.serviceId).toBeTruthy()
     expect(before.book.lookMediaId).toBeTruthy()
 
-    // A hair shot is not a selfie. The gate must not move.
-    await attachAcceptedCapture(db, sessionId, 'hair_back', 'thread-gate')
-    const stillLocked = await thread(sessionId)
-    expect(stillLocked.book.enabled).toBe(false)
-    expect(stillLocked.book.reason).toBe('SELFIE_REQUIRED')
-
-    // The selfie, and only the selfie, opens it — with no analysis, no
-    // estimate and nothing else finished.
-    await attachAcceptedCapture(db, sessionId, 'face_front', 'thread-gate')
+    // The early photo, and only that, opens it — with no intake, no analysis,
+    // no estimate and nothing else finished. This is the whole point of P7a:
+    // the spark converts into a booking before any of that exists.
+    await takeEarlyPhoto(sessionId)
     const unlocked = await thread(sessionId)
     expect(unlocked.book.enabled).toBe(true)
     expect(unlocked.book.reason).toBeNull()
-    expect(unlocked.status).not.toBe('COMPLETED')
+    expect(unlocked.status).toBe('EARLY_PHOTO_READY')
+    // The intake renders BELOW the CTA as prep, and nothing in it is answered:
+    // the booking did not wait for a single question.
+    const questions = ofKind(unlocked.messages, 'QUESTION')
+    expect(questions.every((q) => q.answer === null)).toBe(true)
+    // And the photo that unlocked it is above the intake in the thread.
+    const ids = unlocked.messages.map((m) => m.id)
+    expect(ids.indexOf(`photo:${CONSULT_EARLY_PHOTO_SHOT_KEY}`)).toBeLessThan(
+      ids.findIndex((id) => id.startsWith('intake:')),
+    )
+  })
+
+  // The unlocking shot must resolve for EVERY family, including one nobody has
+  // modelled yet: `consultFamily` defaults to OTHER, so a category an admin
+  // adds without thinking about it still has to be bookable.
+  it('resolves the unlocking shot for every service family', () => {
+    for (const family of [
+      'HAIR',
+      'SKIN',
+      'NAILS',
+      'BROWS_LASHES',
+      'MAKEUP',
+      'BODY',
+      'OTHER',
+    ] as const) {
+      const pack = resolveConsultCapturePack({ categorySlug: 'anything', family })
+      // It is deliberately NOT a guided slot — it must not appear in the prep
+      // checklist or move any pack's N/M counter...
+      expect(
+        pack.shots.some((shot) => shot.key === CONSULT_EARLY_PHOTO_SHOT_KEY),
+      ).toBe(false)
+    }
+    // ...and it resolves from the registry regardless, which is what the gate
+    // and the vision gate both use.
+    expect(findConsultCaptureShot(CONSULT_EARLY_PHOTO_SHOT_KEY)).not.toBeNull()
   })
 
   // 🔴 The booking join is on the LOOK, because booking at the spark runs the
@@ -513,6 +584,7 @@ describe('consult thread projection', () => {
   it('answers the inspiration step as a card, not as a wizard step', async () => {
     const sessionId = await startConsult()
     await acceptBothAgreements(sessionId)
+    await takeEarlyPhoto(sessionId)
     await appendConsultIntakeRevision({
       consultSessionId: sessionId,
       actor: { type: ConsultActorType.CLIENT, id: fx.clientUserId },
@@ -620,6 +692,7 @@ describe('consult thread projection', () => {
   it('🔴 "Change something" reopens the coarse cards instead of standing as an agreement', async () => {
     const sessionId = await startConsult()
     await acceptBothAgreements(sessionId)
+    await takeEarlyPhoto(sessionId)
     await appendConsultIntakeRevision({
       consultSessionId: sessionId,
       actor: { type: ConsultActorType.CLIENT, id: fx.clientUserId },
