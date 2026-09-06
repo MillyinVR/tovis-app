@@ -124,7 +124,15 @@ async function liveProvider(
     // The evaluation corpus measures the CLIENT read, so no reference is
     // supplied — the same shape a client who skipped the inspiration step
     // produces, not a stub for one that failed.
-    inspiration: { source: 'NONE', analysis: null, answers: [] },
+    inspiration: {
+      source: 'NONE',
+      analysis: null,
+      answers: [],
+      wants: [],
+      avoids: [],
+      unsure: [],
+      keep: [],
+    },
     // The corpus runs the COLOUR intake, whose policy derives what may be
     // raised from the fixture's own answers — the same derivation the consult
     // route makes, so the eval measures the enum production actually sends.

@@ -11,6 +11,7 @@
 // pro brief reads the same answer the same way whichever hair service the
 // consult is about.
 
+import { coarseCards, HAIR_GENERAL_KEEP_VALUES } from '../cardQuestions'
 import {
   CURRENT_UPKEEP_OPTIONS,
   FULLNESS_GOAL_OPTIONS,
@@ -134,5 +135,36 @@ export const HAIR_GENERAL_INSPIRATION_PACK: ConsultInspirationPackDefinition = {
     'current_styling:sometimes': 'The client sometimes wears their hair in a similar way.',
     'current_styling:no': 'The client does not currently wear their hair this way.',
     'styling_walkthrough:yes': 'The client would like a styling walkthrough.',
+  },
+}
+
+/**
+ * P5d — the CARD pack for every non-colour hair category.
+ *
+ * COARSE ONLY, and the absence of a prep tier is the honest part: the
+ * inspiration reading (lib/consult/inspirationVision.ts) describes hair
+ * COLOUR, so a cut or a treatment consult has no per-attribute reading to make
+ * cards from. Its three coarse cards still work — the crops fall back to the
+ * whole reference, which is exactly what the client sees when a colour
+ * reference could not be read either.
+ *
+ * A shape-and-texture reading is the day this pack grows a prep tier; until
+ * then, inventing eight cards out of nothing would be Part 0 rule 4 with extra
+ * steps.
+ */
+export const HAIR_GENERAL_INSPIRATION_CARD_PACK: ConsultInspirationPackDefinition = {
+  id: HAIR_GENERAL_INSPIRATION_PACK_ID,
+  categorySlug: null,
+  version: 2,
+  schemaVersion: 2,
+  reflectionPromptKey: 'reflectionPromptHair',
+  questions: coarseCards(HAIR_GENERAL_KEEP_VALUES),
+  possibleMeanings: {
+    'spark_focus:the-color': 'The colour in the reference is what stopped her.',
+    'spark_focus:the-shape': 'The shape of the reference is what stopped her.',
+    'spark_focus:the-whole-thing': 'She pointed at the reference as a whole rather than at one part of it.',
+    'keep_as_is:my-length': 'The client asked for her length to be left alone.',
+    'keep_as_is:my-natural-texture': 'The client asked for her natural texture to be left alone.',
+    'understanding_check:thats-right': 'The client confirmed the summary of what she is after.',
   },
 }

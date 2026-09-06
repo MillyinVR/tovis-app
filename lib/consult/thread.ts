@@ -34,6 +34,8 @@ import type {
 } from '@/lib/brand/types'
 import type {
   ConsultCaptureStateDTO,
+  ConsultInspirationCardDTO,
+  ConsultInspirationStateDTO,
   ConsultThreadBookCtaDTO,
   ConsultThreadBookGateReasonDTO,
   ConsultThreadDTO,
@@ -108,6 +110,43 @@ function text(
   state: ConsultThreadMessageStateDTO = 'DONE',
 ): ConsultThreadMessageDTO {
   return { kind: 'TEXT', id, author: 'APP', state, text: body }
+}
+
+/**
+ * P5d — one inspiration CARD as a thread message.
+ *
+ * The card carries its own crop, its own words and its own question; this
+ * function only decides which message id it gets and whether it is the one the
+ * thread is waiting on. An ANSWERED card keeps its place in the thread, dimmed,
+ * with what she chose still on it — a thread you can scroll back through is the
+ * difference between a conversation and a form.
+ *
+ * `text` is null on purpose. The step says its piece once, on the message that
+ * asks for a reference; a bubble above each of eleven cards would be eleven
+ * sentences nobody asked for.
+ */
+function inspirationCardMessage(args: {
+  card: ConsultInspirationCardDTO
+  inspiration: ConsultInspirationStateDTO | null
+  open: boolean
+}): ConsultThreadMessageDTO {
+  const answered = args.card.selectedValues.length > 0
+  return {
+    kind: 'INSPIRATION',
+    id: `inspiration:${args.card.questionKey}`,
+    author: 'APP',
+    state: answered ? 'DONE' : args.open ? 'OPEN' : 'BLOCKED',
+    text: null,
+    sourceDecisionRequired: false,
+    source: args.inspiration?.source ?? null,
+    question: args.card.question,
+    card: args.card,
+    answeredQuestionCount: args.inspiration?.progress.answeredQuestionCount ?? 0,
+    specificDetailCount: args.inspiration?.progress.specificDetailCount ?? 0,
+    requiredSpecificDetailCount:
+      args.inspiration?.progress.requiredSpecificDetailCount ?? 0,
+    schemaVersion: args.inspiration?.schemaVersion ?? 0,
+  }
 }
 
 /**
@@ -321,6 +360,88 @@ export async function loadConsultThread(args: {
     return finish({ session, look, pro, out, booking })
   }
 
+  // ── Inspiration, coarse tier ─────────────────────────────────────────────
+  //
+  // 🔴 BEFORE the intake, and that is the Sept 5 flow order: the spark, then
+  // "what made you stop scrolling?", then the booking. The three coarse cards
+  // are three taps and they come before anything that reads like homework.
+  //
+  // ⚠️ THE DEPENDENCY (P7a): the inspiration step's own window is still
+  // MEDIA_READY — in the contract (`MUTABLE_STATUS`) and in the database
+  // (`consult_lifecycle_guard` pins an INSPIRATION revision to MEDIA_READY) —
+  // and a consult only reaches MEDIA_READY once its intake is complete. So
+  // TODAY these cards render above an intake she has already answered rather
+  // than in front of one she has not. Ordering them here is what makes the
+  // thread correct the day P7a's early-photo stage moves the window; it
+  // changes nothing about resume, because at INTAKE_READY there are no
+  // inspiration messages at all and at MEDIA_READY every intake message is
+  // already DONE.
+  const inspiration = await optionalStage(() =>
+    loadConsultInspirationState({ ...stageArgs, copy: args.inspirationCopy }),
+  )
+  const inspirationCards = inspiration?.cards ?? []
+  const coarseCards = inspirationCards.filter((card) => card.tier === 'COARSE')
+  const prepCards = inspirationCards.filter((card) => card.tier === 'PREP')
+
+  if (inspiration) {
+    const { progress } = inspiration
+    const complete = progress.canComplete && !progress.currentQuestion
+    const sourceDecisionRequired = progress.blocker === 'SOURCE_DECISION_REQUIRED'
+    // The step's own bubble and the reference itself. It stays one message —
+    // this is where she adds a picture or carries on without one, and it is
+    // the message the read stage's "let me have a proper look" hangs off.
+    out.push({
+      kind: 'INSPIRATION',
+      id: 'inspiration',
+      author: 'APP',
+      // 🔴 For a CARD consult this message is a bubble and the reference, not a
+      // step: the only thing it can be waiting on is the source decision. Left
+      // OPEN it would be the first open message in the thread, so
+      // `nextOpenMessageId` would resume her on a header instead of on the
+      // card she still has to answer.
+      state:
+        coarseCards.length > 0
+          ? sourceDecisionRequired
+            ? 'OPEN'
+            : 'DONE'
+          : complete
+            ? 'DONE'
+            : 'OPEN',
+      text: fillConsultThreadCopy(
+        complete
+          ? copy.inspirationDone
+          : sourceDecisionRequired
+            ? copy.inspirationSourceIntro
+            : copy.inspirationIntro,
+        { pro },
+      ),
+      sourceDecisionRequired,
+      source: inspiration.source,
+      // 🔴 The wizard question is carried ONLY for a contract-v1 consult, which
+      // has no cards. A v2 consult answers on its cards; serving the same
+      // question twice would render it twice and let two forms disagree.
+      question: coarseCards.length > 0 ? null : progress.currentQuestion,
+      card: null,
+      answeredQuestionCount: progress.answeredQuestionCount,
+      specificDetailCount: progress.specificDetailCount,
+      requiredSpecificDetailCount: progress.requiredSpecificDetailCount,
+      schemaVersion: inspiration.schemaVersion,
+    })
+
+    // One message per coarse card, in pack order. The card the server is
+    // waiting on is the OPEN one; the ones after it render as requests she can
+    // still jump to, exactly as the photo pack does.
+    for (const card of coarseCards) {
+      out.push(
+        inspirationCardMessage({
+          card,
+          inspiration,
+          open: progress.currentQuestion?.key === card.questionKey,
+        }),
+      )
+    }
+  }
+
   // ── Intake ───────────────────────────────────────────────────────────────
   const intake = await optionalStage(() => loadConsultIntakeState(stageArgs))
   if (intake) {
@@ -361,37 +482,6 @@ export async function loadConsultThread(args: {
     if (!nextKey && intake.progress.canComplete) {
       out.push(text('intake-done', copy.intakeDone))
     }
-  }
-
-  // ── Inspiration ──────────────────────────────────────────────────────────
-  const inspiration = await optionalStage(() =>
-    loadConsultInspirationState({ ...stageArgs, copy: args.inspirationCopy }),
-  )
-  if (inspiration) {
-    const { progress } = inspiration
-    const complete = progress.canComplete && !progress.currentQuestion
-    const sourceDecisionRequired = progress.blocker === 'SOURCE_DECISION_REQUIRED'
-    out.push({
-      kind: 'INSPIRATION',
-      id: 'inspiration',
-      author: 'APP',
-      state: complete ? 'DONE' : 'OPEN',
-      text: fillConsultThreadCopy(
-        complete
-          ? copy.inspirationDone
-          : sourceDecisionRequired
-            ? copy.inspirationSourceIntro
-            : copy.inspirationIntro,
-        { pro },
-      ),
-      sourceDecisionRequired,
-      source: inspiration.source,
-      question: progress.currentQuestion,
-      answeredQuestionCount: progress.answeredQuestionCount,
-      specificDetailCount: progress.specificDetailCount,
-      requiredSpecificDetailCount: progress.requiredSpecificDetailCount,
-      schemaVersion: inspiration.schemaVersion,
-    })
   }
 
   // ── Photos ───────────────────────────────────────────────────────────────
@@ -499,6 +589,25 @@ export async function loadConsultThread(args: {
       bookingId: booking.id,
     })
     out.push(text('prep-intro', fillConsultThreadCopy(copy.prepIntro, { pro })))
+    // ── Inspiration, prep tier ─────────────────────────────────────────────
+    //
+    // AFTER the booking, because that is what they are for: "help {pro} get
+    // ready". One card per attribute the reference was actually read as, so a
+    // consult whose reading settled three things asks three cards and one that
+    // could not be read asks none — the list is never padded out.
+    //
+    // Only the FIRST unanswered one is open. The rest render and are tappable
+    // (she can answer them in any order — the write path allows it) but resume
+    // lands on one place, the same rule the photo pack follows.
+    for (const card of prepCards) {
+      out.push(
+        inspirationCardMessage({
+          card,
+          inspiration,
+          open: inspiration?.progress.nextPrepQuestionKey === card.questionKey,
+        }),
+      )
+    }
     // The moment the provisional price firms up. Derived, not written: P5a is
     // presentation only, so this ANNOUNCES that an estimate now exists — it does
     // not reprice the booking. That write is the next slice.

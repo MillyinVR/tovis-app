@@ -2543,9 +2543,14 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
     const itemCountBefore = await db.bookingServiceItem.count({
       where: { bookingId: consult.bookingId },
     })
+    // 🔴 P5d: a CUT, not a style finish. The card pack's catalogue pointer is
+    // LENGTH — "the shape of it" and "the whole thing" are what can imply a
+    // service of their own — because those are the only things the coarse tier
+    // asks about. STYLING and FULLNESS are no longer asked at all, so nothing
+    // can point at them; see the note on `spark_focus` in ../cardQuestions.ts.
     const stylingService = await db.service.create({
       data: {
-        name: `${tag} Style Finish`,
+        name: `${tag} Cut and Finish`,
         categoryId,
         defaultDurationMinutes: 20,
         minPrice: new Prisma.Decimal('30.00'),
@@ -2575,21 +2580,20 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
         input: {
           idempotencyKey: 'out-of-order',
           schemaVersion: INSPIRATION_SCHEMA_VERSION,
-          questionKey: 'avoid_colors',
-          selectedValues: ['none'],
+          // The SECOND coarse card, before the first — the order rule still
+          // holds across the tier.
+          questionKey: 'keep_as_is',
+          selectedValues: ['my-length'],
         },
       }),
     ).rejects.toMatchObject({ code: 'INSPIRATION_QUESTION_OUT_OF_ORDER' })
 
-    // P5c: the colour pack's contract-v2 questions. Same keys, same values —
-    // `other_detail` is gone, because v2 records no free text.
+    // P5d: the colour pack's three COARSE cards, which are what completes the
+    // step. The prep tier comes after the booking and gates nothing.
     const answers = [
-      ['favorite_colors', ['cool-smoky']],
-      ['avoid_colors', ['none']],
-      ['length_goal', ['yes-same-length']],
-      ['fullness_goal', ['more-full']],
-      ['current_styling', ['not-sure']],
-      ['styling_walkthrough', ['no']],
+      ['spark_focus', ['the-shape']],
+      ['keep_as_is', ['my-length']],
+      ['understanding_check', ['thats-right']],
     ] as const
     let completed: Awaited<ReturnType<typeof answerConsultInspirationQuestion>> | null = null
     for (const [questionKey, selectedValues] of answers) {
@@ -2613,17 +2617,19 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
       complete: true,
       source: 'EXTERNAL_UPLOAD',
       answers: expect.arrayContaining([
-        expect.objectContaining({ questionKey: 'styling_walkthrough' }),
+        expect.objectContaining({ questionKey: 'understanding_check' }),
       ]),
+      // Her words come from the brand copy table now, resolved on read — the
+      // payload holds `spark_focus: ['the-color']` and nothing else.
       exactClientDetails: expect.arrayContaining([
-        expect.objectContaining({ clientWords: 'The cool or smoky colors' }),
+        expect.objectContaining({ clientWords: 'The shape of it' }),
       ]),
       possibleProfessionalInterpretation: expect.arrayContaining([
         expect.objectContaining({ confidence: 'POSSIBLE', evidence: 'CLIENT_SELECTION' }),
       ]),
       catalogGuidance: [
         expect.objectContaining({
-          detail: 'STYLING',
+          detail: 'LENGTH',
           contextOnly: true,
           automaticallyAdded: false,
           message: expect.stringContaining('nothing was added'),
@@ -2631,12 +2637,11 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
       ],
     })
     expect(completed?.state.progress).toMatchObject({
-      answeredQuestionCount: 6,
-      // Two selections are neutral ("None", "Not sure") and the walkthrough
-      // answer is a service preference rather than a detail she pointed at
-      // (`countsAsDetail: false`), so three is what this answer set produces —
-      // it is no longer what completion REQUIRES.
-      specificDetailCount: 3,
+      // P5d: THREE coarse cards, and the coarse tier is what completes.
+      answeredQuestionCount: 3,
+      // Two of the three are details she pointed at; the understanding check
+      // is a confirmation, not a detail (`countsAsDetail: false`).
+      specificDetailCount: 2,
       canComplete: true,
       requiredSpecificDetailCount: 0,
     })
@@ -2646,10 +2651,10 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
         clientId: consult.clientId,
         actor: { type: ConsultActorType.CLIENT, id: consult.userId },
         input: {
-          idempotencyKey: 'answer-favorite_colors',
+          idempotencyKey: 'answer-spark_focus',
           schemaVersion: INSPIRATION_SCHEMA_VERSION,
-          questionKey: 'favorite_colors',
-          selectedValues: ['cool-smoky'],
+          questionKey: 'spark_focus',
+          selectedValues: ['the-shape'],
         },
       })).replayed,
     ).toBe(true)
@@ -2659,10 +2664,10 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
         clientId: consult.clientId,
         actor: { type: ConsultActorType.CLIENT, id: consult.userId },
         input: {
-          idempotencyKey: 'answer-favorite_colors',
+          idempotencyKey: 'answer-spark_focus',
           schemaVersion: INSPIRATION_SCHEMA_VERSION,
-          questionKey: 'favorite_colors',
-          selectedValues: ['warm-golden'],
+          questionKey: 'spark_focus',
+          selectedValues: ['the-color'],
         },
       }),
     ).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' })
@@ -2746,7 +2751,7 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
           source: 'EXTERNAL_UPLOAD',
           inspirationId: row.id,
           exactClientDetails: expect.arrayContaining([
-            expect.objectContaining({ clientWords: 'The cool or smoky colors' }),
+            expect.objectContaining({ clientWords: 'The shape of it' }),
           ]),
           possibleProfessionalInterpretation: expect.arrayContaining([
             expect.objectContaining({ confidence: 'POSSIBLE' }),
@@ -2779,12 +2784,9 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
 
     await attachExternalInspiration(consult, 'booking-snapshot')
     const answers = [
-      ['favorite_colors', ['cool-smoky']],
-      ['avoid_colors', ['none']],
-      ['length_goal', ['yes-same-length']],
-      ['fullness_goal', ['more-full']],
-      ['current_styling', ['not-sure']],
-      ['styling_walkthrough', ['no']],
+      ['spark_focus', ['the-color']],
+      ['keep_as_is', ['my-length']],
+      ['understanding_check', ['thats-right']],
     ] as const
     let completed: Awaited<ReturnType<typeof answerConsultInspirationQuestion>> | null = null
     for (const [questionKey, selectedValues] of answers) {
@@ -2803,7 +2805,7 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
     // Guards against a vacuous pass: confirm the flow actually completed
     // before asserting nothing else moved.
     expect(completed?.state.progress).toMatchObject({
-      answeredQuestionCount: 6,
+      answeredQuestionCount: 3,
       canComplete: true,
     })
 

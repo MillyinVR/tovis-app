@@ -23,7 +23,7 @@ import {
   ImmutableConsultResultError,
   loadLatestImmutableConsultResult,
 } from './immutableResult'
-import { normalizeStoredConsultInspirationAnalysis } from './inspirationAnalysisContract'
+import { normalizeStoredConsultInspirationAnalysis } from './inspirationAnalysisRead'
 import { loadConsultServiceEstimatesByConsultId } from './serviceEstimate'
 
 export { selectLatestConsultRevision } from './immutableResult'

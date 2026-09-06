@@ -18,6 +18,9 @@
 
 import type { ConsultServiceFamily } from '@prisma/client'
 
+import { CONSULT_INSPIRATION_FIELD_VALUES } from '../inspirationAttributes'
+
+import { defaultClientConsultInspirationCopy } from '@/lib/brand/defaultClientConsultInspirationCopy'
 import type { BrandClientConsultInspirationCopy } from '@/lib/brand/types'
 import type {
   ConsultInspirationAnswerDTO,
@@ -28,9 +31,18 @@ import type {
 } from '@/lib/dto/consult'
 import { isRecord } from '@/lib/guards'
 
-import { GENERAL_SERVICE_INSPIRATION_PACK } from './packs/generalService'
-import { HAIR_COLOR_INSPIRATION_PACK } from './packs/hairColor'
-import { HAIR_GENERAL_INSPIRATION_PACK } from './packs/hairGeneral'
+import {
+  GENERAL_SERVICE_INSPIRATION_CARD_PACK,
+  GENERAL_SERVICE_INSPIRATION_PACK,
+} from './packs/generalService'
+import {
+  HAIR_COLOR_INSPIRATION_CARD_PACK,
+  HAIR_COLOR_INSPIRATION_PACK,
+} from './packs/hairColor'
+import {
+  HAIR_GENERAL_INSPIRATION_CARD_PACK,
+  HAIR_GENERAL_INSPIRATION_PACK,
+} from './packs/hairGeneral'
 import {
   CONSULT_INSPIRATION_CONTRACT_V2,
   CONSULT_INSPIRATION_FORBIDDEN_WORDS,
@@ -48,19 +60,27 @@ import {
 
 export const CONSULT_INSPIRATION_PACKS: readonly ConsultInspirationPackDefinition[] =
   [
-    HAIR_COLOR_INSPIRATION_PACK,
-    HAIR_GENERAL_INSPIRATION_PACK,
-    GENERAL_SERVICE_INSPIRATION_PACK,
+    HAIR_COLOR_INSPIRATION_CARD_PACK,
+    HAIR_GENERAL_INSPIRATION_CARD_PACK,
+    GENERAL_SERVICE_INSPIRATION_CARD_PACK,
   ]
 
 /**
  * Superseded pack versions, kept registered because stored payloads name them.
- * Empty today — every pack is on its first version — and it is here rather
- * than added later because the read path already looks packs up BY VERSION,
- * so the day a pack is re-cut is a one-line change instead of a re-design.
+ *
+ * P5d put the three v1 question packs here, and this is the day the mechanism
+ * was built for: a consult that answered v1's six questions is READ against
+ * v1's six questions forever — its labels, its option values, its
+ * `possibleMeanings` — while a consult starting today gets cards. Removing an
+ * entry would make every payload naming it unreadable, so nothing leaves this
+ * list until no row names it.
  */
 export const CONSULT_INSPIRATION_PACK_ARCHIVE: readonly ConsultInspirationPackDefinition[] =
-  []
+  [
+    HAIR_COLOR_INSPIRATION_PACK,
+    HAIR_GENERAL_INSPIRATION_PACK,
+    GENERAL_SERVICE_INSPIRATION_PACK,
+  ]
 
 const PACKS_BY_ID = new Map(CONSULT_INSPIRATION_PACKS.map((pack) => [pack.id, pack]))
 
@@ -87,6 +107,23 @@ export function findConsultInspirationPack(
   return PACKS_BY_ID_AND_VERSION.get(`${packId}@${packVersion}`) ?? null
 }
 
+/**
+ * 🔴 The family fallbacks resolve through `PACKS_BY_ID`, NOT through an
+ * imported pack const.
+ *
+ * They used to name the constants directly, and P5d is where that bit: the
+ * registry listed the new card packs, the hair-colour path resolved by SLUG
+ * and got cards, and these two lines quietly kept serving version 1 to every
+ * other family. Every test that asked "does the registry list the card pack?"
+ * said yes. Resolution has ONE source now — the registered set — so a pack
+ * that is registered is a pack that is served.
+ */
+function currentPack(id: string): ConsultInspirationPackDefinition {
+  const pack = PACKS_BY_ID.get(id)
+  if (!pack) throw new Error(`Inspiration pack "${id}" is not registered.`)
+  return pack
+}
+
 export function resolveConsultInspirationPack(args: {
   categorySlug: string
   family: ConsultServiceFamily
@@ -94,20 +131,66 @@ export function resolveConsultInspirationPack(args: {
   const bySlug = PACKS_BY_CATEGORY_SLUG.get(args.categorySlug)
   if (bySlug) return bySlug
   return args.family === 'HAIR'
-    ? HAIR_GENERAL_INSPIRATION_PACK
-    : GENERAL_SERVICE_INSPIRATION_PACK
+    ? currentPack(HAIR_GENERAL_INSPIRATION_PACK.id)
+    : currentPack(GENERAL_SERVICE_INSPIRATION_PACK.id)
+}
+
+/**
+ * The words for ONE pack question, resolved.
+ *
+ * A contract-v1 pack carries its labels inline; a card pack carries none and
+ * reads them from brand copy, keyed `${questionKey}` (with a
+ * `${packId}:${questionKey}` override so a family can word a shared question
+ * its own way) and `${questionKey}:${optionValue}`.
+ *
+ * 🔴 The fallback is the KEY, not an empty string. A card whose copy went
+ * missing shows `spark_focus` — ugly, obvious, and reported by
+ * `assertConsultInspirationCardCopy` in CI — rather than a card with a blank
+ * question and four blank buttons, which looks like a broken layout and gets
+ * diagnosed as one.
+ */
+export function consultInspirationQuestionLabel(
+  pack: ConsultInspirationPackDefinition,
+  question: ConsultInspirationPackQuestion,
+  copy: BrandClientConsultInspirationCopy,
+): string {
+  if (question.label !== null) return question.label
+  return (
+    copy.cards.prompts[`${pack.id}:${question.key}`] ??
+    copy.cards.prompts[question.key] ??
+    question.key
+  )
+}
+
+export function consultInspirationOptionLabel(
+  question: ConsultInspirationPackQuestion,
+  option: { value: string; label: string | null },
+  copy: BrandClientConsultInspirationCopy,
+): string {
+  if (option.label !== null) return option.label
+  return copy.cards.optionLabels[`${question.key}:${option.value}`] ?? option.value
 }
 
 /** The wire shape of a pack question — the pack's own rules stay server-side. */
 export function toConsultInspirationQuestionDTO(
+  pack: ConsultInspirationPackDefinition,
   question: ConsultInspirationPackQuestion,
+  copy: BrandClientConsultInspirationCopy,
+  /** The server-composed text for a `composedPrompt` question (the check). */
+  composedLabel?: string | null,
 ): ConsultInspirationQuestionDTO {
   return {
     key: question.key,
-    label: question.label,
+    label:
+      question.composedPrompt && composedLabel
+        ? composedLabel
+        : consultInspirationQuestionLabel(pack, question, copy),
     helpText: question.helpText,
     kind: question.kind,
-    options: question.options.map((option) => ({ ...option })),
+    options: question.options.map((option) => ({
+      value: option.value,
+      label: consultInspirationOptionLabel(question, option, copy),
+    })),
     minSelections: question.minSelections,
     maxSelections: question.maxSelections,
     allowText: question.allowText,
@@ -169,6 +252,9 @@ export function validateConsultInspirationAnswer(
 export function evaluateConsultInspirationProgress(
   pack: ConsultInspirationPackDefinition,
   answers: Readonly<Record<string, readonly string[]>>,
+  copy: BrandClientConsultInspirationCopy = defaultClientConsultInspirationCopy,
+  /** The composed understanding-check text, when the caller has a reading. */
+  composedLabel?: string | null,
 ): ConsultInspirationProgress {
   const answeredQuestionCount = pack.questions.filter(
     (question) => answers[question.key] !== undefined,
@@ -176,14 +262,30 @@ export function evaluateConsultInspirationProgress(
   const countsAsDetail = new Map(
     pack.questions.map((question) => [question.key, question.countsAsDetail]),
   )
-  const specificDetailCount = buildConsultInspirationExactDetails(pack, answers).filter(
-    (detail) => countsAsDetail.get(detail.questionKey) !== false,
-  ).length
+  const specificDetailCount = buildConsultInspirationExactDetails(
+    pack,
+    answers,
+    copy,
+  ).filter((detail) => countsAsDetail.get(detail.questionKey) !== false).length
+  // 🔴 COMPLETION IS THE COARSE TIER, and only it. A prep card exists only
+  // where the reference was actually READ as something — a family with no
+  // reading has none at all, and a photograph the model could not read has
+  // none either. Gating on them would make those consults impossible to
+  // finish, which is the same shape of bug as v1's three-detail gate.
   const unanswered = pack.questions.find(
-    (question) => answers[question.key] === undefined,
+    (question) =>
+      question.tier === 'COARSE' && answers[question.key] === undefined,
   )
+  const nextPrep = pack.questions.find(
+    (question) => question.tier === 'PREP' && answers[question.key] === undefined,
+  )
+  const current = unanswered ?? null
   return {
-    currentQuestion: unanswered ? toConsultInspirationQuestionDTO(unanswered) : null,
+    currentQuestion: current
+      ? toConsultInspirationQuestionDTO(pack, current, copy, composedLabel)
+      : null,
+    /** The first unanswered PREP card, once the coarse tier is done. */
+    nextPrepQuestionKey: unanswered ? null : (nextPrep?.key ?? null),
     answeredQuestionCount,
     specificDetailCount,
     canComplete: !unanswered,
@@ -191,22 +293,48 @@ export function evaluateConsultInspirationProgress(
   }
 }
 
+/**
+ * Apply a card's `reopens` rule to an answer set.
+ *
+ * Choosing "Change something" on the understanding check clears the two cards
+ * it reopens AND itself, so `canComplete` goes back to false and the client is
+ * returned to the first card. Leaving the check stored would make the pack read
+ * as complete again the instant she re-answered card one, and she would never
+ * be shown the corrected summary.
+ */
+export function applyConsultInspirationReopen(
+  question: ConsultInspirationPackQuestion,
+  selectedValues: readonly string[],
+  answers: Readonly<Record<string, readonly string[]>>,
+): Record<string, readonly string[]> {
+  const next: Record<string, readonly string[]> = { ...answers }
+  const cleared = new Set(
+    selectedValues.flatMap((value) => [...(question.reopens?.[value] ?? [])]),
+  )
+  for (const key of cleared) delete next[key]
+  if (!cleared.has(question.key)) next[question.key] = [...selectedValues]
+  return next
+}
+
 /** Her selections as the professional reads them, in pack order. */
 export function buildConsultInspirationExactDetails(
   pack: ConsultInspirationPackDefinition,
   answers: Readonly<Record<string, readonly string[]>>,
+  copy: BrandClientConsultInspirationCopy = defaultClientConsultInspirationCopy,
 ): ConsultInspirationExactDetailDTO[] {
   const details: ConsultInspirationExactDetailDTO[] = []
   for (const question of pack.questions) {
     for (const value of answers[question.key] ?? []) {
       if (CONSULT_INSPIRATION_NEUTRAL_VALUES.has(value)) continue
-      const label = question.options.find((option) => option.value === value)?.label
-      if (!label) continue
+      const option = question.options.find((entry) => entry.value === value)
+      if (!option) continue
       details.push({
         questionKey: question.key,
         value,
-        clientWords: label,
-        sentiment: question.detailSentiment,
+        clientWords: consultInspirationOptionLabel(question, option, copy),
+        // A prep card asks one question with two opposite answers, so the
+        // sentiment is the VALUE's where the pack declares one.
+        sentiment: question.valueSentiments?.[value] ?? question.detailSentiment,
       })
     }
   }
@@ -407,7 +535,11 @@ export function toConsultInspirationReviewV2(
   payload: ConsultInspirationPayloadV2,
   copy: BrandClientConsultInspirationCopy,
 ): ConsultInspirationReview {
-  const exactClientDetails = buildConsultInspirationExactDetails(pack, payload.answers)
+  const exactClientDetails = buildConsultInspirationExactDetails(
+    pack,
+    payload.answers,
+    copy,
+  )
   const answers: ConsultInspirationAnswerDTO[] = pack.questions.flatMap((question) => {
     const selectedValues = payload.answers[question.key]
     return selectedValues
@@ -522,7 +654,11 @@ export function assertConsultInspirationPackWritable(
       if (CONSULT_INSPIRATION_FORBIDDEN_WORDS.test(option.value)) {
         fail(`value "${option.value}" carries a word the guard refuses.`)
       }
-      if (!option.label.trim()) fail(`value "${option.value}" has no label.`)
+      // A card option carries no inline label — its words are brand copy, and
+      // `assertConsultInspirationCardCopy` is what proves they exist.
+      if (option.label !== null && !option.label.trim()) {
+        fail(`value "${option.value}" has no label.`)
+      }
     }
     if (question.options.length < question.maxSelections) {
       fail(`question "${question.key}" allows more picks than it offers.`)
@@ -533,6 +669,66 @@ export function assertConsultInspirationPackWritable(
     const question = pack.questions.find((candidate) => candidate.key === questionKey)
     if (!question || !question.options.some((option) => option.value === value)) {
       fail(`possibleMeanings names "${key}", which the pack does not ask.`)
+    }
+  }
+}
+
+/**
+ * 🔴 The pack-vs-COPY assertion, the card twin of the pack-vs-database one
+ * above.
+ *
+ * A card pack deliberately carries no words: its question text and every
+ * option label live in `BrandClientConsultInspirationCardCopy`, resolved on
+ * read. That is what lets a payload store keys and enums only — and it is also
+ * how a pack can ship a card that renders as `spark_focus` with four buttons
+ * labelled `the-color`, `the-shape`, `the-whole-thing`, `not-sure`, passing
+ * typecheck and every unit test on the way.
+ *
+ * So the registry's own test runs this over every registered pack, current and
+ * archived, against the brand's default table. A card with no words is a red
+ * build.
+ */
+export function assertConsultInspirationCardCopy(
+  pack: ConsultInspirationPackDefinition,
+  copy: BrandClientConsultInspirationCopy,
+): void {
+  const fail = (message: string) => {
+    throw new Error(`Inspiration pack ${pack.id} v${pack.version}: ${message}`)
+  }
+  for (const question of pack.questions) {
+    if (question.label === null && !question.composedPrompt) {
+      const prompt =
+        copy.cards.prompts[`${pack.id}:${question.key}`] ??
+        copy.cards.prompts[question.key]
+      if (!prompt?.trim()) {
+        fail(`card "${question.key}" has no prompt in the brand copy table.`)
+      }
+    }
+    for (const option of question.options) {
+      if (option.label !== null) continue
+      const label = copy.cards.optionLabels[`${question.key}:${option.value}`]
+      if (!label?.trim()) {
+        fail(
+          `card "${question.key}" option "${option.value}" has no label in the brand copy table.`,
+        )
+      }
+    }
+    // A prep card names an attribute, and its plain-language name is looked up
+    // per VALUE the reading produced — so every value the reading can produce
+    // for that attribute needs a name, not just the ones a test happened to
+    // exercise. UNKNOWN never gets a card, so it never needs one.
+    if (!question.attribute) continue
+    for (const value of CONSULT_INSPIRATION_FIELD_VALUES[question.attribute]) {
+      if (value === 'UNKNOWN') continue
+      if (!copy.cards.attributeNames[`${question.attribute}:${value}`]?.trim()) {
+        fail(`attribute "${question.attribute}" value "${value}" has no name.`)
+      }
+      if (!copy.cards.attributeShortNames[`${question.attribute}:${value}`]?.trim()) {
+        fail(`attribute "${question.attribute}" value "${value}" has no short name.`)
+      }
+    }
+    if (!copy.cards.unsureClauses[question.attribute]?.trim()) {
+      fail(`attribute "${question.attribute}" has no "could not see it" clause.`)
     }
   }
 }

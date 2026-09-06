@@ -9415,6 +9415,20 @@
       ],
       "type": "string"
     },
+    "ConsultInspirationAnalysisFieldDTO": {
+      "description": "One of the eight attributes above, by name.\n\nP5d: an inspiration CARD is about exactly one of these, and its crop is that attribute's `region`. Named here rather than in the vision module so a pack definition can point at an attribute without importing the provider client.",
+      "enum": [
+        "baseLevel",
+        "lightestLevel",
+        "tone",
+        "technique",
+        "placement",
+        "rootBlend",
+        "finish",
+        "dimension"
+      ],
+      "type": "string"
+    },
     "ConsultInspirationAnalysisFinishDTO": {
       "enum": [
         "HIGH_SHINE",
@@ -9771,6 +9785,119 @@
         "sentiment"
       ],
       "type": "object"
+    },
+    "ConsultInspirationCardDTO": {
+      "description": "P5d — an inspiration CARD: a crop of the client's own reference, a plain word for what is in the crop, and a question about it.\n\n🔴 Nothing here is stored. The crop comes from the reading (`ConsultInspirationAnalysisDTO`), the words come from the brand's copy table, and the client's payload holds only the question key and the option enum she tapped. A client renders this; it never composes one.\n\n🔴 A card exists only where the reading saw something. There is no fixed list of cards to fall back to, which is what makes \"a light-blonde reference never produces a copper question\" structural rather than a rule someone remembered.",
+      "properties": {
+        "attribute": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultInspirationAnalysisFieldDTO"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The reading attribute this card is about, or null for a coarse card."
+        },
+        "attributeValue": {
+          "description": "That attribute's read value, so the client and the brief agree.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "🔴 The plain-language name, shown UNDER the crop and never above it. Null on a card with no single subject.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "optionRegions": {
+          "description": "Per-option crops, when the card's options point at different parts.",
+          "items": {
+            "$ref": "#/definitions/ConsultInspirationCardOptionDTO"
+          },
+          "type": "array"
+        },
+        "question": {
+          "$ref": "#/definitions/ConsultInspirationQuestionDTO",
+          "description": "The question itself, in the shape the answer route already accepts."
+        },
+        "questionKey": {
+          "$ref": "#/definitions/ConsultInspirationQuestionKeyDTO",
+          "description": "The pack question this card asks — what an answer echoes back."
+        },
+        "region": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultInspirationAnalysisRegionDTO"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The crop for the card. Null means show the whole reference."
+        },
+        "selectedValues": {
+          "description": "What she has already chosen here — the thread's own history.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "tier": {
+          "$ref": "#/definitions/ConsultInspirationCardTierDTO"
+        }
+      },
+      "required": [
+        "questionKey",
+        "tier",
+        "attribute",
+        "attributeValue",
+        "name",
+        "region",
+        "optionRegions",
+        "question",
+        "selectedValues"
+      ],
+      "type": "object"
+    },
+    "ConsultInspirationCardOptionDTO": {
+      "description": "One option of a card whose OPTIONS crop to different parts of the reference.\n\nThe coarse \"what made you stop scrolling?\" card is the only user today: \"the color\" and \"the shape of it\" are two visibly different crops of one photograph, and being able to SEE the difference is what makes the question answerable by someone who has never been asked it before.\n\nA null `region` means show the whole reference — either because the option is about the whole picture (\"the whole thing\"), or because the reading did not settle the attributes that option groups. Both are the same instruction to the client, on purpose: a fallback that looks like a feature.",
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "region": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultInspirationAnalysisRegionDTO"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "value",
+        "label",
+        "region"
+      ],
+      "type": "object"
+    },
+    "ConsultInspirationCardTierDTO": {
+      "description": "P5d — which tier a card belongs to. COARSE is the three asked before the booking; PREP is the fine per-attribute cards asked after it.",
+      "enum": [
+        "COARSE",
+        "PREP"
+      ],
+      "type": "string"
     },
     "ConsultInspirationCatalogGuidanceDTO": {
       "properties": {
@@ -10136,6 +10263,13 @@
     },
     "ConsultInspirationStateDTO": {
       "properties": {
+        "cards": {
+          "description": "P5d — every card this client is shown, coarse first then prep, in pack order. Empty for a contract-v1 consult (which has a question wizard, not cards) and for one that brought no reference.\n\nOPTIONAL on the wire, like every field added since: the published schema grows by addition only, so shipped fixtures and shipped clients stay valid.",
+          "items": {
+            "$ref": "#/definitions/ConsultInspirationCardDTO"
+          },
+          "type": "array"
+        },
         "consultId": {
           "type": "string"
         },
@@ -10180,6 +10314,13 @@
                 {
                   "type": "null"
                 }
+              ]
+            },
+            "nextPrepQuestionKey": {
+              "description": "P5d — the first unanswered PREP card, once the coarse tier is done.\n\nNot the same thing as `currentQuestion`, which is what still blocks completion; a prep card never blocks anything. ABSENT means a server (or a contract-v1 consult) with no prep tier at all.",
+              "type": [
+                "string",
+                "null"
               ]
             },
             "requiredSpecificDetailCount": {
@@ -11832,6 +11973,17 @@
           "const": "APP",
           "type": "string"
         },
+        "card": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultInspirationCardDTO"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "P5d — the card this message IS, when it is one.\n\nAdditive and optional on the wire: a client that predates cards keeps rendering `question` and simply shows no crop, which is the same thing it shows a client whose reference could not be read. `question` is carried alongside deliberately — answering has not changed, and a card that made its own answer route would be a second write path to keep in step."
+        },
         "id": {
           "type": "string"
         },
@@ -11876,7 +12028,11 @@
           "$ref": "#/definitions/ConsultThreadMessageStateDTO"
         },
         "text": {
-          "type": "string"
+          "description": "🔴 NULLABLE since P5d. The step's own bubble belongs to the message that asks for a reference; a CARD says its piece on the card itself, and a bubble above every one of eleven cards would be eleven sentences nobody asked for. Clients render the bubble only when there is one.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [

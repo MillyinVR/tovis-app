@@ -527,8 +527,19 @@ describe('consult thread projection', () => {
 
     const t = await thread(sessionId)
     const inspiration = ofKind(t.messages, 'INSPIRATION')
-    expect(inspiration).toHaveLength(1)
-    expect(inspiration[0]?.state).toBe('OPEN')
+    // P5d — the step's own message, then ONE MESSAGE PER COARSE CARD. There is
+    // no reading on this fixture (nothing has called `/inspiration/read`), so
+    // the prep tier is empty and the coarse cards crop to the whole reference.
+    expect(inspiration.map((message) => message.id)).toEqual([
+      'inspiration',
+      'inspiration:spark_focus',
+      'inspiration:keep_as_is',
+      'inspiration:understanding_check',
+    ])
+    // 🔴 DONE, not OPEN: for a card consult this message is a bubble and the
+    // reference. The open step is the CARD, so resume lands on the thing she
+    // still has to answer rather than on a header above it.
+    expect(inspiration[0]?.state).toBe('DONE')
     // 🔴 A LOOK-anchored consult has ALREADY been shown the picture, so its
     // inspiration source is seeded from the look and the source decision never
     // fires (lib/consult/inspirationSeed.ts). The card opens straight on the
@@ -536,11 +547,37 @@ describe('consult thread projection', () => {
     // image she just tapped is exactly the step Book the Look deleted.
     expect(inspiration[0]?.sourceDecisionRequired).toBe(false)
     expect(inspiration[0]?.source).not.toBeNull()
-    expect(inspiration[0]?.question).not.toBeNull()
+    // 🔴 The step message carries NO wizard question for a card consult: the
+    // questions are on the cards, and serving one twice would render it twice.
+    expect(inspiration[0]?.question).toBeNull()
+    expect(inspiration[0]?.card).toBeNull()
     // 🔴 P5c: contract v2 has NO detail gate, so the card asks for the pack's
     // questions and nothing more. Under v1 this was 3, and a client who
     // genuinely did not mind could not finish the step at all.
     expect(inspiration[0]?.requiredSpecificDetailCount).toBe(0)
+
+    // The first card is the one the thread is waiting on; the rest render but
+    // are not the resume point.
+    const spark = inspiration[1]!
+    expect(spark.state).toBe('OPEN')
+    expect(t.nextOpenMessageId).toBe('inspiration:spark_focus')
+    expect(spark.card?.tier).toBe('COARSE')
+    expect(spark.card?.question.label).toBe('What made you stop scrolling?')
+    expect(spark.card?.optionRegions.map((option) => option.label)).toEqual([
+      'The color',
+      'The shape of it',
+      'The whole thing',
+      'Not sure',
+    ])
+    // No reading yet, so every crop is the whole picture — the stated fallback,
+    // not a blank card.
+    for (const option of spark.card?.optionRegions ?? []) {
+      expect(option.region).toBeNull()
+    }
+    expect(inspiration[2]?.state).toBe('BLOCKED')
+    // The understanding check's text is COMPOSED by the server. With nothing
+    // answered yet it is the honest fallback, naming the pro.
+    expect(inspiration[3]?.card?.question.label).toContain('work out the details')
 
     for (const [questionKey, selectedValues] of INSPIRATION_ANSWERS) {
       await answerConsultInspirationQuestion({
@@ -557,8 +594,76 @@ describe('consult thread projection', () => {
     }
 
     const after = await thread(sessionId)
-    const done = ofKind(after.messages, 'INSPIRATION')[0]
-    expect(done?.state).toBe('DONE')
-    expect(done?.question).toBeNull()
+    const afterCards = ofKind(after.messages, 'INSPIRATION')
+    expect(afterCards[0]?.state).toBe('DONE')
+    expect(afterCards[0]?.question).toBeNull()
+    // Every answered card keeps its place, dimmed, with what she chose on it —
+    // a thread you can scroll back through, not a form that clears itself.
+    for (const card of afterCards.slice(1)) {
+      expect(card.state).toBe('DONE')
+      expect(card.card?.selectedValues.length).toBeGreaterThan(0)
+    }
+    // 🔴 The check now reads back her actual answers, composed server-side.
+    //
+    // No "aren't sure how bright yet" clause here, and its absence is the
+    // point: this consult has no READING, so there is no particular attribute
+    // the photograph failed to settle. Claiming one would be a sentence about
+    // a reading that was never made.
+    expect(afterCards[3]?.card?.question.label).toBe(
+      'You like the color and want to keep your length. We’ll help ' +
+        after.professionalDisplayName +
+        ' work out the details.',
+    )
+    expect(after.nextOpenMessageId).not.toBe('inspiration:spark_focus')
+  })
+
+  it('🔴 "Change something" reopens the coarse cards instead of standing as an agreement', async () => {
+    const sessionId = await startConsult()
+    await acceptBothAgreements(sessionId)
+    await appendConsultIntakeRevision({
+      consultSessionId: sessionId,
+      actor: { type: ConsultActorType.CLIENT, id: fx.clientUserId },
+      loadInput: async () => ({
+        idempotencyKey: 'thread-inspo-reopen-intake',
+        packVersion: HAIR_COLOR_INTAKE_PACK_VERSION,
+        schemaVersion: HAIR_COLOR_INTAKE_SCHEMA_VERSION,
+        complete: true,
+        answers: completeAnswers,
+      }),
+    })
+    for (const [questionKey, selectedValues] of INSPIRATION_ANSWERS.slice(0, 2)) {
+      await answerConsultInspirationQuestion({
+        consultSessionId: sessionId,
+        clientId: fx.clientId,
+        actor: { type: ConsultActorType.CLIENT, id: fx.clientUserId },
+        input: {
+          idempotencyKey: `thread-reopen-${questionKey}`,
+          schemaVersion: INSPIRATION_SCHEMA_VERSION,
+          questionKey,
+          selectedValues,
+        },
+      })
+    }
+    await answerConsultInspirationQuestion({
+      consultSessionId: sessionId,
+      clientId: fx.clientId,
+      actor: { type: ConsultActorType.CLIENT, id: fx.clientUserId },
+      input: {
+        idempotencyKey: 'thread-reopen-change',
+        schemaVersion: INSPIRATION_SCHEMA_VERSION,
+        questionKey: 'understanding_check',
+        selectedValues: ['change-something'],
+      },
+    })
+
+    const reopened = await thread(sessionId)
+    const cards = ofKind(reopened.messages, 'INSPIRATION')
+    // Back to the first card, with nothing stored — including the check itself,
+    // which must not stand as an agreement she withdrew.
+    expect(reopened.nextOpenMessageId).toBe('inspiration:spark_focus')
+    for (const card of cards.slice(1)) {
+      expect(card.card?.selectedValues).toEqual([])
+    }
+    expect(cards[0]?.state).toBe('DONE')
   })
 })

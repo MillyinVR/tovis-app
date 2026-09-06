@@ -579,19 +579,16 @@ const completeAnswers = {
 }
 
 /**
- * P5c — the colour pack's contract-v2 questions, in the order it asks them.
+ * P5d — the colour pack's COARSE cards, in the order it asks them.
  *
- * Keys and values are byte-identical to the v1 questions they replace. What is
- * gone is `other_detail`: v2 stores keys and enums only, so there is nowhere to
- * put a client's sentence, and no `text`/`sentiment` to pass.
+ * Three taps. The coarse tier is what completes the step and gates the
+ * analysis; the PREP cards come after the booking and never gate anything, so
+ * a fixture that answered them would be walking a flow no client walks.
  */
 const INSPIRATION_ANSWERS: ReadonlyArray<[string, string[]]> = [
-  ['favorite_colors', ['cool-smoky']],
-  ['avoid_colors', ['none']],
-  ['length_goal', ['yes-same-length']],
-  ['fullness_goal', ['more-full']],
-  ['current_styling', ['not-sure']],
-  ['styling_walkthrough', ['no']],
+  ['spark_focus', ['the-color']],
+  ['keep_as_is', ['my-length']],
+  ['understanding_check', ['thats-right']],
 ]
 
 function context(id: string) {
@@ -2081,6 +2078,151 @@ describe('P5b — the reference is read in its own MEDIA_READY stage', () => {
     const recovered = await readStage(sessionId, 'p5b-unreadable-3')
     expect(recovered.status).toBe(200)
     expect((await inspirationSource(sessionId))?.analysisReady).toBe(true)
+  })
+
+  /**
+   * P5d — the cards, end to end against real PostgreSQL.
+   *
+   * What only a real database can say here: that a PREP card's answer survives
+   * `consult_inspiration_payload_guard` (a key and a value the guard has never
+   * been taught, on a pack version it has never been taught either), and that
+   * the four preference lists the analysis is handed are derived from the
+   * STORED artefact and the STORED payload rather than from anything held in
+   * memory by the test.
+   */
+  it('builds cards from the reading, writes a prep answer through the live guard, and hands the pairs to the analysis', async () => {
+    captured.analysisInputs.length = 0
+    captured.inspirationCalls = 0
+    captured.inspirationFailure = null
+    const lookPostId = await freshHairLook()
+    const created = await startLook(lookPostId)
+    const sessionId = ((await body(created)).consult as { id: string }).id
+    if (!sessionIds.includes(sessionId)) sessionIds.push(sessionId)
+    await consentAndCompleteIntake(sessionId, 'p5d')
+
+    // Before the read there is no reading, so there are no prep cards — only
+    // the three coarse ones, cropping to the whole reference.
+    const beforeRead = await loadConsultInspirationState({
+      consultSessionId: sessionId,
+      clientId,
+      actorUserId: clientUserId,
+    })
+    expect(beforeRead.cards?.map((card) => card.questionKey)).toEqual([
+      'spark_focus',
+      'keep_as_is',
+      'understanding_check',
+    ])
+
+    await readStage(sessionId, 'p5d-read')
+    expect(captured.inspirationCalls).toBe(1)
+
+    const afterRead = await loadConsultInspirationState({
+      consultSessionId: sessionId,
+      clientId,
+      actorUserId: clientUserId,
+    })
+    const prep = (afterRead.cards ?? []).filter((card) => card.tier === 'PREP')
+    // 🔴 SEVEN cards, not eight: the fake reads `dimension` as UNKNOWN, and an
+    // attribute the model could not settle gets no card at all.
+    expect(prep.map((card) => card.attribute)).toEqual([
+      'baseLevel',
+      'lightestLevel',
+      'tone',
+      'technique',
+      'placement',
+      'rootBlend',
+      'finish',
+    ])
+    // 🔴 B5, proven on a real row: a light-blonde, COOL reference produces
+    // blonde and ash cards and no copper one. Under v1 every consult was asked
+    // about "the copper or red colors" whatever the photograph showed.
+    const names = prep.map((card) => card.name ?? '').join(' ')
+    expect(names).toContain('light blonde')
+    expect(names).toContain('cooler, silvery cast')
+    expect(names.toLowerCase()).not.toContain('copper')
+    // Every prep card crops to its own attribute's region, and the coarse card
+    // still offers its four options.
+    for (const card of prep) expect(card.region).not.toBeNull()
+
+    // The coarse tier completes the step; the prep tier does not gate it.
+    await answerInspiration(sessionId, 'p5d')
+    const completed = await loadConsultInspirationState({
+      consultSessionId: sessionId,
+      clientId,
+      actorUserId: clientUserId,
+    })
+    expect(completed.progress.canComplete).toBe(true)
+    expect(completed.progress.nextPrepQuestionKey).toBe('attr_base_level')
+
+    // 🔴 A PREP answer, through the LIVE guard: a question key and an option
+    // value the trigger has never been taught, on pack version 2.
+    for (const [questionKey, selectedValues] of [
+      ['attr_lightest_level', ['yes']],
+      ['attr_tone', ['not-this']],
+      ['attr_finish', ['not-sure']],
+    ] as const) {
+      await answerConsultInspirationQuestion({
+        consultSessionId: sessionId,
+        clientId,
+        actor: { type: ConsultActorType.CLIENT, id: clientUserId },
+        input: {
+          idempotencyKey: `p5d-${questionKey}`,
+          schemaVersion: INSPIRATION_SCHEMA_VERSION,
+          questionKey,
+          selectedValues,
+        },
+      })
+    }
+    const stored = await db.consultRevision.findFirstOrThrow({
+      where: { consultSessionId: sessionId, kind: ConsultRevisionKind.INSPIRATION },
+      orderBy: [{ revision: 'desc' }, { id: 'desc' }],
+      select: { payload: true },
+    })
+    // Keys and enums ONLY. The words the client saw are nowhere in the row.
+    expect((stored.payload as { answers: Record<string, string[]> }).answers).toEqual({
+      spark_focus: ['the-color'],
+      keep_as_is: ['my-length'],
+      understanding_check: ['thats-right'],
+      attr_lightest_level: ['yes'],
+      attr_tone: ['not-this'],
+      attr_finish: ['not-sure'],
+    })
+
+    // …and the analysis is handed the PAIRS, derived from the stored artefact.
+    for (const shotKey of [
+      'hair_back',
+      'hair_left',
+      'hair_right',
+      'hair_crown',
+      'face_front',
+      'face_side',
+      'eyes_closeup',
+    ] as const) {
+      await attachAcceptedCapture(sessionId, shotKey, 'p5d')
+    }
+    const analysis = await startAnalysis(
+      jsonRequest(`/api/v1/client/consult/${sessionId}/analysis`, {
+        idempotencyKey: 'p5d-analysis',
+        schemaVersion: CONSULT_ANALYSIS_SCHEMA_VERSION,
+        promptVersion: CONSULT_ANALYSIS_PROMPT_VERSION,
+      }),
+      context(sessionId),
+    )
+    expect(analysis.status).toBe(200)
+    const drained = await processConsultAnalysisRuns({ take: 1 })
+    expect(drained.outcomes[0]?.result).toBe('COMPLETED')
+
+    const [analysisInput] = captured.analysisInputs
+    const inspiration = analysisInput?.inspiration as {
+      wants: string[]
+      avoids: string[]
+      unsure: string[]
+      keep: string[]
+    }
+    expect(inspiration.wants).toEqual(['The color', 'lightestLevel:LEVEL_9'])
+    expect(inspiration.avoids).toEqual(['tone:COOL'])
+    expect(inspiration.unsure).toEqual(['finish:HIGH_SHINE'])
+    expect(inspiration.keep).toEqual(['My length'])
   })
 })
 

@@ -10,6 +10,7 @@
 // the family registry falls through to this pack rather than to nothing, which
 // is what a hair-only question list used to mean for every other service.
 
+import { coarseCards, GENERAL_KEEP_VALUES } from '../cardQuestions'
 import {
   CURRENT_UPKEEP_OPTIONS,
   INTENSITY_GOAL_OPTIONS,
@@ -112,5 +113,31 @@ export const GENERAL_SERVICE_INSPIRATION_PACK: ConsultInspirationPackDefinition 
     'current_upkeep:sometimes': 'The client sometimes does something similar.',
     'current_upkeep:no': 'The client does not currently do this.',
     'upkeep_walkthrough:yes': 'The client would like to be walked through the upkeep.',
+  },
+}
+
+/**
+ * P5d — the CARD pack every family outside HAIR falls through to.
+ *
+ * Coarse only, for the same reason as the hair-general pack: there is no
+ * reading of a nail, brow or makeup reference yet, so there are no
+ * per-attribute cards to build and none are invented. The three coarse cards
+ * are service-neutral by design — "the color", "the shape of it" and "the
+ * whole thing" are as true of a nail set as of a balayage.
+ */
+export const GENERAL_SERVICE_INSPIRATION_CARD_PACK: ConsultInspirationPackDefinition = {
+  id: GENERAL_SERVICE_INSPIRATION_PACK_ID,
+  categorySlug: null,
+  version: 2,
+  schemaVersion: 2,
+  reflectionPromptKey: 'reflectionPrompt',
+  questions: coarseCards(GENERAL_KEEP_VALUES),
+  possibleMeanings: {
+    'spark_focus:the-color': 'The colour in the reference is what stopped her.',
+    'spark_focus:the-shape': 'The shape in the reference is what stopped her.',
+    'spark_focus:the-whole-thing': 'She pointed at the reference as a whole rather than at one part of it.',
+    'keep_as_is:my-length': 'The client asked for her length to be left alone.',
+    'keep_as_is:my-natural-shape': 'The client asked for her natural shape to be left alone.',
+    'understanding_check:thats-right': 'The client confirmed the summary of what she is after.',
   },
 }

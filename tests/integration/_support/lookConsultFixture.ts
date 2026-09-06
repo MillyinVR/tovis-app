@@ -127,19 +127,18 @@ export const completeAnswers = {
 }
 
 /**
- * P5c — the colour pack's contract-v2 questions, in the order it asks them.
+ * P5d — the colour pack's COARSE cards, in the order it asks them.
  *
- * Keys and values are byte-identical to the v1 questions they replace. What is
- * gone is `other_detail`: v2 stores keys and enums only, so there is nowhere to
- * put a client's sentence, and no `text`/`sentiment` to pass.
+ * Three taps, not six questions: the coarse tier is what completes the step
+ * and what a consult has to get through before it can be analysed. The PREP
+ * cards are deliberately absent — they come after the booking, they never gate
+ * completion, and a fixture that answered them would be testing a flow no
+ * client is walked through.
  */
 export const INSPIRATION_ANSWERS: ReadonlyArray<[string, string[]]> = [
-  ['favorite_colors', ['cool-smoky']],
-  ['avoid_colors', ['none']],
-  ['length_goal', ['yes-same-length']],
-  ['fullness_goal', ['more-full']],
-  ['current_styling', ['not-sure']],
-  ['styling_walkthrough', ['no']],
+  ['spark_focus', ['the-color']],
+  ['keep_as_is', ['my-length']],
+  ['understanding_check', ['thats-right']],
 ]
 
 /**

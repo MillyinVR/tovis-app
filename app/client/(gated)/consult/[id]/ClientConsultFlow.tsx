@@ -36,6 +36,7 @@ import type {
   ConsultAnalysisRunDTO,
   ConsultCaptureQualityReasonCodeDTO,
   ConsultCaptureSlotStateDTO,
+  ConsultInspirationCardDTO,
   ConsultInspirationQuestionDTO,
   ConsultInspirationStateDTO,
   ConsultThreadConsentMessageDTO,
@@ -126,35 +127,17 @@ const NEUTRAL_INSPIRATION_VALUES = new Set([
 ])
 
 /**
- * Where to look in the inspiration photo for each question. Presentation only,
- * and OPTIONAL: a key with no entry simply renders no hint, which is what a
- * pack this map has not been taught looks like.
+ * 🔴 P5d DELETED the per-question focus hint map that used to live here (and
+ * its iOS twin, `consultInspirationFocusHints`).
  *
- * Keyed by question key across every pack (lib/consult/inspiration/packs/),
- * because the packs deliberately share a key wherever they ask the same thing.
- * `other_detail` is contract v1's free-text question, kept here for consults
- * still being asked it.
+ * It was a sentence telling the client where to LOOK — "zoom into the hair and
+ * look at the mix of colors" — written once per question key and guessed at
+ * per pack. A card does not need one: it shows her the crop.
+ *
+ * Do not reintroduce it. A hint that describes a region the server can send is
+ * a second, hand-maintained answer to a question the reading already answers,
+ * and it drifts silently the moment a pack asks something it was never taught.
  */
-const INSPIRATION_FOCUS: Readonly<Record<string, string>> = {
-  favorite_colors:
-    'Zoom into the hair and look at the mix of colors — the brightest pieces, the deepest pieces, and the tones in between.',
-  avoid_colors:
-    'Look over each color in the hair again — is there any you would not want on you?',
-  favorite_details: 'Look over the whole picture — what stands out to you first?',
-  avoid_details: 'Look again — is there anything in it you would not want on you?',
-  length_goal: 'Look at where the hair ends — how long it falls.',
-  fullness_goal: 'Look at how thick and full the hair appears overall.',
-  intensity_goal:
-    'Think about how strong a version of this you would actually want.',
-  current_styling:
-    'Look at how the hair is styled — straight, waves, curls, or something else.',
-  current_upkeep: 'Think about whether this is something you already do yourself.',
-  styling_walkthrough:
-    'Think about whether you could get it styled this way on your own.',
-  upkeep_walkthrough:
-    'Think about whether you would want to be shown how to keep it up.',
-  other_detail: 'One last look — anything else stand out, good or bad?',
-}
 
 const QUALITY_REASON_COPY: Readonly<
   Record<ConsultCaptureQualityReasonCodeDTO, string>
@@ -293,6 +276,7 @@ export default function ClientConsultFlow({
   const analysisKey = useRef<string>(newKey())
   // P5b — the inspiration read stage: its own busy flag, its own error, and
   // the id of the reference it last asked about.
+  const [inspirationFullscreen, setInspirationFullscreen] = useState(false)
   const [readingInspiration, setReadingInspiration] = useState(false)
   const [inspirationReadError, setInspirationReadError] = useState<string | null>(
     null,
@@ -412,6 +396,16 @@ export default function ClientConsultFlow({
     })
 
   // ── Inspiration ───────────────────────────────────────────────────────────
+  //
+  // ONE signed read of the reference for the whole thread. Every card crops the
+  // same URL; a read per card would be eleven requests for one photograph.
+  const inspirationImage = useConsultInspirationImage(
+    thread?.messages.find(
+      (message): message is ConsultThreadInspirationMessageDTO =>
+        message.kind === 'INSPIRATION' && Boolean(message.source?.imageAvailable),
+    )?.source?.imageReadEndpoint ?? null,
+  )
+
   const skipInspiration = (message: ConsultThreadInspirationMessageDTO) =>
     run(async () => {
       await api(`${base}/inspiration`, {
@@ -739,6 +733,26 @@ export default function ClientConsultFlow({
       }
     >
       <ErrorNote message={error} />
+      {inspirationFullscreen && inspirationImage.url ? (
+        <div
+          className="fixed inset-0 z-50 grid place-items-center bg-scrim/80 p-4"
+          data-testid="consult-inspiration-fullscreen"
+        >
+          <div className="w-full max-w-lg">
+            <ZoomableImage
+              src={inspirationImage.url}
+              alt="Your inspiration photo"
+            />
+            <button
+              type="button"
+              className={`${BUTTON_SECONDARY} mt-3`}
+              onClick={() => setInspirationFullscreen(false)}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      ) : null}
       {thread.messages.map((message) => (
         <ThreadMessageSlot key={message.id} id={message.id}>
           <ConsultThreadMessage
@@ -753,6 +767,8 @@ export default function ClientConsultFlow({
             onUploadInspiration={uploadInspiration}
             onAnswerInspiration={answerInspiration}
             copy={copy}
+            inspirationImage={inspirationImage}
+            onOpenInspirationFull={() => setInspirationFullscreen(true)}
             readingInspiration={readingInspiration}
             inspirationReadError={inspirationReadError}
             onRetryInspirationRead={readInspiration}
@@ -791,6 +807,8 @@ function ConsultThreadMessage({
   onUploadInspiration,
   onAnswerInspiration,
   copy,
+  inspirationImage,
+  onOpenInspirationFull,
   readingInspiration,
   inspirationReadError,
   onRetryInspirationRead,
@@ -814,6 +832,9 @@ function ConsultThreadMessage({
     file: File,
   ) => void
   copy: BrandClientConsultThreadCopy
+  /** The ONE signed read of the reference, shared by every card. */
+  inspirationImage: ReturnType<typeof useConsultInspirationImage>
+  onOpenInspirationFull: () => void
   readingInspiration: boolean
   inspirationReadError: string | null
   onRetryInspirationRead: (inspirationId: string) => void
@@ -857,11 +878,23 @@ function ConsultThreadMessage({
       )
 
     case 'INSPIRATION':
-      return (
+      // A CARD message renders as a card; the step's own message (the one that
+      // asks for a reference and carries the read state) renders as before.
+      return message.card ? (
+        <InspirationCardMessage
+          message={message}
+          card={message.card}
+          busy={busy}
+          image={inspirationImage}
+          onAnswer={onAnswerInspiration}
+          onOpenFull={onOpenInspirationFull}
+        />
+      ) : (
         <InspirationMessage
           message={message}
           busy={busy}
           copy={copy}
+          image={inspirationImage}
           reading={readingInspiration}
           readError={inspirationReadError}
           onRetryRead={onRetryInspirationRead}
@@ -1006,6 +1039,7 @@ function InspirationMessage({
   message,
   busy,
   copy,
+  image,
   reading,
   readError,
   onRetryRead,
@@ -1016,6 +1050,7 @@ function InspirationMessage({
   message: ConsultThreadInspirationMessageDTO
   busy: boolean
   copy: BrandClientConsultThreadCopy
+  image: ReturnType<typeof useConsultInspirationImage>
   /** P5b: the vision read of this reference is in flight. */
   reading: boolean
   /** The server's own words for why the read failed, or null. */
@@ -1040,7 +1075,9 @@ function InspirationMessage({
   const source = message.source
   return (
     <div className="grid gap-2">
-      <ThreadBubble author="APP">{message.text}</ThreadBubble>
+      {message.text ? (
+        <ThreadBubble author="APP">{message.text}</ThreadBubble>
+      ) : null}
       {done ? null : (
         <ThreadCard>
           {message.sourceDecisionRequired ? (
@@ -1071,14 +1108,7 @@ function InspirationMessage({
           ) : null}
 
           {message.source ? (
-            <InspirationImagePanel
-              source={message.source}
-              focusHint={
-                message.question
-                  ? (INSPIRATION_FOCUS[message.question.key] ?? null)
-                  : null
-              }
-            />
+            <InspirationImagePanel source={message.source} image={image} />
           ) : null}
 
           {/* P5b — the read stage, under the picture it is reading. It is not
@@ -1690,13 +1720,21 @@ function reportInspirationReadFailure(
  * with a manual retry and schedules nothing — there is no timer that can turn
  * a broken contract into a request loop.
  */
-function InspirationImagePanel({
-  source,
-  focusHint,
-}: {
-  source: NonNullable<ConsultInspirationStateDTO['source']>
-  focusHint: string | null
-}) {
+/**
+ * The ONE signed read of the client's reference, for the whole thread.
+ *
+ * 🔴 Lifted out of the panel in P5d, and the reason is arithmetic: the thread
+ * now renders up to eleven card messages, each of which shows a crop of the
+ * same photograph. A per-message read would be eleven requests against a
+ * force-dynamic route for one image — the shape of the refetch bug P1 fixed,
+ * arrived at from the other direction. One read, one renewal timer, every crop
+ * pointed at the same URL.
+ */
+function useConsultInspirationImage(endpoint: string | null): {
+  url: string | null
+  failed: boolean
+  retry: () => void
+} {
   const [signedUrl, setSignedUrl] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
   // The ONLY thing that starts a read. It advances on mount, on an endpoint
@@ -1704,9 +1742,12 @@ function InspirationImagePanel({
   // scheduled, and the user's Retry press. A failure advances nothing, so a
   // persistently broken read costs one request, not a loop.
   const [attempt, setAttempt] = useState(0)
-  const endpoint = source.imageReadEndpoint
 
   useEffect(() => {
+    // No reference on this thread: nothing to read, and nothing to clear —
+    // the values are DERIVED from `endpoint` below rather than written here,
+    // so a consult whose reference goes away cannot keep painting a stale URL.
+    if (!endpoint) return
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | undefined
 
@@ -1747,6 +1788,26 @@ function InspirationImagePanel({
     }
   }, [endpoint, attempt])
 
+  return {
+    url: endpoint ? signedUrl : null,
+    failed: endpoint ? failed : false,
+    retry: () => {
+      // Clearing `failed` swaps the alert for the loading line, so the press
+      // has visible feedback without a second flag.
+      setFailed(false)
+      setAttempt((value) => value + 1)
+    },
+  }
+}
+
+function InspirationImagePanel({
+  source,
+  image,
+}: {
+  source: NonNullable<ConsultInspirationStateDTO['source']>
+  image: ReturnType<typeof useConsultInspirationImage>
+}) {
+  const { url: signedUrl, failed } = image
   if (!source.imageAvailable) return null
   return (
     <div className="mt-4 grid gap-2">
@@ -1766,16 +1827,7 @@ function InspirationImagePanel({
             and if it still won’t load, go back a step and pick it again.
           </p>
           <div>
-            <button
-              type="button"
-              className={BUTTON_SECONDARY}
-              onClick={() => {
-                // Clearing `failed` swaps the alert for the loading line, so
-                // the press has visible feedback without a second flag.
-                setFailed(false)
-                setAttempt((value) => value + 1)
-              }}
-            >
+            <button type="button" className={BUTTON_SECONDARY} onClick={image.retry}>
               Retry
             </button>
           </div>
@@ -1785,15 +1837,222 @@ function InspirationImagePanel({
           Loading your inspiration photo…
         </p>
       )}
-      {focusHint ? (
-        <p className="rounded-lg border border-surfaceGlass/10 bg-surfaceGlass/10 px-3 py-2 text-xs leading-5 text-textPrimary">
-          {focusHint} Pinch, scroll, or double-tap the photo to zoom.
-        </p>
-      ) : null}
     </div>
   )
 }
 
+
+/**
+ * P5d — a CROP of the client's reference, sized to one region of it.
+ *
+ * The region arrives normalized (0..1 of the image), and the crop is done in
+ * CSS from ONE already-loaded image rather than by asking a server for a cut
+ * version: the reference is short-lived signed media, and cropping it
+ * server-side would be a second render path and a second thing to purge.
+ *
+ * 🔴 The natural size is measured through a REF, not `onLoad`. React does not
+ * fire `onLoad` for an `<img>` that was already `complete` when the handler
+ * attached — which is the normal case here, because every card after the first
+ * shows the same cached photograph. A crop that waited for `onLoad` would sit
+ * blank on exactly the cards the client scrolls to second.
+ *
+ * Without a measurement the box falls back to a square, which crops honestly
+ * (the right part of the picture) and only distorts its aspect — visibly worse
+ * than the measured version, never wrong about WHAT it is showing.
+ */
+function InspirationRegionCrop({
+  src,
+  region,
+  alt,
+  onOpen,
+}: {
+  src: string
+  region: { x: number; y: number; w: number; h: number } | null
+  alt: string
+  onOpen: () => void
+}) {
+  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null)
+  const measure = useCallback((element: HTMLImageElement | null) => {
+    if (element?.complete && element.naturalWidth > 0) {
+      setNatural({ w: element.naturalWidth, h: element.naturalHeight })
+    }
+  }, [])
+
+  const box =
+    region && region.w > 0 && region.h > 0
+      ? {
+          // The sprite-crop formula: scale the image up so the region fills the
+          // box, then slide it so the region's own offset is what shows.
+          backgroundImage: `url(${JSON.stringify(src)})`,
+          backgroundSize: `${100 / region.w}% ${100 / region.h}%`,
+          backgroundPosition: `${
+            region.w >= 1 ? 50 : (region.x / (1 - region.w)) * 100
+          }% ${region.h >= 1 ? 50 : (region.y / (1 - region.h)) * 100}%`,
+          backgroundRepeat: 'no-repeat',
+          aspectRatio: natural
+            ? `${region.w * natural.w} / ${region.h * natural.h}`
+            : '1 / 1',
+        }
+      : {
+          backgroundImage: `url(${JSON.stringify(src)})`,
+          backgroundSize: 'contain',
+          backgroundPosition: 'center',
+          backgroundRepeat: 'no-repeat',
+          aspectRatio: natural ? `${natural.w} / ${natural.h}` : '1 / 1',
+        }
+
+  return (
+    <>
+      {/* Measured only. The visible crop is the div below, which paints the
+          same (already fetched) URL as a background. */}
+      <img
+        ref={measure}
+        src={src}
+        alt=""
+        aria-hidden
+        onLoad={(event) =>
+          setNatural({
+            w: event.currentTarget.naturalWidth,
+            h: event.currentTarget.naturalHeight,
+          })
+        }
+        className="pointer-events-none absolute h-px w-px opacity-0"
+      />
+      <button
+        type="button"
+        onClick={onOpen}
+        aria-label={`${alt} — tap to see the whole photo`}
+        data-testid="consult-inspiration-crop"
+        className="block w-full overflow-hidden rounded-xl border border-surfaceGlass/10 bg-bgSurface"
+        style={box}
+      />
+    </>
+  )
+}
+
+/**
+ * P5d — ONE inspiration card: the crop, then the plain word for it, then the
+ * question.
+ *
+ * 🔴 The order on screen is the order in that sentence, and it is the Stage 2
+ * rule: no jargon before its picture. She is looking at the silvery part of her
+ * own reference before anything calls it "ash", and the word is offered
+ * ("some people call it") rather than assumed.
+ *
+ * The coarse spark card is the one whose OPTIONS each carry a crop, so it
+ * renders a small strip of them: the difference between "the color" and "the
+ * shape of it" is a thing to SEE, not to read.
+ */
+function InspirationCardMessage({
+  message,
+  card,
+  busy,
+  image,
+  onAnswer,
+  onOpenFull,
+}: {
+  message: ConsultThreadInspirationMessageDTO
+  card: ConsultInspirationCardDTO
+  busy: boolean
+  image: ReturnType<typeof useConsultInspirationImage>
+  onAnswer: (
+    message: ConsultThreadInspirationMessageDTO,
+    question: ConsultInspirationQuestionDTO,
+    selectedValues: string[],
+  ) => void
+  onOpenFull: () => void
+}) {
+  const answered = card.selectedValues.length > 0
+  const optionCrops = card.optionRegions.filter((option) => option.region !== null)
+  return (
+    <ThreadCard dimmed={answered}>
+      {image.url ? (
+        <div className="relative grid gap-2">
+          <InspirationRegionCrop
+            src={image.url}
+            region={card.region}
+            alt={card.name ?? 'Part of your inspiration photo'}
+            onOpen={onOpenFull}
+          />
+          {optionCrops.length > 0 ? (
+            <div className="grid grid-cols-2 gap-2">
+              {optionCrops.map((option) => (
+                <div key={option.value} className="grid gap-1">
+                  <InspirationRegionCrop
+                    src={image.url!}
+                    region={option.region}
+                    alt={option.label}
+                    onOpen={onOpenFull}
+                  />
+                  <p
+                    className="text-center text-[11px] leading-4 text-textSecondary"
+                    data-testid="consult-inspiration-option-label"
+                  >
+                    {option.label}
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : image.failed ? (
+        // Surfaced, never silent: she is being asked about a picture, so if we
+        // cannot put it in front of her she is told, and the question stays
+        // answerable from the photo she remembers.
+        <div
+          role="alert"
+          data-testid="consult-inspiration-card-image-error"
+          className="rounded-lg border border-toneWarn/30 bg-toneWarn/10 px-3 py-2"
+        >
+          <p className="text-xs leading-5 text-textPrimary">
+            We couldn’t load your inspiration photo for this one.
+          </p>
+          <button
+            type="button"
+            className={`${BUTTON_SECONDARY} mt-2`}
+            onClick={image.retry}
+          >
+            Retry
+          </button>
+        </div>
+      ) : null}
+
+      {/* 🔴 UNDER the crop. Never above it. */}
+      {card.name ? (
+        <p
+          className="mt-3 text-sm leading-6 text-textPrimary"
+          data-testid="consult-inspiration-card-name"
+        >
+          {card.name}
+        </p>
+      ) : null}
+
+      <p
+        className="mt-2 text-sm font-bold text-textPrimary"
+        data-testid="consult-inspiration-card-prompt"
+      >
+        {card.question.label}
+      </p>
+
+      {answered ? (
+        <p className="mt-2 text-xs leading-5 text-textSecondary">
+          {card.question.options
+            .filter((option) => card.selectedValues.includes(option.value))
+            .map((option) => option.label)
+            .join(', ')}
+        </p>
+      ) : (
+        <InspirationQuestionForm
+          key={`${card.questionKey}:${card.selectedValues.join(',')}`}
+          question={card.question}
+          busy={busy}
+          showLabel={false}
+          onAnswer={(question, values) => onAnswer(message, question, values)}
+        />
+      )}
+    </ThreadCard>
+  )
+}
 
 /**
  * The inspiration question, as taps only.
@@ -1808,10 +2067,20 @@ function InspirationImagePanel({
 function InspirationQuestionForm({
   question,
   busy,
+  showLabel = true,
   onAnswer,
 }: {
   question: ConsultInspirationQuestionDTO
   busy: boolean
+  /**
+   * 🔴 False on a CARD, which renders the question itself — after its crop and
+   * its plain-language name, which is the whole point of the card's ordering.
+   * Left true it renders a SECOND copy of the same sentence, above the name,
+   * putting the jargon-free word after a question the client has already been
+   * asked. Caught in a browser (tests/e2e/consult-inspiration-cards.spec.ts);
+   * no unit test could see it, because both copies are correct on their own.
+   */
+  showLabel?: boolean
   onAnswer: (
     question: ConsultInspirationQuestionDTO,
     selectedValues: string[],
@@ -1844,7 +2113,9 @@ function InspirationQuestionForm({
 
   return (
     <div className="mt-4 grid gap-3">
-      <h3 className="text-base font-black text-textPrimary">{question.label}</h3>
+      {showLabel ? (
+        <h3 className="text-base font-black text-textPrimary">{question.label}</h3>
+      ) : null}
       {question.helpText ? (
         <p className="text-sm text-textSecondary">{question.helpText}</p>
       ) : null}
