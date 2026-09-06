@@ -971,8 +971,8 @@ export type BrandHomeCopy = {
     ctaBrowse: string
     ctaWhy: string
   }
+  /** Chip labels only. The chips explain themselves; there is no legend prose (Tori, 2026-09-05). */
   legend: {
-    body: string
     live: string
     rollingOut: string
   }
@@ -991,8 +991,8 @@ export type BrandHomeCopy = {
     items: { tool: string; withWhat: string }[]
     evidence: string
   }
-  clients: { label: string; title: string; features: BrandHomeFeature[] }
-  pros: { label: string; title: string; features: BrandHomeFeature[] }
+  clients: { label: string; title: string; intro: string; features: BrandHomeFeature[] }
+  pros: { label: string; title: string; intro: string; features: BrandHomeFeature[] }
   money: BrandHomeFeature & { label: string; cta: string }
   next: { label: string; title: string; body: string; verifiedPrefix: string }
 }
