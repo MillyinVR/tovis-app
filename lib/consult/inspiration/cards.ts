@@ -331,10 +331,16 @@ export function buildConsultInspirationCard(args: {
   // pack's full list, which is what makes "a blonde reference offers no copper
   // region" structural rather than remembered.
   //
-  // 🔴 A neutral option ("not sure", "nothing to change") is ALWAYS offered
-  // and never carries a region. It is what a client whose reference could not
-  // be read at all still gets to answer, and it is why this card — unlike a
-  // prep card — is never suppressed.
+  // 🔴 A neutral option ("not sure", "nothing to change") rides alongside the
+  // regions — but a move with NO regions is not built at all. A picker that
+  // said "Tap what you love." over a photograph with nothing on it, and one
+  // button reading "Not sure yet", is a question about an absence.
+  //
+  // That is the same rule the eight prep cards followed and it was nearly lost
+  // here: this first shipped always-built, on the reasoning that the neutral
+  // option is always answerable. `consult-look-anchor` caught it — a consult
+  // whose reference has not been read yet had three coarse cards and then two
+  // empty moves.
   if (question.optionsFromReading) {
     const options: ConsultInspirationCardOptionDTO[] = []
     for (const option of question.options) {
@@ -367,6 +373,8 @@ export function buildConsultInspirationCard(args: {
         ),
       })
     }
+    // No region, no move. See the note above.
+    if (!options.some((option) => option.region !== null)) return null
     return {
       questionKey: question.key,
       tier: question.tier,

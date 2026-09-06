@@ -2141,27 +2141,49 @@ describe('P5b — the reference is read in its own MEDIA_READY stage', () => {
       actorUserId: clientUserId,
     })
     const prep = (afterRead.cards ?? []).filter((card) => card.tier === 'PREP')
-    // 🔴 SEVEN cards, not eight: the fake reads `dimension` as UNKNOWN, and an
-    // attribute the model could not settle gets no card at all.
-    expect(prep.map((card) => card.attribute)).toEqual([
-      'baseLevel',
-      'lightestLevel',
+    // 🔴 P5g — the prep tier is TWO MOVES over one picture, not eight cards.
+    // (The eight are pack v2, still served to every consult pinned to it; this
+    // is a new consult, so it gets v3.)
+    expect(prep.map((card) => card.questionKey)).toEqual([
+      'love_regions',
+      'change_regions',
+    ])
+    for (const card of prep) {
+      expect(card.presentation).toBe('REGION_PICKER')
+      // The picker draws on the WHOLE reference, so the card itself has no crop
+      // — a crop here would move every box off what it was measured against.
+      expect(card.region).toBeNull()
+    }
+
+    // 🔴 SEVEN regions, not eight: the fake reads `dimension` as UNKNOWN, and
+    // an attribute the model could not settle is not offered at all.
+    const love = prep[0]!
+    expect(
+      love.optionRegions.filter((o) => o.region !== null).map((o) => o.value),
+    ).toEqual([
+      'base-level',
+      'lightest-level',
       'tone',
       'technique',
       'placement',
-      'rootBlend',
+      'root-blend',
       'finish',
     ])
-    // 🔴 B5, proven on a real row: a light-blonde, COOL reference produces
-    // blonde and ash cards and no copper one. Under v1 every consult was asked
-    // about "the copper or red colors" whatever the photograph showed.
-    const names = prep.map((card) => card.name ?? '').join(' ')
+    expect(love.optionRegions.some((o) => o.value === 'dimension')).toBe(false)
+    // Every region points somewhere; the neutral option points nowhere.
+    for (const option of love.optionRegions) {
+      if (option.value === 'not-sure') expect(option.region).toBeNull()
+      else expect(option.region).not.toBeNull()
+    }
+
+    // 🔴 B5, proven on a real row: a light-blonde, COOL reference labels its
+    // regions blonde and ash and offers no copper one. Under v1 every consult
+    // was asked about "the copper or red colors" whatever the photograph
+    // showed.
+    const names = love.optionRegions.map((option) => option.label).join(' ')
     expect(names).toContain('light blonde')
-    expect(names).toContain('cooler, silvery cast')
+    expect(names).toContain('cool, silvery cast')
     expect(names.toLowerCase()).not.toContain('copper')
-    // Every prep card crops to its own attribute's region, and the coarse card
-    // still offers its four options.
-    for (const card of prep) expect(card.region).not.toBeNull()
 
     // The coarse tier completes the step; the prep tier does not gate it.
     await answerInspiration(sessionId, 'p5d')
@@ -2171,14 +2193,17 @@ describe('P5b — the reference is read in its own MEDIA_READY stage', () => {
       actorUserId: clientUserId,
     })
     expect(completed.progress.canComplete).toBe(true)
-    expect(completed.progress.nextPrepQuestionKey).toBe('attr_base_level')
+    expect(completed.progress.nextPrepQuestionKey).toBe('love_regions')
 
-    // 🔴 A PREP answer, through the LIVE guard: a question key and an option
-    // value the trigger has never been taught, on pack version 2.
+    // 🔴 A PREP answer, through the LIVE guard: question keys and option values
+    // the trigger has never been taught, on pack version 3. This is the claim
+    // "P5g needs no migration for the cards" being PROVEN rather than reasoned
+    // about — the attribute-name values have to survive
+    // `consult_inspiration_payload_guard`'s slug/token shapes and its content
+    // regex, on a real row, or the client loses her answer at the last tap.
     for (const [questionKey, selectedValues] of [
-      ['attr_lightest_level', ['yes']],
-      ['attr_tone', ['not-this']],
-      ['attr_finish', ['not-sure']],
+      ['love_regions', ['lightest-level', 'tone']],
+      ['change_regions', ['base-level']],
     ] as const) {
       await answerConsultInspirationQuestion({
         consultSessionId: sessionId,
@@ -2202,9 +2227,8 @@ describe('P5b — the reference is read in its own MEDIA_READY stage', () => {
       spark_focus: ['the-color'],
       keep_as_is: ['my-length'],
       understanding_check: ['thats-right'],
-      attr_lightest_level: ['yes'],
-      attr_tone: ['not-this'],
-      attr_finish: ['not-sure'],
+      love_regions: ['lightest-level', 'tone'],
+      change_regions: ['base-level'],
     })
 
     // …and the analysis is handed the PAIRS, derived from the stored artefact.
@@ -2238,9 +2262,21 @@ describe('P5b — the reference is read in its own MEDIA_READY stage', () => {
       unsure: string[]
       keep: string[]
     }
-    expect(inspiration.wants).toEqual(['The color', 'lightestLevel:LEVEL_9'])
-    expect(inspiration.avoids).toEqual(['tone:COOL'])
-    expect(inspiration.unsure).toEqual(['finish:HIGH_SHINE'])
+    // 🔴 The pairs are IDENTICAL in shape to what v2's eight cards produced —
+    // `attribute:VALUE`, derived from the reading, not from the payload. Two
+    // moves replaced eight cards and nothing downstream can tell.
+    expect(inspiration.wants).toEqual([
+      'The color',
+      'lightestLevel:LEVEL_9',
+      'tone:COOL',
+    ])
+    expect(inspiration.avoids).toEqual(['baseLevel:LEVEL_6'])
+    // 🔴 EMPTY, and that is the one thing v3 gives up. v2 offered "Not sure"
+    // per attribute; the region moves have one neutral answer for the whole
+    // move, so an attribute she simply did not tap is an absence rather than a
+    // recorded "unsure". The analysis is told less here and correctly — an
+    // untapped attribute already means "she did not point at this".
+    expect(inspiration.unsure).toEqual([])
     expect(inspiration.keep).toEqual(['My length'])
   })
 })

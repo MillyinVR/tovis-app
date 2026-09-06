@@ -310,22 +310,37 @@ describe('inspiration cards', () => {
       expect(preferences.unsure).toEqual([])
     })
 
-    it('still asks both moves when the photograph could not be read at all', () => {
-      const { prep } = cards({}, null)
-      // 🔴 Unlike a v2 prep card, a region move is NEVER suppressed: its
-      // neutral option is an answer a client can always give, and suppressing
-      // the moves would leave a consult whose reference could not be read with
-      // no prep tier at all.
+    it('🔴 asks NEITHER move when the photograph could not be read at all', () => {
+      // A picker with no boxes is a question about an absence: "Tap what you
+      // love." over a plain photograph, with one button reading "Not sure yet".
+      // The eight prep cards it replaces were suppressed for the same reason,
+      // and this shipped the other way for one CI run before
+      // `consult-look-anchor` caught it.
+      expect(cards({}, null).prep).toEqual([])
+      // The coarse tier is untouched — those are answerable with no reading at
+      // all, which is exactly why they are the PRE-booking tier.
+      expect(cards({}, null).coarse).toHaveLength(3)
+    })
+
+    it('asks a move with whatever the reading DID settle, and no more', () => {
+      const onlyTone = {
+        ...BLONDE,
+        baseLevel: UNREAD,
+        lightestLevel: UNREAD,
+        technique: UNREAD,
+        placement: UNREAD,
+        rootBlend: UNREAD,
+        finish: UNREAD,
+      } as ConsultInspirationAnalysisAttributesDTO
+      const { prep } = cards({}, onlyTone)
       expect(prep.map((card) => card.questionKey)).toEqual([
         'love_regions',
         'change_regions',
       ])
-      for (const card of prep) {
-        expect(card.optionRegions.every((option) => option.region === null)).toBe(true)
-        expect(card.optionRegions.map((option) => option.value)).toEqual([
-          card.questionKey === 'love_regions' ? 'not-sure' : 'nothing-to-change',
-        ])
-      }
+      expect(prep[0]!.optionRegions.map((option) => option.value)).toEqual([
+        'tone',
+        'not-sure',
+      ])
     })
   })
 

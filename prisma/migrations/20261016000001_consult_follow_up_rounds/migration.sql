@@ -93,6 +93,15 @@ CREATE UNIQUE INDEX "ConsultFollowUpRound_session_version_round_key"
 CREATE INDEX "ConsultFollowUpRound_consultSessionId_createdAt_idx"
   ON "ConsultFollowUpRound" ("consultSessionId", "createdAt");
 
+-- 🔴 The deny-all posture every public table carries. A table added after
+-- 20260901000000 does NOT inherit it, so it is enabled in the migration that
+-- creates the table — and `tests/integration/database-hardening.test.ts` is
+-- what noticed this one was missing. RLS with no policy denies every
+-- non-bypassing role, which is the whole lock: this table holds a model's
+-- prose about a named client's hair, and the anon role has no business
+-- reading a row of it.
+ALTER TABLE "ConsultFollowUpRound" ENABLE ROW LEVEL SECURITY;
+
 -- ── The CHECKs ──────────────────────────────────────────────────────────────
 -- What a CHECK can hold is held in a CHECK; the per-element shape needs a
 -- set-returning function, which CHECK constraints may not call, so it is a
