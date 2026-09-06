@@ -497,12 +497,18 @@ async function buildState(
       categorySlug: pack.categorySlug,
       version: pack.version,
       schemaVersion: pack.schemaVersion,
-      shots: pack.shots.map(({ key, title, instruction, requirement }) => ({
-        key,
-        title,
-        instruction,
-        requirement,
-      })),
+      shots: pack.shots.map(
+        ({ key, title, instruction, requirement, framing }) => ({
+          key,
+          title,
+          instruction,
+          requirement,
+          // P3: the camera crops a TIGHT_CROP shot on device. `acceptance` and
+          // `gate` stay server-side; `framing` is the one server fact the
+          // client has to be told (see ConsultCaptureShotFramingDTO).
+          framing,
+        }),
+      ),
     },
     earlyPhoto,
     chartCopy: {

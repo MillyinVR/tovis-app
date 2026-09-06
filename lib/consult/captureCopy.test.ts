@@ -54,6 +54,7 @@ describe('formatConsultCaptureIntro', () => {
       title: `View ${index}`,
       instruction: '',
       requirement: 'REQUIRED' as const,
+      framing: 'FULL_VIEW' as const,
     }))
     expect(formatConsultCaptureIntro(copy, { shots })).toMatch(/^12 daylight photos/)
   })

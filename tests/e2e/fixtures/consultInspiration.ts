@@ -184,43 +184,50 @@ export const captureState: ConsultCaptureStateDTO = {
         "key": "hair_back",
         "title": "Hair back",
         "instruction": "Face away from the camera in indirect daylight.",
-        "requirement": "REQUIRED"
+        "requirement": "REQUIRED",
+        "framing": "FULL_VIEW"
       },
       {
         "key": "hair_left",
         "title": "Left side",
         "instruction": "Turn the left side toward the camera in indirect daylight.",
-        "requirement": "REQUIRED"
+        "requirement": "REQUIRED",
+        "framing": "FULL_VIEW"
       },
       {
         "key": "hair_right",
         "title": "Right side",
         "instruction": "Turn the right side toward the camera in indirect daylight.",
-        "requirement": "REQUIRED"
+        "requirement": "REQUIRED",
+        "framing": "FULL_VIEW"
       },
       {
         "key": "hair_crown",
         "title": "Crown",
         "instruction": "Angle the crown toward the camera in indirect daylight.",
-        "requirement": "REQUIRED"
+        "requirement": "REQUIRED",
+        "framing": "FULL_VIEW"
       },
       {
         "key": "face_front",
         "title": "Face front",
         "instruction": "Face the camera straight on in indirect daylight with a relaxed, neutral expression.",
-        "requirement": "REQUIRED"
+        "requirement": "REQUIRED",
+        "framing": "FULL_VIEW"
       },
       {
         "key": "face_side",
         "title": "Profile",
         "instruction": "Turn fully to one side in indirect daylight.",
-        "requirement": "REQUIRED"
+        "requirement": "REQUIRED",
+        "framing": "FULL_VIEW"
       },
       {
         "key": "eyes_closeup",
         "title": "Eyes & brows",
         "instruction": "Fill the frame with both eyes and brows, eyes open, in indirect daylight.",
-        "requirement": "REQUIRED"
+        "requirement": "REQUIRED",
+        "framing": "TIGHT_CROP"
       }
     ]
   },
@@ -622,6 +629,7 @@ function threadEarlyPhotoMessage(
       instruction:
         'One photo of you as you are — camera or camera roll, whatever light you are in. It does not need to be a good photo.',
       requirement: 'REQUIRED',
+      framing: 'FULL_VIEW',
     },
     shotPackVersion: 1,
     schemaVersion: 1,

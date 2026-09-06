@@ -8901,6 +8901,9 @@
     },
     "ConsultCaptureShotDTO": {
       "properties": {
+        "framing": {
+          "$ref": "#/definitions/ConsultCaptureShotFramingDTO"
+        },
         "instruction": {
           "type": "string"
         },
@@ -8919,9 +8922,18 @@
         "key",
         "title",
         "instruction",
-        "requirement"
+        "requirement",
+        "framing"
       ],
       "type": "object"
+    },
+    "ConsultCaptureShotFramingDTO": {
+      "description": "How much of the world a view asks for, as the CLIENT needs to know it.\n\nThe gate's own use of this lives server-side (lib/consult/capture/types.ts): it decides whether a colour finding refuses a shot or only warns on it. It is on the wire because the CAMERA needs the same answer for a different reason (P3): a `TIGHT_CROP` shot is composed as an ordinary portrait and then auto-cropped on device to the band the shot actually asks for, while a `FULL_VIEW` shot is uploaded as framed.\n\n🔴 It is served rather than derived from the shot KEY on the client. The key is open by design (a pack added after a build ships still renders and uploads), so a device-side key→framing table would silently stop auto-cropping the first TIGHT_CROP shot of any pack it has not been taught — with no error, no telemetry, and a photograph the gate then refuses for VIEW_MISMATCH. The server is the only place that knows.",
+      "enum": [
+        "FULL_VIEW",
+        "TIGHT_CROP"
+      ],
+      "type": "string"
     },
     "ConsultCaptureShotKeyDTO": {
       "enum": [
