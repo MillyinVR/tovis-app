@@ -54,7 +54,6 @@ export function defaultHomeCopy(brandName: string): BrandHomeCopy {
     },
 
     legend: {
-      body: 'Two labels on this page, and no third. Live means it is yours today. Rolling out means it is built and behind a switch or a beta. Nothing planned appears here.',
       live: 'Live',
       rollingOut: 'Rolling out',
     },
@@ -106,58 +105,99 @@ export function defaultHomeCopy(brandName: string): BrandHomeCopy {
     },
 
     clients: {
-      label: 'Clients',
-      title: 'Find your perfect look',
+      label: 'For clients',
+      title: 'Book the look, not the service.',
+      intro: 'You know what you want to look like. You should not have to translate it into a menu.',
       features: [
         {
-          title: 'Looks, not listings',
-          body: 'Browse real transformations by category, or find professionals near you on the map.',
+          title: 'Scroll like you already do',
+          body: 'A feed of real results by category. Browse the look you want, not a list of service names.',
           state: 'live',
-          evidence: '/looks feed with category tabs (LooksTopBar); /search; /api/v1/pros/nearby.',
+          evidence: '/looks feed with category tabs (LooksTopBar); B1 de-serviced the feed (#1040, deployed 2026-09-01).',
         },
         {
-          title: 'Aftercare that follows up',
-          body: 'Aftercare notes, the products your professional used, and a one-tap rebook. In your inbox, not a text thread.',
+          title: 'Tap the look. Book it.',
+          body: 'Every look carries a starting price and a Book button. From scrolling to a held time in one tap.',
           state: 'live',
-          evidence:
-            'Aftercare inbox + rebook picker; ProductRecommendation on AftercareSummary (prisma/schema.prisma) rendered on the client booking page.',
+          evidence: 'Book the Look B1–B8 merged and web-deployed 2026-09-01; lib/looks/startingPrice.ts; Book CTA on the feed card.',
+        },
+        {
+          title: 'New city? Scout it first',
+          body: 'Type any neighbourhood and see who is available there before you arrive.',
+          state: 'live',
+          evidence: 'Search takes a typed place (Places autocomplete in app/(main)/search/SearchMapClient.tsx); /api/v1/pros/nearby.',
+        },
+        {
+          title: 'Booked out? Get in line',
+          body: 'Join their waitlist. When your pro frees a spot, you get the offer first, straight to your phone.',
+          state: 'live',
+          evidence: 'Waitlist entries + pro-sent offers (app/api/v1/pro/waitlist/[entryId]/offer) notify via WAITLIST_TIME_OFFERED; last-minute openings feed + priority offers (lib/lastMinute).',
+        },
+        {
+          title: 'Aftercare that remembers for you',
+          body: 'How to keep it up at home, when to rebook, and the products your pro recommended. All in one place, so nothing gets forgotten.',
+          state: 'live',
+          evidence: 'Aftercare inbox + rebook picker; ProductRecommendation on AftercareSummary (prisma/schema.prisma) rendered on the client booking page.',
+        },
+        {
+          title: 'Post it. Inspire. Get paid.',
+          body: 'Share your own results. When someone books from your look, you earn a credit toward your next appointment. The easiest referral bonus you will ever get.',
+          state: 'rolling-out',
+          evidence: 'Client-authored looks via share-look (app/api/v1/client/bookings/[id]/share-look); creator credit 3% minted on COMPLETION (lib/credit/clientCredit.ts, #947); spend at checkout needs Stripe, which is on hold / test mode, and the settlement transfer leg has never run (memory: creator-credit-rate-and-trigger, checked 2026-09-05).',
         },
         {
           title: 'A chart that travels with you',
-          body: 'Your history stays yours. Share it with a new professional for 30 days, then it closes on its own.',
+          body: 'Your history is yours. Share it with a new pro for 30 days, then it closes on its own.',
           state: 'live',
           evidence: 'Consent-gated client chart sharing with 30-day windows (Aug 2026 code audit).',
         },
         {
-          title: 'First call on openings',
-          body: 'Join a waitlist, hear first about last-minute openings, and claim a friend’s referral with a tap.',
+          title: 'Refer with a tap',
+          body: 'Hold your phone to a friend’s. That is the whole referral.',
           state: 'live',
-          evidence:
-            'Waitlist, last-minute openings feed + priority offers, NFC tap-to-claim referrals (Aug 2026 code audit).',
+          evidence: 'NFC tap-to-claim referrals (Aug 2026 code audit).',
         },
         {
           title: 'The iPhone app',
           body: 'In beta testing now. The web works on every phone today.',
           state: 'rolling-out',
-          evidence:
-            'tovis-ios on TestFlight only, not in the App Store (app-store-submission-state, 2026-09-01: build 63 archived, TestFlight only).',
+          evidence: 'tovis-ios on TestFlight only, not in the App Store (app-store-submission-state, 2026-09-01: build 63 archived, TestFlight only).',
         },
       ],
     },
 
     pros: {
-      label: 'Professionals',
-      title: 'Run your business',
+      label: 'For professionals',
+      title: 'Your work is the storefront.',
+      intro: 'Every look you post is bookable. Everything after the tap is handled.',
       features: [
         {
-          title: 'A book that stays full',
-          body: 'Services, calendar, real availability, held slots, and a client roster, from one clean dashboard.',
+          title: 'Looks that book themselves',
+          body: 'Post a result, it carries a starting price and a Book button. Clients book the look; you see exactly what they are asking for.',
           state: 'live',
-          evidence: 'Services / calendar / availability / client roster per Aug 2026 code audit.',
+          evidence: 'Book the Look B1–B8 merged and web-deployed 2026-09-01; pro sees the proposal line items (B4/B5).',
         },
         {
-          title: 'Charts and consent',
-          body: 'Notes, allergies, visit history, before-and-after photos, and signed consent forms on every client. The part other apps leave to your notes app.',
+          title: 'Consult before the chair',
+          body: 'A brief from the client’s own photos, matched to your menu and your prices, before they sit down. You make the final call.',
+          state: 'rolling-out',
+          evidence: 'AI consult web deployed 2026-09-03/05 (#1067–#1071, #1080–#1086); founder-only pilot; scope kill switch AI_CONSULT_SERVICE_SCOPE.',
+        },
+        {
+          title: 'Held, not hoped',
+          body: 'A request holds the time the moment it lands. Confirm every one, or switch on instant booking and let the calendar fill itself.',
+          state: 'live',
+          evidence: 'PENDING owns its slot (BOOKING_BLOCKING_STATUSES, DB EXCLUDE-backed); Professional.autoAcceptBookings toggle (docs/product/BOOK-THE-LOOK-DIRECTION.md decision 4).',
+        },
+        {
+          title: 'Fill the gap',
+          body: 'A cancellation becomes a last-minute opening. Offer it to your waitlist first and watch it go.',
+          state: 'live',
+          evidence: 'Last-minute openings feed + priority offers (lib/lastMinute); waitlist offers (app/api/v1/pro/waitlist/[entryId]/offer).',
+        },
+        {
+          title: 'Charts and consent, built in',
+          body: 'Notes, allergies, visit history, photos, and signed consent on every client. Not in a notes app.',
           state: 'live',
           evidence: 'Client charts + technical records + consent forms (Aug 2026 code audit).',
         },
@@ -177,29 +217,25 @@ export function defaultHomeCopy(brandName: string): BrandHomeCopy {
           title: 'Bring your book with you',
           body: 'Import your services and clients from the app you use now. Nothing to re-type.',
           state: 'live',
-          evidence:
-            'Migration import wizard; prod runtime probe 2026-08-25 GET /api/v1/pro/capabilities → importFromAnotherApp: true.',
+          evidence: 'Migration import wizard; prod runtime probe 2026-08-25 GET /api/v1/pro/capabilities → importFromAnotherApp: true.',
         },
         {
           title: 'Ranked by bookings, not followers',
-          body: 'The feed lifts a look by the appointments it produced, not by follower count. A great stylist with a small following outranks a big account nobody books.',
+          body: 'The feed lifts a look by the appointments it produced. A great stylist with a small following outranks a big account nobody books.',
           state: 'rolling-out',
-          evidence:
-            'Booking-conversion boost in lib/looks/personalizedRanking.ts fed by the look-conversion-stats job; ENABLE_PERSONALIZED_FEED is set in prod but its value is Hidden and UNVERIFIED (2026-09-05). Do not promote to live without a runtime probe.',
+          evidence: 'Booking-conversion boost in lib/looks/personalizedRanking.ts fed by the look-conversion-stats job; ENABLE_PERSONALIZED_FEED is set in prod but its value is Hidden and UNVERIFIED (2026-09-05). Do not promote to live without a runtime probe.',
         },
         {
           title: 'A camera that coaches the shot',
           body: 'Capture guidance, quality checks, and retakes, so every before-and-after is one you would post.',
           state: 'rolling-out',
-          evidence:
-            'AI camera subsystem is iOS-only (Aug 2026 code audit); iOS is in TestFlight, not the App Store (build 63 archived 2026-09-01; checked 2026-09-05).',
+          evidence: 'AI camera subsystem is iOS-only (Aug 2026 code audit); iOS is in TestFlight, not the App Store (build 63 archived 2026-09-01; checked 2026-09-05).',
         },
         {
           title: 'Deposits that enforce themselves',
           body: 'A deposit at booking and a late-cancel policy that does the awkward part for you.',
           state: 'rolling-out',
-          evidence:
-            'No-show protection built, ENABLE_NO_SHOW_PROTECTION → noShowFees: false in prod (probe 2026-08-25); Stripe on hold, prod Stripe in test mode.',
+          evidence: 'No-show protection built, ENABLE_NO_SHOW_PROTECTION → noShowFees: false in prod (probe 2026-08-25); Stripe on hold, prod Stripe in test mode.',
         },
       ],
     },

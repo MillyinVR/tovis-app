@@ -8,7 +8,7 @@
 //
 // Shape: one scroll, everything a visitor needs. A hero, a four-beat
 // manifesto band, the loop as a numbered column, what one account replaces,
-// two audience columns, the money on its own tinted band, and a dated
+// a section each for clients and for pros, the money on its own tinted band, and a dated
 // "what's next". Rhythm comes from alternating full-bleed bands with quiet
 // measure-width sections, not from cards.
 import Link from 'next/link'
@@ -67,7 +67,7 @@ function FeatureRow({
   legend: BrandHomeCopy['legend']
 }) {
   return (
-    <li className="py-6">
+    <li className="border-t border-textPrimary/8 py-6">
       <div className="mb-2 flex flex-wrap items-center gap-2.5">
         <h3 className="font-display text-[19px] font-semibold leading-tight text-textPrimary">
           {feature.title}
@@ -182,10 +182,7 @@ export default async function Home() {
             <h2 className="font-display text-[34px] font-semibold leading-[1.05] tracking-tight sm:text-[44px]">
               {copy.loop.title}
             </h2>
-            <p className="mt-6 max-w-[48ch] text-[13px] leading-relaxed text-textSecondary">
-              {copy.legend.body}
-            </p>
-            <div className="mt-4 flex items-center gap-2">
+            <div className="mt-6 flex items-center gap-2">
               <StateChip state="live" legend={copy.legend} />
               <StateChip state="rolling-out" legend={copy.legend} />
             </div>
@@ -211,7 +208,7 @@ export default async function Home() {
       </section>
 
       {/* ── One account replaces ─────────────────────────────────── */}
-      <section className="border-y border-textPrimary/8 bg-textPrimary/[0.03] py-20">
+      <section className="py-20">
         <div className={SECTION}>
           <div className="tovis-section-label mb-6">{copy.replaces.label}</div>
           <div className="grid gap-x-16 gap-y-8 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
@@ -237,34 +234,37 @@ export default async function Home() {
         </div>
       </section>
 
-      {/* ── Who it's for ─────────────────────────────────────────── */}
+      {/* ── For clients ──────────────────────────────────────────── */}
       <section className={`${SECTION} py-24`}>
-        <div className="tovis-section-label mb-12">Who {brand.displayName} is for</div>
+        <div className="mb-3 text-[10px] font-black tracking-[0.20em] text-accentPrimary">
+          {copy.clients.label.toUpperCase()}
+        </div>
+        <h2 className="font-display max-w-[16ch] text-[40px] font-semibold leading-[1.02] tracking-tight sm:text-[56px]">
+          {copy.clients.title}
+        </h2>
+        <p className="mt-5 max-w-[48ch] text-[16px] leading-relaxed text-textSecondary">{copy.clients.intro}</p>
+        <ul className="mt-10 grid gap-x-16 md:grid-cols-2">
+          {copy.clients.features.map((feature) => (
+            <FeatureRow key={feature.title} feature={feature} legend={copy.legend} />
+          ))}
+        </ul>
+      </section>
 
-        <div className="grid gap-x-20 gap-y-20 md:grid-cols-2">
-          <div>
-            <div className="mb-3 text-[10px] font-black tracking-[0.20em] text-accentPrimary">
-              {copy.clients.label.toUpperCase()}
-            </div>
-            <h2 className="font-display text-[34px] font-semibold leading-[1.05] tracking-tight">{copy.clients.title}</h2>
-            <ul className="mt-4 divide-y divide-textPrimary/8">
-              {copy.clients.features.map((feature) => (
-                <FeatureRow key={feature.title} feature={feature} legend={copy.legend} />
-              ))}
-            </ul>
+      {/* ── For professionals ────────────────────────────────────── */}
+      <section className="border-y border-textPrimary/8 bg-textPrimary/[0.03] py-24">
+        <div className={SECTION}>
+          <div className="mb-3 text-[10px] font-black tracking-[0.20em] text-microAccent/80">
+            {copy.pros.label.toUpperCase()}
           </div>
-
-          <div>
-            <div className="mb-3 text-[10px] font-black tracking-[0.20em] text-microAccent/70">
-              {copy.pros.label.toUpperCase()}
-            </div>
-            <h2 className="font-display text-[34px] font-semibold leading-[1.05] tracking-tight">{copy.pros.title}</h2>
-            <ul className="mt-4 divide-y divide-textPrimary/8">
-              {copy.pros.features.map((feature) => (
-                <FeatureRow key={feature.title} feature={feature} legend={copy.legend} />
-              ))}
-            </ul>
-          </div>
+          <h2 className="font-display max-w-[16ch] text-[40px] font-semibold leading-[1.02] tracking-tight sm:text-[56px]">
+            {copy.pros.title}
+          </h2>
+          <p className="mt-5 max-w-[48ch] text-[16px] leading-relaxed text-textSecondary">{copy.pros.intro}</p>
+          <ul className="mt-10 grid gap-x-16 md:grid-cols-2">
+            {copy.pros.features.map((feature) => (
+              <FeatureRow key={feature.title} feature={feature} legend={copy.legend} />
+            ))}
+          </ul>
         </div>
       </section>
 
