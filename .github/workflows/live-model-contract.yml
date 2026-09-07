@@ -70,6 +70,23 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
+      # 2026-09-07 (v4). The colour policy changed — warm light and colour cast
+      # stopped refusing a photo, and hard rejection narrowed to a frame that
+      # cannot be READ. That whole change rests on one sentence of prompt
+      # ("judge dark and bright by LEGIBILITY, not preference"), every capture
+      # test mocks the provider, and until now NOTHING had ever sent a real
+      # image to `checkConsultCapture`. The dark-frame case is the load-bearing
+      # one: if it ever starts passing an image through, v4 has become
+      # permissive and the gate is doing nothing.
+      #
+      # Runs even if the step above fails — a schema refusal and a gate verdict
+      # are different findings and the nightly should report both.
+      - name: Consult capture-gate verdicts
+        if: ${{ !cancelled() }}
+        run: pnpm test:live:consult-capture-gate
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
       # P2e. Same reasoning one layer down: the schemas compiling says nothing
       # about the IMAGES. A production run failed six times on a reference 32 KB
       # over the consult's own ceiling, and every test mocked the provider, so
