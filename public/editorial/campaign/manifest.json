@@ -1,0 +1,51 @@
+{
+  "status": "Generated editorial placeholders; not real professional work. Replace each nickname with consented real Tovis work.",
+  "assets": [
+    {
+      "key": "nails",
+      "prompt": "Candid editorial beauty photograph, portrait 3:4. Closeup of an adult dark-skinned person's hand resting on faded denim with short sculptural cobalt and silver chrome nail art, rings, direct flash, tactile denim, imperfect casual framing, energetic independent fashion magazine style. Anatomically correct five fingers, natural skin texture. No text logos watermarks.",
+      "source": "exec-479ed0f1-9a95-4d20-bd45-24fdc1dcc3a5.png",
+      "file": "nails.webp"
+    },
+    {
+      "key": "blonde",
+      "prompt": "Candid editorial beauty photograph portrait 3:4. Adult East Asian woman age 26 with short copper-red bob laughing looking sideways outside a neighborhood salon, violet shirt, warm concrete and strong late afternoon shadow, wind catching strands, authentic skin texture and freckles, documentary fashion 35mm direct flash, off-center crop, energetic spontaneous moment. No text logos watermarks. Not airbrushed or stock studio.",
+      "source": "exec-91601260-c6c5-4a2f-a65c-a6ad581ba05d.png",
+      "file": "blonde.webp"
+    },
+    {
+      "key": "brows",
+      "prompt": "Candid editorial makeup portrait 3:4. Androgynous adult Black man age 25 with close cropped natural hair, sculpted full brows and subtle metallic olive eyeliner, natural skin texture, relaxed confident expression, dark teal shirt, close crop face and shoulders against warm plaster wall, directional flash, independent youth fashion editorial, expressive and unretouched feeling. No text logos watermarks.",
+      "source": "exec-a9f33fb8-24bf-4756-b410-c3c3808794c8.png",
+      "file": "brows.webp"
+    },
+    {
+      "key": "curls",
+      "prompt": "Candid editorial photograph portrait 3:4 of an adult mixed-race woman age 25 with voluminous dark natural curls, white tee, leaning against a sunny violet painted wall, joyful mid-motion turning head, detailed curl texture and natural pores, independent fashion magazine 35mm flash with slight film grain. No text logos watermarks, no other people.",
+      "source": "exec-d529b999-07f4-4f9c-9568-bbcd18f5642d.png",
+      "file": "curls.webp"
+    },
+    {
+      "key": "extensions-mirror-approved",
+      "source": "exec-e5724268-3b69-45ed-b648-35f9475b7565.png",
+      "status": "User-approved generated editorial placeholder",
+      "file": "extensions-mirror-approved.webp"
+    },
+    {
+      "key": "clipper-cut-approved",
+      "source": "exec-23bb3989-c3a4-4781-bb8b-4424ced7823f.png",
+      "status": "User-approved generated editorial placeholder",
+      "file": "clipper-cut-approved.webp"
+    }
+  ],
+  "excluded": "Salon cutting technique image rejected by user; do not reuse.",
+  "screenshots": {
+    "files": [
+      "ios-looks.webp",
+      "ios-discover.webp"
+    ],
+    "source": "Tovis iOS Debug app, iPhone 17 Pro simulator, captured 2026-09-06. Sample fixture profiles and approved generated editorial images loaded by the native app. UI pixels not composited.",
+    "replacement": "Recapture consented real professional content in the native app. Keep previews explicitly non-bookable."
+  },
+  "replacement": "Replace files by nickname and update lib/brand/editorialCampaign.ts alt text, labels and generated disclosures after approval. Keep native screenshots Tovis-only unless recaptured for the partner brand."
+}

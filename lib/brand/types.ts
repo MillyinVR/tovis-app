@@ -1,3 +1,4 @@
+import type { EditorialCampaign } from './editorialCampaign'
 // lib/brand/types.ts
 
 export type BrandId = string // 'tovis' | 'salon-xyz' | 'school-abc' | ...
@@ -1126,6 +1127,7 @@ export type BrandHomeCardPreview = {
 
 /** Public homepage copy (app/page.tsx). See lib/brand/defaultHomeCopy.ts. */
 export type BrandHomeCopy = {
+  campaign?: EditorialCampaign
   /** Brand-owned imagery and clearly labelled previews; never live feature claims. */
   editorial: {
     heroImage: { src: string; alt: string }

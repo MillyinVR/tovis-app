@@ -1,3 +1,5 @@
+import EditorialHome from './_components/home/EditorialHome'
+import './styles/editorial-home.css'
 // Public homepage: tenant copy, explicit editorial placeholders, and gated feature claims.
 import { Fragment } from 'react'
 import Link from 'next/link'
@@ -250,6 +252,33 @@ function CallsToAction({
 export default async function Home() {
   const brand = getBrandForTenantContext(await resolveTenantContextForLayout())
   const copy = brand.home
+  if (copy.campaign) {
+    return (
+      <main>
+        <JsonLdScript
+          data={buildHomeJsonLd({ brandDisplayName: brand.displayName, url: absoluteUrl('/'), copy })}
+        />
+        <EditorialHome
+          copy={copy}
+          campaign={copy.campaign}
+          navigation={<PublicTopBar links={copy.campaign.nav} />}
+          footer={
+            <footer className="eh-footer">
+              <nav>
+                {copy.campaign.footerLinks.map(link => (
+                  <Link key={link.href} href={link.href}>{link.label}</Link>
+                ))}
+              </nav>
+              <div>
+                <strong>{copy.campaign.smsLabel}</strong>
+                <p>{buildTransactionalSmsPageCopy(brand.displayName)}</p>
+              </div>
+            </footer>
+          }
+        />
+      </main>
+    )
+  }
   const { stats, voices } = homepageSocialProof()
   const lastBeat = copy.manifesto.length - 1
 
