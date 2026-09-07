@@ -865,6 +865,38 @@ export type BrandClientConsultThreadCopy = {
   bookCtaLabel: string
   bookCtaSelfieRequired: string
   bookCtaNotBookable: string
+  /**
+   * P7a-5 — the pro asks for the safety answers before she holds a slot in this
+   * service category. Carries `{pro}`, so it is filled and sent by the SERVER
+   * (`ConsultThreadBookCtaDTO.gateNote`), not composed on either device.
+   */
+  bookCtaPrepRequired: string
+  /**
+   * P7a-5 — the money line under the CTA, assembled server-side into
+   * `ConsultThreadBookCtaDTO.priceNote`.
+   *
+   * ⚠️ `depositFlat` / `depositPercent` / `prepay` are the three honest states,
+   * and they are NOT interchangeable. A percentage deposit has no dollar figure
+   * at the spark (no location mode, no add-ons chosen yet), and a
+   * prepay-required service takes the WHOLE price, not a deposit — calling that
+   * "$X deposit" would understate what the tap is about to charge.
+   *
+   * `noteSeparator` joins the price half to the money half. It is punctuation,
+   * but it lives here so a white-label deployment that wants a line break or a
+   * bullet is not editing a component.
+   */
+  bookCtaDepositFlat: string
+  bookCtaDepositPercent: string
+  bookCtaPrepay: string
+  bookCtaNoteSeparator: string
+  /**
+   * P7a-5 — the deposit sentence appended to the booking confirmation bubble.
+   *
+   * By this point the deposit is a STAMPED number on the booking, so `{amount}`
+   * is the real figure even when the pro's rule was a percentage — this is the
+   * one place a percent deposit can honestly be shown in dollars.
+   */
+  bookedDepositNote: string
 
   /**
    * P7a-3 — the consult is a living document until the appointment.

@@ -1687,6 +1687,12 @@ function BookTheLookCta({
   // A booking-anchored consult already HAS its appointment, and a stopped one
   // has nothing to book. Neither gets a button at all — a permanently disabled
   // CTA reads as a bug, not as a rule.
+  //
+  // 🔴 P7a-5's PREP_REQUIRED is NOT in this list, on purpose. It is the one
+  // gate the client can clear herself, in this same thread, by answering the
+  // questions above the button — so the button stays, disabled, with the
+  // reason under it. Hiding it would remove the only thing telling her that
+  // answering leads anywhere.
   if (book.reason === 'NOT_LOOK_ANCHORED' || book.reason === 'CONSULT_STOPPED') {
     return null
   }
@@ -1703,9 +1709,29 @@ function BookTheLookCta({
       >
         {copy.bookCtaLabel}
       </button>
+      {/* P7a-5 — "From $180 · $25.00 deposit", composed by the server and
+          rendered verbatim. Never assembled here: two numbers joined in a
+          component is how one look came to show two different prices. */}
+      {book.priceNote ? (
+        <p
+          data-testid="consult-thread-book-price-note"
+          className="text-center text-xs text-textSecondary"
+        >
+          {book.priceNote}
+        </p>
+      ) : null}
       {book.reason === 'SELFIE_REQUIRED' ? (
         <p className="text-center text-xs text-textMuted">
           {copy.bookCtaSelfieRequired}
+        </p>
+      ) : null}
+      {/* Server copy, because it names the pro. */}
+      {book.gateNote ? (
+        <p
+          data-testid="consult-thread-book-gate-note"
+          className="text-center text-xs text-textMuted"
+        >
+          {book.gateNote}
         </p>
       ) : null}
       {book.reason === 'LOOK_NOT_BOOKABLE' ? (

@@ -77,6 +77,13 @@ export const defaultClientConsultThreadCopy: BrandClientConsultThreadCopy = {
   bookCtaSelfieRequired: 'Send one photo of yourself and this opens up.',
   bookCtaNotBookable:
     'This look isn’t bookable on its own — message your professional and she can set it up.',
+  bookCtaPrepRequired: '{pro} asks clients to finish a few questions first.',
+  bookCtaDepositFlat: '{amount} deposit',
+  bookCtaDepositPercent: '{percent}% deposit',
+  bookCtaPrepay: 'paid in full when you book',
+  bookCtaNoteSeparator: ' · ',
+  bookedDepositNote:
+    'Your {amount} deposit is held and comes off the total. Cancel more than 24 hours ahead and it comes back.',
 
   // P7a-3 — the consult stays open until the appointment, so these are the
   // sentences of a document that is still alive.

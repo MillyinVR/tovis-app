@@ -694,6 +694,13 @@ export function threadFixture(args: {
   /** Force particular slots to a state, e.g. the selfie not yet sent. */
   slotOverrides?: Partial<Record<string, ConsultCaptureStateDTO['slots'][number]['state']>>
   bookEnabled?: boolean
+  /**
+   * P7a-5 — the pro books this category after prep, so the CTA is visible,
+   * disabled, and says why. Overrides `bookEnabled`.
+   */
+  bookPrepRequired?: boolean
+  /** P7a-5 — the money line under the CTA, e.g. "From $180 · $25.00 deposit". */
+  bookPriceNote?: string | null
   /** P7a-1: the early photo's slot, or null for "not taken yet". */
   earlyPhoto?: ConsultCaptureStateDTO['earlyPhoto']
   status?: ConsultThreadDTO['status']
@@ -790,11 +797,22 @@ export function threadFixture(args: {
     messages,
     chartCopy: captureState.chartCopy,
     book: {
-      enabled: args.bookEnabled ?? true,
-      reason: args.bookEnabled === false ? 'SELFIE_REQUIRED' : null,
+      enabled: args.bookPrepRequired ? false : (args.bookEnabled ?? true),
+      reason: args.bookPrepRequired
+        ? 'PREP_REQUIRED'
+        : args.bookEnabled === false
+          ? 'SELFIE_REQUIRED'
+          : null,
       lookPostId: 'look_fixture_1',
       serviceId: 'service_fixture_1',
       lookMediaId: 'media_fixture_1',
+      priceNote: args.bookPriceNote ?? null,
+      // Server-composed and filled: the fixture carries the sentence the way
+      // the wire does, so the browser test proves the RENDERING rather than a
+      // second implementation of the substitution.
+      gateNote: args.bookPrepRequired
+        ? 'Susie asks clients to finish a few questions first.'
+        : null,
     },
   }
 }

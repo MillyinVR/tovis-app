@@ -25,7 +25,7 @@ import 'server-only'
 // with the booking confirmation slotted in wherever the booking actually
 // happened. The client renders the list; it does not decide the order.
 
-import { ConsultSessionStatus } from '@prisma/client'
+import { BookingDepositStatus, ConsultSessionStatus, type Prisma } from '@prisma/client'
 
 import type {
   BrandClientConsultCaptureCopy,
@@ -48,6 +48,8 @@ import {
   professionalPublicDisplayNameSelect,
 } from '@/lib/privacy/professionalDisplayName'
 import { prisma } from '@/lib/prisma'
+import { formatLookStartingPrice } from '@/lib/looks/startingPrice'
+import { decimalToCents, formatCents } from '@/lib/money'
 import {
   DEFAULT_TIME_ZONE,
   formatInTimeZone,
@@ -73,18 +75,29 @@ import {
 import { formatConsultCaptureIntro } from './captureCopy'
 import { loadConsultAnalysisState } from './analysisContract'
 import {
+  consultEarlyPhotoSettled,
   earlyPhotoWritable,
   guidedCaptureWritable,
   loadConsultCaptureState,
 } from './captureContract'
 import { loadAuthorizedClientConsultResults } from './clientResults'
-import { resolveThreadBooking } from './bookingLink'
+import { resolveThreadBooking, type ConsultThreadBooking } from './bookingLink'
 import { loadConsultFollowUpState } from './followUpContract'
 import { loadConsultInspirationState } from './inspirationContract'
 import { loadConsultIntakeState } from './intakeContract'
 import { loadConsultPrepState } from './prepDeadline'
 import { resolveConsultServiceIdentity } from './serviceIdentity'
-import { consultThreadOpening, fillConsultThreadCopy } from './threadCopy'
+import { previewConsultSparkCharge } from './sparkCharge'
+import {
+  consultSparkGateBlocked,
+  loadConsultSparkGatePolicy,
+  type ConsultSparkGatePolicy,
+} from './sparkGate'
+import {
+  consultThreadBookPriceNote,
+  consultThreadOpening,
+  fillConsultThreadCopy,
+} from './threadCopy'
 
 
 
@@ -172,6 +185,11 @@ const THREAD_SESSION_SELECT = {
   bookingId: true,
   professionalId: true,
   anchorLookPostId: true,
+  // P7a-5 — which category the pro's booking gate and deposit are keyed on.
+  // The category the Service row points at, as stored: `ConsultSession` and
+  // `Booking` already agree on that answer (holdCreateOffering.ts), so the
+  // gate the client meets here and the deposit charged at finalize read one row.
+  serviceCategoryId: true,
   // Which service this consult is FOR. The opening bubble names it (handoff
   // B6: the look-based flow never did, so the client could not answer questions
   // about it), and that has to work at CONSENT_REQUIRED — before any intake
@@ -209,6 +227,10 @@ const THREAD_LOOK_SELECT = {
   id: true,
   serviceId: true,
   primaryMediaAssetId: true,
+  // P7a-5 — the number the feed already shows for this look. Mode-free by
+  // design (`LookPost.priceStartingAt`), which is what makes it the honest one
+  // to put on a CTA where no salon/mobile choice has been made yet.
+  priceStartingAt: true,
 } as const
 
 export class ConsultThreadNotFoundError extends Error {
@@ -330,6 +352,15 @@ export async function loadConsultThread(args: {
         null,
     ) ?? DEFAULT_TIME_ZONE
 
+  // P7a-5 — the pro's per-category setting: does she hold the slot until the
+  // safety answers are in? Read here, beside the prep state the gate consumes,
+  // and passed down rather than re-read — the CTA and the finalize refusal in
+  // `sparkLink.ts` must be answering with the same row.
+  const gatePolicy = await loadConsultSparkGatePolicy(prisma, {
+    professionalId: session.professionalId,
+    serviceCategoryId: session.serviceCategoryId,
+  })
+
   const rerun = await resolveConsultRerunState(prisma, session.id)
   const versions = await loadConsultPlanVersions(session.id)
   /**
@@ -387,7 +418,16 @@ export async function loadConsultThread(args: {
       messages: out.messages,
       // A stopped consult has no capture window left, so no chart-copy choice.
       chartCopy: null,
-      book: bookCta({ reason: 'CONSULT_STOPPED', session, look, booking }),
+      book: await resolveBookCta({
+        reason: 'CONSULT_STOPPED',
+        session,
+        look,
+        booking,
+        pro,
+        copy,
+        clientId: args.clientId,
+        actorUserId: args.actorUserId,
+      }),
     }
   }
 
@@ -418,7 +458,18 @@ export async function loadConsultThread(args: {
   }
 
   if (consentOutstanding) {
-    return finish({ session, look, pro, out, booking })
+    return finish({
+      session,
+      look,
+      pro,
+      copy,
+      out,
+      booking,
+      clientId: args.clientId,
+      actorUserId: args.actorUserId,
+      gatePolicy,
+      prepComplete: prep?.complete ?? false,
+    })
   }
 
   // ── Inspiration, coarse tier ─────────────────────────────────────────────
@@ -784,7 +835,18 @@ export async function loadConsultThread(args: {
       id: `booking:${booking.id}`,
       author: 'APP',
       state: 'DONE',
-      text: fillConsultThreadCopy(copy.booked, { pro }),
+      // P7a-5 — the deposit, said out loud at the moment it becomes real.
+      //
+      // 🔴 Appended to the EXISTING bubble rather than pushed as a new one. A
+      // new message kind would need three landings across two repos to ship
+      // (the cross-repo fixture guard fails a new union member in BOTH
+      // directions); a longer sentence in a kind both clients already render
+      // needs none. Same reasoning P7a-4 recorded for its deadline bubble.
+      //
+      // The amount is `depositAmount` off the booking — the number actually
+      // stamped and charged — so a PERCENT deposit, which the CTA could only
+      // honestly show as a percentage, becomes a real dollar figure here.
+      text: consultThreadBookedText(copy, { pro, booking }),
       bookingId: booking.id,
     })
     out.push(text('prep-intro', fillConsultThreadCopy(copy.prepIntro, { pro })))
@@ -910,16 +972,26 @@ export async function loadConsultThread(args: {
     }
   }
 
-  return finish({ session, look, pro, out, booking, capture })
+  return finish({
+    session,
+    look,
+    pro,
+    copy,
+    out,
+    booking,
+    clientId: args.clientId,
+    actorUserId: args.actorUserId,
+    gatePolicy,
+    prepComplete: prep?.complete ?? false,
+    capture,
+  })
 }
 
-type ThreadLook = {
-  id: string
-  serviceId: string | null
-  primaryMediaAssetId: string
-} | null
+type ThreadLook = Prisma.LookPostGetPayload<{
+  select: typeof THREAD_LOOK_SELECT
+}> | null
 
-function finish(args: {
+async function finish(args: {
   session: {
     id: string
     status: ConsultSessionStatus
@@ -928,14 +1000,22 @@ function finish(args: {
   }
   look: ThreadLook
   pro: string
+  copy: BrandClientConsultThreadCopy
   out: { messages: ConsultThreadMessageDTO[] }
-  booking: { id: string } | null
+  booking: ConsultThreadBooking | null
+  /** The client, for the deposit preview's relationship-aware resolution. */
+  clientId: string
+  actorUserId: string
+  /** P7a-5 — the pro's setting for this consult's category, or null for none. */
+  gatePolicy: ConsultSparkGatePolicy | null
+  /** P7a-5 — `deriveConsultPrepState().complete`, the gate for AFTER_PREP. */
+  prepComplete: boolean
   /**
    * The capture state, when the step is readable. Its slots decide the sticky
    * CTA's gate, and its chart-copy choice rides on the thread root.
    */
   capture?: ConsultCaptureStateDTO | null
-}): ConsultThreadDTO {
+}): Promise<ConsultThreadDTO> {
   // What unlocks the sticky CTA: one accepted early photo (P7a-1).
   //
   // Read off its own field, not out of `slots` — the early photo belongs to no
@@ -950,7 +1030,44 @@ function finish(args: {
   // served until the intake is done, so gating the booking on one of its slots
   // would have put the whole intake in front of the spark, which is the exact
   // ordering P7a exists to undo.
-  const selfieIn = args.capture?.earlyPhoto?.state === 'ACCEPTED'
+  // 🔴 The stage's answer FIRST, the database's answer only when the stage has
+  // none. The capture stage stops being readable once the intake begins, so
+  // `capture` goes null there and reading the slot alone re-locked the CTA on
+  // SELFIE_REQUIRED — telling a client to send a photo she had already sent,
+  // with no way to send it again. `consultEarlyPhotoSettled` asks the row.
+  //
+  // PURGED and EXPIRED count for the same reason PURGED counts on the photo
+  // request above: both describe a photo that WAS accepted and has since been
+  // swept, and retention running is not something the client did.
+  const earlyPhotoState = args.capture?.earlyPhoto?.state
+  const selfieIn =
+    earlyPhotoState === 'ACCEPTED' ||
+    earlyPhotoState === 'PURGED' ||
+    earlyPhotoState === 'EXPIRED' ||
+    (args.capture == null &&
+      (await consultEarlyPhotoSettled(prisma, args.session.id)))
+
+  // P7a-5 — the pro's gate, second in line behind the selfie.
+  //
+  // Order is not arbitrary: the early photo comes BEFORE the intake in this
+  // thread, so when neither is done the honest next step to name is the photo.
+  // Prep surfaces once that is in, which is also when she can act on it — the
+  // intake messages are right there, above the button.
+  const prepBlocked = consultSparkGateBlocked({
+    policy: args.gatePolicy,
+    prepComplete: args.prepComplete,
+  })
+
+  const book = await resolveBookCta({
+    reason: selfieIn ? (prepBlocked ? 'PREP_REQUIRED' : null) : 'SELFIE_REQUIRED',
+    session: args.session,
+    look: args.look,
+    booking: args.booking,
+    pro: args.pro,
+    copy: args.copy,
+    clientId: args.clientId,
+    actorUserId: args.actorUserId,
+  })
 
   return {
     consultId: args.session.id,
@@ -961,12 +1078,7 @@ function finish(args: {
       args.out.messages.find((m) => m.state === 'OPEN')?.id ?? null,
     messages: args.out.messages,
     chartCopy: args.capture?.chartCopy ?? null,
-    book: bookCta({
-      reason: selfieIn ? null : 'SELFIE_REQUIRED',
-      session: args.session,
-      look: args.look,
-      booking: args.booking,
-    }),
+    book,
   }
 }
 
@@ -978,33 +1090,108 @@ function finish(args: {
  * booking runs the ordinary look-booking path, and the analysis takes ~100s,
  * which is longer than a spark lasts.
  */
-function bookCta(args: {
+/**
+ * The booking confirmation bubble, plus its deposit sentence when there is one.
+ *
+ * PENDING is deliberately included: a deposit checkout that has been created
+ * and not yet paid is still money she is about to be asked for, and a
+ * confirmation that stayed silent about it would be the same surprise this
+ * slice exists to remove. A REFUNDED, FAILED or NONE deposit says nothing —
+ * there is no held money to describe.
+ */
+function consultThreadBookedText(
+  copy: BrandClientConsultThreadCopy,
+  args: { pro: string; booking: ConsultThreadBooking },
+): string {
+  const booked = fillConsultThreadCopy(copy.booked, { pro: args.pro })
+  const status = args.booking.depositStatus
+  if (status !== BookingDepositStatus.PAID && status !== BookingDepositStatus.PENDING) {
+    return booked
+  }
+
+  const cents = decimalToCents(args.booking.depositAmount)
+  if (cents == null || cents <= 0) return booked
+
+  return `${booked} ${fillConsultThreadCopy(copy.bookedDepositNote, {
+    amount: formatCents(cents),
+  })}`
+}
+
+async function resolveBookCta(args: {
   reason: ConsultThreadBookGateReasonDTO | null
-  session: { anchorLookPostId: string | null }
+  session: { anchorLookPostId: string | null; professionalId: string }
   look: ThreadLook
-  booking: { id: string } | null
-}): ConsultThreadBookCtaDTO {
-  const { look } = args
+  booking: ConsultThreadBooking | null
+  pro: string
+  copy: BrandClientConsultThreadCopy
+  clientId: string
+  actorUserId: string
+}): Promise<ConsultThreadBookCtaDTO> {
+  const { look, copy } = args
   const base = {
     lookPostId: args.session.anchorLookPostId,
     serviceId: look?.serviceId ?? null,
     lookMediaId: look?.primaryMediaAssetId ?? null,
   }
+  /** A CTA with nothing to say about money or about a gate she can clear. */
+  const quiet = { ...base, priceNote: null, gateNote: null }
 
   // A booking-anchored consult already HAS its appointment; a look that names no
   // service has nothing for the ordinary path to book. Both are refusals with a
   // reason rather than a button that fails one screen later.
+  //
+  // 🔴 None of these four disclose a price, and that is a decision rather than
+  // an omission: there is no tap here to disclose anything ABOUT. A booked
+  // client's money lives on her booking; a look nobody can book has no charge
+  // to warn her of. It also keeps `previewConsultSparkCharge` — eight indexed
+  // reads — off every state that cannot use the answer, including the
+  // ALREADY_BOOKED state that the 5s analysis poll refetches every tick.
   if (!args.session.anchorLookPostId) {
-    return { enabled: false, reason: 'NOT_LOOK_ANCHORED', ...base }
+    return { enabled: false, reason: 'NOT_LOOK_ANCHORED', ...quiet }
   }
   if (args.booking) {
-    return { enabled: false, reason: 'ALREADY_BOOKED', ...base }
+    return { enabled: false, reason: 'ALREADY_BOOKED', ...quiet }
   }
   if (!look?.serviceId) {
-    return { enabled: false, reason: 'LOOK_NOT_BOOKABLE', ...base }
+    return { enabled: false, reason: 'LOOK_NOT_BOOKABLE', ...quiet }
   }
+  if (args.reason === 'CONSULT_STOPPED') {
+    return { enabled: false, reason: args.reason, ...quiet }
+  }
+
+  // Live, or held only by something she can clear herself in this same thread.
+  // Both get the money line: a client about to answer three questions so she
+  // can book deserves to know a deposit is waiting on the other side of them,
+  // not to find out after she has done the work.
+  const charge = await previewConsultSparkCharge({
+    clientId: args.clientId,
+    clientUserId: args.actorUserId,
+    professionalId: args.session.professionalId,
+    serviceId: look.serviceId,
+    lookPostId: args.session.anchorLookPostId,
+  })
+
+  const priceNote = consultThreadBookPriceNote(copy, {
+    priceLabel: formatLookStartingPrice(look.priceStartingAt),
+    charge,
+  })
+
+  if (args.reason === 'PREP_REQUIRED') {
+    return {
+      enabled: false,
+      reason: 'PREP_REQUIRED',
+      ...base,
+      priceNote,
+      // Filled HERE because it names the pro — the thread's standing rule that
+      // a sentence carrying a slot is composed by the server and rendered
+      // verbatim by both clients (lib/consult/threadCopy.ts).
+      gateNote: fillConsultThreadCopy(copy.bookCtaPrepRequired, { pro: args.pro }),
+    }
+  }
+
   if (args.reason) {
-    return { enabled: false, reason: args.reason, ...base }
+    return { enabled: false, reason: args.reason, ...base, priceNote, gateNote: null }
   }
-  return { enabled: true, reason: null, ...base }
+
+  return { enabled: true, reason: null, ...base, priceNote, gateNote: null }
 }

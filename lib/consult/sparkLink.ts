@@ -27,9 +27,17 @@
 
 import 'server-only'
 
-import { BookingStatus, ConsultSessionStatus, Prisma } from '@prisma/client'
+import {
+  BookingStatus,
+  ConsultRevisionKind,
+  ConsultSessionStatus,
+  ProCategoryBookingGate,
+  Prisma,
+} from '@prisma/client'
 
 import { CONSULT_ANCHOR_SELECT, evaluateConsultAnchorScope } from './anchor'
+import { deriveConsultPrepState, CONSULT_PREP_SESSION_SELECT } from './prepDeadline'
+import { consultSparkGateBlocked, loadConsultSparkGatePolicy } from './sparkGate'
 
 /**
  * Bookings that still hold their consult's one link.
@@ -68,15 +76,48 @@ export type ConsultSparkLinkRefusal =
   | 'MISMATCH'
   /** The consult already holds a live booking. */
   | 'ALREADY_LINKED'
+  /**
+   * P7a-5. This pro asks for the safety answers before a slot is taken in this
+   * service category, and they are not in yet.
+   *
+   * 🔴 This refusal is the POINT of the setting, not a nicety. The thread
+   * disables its button, but a disabled button is not a control — the pro's
+   * whole reason for switching this on is that she does not want the slot held,
+   * and a slot taken by a hand-made POST is just as held. Refusing here aborts
+   * the finalize transaction, so no booking is created at all.
+   */
+  | 'PREP_REQUIRED'
 
 export type ConsultSparkLinkResult =
   | { ok: true; consultSessionId: string }
   | { ok: false; reason: ConsultSparkLinkRefusal }
 
 const SPARK_LINK_SELECT = {
+  // 🔴 The prep rule's OWN select, not a hand-listed twin of it: the boundary
+  // and the thread's CTA have to be reading the same columns, or the button and
+  // the refusal can disagree about whether prep is done — which is exactly the
+  // bug a server-side gate exists to prevent.
+  ...CONSULT_PREP_SESSION_SELECT,
+  ...CONSULT_ANCHOR_SELECT,
   id: true,
   status: true,
-  ...CONSULT_ANCHOR_SELECT,
+  // 🔴 The two NESTED selects are MERGED, not replaced. Spreading one relation
+  // select on top of another keeps only the last one's fields, and the compiler
+  // caught exactly that here: the anchor's `booking` dropped `id`,
+  // `locationTimeZone` and `totalDurationMinutes`, which is the whole prep
+  // deadline. Same discipline `thread.ts` and `prepDeadline.ts` already record.
+  serviceCategory: {
+    select: {
+      ...CONSULT_ANCHOR_SELECT.serviceCategory.select,
+      ...CONSULT_PREP_SESSION_SELECT.serviceCategory.select,
+    },
+  },
+  booking: {
+    select: {
+      ...CONSULT_ANCHOR_SELECT.booking.select,
+      ...CONSULT_PREP_SESSION_SELECT.booking.select,
+    },
+  },
 } satisfies Prisma.ConsultSessionSelect
 
 /**
@@ -153,6 +194,33 @@ export async function resolveConsultSparkLink(
     select: { id: true },
   })
   if (held) return { ok: false, reason: 'ALREADY_LINKED' }
+
+  // P7a-5 — the pro's per-category gate, checked LAST because it is the only
+  // refusal the client can clear herself: everything above is a fact about the
+  // request, this is a step she has not finished yet.
+  const gatePolicy = await loadConsultSparkGatePolicy(tx, {
+    professionalId: consult.professionalId,
+    serviceCategoryId: consult.serviceCategoryId,
+  })
+
+  // Skip the intake read entirely when the pro has not asked for the gate,
+  // which is every pro until one turns it on.
+  if (gatePolicy?.bookingGate === ProCategoryBookingGate.AFTER_PREP) {
+    const intakeRevisions = await tx.consultRevision.findMany({
+      where: { consultSessionId: consult.id, kind: ConsultRevisionKind.INTAKE },
+      orderBy: [{ revision: 'desc' }, { id: 'desc' }],
+      select: { payload: true },
+    })
+
+    const prep = deriveConsultPrepState({
+      session: consult,
+      intakePayloads: intakeRevisions.map((revision) => revision.payload),
+    })
+
+    if (consultSparkGateBlocked({ policy: gatePolicy, prepComplete: prep.complete })) {
+      return { ok: false, reason: 'PREP_REQUIRED' }
+    }
+  }
 
   return { ok: true, consultSessionId: consult.id }
 }

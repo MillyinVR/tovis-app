@@ -10122,6 +10122,13 @@ async function resolveFinalizeConsultSparkLink(args: {
     if (link.reason === 'ALREADY_LINKED') {
       throw bookingError('CONSULT_ALREADY_BOOKED')
     }
+    // P7a-5 — the pro books this category after prep, and prep is not done.
+    // Thrown, so the finalize transaction aborts and NO booking is created:
+    // the pro's reason for the setting is that she does not want the slot
+    // taken, and a booking created-then-unlinked would take it anyway.
+    if (link.reason === 'PREP_REQUIRED') {
+      throw bookingError('CONSULT_PREP_REQUIRED')
+    }
     throw bookingError('CONSULT_LINK_MISMATCH')
   }
 

@@ -418,6 +418,21 @@ export const DELETE_BOUNDARY: Readonly<Record<string, DeleteDisposition>> = {
   },
   ClientProfessionalNote: { status: 'RETAIN', reason: R_PRO_AUTHORED },
   ClientFormulaEntry: { status: 'RETAIN', reason: R_PRO_AUTHORED },
+  // P7a-5. RETAIN, and the reasoning is worth writing down because the first
+  // answer here was wrong. The row DOES carry an ON DELETE CASCADE from
+  // `ProfessionalProfile` — but that profile is ANONYMIZED, not deleted (see
+  // above), so the cascade never fires and claiming DELETE would have been a
+  // promise the deletion path does not keep. The completeness guard caught it.
+  //
+  // Retaining it is also the correct outcome on its merits: the row names a pro
+  // and a service CATEGORY, carries a booking gate and a deposit amount, and
+  // names no other party and no personal data at all. There is nothing on it to
+  // erase, and it is service configuration hanging off a row that survives.
+  ProCategoryBookingPolicy: {
+    status: 'RETAIN',
+    reason:
+      'No personal data: a (professional, service category) pair carrying a booking gate and a deposit amount. It hangs off a ProfessionalProfile that is anonymized rather than deleted, so there is nothing on it to erase and nothing that identifies anyone once that row is anonymized.',
+  },
   ProClientPolicy: { status: 'RETAIN', reason: R_PRO_AUTHORED },
   ProClientInvite: { status: 'RETAIN', reason: R_OTHER_PARTY },
   ConsultationApproval: { status: 'RETAIN', reason: R_OTHER_PARTY },
