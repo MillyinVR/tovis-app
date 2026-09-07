@@ -21,7 +21,7 @@ export const dynamic = 'force-dynamic'
 // entity approaches this count.
 const MAX_ENTRIES_PER_SECTION = 5000
 
-const STATIC_PATHS = ['/', '/search', '/looks', '/why', '/about'] as const
+const STATIC_PATHS = ['/', '/search', '/looks', '/why', '/about', '/faq'] as const
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const base = process.env.NEXT_PUBLIC_APP_URL?.trim()

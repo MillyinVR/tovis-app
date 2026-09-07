@@ -1,8 +1,12 @@
+import { editorialRetention } from './editorialRetention'
+import { editorialSeo } from './editorialSeo'
 /** Brand-owned campaign content. Native screenshots are opt-in per brand. */
 export type EditorialCampaign = ReturnType<typeof editorialCampaign>
 export function editorialCampaign() {
   const asset = (file: string) => `/editorial/campaign/${file}.webp`
   return {
+    seo: editorialSeo(),
+    retention: editorialRetention(),
     palette: {
       deep: '11 52 48',
       cream: '243 240 231',
@@ -14,7 +18,7 @@ export function editorialCampaign() {
     announcement: 'San Diego, you’re up first.',
     strap: 'Beauty. Barbering. Whatever’s next.',
     eyebrow: 'Good looks. Your way.',
-    intro: 'Find a look you love. Find someone who gets it.',
+    intro: 'Discover beauty looks. Book hairstylists, barbers, nail techs, and beauty professionals. Starting in San Diego.',
     sticker: 'Your next look lives here.',
     nav: [
       { href: '#discovery', label: 'Explore looks' },
@@ -137,7 +141,7 @@ export function editorialCampaign() {
       'Build your name.',
     ],
     footerLinks: [
-      { href: '/why', label: 'Why' },
+      { href: '/why', label: 'Pricing' },
       { href: '/about', label: 'About' },
       { href: '/support', label: 'Support' },
       { href: '/privacy', label: 'Privacy' },
