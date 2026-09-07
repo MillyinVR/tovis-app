@@ -25,7 +25,7 @@ import 'server-only'
 // with the booking confirmation slotted in wherever the booking actually
 // happened. The client renders the list; it does not decide the order.
 
-import { BookingStatus, ConsultSessionStatus } from '@prisma/client'
+import { BookingStatus, ConsultCaptureStatus, ConsultSessionStatus } from '@prisma/client'
 
 import type {
   BrandClientConsultCaptureCopy,
@@ -356,6 +356,19 @@ export async function loadConsultThread(args: {
     return finish({ session, look, pro, out, booking })
   }
 
+  const bookingPhotos = await prisma.consultCapture.findMany({
+    where: {
+      consultSessionId: session.id,
+      shotKey: { in: [CONSULT_EARLY_PHOTO_SHOT_KEY, 'face_front'] },
+    },
+    distinct: ['shotKey'],
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    select: { status: true, shotKey: true },
+  })
+  const selfieIn = bookingPhotos.some(
+    (photo) => photo.status === ConsultCaptureStatus.ACCEPTED,
+  )
+
   // ── Inspiration, coarse tier ─────────────────────────────────────────────
   //
   // 🔴 BEFORE the intake, and that is the Sept 5 flow order: the spark, then
@@ -475,19 +488,13 @@ export async function loadConsultThread(args: {
   const intake = await optionalStage(() => loadConsultIntakeState(stageArgs))
   if (intake) {
     const answers = intake.latestRevision?.answers ?? {}
-    // 🔴 `progress.nextQuestionKey` goes NULL the moment every REQUIRED question
-    // (and the conditional goal direction) is answered — it never names a
-    // SKIPPABLE one. Following it alone therefore stops asking optional
-    // questions altogether, which is a question the client is simply never
-    // shown. The wizard this replaced fell back to "the first unanswered
-    // question" for exactly that reason, and the fallback comes with it.
-    //
-    // The server still owns COMPLETENESS: `canComplete` is what the submit
-    // echoes, and an optional question left unanswered never blocks it.
-    const nextKey =
-      intake.progress.nextQuestionKey ??
-      intake.questionPack.questions.find((entry) => !answers[entry.key])?.key ??
-      null
+    const nextKey = intake.latestRevision?.complete
+      ? null
+      : intake.progress.nextQuestionKey ??
+        intake.questionPack.questions.find(
+          (entry) => entry.requirement === 'SKIPPABLE' && !answers[entry.key],
+        )?.key ??
+        null
     out.push(text('intake-intro', copy.intakeIntro))
 
     for (const question of intake.questionPack.questions) {
@@ -650,7 +657,7 @@ export async function loadConsultThread(args: {
     }
   }
 
-  return finish({ session, look, pro, out, booking, capture })
+  return finish({ session, look, pro, out, booking, capture, selfieIn })
 }
 
 type ThreadLook = {
@@ -670,28 +677,9 @@ function finish(args: {
   pro: string
   out: { messages: ConsultThreadMessageDTO[] }
   booking: { id: string } | null
-  /**
-   * The capture state, when the step is readable. Its slots decide the sticky
-   * CTA's gate, and its chart-copy choice rides on the thread root.
-   */
   capture?: ConsultCaptureStateDTO | null
+  selfieIn?: boolean
 }): ConsultThreadDTO {
-  // What unlocks the sticky CTA: one accepted early photo (P7a-1).
-  //
-  // Read off its own field, not out of `slots` — the early photo belongs to no
-  // pack. A WARNED photo counts: a warning only ever rides on an ACCEPTED
-  // capture, so "accepted or warned" is one condition, and for this shot
-  // warnings are the NORMAL outcome (dim room, warm lamp, odd crop).
-  //
-  // This was `face_front` out of `slots` before P7a. That worked — every pack
-  // does contain `face_front`, the area pack included (it imports the hair
-  // pack's shot object rather than declaring one, which is easy to miss when
-  // reading the file). It moved because the guided pack is PREP now: it is not
-  // served until the intake is done, so gating the booking on one of its slots
-  // would have put the whole intake in front of the spark, which is the exact
-  // ordering P7a exists to undo.
-  const selfieIn = args.capture?.earlyPhoto?.state === 'ACCEPTED'
-
   return {
     consultId: args.session.id,
     status: args.session.status,
@@ -702,7 +690,7 @@ function finish(args: {
     messages: args.out.messages,
     chartCopy: args.capture?.chartCopy ?? null,
     book: bookCta({
-      reason: selfieIn ? null : 'SELFIE_REQUIRED',
+      reason: args.selfieIn ? null : 'SELFIE_REQUIRED',
       session: args.session,
       look: args.look,
       booking: args.booking,

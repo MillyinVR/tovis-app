@@ -348,6 +348,29 @@ describe('consult thread projection', () => {
     expect(after.nextOpenMessageId).not.toBe(questions[0]?.id)
   })
 
+  it('offers only skippable questions after the required intake answers', async () => {
+    const sessionId = await startConsult()
+    await acceptBothAgreements(sessionId)
+    await takeEarlyPhoto(sessionId)
+    await appendConsultIntakeRevision({
+      consultSessionId: sessionId,
+      actor: { type: ConsultActorType.CLIENT, id: fx.clientUserId },
+      loadInput: async () => ({
+        idempotencyKey: 'thread-optional-intake',
+        packVersion: HAIR_COLOR_INTAKE_PACK_VERSION,
+        schemaVersion: HAIR_COLOR_INTAKE_SCHEMA_VERSION,
+        complete: false,
+        answers: completeAnswers,
+      }),
+    })
+
+    const questions = ofKind((await thread(sessionId)).messages, 'QUESTION')
+    const open = questions.filter((question) => question.state === 'OPEN')
+    expect(open).toHaveLength(1)
+    expect(open[0]?.question.requirement).toBe('SKIPPABLE')
+    expect(questions.some((question) => question.id === 'intake:goal_direction')).toBe(false)
+  })
+
   it('emits one photo request per shot in the served pack, carrying the served slot', async () => {
     const sessionId = await startConsult()
     await acceptBothAgreements(sessionId)
@@ -366,6 +389,8 @@ describe('consult thread projection', () => {
 
     const t = await thread(sessionId)
     const allPhotos = ofKind(t.messages, 'PHOTO_REQUEST')
+    expect(ofKind(t.messages, 'QUESTION').every((question) => question.state === 'DONE')).toBe(true)
+    expect(t.messages.some((message) => message.id === 'intake:goal_direction')).toBe(false)
     // Eight photo requests: the early photo, then the pack's seven. The early
     // one is a separate stage that happens BEFORE the intake — it is not a
     // guided slot and does not count towards the pack (P7a-1).
@@ -495,6 +520,8 @@ describe('consult thread projection', () => {
     })
     const after = await thread(sessionId)
     expect(after.status).toBe('MEDIA_READY')
+    await attachAcceptedCapture(db, sessionId, 'face_front', 'thread-legacy-face')
+    expect((await thread(sessionId)).book.enabled).toBe(true)
     expect(
       after.messages.some((m) => m.id.startsWith('intake:')),
       'the intake it already answered is still on the thread',
@@ -637,6 +664,8 @@ describe('consult thread projection', () => {
 
     const t = await thread(sessionId)
     const plan = ofKind(t.messages, 'PLAN')
+    expect(t.book.enabled).toBe(true)
+    expect(t.book.reason).toBeNull()
     expect(plan).toHaveLength(1)
     expect(plan[0]?.results).not.toBeNull()
     expect(plan[0]?.awaitingStart).toBe(false)
