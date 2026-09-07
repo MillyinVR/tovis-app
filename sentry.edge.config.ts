@@ -4,6 +4,7 @@ import * as Sentry from '@sentry/nextjs'
 
 import {
   buildSentryConsoleLoggingIntegrations,
+  isSentryServerReportingEnabled,
   readSentryDist,
   readSentryDsn,
   readSentryEnableLogs,
@@ -18,7 +19,7 @@ const enableLogs = readSentryEnableLogs()
 
 Sentry.init({
   dsn,
-  enabled: Boolean(dsn),
+  enabled: isSentryServerReportingEnabled(dsn),
   environment: readSentryEnvironment(),
   release: readSentryRelease(),
   dist: readSentryDist(),

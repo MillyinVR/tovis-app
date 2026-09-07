@@ -37,9 +37,18 @@ export function requireEnv(name: string): string {
  * drift the no-duplicate-logic rule exists to stop.
  */
 export function envFlagEnabled(name: string): boolean {
-  const raw = readOptionalEnv(name)
-  if (raw === null) return false
-  const value = raw.toLowerCase()
+  return parseEnvFlag(readOptionalEnv(name))
+}
+
+/**
+ * The parse behind `envFlagEnabled`, for callers that already hold the raw
+ * value. The browser bundle needs this: Next inlines only a LITERAL
+ * `process.env.NEXT_PUBLIC_X` reference at build time, so a name-based lookup
+ * like `envFlagEnabled('NEXT_PUBLIC_X')` reads `undefined` there.
+ */
+export function parseEnvFlag(raw: string | null | undefined): boolean {
+  const value = raw?.trim().toLowerCase()
+  if (!value) return false
   return value === '1' || value === 'true' || value === 'yes'
 }
 
