@@ -52,6 +52,11 @@ export const defaultClientConsultThreadCopy: BrandClientConsultThreadCopy = {
   booked: 'You’re on {pro}’s calendar. Nice.',
   prepIntro:
     'Now let’s help {pro} get ready. Everything you add from here sharpens what she sees before you walk in — do it now, or come back to it later.',
+  prepComplete:
+    'That’s the safety bit done — everything {pro} needs to work safely is in. No more nudges from me about it.',
+  prepDeadlineDue:
+    'A few of these are the ones {pro} needs before she can safely start, so they’re due by {deadline}. They take about a minute.',
+
   estimateReady:
     'Your plan firmed up, so the price on your appointment has too. {pro} confirms the final number at your visit.',
 

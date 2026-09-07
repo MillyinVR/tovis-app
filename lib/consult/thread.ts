@@ -48,6 +48,11 @@ import {
   professionalPublicDisplayNameSelect,
 } from '@/lib/privacy/professionalDisplayName'
 import { prisma } from '@/lib/prisma'
+import {
+  DEFAULT_TIME_ZONE,
+  formatInTimeZone,
+  sanitizeTimeZone,
+} from '@/lib/time'
 
 import {
   loadConsultPlanVersions,
@@ -77,6 +82,7 @@ import { resolveThreadBooking } from './bookingLink'
 import { loadConsultFollowUpState } from './followUpContract'
 import { loadConsultInspirationState } from './inspirationContract'
 import { loadConsultIntakeState } from './intakeContract'
+import { loadConsultPrepState } from './prepDeadline'
 import { resolveConsultServiceIdentity } from './serviceIdentity'
 import { consultThreadOpening, fillConsultThreadCopy } from './threadCopy'
 
@@ -311,6 +317,19 @@ export async function loadConsultThread(args: {
   // P7a-3: the plan is VERSIONED now, and the thread has to say which version
   // it is showing and whether a newer one is on its way. Read UP HERE because
   // the steps above the plan need the answer too — see `hasPlan`.
+  // P7a-4 — the prep deadline and whether the safety answers are in. Read
+  // through the SSOT rather than derived here, so the bubble she reads, the
+  // reminders she gets and the flag her pro sees are one answer to one
+  // question.
+  const prepLoaded = await loadConsultPrepState(prisma, session.id)
+  const prep = prepLoaded?.prep ?? null
+  const prepTimeZone =
+    sanitizeTimeZone(
+      prepLoaded?.session.booking?.locationTimeZone ??
+        prepLoaded?.session.inspiredBookings[0]?.locationTimeZone ??
+        null,
+    ) ?? DEFAULT_TIME_ZONE
+
   const rerun = await resolveConsultRerunState(prisma, session.id)
   const versions = await loadConsultPlanVersions(session.id)
   /**
@@ -769,6 +788,40 @@ export async function loadConsultThread(args: {
       bookingId: booking.id,
     })
     out.push(text('prep-intro', fillConsultThreadCopy(copy.prepIntro, { pro })))
+
+    // ── P7a-4: the safety answers, and when they are due ───────────────────
+    //
+    // 🔴 A TEXT bubble, not a message kind of its own. A new member of the
+    // ConsultThreadMessageDTO union fails the cross-repo fixture guard in BOTH
+    // directions and needs three landings to ship (iOS property → web schema →
+    // iOS fixture); a new sentence in an existing kind needs none, and this is
+    // a sentence. iOS renders it today with no change at all.
+    //
+    // Derived on every read, so it is never stale: the bubble flips the moment
+    // the last answer lands, from the same rule that stops the reminders
+    // (lib/consult/prepDeadline.ts). One rule, so the thread and her inbox
+    // cannot disagree about whether she is finished.
+    if (prep) {
+      if (prep.complete) {
+        out.push(
+          text('prep-complete', fillConsultThreadCopy(copy.prepComplete, { pro })),
+        )
+      } else if (prep.deadlineAt) {
+        out.push(
+          text(
+            'prep-deadline',
+            fillConsultThreadCopy(copy.prepDeadlineDue, {
+              pro,
+              deadline: formatInTimeZone(prep.deadlineAt, prepTimeZone, {
+                weekday: 'long',
+                month: 'long',
+                day: 'numeric',
+              }),
+            }),
+          ),
+        )
+      }
+    }
     // ── Inspiration, prep tier ─────────────────────────────────────────────
     //
     // AFTER the booking, because that is what they are for: "help {pro} get

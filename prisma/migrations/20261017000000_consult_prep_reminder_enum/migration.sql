@@ -1,0 +1,23 @@
+-- P7a-4 — the prep-deadline reminder's notification event key.
+--
+-- Enum labels only, in their own migration: PostgreSQL requires a new label to
+-- COMMIT before any later migration may name it in a table, constraint, trigger
+-- or function, and Prisma wraps each migration in a transaction. Same
+-- convention as 20261016000000_consult_follow_up_enum,
+-- 20261015000000_consult_rerun_audit_enum and
+-- 20261013000000_consult_early_photo_enum.
+--
+-- ONE key for all four escalations, not four. It follows APPOINTMENT_REMINDER,
+-- which is also one key whose payload carries which lead time it is
+-- (lib/notifications/appointmentReminders.ts): the recipient preference a
+-- client sets is "do I want to be reminded about prep", never "do I want the
+-- 72-hour one but not the 24-hour one", and four keys would offer them four
+-- switches for one decision. The stage rides in the scheduled row's payload,
+-- where the drain-time validator reads it.
+--
+-- This is the WHOLE schema change for P7a-4. The deadline itself is derived
+-- (the appointment minus the category's N — lib/consult/prepDeadline.ts), the
+-- reminders are ordinary ScheduledClientNotification rows, and prep completion
+-- is read from the intake revisions that already exist. Nothing here stores a
+-- second copy of a fact the consult already knows.
+ALTER TYPE "NotificationEventKey" ADD VALUE 'CONSULT_PREP_REMINDER' AFTER 'AI_CONSULT_ANALYSIS_FAILED';

@@ -136,9 +136,15 @@ export type ConsultInputWindow =
  * exactly one anchor, and `resolveConsultSparkLink` refuses to link a booking
  * to a consult that already has one of its own.
  */
-export function consultLinkedBooking(
-  session: ConsultOpenWindowSession,
-): Prisma.BookingGetPayload<{ select: typeof LINKED_BOOKING_SELECT }> | null {
+export function consultLinkedBooking<
+  TBooking extends Prisma.BookingGetPayload<{
+    select: typeof LINKED_BOOKING_SELECT
+  }>,
+>(session: {
+  bookingId: string | null
+  booking: TBooking | null
+  inspiredBookings: TBooking[]
+}): TBooking | null {
   if (session.bookingId && session.booking) return session.booking
   return session.inspiredBookings[0] ?? null
 }

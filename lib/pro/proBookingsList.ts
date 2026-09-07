@@ -37,6 +37,7 @@ import {
   derivePaymentBadge,
   type PaymentBadge,
 } from '@/lib/booking/paymentBadge'
+import type { ConsultPrepBadge } from '@/lib/consult/prepBadge'
 import {
   RELATIONSHIP_BADGE_SELECT,
   deriveRelationshipBadge,
@@ -397,6 +398,17 @@ export type ProBookingListItemDTO = {
    * payload is byte-identical to pre-K11 and an old fixture still validates.
    */
   clientConfirmation?: ClientConfirmationBadge
+  /**
+   * P7a-4 — the day-of prep flag, derived by lib/consult/prepBadge.ts. OPTIONAL
+   * and absent for every booking with no consult attached (the overwhelming
+   * majority), so an untouched row serialises byte-identically to pre-P7a-4 and
+   * an old iOS fixture still validates. A NEW PROPERTY, deliberately not a new
+   * union member — the cross-repo fixture guard treats those very differently.
+   *
+   * The pro's SCHEDULE renders it and nothing more: an unanswered safety
+   * question is a prompt to reach out, never a block on the appointment.
+   */
+  consultPrep?: ConsultPrepBadge
   sessionStep: SessionStep | null
   scheduledFor: string
   timeZone: string
@@ -444,7 +456,17 @@ export type ProBookingsListResponse = {
 
 export function serializeBookingsListRow(
   booking: BookingsListRow,
-  args: { scheduleTz: string; visibleClientIdSet: ReadonlySet<string> },
+  args: {
+    scheduleTz: string
+    visibleClientIdSet: ReadonlySet<string>
+    /**
+     * P7a-4 — booking id → prep badge, from `loadProBookingsPrepBadges`. Passed
+     * in rather than read here because this function is synchronous and per-row:
+     * looking prep up inside it would be one query per booking on every render
+     * of the pro's day.
+     */
+    consultPrepBadges?: ReadonlyMap<string, ConsultPrepBadge>
+  },
 ): ProBookingListItemDTO {
   const tz = resolveAppointmentDisplayTimeZone(
     booking.locationTimeZone,
@@ -457,6 +479,7 @@ export function serializeBookingsListRow(
     booking.client.lastName ?? ''
   }`.trim()
   const clientConfirmation = deriveClientConfirmationBadge(booking)
+  const consultPrep = args.consultPrepBadges?.get(booking.id)
 
   return {
     id: booking.id,
@@ -467,6 +490,10 @@ export function serializeBookingsListRow(
     // K11 confirmation state — omitted (not null) when never requested, so an
     // untouched row serialises byte-identically to pre-K11.
     ...(clientConfirmation.significant ? { clientConfirmation } : {}),
+    // Same omit-when-insignificant rule as the confirmation badge above, and
+    // for the same reason: a booking with nothing to prepare must serialise
+    // exactly as it did before this field existed.
+    ...(consultPrep?.significant ? { consultPrep } : {}),
     sessionStep: booking.sessionStep ?? null,
     scheduledFor: booking.scheduledFor.toISOString(),
     timeZone: safeTz,

@@ -258,6 +258,11 @@ describe('app/api/internal/jobs/client-reminders/route.ts', () => {
             NotificationEventKey.APPOINTMENT_REMINDER,
             NotificationEventKey.REVIEW_REQUESTED,
             NotificationEventKey.DEPOSIT_REMINDER,
+            // P7a-4. Pinned here on purpose: this cron is the ONLY thing that
+            // turns a scheduled prep reminder into a notification, so a kind
+            // silently dropped from the drain set is a reminder that never
+            // fires and nothing else would notice.
+            NotificationEventKey.CONSULT_PREP_REMINDER,
           ],
         },
         cancelledAt: null,

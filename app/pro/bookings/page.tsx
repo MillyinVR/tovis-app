@@ -9,6 +9,9 @@ import { noShowProtectionEnabled } from '@/lib/noShowProtection/flag'
 import { moneyToString } from '@/lib/money'
 import { deriveClientConfirmationBadge } from '@/lib/booking/clientConfirmation'
 import { derivePaymentBadge } from '@/lib/booking/paymentBadge'
+import type { ConsultPrepBadge } from '@/lib/consult/prepBadge'
+import { loadProBookingsPrepBadges } from '@/lib/consult/proPrepStatus'
+import { prisma } from '@/lib/prisma'
 import RelationshipBadgePill from '@/app/_components/RelationshipBadgePill'
 import {
   resolveBookingLocationMeta,
@@ -92,6 +95,20 @@ function ConfirmationPill({ booking }: { booking: BookingRow }) {
   if (!badge.significant) return null
 
   return <Badge tone={badge.tone}>{badge.label}</Badge>
+}
+
+// P7a-4 — the day-of prep flag, from THE one helper
+// (lib/consult/prepBadge.ts). Same `significant` gate as its neighbours: a
+// booking with no consult attached renders nothing, which is nearly all of
+// them. It flags; it never blocks — the appointment stands either way.
+function PrepPill({ badge }: { badge: ConsultPrepBadge | undefined }) {
+  if (!badge?.significant) return null
+
+  return (
+    <Badge tone={badge.tone} title={badge.description}>
+      {badge.label}
+    </Badge>
+  )
 }
 
 function CloseoutBadge({ bookingId }: { bookingId: string }) {
@@ -348,11 +365,13 @@ function Section({
   items,
   scheduleTz,
   clientLinkViewer,
+  prepBadges,
 }: {
   title: string
   items: BookingRow[]
   scheduleTz: string
   clientLinkViewer: ClientLinkViewer
+  prepBadges: ReadonlyMap<string, ConsultPrepBadge>
 }) {
   return (
     <section className="grid gap-3">
@@ -406,6 +425,8 @@ function Section({
                       <PaymentPill booking={booking} />
 
                       <ConfirmationPill booking={booking} />
+
+                      <PrepPill badge={prepBadges.get(booking.id)} />
 
                       {needsCloseout(booking) ? (
                         <CloseoutBadge bookingId={booking.id} />
@@ -557,6 +578,19 @@ export default async function ProBookingsPage(props: {
     stats,
   } = buckets
 
+  // P7a-4 — one batched read for the whole screen's prep flags. Never blocks
+  // the page: a pro must not lose their bookings list because a prep read
+  // failed, so a failure degrades to no flags rather than to no schedule.
+  const prepBadges = await loadProBookingsPrepBadges(prisma, {
+    bookingIds: [
+      ...todayBookings,
+      ...upcomingBookings,
+      ...pastBookings,
+      ...cancelledBookings,
+    ].map((booking) => booking.id),
+    professionalId: proId,
+  }).catch(() => new Map<string, ConsultPrepBadge>())
+
   const showTz = pickTimeZoneOrNull(scheduleTz)
 
   const todayCount = stats.today
@@ -615,18 +649,21 @@ export default async function ProBookingsPage(props: {
               items={todayBookings}
               scheduleTz={scheduleTz}
               clientLinkViewer={clientLinkViewer}
+              prepBadges={prepBadges}
             />
             <Section
               title="Upcoming"
               items={upcomingBookings}
               scheduleTz={scheduleTz}
               clientLinkViewer={clientLinkViewer}
+              prepBadges={prepBadges}
             />
             <Section
               title="Past"
               items={pastBookings}
               scheduleTz={scheduleTz}
               clientLinkViewer={clientLinkViewer}
+              prepBadges={prepBadges}
             />
           </>
         ) : null}
@@ -637,6 +674,7 @@ export default async function ProBookingsPage(props: {
             items={cancelledBookings}
             scheduleTz={scheduleTz}
             clientLinkViewer={clientLinkViewer}
+            prepBadges={prepBadges}
           />
         ) : null}
       </div>

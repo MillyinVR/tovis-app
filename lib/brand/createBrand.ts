@@ -16,6 +16,7 @@ import { defaultProCalendarCopy } from './defaultProCalendarCopy'
 import { defaultClientConsultBookingCopy } from './defaultClientConsultBookingCopy'
 import { defaultClientConsultInspirationCopy } from './defaultClientConsultInspirationCopy'
 import { defaultClientConsultPlanDiffCopy } from './defaultClientConsultPlanDiffCopy'
+import { defaultClientConsultPrepCopy } from './defaultClientConsultPrepCopy'
 import { defaultClientConsultThreadCopy } from './defaultClientConsultThreadCopy'
 import { defaultClientConsultResultsCopy } from './defaultClientConsultResultsCopy'
 import { defaultClientConsultCaptureCopy } from './defaultClientConsultCaptureCopy'
@@ -60,6 +61,7 @@ export type CreateBrandInput = {
   clientConsultCapture?: BrandConfig['clientConsultCapture']
   clientConsultBooking?: BrandConfig['clientConsultBooking']
   clientConsultThread?: BrandConfig['clientConsultThread']
+  clientConsultPrep?: BrandConfig['clientConsultPrep']
   clientConsultPlanDiff?: BrandConfig['clientConsultPlanDiff']
   clientConsultInspiration?: BrandConfig['clientConsultInspiration']
   /** Override the public homepage copy (defaults to the checkable product copy). */
@@ -117,6 +119,7 @@ export function createBrandConfig(input: CreateBrandInput): BrandConfig {
       input.clientConsultBooking ?? defaultClientConsultBookingCopy,
     clientConsultThread:
       input.clientConsultThread ?? defaultClientConsultThreadCopy,
+    clientConsultPrep: input.clientConsultPrep ?? defaultClientConsultPrepCopy,
     clientConsultPlanDiff:
       input.clientConsultPlanDiff ?? defaultClientConsultPlanDiffCopy,
     clientConsultInspiration:

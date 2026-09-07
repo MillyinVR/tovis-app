@@ -253,6 +253,7 @@ import {
   computeDepositReminderRunAt,
   scheduleDepositReminderOnBooking,
 } from '@/lib/notifications/depositReminders'
+import { syncConsultPrepReminders } from '@/lib/notifications/consultPrepReminders'
 import {
   cancelBookingAppointmentReminders,
   syncBookingAppointmentReminders,
@@ -6557,6 +6558,18 @@ async function performLockedCancel(args: {
     bookingId: booking.id,
   })
 
+  // P7a-4: drop the pending prep reminders too. "Answer these before your
+  // appointment" after the appointment is gone is the same lie the pay-link
+  // nudge below would be. The prep validator ALSO self-heals (it re-reads the
+  // booking status at drain and cancels), so this is the eager half — which
+  // matters because it is what empties the client's queue immediately rather
+  // than up to fifteen minutes later.
+  await cancelScheduledClientNotificationsForBooking({
+    tx: args.tx,
+    bookingId: booking.id,
+    eventKeys: [NotificationEventKey.CONSULT_PREP_REMINDER],
+  })
+
   // K10-B-1: the scheduled pay-link nudge has NO drain-time revalidation, so a
   // cancel — every path lands here, including the deposit release sweep — must
   // stamp it cancelled. "Pay your deposit or the booking is released" after
@@ -10995,6 +11008,22 @@ if (args.openingId) {
     tx: args.tx,
     bookingId: created.id,
   })
+
+  // P7a-4 — the spark now has an appointment, so the safety answers now have a
+  // deadline. Planned here because this is the moment the deadline comes into
+  // existence: before the booking there is nothing to be ready for.
+  //
+  // Only the SCHEDULED rows are written on this transaction. The immediate
+  // "you're booked, here's the deadline" notification is emitted by the route
+  // after the commit — a client must never be told about an appointment whose
+  // transaction then rolls back.
+  if (sourceConsultSessionId) {
+    await syncConsultPrepReminders({
+      tx: args.tx,
+      consultSessionId: sourceConsultSessionId,
+      now: args.now,
+    })
+  }
 
   // Auto-accepted client finalize is itself the confirmation moment. Pending
   // requests receive the invitation later through the shared
