@@ -2,6 +2,7 @@
 import Link from 'next/link'
 import { buildTransactionalSmsPageCopy } from '@/lib/transactionalSmsPolicy'
 import PublicTopBar from '@/app/_components/PublicTopBar/PublicTopBar'
+import { defaultAboutCopy } from '@/lib/brand/defaultAboutCopy'
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 
@@ -10,11 +11,13 @@ export const dynamic = 'force-dynamic'
 export default async function FaqPage() {
   const brand = getBrandForTenantContext(await resolveTenantContextForLayout())
   const n = brand.displayName // shorthand for inline use
+  // The "What is <brand>?" answer is the About page's, so the two never drift.
+  const about = defaultAboutCopy(n)
 
   const faqs = [
     {
-      q: `What is ${n}?`,
-      a: `${n} is a platform for beauty professionals and clients. Professionals use it to manage business and booking flows. Clients use it to discover looks, choose services, and manage bookings.`,
+      q: about.title,
+      a: about.summary,
     },
     {
       q: `Why does ${n} ask for my phone number during signup?`,
