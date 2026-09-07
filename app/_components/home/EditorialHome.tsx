@@ -7,6 +7,7 @@ import type { BrandHomeCopy } from '@/lib/brand/types'
 import type { EditorialCampaign } from '@/lib/brand/editorialCampaign'
 import type { MarketingPricing } from '@/lib/brand/marketingPricing'
 import CardPreview from './CardPreview'
+import HomeMotion from './HomeMotion'
 
 export default function EditorialHome({
   copy,
@@ -25,7 +26,6 @@ export default function EditorialHome({
   const [saved, setSaved] = useState<string[]>([])
   const [screen, setScreen] = useState(0)
   const [preferences, setPreferences] = useState(c.preferences.slice(0, 1))
-  const selectedScreen = c.screens[screen]
   const inspiration = c.photos[0]
   function toggle(
     value: string,
@@ -53,7 +53,8 @@ export default function EditorialHome({
         <span>{c.strap}</span>
       </div>
       {navigation}
-      <section className="eh-hero">
+      <HomeMotion key="editorial-motion" scopeId="eh-hero" />
+      <section id="eh-hero" className="eh-hero">
         <div className="eh-kicker">{c.eyebrow}</div>
         <h1>
           {copy.hero.headlineTop}
@@ -88,7 +89,7 @@ export default function EditorialHome({
         <p className="eh-disclosure">{copy.editorial.placeholderLabel}</p>
       </section>
       <section className="eh-section eh-explainer">
-        <h2>{c.seo.audienceTitle}</h2>
+        <h2 className="tv-reveal">{c.seo.audienceTitle}</h2>
         <p>{c.seo.audienceBody}</p>
       </section>
       <div className="eh-strip">
@@ -98,7 +99,7 @@ export default function EditorialHome({
       </div>
       <section id="loop" className="eh-section eh-app">
         <div className="eh-kicker">{c.appEyebrow}</div>
-        <h2>{c.appTitle}</h2>
+        <h2 className="tv-reveal">{c.appTitle}</h2>
         <div className="eh-app-grid">
           <div>
             <div className="eh-screen-buttons">
@@ -120,24 +121,31 @@ export default function EditorialHome({
               ))}
             </div>
           </div>
-          <figure>
+          <figure className="tv-reveal tv-delay-1">
             <div className="eh-phone">
-              {selectedScreen && (
-                <Image
-                  src={selectedScreen.src}
-                  alt={selectedScreen.alt}
-                  width={660}
-                  height={1435}
-                  sizes="330px"
-                />
-              )}
+              {c.screens.map((item, i) => (
+                <div
+                  key={item.src}
+                  className="eh-screen"
+                  data-active={screen === i}
+                  aria-hidden={screen !== i}
+                >
+                  <Image
+                    src={item.src}
+                    alt={item.alt}
+                    width={660}
+                    height={1435}
+                    sizes="330px"
+                  />
+                </div>
+              ))}
             </div>
             <figcaption className="eh-caption">{c.screenDisclosure}</figcaption>
           </figure>
         </div>
       </section>
       <section id="discovery" className="eh-section">
-        <div className="eh-section-head">
+        <div className="eh-section-head tv-reveal">
           <div>
             <div className="eh-kicker">{c.discoveryEyebrow}</div>
             <h2>{c.discoveryTitle}</h2>
@@ -197,7 +205,7 @@ export default function EditorialHome({
       <section className="eh-section eh-brief">
         <div>
           <div className="eh-kicker">{c.briefEyebrow}</div>
-          <h2>{c.briefTitle}</h2>
+          <h2 className="tv-reveal">{c.briefTitle}</h2>
           <p>{c.briefIntro}</p>
           <p className="eh-caption">{copy.editorial.journeyNote}</p>
         </div>
@@ -241,7 +249,7 @@ export default function EditorialHome({
       <section id="clients" className="eh-section eh-trust">
         <div>
           <div className="eh-kicker">{c.trustEyebrow}</div>
-          <h2>{copy.editorial.trustTitle}</h2>
+          <h2 className="tv-reveal">{copy.editorial.trustTitle}</h2>
         </div>
         {c.trustItems.map((item) => (
           <div key={item.title}>
@@ -253,7 +261,7 @@ export default function EditorialHome({
       <section id="pros" className="eh-section eh-pro">
         <div>
           <div className="eh-kicker">{c.proEyebrow}</div>
-          <h2>{c.proTitle}</h2>
+          <h2 className="tv-reveal">{c.proTitle}</h2>
           <p>{c.proIntro}</p>
           <Link href="/signup/pro" className="eh-button">
             {copy.hero.ctaPro} ↗
@@ -270,7 +278,7 @@ export default function EditorialHome({
       </section>
       <section id="retention" className="eh-section eh-retention">
         <div className="eh-kicker">{c.retention.eyebrow}</div>
-        <h2>{c.retention.title}</h2>
+        <h2 className="tv-reveal">{c.retention.title}</h2>
         <p className="eh-retention-intro">{c.retention.intro}</p>
         <div className="eh-retention-grid">
           {c.retention.features.map((feature) => (
@@ -300,7 +308,7 @@ export default function EditorialHome({
       {copy.editorial.progression.length > 0 && (
         <section className="eh-section eh-program">
           <div className="eh-kicker">{copy.editorial.upcomingLabel}</div>
-          <h2>{copy.editorial.foundingTitle}</h2>
+          <h2 className="tv-reveal">{copy.editorial.foundingTitle}</h2>
           <p>{copy.editorial.foundingBody}</p>
           <p>{copy.editorial.foundingCard}</p>
           {copy.editorial.foundingPreview && (
@@ -320,7 +328,7 @@ export default function EditorialHome({
         </section>
       )}
       <section className="eh-section eh-faq">
-        <h2>{pricing.title}</h2>
+        <h2 className="tv-reveal">{pricing.title}</h2>
         <p>{pricing.commission}</p>
         <p>{pricing.subscription}</p>
         <aside className="eh-membership-offer">
@@ -332,7 +340,7 @@ export default function EditorialHome({
         <Link className="eh-link" href="/why">
           {pricing.link} →
         </Link>
-        <h2>{c.seo.faqTitle}</h2>
+        <h2 className="tv-reveal">{c.seo.faqTitle}</h2>
         {c.seo.questions.map((item) => (
           <details key={item.question}>
             <summary>{item.question}</summary>
