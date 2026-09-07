@@ -7,6 +7,7 @@
 // lib/brand/brands/_template.ts and docs/design/white-label-runbook.md.
 import type { BrandConfig, BrandHomeCardPreview } from '../types'
 import { createBrandConfig } from '../createBrand'
+import { editorialCampaign } from '../editorialCampaign'
 import { defaultHomeCopy } from '../defaultHomeCopy'
 import { TOVIS_EYE_SVG } from '../eyeSvg'
 
@@ -21,6 +22,7 @@ const cardPreview = {
 } satisfies Pick<BrandHomeCardPreview, 'trigger' | 'previewLabel' | 'brandName' | 'markSrc' | 'note'>
 
 const home = defaultHomeCopy('TOVIS')
+home.campaign = editorialCampaign()
 home.editorial = {
   ...home.editorial,
   location: 'Starting in San Diego',
