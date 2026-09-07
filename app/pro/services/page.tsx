@@ -5,6 +5,7 @@ import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 import ServicesManagerSection from '@/app/pro/profile/_sections/ServicesManagerSection'
 import PrepChecklistEditor from '@/app/pro/services/PrepChecklistEditor'
+import CategoryBookingPolicyEditor from '@/app/pro/services/CategoryBookingPolicyEditor'
 
 export const dynamic = 'force-dynamic'
 
@@ -32,6 +33,13 @@ export default async function ProServicesPage() {
           it belongs to the pro, not to any one offering. */}
       <div className="mx-auto mt-4 w-full max-w-5xl px-4 pb-8">
         <PrepChecklistEditor />
+      </div>
+
+      {/* P7a-5 — when clients can book each category, and that category's
+          deposit. Per category rather than per service, so it sits alongside
+          the menu rather than inside one row of it. */}
+      <div className="mx-auto w-full max-w-5xl px-4 pb-8">
+        <CategoryBookingPolicyEditor />
       </div>
     </main>
   )

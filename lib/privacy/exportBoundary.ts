@@ -235,6 +235,17 @@ export const EXPORT_BOUNDARY: Readonly<Record<string, ExportDisposition>> = {
     status: 'OMITTED',
     reason: `${OMITTED_PRO_AUTHORED_FEEDBACK} ClientFormulaEntry is always PRIVATE_TO_AUTHOR by schema and never public.`,
   },
+  // P7a-5. Reaches the subject only through `ProfessionalProfile` — the row
+  // names a pro and a service CATEGORY and nothing else. There is no client on
+  // it, so for a client subject there is nothing to disclose; for a pro subject
+  // it is her own menu configuration, which she reads and writes on her
+  // Services screen rather than through a subject-access request.
+  ProCategoryBookingPolicy: {
+    status: 'OMITTED',
+    reason:
+      'Carries no subject data: a (professional, service category) pair with a booking gate and a deposit amount. No client is named on it, and the pro authors and reads it directly in her own Services settings.',
+  },
+
   ProClientPolicy: {
     status: 'OMITTED',
     reason:

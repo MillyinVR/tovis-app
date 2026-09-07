@@ -16,7 +16,7 @@ import 'server-only'
 // `followUpContract` import `thread`, which already imports `followUpContract`
 // — a cycle, for one function that belongs to neither.
 
-import { BookingStatus } from '@prisma/client'
+import { BookingStatus, type Prisma } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
 
@@ -94,6 +94,24 @@ function consultSparkLinkCutoverAt(): Date | null {
  * feeling. When this stops firing in prod, delete everything below the link
  * query. (`LIVE_BOOKING_STATUSES` stays — the link query uses it too.)
  */
+/**
+ * P7a-5 — the deposit columns travel with the booking id.
+ *
+ * The confirmation bubble has to be able to say "your $25 deposit is held and
+ * comes off the total", and by that point the deposit is a STAMPED number
+ * rather than a rule — which is the one place a percentage deposit can honestly
+ * be shown in dollars.
+ */
+export const CONSULT_THREAD_BOOKING_SELECT = {
+  id: true,
+  depositStatus: true,
+  depositAmount: true,
+} satisfies Prisma.BookingSelect
+
+export type ConsultThreadBooking = Prisma.BookingGetPayload<{
+  select: typeof CONSULT_THREAD_BOOKING_SELECT
+}>
+
 export async function resolveThreadBooking(
   db: typeof prisma,
   args: {
@@ -103,13 +121,13 @@ export async function resolveThreadBooking(
     anchorLookPostId: string | null
     consultCreatedAt: Date
   },
-): Promise<{ id: string } | null> {
+): Promise<ConsultThreadBooking | null> {
   const linked = await db.booking.findFirst({
     where: {
       sourceConsultSessionId: args.consultSessionId,
       status: { in: LIVE_BOOKING_STATUSES },
     },
-    select: { id: true },
+    select: CONSULT_THREAD_BOOKING_SELECT,
   })
   if (linked) return linked
 
@@ -136,7 +154,7 @@ export async function resolveThreadBooking(
         ? { gte: args.consultCreatedAt, lt: cutover }
         : { gte: args.consultCreatedAt },
     },
-    select: { id: true },
+    select: CONSULT_THREAD_BOOKING_SELECT,
     orderBy: { createdAt: 'desc' },
   })
 

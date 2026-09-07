@@ -36,6 +36,10 @@ import {
   type DepositRequirement,
 } from '@/lib/booking/depositRequirement'
 import type { DepositSettings } from '@/lib/booking/discoveryDepositPlan'
+import {
+  CATEGORY_DEPOSIT_POLICY_SELECT,
+  resolveEffectiveDepositSettings,
+} from '@/lib/booking/categoryDeposit'
 import { loadProClientPolicy } from '@/lib/proClientPolicy/load'
 import { membershipEnforcementEnabled } from '@/lib/membership/enforcement'
 import { resolveEffectiveEntitlements } from '@/lib/pro/entitlements'
@@ -249,7 +253,29 @@ export async function resolveDiscoveryFinalize(args: {
     // impose (or lift) a charge on this pro's booking.
     prisma.professionalServiceOffering.findFirst({
       where: { id: args.offeringId, professionalId: args.professionalId },
-      select: { prepayScope: true },
+      select: {
+        prepayScope: true,
+        // P7a-5: the pro's per-category deposit, fetched THROUGH the offering
+        // rather than as a second hop. The category is only knowable once the
+        // offering resolves, so a separate query would be a serial hop on a
+        // path whose known weakness is a fetch waterfall (see the K16 note
+        // below). Filtered to this pro inside the join, and `take: 1` because
+        // (professionalId, serviceCategoryId) is unique.
+        service: {
+          select: {
+            categoryId: true,
+            category: {
+              select: {
+                categoryBookingPolicies: {
+                  where: { professionalId: args.professionalId },
+                  select: CATEGORY_DEPOSIT_POLICY_SELECT,
+                  take: 1,
+                },
+              },
+            },
+          },
+        },
+      },
     }),
     // K16: this pro's policy for THIS client. Joined into the same Promise.all
     // rather than added as a serial hop — the same reasoning K8 recorded for the
@@ -269,7 +295,7 @@ export async function resolveDiscoveryFinalize(args: {
     discoveryViewKind,
   })
 
-  const depositSettings: DepositSettings = paymentSettings
+  const accountDepositSettings: DepositSettings = paymentSettings
     ? {
         depositEnabled: paymentSettings.depositEnabled,
         depositType: paymentSettings.depositType,
@@ -280,6 +306,20 @@ export async function resolveDiscoveryFinalize(args: {
         depositPercent: paymentSettings.depositPercent ?? null,
       }
     : disabledSettings
+
+  // P7a-5 — the pro's per-category amount, applied HERE so that every consumer
+  // of the directive (both finalize charge sites, and the consult thread's
+  // pre-tap disclosure) is handed the SAME number. Overlaying it at each charge
+  // site instead would be two places to remember and one to forget.
+  //
+  // 🔴 AMOUNT ONLY. `depositEnabled` and `depositScope` are carried through
+  // untouched, so `depositRequirement` below — the one gate — is completely
+  // unaffected by this and needs no new signal. A category row cannot make a
+  // booking owe a deposit it did not already owe; it can only change how much.
+  const depositSettings = resolveEffectiveDepositSettings({
+    account: accountDepositSettings,
+    category: offeringPrepay?.service?.category?.categoryBookingPolicies[0] ?? null,
+  })
 
   const proStripeReady = Boolean(
     paymentSettings?.stripeChargesEnabled &&

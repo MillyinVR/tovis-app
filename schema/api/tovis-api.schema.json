@@ -11916,6 +11916,13 @@
         "enabled": {
           "type": "boolean"
         },
+        "gateNote": {
+          "description": "P7a-5 — why the button is dark, in the pro's own name, when the reason is `PREP_REQUIRED`. Null for every other reason.\n\nServer-composed because it carries the pro's display name, and a `{pro}` slot filled on the device would be the second implementation of a substitution this repo deliberately does once (`fillConsultThreadCopy`). The two older notes stay client-side: they carry no slots, and both clients already mirror them.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "lookMediaId": {
           "description": "The look's primary media, so the booking sheet's cover is the photo she tapped.",
           "type": [
@@ -11925,6 +11932,13 @@
         },
         "lookPostId": {
           "description": "The look this consult is anchored to. Null on a booking-anchored consult.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "priceNote": {
+          "description": "P7a-5 — the money line under the button: \"From $180 · $25 deposit\".\n\n🔴 COMPOSED ON THE SERVER, rendered verbatim, exactly like the thread's bubbles (lib/consult/threadCopy.ts). Two separate numbers on the wire would be two numbers each client joins by hand, which is how the same look came to read \"From $249.5\" in the feed and \"From $250\" everywhere else before `formatLookStartingPrice` consolidated it.\n\n🔴 A PERCENT deposit renders as a percentage (\"20% deposit\"), never as a dollar figure. The percentage is taken of the service subtotal, which needs a location mode and any add-ons — none of them chosen at the spark — so a dollar amount here would be a guess presented as a promise.\n\nNull when there is no price to show and no charge to disclose. The deposit half appears only when `resolveDepositRequirement` says this booking really would owe one, so the CTA and the charge cannot disagree.",
           "type": [
             "string",
             "null"
@@ -11953,7 +11967,9 @@
         "reason",
         "lookPostId",
         "serviceId",
-        "lookMediaId"
+        "lookMediaId",
+        "priceNote",
+        "gateNote"
       ],
       "type": "object"
     },
@@ -11964,7 +11980,8 @@
         "ALREADY_BOOKED",
         "NOT_LOOK_ANCHORED",
         "CONSULT_STOPPED",
-        "LOOK_NOT_BOOKABLE"
+        "LOOK_NOT_BOOKABLE",
+        "PREP_REQUIRED"
       ],
       "type": "string"
     },

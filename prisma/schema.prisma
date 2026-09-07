@@ -492,6 +492,19 @@ enum DepositScope {
   ALL_CLIENTS // every booking
 }
 
+// P7a-5: when a client may take a slot in one category of a pro's work.
+//
+// INSTANT is today's behaviour and the default for every pro and every category
+// that has no row. AFTER_PREP holds the Book CTA — visible, disabled, and
+// SAYING why — until the consult's safety answers are in
+// (`deriveConsultPrepState().complete`). It is a per-pro, per-category choice
+// for pros who will not hold a big-ticket slot on an unanswered chemical
+// history (handoff, "Pro opt-in").
+enum ProCategoryBookingGate {
+  INSTANT
+  AFTER_PREP
+}
+
 /// K10 (D4 = per-service): what a prepay-required service collects up front.
 /// Prepay is NOT a second payment rail — it is a 100% deposit, so it reuses the
 /// deposit PaymentIntent, the credit-to-total (lib/booking/depositCredit.ts),
@@ -2133,6 +2146,7 @@ model ProfessionalProfile {
 
   clientNotes                 ClientProfessionalNote[]
   clientPolicies              ProClientPolicy[]
+  categoryBookingPolicies     ProCategoryBookingPolicy[]
   clientChartShares           ClientChartShare[]
   bookingSeries               BookingSeries[]
   clientFormulaEntries        ClientFormulaEntry[]
@@ -2829,12 +2843,13 @@ model ServiceCategory {
 
   isActive Boolean @default(true)
 
-  viralRequests   ViralServiceRequest[]
-  services        Service[]
-  adminActionLogs AdminActionLog[]       @relation("CategoryLogs")
-  lookRankStat    LookCategoryRankStat?
-  lookTrendStat   LookCategoryTrendStat?
-  consultSessions ConsultSession[]
+  viralRequests           ViralServiceRequest[]
+  services                Service[]
+  adminActionLogs         AdminActionLog[]           @relation("CategoryLogs")
+  lookRankStat            LookCategoryRankStat?
+  lookTrendStat           LookCategoryTrendStat?
+  consultSessions         ConsultSession[]
+  categoryBookingPolicies ProCategoryBookingPolicy[]
 }
 
 // Per-service-category engagement-rate aggregate — the data source for the
@@ -8243,4 +8258,54 @@ model ConsultBookingProposalLine {
   @@unique([proposalId, serviceId])
   @@index([proposalId, sortOrder])
   @@index([estimateLineId])
+}
+
+/// P7a-5 — when clients can book a category of this pro's work, and what
+/// deposit that category asks for.
+///
+/// A pro with NO row for a category gets exactly today's behaviour: the gate is
+/// INSTANT and the deposit is whatever `ProfessionalPaymentSettings` already
+/// says. That is a structural guarantee, not a branch — every field either has
+/// an INSTANT-equivalent default or is nullable and falls through.
+///
+/// 🔴 The deposit columns override the AMOUNT ONLY. Whether a booking owes a
+/// deposit at all is still `ProfessionalPaymentSettings.depositEnabled` +
+/// `depositScope`, read through the one gate in
+/// `lib/booking/depositRequirement.ts`, which this slice does not touch. A
+/// category amount stored while the account switch is off would be a registered
+/// policy with no call site — the exact shape of the K10-A bug — so the write
+/// route REFUSES to store one instead (`describeCategoryDepositBlocker`).
+///
+/// 🔴 Keyed on the category the Service row actually points at (leaf as stored,
+/// Tori 2026-09-07). `ServiceCategory` is a two-level tree and no inheritance is
+/// applied: setting "Hair coloring" does not set "Hair cutting", and a pro who
+/// wants both sets both. `Booking` and `ConsultSession` already agree that a
+/// service's category is `Service.categoryId` (`holdCreateOffering.ts`), so the
+/// consult's gate and the booking's deposit read the same row.
+model ProCategoryBookingPolicy {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  professionalId    String
+  serviceCategoryId String
+
+  /// Whether the consult's Book CTA is live at the spark, or waits for the
+  /// safety answers. Enforced server-side at finalize, not only in the button.
+  bookingGate ProCategoryBookingGate @default(INSTANT)
+
+  /// Null = this category uses the account-wide amount. Non-null REPLACES it —
+  /// the two never stack, exactly as the prepay term never stacks with the
+  /// ordinary deposit.
+  depositType       DepositType?
+  depositFlatAmount Decimal?     @db.Decimal(10, 2)
+  depositPercent    Int?
+
+  professional    ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+  serviceCategory ServiceCategory     @relation(fields: [serviceCategoryId], references: [id], onDelete: Cascade)
+
+  /// One policy per (pro, category) — the resolver reads at most one row, and a
+  /// second would make "the deposit for this category" ambiguous on a money path.
+  @@unique([professionalId, serviceCategoryId])
+  @@index([serviceCategoryId])
 }

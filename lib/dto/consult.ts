@@ -2203,6 +2203,17 @@ export type ConsultThreadBookGateReasonDTO =
   | 'NOT_LOOK_ANCHORED'
   | 'CONSULT_STOPPED'
   | 'LOOK_NOT_BOOKABLE'
+  /**
+   * P7a-5. This pro asks clients in this service category to finish the safety
+   * questions before taking a slot (`ProCategoryBookingPolicy.bookingGate`).
+   *
+   * 🔴 Unlike the others this one is TEMPORARY BY DESIGN — the client can clear
+   * it herself, in this same thread, by answering. So the button stays visible
+   * and disabled with `gateNote` under it, and both clients must keep it in
+   * their "show, disabled" branch rather than their "hide" branch. Hiding it
+   * would remove the only thing telling her what to do next.
+   */
+  | 'PREP_REQUIRED'
 
 /**
  * The sticky CTA's state, decided by the SERVER so the two clients cannot
@@ -2224,6 +2235,36 @@ export type ConsultThreadBookCtaDTO = {
   serviceId: string | null
   /** The look's primary media, so the booking sheet's cover is the photo she tapped. */
   lookMediaId: string | null
+  /**
+   * P7a-5 — the money line under the button: "From $180 · $25 deposit".
+   *
+   * 🔴 COMPOSED ON THE SERVER, rendered verbatim, exactly like the thread's
+   * bubbles (lib/consult/threadCopy.ts). Two separate numbers on the wire would
+   * be two numbers each client joins by hand, which is how the same look came
+   * to read "From $249.5" in the feed and "From $250" everywhere else before
+   * `formatLookStartingPrice` consolidated it.
+   *
+   * 🔴 A PERCENT deposit renders as a percentage ("20% deposit"), never as a
+   * dollar figure. The percentage is taken of the service subtotal, which needs
+   * a location mode and any add-ons — none of them chosen at the spark — so a
+   * dollar amount here would be a guess presented as a promise.
+   *
+   * Null when there is no price to show and no charge to disclose. The deposit
+   * half appears only when `resolveDepositRequirement` says this booking really
+   * would owe one, so the CTA and the charge cannot disagree.
+   */
+  priceNote: string | null
+  /**
+   * P7a-5 — why the button is dark, in the pro's own name, when the reason is
+   * `PREP_REQUIRED`. Null for every other reason.
+   *
+   * Server-composed because it carries the pro's display name, and a `{pro}`
+   * slot filled on the device would be the second implementation of a
+   * substitution this repo deliberately does once (`fillConsultThreadCopy`).
+   * The two older notes stay client-side: they carry no slots, and both clients
+   * already mirror them.
+   */
+  gateNote: string | null
 }
 
 export type ConsultThreadDTO = {

@@ -78,3 +78,4 @@ export const EARLY_PHOTO_SHOT_DTO: ConsultCaptureShotDTO = Object.freeze({
   // taken from it rather than retyped, like every other field here.
   framing: EARLY_PHOTO_SHOT.framing,
 })
+

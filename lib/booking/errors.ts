@@ -58,6 +58,7 @@ export type BookingErrorCode =
   | "CONSULT_PROPOSAL_OFFERING_MISMATCH"
   | "CONSULT_ALREADY_BOOKED"
   | "CONSULT_LINK_MISMATCH"
+  | "CONSULT_PREP_REQUIRED"
   | "MISSING_MEDIA_ID"
   | "OPENING_NOT_AVAILABLE"
   | "BOOKING_NOT_RESCHEDULABLE"
@@ -586,6 +587,22 @@ const BOOKING_ERROR_CATALOG: Record<BookingErrorCode, BookingErrorMeta> = {
     uiAction: "NONE",
     message: "Consult does not match this booking.",
     userMessage: "That consultation doesn’t match this appointment.",
+  },
+  // P7a-5. This pro asks clients in this service category to finish the safety
+  // questions before a slot is held (`ProCategoryBookingPolicy.bookingGate`).
+  // The thread's Book button is already disabled and says so; this refuses the
+  // request that never met the button.
+  //
+  // Retryable, and that word is load-bearing here: unlike every other consult
+  // refusal this one is CLEARED BY THE CLIENT, in the consult she already has
+  // open, by answering. The message says what to do rather than what went wrong.
+  CONSULT_PREP_REQUIRED: {
+    httpStatus: 409,
+    retryable: true,
+    uiAction: "NONE",
+    message: "Consult prep is incomplete and this pro books after prep.",
+    userMessage:
+      "Your professional asks clients to finish a few questions first. Answer them in your consultation and this opens up.",
   },
   // Book the Look, B4. The estimate could not be turned into a proposal for the
   // mode being booked — the analysis routed to safety prerequisites, the pro

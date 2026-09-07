@@ -1378,3 +1378,47 @@ export async function updateConsultChartCopyChoice(args: {
     { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
   )
 }
+
+/**
+ * Has this consult's early photo been taken — asked of the DATABASE, whatever
+ * stage the consult is in now.
+ *
+ * WHY IT IS NOT DERIVED FROM STATUS (P7a-5). The sticky CTA read the selfie off
+ * the CAPTURE STAGE's state, which stops being readable once the intake begins:
+ * `capture` goes null there, and the CTA silently fell back to SELFIE_REQUIRED.
+ * A client who took her photo and then answered a question was told to "send
+ * one photo of yourself and this opens up" about a photo she had already sent,
+ * with no way to send it again.
+ *
+ * 🔴 The tempting fix — "any status past EARLY_PHOTO_READY implies a photo,
+ * because `consult_lifecycle_guard` says so" — is WRONG, and the repo's own
+ * test caught it. That trigger constrains ONE EDGE (EARLY_PHOTO_READY →
+ * INTAKE_READY), not the state: a pre-P7a-1 session reached INTAKE_READY
+ * straight from CONSENT_REQUIRED and has no early photo at all. Inferring from
+ * status would have handed every legacy consult a live Book button it had not
+ * earned.
+ *
+ * Latent before P7a-5 — with instant booking the intake is answered AFTER
+ * booking, where the CTA is ALREADY_BOOKED and hidden. Fatal with it: "book
+ * after prep" REQUIRES her to answer first, so nothing could ever release the
+ * gated CTA and the pro's setting would be unbookable.
+ *
+ * REJECTED and UPLOADED do not count — neither is a photo that passed. EXPIRED
+ * and PURGED do: both describe a capture that WAS accepted and has since been
+ * swept, and taking the Book button back because retention ran is not a thing
+ * the client did.
+ */
+export async function consultEarlyPhotoSettled(
+  db: Pick<Prisma.TransactionClient, 'consultCapture'>,
+  consultSessionId: string,
+): Promise<boolean> {
+  const accepted = await db.consultCapture.findFirst({
+    where: {
+      consultSessionId,
+      shotKey: CONSULT_EARLY_PHOTO_SHOT_KEY,
+      status: ConsultCaptureStatus.ACCEPTED,
+    },
+    select: { id: true },
+  })
+  return accepted != null
+}
