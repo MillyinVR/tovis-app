@@ -34,6 +34,10 @@ export const defaultClientConsultThreadCopy: BrandClientConsultThreadCopy = {
 
   captureIntro:
     'Now a few of you, in daylight if you can. Each one gets checked straight away, and I’ll tell you why if one won’t work.',
+  // Says what happens next rather than what is missing — she has not failed a
+  // step here, she simply has not reached one. No jargon, no "locked".
+  captureLockedBeforeBooking:
+    'Photos come after you book — I’ll walk you through them then.',
   captureDone: 'All of them came through. That’s the hard part done.',
   capturePartial:
     'You can carry on with the ones that came through. Anything the missing shots would have shown just comes back as unknown — no guessing.',

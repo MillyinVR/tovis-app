@@ -754,6 +754,11 @@ export type BrandClientConsultThreadCopy = {
 
   /** Before the photo requests. */
   captureIntro: string
+  /**
+   * Shown in place of the guided pack while the guided stage is not open yet
+   * (P3b) — before booking and intake, the photos simply are not asked for.
+   */
+  captureLockedBeforeBooking: string
   /** When every requested photo is accepted. */
   captureDone: string
   /** When some were skipped but the client can still continue. */

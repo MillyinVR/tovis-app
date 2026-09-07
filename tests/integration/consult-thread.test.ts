@@ -22,6 +22,7 @@ import {
   BookingStatus,
   ConsultActorType,
   ConsultAgreementKind,
+  ConsultSessionStatus,
   Prisma,
   PrismaClient,
   ServiceLocationType,
@@ -92,6 +93,10 @@ import {
   HAIR_COLOR_INTAKE_SCHEMA_VERSION,
 } from '@/lib/consult/intakePack'
 import { CONSULT_EARLY_PHOTO_SHOT_KEY } from '@/lib/consult/capture/earlyPhoto'
+import {
+  earlyPhotoWritable,
+  guidedCaptureWritable,
+} from '@/lib/consult/captureContract'
 import {
   findConsultCaptureShot,
   resolveConsultCapturePack,
@@ -348,6 +353,74 @@ describe('consult thread projection', () => {
     expect(open.length).toBeLessThanOrEqual(1)
     expect(open.every((q) => q.state === 'OPEN')).toBe(true)
     expect(after.nextOpenMessageId).not.toBe(questions[0]?.id)
+  })
+
+  it('offers NO guided shot until the guided stage exists, and every offer it makes the write boundary accepts (P3b)', async () => {
+    const sessionId = await startConsult()
+    await acceptBothAgreements(sessionId)
+    await takeEarlyPhoto(sessionId)
+
+    // ── EARLY_PHOTO_READY: the selfie, the CTA, and nothing shootable beyond.
+    const early = await thread(sessionId)
+    expect(early.status).toBe('EARLY_PHOTO_READY')
+    expect(early.book.enabled).toBe(true)
+
+    const earlyPhotos = ofKind(early.messages, 'PHOTO_REQUEST')
+    // 🔴 ONE. This is the regression: all seven guided requests used to be
+    // served here, both clients drew a working camera on them, and the write
+    // boundary refused the upload that came back — "This consult changed", on a
+    // shot the thread had just asked for. Proven on device 2026-09-06.
+    expect(earlyPhotos).toHaveLength(1)
+    expect(earlyPhotos[0]?.shot.key).toBe(CONSULT_EARLY_PHOTO_SHOT_KEY)
+    expect(earlyPhotos[0]?.shootable).toBe(true)
+
+    // Not silence — she is told the photos are coming.
+    expect(early.messages.some((m) => m.id === 'capture-locked')).toBe(true)
+    // And the pack's intro does not run ahead of the pack.
+    expect(early.messages.some((m) => m.id === 'capture-intro')).toBe(false)
+
+    // ── The invariant, stated directly: the thread never offers a shot the
+    // write boundary would refuse. Checked against the boundary's own
+    // predicates rather than a second copy of the rule.
+    for (const photo of ofKind(early.messages, 'PHOTO_REQUEST')) {
+      const writable =
+        photo.shot.key === CONSULT_EARLY_PHOTO_SHOT_KEY
+          ? earlyPhotoWritable(early.status as ConsultSessionStatus)
+          : guidedCaptureWritable(early.status as ConsultSessionStatus)
+      expect(photo.shootable).toBe(writable)
+      expect(writable).toBe(true)
+    }
+
+    // ── After the intake: the seven arrive, and all of them are shootable.
+    await appendConsultIntakeRevision({
+      consultSessionId: sessionId,
+      actor: { type: ConsultActorType.CLIENT, id: fx.clientUserId },
+      loadInput: async () => ({
+        idempotencyKey: 'p3b-guided-gate-intake',
+        packVersion: HAIR_COLOR_INTAKE_PACK_VERSION,
+        schemaVersion: HAIR_COLOR_INTAKE_SCHEMA_VERSION,
+        complete: true,
+        answers: completeAnswers,
+      }),
+    })
+
+    const prep = await thread(sessionId)
+    expect(prep.status).toBe('MEDIA_READY')
+    const prepPhotos = ofKind(prep.messages, 'PHOTO_REQUEST')
+    expect(prepPhotos).toHaveLength(8)
+    expect(prepPhotos.every((photo) => photo.shootable === true)).toBe(true)
+    // The note that stood in for the pack is gone; the pack's own intro is back.
+    expect(prep.messages.some((m) => m.id === 'capture-locked')).toBe(false)
+    expect(prep.messages.some((m) => m.id === 'capture-intro')).toBe(true)
+
+    // 🔴 And BLOCKED is still tappable. Only the first outstanding guided shot
+    // is the resume point, so the rest are BLOCKED — but they are shootable,
+    // which is how she jumps between them and how she retakes one after her
+    // plan exists. Gating a camera on `state` would take both away; that is
+    // why `shootable` is a separate field and not a reading of this one.
+    const blocked = prepPhotos.filter((photo) => photo.state === 'BLOCKED')
+    expect(blocked.length).toBeGreaterThan(0)
+    expect(blocked.every((photo) => photo.shootable === true)).toBe(true)
   })
 
   it('emits one photo request per shot in the served pack, carrying the served slot', async () => {
