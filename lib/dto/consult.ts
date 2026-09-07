@@ -708,8 +708,8 @@ export type ConsultCaptureQualityReasonCodeDTO =
 //
 // WHICH findings may be downgraded is the SHOT's decision, not this type's, and
 // the two answers differ (lib/consult/capture/types.ts):
-//   - a GUIDED shot downgrades the two colour findings, and only on a tight
-//     crop, where the frame is mostly one subject and a warm reading is as
+//   - a GUIDED shot downgrades the two colour findings, on every framing
+//     (2026-09-07); before that only on a tight crop, where a warm reading is as
 //     likely to be the skin as the room (B3);
 //   - the WARN_ONLY early photo downgrades everything except
 //     `SUBJECT_NOT_VISIBLE`, because it is taken in whatever light is on and is
@@ -733,6 +733,27 @@ export type ConsultCaptureSlotStateDTO = {
   retakeTip: string | null
   rawExpiresAt: string | null
   purgedAt: string | null
+  /**
+   * How many times this slot has been JUDGED — accepted or rejected — for the
+   * whole life of the consult. 0 on an empty slot, 1 on a first verdict.
+   *
+   * On the wire because a second refusal that looks exactly like the first is
+   * indistinguishable from nothing having happened. That is not hypothetical:
+   * it is what a client reported on 2026-09-07 as "the retake never finished",
+   * when in fact all four attempts were judged on their own bytes and refused
+   * for the same reason.
+   */
+  attemptCount: number
+  /**
+   * The reason the attempt BEFORE this one was refused, if there was one and it
+   * was refused. Lets a client say "this one's warm too" without keeping its
+   * own history — which it cannot do reliably anyway, since the queue forgets a
+   * shot the moment a verdict lands and a reinstall forgets everything.
+   *
+   * Null when this is the first attempt, when the previous attempt was
+   * ACCEPTED, or when the previous attempt's reason is not known.
+   */
+  previousReasonCode: ConsultCaptureQualityReasonCodeDTO | null
 }
 
 // Decision 2026-08-26: consult photos may be kept on the client's chart with
@@ -1720,6 +1741,23 @@ export type ConsultBriefFeedbackResponseDTO = {
   replayed: boolean
 }
 
+/**
+ * The colour-reliability tally behind the plan's rule-8 line. Counts, not a
+ * verdict: the sentence names them ("4 of your 5 photos"), and a client can
+ * check that against what she remembers taking.
+ */
+export type ConsultResultsPhotoLightDTO = {
+  /** Accepted captures that fed the analysis. */
+  acceptedFrameCount: number
+  /** How many of those carried a colour warning (warm light or a cast). */
+  warmFrameCount: number
+  /**
+   * Whether MOST of them did — strictly more than half, and at least one.
+   * Decided here so the two clients cannot disagree about what "most" means.
+   */
+  mostFramesWarm: boolean
+}
+
 export type ConsultClientResultsDTO = {
   consultId: string
   // Exactly one of these is set — a consult is anchored to a booking or, since
@@ -1757,6 +1795,21 @@ export type ConsultClientResultsDTO = {
   // default heading) keep decoding; a build that reads it falls back to its
   // own string when absent. #1068 planned it and dropped it.
   directionsTitle?: string
+  /**
+   * What the LIGHT in her photographs means for the colour reading — rule 8:
+   * the consult says what it could not see rather than filling the gap.
+   *
+   * Warm light stopped refusing a photo on 2026-09-07, so a plan can now be
+   * built from frames the old gate would have turned away. That is the right
+   * trade — a blocked client learns nothing — but only if the plan SAYS so
+   * when the light was against it. The analysis already widens its confidence
+   * on a warned frame; this is the same fact in the client's own words.
+   *
+   * OPTIONAL on the wire, so the cross-repo fixture contract stays a pure
+   * addition and a native build that predates it keeps decoding
+   * (tools/check-ios-fixture-contract.mjs).
+   */
+  photoLight?: ConsultResultsPhotoLightDTO
   meCardTeaser: {
     locked: true
     tapped: boolean

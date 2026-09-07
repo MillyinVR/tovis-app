@@ -578,6 +578,17 @@ export type BrandClientConsultResultsCopy = {
   aiObservationsTitle: string
   aiObservationsBody: string
   /**
+   * Rule 8, said about the LIGHT: shown only when most of the frames the
+   * reading actually used were shot in warm or cast light.
+   *
+   * Warm light stopped refusing a photo on 2026-09-07, which is why this line
+   * has to exist. Before, a warm frame never reached the analysis at all; now
+   * it can, so the plan owes her the caveat instead of the refusal. `{warm}`
+   * and `{total}` are counts — the sentence names them so she can check it
+   * against the photographs she remembers taking.
+   */
+  warmLightCaveat: string
+  /**
    * Schema v4 reports the two named ends of the head, so the screen names
    * them too. v3's single "Current level range" tile rendered a min/max pair
    * as "Levels 5–7", which reads as base-to-lightest — a claim the model was

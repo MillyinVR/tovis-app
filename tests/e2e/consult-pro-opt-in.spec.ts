@@ -35,6 +35,8 @@ const acceptedSelfie: EarlyPhoto = {
   retakeTip: null,
   rawExpiresAt: '2026-09-07T18:00:00.000Z',
   purgedAt: null,
+  attemptCount: 1,
+  previousReasonCode: null,
 }
 
 async function stubThread(

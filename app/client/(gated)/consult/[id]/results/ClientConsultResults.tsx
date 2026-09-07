@@ -125,6 +125,19 @@ export default function ClientConsultResults({
         <p className="mt-1 text-sm text-textSecondary">
           {copy.aiObservationsBody}
         </p>
+        {/*
+          Rule 8: say what the photographs could not settle. Only when MOST of
+          the accepted frames carried a colour warning — one warm frame among
+          five is not a caveat about the reading, it is noise, and a caveat
+          shown every time stops being read.
+        */}
+        {results.photoLight?.mostFramesWarm ? (
+          <p className="mt-2 rounded-lg border border-toneWarn/30 bg-toneWarn/10 px-2 py-1.5 text-xs leading-5 text-textPrimary">
+            {copy.warmLightCaveat
+              .replace('{warm}', String(results.photoLight.warmFrameCount))
+              .replace('{total}', String(results.photoLight.acceptedFrameCount))}
+          </p>
+        ) : null}
         <ul className="mt-3 grid gap-2 sm:grid-cols-2">
           <Observation
             label={copy.baseLevelLabel}

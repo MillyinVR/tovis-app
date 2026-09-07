@@ -240,7 +240,9 @@ export const captureState: ConsultCaptureStateDTO = {
       "qualityWarningCode": null,
       "retakeTip": null,
       "rawExpiresAt": "2026-08-12T18:00:00.000Z",
-      "purgedAt": null
+      "purgedAt": null,
+      "attemptCount": 1,
+      "previousReasonCode": null
     },
     {
       "shotKey": "hair_left",
@@ -250,7 +252,9 @@ export const captureState: ConsultCaptureStateDTO = {
       "qualityWarningCode": null,
       "retakeTip": null,
       "rawExpiresAt": "2026-08-12T18:00:00.000Z",
-      "purgedAt": null
+      "purgedAt": null,
+      "attemptCount": 1,
+      "previousReasonCode": null
     },
     {
       "shotKey": "hair_right",
@@ -260,7 +264,9 @@ export const captureState: ConsultCaptureStateDTO = {
       "qualityWarningCode": null,
       "retakeTip": null,
       "rawExpiresAt": "2026-08-12T18:00:00.000Z",
-      "purgedAt": null
+      "purgedAt": null,
+      "attemptCount": 1,
+      "previousReasonCode": null
     },
     {
       "shotKey": "hair_crown",
@@ -270,7 +276,9 @@ export const captureState: ConsultCaptureStateDTO = {
       "qualityWarningCode": null,
       "retakeTip": null,
       "rawExpiresAt": "2026-08-12T18:00:00.000Z",
-      "purgedAt": null
+      "purgedAt": null,
+      "attemptCount": 1,
+      "previousReasonCode": null
     },
     {
       "shotKey": "face_front",
@@ -280,7 +288,9 @@ export const captureState: ConsultCaptureStateDTO = {
       "qualityWarningCode": null,
       "retakeTip": null,
       "rawExpiresAt": "2026-08-12T18:00:00.000Z",
-      "purgedAt": null
+      "purgedAt": null,
+      "attemptCount": 1,
+      "previousReasonCode": null
     },
     {
       "shotKey": "face_side",
@@ -290,7 +300,9 @@ export const captureState: ConsultCaptureStateDTO = {
       "qualityWarningCode": null,
       "retakeTip": null,
       "rawExpiresAt": "2026-08-12T18:00:00.000Z",
-      "purgedAt": null
+      "purgedAt": null,
+      "attemptCount": 1,
+      "previousReasonCode": null
     },
     {
       "shotKey": "eyes_closeup",
@@ -300,7 +312,9 @@ export const captureState: ConsultCaptureStateDTO = {
       "qualityWarningCode": null,
       "retakeTip": null,
       "rawExpiresAt": "2026-08-12T18:00:00.000Z",
-      "purgedAt": null
+      "purgedAt": null,
+      "attemptCount": 1,
+      "previousReasonCode": null
     }
   ],
   "chartCopy": {
@@ -642,6 +656,8 @@ function threadEarlyPhotoMessage(
       retakeTip: null,
       rawExpiresAt: null,
       purgedAt: null,
+      attemptCount: 0,
+      previousReasonCode: null,
     },
   }
 }

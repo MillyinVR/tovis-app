@@ -10,8 +10,9 @@ import type {
 
 import { findConsultCaptureShot } from './capture/registry'
 import {
+  CONSULT_COLOR_FINDING_WARNING_CODES,
   CONSULT_WARN_ONLY_REJECTING_REASON_CODE,
-  shotToleratesColorCast,
+  isConsultColorFindingCode,
 } from './capture/types'
 import {
   meterConsultProviderCall,
@@ -29,19 +30,29 @@ export type ConsultCaptureMediaType =
   (typeof CONSULT_CAPTURE_MEDIA_TYPES)[number]
 
 export const CONSULT_CAPTURE_QUALITY_SCHEMA_VERSION = 1
-// v3 (2026-09-03, B3): the colour-cast rejection became shot-aware. A warm or
-// cast reading on a TIGHT_CROP view is a warning on the accepted result; on a
-// FULL_VIEW it is still a rejection. Both the system prompt and `sanitize`
-// changed, so stored rows must be distinguishable by version.
-export const CONSULT_CAPTURE_QUALITY_PROMPT_VERSION = 'full-analysis-capture-v3'
+// v4 (2026-09-07): warm light and colour cast are warnings on EVERY guided
+// shot, not just a tight crop (Tori). v3's shot-aware split is gone — the
+// rejection list is now the unreadable frames only. Both the system prompt and
+// `sanitize` changed, so stored rows must be distinguishable by version.
+//
+// 🔴 Bumping this constant ALONE is a bare 500 on every photo: the value is
+// pinned in two database objects — `ConsultCapture_quality_contract` (the row
+// would fail its CHECK) and `consult_revision_requires_agreements` (the
+// analysis prerequisite would stop seeing accepted captures). Both pins are
+// SETS and both must learn the new value in the same migration; read the live
+// `pg_get_functiondef`, never just the migration files.
+export const CONSULT_CAPTURE_QUALITY_PROMPT_VERSION = 'full-analysis-capture-v4'
 
 /**
  * Which prompt versions an accepted capture may have been judged under and
- * still be a usable analysis input. The bump to v3 only LOOSENED a colour
- * rule, so a photo that passed the stricter v2 gate is still a good input —
- * pinning the analysis to the current version alone would strand a client
- * who accepted photos before the deploy and pressed Analyze after it, with no
- * way back (an accepted slot cannot be retaken, only replaced).
+ * still be a usable analysis input. Every bump so far has only LOOSENED a
+ * colour rule (v3 for tight crops, v4 for every shot), so a photo that passed
+ * a stricter earlier gate is still a good input — pinning the analysis to the
+ * current version alone would strand a client who accepted photos before the
+ * deploy and pressed Analyze after it, with no way back (an accepted slot
+ * cannot be retaken, only replaced).
+ *
+ * 🔴 Append here, never replace: this list only ever grows.
  *
  * Mirrored by the database prerequisite guard
  * (`consult_revision_requires_agreements`); the two must agree.
@@ -61,6 +72,7 @@ export const CONSULT_EARLY_PHOTO_QUALITY_PROMPT_VERSION = 'early-photo-capture-v
 
 export const CONSULT_ANALYZABLE_CAPTURE_PROMPT_VERSIONS = [
   'full-analysis-capture-v2',
+  'full-analysis-capture-v3',
   CONSULT_CAPTURE_QUALITY_PROMPT_VERSION,
   CONSULT_EARLY_PHOTO_QUALITY_PROMPT_VERSION,
 ] as const
@@ -99,25 +111,29 @@ export const CONSULT_CAPTURE_QUALITY_REASON_CODES = [
   'OTHER_QUALITY_FAILURE',
 ] as const satisfies readonly ConsultCaptureQualityReasonCodeDTO[]
 
-export const CONSULT_CAPTURE_QUALITY_WARNING_CODES = [
-  'WARM_INDOOR_LIGHT',
-  'COLOR_CAST',
-] as const satisfies readonly ConsultCaptureQualityWarningCodeDTO[]
+/**
+ * The colour findings, re-exported under the name the analysis contract reads.
+ * Defined once in `capture/types.ts` — the policy that says they never reject
+ * lives with them, and a second literal here could drift out of agreement with
+ * it silently.
+ */
+export const CONSULT_CAPTURE_QUALITY_WARNING_CODES =
+  CONSULT_COLOR_FINDING_WARNING_CODES satisfies readonly ConsultCaptureQualityWarningCodeDTO[]
 
 function isColorFinding(
   reasonCode: ConsultCaptureQualityReasonCodeDTO,
 ): reasonCode is ConsultCaptureQualityWarningCodeDTO {
-  return CONSULT_CAPTURE_QUALITY_WARNING_CODES.some(
-    (candidate) => candidate === reasonCode,
-  )
+  return isConsultColorFindingCode(reasonCode)
 }
 
 export type ConsultCaptureQualityResult = {
   accepted: boolean
   reasonCode: ConsultCaptureQualityReasonCodeDTO
   /**
-   * A colour finding that did NOT block this shot — only ever set alongside
-   * `accepted: true` and `reasonCode: 'PASS'`, and only on a tight-crop view.
+   * A finding that did NOT block this shot — only ever set alongside
+   * `accepted: true` and `reasonCode: 'PASS'`. On a guided shot that is one of
+   * the two colour findings, on any framing (v4); on the early photo it is
+   * anything short of "no person here".
    */
   warningCode: ConsultCaptureQualityWarningCodeDTO | null
   retakeTip: string | null
@@ -155,8 +171,8 @@ const REQUEST_TIMEOUT_MS = 50_000
  * Only the CEILING moves: not the prompt, not the schema, not the effort
  * level. A truncated answer is not a different verdict, it is the same verdict
  * cut off — so `CONSULT_CAPTURE_QUALITY_PROMPT_VERSION` deliberately does NOT
- * move with it, and no capture already accepted under v3 is invalidated
- * (bumping it strands a client mid-consult; see the version constant below).
+ * move with it, and no capture already accepted is invalidated (bumping it
+ * strands a client mid-consult; see the version constant above).
  */
 const CONSULT_CAPTURE_QUALITY_MAX_TOKENS = 2_000
 const RETAKE_TIP_MAX_CHARS = 160
@@ -206,15 +222,16 @@ const QUALITY_SCHEMA: Record<string, unknown> = {
 }
 
 const SYSTEM =
-  'You are a strict capture-quality gate for a beauty consultation. ' +
+  'You are a capture-quality gate for a beauty consultation. ' +
   'Judge only whether this single photo is a usable input for later analysis. ' +
   'Do not analyze the client, infer traits, diagnose, recommend services, or ' +
-  'describe sensitive content. Whether the requested view is visible always ' +
-  'outranks how the light reads: if the view is missing, obstructed, or wrong, ' +
-  'report that instead. How much a warm-light or color-cast finding costs the ' +
-  'photo depends on the requested view, and each request states which rule ' +
-  'applies to it. Return exactly one stable reason code and at most one short ' +
-  'retake tip.'
+  'describe sensitive content. You refuse a photo only when it cannot be READ: ' +
+  'the requested view is missing, obstructed or wrong; the subject is not ' +
+  'there; the frame is too blurred or too far past dark or bright to make out. ' +
+  'How the LIGHT reads is never a refusal — a warm or cast reading is reported ' +
+  'and recorded as a warning on an accepted photo, because it is real ' +
+  'information for the later analysis and not a reason to send someone back ' +
+  'out. Return exactly one stable reason code and at most one short retake tip.'
 
 /**
  * The acceptance sentence for a view comes from the shot's definition in the
@@ -239,16 +256,20 @@ function instructions(shotKey: string): string {
     ].join('\n')
   }
 
-  // The colour-fidelity line is the shot's own `framing`, not a list of keys
-  // this file keeps: a new pack brings its answer with it.
-  const colorRule = shotToleratesColorCast(shot)
-    ? 'This view is a tight crop: the subject fills the frame, so its average color is mostly skin or surface and a warm reading is as likely to be the person as the room. Do NOT reject it for lighting alone. If the requested view is visible and everything else is usable but the light reads warm or cast, still report WARM_INDOOR_LIGHT or COLOR_CAST — it is recorded as a warning, not a refusal. If the requested view is NOT visible, report the view or subject failure instead; that outranks any color finding.'
-    : 'This view is a full view with room around the subject, and color fidelity is the point of it: WARM_INDOOR_LIGHT and COLOR_CAST are rejected even when the requested view is otherwise visible.'
+  // v4: ONE colour rule for every guided shot. `framing` no longer decides what
+  // a colour finding costs — it describes the composition, which is what helps
+  // the model judge whether the requested VIEW is actually in the frame.
+  const composition =
+    shot.framing === 'TIGHT_CROP'
+      ? 'Composition: a tight crop. The subject should FILL the frame, with almost no background around it.'
+      : 'Composition: a full view, composed at arm’s length or further, with room around the subject.'
   return [
     `Requested view: ${shotKey}.`,
     shot.acceptance,
-    colorRule,
-    'Use PASS only when nothing at all is wrong. Every other reason code names the one thing that is.',
+    composition,
+    'Lighting is never a refusal on this shot. If the requested view is visible and the frame is readable but the light reads warm or cast, report WARM_INDOOR_LIGHT or COLOR_CAST — it is recorded as a warning on an ACCEPTED photo, not a rejection. Report it rather than answering PASS: the later analysis uses it to widen its confidence, so a bare PASS on a warm frame loses real information.',
+    'Refuse the photo ONLY when it cannot be read: the requested view is missing, obstructed or wrong (VIEW_MISMATCH, HAIR_NOT_VISIBLE), there is no subject (SUBJECT_NOT_VISIBLE), or the frame is too blurred or too far past dark or bright to make the view out (BLURRY, TOO_DARK, TOO_BRIGHT). Judge dark and bright by LEGIBILITY, not by preference: if the requested view can still be made out, that is not a refusal.',
+    'Use PASS only when there is genuinely nothing to note.',
     'retakeTip: give zero or one concrete sentence, max 160 characters, whenever the reason code is not PASS.',
   ].join('\n')
 }
@@ -260,10 +281,10 @@ function cleanTip(value: unknown): string | null {
 }
 
 /**
- * The provider's raw JSON → the stored result, including the shot-aware
- * colour policy. Exported because the capture integration tests stand a fake
- * provider in front of the network and must still run its payload through THE
- * policy, not a second copy of it.
+ * The provider's raw JSON → the stored result, including the downgrade policy
+ * that decides what a finding COSTS. Exported because the capture integration
+ * tests stand a fake provider in front of the network and must still run its
+ * payload through THE policy, not a second copy of it.
  */
 export function sanitizeConsultCaptureQuality(
   raw: unknown,
@@ -284,7 +305,7 @@ export function sanitizeConsultCaptureQuality(
   // the finding, the server decides what it costs. So a model that answers
   // `accepted: false` (the honest reading of "this light is warm") and one
   // that answers `accepted: true` land on the same stored result, and no
-  // provider wobble can turn a full-view cast into an acceptance.
+  // provider wobble can turn an unreadable frame into an acceptance.
   //
   // P7a-1, the early photo: the same principle, one rung wider. Every finding
   // except "there is no person here" becomes a warning on an accepted capture,
@@ -305,7 +326,11 @@ export function sanitizeConsultCaptureQuality(
     }
   }
 
-  if (isColorFinding(reasonCode) && shotToleratesColorCast(shot)) {
+  // v4: a colour finding never refuses a guided shot, on any framing. Decided
+  // HERE and not by the provider, so a model that answers `accepted: false` on
+  // a warm frame — the honest reading of the old rule, and of most training
+  // data — still lands on an ACCEPTED row carrying the warning.
+  if (isColorFinding(reasonCode)) {
     return {
       accepted: true,
       reasonCode: 'PASS',
@@ -315,9 +340,8 @@ export function sanitizeConsultCaptureQuality(
     }
   }
 
-  // Color fidelity is a non-negotiable gate on every full view. Treat
-  // inconsistent provider output as a rejection, never as permission to
-  // analyze.
+  // Everything past here is a frame that could not be READ. Treat inconsistent
+  // provider output as a rejection, never as permission to analyze.
   if (raw.accepted && reasonCode !== 'PASS') {
     throw new ConsultCaptureVisionError('bad_output')
   }

@@ -86,6 +86,8 @@ const accepted = (warningCode: string | null): EarlyPhoto => ({
   retakeTip: null,
   rawExpiresAt: '2026-09-07T18:00:00.000Z',
   purgedAt: null,
+  attemptCount: 1,
+  previousReasonCode: null,
 })
 
 test.describe('P7a-1 the early photo', () => {
@@ -174,6 +176,8 @@ test.describe('P7a-1 the early photo', () => {
         retakeTip: 'We could not find a face — try again with your face in frame.',
         rawExpiresAt: '2026-09-07T18:00:00.000Z',
         purgedAt: null,
+        attemptCount: 1,
+        previousReasonCode: null,
       },
       bookEnabled: false,
       status: 'EARLY_PHOTO_READY',
