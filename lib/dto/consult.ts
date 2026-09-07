@@ -2021,6 +2021,25 @@ export type ConsultThreadPhotoRequestMessageDTO = {
    * placeholder for "not taken yet".
    */
   slot: ConsultCaptureSlotStateDTO
+  /**
+   * May this shot be taken RIGHT NOW? (P3b.)
+   *
+   * 🔴 This is not `state`, and the difference is the point. `state: BLOCKED`
+   * means "not the place resume lands" — a blocked photo request is
+   * deliberately still tappable on both clients, which is how she jumps
+   * between guided shots and how she retakes one after her plan exists. Gating
+   * the camera on BLOCKED would take both of those away.
+   *
+   * `shootable` answers the other question: would the SERVER accept this
+   * upload? It is derived from `guidedCaptureWritable` /`earlyPhotoWritable`
+   * — the same predicates the write boundary itself uses — so a request can
+   * never be offered on a client and refused on the server again, which is
+   * exactly what happened on Tori's phone on 2026-09-06.
+   *
+   * Optional on the wire: a client that predates it treats a request as
+   * shootable, which is the behaviour it already had.
+   */
+  shootable?: boolean
 }
 
 /**

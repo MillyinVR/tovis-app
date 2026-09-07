@@ -1315,6 +1315,13 @@ function PhotoRequestMessage({
   const { shot, slot } = message
   const accepted = slot.state === 'ACCEPTED'
   const badge = photoBadge(slot.state)
+  // 🔴 `shootable`, never `state` (P3b). A BLOCKED request is deliberately
+  // still actionable — that is how she jumps between guided shots and retakes
+  // one after her plan exists — so gating the control on BLOCKED would remove
+  // two behaviours the thread documents. `shootable` asks the only question
+  // that matters here: would the server take this upload? Undefined from a
+  // server that predates the field means yes, which is what shipped before.
+  const shootable = message.shootable !== false
 
   return (
     <ThreadCard dimmed={accepted}>
@@ -1363,24 +1370,33 @@ function PhotoRequestMessage({
         </p>
       ) : null}
 
-      <label
-        className={`mt-3 inline-block cursor-pointer ${
-          accepted ? BUTTON_SECONDARY : BUTTON_PRIMARY
-        }`}
-      >
-        {accepted ? 'Replace this photo' : badge.action}
-        <input
-          type="file"
-          accept="image/jpeg,image/png,image/webp"
-          className="hidden"
-          disabled={busy}
-          onChange={(event) => {
-            const file = event.target.files?.[0]
-            if (file) onUpload(message, file)
-            event.target.value = ''
-          }}
-        />
-      </label>
+      {shootable ? (
+        <label
+          className={`mt-3 inline-block cursor-pointer ${
+            accepted ? BUTTON_SECONDARY : BUTTON_PRIMARY
+          }`}
+        >
+          {accepted ? 'Replace this photo' : badge.action}
+          <input
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            className="hidden"
+            disabled={busy}
+            onChange={(event) => {
+              const file = event.target.files?.[0]
+              if (file) onUpload(message, file)
+              event.target.value = ''
+            }}
+          />
+        </label>
+      ) : (
+        // No control at all, and one line saying why. Offering an upload the
+        // server would refuse is what produced "This consult changed" on a
+        // photo the thread had just asked for.
+        <p className="mt-3 text-xs leading-5 text-textMuted">
+          This one opens after you book.
+        </p>
+      )}
     </ThreadCard>
   )
 }

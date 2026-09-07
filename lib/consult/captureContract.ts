@@ -355,6 +355,39 @@ const POST_INTAKE_CAPTURE_WRITE_STATES = new Set<ConsultSessionStatus>([
   ConsultSessionStatus.COMPLETED,
 ])
 
+/**
+ * May a GUIDED shot be written in this state? (P3b.)
+ *
+ * 🔴 Exported so the THREAD can ask the same question the write boundary
+ * answers, instead of holding a second opinion about it. That divergence is
+ * the whole of the bug this exists to close: the thread emitted all seven
+ * guided photo requests at EARLY_PHOTO_READY, both clients rendered a working
+ * camera button on them, and `assertCaptureWriteState` — correctly — refused
+ * the upload. The client had already taken the photograph by then, so the
+ * refusal read as "This consult changed" on a shot she had just been invited
+ * to take. Proven on Tori's phone, 2026-09-06: two `eyes_closeup` captures
+ * blocked at issue, `bytesUploaded: false`.
+ *
+ * Ask this before OFFERING a guided shot. `assertCaptureWriteState` still
+ * refuses one that arrives anyway — a projection is not a permission check.
+ */
+export function guidedCaptureWritable(status: ConsultSessionStatus): boolean {
+  return POST_INTAKE_CAPTURE_WRITE_STATES.has(status)
+}
+
+/**
+ * May the EARLY photo be written in this state? The early photo's window is
+ * wider than the pack's on purpose: it may be taken in the early stage AND
+ * replaced later, because the thread is a living document until the
+ * appointment.
+ */
+export function earlyPhotoWritable(status: ConsultSessionStatus): boolean {
+  return (
+    status === ConsultSessionStatus.EARLY_PHOTO_READY ||
+    POST_INTAKE_CAPTURE_WRITE_STATES.has(status)
+  )
+}
+
 function assertCaptureWriteState(
   session: CaptureScope,
   shotKey: string,
@@ -363,9 +396,8 @@ function assertCaptureWriteState(
 ): void {
   const allowed =
     shotKey === CONSULT_EARLY_PHOTO_SHOT_KEY
-      ? session.status === ConsultSessionStatus.EARLY_PHOTO_READY ||
-        POST_INTAKE_CAPTURE_WRITE_STATES.has(session.status)
-      : POST_INTAKE_CAPTURE_WRITE_STATES.has(session.status)
+      ? earlyPhotoWritable(session.status)
+      : guidedCaptureWritable(session.status)
   if (!allowed) {
     throw new ConsultWriteError('INVALID_STATE', `Capture ${action} is unavailable.`)
   }

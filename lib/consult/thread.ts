@@ -67,7 +67,11 @@ import {
 } from './capture/earlyPhoto'
 import { formatConsultCaptureIntro } from './captureCopy'
 import { loadConsultAnalysisState } from './analysisContract'
-import { loadConsultCaptureState } from './captureContract'
+import {
+  earlyPhotoWritable,
+  guidedCaptureWritable,
+  loadConsultCaptureState,
+} from './captureContract'
 import { loadAuthorizedClientConsultResults } from './clientResults'
 import { resolveThreadBooking } from './bookingLink'
 import { loadConsultFollowUpState } from './followUpContract'
@@ -501,6 +505,10 @@ export async function loadConsultThread(args: {
       // The only step that can be open before the booking; there is nothing
       // ahead of it to wait for. Once a plan exists it is history, not a step.
       state: settled ? 'DONE' : hasPlan ? 'BLOCKED' : 'OPEN',
+      // 🔴 Its own predicate, not the pack's: the early photo may be taken in
+      // the early stage AND replaced later, which is exactly why one shared
+      // "is capture open" flag would be wrong for one of the two.
+      shootable: earlyPhotoWritable(session.status),
       shot: EARLY_PHOTO_SHOT_DTO,
       shotPackVersion: CONSULT_EARLY_PHOTO_PACK_VERSION,
       schemaVersion: capture.shotPack.schemaVersion,
@@ -567,8 +575,26 @@ export async function loadConsultThread(args: {
   }
 
   // ── Photos, the guided pack ──────────────────────────────────────────────
+  //
   // Prep. Uses the capture state already loaded above the intake.
-  if (capture) {
+  //
+  // 🔴 GATED ON THE WRITE BOUNDARY'S OWN ANSWER (P3b). `capture` loads at
+  // EARLY_PHOTO_READY — it has to, because the early photo lives in the same
+  // stage — and this block used to run whenever it loaded. So all seven guided
+  // requests were served before the guided stage existed, both clients drew a
+  // working camera on them, and `assertCaptureWriteState` refused the upload
+  // that came back. On Tori's phone that surfaced as "This consult changed.
+  // Return to your appointment and try again" on a shot the thread had just
+  // asked her for, twice.
+  //
+  // The fix is not a second status check here. It is asking the function the
+  // write boundary itself asks, so the offer and the permission cannot drift.
+  if (capture && !guidedCaptureWritable(session.status)) {
+    // Not silence: she should know the photos are coming, just not now. One
+    // bubble, in place of the pack — nothing shootable, nothing to fail at.
+    out.push(text('capture-locked', copy.captureLockedBeforeBooking))
+  }
+  if (capture && guidedCaptureWritable(session.status)) {
     // 🔴 The intro names the PACK's own counts, and it must keep doing so. The
     // thread shows every photo request as its own message, so she can see them —
     // but the sentence that says "three of your hair and two of your face" is
@@ -614,6 +640,10 @@ export async function loadConsultThread(args: {
         shotPackVersion: capture.shotPack.version,
         schemaVersion: capture.shotPack.schemaVersion,
         slot,
+        // True by construction inside this block — but stated rather than
+        // assumed, so a client never has to infer it from `state` (which means
+        // something else) or from the status (which is not its business).
+        shootable: guidedCaptureWritable(session.status),
       })
     }
     const accepted = capture.slots.filter((s) => s.state === 'ACCEPTED').length
