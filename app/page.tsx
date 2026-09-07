@@ -1,3 +1,7 @@
+import { defaultHomeCopy } from '@/lib/brand/defaultHomeCopy'
+import type { Metadata } from 'next'
+import { platformFeesEnabled } from '@/lib/booking/discoveryFee'
+import { marketingPricing } from '@/lib/brand/marketingPricing'
 import EditorialHome from './_components/home/EditorialHome'
 import './styles/editorial-home.css'
 // Public homepage: tenant copy, explicit editorial placeholders, and gated feature claims.
@@ -26,6 +30,18 @@ import {
 } from '@/lib/homepage/socialProof'
 
 export const dynamic = 'force-dynamic'
+
+export async function generateMetadata(): Promise<Metadata> {
+  const tenant = await resolveTenantContextForLayout()
+  const brand = getBrandForTenantContext(tenant)
+  const seo = tenant.isRoot ? brand.home.campaign?.seo : undefined
+  return {
+    title: seo?.title ?? brand.displayName,
+    description: seo?.description ?? brand.home.hero.intro,
+    alternates: { canonical: '/' },
+    openGraph: { title: seo?.title ?? brand.displayName, description: seo?.description ?? brand.home.hero.intro, url: '/' },
+  }
+}
 
 /** The hero is the cursor glow's positioning context; HomeMotion needs its id. */
 const HERO_ID = 'tv-hero'
@@ -250,9 +266,10 @@ function CallsToAction({
 }
 
 export default async function Home() {
-  const brand = getBrandForTenantContext(await resolveTenantContextForLayout())
-  const copy = brand.home
-  if (copy.campaign) {
+  const tenant = await resolveTenantContextForLayout()
+  const brand = getBrandForTenantContext(tenant)
+  const copy = !tenant.isRoot && brand.home.campaign ? defaultHomeCopy(brand.displayName) : brand.home
+  if (tenant.isRoot && copy.campaign) {
     return (
       <main>
         <JsonLdScript
@@ -261,6 +278,7 @@ export default async function Home() {
         <EditorialHome
           copy={copy}
           campaign={copy.campaign}
+          pricing={marketingPricing(platformFeesEnabled())}
           navigation={<PublicTopBar links={copy.campaign.nav} />}
           footer={
             <footer className="eh-footer">

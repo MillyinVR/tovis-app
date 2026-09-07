@@ -37,7 +37,7 @@ export function buildHomeJsonLd(args: {
     url,
     applicationCategory: 'BusinessApplication',
     operatingSystem: 'Web',
-    description: copy.hero.intro,
+    description: copy.campaign?.seo.description ?? copy.hero.intro,
     // The free tier is live: taking bookings needs no subscription
     // (lib/membership/plans.ts, `free`).
     offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },

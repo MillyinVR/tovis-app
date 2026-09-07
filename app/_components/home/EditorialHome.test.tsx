@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { defaultHomeCopy } from '@/lib/brand/defaultHomeCopy'
 import { editorialCampaign } from '@/lib/brand/editorialCampaign'
+import { marketingPricing } from '@/lib/brand/marketingPricing'
 import EditorialHome from './EditorialHome'
 vi.mock('next/image', () => ({
   default: ({ alt }: { alt: string }) => <span role="img" aria-label={alt} />,
@@ -20,6 +21,7 @@ describe('editorial homepage', () => {
       <EditorialHome
         copy={defaultHomeCopy('Partner')}
         campaign={campaign}
+        pricing={marketingPricing(false)}
         navigation={null}
         footer={null}
       />,

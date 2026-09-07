@@ -36,7 +36,7 @@ describe('buildHomeJsonLd', () => {
     const featureList = ld.featureList as string[]
     for (const stage of copy.editorial.progression) expect(featureList).not.toContain(stage)
     expect(featureList).not.toContain('Look Brief')
-    expect(copy.editorial.journeyNote).toContain('founder pilot')
+    expect(copy.editorial.journeyNote).toContain('finalize the plan')
     expect(copy.editorial.progressionBody).toContain('not live')
   })
 

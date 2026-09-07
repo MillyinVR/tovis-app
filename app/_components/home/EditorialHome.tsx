@@ -5,16 +5,19 @@ import Image from 'next/image'
 import Link from 'next/link'
 import type { BrandHomeCopy } from '@/lib/brand/types'
 import type { EditorialCampaign } from '@/lib/brand/editorialCampaign'
+import type { MarketingPricing } from '@/lib/brand/marketingPricing'
 import CardPreview from './CardPreview'
 
 export default function EditorialHome({
   copy,
   campaign: c,
+  pricing,
   navigation,
   footer,
 }: {
   copy: BrandHomeCopy
   campaign: EditorialCampaign
+  pricing: MarketingPricing
   navigation: ReactNode
   footer: ReactNode
 }) {
@@ -83,6 +86,10 @@ export default function EditorialHome({
           </div>
         </div>
         <p className="eh-disclosure">{copy.editorial.placeholderLabel}</p>
+      </section>
+      <section className="eh-section eh-explainer">
+        <h2>{c.seo.audienceTitle}</h2>
+        <p>{c.seo.audienceBody}</p>
       </section>
       <div className="eh-strip">
         {copy.editorial.categories.map((item) => (
@@ -261,6 +268,35 @@ export default function EditorialHome({
           ))}
         </ol>
       </section>
+      <section id="retention" className="eh-section eh-retention">
+        <div className="eh-kicker">{c.retention.eyebrow}</div>
+        <h2>{c.retention.title}</h2>
+        <p className="eh-retention-intro">{c.retention.intro}</p>
+        <div className="eh-retention-grid">
+          {c.retention.features.map((feature) => (
+            <article key={feature.title}>
+              <h3>{feature.title}</h3>
+              <p>{feature.body}</p>
+            </article>
+          ))}
+        </div>
+        <div className="eh-retention-opening">
+          <h3>{c.retention.openingTitle}</h3>
+          <p>{c.retention.openingIntro}</p>
+          <ol>
+            {c.retention.tiers.map((tier, index) => (
+              <li key={tier.title}>
+                <span className="eh-kicker">0{index + 1}</span>
+                <h4>{tier.title}</h4>
+                <p>{tier.body}</p>
+              </li>
+            ))}
+          </ol>
+          <p>{c.retention.openingNote}</p>
+        </div>
+        <p className="eh-retention-closer">{c.retention.closer}</p>
+        <Link href="/signup/pro" className="eh-button eh-filled">{c.retention.cta} ↗</Link>
+      </section>
       {copy.editorial.progression.length > 0 && (
         <section className="eh-section eh-program">
           <div className="eh-kicker">{copy.editorial.upcomingLabel}</div>
@@ -283,6 +319,27 @@ export default function EditorialHome({
           <p>{copy.editorial.progressionBody}</p>
         </section>
       )}
+      <section className="eh-section eh-faq">
+        <h2>{pricing.title}</h2>
+        <p>{pricing.commission}</p>
+        <p>{pricing.subscription}</p>
+        <aside className="eh-membership-offer">
+          <h3>{c.seo.membershipOffer.title}</h3>
+          <p>{c.seo.membershipOffer.body}</p>
+        </aside>
+        <p>{pricing.professional}</p>
+        <p>{pricing.client}</p>
+        <Link className="eh-link" href="/why">
+          {pricing.link} →
+        </Link>
+        <h2>{c.seo.faqTitle}</h2>
+        {c.seo.questions.map((item) => (
+          <details key={item.question}>
+            <summary>{item.question}</summary>
+            <p>{item.answer}</p>
+          </details>
+        ))}
+      </section>
       {footer}
     </div>
   )

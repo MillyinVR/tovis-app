@@ -1,3 +1,4 @@
+import { editorialPrograms } from '../editorialPrograms'
 // lib/brand/brands/tovis.ts
 //
 // The canonical TOVIS brand — the reference implementation of a BrandConfig.
@@ -26,10 +27,12 @@ home.campaign = editorialCampaign()
 home.editorial = {
   ...home.editorial,
   location: 'Starting in San Diego',
-  foundingTitle: 'San Diego first. A new beauty community, from the beginning.',
-  foundingBody: 'We’re building toward the Founding 100: the first 100 professionals helping shape what comes next. Explore the professional signup to get started; program launch details are still to be announced.',
-  foundingCard: 'Coming soon: the Founding Member Card. Only the first 100 professionals will ever receive one. It sits below Gold and recognizes founding membership; it does not replace the professional recognition path below.',
-  foundingPreview: { ...cardPreview, tier: 'FOUNDING MEMBER', serial: 'No. — / 100', finish: 'neutral' },
+  journeyNote: editorialPrograms.briefNote,
+  upcomingLabel: 'Our founding community',
+  foundingTitle: editorialPrograms.foundingTitle,
+  foundingBody: editorialPrograms.foundingBody,
+  foundingCard: editorialPrograms.foundingCard,
+  foundingPreview: { ...cardPreview, previewLabel: editorialPrograms.foundingPreviewLabel, note: editorialPrograms.foundingPreviewNote, tier: 'FOUNDING MEMBER', serial: 'No. — / 100', finish: 'neutral' },
   progressionCards: {
     'Numbered Gold TOVIS Card': { ...cardPreview, tier: 'ELITE MEMBER', serial: 'No. —', finish: 'gold' },
   },
