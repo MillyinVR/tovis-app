@@ -2,7 +2,9 @@
 
 import * as Sentry from '@sentry/nextjs'
 
+import { envFlagEnabled, isDeployedRuntime } from '@/lib/env'
 import { isRecord } from '@/lib/guards'
+import { shouldEnableSentry } from '@/lib/observability/sentryGate'
 import { redactAuditPayload } from '@/lib/security/auditRedaction'
 
 const DEFAULT_TRACES_SAMPLE_RATE = 0.05
@@ -10,6 +12,19 @@ const DEFAULT_PROFILES_SAMPLE_RATE = 0
 
 export function readSentryDsn(): string | undefined {
   return process.env.SENTRY_DSN ?? process.env.NEXT_PUBLIC_SENTRY_DSN
+}
+
+/**
+ * Server/edge `enabled` flag: a DSN alone is not enough — the process must be a
+ * Vercel deployment (`VERCEL_ENV` production or preview) or carry
+ * `SENTRY_ALLOW_LOCAL`. See sentryGate.ts for why.
+ */
+export function isSentryServerReportingEnabled(dsn: string | undefined): boolean {
+  return shouldEnableSentry({
+    dsn,
+    onDeployedRuntime: isDeployedRuntime(),
+    allowLocal: envFlagEnabled('SENTRY_ALLOW_LOCAL'),
+  })
 }
 
 export function readSentryTracesSampleRate(): number {

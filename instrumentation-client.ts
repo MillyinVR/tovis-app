@@ -2,6 +2,12 @@
 
 import * as Sentry from '@sentry/nextjs'
 
+import { parseEnvFlag } from '@/lib/env'
+import {
+  isLoopbackHostname,
+  shouldEnableSentry,
+} from '@/lib/observability/sentryGate'
+
 export const onRouterTransitionStart = Sentry.captureRouterTransitionStart
 
 const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN
@@ -41,9 +47,21 @@ function readDist(): string | undefined {
   )
 }
 
+// The browser has no VERCEL_ENV; a loopback hostname is the one signal that
+// cannot be a deployment. Vercel previews and prod always serve on a real host.
+function isDeployedOrigin(): boolean {
+  if (typeof window === 'undefined') return false
+  return !isLoopbackHostname(window.location.hostname)
+}
+
 Sentry.init({
   dsn,
-  enabled: Boolean(dsn),
+  enabled: shouldEnableSentry({
+    dsn,
+    onDeployedRuntime: isDeployedOrigin(),
+    // Literal reference on purpose — Next inlines NEXT_PUBLIC_* by name only.
+    allowLocal: parseEnvFlag(process.env.NEXT_PUBLIC_SENTRY_ALLOW_LOCAL),
+  }),
   environment: readEnvironment(),
   release: readRelease(),
   dist: readDist(),
