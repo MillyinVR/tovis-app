@@ -72,10 +72,6 @@
   transition: transform 0.3s;
   background: rgb(var(--bg-secondary));
 }
-.eh-shot:hover {
-  transform: translateY(-8px);
-  z-index: 2;
-}
 .eh-shot:nth-child(2) {
   height: 240px;
   transform: rotate(5deg);
@@ -89,6 +85,10 @@
   height: 240px;
   transform: rotate(7deg);
   margin-bottom: 48px;
+}
+.eh-shot:hover {
+  transform: translateY(-8px);
+  z-index: 2;
 }
 .eh-shot img {
   object-fit: cover;

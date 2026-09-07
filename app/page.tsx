@@ -279,9 +279,9 @@ export default async function Home() {
           copy={copy}
           campaign={copy.campaign}
           pricing={marketingPricing(platformFeesEnabled())}
-          navigation={<PublicTopBar links={copy.campaign.nav} />}
+          navigation={<PublicTopBar key="editorial-navigation" links={copy.campaign.nav} />}
           footer={
-            <footer className="eh-footer">
+            <footer key="editorial-footer" className="eh-footer">
               <nav>
                 {copy.campaign.footerLinks.map(link => (
                   <Link key={link.href} href={link.href}>{link.label}</Link>
