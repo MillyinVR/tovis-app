@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultHomeCopy } from '@/lib/brand/defaultHomeCopy'
 import { editorialCampaign } from '@/lib/brand/editorialCampaign'
 import { marketingPricing } from '@/lib/brand/marketingPricing'
@@ -9,6 +9,10 @@ vi.mock('next/image', () => ({
 }))
 
 describe('editorial homepage', () => {
+  beforeEach(() => {
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: true })))
+  })
+  afterEach(() => vi.unstubAllGlobals())
   it('keeps the root campaign out of white-label defaults', () => {
     expect(defaultHomeCopy('Partner').campaign).toBeUndefined()
   })
