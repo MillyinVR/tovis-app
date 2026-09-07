@@ -8,11 +8,15 @@ import {
   Prisma,
 } from '@prisma/client'
 
-import type { ConsultClientResultsDTO } from '@/lib/dto/consult'
+import type {
+  ConsultClientResultsDTO,
+  ConsultResultsPhotoLightDTO,
+} from '@/lib/dto/consult'
 import { logAiConsultServe } from '@/lib/observability/aiConsultEvents'
 import { prisma } from '@/lib/prisma'
 
 import { isAiConsultC7ExposureEnabledForPro } from './access'
+import { isConsultColorFindingCode } from './capture/types'
 import { requireCurrentConsultAgreementAcceptances } from './agreementContract'
 import { evaluateConsultAnchorScope } from './anchor'
 import { CONSULT_OPEN_WINDOW_SELECT } from './openWindow'
@@ -100,10 +104,35 @@ async function requireAuthorizedClientResultScope(
   return session
 }
 
+/**
+ * The rule-8 colour tally: how many of the frames the analysis actually READ
+ * were shot in light that cannot be trusted for colour.
+ *
+ * Counts ACCEPTED rows only. A rejected frame is not an input to the plan, so
+ * counting it would make the sentence describe photographs the reading never
+ * saw — which is the opposite of what rule 8 is for.
+ */
+function photoLightFor(
+  captures: readonly { status: ConsultCaptureStatus; qualityWarningCode: string | null }[],
+): ConsultResultsPhotoLightDTO {
+  const accepted = captures.filter(
+    (capture) => capture.status === ConsultCaptureStatus.ACCEPTED,
+  )
+  const warm = accepted.filter((capture) =>
+    isConsultColorFindingCode(capture.qualityWarningCode ?? ''),
+  )
+  return {
+    acceptedFrameCount: accepted.length,
+    warmFrameCount: warm.length,
+    mostFramesWarm: warm.length > 0 && warm.length * 2 > accepted.length,
+  }
+}
+
 function clientResultsDto(args: {
   scope: ClientResultScope
   result: Awaited<ReturnType<typeof loadLatestImmutableConsultResult>>
   teaserTapped: boolean
+  photoLight: ConsultResultsPhotoLightDTO
 }): ConsultClientResultsDTO {
   const directions = args.result.payload.recommendationDirections
 
@@ -124,6 +153,7 @@ function clientResultsDto(args: {
     safetyFlags: args.result.payload.safetyFlags,
     achievabilityDirection: args.result.payload.achievabilityDirection,
     recommendationDirections: directions,
+    photoLight: args.photoLight,
     meCardTeaser: { locked: true, tapped: args.teaserTapped },
     createdAt: args.result.createdAt.toISOString(),
   }
@@ -206,7 +236,7 @@ export async function loadAuthorizedClientConsultResults(
             in: [ConsultCaptureStatus.ACCEPTED, ConsultCaptureStatus.REJECTED],
           },
         },
-        select: { status: true },
+        select: { status: true, qualityWarningCode: true },
       })
       const attributedBookingCount = await tx.booking.count({
         where: { sourceConsultSessionId: scope.id },
@@ -217,6 +247,7 @@ export async function loadAuthorizedClientConsultResults(
           scope,
           result,
           teaserTapped: actions.has(ConsultAuditAction.ME_CARD_TEASER_TAPPED),
+          photoLight: photoLightFor(captures),
         }),
         firstServe,
         acceptedPhotoCount: captures.filter(

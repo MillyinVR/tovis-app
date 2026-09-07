@@ -429,6 +429,10 @@ function stateForCapture(
     rawExpiresAt: Date
     purgedAt: Date | null
   },
+  history: {
+    attemptCount: number
+    previousReasonCode: string | null
+  },
 ): ConsultCaptureSlotStateDTO {
   // Not `pack.shots.find` — the early photo is a capture of this consult and a
   // member of no pack, so the pack is the wrong place to ask (P7a-1).
@@ -463,6 +467,24 @@ function stateForCapture(
     retakeTip: capture.retakeTip,
     rawExpiresAt: capture.purgedAt ? null : capture.rawExpiresAt.toISOString(),
     purgedAt: capture.purgedAt?.toISOString() ?? null,
+    attemptCount: history.attemptCount,
+    previousReasonCode: history.previousReasonCode
+      ? [...QUALITY_REASON_CODES].find(
+          (candidate) => candidate === history.previousReasonCode,
+        ) ?? null
+      : null,
+  }
+}
+
+/** What `stateForCapture` needs about the attempts BEFORE the latest one. */
+function historyFor(
+  shotKey: string,
+  attemptCounts: ReadonlyMap<string, number>,
+  previousReasons: ReadonlyMap<string, string | null>,
+): { attemptCount: number; previousReasonCode: string | null } {
+  return {
+    attemptCount: attemptCounts.get(shotKey) ?? 0,
+    previousReasonCode: previousReasons.get(shotKey) ?? null,
   }
 }
 
@@ -473,16 +495,23 @@ async function buildState(
 ): Promise<ConsultCaptureStateDTO> {
   const pack = packFor(session)
   // The durable audit trail may contain arbitrarily many rejected replacements,
-  // but this read is intentionally fixed at one row per pack slot.
+  // but this read is intentionally fixed at two rows per pack slot.
   //
   // P7a-1: the early photo is queried alongside them and lands in its own field
   // — NOT in `slots`. It is not one of this pack's slots (it belongs to no
   // pack), and putting it there would have added a phantom "todo" to the guided
   // checklist and moved every N/M counter the client renders.
-  const captures = await Promise.all(
-    [...pack.shots.map((shot) => shot.key), CONSULT_EARLY_PHOTO_SHOT_KEY].map(
-      (shotKey) =>
-      tx.consultCapture.findFirst({
+  // `take: 2`, not 1: the row before the latest one is what lets a client say
+  // "this one's warm too" rather than repeating a refusal verbatim and looking
+  // like nothing happened. Still a fixed, tiny read per slot — never the whole
+  // audit trail, which a session may hold 48 rows of.
+  const shotKeys = [
+    ...pack.shots.map((shot) => shot.key),
+    CONSULT_EARLY_PHOTO_SHOT_KEY,
+  ]
+  const recentByShot = await Promise.all(
+    shotKeys.map((shotKey) =>
+      tx.consultCapture.findMany({
         where: { consultSessionId: session.id, shotKey },
         select: {
           id: true,
@@ -495,9 +524,36 @@ async function buildState(
           purgedAt: true,
         },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: 2,
       }),
     ),
   )
+  // How many verdicts this slot has had, ever. One grouped read for the whole
+  // session rather than one count per slot.
+  const judgedCounts = await tx.consultCapture.groupBy({
+    by: ['shotKey'],
+    where: {
+      consultSessionId: session.id,
+      status: {
+        in: [ConsultCaptureStatus.ACCEPTED, ConsultCaptureStatus.REJECTED],
+      },
+    },
+    _count: { _all: true },
+  })
+  const attemptCounts = new Map(
+    judgedCounts.map((row) => [row.shotKey, row._count._all] as const),
+  )
+  // The reason the attempt BEFORE the latest was refused — null unless it was
+  // refused, because "this one's warm too" is only true after a refusal.
+  const previousReasons = new Map(
+    recentByShot.flatMap((rows) => {
+      const previous = rows[1]
+      return previous && previous.status === ConsultCaptureStatus.REJECTED
+        ? [[previous.shotKey, previous.qualityReasonCode] as const]
+        : []
+    }),
+  )
+  const captures = recentByShot.map((rows) => rows[0] ?? null)
   const latest = new Map(
     captures.flatMap((capture) =>
       capture && packHasShot(pack, capture.shotKey)
@@ -509,16 +565,21 @@ async function buildState(
     captures.find(
       (capture) => capture?.shotKey === CONSULT_EARLY_PHOTO_SHOT_KEY,
     ) ?? null
+  const earlyHistory = historyFor(
+    CONSULT_EARLY_PHOTO_SHOT_KEY,
+    attemptCounts,
+    previousReasons,
+  )
   const earlyPhoto = !earlyCapture
     ? null
     : !earlyCapture.purgedAt &&
         earlyCapture.rawExpiresAt.getTime() <= now.getTime()
       ? {
-          ...stateForCapture(pack, earlyCapture),
+          ...stateForCapture(pack, earlyCapture, earlyHistory),
           state: 'EXPIRED' as const,
           rawExpiresAt: null,
         }
-      : stateForCapture(pack, earlyCapture)
+      : stateForCapture(pack, earlyCapture, earlyHistory)
 
   return {
     consultId: session.id,
@@ -559,16 +620,19 @@ async function buildState(
           retakeTip: null,
           rawExpiresAt: null,
           purgedAt: null,
+          attemptCount: 0,
+          previousReasonCode: null,
         }
       }
+      const history = historyFor(shotKey, attemptCounts, previousReasons)
       if (!capture.purgedAt && capture.rawExpiresAt.getTime() <= now.getTime()) {
         return {
-          ...stateForCapture(pack, capture),
+          ...stateForCapture(pack, capture, history),
           state: 'EXPIRED',
           rawExpiresAt: null,
         }
       }
-      return stateForCapture(pack, capture)
+      return stateForCapture(pack, capture, history)
     }),
   }
 }

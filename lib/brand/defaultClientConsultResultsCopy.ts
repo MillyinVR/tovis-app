@@ -13,6 +13,8 @@ export const defaultClientConsultResultsCopy: BrandClientConsultResultsCopy = {
   aiObservationsTitle: 'Photo-based observations',
   aiObservationsBody:
     'These observations are a starting point for your professional to verify in person.',
+  warmLightCaveat:
+    '{warm} of your {total} photos were taken in warm indoor light, so the colour readings below are less certain than the rest. Your professional will check them in daylight.',
   baseLevelLabel: 'Base level',
   lightestLevelLabel: 'Lightest level',
   toneLabel: 'Visible tone',

@@ -591,6 +591,8 @@ export async function loadConsultThread(args: {
         retakeTip: null,
         rawExpiresAt: null,
         purgedAt: null,
+        attemptCount: 0,
+        previousReasonCode: null,
       },
     })
   }
@@ -693,6 +695,8 @@ export async function loadConsultThread(args: {
         retakeTip: null,
         rawExpiresAt: null,
         purgedAt: null,
+        attemptCount: 0,
+        previousReasonCode: null,
       }
       // PURGED is settled here for the same reason it is on the early photo.
       const settled = slot.state === 'ACCEPTED' || slot.state === 'PURGED'

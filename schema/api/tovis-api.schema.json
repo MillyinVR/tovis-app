@@ -8983,11 +8983,26 @@
     },
     "ConsultCaptureSlotStateDTO": {
       "properties": {
+        "attemptCount": {
+          "description": "How many times this slot has been JUDGED — accepted or rejected — for the whole life of the consult. 0 on an empty slot, 1 on a first verdict.\n\nOn the wire because a second refusal that looks exactly like the first is indistinguishable from nothing having happened. That is not hypothetical: it is what a client reported on 2026-09-07 as \"the retake never finished\", when in fact all four attempts were judged on their own bytes and refused for the same reason.",
+          "type": "number"
+        },
         "captureId": {
           "type": [
             "string",
             "null"
           ]
+        },
+        "previousReasonCode": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultCaptureQualityReasonCodeDTO"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The reason the attempt BEFORE this one was refused, if there was one and it was refused. Lets a client say \"this one's warm too\" without keeping its own history — which it cannot do reliably anyway, since the queue forgets a shot the moment a verdict lands and a reinstall forgets everything.\n\nNull when this is the first attempt, when the previous attempt was ACCEPTED, or when the previous attempt's reason is not known."
         },
         "purgedAt": {
           "type": [
@@ -9050,7 +9065,9 @@
         "qualityWarningCode",
         "retakeTip",
         "rawExpiresAt",
-        "purgedAt"
+        "purgedAt",
+        "attemptCount",
+        "previousReasonCode"
       ],
       "type": "object"
     },
@@ -9245,6 +9262,10 @@
             "tapped"
           ],
           "type": "object"
+        },
+        "photoLight": {
+          "$ref": "#/definitions/ConsultResultsPhotoLightDTO",
+          "description": "What the LIGHT in her photographs means for the colour reading — rule 8: the consult says what it could not see rather than filling the gap.\n\nWarm light stopped refusing a photo on 2026-09-07, so a plan can now be built from frames the old gate would have turned away. That is the right trade — a blocked client learns nothing — but only if the plan SAYS so when the light was against it. The analysis already widens its confidence on a warned frame; this is the same fact in the client's own words.\n\nOPTIONAL on the wire, so the cross-repo fixture contract stays a pure addition and a native build that predates it keeps decoding (tools/check-ios-fixture-contract.mjs)."
         },
         "profile": {
           "$ref": "#/definitions/ConsultAnalysisFeatureProfileDTO"
@@ -11624,6 +11645,29 @@
       },
       "required": [
         "review"
+      ],
+      "type": "object"
+    },
+    "ConsultResultsPhotoLightDTO": {
+      "description": "The colour-reliability tally behind the plan's rule-8 line. Counts, not a verdict: the sentence names them (\"4 of your 5 photos\"), and a client can check that against what she remembers taking.",
+      "properties": {
+        "acceptedFrameCount": {
+          "description": "Accepted captures that fed the analysis.",
+          "type": "number"
+        },
+        "mostFramesWarm": {
+          "description": "Whether MOST of them did — strictly more than half, and at least one. Decided here so the two clients cannot disagree about what \"most\" means.",
+          "type": "boolean"
+        },
+        "warmFrameCount": {
+          "description": "How many of those carried a colour warning (warm light or a cast).",
+          "type": "number"
+        }
+      },
+      "required": [
+        "acceptedFrameCount",
+        "warmFrameCount",
+        "mostFramesWarm"
       ],
       "type": "object"
     },

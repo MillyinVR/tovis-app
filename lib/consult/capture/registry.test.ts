@@ -14,7 +14,7 @@ import {
   packHasShot,
   resolveConsultCapturePack,
 } from './registry'
-import { shotToleratesColorCast } from './types'
+import { shotMayWarn } from './types'
 
 describe('consult capture registry', () => {
   it('keeps the hair pack byte-stable and registers the two family packs beside it', () => {
@@ -132,23 +132,23 @@ describe('consult capture registry', () => {
       }
     })
 
-    it('marks exactly the shots whose acceptance rule asks the subject to fill the frame', () => {
+    it('marks TIGHT_CROP on exactly the shots whose acceptance rule asks the subject to fill the frame', () => {
       const askedToFill = everyShot
         .filter((shot) => /fills? most of the frame/.test(shot.acceptance))
         .map((shot) => shot.key)
-      const tolerant = everyShot
-        .filter(shotToleratesColorCast)
+      const tight = everyShot
+        .filter((shot) => shot.framing === 'TIGHT_CROP')
         .map((shot) => shot.key)
 
-      expect(new Set(tolerant)).toEqual(new Set(askedToFill))
-      expect(new Set(tolerant)).toEqual(new Set(['eyes_closeup', 'area_closeup']))
+      expect(new Set(tight)).toEqual(new Set(askedToFill))
+      expect(new Set(tight)).toEqual(new Set(['eyes_closeup', 'area_closeup']))
     })
 
-    it('keeps every full view — hair, face and the area in context — colour-strict', () => {
-      const strict = everyShot
-        .filter((shot) => !shotToleratesColorCast(shot))
+    it('names every full view — hair, face and the area in context', () => {
+      const full = everyShot
+        .filter((shot) => shot.framing === 'FULL_VIEW')
         .map((shot) => shot.key)
-      expect(new Set(strict)).toEqual(
+      expect(new Set(full)).toEqual(
         new Set([
           'hair_back',
           'hair_left',
@@ -159,6 +159,45 @@ describe('consult capture registry', () => {
           'area_wide',
         ]),
       )
+    })
+  })
+
+  // 2026-09-07: warm light and colour cast warn on EVERY shot. The old rule
+  // split on `framing`, which made `face_front` unpassable in a warm-lit room
+  // while `eyes_closeup` passed in the same minute (prod consult
+  // cmtoma65j0002l9040bpit3v6, four refusals over two days).
+  describe('colour findings never refuse a shot', () => {
+    const everyShot = CONSULT_CAPTURE_PACKS.flatMap((pack) => pack.shots)
+
+    it('lets every registered shot carry both colour findings as warnings', () => {
+      for (const shot of everyShot) {
+        expect(shotMayWarn(shot, 'WARM_INDOOR_LIGHT')).toBe(true)
+        expect(shotMayWarn(shot, 'COLOR_CAST')).toBe(true)
+      }
+    })
+
+    it('still refuses the unreadable frames on a guided shot', () => {
+      const guided = everyShot.filter((shot) => shot.gate === 'GUIDED')
+      expect(guided.length).toBeGreaterThan(0)
+      for (const shot of guided) {
+        for (const code of [
+          'SUBJECT_NOT_VISIBLE',
+          'VIEW_MISMATCH',
+          'BLURRY',
+          'TOO_DARK',
+          'TOO_BRIGHT',
+          'HAIR_NOT_VISIBLE',
+          'OTHER_QUALITY_FAILURE',
+        ]) {
+          expect(shotMayWarn(shot, code)).toBe(false)
+        }
+      }
+    })
+
+    it('never treats PASS as a warning', () => {
+      for (const shot of everyShot) {
+        expect(shotMayWarn(shot, 'PASS')).toBe(false)
+      }
     })
   })
 })

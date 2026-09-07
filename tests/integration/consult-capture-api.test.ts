@@ -1167,13 +1167,83 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
     expect(darkJson).not.toHaveBeenCalled()
   })
 
-  it('hard-rejects warm light and color cast, purges immediately, and preserves replacement evidence', async () => {
-    const consult = await createReadyConsult('replace')
+  // v4 (Tori, 2026-09-07): warm light and colour cast ACCEPT with a warning on
+  // every shot. This test used to assert the opposite — it is the shape of the
+  // rule that made prod consult cmtoma65j0002l9040bpit3v6 unfinishable indoors.
+  // What still hard-rejects is a frame that cannot be READ, so the
+  // purge/replacement half of the case moves to BLURRY and keeps its coverage.
+  it('accepts warm light and colour cast as warnings on a FULL VIEW, against the real constraint', async () => {
+    const consult = await createReadyConsult('warm-full-view')
     authenticate(consult)
     fake.qualityByShot.set('hair_left', {
       accepted: false,
       reasonCode: 'WARM_INDOOR_LIGHT',
       retakeTip: 'Face a window and turn off warm room lights.',
+      model: 'fake-quality-model',
+    })
+    const warmId = await issueAttach(consult, 'hair_left', 'warm')
+    const [first, retry] = await Promise.all([
+      quality(consult, warmId, 'same-quality'),
+      quality(consult, warmId, 'same-quality'),
+    ])
+    expect(first.status).toBe(200)
+    expect(retry.status).toBe(200)
+    // The early photo was judged first, by the same gate (P7a-1).
+    expect(fake.modelCalls).toEqual(['early_photo', 'hair_left'])
+    // 🔴 The provider REFUSED it; the server overrules that, and the tip is
+    // dropped because there is nothing to retake.
+    expect(await body(first)).toMatchObject({
+      quality: {
+        accepted: true,
+        reasonCode: 'PASS',
+        warningCode: 'WARM_INDOOR_LIGHT',
+        retakeTip: null,
+      },
+    })
+    const warm = await db.consultCapture.findUniqueOrThrow({ where: { id: warmId } })
+    expect(warm.status).toBe(ConsultCaptureStatus.ACCEPTED)
+    expect(warm.qualityWarningCode).toBe('WARM_INDOOR_LIGHT')
+    expect(warm.qualityPromptVersion).toBe('full-analysis-capture-v4')
+    // An accepted frame keeps its bytes — the analysis still has to read it.
+    expect(warm.storagePath).not.toBeNull()
+    expect(warm.purgedAt).toBeNull()
+
+    const colorCastConsult = await createReadyConsult('color-cast')
+    authenticate(colorCastConsult)
+    fake.qualityByShot.set('hair_back', {
+      accepted: false,
+      reasonCode: 'COLOR_CAST',
+      retakeTip: 'Move into indirect daylight and remove colored reflections.',
+      model: 'fake-quality-model',
+    })
+    const colorCastId = await issueAttach(colorCastConsult, 'hair_back', 'color-cast')
+    const colorCastResponse = await quality(
+      colorCastConsult,
+      colorCastId,
+      'color-cast-quality',
+    )
+    expect(await body(colorCastResponse)).toMatchObject({
+      quality: { accepted: true, reasonCode: 'PASS', warningCode: 'COLOR_CAST' },
+    })
+    expect(
+      await db.consultCapture.findUniqueOrThrow({
+        where: { id: colorCastId },
+        select: { purgedAt: true, storagePath: true, status: true },
+      }),
+    ).toMatchObject({
+      purgedAt: null,
+      storagePath: expect.any(String),
+      status: ConsultCaptureStatus.ACCEPTED,
+    })
+  })
+
+  it('hard-rejects an UNREADABLE frame, purges immediately, and preserves replacement evidence', async () => {
+    const consult = await createReadyConsult('replace')
+    authenticate(consult)
+    fake.qualityByShot.set('hair_left', {
+      accepted: false,
+      reasonCode: 'BLURRY',
+      retakeTip: 'Hold the phone steady and tap to focus before shooting.',
       model: 'fake-quality-model',
     })
     const rejectedId = await issueAttach(consult, 'hair_left', 'rejected')
@@ -1183,13 +1253,12 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
     ])
     expect(first.status).toBe(200)
     expect(retry.status).toBe(200)
-    // The early photo was judged first, by the same gate (P7a-1).
     expect(fake.modelCalls).toEqual(['early_photo', 'hair_left'])
     expect(await body(first)).toMatchObject({
       quality: {
         accepted: false,
-        reasonCode: 'WARM_INDOOR_LIGHT',
-        retakeTip: 'Face a window and turn off warm room lights.',
+        reasonCode: 'BLURRY',
+        retakeTip: 'Hold the phone steady and tap to focus before shooting.',
       },
     })
     const rejected = await db.consultCapture.findUniqueOrThrow({ where: { id: rejectedId } })
@@ -1216,33 +1285,27 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
       }),
     ).toBe(1)
 
-    const colorCastConsult = await createReadyConsult('color-cast')
-    authenticate(colorCastConsult)
-    fake.qualityByShot.set('hair_back', {
-      accepted: false,
-      reasonCode: 'COLOR_CAST',
-      retakeTip: 'Move into indirect daylight and remove colored reflections.',
-      model: 'fake-quality-model',
-    })
-    const colorCastId = await issueAttach(
-      colorCastConsult,
-      'hair_back',
-      'color-cast',
+    // The replacement is the NEWEST row for the shot, and the slot serves it —
+    // with the attempt history that lets the client tell them apart.
+    const state = await getCapture(
+      new Request(
+        `http://test/api/v1/client/consult/${consult.sessionId}/capture`,
+      ),
+      context(consult.sessionId),
     )
-    const colorCastResponse = await quality(
-      colorCastConsult,
-      colorCastId,
-      'color-cast-quality',
+    expect(state.status).toBe(200)
+    const statePayload = (await body(state)) as {
+      capture: { slots: Array<Record<string, unknown>> }
+    }
+    const slot = statePayload.capture.slots.find(
+      (entry) => entry.shotKey === 'hair_left',
     )
-    expect(await body(colorCastResponse)).toMatchObject({
-      quality: { accepted: false, reasonCode: 'COLOR_CAST' },
+    expect(slot).toMatchObject({
+      state: 'ACCEPTED',
+      captureId: replacementId,
+      attemptCount: 2,
+      previousReasonCode: 'BLURRY',
     })
-    expect(
-      await db.consultCapture.findUniqueOrThrow({
-        where: { id: colorCastId },
-        select: { purgedAt: true, storagePath: true },
-      }),
-    ).toMatchObject({ purgedAt: expect.any(Date), storagePath: null })
   })
 
   it('moves to ANALYSIS_PENDING exactly once after seven accepted unexpired slots', async () => {
@@ -3248,13 +3311,15 @@ describe('consult partial capture submission against PostgreSQL (Tori, 2026-08-2
     })
   })
 
+  // v4: the reason has to be one that still REFUSES. Warm light is a warning
+  // now, so this case is carried by an unreadable frame instead.
   it('keeps the rejection reason and retake tip on the slot after the immediate purge', async () => {
     const consult = await createReadyConsult('rejected-slot-state')
     authenticate(consult)
     fake.qualityByShot.set('hair_left', {
       accepted: false,
-      reasonCode: 'WARM_INDOOR_LIGHT',
-      retakeTip: 'Face a window in indirect daylight.',
+      reasonCode: 'TOO_DARK',
+      retakeTip: 'Turn on more light, or move to a brighter room.',
       model: 'fake-quality-model',
     })
     const rejectedId = await issueAttach(consult, 'hair_left', 'rejected-slot')
@@ -3280,16 +3345,20 @@ describe('consult partial capture submission against PostgreSQL (Tori, 2026-08-2
     )
     expect(slot).toMatchObject({
       state: 'REJECTED',
-      qualityReasonCode: 'WARM_INDOOR_LIGHT',
-      retakeTip: 'Face a window in indirect daylight.',
+      qualityReasonCode: 'TOO_DARK',
+      retakeTip: 'Turn on more light, or move to a brighter room.',
+      // A first refusal: the client is told nothing about a "repeat" yet.
+      attemptCount: 1,
+      previousReasonCode: null,
     })
   })
 
-  // B3. The eyes/brows shot was being refused by a colour rule written for a
-  // photo of a whole head. On a view whose own spec asks the eyes to FILL the
-  // frame there is almost no background left to read the light off, so the
-  // finding is recorded as a warning and the slot is accepted.
-  it('accepts a warm-lit eyes/brows close-up with a warning, and still rejects a warm full-face shot', async () => {
+  // v4 (Tori, 2026-09-07). B3 made a warm reading a warning on a TIGHT_CROP and
+  // kept it a refusal on a FULL_VIEW. That split is what made prod consult
+  // cmtoma65j0002l9040bpit3v6 impossible to finish: `eyes_closeup` passed and
+  // `face_front` was refused, in the same room, thirty seconds apart. Both are
+  // warnings now, and this test asserts exactly that pair.
+  it('accepts a warm-lit close-up AND a warm-lit full-face shot, both with a warning', async () => {
     const consult = await createReadyConsult('tight-crop-warning')
     authenticate(consult)
     // Exactly what the provider answers today for the shot Tori's walkthrough
@@ -3329,12 +3398,14 @@ describe('consult partial capture submission against PostgreSQL (Tori, 2026-08-2
       qualityReasonCode: 'PASS',
       qualityWarningCode: 'WARM_INDOOR_LIGHT',
       retakeTip: null,
-      qualityPromptVersion: 'full-analysis-capture-v3',
+      qualityPromptVersion: 'full-analysis-capture-v4',
     })
     // …and the raw object survives, as it must for an accepted shot.
     expect(storedEyes.purgedAt).toBeNull()
 
-    // (b) a genuinely warm-cast FULL-FACE shot is still a hard rejection.
+    // (b) 🔴 The FULL-FACE shot in the same warm light is now accepted too —
+    // this assertion is the inverse of the one it replaces, and it is the whole
+    // point of v4. Its raw object survives, so the analysis can read it.
     fake.qualityByShot.set('face_front', {
       accepted: false,
       reasonCode: 'WARM_INDOOR_LIGHT',
@@ -3344,21 +3415,22 @@ describe('consult partial capture submission against PostgreSQL (Tori, 2026-08-2
     const faceId = await issueAttach(consult, 'face_front', 'warm-full-face')
     expect(await body(await quality(consult, faceId, 'warm-full-face-q'))).toMatchObject({
       quality: {
-        accepted: false,
-        reasonCode: 'WARM_INDOOR_LIGHT',
-        warningCode: null,
-        retakeTip: 'Move near a window and face the daylight.',
+        accepted: true,
+        reasonCode: 'PASS',
+        warningCode: 'WARM_INDOOR_LIGHT',
+        retakeTip: null,
       },
     })
     expect(
       await db.consultCapture.findUniqueOrThrow({
         where: { id: faceId },
-        select: { status: true, qualityWarningCode: true, purgedAt: true },
+        select: { status: true, qualityWarningCode: true, purgedAt: true, storagePath: true },
       }),
     ).toMatchObject({
-      status: ConsultCaptureStatus.REJECTED,
-      qualityWarningCode: null,
-      purgedAt: expect.any(Date),
+      status: ConsultCaptureStatus.ACCEPTED,
+      qualityWarningCode: 'WARM_INDOOR_LIGHT',
+      purgedAt: null,
+      storagePath: expect.any(String),
     })
 
     // (d) an ordinary full view under neutral light is untouched: accepted,
@@ -3368,9 +3440,10 @@ describe('consult partial capture submission against PostgreSQL (Tori, 2026-08-2
       quality: { accepted: true, reasonCode: 'PASS', warningCode: null },
     })
 
-    // (c) the "N / M accepted" counter is `slots.filter(state == ACCEPTED)`
-    // on both clients, so the close-up now counts toward it and the warm
-    // full-face shot does not.
+    // (c) the "N / M accepted" counter is `slots.filter(state == ACCEPTED)` on
+    // both clients. Under v4 all THREE count — including the warm full-face
+    // shot, which is the difference a client actually feels: her checklist
+    // advances in her own kitchen instead of stalling at one of seven.
     const state = await getCapture(
       new Request(`http://test/api/v1/client/consult/${consult.sessionId}/capture`),
       context(consult.sessionId),
@@ -3388,9 +3461,10 @@ describe('consult partial capture submission against PostgreSQL (Tori, 2026-08-2
       retakeTip: null,
     })
     expect(bySlot.get('face_front')).toMatchObject({
-      state: 'REJECTED',
-      qualityReasonCode: 'WARM_INDOOR_LIGHT',
-      qualityWarningCode: null,
+      state: 'ACCEPTED',
+      qualityReasonCode: 'PASS',
+      qualityWarningCode: 'WARM_INDOOR_LIGHT',
+      retakeTip: null,
     })
     expect(bySlot.get('face_side')).toMatchObject({
       state: 'ACCEPTED',
@@ -3398,7 +3472,7 @@ describe('consult partial capture submission against PostgreSQL (Tori, 2026-08-2
     })
     expect(
       payload.capture.slots.filter((slot) => slot.state === 'ACCEPTED').length,
-    ).toBe(2)
+    ).toBe(3)
     expect(payload.capture.slots.length).toBe(7)
   })
 })

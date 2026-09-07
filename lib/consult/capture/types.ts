@@ -12,22 +12,24 @@ import type {
 } from '@/lib/dto/consult'
 
 /**
- * How much of the world a view is asking for — the property the quality gate
- * reads to decide how much a colour finding is worth on this shot.
+ * How much of the world a view is asking for.
  *
  * `FULL_VIEW` is a shot composed at arm's length or further: a head, a
  * profile, a whole treatment area in its surroundings. There is background in
- * the frame, so a warm or cast reading really is a reading of the ROOM, and
- * colour fidelity is the point of the photo. A cast is a rejection.
+ * the frame.
  *
  * `TIGHT_CROP` is a shot whose acceptance spec asks the subject to FILL the
  * frame — eyes and brows edge to edge, a nail bed or a patch of skin filling
- * the frame. There is almost no background left to read the light off, so the
- * average colour of that frame is mostly skin; a warm reading is as likely to
- * be the person as the lamp. Rejecting on it refuses a perfectly usable
- * close-up (bug B3). A cast is recorded as a WARNING on the accepted result
- * instead — unless the requested view is not visible, which is its own
- * rejection and outranks any colour finding.
+ * the frame. There is almost no background left.
+ *
+ * 🔴 It no longer decides what a COLOUR finding costs. Until 2026-09-07 a warm
+ * or cast reading rejected a `FULL_VIEW` and only warned on a `TIGHT_CROP`;
+ * warm light now warns on every shot (Tori, 2026-09-07 — see
+ * `CONSULT_COLOR_FINDING_WARNING_CODES`). What survives is what this property
+ * always literally described: how much of the world the view asks for. Two
+ * live readers — P3's on-device crop (it is on the wire as
+ * `ConsultCaptureShotFramingDTO`) and the composition sentence the quality
+ * gate is given, which helps it judge whether the requested VIEW is there.
  *
  * Required, not optional, so a new pack cannot forget to say which it is:
  * the compiler asks the question at the one place that knows the answer, the
@@ -40,9 +42,9 @@ export type ConsultCaptureShotFraming = 'FULL_VIEW' | 'TIGHT_CROP'
  * question `framing` started, and the one P7a needed a new answer to.
  *
  * `GUIDED` is the pack behaviour that has always shipped: the photo is an
- * analysis input first, so anything that makes it a worse input rejects it and
- * asks for a retake. `framing` still decides whether a colour finding is one of
- * those things (B3).
+ * analysis input first, so anything that leaves it UNREADABLE rejects it and
+ * asks for a retake. A colour finding is no longer one of those things on any
+ * shot — see `CONSULT_COLOR_FINDING_WARNING_CODES`.
  *
  * `WARN_ONLY` is the early photo (P7a). It is taken at the spark, in bed, in
  * whatever light is on, from the camera or the roll, and its job is to unlock a
@@ -63,23 +65,41 @@ export type ConsultCaptureShotDefinition = ConsultCaptureShotDTO & {
    * daylight / colour-fidelity requirement; that part is universal.
    */
   readonly acceptance: string
-  /** See `ConsultCaptureShotFraming`. Never on the wire; server-only. */
+  /** See `ConsultCaptureShotFraming`. On the wire, for P3's on-device crop. */
   readonly framing: ConsultCaptureShotFraming
   /** See `ConsultCaptureShotGate`. Never on the wire; server-only. */
   readonly gate: ConsultCaptureShotGate
 }
 
 /**
- * Is a colour finding on this view a rejection, or only a warning? The single
- * place the question is answered, derived from the shot's own spec.
+ * The two findings that describe the LIGHT rather than the photograph, and
+ * never refuse a capture on any shot (Tori, 2026-09-07).
  *
- * A `WARN_ONLY` shot tolerates a cast whatever its framing — see
- * `ConsultCaptureShotGate`.
+ * 🔴 The rule this replaced rejected a warm reading on every `FULL_VIEW`. It
+ * was defensible — colour fidelity really is the point of those frames — and
+ * in practice it made the consult impossible to finish indoors: prod session
+ * `cmtoma65j0002l9040bpit3v6` failed `face_front` FOUR times across two days
+ * on `WARM_INDOOR_LIGHT`, in the same room where `eyes_closeup` passed thirty
+ * seconds earlier carrying the same finding as a warning. A gate a client
+ * cannot pass in her own home is not a quality bar, it is a wall.
+ *
+ * What replaces it is not "accept anything": the warning is still RECORDED, it
+ * still reaches the analysis (which widens its confidence and can answer
+ * UNKNOWN), it still reaches the pro brief, and the plan says so out loud when
+ * most frames carried it. The client is told, and asked — not blocked.
+ *
+ * Rejection is now reserved for a frame that cannot be READ at all: the
+ * subject or view missing, blur, or exposure past legibility.
  */
-export function shotToleratesColorCast(
-  shot: ConsultCaptureShotDefinition,
-): boolean {
-  return shot.gate === 'WARN_ONLY' || shot.framing === 'TIGHT_CROP'
+export const CONSULT_COLOR_FINDING_WARNING_CODES = [
+  'WARM_INDOOR_LIGHT',
+  'COLOR_CAST',
+] as const
+
+export function isConsultColorFindingCode(value: string): boolean {
+  return CONSULT_COLOR_FINDING_WARNING_CODES.some(
+    (candidate) => candidate === value,
+  )
 }
 
 /**
@@ -112,12 +132,8 @@ export function shotMayWarn(
   if (shot.gate === 'WARN_ONLY') {
     return warningCode !== CONSULT_WARN_ONLY_REJECTING_REASON_CODE
   }
-  // A GUIDED shot downgrades the two colour findings, and only where a cast is
-  // as likely to be the subject as the room.
-  return (
-    shotToleratesColorCast(shot) &&
-    (warningCode === 'WARM_INDOOR_LIGHT' || warningCode === 'COLOR_CAST')
-  )
+  // A GUIDED shot downgrades the two colour findings, on every framing.
+  return isConsultColorFindingCode(warningCode)
 }
 
 export type ConsultCapturePackDefinition = Readonly<

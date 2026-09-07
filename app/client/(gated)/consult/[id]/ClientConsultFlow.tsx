@@ -29,6 +29,7 @@ import type { BrandClientConsultThreadCopy } from '@/lib/brand/types'
 import { fillConsultThreadCopy } from '@/lib/consult/threadCopy'
 import { CONSULT_EARLY_PHOTO_SHOT_KEY } from '@/lib/consult/capture/earlyPhoto'
 import { CONSULT_CAPTURE_MAX_BYTES } from '@/lib/consult/capturePack'
+import { consultSlotRetakeGuidance } from '@/lib/consult/captureRetakeGuidance'
 import {
   CONSULT_ANALYSIS_POLL_INTERVAL_MS,
   consultAnalysisRunProgress,
@@ -1315,6 +1316,8 @@ function PhotoRequestMessage({
   const { shot, slot } = message
   const accepted = slot.state === 'ACCEPTED'
   const badge = photoBadge(slot.state)
+  // A second refusal must not look like the first — see captureRetakeGuidance.
+  const guidance = consultSlotRetakeGuidance(slot)
   // 🔴 `shootable`, never `state` (P3b). A BLOCKED request is deliberately
   // still actionable — that is how she jumps between guided shots and retakes
   // one after her plan exists — so gating the control on BLOCKED would remove
@@ -1351,16 +1354,32 @@ function PhotoRequestMessage({
 
       {slot.state === 'REJECTED' ? (
         <div className="mt-2 rounded-lg border border-toneWarn/30 bg-toneWarn/10 px-2 py-1.5 text-xs leading-5 text-textPrimary">
-          {slot.qualityReasonCode
-            ? QUALITY_REASON_COPY[slot.qualityReasonCode]
-            : QUALITY_REASON_COPY.OTHER_QUALITY_FAILURE}
-          {slot.retakeTip ? ` ${slot.retakeTip}` : null}
+          {guidance.attemptLabel ? (
+            <span className="mr-1 font-mono text-[10px] font-bold uppercase tracking-[0.08em] text-textSecondary">
+              {guidance.attemptLabel}
+            </span>
+          ) : null}
+          {guidance.repeatedLine ?? (
+            slot.qualityReasonCode
+              ? QUALITY_REASON_COPY[slot.qualityReasonCode]
+              : QUALITY_REASON_COPY.OTHER_QUALITY_FAILURE
+          )}
+          {guidance.nextStep ? ` ${guidance.nextStep}` : null}
         </div>
       ) : null}
 
+      {/*
+        A warm frame is ACCEPTED now, so this is a coach's aside and not a
+        verdict: it says what the light costs the reading, and it never stands
+        between her and the next shot. The retake offer is deliberately not a
+        question here — the phone can schedule a reminder for tomorrow and a
+        browser tab cannot, so asking without being able to act would leave a
+        question dangling.
+      */}
       {slot.qualityWarningCode && accepted ? (
-        <div className="mt-2 rounded-lg border border-toneWarn/30 bg-toneWarn/10 px-2 py-1.5 text-xs leading-5 text-textPrimary">
-          {QUALITY_REASON_COPY[slot.qualityWarningCode]} We can still use it.
+        <div className="mt-2 rounded-lg border border-toneInfo/30 bg-toneInfo/10 px-2 py-1.5 text-xs leading-5 text-textPrimary">
+          {QUALITY_REASON_COPY[slot.qualityWarningCode]} We can still use it —
+          daylight just reads truer, if you get the chance to retake it.
         </div>
       ) : null}
 
