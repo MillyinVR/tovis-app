@@ -46,6 +46,9 @@ import {
   pickStringArray,
 } from '@/lib/pick'
 import { getVisibleClientIdSetForPro } from '@/lib/clientVisibility'
+import type { ConsultPrepBadge } from '@/lib/consult/prepBadge'
+import { loadProBookingsPrepBadges } from '@/lib/consult/proPrepStatus'
+import { prisma } from '@/lib/prisma'
 import { resolveProScheduleTimeZone } from '@/lib/proLocations/resolveProScheduleTimeZone'
 import {
   loadProBookingsBuckets,
@@ -88,9 +91,27 @@ export async function GET(req: Request) {
       getVisibleClientIdSetForPro(auth.professionalId),
     ])
 
+    // P7a-4 — the day-of prep flags, in ONE batched read for every bucket
+    // rather than a query per row. Never blocks the list: a pro must not lose
+    // their whole schedule because a prep read failed.
+    const allRows = [
+      ...buckets.today,
+      ...buckets.upcoming,
+      ...buckets.past,
+      ...buckets.cancelled,
+    ]
+    const consultPrepBadges = await loadProBookingsPrepBadges(prisma, {
+      bookingIds: allRows.map((row) => row.id),
+      professionalId: auth.professionalId,
+    }).catch(() => new Map<string, ConsultPrepBadge>())
+
     const serialize = (rows: BookingsListRow[]) =>
       rows.map((row) =>
-        serializeBookingsListRow(row, { scheduleTz, visibleClientIdSet }),
+        serializeBookingsListRow(row, {
+          scheduleTz,
+          visibleClientIdSet,
+          consultPrepBadges,
+        }),
       )
 
     const body: ProBookingsListResponse = {

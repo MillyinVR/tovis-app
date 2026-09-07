@@ -31,6 +31,7 @@ export type NotificationTemplateKey =
   | 'ai_consult_invitation'
   | 'ai_consult_analysis_ready'
   | 'ai_consult_analysis_failed'
+  | 'consult_prep_reminder'
   | 'saved_look_price_alternative'
   | 'viral_request_approved'
   | 'payment_collected'
@@ -214,6 +215,7 @@ export const NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.AI_CONSULT_INVITATION,
   NotificationEventKey.AI_CONSULT_ANALYSIS_READY,
   NotificationEventKey.AI_CONSULT_ANALYSIS_FAILED,
+  NotificationEventKey.CONSULT_PREP_REMINDER,
   NotificationEventKey.SAVED_LOOK_PRICE_ALTERNATIVE,
   NotificationEventKey.VIRAL_REQUEST_APPROVED,
   NotificationEventKey.PAYMENT_COLLECTED,
@@ -682,6 +684,31 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     templateKey: 'ai_consult_analysis_failed',
     supportedRecipients: [NotificationRecipientKind.CLIENT],
     defaultChannelsByRecipient: {
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
+    },
+  },
+
+  [NotificationEventKey.CONSULT_PREP_REMINDER]: {
+    // P7a-4. TRANSACTIONAL, and for the same reason AI_CONSULT_ANALYSIS_READY
+    // is: the client asked for this appointment, the answers are about her own
+    // safety, and the deadline is one SHE has to act before. It is not the app
+    // deciding she might like to hear from it.
+    //
+    // It does NOT bypass quiet hours. That is the difference from its
+    // analysis-run siblings, and it is deliberate: those answer a question she
+    // is sitting there waiting on, this one is a deadline days away. Waking
+    // someone at 03:00 to say "you have 48 hours" would be the app's urgency,
+    // not hers — and the escalation already has three more chances to land.
+    key: NotificationEventKey.CONSULT_PREP_REMINDER,
+    defaultPriority: NotificationPriority.NORMAL,
+    transactional: true,
+    allowQuietHoursBypass: false,
+    templateKey: 'consult_prep_reminder',
+    supportedRecipients: [NotificationRecipientKind.CLIENT],
+    defaultChannelsByRecipient: {
+      // No SMS. The questions live behind a login and are health-adjacent, so
+      // the notification is a doorbell, not the ask itself — the same rule the
+      // consult's other client-facing events keep.
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
     },
   },
@@ -1314,6 +1341,7 @@ export const CLIENT_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.AI_CONSULT_INVITATION,
   NotificationEventKey.AI_CONSULT_ANALYSIS_READY,
   NotificationEventKey.AI_CONSULT_ANALYSIS_FAILED,
+  NotificationEventKey.CONSULT_PREP_REMINDER,
   NotificationEventKey.SAVED_LOOK_PRICE_ALTERNATIVE,
   NotificationEventKey.PAYMENT_COLLECTED,
   NotificationEventKey.PAYMENT_ACTION_REQUIRED,

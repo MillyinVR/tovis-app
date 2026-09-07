@@ -106,6 +106,8 @@ const EVENT_LABELS: Record<NotificationEventKey, string> = {
   [NotificationEventKey.AI_CONSULT_ANALYSIS_READY]: 'Your consult is ready',
   [NotificationEventKey.AI_CONSULT_ANALYSIS_FAILED]:
     'Problems finishing your consult',
+  [NotificationEventKey.CONSULT_PREP_REMINDER]:
+    'Questions your pro needs before your appointment',
   [NotificationEventKey.SAVED_LOOK_PRICE_ALTERNATIVE]: 'Similar looks in your range',
   [NotificationEventKey.VIRAL_REQUEST_APPROVED]: 'Feature request approved',
   [NotificationEventKey.PAYMENT_COLLECTED]: 'Payment receipt',
@@ -190,8 +192,11 @@ const CATEGORY_DEFS: readonly CategoryDef[] = [
   {
     key: 'REMINDERS',
     label: 'Reminders',
-    description: 'Upcoming appointment reminders.',
-    eventKeys: [NotificationEventKey.APPOINTMENT_REMINDER],
+    description: 'Upcoming appointments, and anything your pro needs before one.',
+    eventKeys: [
+      NotificationEventKey.APPOINTMENT_REMINDER,
+      NotificationEventKey.CONSULT_PREP_REMINDER,
+    ],
   },
   {
     key: 'PAYMENTS',

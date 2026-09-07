@@ -722,6 +722,39 @@ export type BrandClientConsultPlanDiffCopy = {
   achievabilityUnknown: string
 }
 
+/**
+ * P7a-4 — one prep reminder's notification title and body.
+ *
+ * `{pro}` and `{deadline}` are filled by the emitter
+ * (lib/notifications/consultPrepReminders.ts) through the same substitution
+ * the thread bubbles use.
+ */
+export type BrandClientConsultPrepMessage = {
+  title: string
+  body: string
+}
+
+/**
+ * The four escalating prep reminders, in the order they fire.
+ *
+ * `booked` goes out immediately when the appointment is made; the other three
+ * are scheduled against the DEADLINE, not the appointment — 72 hours before
+ * it, 24 hours before it, and on the day it falls (Tori, 2026-09-06). Keyed by
+ * what the client is being told rather than by an offset, so a category whose
+ * N makes "72 hours before the deadline" land somewhere else still says the
+ * right thing.
+ */
+export type BrandClientConsultPrepCopy = {
+  /** Immediately on booking: the deadline exists and here is when it is. */
+  booked: BrandClientConsultPrepMessage
+  /** 72 hours before the deadline. */
+  ahead: BrandClientConsultPrepMessage
+  /** 24 hours before the deadline. */
+  soon: BrandClientConsultPrepMessage
+  /** On the deadline itself. The LAST one — nothing fires after it. */
+  due: BrandClientConsultPrepMessage
+}
+
 export type BrandClientConsultThreadCopy = {
   /** The first bubble, when the service is known / when it is not. */
   openingWithService: string
@@ -775,6 +808,22 @@ export type BrandClientConsultThreadCopy = {
   booked: string
   /** The bubble that turns the rest of the thread into prep. `{pro}`. */
   prepIntro: string
+  /**
+   * P7a-4 — posted when the LAST safety answer lands.
+   *
+   * It marks the one moment in prep that is genuinely finished, and it is the
+   * thing that stops the reminders. It says so, because a client who has just
+   * been nudged three times deserves to know the nudging is over.
+   */
+  prepComplete: string
+  /**
+   * P7a-4 — the standing "these are due by <date>" line, while any safety
+   * answer is still outstanding. `{pro}` and `{deadline}`.
+   *
+   * A DATE, never a countdown: a thread is re-read days later, and "2 days
+   * left" is wrong the moment she closes the app.
+   */
+  prepDeadlineDue: string
   /**
    * Posted once the analysis has produced an estimate for an already-booked
    * consult — the moment the provisional price firms up. `{pro}`.
@@ -1223,6 +1272,8 @@ export type BrandConfig = {
   clientConsultCapture: BrandClientConsultCaptureCopy
   clientConsultBooking: BrandClientConsultBookingCopy
   clientConsultThread: BrandClientConsultThreadCopy
+  /** P7a-4 — the escalating prep-deadline reminders. */
+  clientConsultPrep: BrandClientConsultPrepCopy
   clientConsultPlanDiff: BrandClientConsultPlanDiffCopy
   clientConsultInspiration: BrandClientConsultInspirationCopy
   home: BrandHomeCopy

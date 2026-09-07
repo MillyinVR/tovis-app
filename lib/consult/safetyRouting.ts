@@ -43,7 +43,18 @@ export function isStrandTestOptionalAddOn(args: {
   )
 }
 
-const NON_COLOR_TREATMENT_KEYS = [
+/**
+ * The non-colour treatment-history keys, across every version of the colour
+ * pack. v2 asked perm / relaxer / keratin separately; v3 folded them into
+ * `other_chemical_history`, which carries the identical option values — so the
+ * one list serves both, and a session pinned to either version routes the same.
+ *
+ * Exported because P7a-4's prep deadline has to know WHICH questions are the
+ * safety ones, and deriving that set from this constant is what stops the two
+ * drifting: a key added here is a key prep starts requiring, with no second
+ * edit.
+ */
+export const CONSULT_NON_COLOR_TREATMENT_KEYS = [
   'henna_plant_dye_history',
   'perm_history',
   'relaxer_texturizer_history',
@@ -54,7 +65,7 @@ const NON_COLOR_TREATMENT_KEYS = [
 export function hasReportedNonColorTreatment(
   intake: Readonly<ConsultIntakeAnswerMapDTO>,
 ): boolean {
-  return NON_COLOR_TREATMENT_KEYS.some((key) => {
+  return CONSULT_NON_COLOR_TREATMENT_KEYS.some((key) => {
     const value = intake[key]
     return Boolean(value && value !== 'never' && value !== 'not-sure')
   })
@@ -66,7 +77,7 @@ export function hasUnknownChemicalHistory(
   return [
     'box_dye_history',
     'prior_lightening',
-    ...NON_COLOR_TREATMENT_KEYS,
+    ...CONSULT_NON_COLOR_TREATMENT_KEYS,
   ].some((key) => intake[key] === 'not-sure')
 }
 

@@ -340,6 +340,7 @@
         "AI_CONSULT_INVITATION",
         "AI_CONSULT_ANALYSIS_READY",
         "AI_CONSULT_ANALYSIS_FAILED",
+        "CONSULT_PREP_REMINDER",
         "BOOKING_STARTED",
         "BOOKING_RESCHEDULED",
         "BOOKING_CANCELLED_BY_CLIENT",
@@ -10983,6 +10984,45 @@
       ],
       "type": "object"
     },
+    "ConsultPrepBadge": {
+      "properties": {
+        "description": {
+          "description": "Plain-words expansion for tooltips and screen readers (never a shape).",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/definitions/ConsultPrepBadgeState"
+        },
+        "label": {
+          "description": "The short display words — what a pill prints.",
+          "type": "string"
+        },
+        "significant": {
+          "description": "false = render nothing anywhere. See the module note.",
+          "type": "boolean"
+        },
+        "tone": {
+          "$ref": "#/definitions/BadgeTone"
+        }
+      },
+      "required": [
+        "kind",
+        "label",
+        "description",
+        "tone",
+        "significant"
+      ],
+      "type": "object"
+    },
+    "ConsultPrepBadgeState": {
+      "enum": [
+        "NO_CONSULT",
+        "COMPLETE",
+        "INCOMPLETE",
+        "OVERDUE"
+      ],
+      "type": "string"
+    },
     "ConsultProBriefDTO": {
       "properties": {
         "achievabilityDirection": {
@@ -16154,6 +16194,10 @@
         "clientConfirmation": {
           "$ref": "#/definitions/ClientConfirmationBadge",
           "description": "Client-confirmation state (K11), derived by lib/booking/clientConfirmation.ts. OPTIONAL and absent when confirmation was never requested — every row until K12 ships the writers — so today's payload is byte-identical to pre-K11 and an old fixture still validates."
+        },
+        "consultPrep": {
+          "$ref": "#/definitions/ConsultPrepBadge",
+          "description": "P7a-4 — the day-of prep flag, derived by lib/consult/prepBadge.ts. OPTIONAL and absent for every booking with no consult attached (the overwhelming majority), so an untouched row serialises byte-identically to pre-P7a-4 and an old iOS fixture still validates. A NEW PROPERTY, deliberately not a new union member — the cross-repo fixture guard treats those very differently.\n\nThe pro's SCHEDULE renders it and nothing more: an unanswered safety question is a prompt to reach out, never a block on the appointment."
         },
         "durationMinutes": {
           "type": "number"

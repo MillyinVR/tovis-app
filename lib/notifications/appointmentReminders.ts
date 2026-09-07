@@ -866,11 +866,20 @@ export async function validateDueAppointmentReminder(args: {
  * still-pending exactly like the cancel path, so a row settled by a concurrent
  * writer between validation and here is left alone.
  */
+/**
+ * Re-arm one due row at a new instant.
+ *
+ * A ROW operation, not an appointment-specific one — P7a-4's prep reminders
+ * re-arm through it too (lib/notifications/consultPrepReminders.ts), which is
+ * why `data` is the scheduled row's payload type rather than this file's. The
+ * validator that produced the payload is the one that owns its shape; this
+ * function only moves the row.
+ */
 export async function rescheduleDueAppointmentReminder(args: {
   tx: Prisma.TransactionClient
   scheduledClientNotificationId: string
   runAt: Date
-  data: AppointmentReminderPayload
+  data: Prisma.InputJsonObject
 }): Promise<void> {
   const runAt = normalizeDateOrNull(args.runAt)
   if (!runAt) {

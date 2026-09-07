@@ -10,6 +10,7 @@ import {
 import { createHash } from 'node:crypto'
 
 import { defaultClientConsultInspirationCopy } from '@/lib/brand/defaultClientConsultInspirationCopy'
+import { syncConsultPrepReminders } from '@/lib/notifications/consultPrepReminders'
 import { prisma } from '@/lib/prisma'
 
 import {
@@ -1272,6 +1273,23 @@ export async function appendConsultIntakeRevision(args: {
     await recordLockedConsultRerunRequest(tx, {
       consultSessionId: args.consultSessionId,
       actor: args.actor,
+    })
+
+    // P7a-4: every intake answer re-plans the prep escalation, because every
+    // answer can be the one that finishes it. `syncConsultPrepReminders`
+    // cancels the pending rows and re-plans from the answers as they now
+    // stand — so a completed prep plans nothing, which IS "reminders stop when
+    // prep completes". A consult with no appointment yet plans nothing either
+    // and is re-planned by the same call once she books.
+    //
+    // Inside the lock, on this tx: the reminders must not survive a write that
+    // rolls back, and a client who answered the last question must never be
+    // reminded about it afterwards because the cancel happened on a separate
+    // connection that lost the race.
+    await syncConsultPrepReminders({
+      tx,
+      consultSessionId: args.consultSessionId,
+      now,
     })
 
     if (input.complete && status === ConsultSessionStatus.INTAKE_IN_PROGRESS) {

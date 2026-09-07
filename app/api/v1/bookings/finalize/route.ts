@@ -30,6 +30,7 @@ import {
 } from '@/app/api/_utils/bookingResponses'
 import { normalizeLocationType } from '@/lib/booking/locationContext'
 import { MAX_CONSULT_ENHANCEMENT_LINE_IDS } from '@/lib/consult/enhancementOffer'
+import { notifyConsultPrepStarted } from '@/lib/notifications/consultPrepReminders'
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 import { broadcastChange } from '@/lib/live/broadcastAudience'
 import { getClientSubmittedBookingStatus } from '@/lib/booking/statusRules'
@@ -875,6 +876,14 @@ export async function POST(request: Request) {
             error: safeError(notificationError),
           })
         }
+
+        // P7a-4 — the spark's "you're booked, and here's when the safety
+        // answers are due" reminder. Here, beside the pro notification, because
+        // this block runs AFTER the transaction commits: a client must never be
+        // told about an appointment whose write then rolls back. It resolves
+        // the consult from the booking's own stamped link, never from the
+        // request, and never throws.
+        await notifyConsultPrepStarted({ bookingId: result.booking.id })
 
         const referralArgs = {
           clientId: ownership.clientId,

@@ -38,11 +38,13 @@ import { mapsHrefFromLocation } from '@/lib/maps'
 import { paymentMethodLabel } from '@/lib/payments/acceptedMethods'
 import { resolveChargeCurrency } from '@/lib/payments/resolveChargeCurrency'
 import ProConsultBrief from '@/app/pro/_components/consult/ProConsultBrief'
+import ProConsultPrepStatus from '@/app/pro/_components/consult/ProConsultPrepStatus'
 import ProConsultProposalReview from '@/app/pro/_components/consult/ProConsultProposalReview'
 import {
   loadAuthorizedProConsultBriefs,
   ProConsultBriefError,
 } from '@/lib/consult/proBrief'
+import { loadProBookingPrepStatus } from '@/lib/consult/proPrepStatus'
 import {
   loadAuthorizedProProposalReview,
   ProProposalReviewError,
@@ -277,6 +279,16 @@ export default async function ProBookingDetailPage(props: {
     }
     throw error
   })
+
+  // P7a-4 — prep state for this booking, whatever the consult's status. The
+  // Brief above is COMPLETED-only by design, so it can never carry the one
+  // thing the pro needs before the appointment: what is still outstanding.
+  // Never blocks the page — a prep read that fails must not cost the pro their
+  // booking screen.
+  const prepStatus = await loadProBookingPrepStatus(prisma, {
+    bookingId: booking.id,
+    professionalId: proId,
+  }).catch(() => null)
 
   // Book the Look, B5 — the pro's review of what this client committed to.
   // Null for the overwhelming majority of bookings, which carry no proposal;
@@ -627,6 +639,8 @@ export default async function ProBookingDetailPage(props: {
       </section>
 
       {reviewBeforeDecision ? null : proposalReviewSection}
+
+      {prepStatus ? <ProConsultPrepStatus prep={prepStatus} /> : null}
 
       {consultBriefs.length ? (
         <section className="tovis-glass mb-3.5 rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4">

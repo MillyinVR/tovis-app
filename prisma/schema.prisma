@@ -649,6 +649,14 @@ enum NotificationEventKey {
   /// P4b: the run exhausted its attempts. Carries no failure detail, only the
   /// door back to the retry.
   AI_CONSULT_ANALYSIS_FAILED
+  /// P7a-4: the safety answers are due before the appointment, and this is the
+  /// escalating nudge toward that deadline (72h and 24h before it, then the
+  /// deadline itself; the "you're booked" one is emitted immediately, not
+  /// scheduled). ONE key for every stage — the stage rides in the scheduled
+  /// row's payload, exactly as APPOINTMENT_REMINDER carries its lead time —
+  /// because a client's preference is about prep, not about which of four
+  /// nudges she wants. Stops the moment prep completes or the booking dies.
+  CONSULT_PREP_REMINDER
   BOOKING_STARTED
   BOOKING_RESCHEDULED
   BOOKING_CANCELLED_BY_CLIENT

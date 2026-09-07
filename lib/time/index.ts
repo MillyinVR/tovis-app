@@ -135,4 +135,4 @@ export {
 } from '@/lib/time/relativeTime'
 
 // Fixed elapsed-duration math (not local calendar-day arithmetic).
-export { addElapsedDays } from '@/lib/time/instant'
+export { addElapsedDays, addElapsedHours } from '@/lib/time/instant'

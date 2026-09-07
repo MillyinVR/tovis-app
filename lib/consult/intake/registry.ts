@@ -304,6 +304,39 @@ export function resolveConsultSessionIntakePack(
 }
 
 /**
+ * The pinned pack AND the latest answers under it, in one call.
+ *
+ * Three contracts already hand-rolled this exact pair (analysis, intake,
+ * follow-up): resolve the version this session is pinned to, then normalize the
+ * newest revision against THAT version. It is extracted here because P7a-4's
+ * prep state needs the same pair, and a fourth copy of a rule about which
+ * answers are current is a fourth place for it to go wrong.
+ *
+ * `payloads` are the session's INTAKE revision payloads, NEWEST FIRST — the
+ * same input `resolveConsultSessionIntakePack` takes.
+ *
+ * A null `payload` means "nothing readable under the pinned pack": no intake
+ * yet, or a newest revision written under a pack this session no longer
+ * serves. Callers treat that as no answers, never as an error — a client who
+ * has not started her intake has answered nothing, which is a state, not a
+ * fault.
+ */
+export function resolveConsultSessionIntakeState(
+  currentPack: ConsultIntakePackDefinition,
+  payloads: readonly unknown[],
+): { pack: ConsultIntakePackDefinition; payload: ConsultIntakePayload | null } {
+  const pack = resolveConsultSessionIntakePack(currentPack, payloads)
+  const newest = payloads[0]
+  return {
+    pack,
+    payload:
+      newest === undefined
+        ? null
+        : normalizeConsultIntakePayloadForPack(pack, newest),
+  }
+}
+
+/**
  * Stored answer codes → the question and option labels the client actually
  * saw, in pack order. Unanswered questions and codes the pack does not know are
  * skipped, so an old revision read against a newer pack loses items rather

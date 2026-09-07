@@ -11,6 +11,7 @@ import { clientConfirmationLoopEnabled } from '@/lib/booking/clientConfirmationL
 import { armAppointmentConfirmationAsk } from '@/lib/booking/writeBoundary'
 import { validateDueReviewRequest } from '@/lib/notifications/reviewRequests'
 import { validateDueDepositReminder } from '@/lib/notifications/depositReminders'
+import { validateDueConsultPrepReminder } from '@/lib/notifications/consultPrepReminders'
 import { upsertClientNotification } from '@/lib/notifications/clientNotifications'
 import { prisma } from '@/lib/prisma'
 import { NotificationEventKey, Prisma } from '@prisma/client'
@@ -37,6 +38,11 @@ const DRAINED_EVENT_KEYS = [
   NotificationEventKey.APPOINTMENT_REMINDER,
   NotificationEventKey.REVIEW_REQUESTED,
   NotificationEventKey.DEPOSIT_REMINDER,
+  // P7a-4. Drains here rather than in a job of its own because it is the same
+  // shape as its three neighbours — a scheduled client row whose truth has to
+  // be re-derived at the moment it fires — and a second cron would be a second
+  // place for that rule to drift.
+  NotificationEventKey.CONSULT_PREP_REMINDER,
 ] as const
 
 const dueReminderCandidateSelect = {
@@ -149,11 +155,17 @@ async function processReminder(args: {
                 scheduledClientNotificationId: args.rowId,
                 now: args.now,
               })
-            : await validateDueAppointmentReminder({
-                tx,
-                scheduledClientNotificationId: args.rowId,
-                now: args.now,
-              })
+            : args.eventKey === NotificationEventKey.CONSULT_PREP_REMINDER
+              ? await validateDueConsultPrepReminder({
+                  tx,
+                  scheduledClientNotificationId: args.rowId,
+                  now: args.now,
+                })
+              : await validateDueAppointmentReminder({
+                  tx,
+                  scheduledClientNotificationId: args.rowId,
+                  now: args.now,
+                })
 
       if (validation.action === 'SKIP') {
         return {
@@ -177,9 +189,11 @@ async function processReminder(args: {
         }
       }
 
-      // Only the appointment-reminder validator can return this: the booking
-      // moved and the row is now firing early, so re-arm it at the canonical
-      // instant instead of cancelling a reminder nothing would ever re-plan.
+      // Returned by the appointment-reminder and consult-prep validators: the
+      // booking moved and the row is now firing early, so re-arm it at the
+      // canonical instant instead of cancelling a reminder nothing would ever
+      // re-plan. The two helpers below are row operations, not
+      // appointment-specific ones, so both kinds reuse them.
       if (validation.action === 'RESCHEDULE') {
         await rescheduleDueAppointmentReminder({
           tx,
