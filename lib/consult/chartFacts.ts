@@ -201,4 +201,3 @@ export async function loadClientChartFacts(args: {
   }
   return args.tx ? read(args.tx) : prisma.$transaction(read, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead })
 }
-
