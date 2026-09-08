@@ -1,3 +1,6 @@
+import { answerVisualInspiration } from './_support/visualInspiration'
+import { appendLockedConsultInspirationRevision } from '@/lib/consult/writeBoundary'
+import { lockConsultSessionRow } from '@/lib/consult/inspirationContract'
 // tests/integration/consult-look-anchor.test.ts
 //
 // Book the Look, slice B2 (docs/product/BOOK-THE-LOOK-DIRECTION.md): a consult
@@ -719,6 +722,7 @@ async function consentAndCompleteIntake(sessionId: string, label: string) {
 
 async function answerInspiration(sessionId: string, label: string) {
   for (const [questionKey, selectedValues] of INSPIRATION_ANSWERS) {
+    if (questionKey === 'understanding_check') await answerVisualInspiration({ consultSessionId: sessionId, clientId, actorUserId: clientUserId, label })
     await answerConsultInspirationQuestion({
       consultSessionId: sessionId,
       clientId,
@@ -2110,7 +2114,7 @@ describe('P5b — the reference is read in its own MEDIA_READY stage', () => {
    * STORED artefact and the STORED payload rather than from anything held in
    * memory by the test.
    */
-  it('builds cards from the reading, writes a prep answer through the live guard, and hands the pairs to the analysis', async () => {
+  it('keeps an archived v4 region consultation readable and writable through the live guard', async () => {
     captured.analysisInputs.length = 0
     captured.inspirationCalls = 0
     captured.inspirationFailure = null
@@ -2119,6 +2123,17 @@ describe('P5b — the reference is read in its own MEDIA_READY stage', () => {
     const sessionId = ((await body(created)).consult as { id: string }).id
     if (!sessionIds.includes(sessionId)) sessionIds.push(sessionId)
     await consentAndCompleteIntake(sessionId, 'p5d')
+    // A real persisted v4 session must keep its two region cards after v5 ships.
+    const source = await db.consultInspiration.findFirstOrThrow({ where: { consultSessionId: sessionId, status: ConsultInspirationStatus.ATTACHED } })
+    await db.$transaction(async (tx) => {
+      await lockConsultSessionRow(tx, sessionId, 'UPDATE')
+      await appendLockedConsultInspirationRevision(tx, {
+        consultSessionId: sessionId, schemaVersion: 2, idempotencyKey: 'archived-v4', requestHash: 'c'.repeat(64),
+        actor: { type: ConsultActorType.CLIENT, id: clientUserId },
+        payload: { packId: 'hair-color-inspiration', packVersion: 4, schemaVersion: 2, source: source.source, inspirationId: source.id, complete: false, answers: {}, catalogGuidance: [] },
+      })
+    })
+
 
     // Before the read there is no reading, so there are no prep cards — only
     // the three coarse ones, cropping to the whole reference.

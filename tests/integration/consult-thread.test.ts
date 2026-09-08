@@ -87,7 +87,8 @@ import { defaultClientConsultCaptureCopy } from '@/lib/brand/defaultClientConsul
 import { defaultClientConsultInspirationCopy } from '@/lib/brand/defaultClientConsultInspirationCopy'
 import { defaultClientConsultPlanDiffCopy } from '@/lib/brand/defaultClientConsultPlanDiffCopy'
 import { defaultClientConsultThreadCopy } from '@/lib/brand/defaultClientConsultThreadCopy'
-import { answerConsultInspirationQuestion } from '@/lib/consult/inspirationContract'
+import { readConsultInspiration } from '@/lib/consult/inspirationAnalysisContract'
+import { answerConsultInspirationQuestion, loadConsultInspirationState, requireCompletedConsultInspiration } from '@/lib/consult/inspirationContract'
 import {
   HAIR_COLOR_INTAKE_PACK_VERSION,
   HAIR_COLOR_INTAKE_SCHEMA_VERSION,
@@ -921,6 +922,70 @@ describe('consult thread projection', () => {
     expect(t.messages[t.messages.length - 1]?.kind).toBe('PLAN')
   })
 
+  it('withdraws completion if a late photo reading reveals unanswered visual questions', async () => {
+    const sessionId = await startConsult()
+    await acceptBothAgreements(sessionId)
+    for (const [questionKey, selectedValues] of INSPIRATION_ANSWERS) {
+      await answerConsultInspirationQuestion({
+        consultSessionId: sessionId, clientId: fx.clientId,
+        actor: { type: ConsultActorType.CLIENT, id: fx.clientUserId },
+        input: { schemaVersion: INSPIRATION_SCHEMA_VERSION, questionKey, selectedValues, idempotencyKey: `late-${questionKey}` },
+      })
+    }
+    await readConsultInspiration({ consultSessionId: sessionId, clientId: fx.clientId, actor: { type: ConsultActorType.CLIENT, id: fx.clientUserId }, idempotencyKey: 'late-reference' })
+    const state = await loadConsultInspirationState({ consultSessionId: sessionId, clientId: fx.clientId, actorUserId: fx.clientUserId })
+    expect(state.progress.canComplete).toBe(false)
+    expect(state.progress.currentQuestion?.key).toBe('color_roots')
+    expect(state.cards?.some((card) => card.questionKey === 'understanding_check')).toBe(false)
+    await expect(requireCompletedConsultInspiration(db, { consultSessionId: sessionId, clientId: fx.clientId, professionalId: fx.professionalId, now: new Date() })).rejects.toMatchObject({ code: 'ANALYSIS_PREREQUISITES_REQUIRED' })
+  })
+
+  it('walks actual reference crops before confirmation, rejects hidden choices, and keeps edited goals honest', async () => {
+    const sessionId = await startConsult()
+    await acceptBothAgreements(sessionId)
+    const scope = { consultSessionId: sessionId, clientId: fx.clientId, actorUserId: fx.clientUserId }
+    const actor = { type: ConsultActorType.CLIENT, id: fx.clientUserId }
+    let sequence = 0
+    const answer = (questionKey: string, value: string) => answerConsultInspirationQuestion({
+      consultSessionId: sessionId, clientId: fx.clientId, actor,
+      input: { schemaVersion: INSPIRATION_SCHEMA_VERSION, questionKey, selectedValues: [value], idempotencyKey: `visual-${++sequence}` },
+    })
+    // Reference reading is the existing bounded provider call, before the questions.
+    await readConsultInspiration({ ...scope, actor, idempotencyKey: 'visual-reference' })
+    await answer('spark_focus', 'the-color')
+    await answer('keep_as_is', 'my-natural-roots')
+    await answer('look_match', 'adapt-selected-parts')
+    const before = await loadConsultInspirationState(scope)
+    expect(before.cards?.some((card) => card.questionKey === 'color_roots')).toBe(false)
+    expect(before.progress.currentQuestion?.key).toBe('color_root_blend')
+    expect(before.cards?.find((card) => card.questionKey === 'color_root_blend')?.region).not.toBeNull()
+    await expect(answer('color_roots', 'change-base')).rejects.toMatchObject({ code: 'INSPIRATION_QUESTION_OUT_OF_ORDER' })
+    await expect(answer('color_root_blend', 'closer-to-roots')).rejects.toMatchObject({ code: 'INSPIRATION_QUESTION_OUT_OF_ORDER' })
+    await expect(answer('understanding_check', 'thats-right')).rejects.toMatchObject({ code: 'INSPIRATION_QUESTION_OUT_OF_ORDER' })
+    await answer('color_root_blend', 'match-reference')
+    // Follow the server's actual applicable sequence, including UNKNOWN skips.
+    for (let step = 0; step < 10; step += 1) {
+      const state = await loadConsultInspirationState(scope)
+      const question = state.progress.currentQuestion
+      if (!question || question.key === 'understanding_check') break
+      await answer(question.key, question.key === 'color_tone' ? 'different-tone' : 'not-sure')
+    }
+    const check = await loadConsultInspirationState(scope)
+    expect(check.progress.currentQuestion?.key).toBe('understanding_check')
+    expect(check.progress.currentQuestion?.label).toContain('different shade, still to be chosen visually')
+    await answer('understanding_check', 'thats-right')
+    expect((await loadConsultInspirationState(scope)).progress.canComplete).toBe(true)
+    const completed = await requireCompletedConsultInspiration(db, { consultSessionId: sessionId, clientId: fx.clientId, professionalId: fx.professionalId, now: new Date() })
+    expect(completed.preferences.wants).not.toContain('tone:COOL')
+    expect(completed.preferences.wants.join(' ')).toContain('different shade')
+    await answer('spark_focus', 'the-layers')
+    const edited = await loadConsultInspirationState(scope)
+    expect(edited.latestReview?.answers.some((item) => item.questionKey.startsWith('color_'))).toBe(false)
+    expect(edited.progress.canComplete).toBe(false)
+    const projected = await thread(sessionId)
+    expect(ofKind(projected.messages, 'INSPIRATION').some((message) => message.card?.questionKey.startsWith('color_'))).toBe(false)
+  })
+
   it('answers the inspiration step as a card, not as a wizard step', async () => {
     const sessionId = await startConsult()
     await acceptBothAgreements(sessionId)
@@ -945,9 +1010,6 @@ describe('consult thread projection', () => {
     expect(inspiration.map((message) => message.id)).toEqual([
       'inspiration',
       'inspiration:spark_focus',
-      'inspiration:keep_as_is',
-      'inspiration:look_match',
-      'inspiration:understanding_check',
     ])
     // 🔴 DONE, not OPEN: for a card consult this message is a bubble and the
     // reference. The open step is the CARD, so resume lands on the thing she
@@ -986,10 +1048,10 @@ describe('consult thread projection', () => {
     for (const option of spark.card?.optionRegions ?? []) {
       expect(option.region).toBeNull()
     }
-    expect(inspiration[2]?.state).toBe('BLOCKED')
+    expect(inspiration[2]).toBeUndefined()
     // The understanding check's text is COMPOSED by the server. With nothing
     // answered yet it is the honest fallback, naming the pro.
-    expect(inspiration.find((message) => message.card?.questionKey === 'understanding_check')?.card?.question.label).toContain('work out the details')
+    expect(inspiration.some((message) => message.card?.questionKey === 'understanding_check')).toBe(false)
 
     for (const [questionKey, selectedValues] of INSPIRATION_ANSWERS) {
       await answerConsultInspirationQuestion({

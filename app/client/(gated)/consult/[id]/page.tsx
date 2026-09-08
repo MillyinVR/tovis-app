@@ -10,7 +10,7 @@ import ClientConsultFlow from './ClientConsultFlow'
 export const dynamic = 'force-dynamic'
 
 type PageProps = {
-  params: Promise<{ id: string }> | { id: string }
+  params: Promise<{ id: string }>
 }
 
 export default async function ClientConsultFlowPage({ params }: PageProps) {

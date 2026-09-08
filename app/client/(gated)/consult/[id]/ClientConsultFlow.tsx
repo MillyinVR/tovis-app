@@ -2107,6 +2107,9 @@ function InspirationRegionCrop({
     }
   }, [])
 
+  const cropAspect = natural
+    ? ((region && region.w > 0 && region.h > 0 ? region.w / region.h : 1) * natural.w) / natural.h
+    : 1
   const box =
     region && region.w > 0 && region.h > 0
       ? {
@@ -2153,7 +2156,9 @@ function InspirationRegionCrop({
         aria-label={`${alt} — tap to see the whole photo`}
         data-testid="consult-inspiration-crop"
         className="block w-full overflow-hidden rounded-xl border border-surfaceGlass/10 bg-bgSurface"
-        style={box}
+        // Keep the zoom and its question together on wide screens. The
+        // aspect stays exact; only the rendered size is capped.
+        style={{ ...box, maxWidth: `${320 * cropAspect}px`, marginInline: 'auto' }}
       />
     </>
   )

@@ -1,3 +1,4 @@
+import { hairVisualDialogueCards } from '../visualDialogue'
 // lib/consult/inspiration/packs/hairGeneral.ts
 //
 // The guided-inspiration pack every HAIR-family category that is not colour
@@ -170,9 +171,18 @@ export const HAIR_GENERAL_INSPIRATION_CARD_PACK_V2: ConsultInspirationPackDefini
 }
 
 /** New sessions distinguish attraction, preservation and how closely to match. */
-export const HAIR_GENERAL_INSPIRATION_CARD_PACK: ConsultInspirationPackDefinition = {
+export const HAIR_GENERAL_INSPIRATION_CARD_PACK_V3: ConsultInspirationPackDefinition = {
   ...HAIR_GENERAL_INSPIRATION_CARD_PACK_V2,
   version: 3,
   questions: hairOutcomeCards(),
+  possibleMeanings: HAIR_OUTCOME_MEANINGS,
+}
+
+/** Visual questions are pinned separately so an existing consultation keeps its vocabulary. */
+export const HAIR_GENERAL_INSPIRATION_CARD_PACK: ConsultInspirationPackDefinition = {
+  ...HAIR_GENERAL_INSPIRATION_CARD_PACK_V3,
+  version: 4,
+  adaptiveVisualDialogue: true,
+  questions: hairVisualDialogueCards(),
   possibleMeanings: HAIR_OUTCOME_MEANINGS,
 }

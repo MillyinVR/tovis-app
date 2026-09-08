@@ -1,3 +1,5 @@
+import { readConsultInspiration } from '@/lib/consult/inspirationAnalysisContract'
+import { answerVisualInspiration } from './visualInspiration'
 // tests/integration/_support/lookConsultFixture.ts
 //
 // The shared fixture for Book the Look's integration suites: one seeded pro
@@ -332,7 +334,9 @@ export async function runConsultToCompletion(
       answers,
     }),
   })
+  await readConsultInspiration({ consultSessionId: sessionId, clientId: fx.clientId, actor: { type: ConsultActorType.CLIENT, id: fx.clientUserId }, idempotencyKey: `${label}-reference` })
   for (const [questionKey, selectedValues] of INSPIRATION_ANSWERS) {
+    if (questionKey === 'understanding_check') await answerVisualInspiration({ consultSessionId: sessionId, clientId: fx.clientId, actorUserId: fx.clientUserId, label })
     await answerConsultInspirationQuestion({
       consultSessionId: sessionId,
       clientId: fx.clientId,

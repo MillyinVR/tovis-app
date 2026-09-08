@@ -102,6 +102,10 @@ export const CONSULT_INSPIRATION_FORBIDDEN_WORDS =
  * the fine per-attribute zoom cards that come AFTER the booking, as "help
  * <pro> get ready".
  *
+ * New adaptive hair packs also put supported visual questions in COARSE,
+ * before confirmation. Their applicability is evaluated from the reading and
+ * earlier answers. Archived PREP behavior remains unchanged.
+ *
  * 🔴 Only COARSE decides completion. A prep card exists only where the reading
  * actually saw something, so requiring one would make a consult whose
  * reference could not be read — or whose family has no reading at all —
@@ -130,6 +134,8 @@ export type ConsultInspirationPackQuestion = Omit<
   /** Only explicitly selected features can point to a catalogue detail. */
   readonly valueCatalogDetails?: Readonly<Record<string, ConsultInspirationCatalogDetail>>
   readonly tier: ConsultInspirationCardTier
+  /** Image-specific, answer-dependent question; archived packs leave this absent. */
+  readonly visualDialogue?: boolean
   /**
    * The analysis attribute this card is about, and therefore the region it
    * crops to. Null for a card that is not about one attribute (the coarse
@@ -233,6 +239,7 @@ export type ConsultInspirationPackDefinition = {
   readonly version: number
   readonly schemaVersion: number
   readonly reflectionPromptKey: ConsultInspirationReflectionPromptKey
+  readonly adaptiveVisualDialogue?: boolean
   readonly questions: readonly ConsultInspirationPackQuestion[]
   /**
    * `${questionKey}:${optionValue}` → what a professional may READ into that
