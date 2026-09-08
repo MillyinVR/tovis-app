@@ -113,19 +113,21 @@ export type ConsultThreadBooking = Prisma.BookingGetPayload<{
 }>
 
 export async function resolveThreadBooking(
-  db: typeof prisma,
+  db: Pick<Prisma.TransactionClient, 'booking'>,
   args: {
     consultSessionId: string
     clientId: string
     professionalId: string
     anchorLookPostId: string | null
     consultCreatedAt: Date
+    /** Deletion must also preserve records of past appointments. */
+    includePastBookings?: boolean
   },
 ): Promise<ConsultThreadBooking | null> {
   const linked = await db.booking.findFirst({
     where: {
       sourceConsultSessionId: args.consultSessionId,
-      status: { in: LIVE_BOOKING_STATUSES },
+      ...(args.includePastBookings ? {} : { status: { in: LIVE_BOOKING_STATUSES } }),
     },
     select: CONSULT_THREAD_BOOKING_SELECT,
   })
@@ -141,7 +143,7 @@ export async function resolveThreadBooking(
     where: {
       clientId: args.clientId,
       professionalId: args.professionalId,
-      status: { in: LIVE_BOOKING_STATUSES },
+      ...(args.includePastBookings ? {} : { status: { in: LIVE_BOOKING_STATUSES } }),
       sourceLookPostId: args.anchorLookPostId,
       // Unlinked only. A booking that HAS a link belongs to whichever consult
       // the boundary validated it against, and it is not this one.

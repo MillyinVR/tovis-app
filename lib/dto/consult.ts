@@ -2347,3 +2347,16 @@ export type ConsultThreadDTO = {
 export type ConsultThreadResponseDTO = {
   thread: ConsultThreadDTO
 }
+
+/** Content-free Home list; private answers and photos stay behind the consult. */
+export type ClientConsultSessionsDTO = {
+  consultations: Array<{
+    id: string
+    lookPostId: string
+    professionalId: string
+    professionalName: string | null
+    updatedAt: string
+    canResume: boolean
+  }>
+  nextCursor: string | null
+}

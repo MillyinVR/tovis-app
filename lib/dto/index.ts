@@ -711,3 +711,5 @@ export type {
   ConsultThreadDTO,
   ConsultThreadResponseDTO,
 } from '@/lib/dto/consult'
+
+export type { ClientConsultSessionsDTO } from './consult'

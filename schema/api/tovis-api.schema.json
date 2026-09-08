@@ -4348,6 +4348,59 @@
     "ClientConsentKind": {
       "$ref": "#/definitions/%24Enums.ClientConsentKind"
     },
+    "ClientConsultSessionsDTO": {
+      "description": "Content-free Home list; private answers and photos stay behind the consult.",
+      "properties": {
+        "consultations": {
+          "items": {
+            "properties": {
+              "canResume": {
+                "type": "boolean"
+              },
+              "id": {
+                "type": "string"
+              },
+              "lookPostId": {
+                "type": "string"
+              },
+              "professionalId": {
+                "type": "string"
+              },
+              "professionalName": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "updatedAt": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "lookPostId",
+              "professionalId",
+              "professionalName",
+              "updatedAt",
+              "canResume"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "consultations",
+        "nextCursor"
+      ],
+      "type": "object"
+    },
     "ClientCreatorTier": {
       "$ref": "#/definitions/%24Enums.ClientCreatorTier"
     },

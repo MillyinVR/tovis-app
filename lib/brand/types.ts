@@ -767,6 +767,12 @@ export type BrandClientConsultPrepCopy = {
 }
 
 export type BrandClientConsultThreadCopy = {
+  homeSessions: {
+    title: string; empty: string; resume: string; delete: string; confirmTitle: string;
+    confirmBody: string; keep: string; deleting: string; failed: string; loadFailed: string;
+    retry: string; more: string; proFallback: string; stopped: string;
+  }
+
   /** The first bubble, when the service is known / when it is not. */
   openingWithService: string
   opening: string

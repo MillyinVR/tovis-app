@@ -11,6 +11,14 @@ import type { BrandClientConsultThreadCopy } from './types'
 // see", never a question that sounds like a test, and never a step that reads
 // as the app protecting itself from the client.
 export const defaultClientConsultThreadCopy: BrandClientConsultThreadCopy = {
+  homeSessions: {
+    title: 'Your look consultations', empty: 'Start with a look you love. Your unbooked consultations will be here.',
+    resume: 'Continue consultation', delete: 'Delete consultation', confirmTitle: 'Delete this consultation?',
+    confirmBody: 'Your answers and temporary consult photos will be deleted. You can start this look again. Photos already saved to your chart stay on your chart.',
+    keep: 'Keep consultation', deleting: 'Deleting…', failed: 'We couldn’t finish deleting this consultation. Please try again.',
+    loadFailed: 'We couldn’t load your consultations.', retry: 'Try again', more: 'Show more', proFallback: 'Your pro',
+    stopped: 'This consultation can’t be continued. You can delete it here.',
+  },
   openingWithService:
     'Love this one. Let’s work out what it would take on your {service} — a few taps, then you can book.',
   opening:
