@@ -130,6 +130,10 @@ async function tapsToThePhotoStep(
           status: 200,
           headers: { 'content-type': 'application/json' },
         })
+      if (url.endsWith('/intake') && init?.method !== 'POST') return body({ intake: {
+        latestRevision: Object.keys(answers).length ? { answers, complete: completed } : null,
+        progress: evaluateConsultIntakeProgress(pack, answers), questionPack: toConsultIntakeQuestionPackDTO(pack),
+      } })
       if (url.endsWith('/intake') && init?.method === 'POST') {
         const sent = JSON.parse(String(init.body)) as {
           answers: Record<string, string>
@@ -150,6 +154,7 @@ async function tapsToThePhotoStep(
         completed = sent.complete
         return body({
           intake: {
+            latestRevision: { answers, complete: completed },
             progress: evaluateConsultIntakeProgress(pack, answers),
             questionPack: toConsultIntakeQuestionPackDTO(pack),
           },

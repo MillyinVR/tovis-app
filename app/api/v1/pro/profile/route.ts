@@ -1,4 +1,5 @@
 // app/api/v1/pro/profile/route.ts
+import { parseConsultProductLines } from '@/lib/consult/mentorSettings'
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { Prisma, ProfessionType, ProNameDisplay } from '@prisma/client'
@@ -62,6 +63,8 @@ function prismaErrorToResponse(e: unknown) {
 // native pro-profile editor reads exactly the fields it can write back. Native
 // has no other way to learn its own professionalId (the web server-renders it).
 const PRO_PROFILE_SELECT = {
+  consultMentorEnabled: true,
+  consultProductLines: true,
   id: true,
   businessName: true,
   handle: true,
@@ -138,6 +141,9 @@ export async function PATCH(req: Request) {
       return jsonFail(404, 'Professional profile not found.')
     }
 
+    if (body.consultMentorEnabled !== undefined && typeof body.consultMentorEnabled !== 'boolean') return jsonFail(400, 'Invalid mentor setting.')
+    const consultProductLines = body.consultProductLines === undefined ? undefined : parseConsultProductLines(body.consultProductLines)
+    if (consultProductLines === null) return jsonFail(400, 'Enter up to 12 product lines, with at most 80 characters each.')
     const businessName = pickNonEmptyStringOrUndefined(body.businessName)
     const bio = pickNonEmptyStringOrUndefined(body.bio)
     const location = pickNonEmptyStringOrUndefined(body.location)
@@ -246,6 +252,8 @@ export async function PATCH(req: Request) {
     }
 
     const data: Prisma.ProfessionalProfileUpdateInput = {
+      ...(typeof body.consultMentorEnabled === 'boolean' ? { consultMentorEnabled: body.consultMentorEnabled } : {}),
+      ...(consultProductLines !== undefined ? { consultProductLines } : {}),
       ...(businessName !== undefined ? { businessName } : {}),
       ...(bio !== undefined ? { bio } : {}),
       ...(location !== undefined ? { location } : {}),

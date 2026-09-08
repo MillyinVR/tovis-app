@@ -2059,6 +2059,8 @@ model ClientAddress {
 }
 
 model ProfessionalProfile {
+  consultMentorEnabled Boolean @default(false)
+  consultProductLines String[] @default([])
   id     String @id @default(cuid())
   userId String @unique
 
@@ -5324,6 +5326,7 @@ model Reminder {
 // =======================
 
 model MediaAsset {
+  consultChartPhotoUses ConsultChartPhotoUse[]
   id               String    @id @default(cuid())
   professionalId   String
   // Tenant of the owning pro (derived from professional.homeTenantId).
@@ -7733,6 +7736,8 @@ enum ConsultProviderCallOutcome {
 /// Client account deletion removes the session and cascades every revision,
 /// legal acceptance, and audit event.
 model ConsultSession {
+  chartPhotoUses ConsultChartPhotoUse[]
+  chartReviews ConsultChartReview[]
   id String @id @default(cuid())
 
   clientId String
@@ -7865,6 +7870,7 @@ model ConsultInspiration {
 /// the private object is confirmed absent. Quality metadata is bounded and
 /// content-free; image bytes never enter PostgreSQL.
 model ConsultCapture {
+  chartPhotoUse ConsultChartPhotoUse?
   id String @id @default(cuid())
 
   consultSessionId String
@@ -7920,6 +7926,8 @@ model ConsultCapture {
 /// row, preserving exactly what existed before. A database trigger rejects
 /// UPDATEs and rejects inserts unless both legal prerequisites are active.
 model ConsultRevision {
+  chartPhotoSources ConsultAnalysisChartPhoto[]
+  chartReview ConsultChartReview?
   id String @id @default(cuid())
 
   consultSessionId String
@@ -8606,4 +8614,44 @@ model ConsultLookVisitOutcome {
   completedAt DateTime
   createdAt DateTime @default(now())
   @@index([consultSessionId, completedAt])
+}
+
+/// Explicit client confirmations of source-dated chart facts. Intake answers
+/// remain in the canonical immutable revision; this row records their origin.
+model ConsultChartReview {
+  id String @id @default(cuid())
+  consultSessionId String
+  consultSession ConsultSession @relation(fields: [consultSessionId], references: [id], onDelete: Cascade)
+  intakeRevisionId String @unique
+  intakeRevision ConsultRevision @relation(fields: [intakeRevisionId], references: [id], onDelete: Cascade)
+  fingerprint String @db.Char(64)
+  decision String @db.VarChar(16)
+  facts Json
+  createdAt DateTime @default(now())
+  @@index([consultSessionId, createdAt])
+}
+
+/// A client explicitly reused this dated chart image as a new starting photo.
+model ConsultChartPhotoUse {
+  analyses ConsultAnalysisChartPhoto[]
+  id String @id @default(cuid())
+  consultSessionId String
+  consultSession ConsultSession @relation(fields: [consultSessionId], references: [id], onDelete: Cascade)
+  captureId String @unique
+  capture ConsultCapture @relation(fields: [captureId], references: [id], onDelete: Cascade)
+  mediaAssetId String?
+  mediaAsset MediaAsset? @relation(fields: [mediaAssetId], references: [id], onDelete: SetNull)
+  sourceRecordedAt DateTime
+  idempotencyKey String @db.VarChar(128)
+  createdAt DateTime @default(now())
+  @@unique([consultSessionId, idempotencyKey])
+}
+
+/// Exact chart-photo inputs consumed by each immutable analysis revision.
+model ConsultAnalysisChartPhoto {
+  revisionId String
+  photoUseId String
+  revision ConsultRevision @relation(fields: [revisionId], references: [id], onDelete: Cascade)
+  photoUse ConsultChartPhotoUse @relation(fields: [photoUseId], references: [id], onDelete: Cascade)
+  @@id([revisionId, photoUseId])
 }

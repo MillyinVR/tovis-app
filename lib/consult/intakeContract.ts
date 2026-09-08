@@ -25,6 +25,9 @@ import {
 } from '@/lib/personalization/lookEmbeddingStore'
 import { normalizeSelfProfile } from '@/lib/personalization/selfProfile'
 import { prisma } from '@/lib/prisma'
+import { readOptionalEnv } from '@/lib/env'
+import { loadClientChartFacts } from './chartFacts'
+import { buildConsultChartReview } from './chartReview'
 
 import { requireCurrentConsultAgreementAcceptances } from './agreementContract'
 import {
@@ -200,6 +203,7 @@ const CONSULT_INTAKE_PREFILL_SOURCES: readonly ConsultIntakePrefillSourceDTO[] =
   'SAVED_LOOK',
   'TASTE_VECTOR',
   'BOOKING_HISTORY',
+  'CHART_FACT',
 ]
 
 function prefillSignals(
@@ -210,7 +214,7 @@ function prefillSignals(
       suggestion.provenance.map((entry) => entry.source),
     ),
   )
-  return CONSULT_INTAKE_PREFILL_SOURCES.map((source) => ({
+  return CONSULT_INTAKE_PREFILL_SOURCES.filter(source => source !== 'CHART_FACT' || informed.has(source)).map((source) => ({
     source,
     available: informed.has(source),
   }))
@@ -442,6 +446,22 @@ export async function loadConsultIntakeState(args: {
         )
       }
 
+      let chartReview: ConsultIntakeStateDTO['chartReview']
+      // Return candidates, never write answers. The thread offers an explicit
+      // confirmation; normal revision validation owns the client's next tap.
+      if (readOptionalEnv('AI_CONSULT_CHART_PREFILL_ENABLED') === 'true') {
+        const chart = await loadClientChartFacts({ clientId: args.clientId,
+          professionalId: session.professionalId, excludeConsultSessionId: session.id, now, tx })
+        const reviewed = await tx.consultChartReview.findFirst({ where: { consultSessionId: session.id }, select: { id: true } })
+        if (!reviewed) chartReview = buildConsultChartReview({ chart, pack,
+          answers: mapLatestRevision(pack, intakeRevisions)?.answers ?? {} })?.offer
+        for (const fact of chart.facts) {
+          if (fact.source !== 'CLIENT_ANSWER' || fact.state !== 'CONFIRM') continue
+          suggestions.set(fact.key, { value: fact.value, provenance: [{ source: 'CHART_FACT',
+            sourceId: fact.sourceId, recordedAt: fact.recordedAt, validUntil: fact.validUntil }] })
+        }
+      }
+
       // Suggestions are kept only for questions THIS pack asks, with a value
       // the question offers — so colour signals simply fall away on a pack
       // that never asks about colour.
@@ -465,6 +485,7 @@ export async function loadConsultIntakeState(args: {
 
       const mappedLatestRevision = mapLatestRevision(pack, intakeRevisions)
       return {
+        ...(chartReview ? { chartReview } : {}),
         consultId: session.id,
         status: session.status,
         service: serviceIdentityDto(serviceIdentity),

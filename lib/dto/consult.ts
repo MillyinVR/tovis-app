@@ -197,10 +197,13 @@ export type ConsultIntakePrefillSourceDTO =
   | 'SAVED_LOOK'
   | 'TASTE_VECTOR'
   | 'BOOKING_HISTORY'
+  | 'CHART_FACT'
 
 export type ConsultIntakePrefillProvenanceDTO = {
   source: ConsultIntakePrefillSourceDTO
   sourceId: string | null
+  recordedAt?: string
+  validUntil?: string | null
 }
 
 export type ConsultIntakePrefillSuggestionDTO = {
@@ -247,6 +250,8 @@ export type ConsultServiceIdentityDTO = {
 }
 
 export type ConsultIntakeStateDTO = {
+  chartReview?: ConsultChartReviewOfferDTO
+
   consultId: string
   status: ConsultSessionStatus
   service: ConsultServiceIdentityDTO
@@ -1061,6 +1066,7 @@ export type ConsultLookPathEstimateDTO = {
 }
 
 export type ConsultLookBriefVersionDTO = {
+  chartSources?: ConsultChartSourceDTO[]
   bookingId: string | null
   confirmationOpen: boolean
   completedVisit: ConsultLookCompletedVisitDTO | null
@@ -1741,7 +1747,16 @@ export type ConsultProposalReviewErrorDTO = {
   code: ConsultProposalReviewErrorCode
 }
 
+export type ConsultMentorDTO = {
+  title: string
+  authority: string
+  formulationNote: string
+  sections: Array<{ id: number; title: string; items: Array<{ text: string; sourceId: string }> }>
+}
+
 export type ConsultProBriefDTO = {
+  mentor?: ConsultMentorDTO
+
   lookBrief?: ConsultLookBriefVersionDTO
   lookPlan?: ConsultLookPlanDTO
   consultId: string
@@ -2066,6 +2081,9 @@ export type ConsultThreadConsentMessageDTO = {
  * `OPEN` one.
  */
 export type ConsultThreadQuestionMessageDTO = {
+  chartFactSourceId?: string
+  chartReviewFingerprint?: string
+
   kind: 'QUESTION'
   id: string
   author: 'APP'
@@ -2135,6 +2153,7 @@ export type ConsultThreadInspirationMessageDTO = {
  * lifted into this message, never re-derived here.
  */
 export type ConsultThreadPhotoRequestMessageDTO = {
+  chartPhotos?: ConsultChartPhotoDTO[]
   kind: 'PHOTO_REQUEST'
   id: string
   author: 'APP'
@@ -2292,6 +2311,7 @@ export type ConsultThreadBookingMessageDTO = {
  * client cannot see is a silent one.
  */
 export type ConsultThreadFollowUpMessageDTO = {
+  chartFactSourceId?: string
   kind: 'FOLLOW_UP'
   id: string
   author: 'APP'
@@ -2453,4 +2473,24 @@ export type ConsultLookCompletedVisitDTO = {
   finalServiceSubtotal: string | null
   completedAt: string
   aftercare: { notes: string | null; sections: Array<{ label: string; body: string }>; products: Array<{ name: string; note: string | null }> } | null
+}
+
+export type ConsultChartReviewOfferDTO = {
+  fingerprint: string
+  lastVisitAt: string
+  facts: Array<{ questionKey: string; label: string; value: string; answer: string; recordedAt: string }>
+}
+
+export type ConsultChartSourceDTO = {
+  questionKey: string
+  recordedAt: string
+  confirmedAt: string
+  summary: string
+}
+
+export type ConsultChartPhotoDTO = {
+  mediaAssetId: string
+  url: string
+  label: string
+  recordedAt: string
 }

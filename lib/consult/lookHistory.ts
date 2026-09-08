@@ -1,6 +1,7 @@
 import { exactKeys } from './analysisValidation'
 import { resolveConsultIntakeFollowUpPack } from './intake/followUp'
 import { normalizeConsultIntakePayload } from './intake/registry'
+import type { ConsultIntakeQuestionDTO } from '@/lib/dto/consult'
 import type { Prisma } from '@prisma/client'
 import { isRecord } from '@/lib/guards'
 import type { ConsultAnalysisIntakeItem } from './analysisEngine'
@@ -8,6 +9,18 @@ import { HAIR_COLOR_INTAKE_PACK } from './intake/packs/hairColor'
 import { CONSULT_FOLLOW_UP_SAFETY_KEYS } from './followUpVocabulary'
 
 export const CONSULT_LOOK_COLOR_HISTORY_QUESTIONS = HAIR_COLOR_INTAKE_PACK.questions.filter(question => CONSULT_FOLLOW_UP_SAFETY_KEYS.has(question.key))
+
+/** Shared validation for history reads and source-dated chart projections. */
+export function canonicalConsultHistoryAnswers(raw: unknown, questions: readonly ConsultIntakeQuestionDTO[]): Record<string, string> {
+  const result: Record<string, string> = {}
+  if (!isRecord(raw)) return result
+  for (const [key, values] of Object.entries(raw)) {
+    if (!Array.isArray(values) || values.length !== 1 || typeof values[0] !== 'string') continue
+    const value = values[0]
+    if (questions.some(question => question.key === key && question.options.some(option => option.value === value))) result[key] = value
+  }
+  return result
+}
 
 /** Only canonical, single-answer client reports can fill a missing history key. */
 export async function loadConsultLookHistory(db: Prisma.TransactionClient, consultSessionId: string) {
@@ -20,13 +33,7 @@ export async function loadConsultLookHistory(db: Prisma.TransactionClient, consu
   const byKey = new Map([...HAIR_COLOR_INTAKE_PACK.questions, ...(followUp?.questions ?? [])].map(question => [question.key, question]))
   const answers: Record<string, string> = {}
   for (const row of rows) {
-    if (!isRecord(row.answers)) continue
-    for (const [key, values] of Object.entries(row.answers)) {
-      const question = byKey.get(key)
-      if (!question || !Array.isArray(values) || values.length !== 1 || typeof values[0] !== 'string' ||
-        !question.options.some(option => option.value === values[0])) continue
-      answers[key] = values[0]
-    }
+    Object.assign(answers, canonicalConsultHistoryAnswers(row.answers, [...byKey.values()]))
   }
   const items: ConsultAnalysisIntakeItem[] = []
   for (const [questionKey, answerCode] of Object.entries(answers).sort(([a], [b]) => a.localeCompare(b))) {

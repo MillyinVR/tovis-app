@@ -232,6 +232,8 @@ describe('app/api/v1/pro/profile/route.ts', () => {
       },
       select: {
         id: true,
+        consultMentorEnabled: true,
+        consultProductLines: true,
         businessName: true,
         handle: true,
         bio: true,
@@ -300,6 +302,8 @@ describe('app/api/v1/pro/profile/route.ts', () => {
       },
       select: {
         id: true,
+        consultMentorEnabled: true,
+        consultProductLines: true,
         businessName: true,
         handle: true,
         bio: true,
@@ -356,6 +360,8 @@ describe('app/api/v1/pro/profile/route.ts', () => {
       },
       select: {
         id: true,
+        consultMentorEnabled: true,
+        consultProductLines: true,
         businessName: true,
         handle: true,
         bio: true,
@@ -446,6 +452,18 @@ describe('app/api/v1/pro/profile/route.ts', () => {
 
     expect(mocks.prisma.professionalProfile.update).not.toHaveBeenCalled()
   })
+  it('persists only the authenticated professional’s mentor settings and bounds product lines', async () => {
+    mocks.prisma.professionalProfile.findUnique.mockResolvedValue(makeCurrentProfile({}))
+    mocks.prisma.professionalProfile.update.mockResolvedValue(makeUpdatedProfile({}))
+    expect((await PATCH(makeRequest({ consultMentorEnabled: true, consultProductLines: ['  Brand Line  ', 'Brand Line'], professionalId: 'foreign' }))).status).toBe(200)
+    expect(mocks.prisma.professionalProfile.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'pro_1' },
+      data: { consultMentorEnabled: true, consultProductLines: ['Brand Line'] } }))
+    mocks.prisma.professionalProfile.update.mockClear()
+    for (const body of [{ consultMentorEnabled: 'true' }, { consultProductLines: [''] }, { consultProductLines: Array(13).fill('line') }, { consultProductLines: ['x'.repeat(81)] }]) {
+      expect((await PATCH(makeRequest(body))).status).toBe(400)
+    }
+    expect(mocks.prisma.professionalProfile.update).not.toHaveBeenCalled()
+  })
 })
 describe('GET /api/v1/pro/profile', () => {
   beforeEach(() => {
@@ -500,4 +518,6 @@ describe('GET /api/v1/pro/profile', () => {
     expect(result).toBe(res)
     expect(mocks.prisma.professionalProfile.findUnique).not.toHaveBeenCalled()
   })
+
+
 })

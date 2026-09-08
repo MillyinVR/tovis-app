@@ -46,6 +46,7 @@ import type {
   ConsultInspirationQuestionDTO,
   ConsultInspirationStateDTO,
   ConsultIntakeSubmitResponseDTO,
+  ConsultIntakeStateResponseDTO,
   ConsultThreadConsentMessageDTO,
   ConsultThreadDTO,
   ConsultThreadInspirationMessageDTO,
@@ -361,6 +362,11 @@ export default function ClientConsultFlow({
     [refresh],
   )
 
+  const useChartPhoto = (mediaAssetId: string) => void run(async () => {
+    await api(`${base}/chart-photo`, { method: 'POST', body: JSON.stringify({ mediaAssetId,
+      idempotencyKey: `chart-photo:${mediaAssetId}` }) })
+  })
+
   const chooseLook: ChooseConsultLook = (expectedVersion, pathIndex, locationType) => {
     void run(async () => {
       await api(`${base}/look-plan/choice`, { method: 'POST', body: JSON.stringify({
@@ -389,12 +395,20 @@ export default function ClientConsultFlow({
   ) =>
     run(async () => {
       if (!thread) return
-      const answers: Record<string, string> = {}
-      for (const entry of thread.messages) {
-        if (entry.kind === 'QUESTION' && entry.answer !== null) {
-          answers[entry.question.key] = entry.answer
-        }
+      if (message.chartFactSourceId) {
+        await api(`${base}/chart-fact`, { method: 'POST', body: JSON.stringify({ sourceId: message.chartFactSourceId,
+          questionKey: message.question.key, value, idempotencyKey: newKey() }) })
+        return
       }
+      if (message.chartReviewFingerprint) {
+        await api(`${base}/chart-review`, { method: 'POST', body: JSON.stringify({
+          fingerprint: message.chartReviewFingerprint, decision: value, idempotencyKey: newKey(),
+        }) })
+        return
+      }
+
+      const current = await api<ConsultIntakeStateResponseDTO>(`${base}/intake`)
+      const answers: Record<string, string> = { ...current.intake.latestRevision?.answers }
       answers[message.question.key] = value
 
       const saved = await api<ConsultIntakeSubmitResponseDTO>(`${base}/intake`, {
@@ -403,12 +417,13 @@ export default function ClientConsultFlow({
           idempotencyKey: newKey(),
           packVersion: message.packVersion,
           schemaVersion: message.schemaVersion,
-          complete: false,
+          complete: current.intake.latestRevision?.complete ?? false,
           answers,
         }),
       })
       if (
         saved.intake.progress.canComplete &&
+        saved.intake.latestRevision?.complete !== true &&
         saved.intake.questionPack.questions.every(
           (question) =>
             question.requirement !== 'SKIPPABLE' || answers[question.key],
@@ -598,6 +613,11 @@ export default function ClientConsultFlow({
     selectedValues: string[],
   ) =>
     run(async () => {
+      if (message.chartFactSourceId && selectedValues.length === 1) {
+        await api(`${base}/chart-fact`, { method: 'POST', body: JSON.stringify({ sourceId: message.chartFactSourceId,
+          questionKey: message.questionKey, value: selectedValues[0], idempotencyKey: newKey() }) })
+        return
+      }
       await api(`${base}/follow-up`, {
         method: 'POST',
         body: JSON.stringify({
@@ -836,6 +856,7 @@ export default function ClientConsultFlow({
             inspirationReadError={inspirationReadError}
             onRetryInspirationRead={readInspiration}
             onUploadShot={uploadShot}
+            onUseChartPhoto={useChartPhoto}
             onChooseLook={chooseLook}
             onStartAnalysis={startAnalysis}
             onRefresh={() => void refresh()}
@@ -880,6 +901,7 @@ function ConsultThreadMessage({
   inspirationReadError,
   onRetryInspirationRead,
   onUploadShot,
+  onUseChartPhoto,
   onStartAnalysis,
   onChooseLook,
   onRefresh,
@@ -919,6 +941,7 @@ function ConsultThreadMessage({
     message: ConsultThreadPhotoRequestMessageDTO,
     file: File,
   ) => void
+  onUseChartPhoto: (mediaAssetId: string) => void
   onChooseLook: ChooseConsultLook
   onStartAnalysis: (message: ConsultThreadPlanMessageDTO) => void
   onRefresh: () => void
@@ -985,6 +1008,7 @@ function ConsultThreadMessage({
           preview={slotPreviews[message.shot.key]}
           error={slotErrors[message.shot.key]}
           onUpload={onUploadShot}
+          onUseChartPhoto={onUseChartPhoto}
         />
       )
 
@@ -1318,7 +1342,9 @@ function PhotoRequestMessage({
   preview,
   error,
   onUpload,
+  onUseChartPhoto,
 }: {
+  onUseChartPhoto: (mediaAssetId: string) => void
   message: ConsultThreadPhotoRequestMessageDTO
   busy: boolean
   preview: string | undefined
@@ -1366,6 +1392,14 @@ function PhotoRequestMessage({
           />
         ) : null}
       </div>
+
+      {shootable && !accepted ? (message.chartPhotos ?? []).map(photo => (
+        <div key={photo.mediaAssetId} className="mt-3 flex items-center gap-3">
+          <RemoteImage src={photo.url} alt={photo.label} intrinsic className="h-24 w-24 rounded-lg object-cover" />
+          <button type="button" disabled={busy} className={BUTTON_SECONDARY}
+            onClick={() => onUseChartPhoto(photo.mediaAssetId)}>{photo.label}</button>
+        </div>
+      )) : null}
 
       {slot.state === 'REJECTED' ? (
         <div className="mt-2 rounded-lg border border-toneWarn/30 bg-toneWarn/10 px-2 py-1.5 text-xs leading-5 text-textPrimary">

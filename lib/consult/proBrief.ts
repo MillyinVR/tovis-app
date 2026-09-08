@@ -2,6 +2,8 @@ import { normalizeStoredInspirationPayload } from './inspirationPack'
 import { consultIntakeItems, findConsultIntakePack, normalizeConsultIntakePayload } from './intake/registry'
 import { requireAuthorizedProLookScope } from './lookBrief'
 import 'server-only'
+import { readOptionalEnv } from '@/lib/env'
+import { buildConsultMentor } from './mentor'
 
 import { consultCalibrationAnswerItems } from './profileCalibration'
 
@@ -199,7 +201,7 @@ async function loadSessionBrief(
     select: { rating: true, createdAt: true },
   })
 
-  return {
+  const brief: ConsultProBriefDTO = {
     consultId: session.id,
     bookingId: session.bookingId,
     lookPostId: session.anchorLookPostId,
@@ -234,6 +236,15 @@ async function loadSessionBrief(
       : null,
     createdAt: result.createdAt.toISOString(),
   }
+  if (readOptionalEnv('AI_CONSULT_MENTOR_ENABLED') === 'true') {
+    const [pro, category] = await Promise.all([
+      tx.professionalProfile.findUnique({ where: { id: session.professionalId }, select: { consultMentorEnabled: true } }),
+      tx.serviceCategory.findUnique({ where: { id: session.serviceCategoryId }, select: { consultFamily: true } }),
+    ])
+    if (pro?.consultMentorEnabled && category?.consultFamily === 'HAIR') brief.mentor = buildConsultMentor(brief)
+  }
+  return brief
+
 }
 
 export type AuthorizedProConsultBriefRequest = (

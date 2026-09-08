@@ -1,3 +1,4 @@
+import { loadConsultChartSources, loadConsultChartPhotoSources } from './chartReview'
 import { describeLookRefinement } from './lookRefinementDiff'
 import { consultLookConfirmationOpen } from './lookConfirmation'
 import { loadConsultLookCompletedVisit } from './lookVisitOutcome'
@@ -122,6 +123,7 @@ export async function loadConsultLookBriefVersion(tx: Prisma.TransactionClient, 
   const source = await tx.consultRevision.findUniqueOrThrow({ where: { id: row.sourceAnalysisRevisionId } })
   const analysis = normalizeStoredConsultAnalysisPayload(source.payload, source.schemaVersion)
   return {
+    chartSources: [...await loadConsultChartSources(tx, consultSessionId, source.revision), ...await loadConsultChartPhotoSources(tx, source.id)],
     completedVisit: await loadConsultLookCompletedVisit(tx, consultSessionId),
     professionalPlan: row.professionalPlan ? effectiveConsultLookPlan(analysis, row) ?? null : null,
     professionalPlanReason: row.professionalPlanReason,

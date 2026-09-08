@@ -11,6 +11,15 @@ import type { BrandClientConsultThreadCopy } from './types'
 // see", never a question that sounds like a test, and never a step that reads
 // as the app protecting itself from the client.
 export const defaultClientConsultThreadCopy: BrandClientConsultThreadCopy = {
+  chartPhotoUsed: 'Starting-point chart photo dated {date}, confirmed by the client for this consultation.',
+  chartPhotoConfirm: 'Chart photo from {date}. Still looks like this? Use this photo.',
+  chartReviewUsed: 'Confirmed from the chart dated {date}: {answer}',
+  chartReviewQuestion: 'Anything done outside the app since your last visit on {date}?',
+  chartReviewConfirm: 'No, these details are still right',
+  chartReviewBoxDyeOnly: 'Only box dye at home; the other details are still right',
+  chartReviewChanged: 'Something has changed',
+  chartReviewSummary: 'Please check these chart details before confirming:',
+  chartHistoryConfirmation: 'Your chart from {date} says “{answer}”. Still right? Tap that answer to confirm, or choose what fits now.',
   homeSessions: {
     title: 'Your look consultations', empty: 'Start with a look you love. Your unbooked consultations will be here.',
     resume: 'Continue consultation', delete: 'Delete consultation', confirmTitle: 'Delete this consultation?',

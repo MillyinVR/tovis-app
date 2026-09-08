@@ -661,7 +661,7 @@ export async function issueConsultCaptureUpload(args: {
   clientId: string
   actor: ClientActor
   now?: Date
-  loadInput: () => Promise<{
+  loadInput: (context: { tx: Prisma.TransactionClient; professionalId: string }) => Promise<{
     idempotencyKey: string
     shotKey: unknown
     shotPackVersion: number
@@ -685,7 +685,7 @@ export async function issueConsultCaptureUpload(args: {
       })
       await requireCurrentConsultAgreementAcceptances(tx, session.id)
       const pack = packFor(session)
-      const input = await args.loadInput()
+      const input = await args.loadInput({ tx, professionalId: session.professionalId })
       requireShotAndVersions(
         pack,
         input.shotKey,

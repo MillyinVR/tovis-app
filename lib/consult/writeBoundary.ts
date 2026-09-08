@@ -1,3 +1,5 @@
+import type { ClientChartFact } from './chartFacts'
+import { toPrismaJson } from '@/lib/typed/prismaJson'
 import { effectiveConsultLookPlan } from './lookBriefPlan'
 import { readStoredLookAdjustments } from './lookAdjustments'
 import { appendLockedConsultLookBriefVersion } from './lookBrief'
@@ -1101,12 +1103,13 @@ export async function appendConsultIntakeRevision(args: {
   consultSessionId: string
   actor: ClientActor
   now?: Date
-  loadInput: () => Promise<{
+  loadInput: (context: { tx: Prisma.TransactionClient; pack: ConsultIntakePackDefinition; clientId: string; professionalId: string; answers: Record<string, string> }) => Promise<{
     packVersion: number
     schemaVersion: number
     complete: boolean
     answers: unknown
     idempotencyKey: string
+    chartReview?: { fingerprint: string; decision: 'CONFIRMED' | 'BOX_DYE_ONLY' | 'SINGLE_FACT' | 'CHANGED'; sources: ClientChartFact[] }
   }>
 }) {
   const now = args.now ?? new Date()
@@ -1160,7 +1163,8 @@ export async function appendConsultIntakeRevision(args: {
     // has proven ownership, eligibility, lifecycle, and both current legal
     // prerequisites. Revocation uses the same row lock, so the two operations
     // have one deterministic order.
-    const input = await args.loadInput()
+    const input = await args.loadInput({ tx, pack, clientId: scope.clientId, professionalId: scope.professionalId,
+      answers: normalizeConsultIntakePayload(priorIntakePayloads[0]?.payload)?.answers ?? {} })
     if (input.packVersion !== pack.version) {
       throw new ConsultWriteError(
         'PACK_VERSION_MISMATCH',
@@ -1193,13 +1197,15 @@ export async function appendConsultIntakeRevision(args: {
           : 'INVALID_ANSWERS'
       throw new ConsultWriteError(code, validated.message)
     }
-    const requestHash = intakeRequestHash({
+    const intakeHash = intakeRequestHash({
       packId: pack.id,
       packVersion: input.packVersion,
       schemaVersion: input.schemaVersion,
       complete: input.complete,
       answers: validated.answers,
     })
+    const requestHash = input.chartReview ? createHash('sha256').update(JSON.stringify({ intakeHash,
+      fingerprint: input.chartReview.fingerprint, decision: input.chartReview.decision })).digest('hex') : intakeHash
 
     const existing = await tx.consultRevision.findFirst({
       where: { consultSessionId: args.consultSessionId, idempotencyKey },
@@ -1283,6 +1289,11 @@ export async function appendConsultIntakeRevision(args: {
         requestHash,
       },
     })
+    if (input.chartReview) {
+      await tx.consultChartReview.create({ data: { consultSessionId: args.consultSessionId,
+        intakeRevisionId: revision.id, fingerprint: input.chartReview.fingerprint,
+        decision: input.chartReview.decision, facts: toPrismaJson(input.chartReview.sources) } })
+    }
     await tx.consultAuditEvent.create({
       data: {
         consultSessionId: args.consultSessionId,

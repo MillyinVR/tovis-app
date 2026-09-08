@@ -266,6 +266,16 @@ export default function ProConsultBrief({
 
   return (
     <article className="grid gap-5" data-consult-brief-id={brief.briefRevisionId}>
+      {brief.mentor ? <section className="rounded-2xl border border-surfaceGlass/20 bg-bgPrimary p-4" data-testid="consult-mentor">
+        <h2 className="text-lg font-bold text-textPrimary">{brief.mentor.title}</h2>
+        <p className="mt-1 text-sm text-textSecondary">{brief.mentor.authority}</p>
+        {brief.mentor.sections.map(section => <section key={section.id} className="mt-4">
+          <h3 className="font-semibold text-textPrimary">{section.id}. {section.title}</h3>
+          <ul className="mt-2 space-y-2 text-sm text-textSecondary">{section.items.map((item, index) =>
+            <li key={index} data-source-revision={item.sourceId}>{item.text}</li>)}</ul>
+        </section>)}
+        <p className="mt-4 text-xs text-textSecondary">{brief.mentor.formulationNote}</p>
+      </section> : null}
       {showDate ? (
         <div className="font-mono text-[10px] font-bold uppercase tracking-[0.12em] text-textMuted">
           {formatInTimeZone(new Date(brief.createdAt), timeZone, {
