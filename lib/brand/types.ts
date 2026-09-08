@@ -768,6 +768,16 @@ export type BrandClientConsultPrepCopy = {
 }
 
 export type BrandClientConsultThreadCopy = {
+  chartHistoryConfirmation: string
+  chartReviewQuestion: string
+  chartReviewConfirm: string
+  chartReviewBoxDyeOnly: string
+  chartReviewChanged: string
+  chartReviewSummary: string
+  chartReviewUsed: string
+  chartPhotoUsed: string
+  chartPhotoConfirm: string
+
   homeSessions: {
     title: string; empty: string; resume: string; delete: string; confirmTitle: string;
     confirmBody: string; keep: string; deleting: string; failed: string; loadFailed: string;

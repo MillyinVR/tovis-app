@@ -16,6 +16,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 
+import ConsultMentorSettings from './ConsultMentorSettings'
 import ThemeToggle from '@/lib/brand/ThemeToggle'
 import { clientSignOut } from '@/lib/auth/clientSignOut'
 import type { WorkspaceOption } from '@/lib/auth/workspaces'
@@ -76,6 +77,7 @@ export default function ProAccountSection({
 
   return (
     <div className="brand-pro-profile-account">
+      <ConsultMentorSettings />
       {canSwitchWorkspace ? (
         <section
           className="brand-pro-profile-account-group"

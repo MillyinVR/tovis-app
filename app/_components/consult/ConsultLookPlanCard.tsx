@@ -106,6 +106,7 @@ export default function ConsultLookPlanCard({ plan: sourcePlan, brief: savedBrie
             {brief.completedVisit.aftercare.products.map((product, index) => <p key={index}>{product.name}{product.note ? ` — ${product.note}` : ''}</p>)}
           </div>}
         </section>}
+        {(brief.chartSources?.length ?? 0) > 0 && <ul>{brief.chartSources?.map(source => <li key={source.questionKey}>{source.summary}</li>)}</ul>}
         {brief.additionalClientAnswers.length > 0 && <details><summary>What you shared in follow-up</summary>
           <dl>{brief.additionalClientAnswers.map(item => <div key={item.questionKey}><dt>{item.question.replace(/^Client follow-up: /, '')}</dt><dd>{item.answer}</dd></div>)}</dl>
         </details>}

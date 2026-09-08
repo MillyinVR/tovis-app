@@ -1,3 +1,4 @@
+import { confirmClientChartPhoto } from '@/lib/consult/chartPhoto'
 import { readConsultInspiration } from '@/lib/consult/inspirationAnalysisContract'
 import { answerVisualInspiration } from './visualInspiration'
 // tests/integration/_support/lookConsultFixture.ts
@@ -293,7 +294,7 @@ export async function runConsultToCompletion(
   lookPostId: string,
   label: string,
   answers: Readonly<Record<string, string>> = completeAnswers,
-  options?: { provisional?: boolean; packVersion?: number },
+  options?: { provisional?: boolean; packVersion?: number; chartPhotoMediaAssetId?: string },
 ): Promise<string> {
   const created = await startLookConsult(
     jsonRequest('/api/v1/client/consult/look', { lookPostId }),
@@ -318,12 +319,17 @@ export async function runConsultToCompletion(
   // database enforces it — a consult cannot leave EARLY_PHOTO_READY without one
   // accepted, unexpired `early_photo` capture. Every fixture that walks the
   // whole flow therefore takes one, exactly as a client does.
+  if (options?.chartPhotoMediaAssetId) {
+    await confirmClientChartPhoto({ consultSessionId: sessionId, clientId: fx.clientId, actorUserId: fx.clientUserId,
+      mediaAssetId: options.chartPhotoMediaAssetId, idempotencyKey: `chart-photo-${label}` })
+  } else {
   await attachAcceptedCapture(
     db,
     sessionId,
     CONSULT_EARLY_PHOTO_SHOT_KEY,
     `early-${label}`,
   )
+  }
 
   const writeIntake = () => appendConsultIntakeRevision({
     consultSessionId: sessionId,

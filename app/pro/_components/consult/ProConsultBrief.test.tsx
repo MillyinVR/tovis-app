@@ -6,6 +6,8 @@ import type {
   ConsultServiceEstimateDTO,
 } from '@/lib/dto/consult'
 
+import { buildConsultMentor } from '@/lib/consult/mentor'
+import { plan } from '@/tests/e2e/fixtures/consultLookBrief'
 import ProConsultBrief from './ProConsultBrief'
 
 const confidence = { min: 0.4, max: 0.7 }
@@ -268,4 +270,16 @@ describe('ProConsultBrief', () => {
     expect(html).not.toContain('$')
     expect(html).not.toContain('Estimated total')
   })
+})
+it('renders the five evidence-bound mentor sections without generating formulation', () => {
+  const source = { ...brief, lookPlan: plan }
+  const mentor = buildConsultMentor(source)
+  expect(mentor.sections.map(section => section.id)).toEqual([1, 2, 3, 4, 5])
+  expect(mentor.sections[2]?.items[0]).toMatchObject({ sourceId: brief.sourceAnalysisRevisionId })
+  expect(mentor.sections[3]?.items.some(item => item.text.includes(plan.paths[0]!.whyThisWorksForYou))).toBe(true)
+  expect(mentor.sections[4]?.items.some(item => item.text.includes('hairline assessment'))).toBe(true)
+  const html = renderToStaticMarkup(<ProConsultBrief brief={{ ...source, mentor }} timeZone="America/Los_Angeles" />)
+  for (const section of mentor.sections) expect(html).toContain(section.title)
+  expect(html).toContain('No formulation data')
+  expect(renderToStaticMarkup(<ProConsultBrief brief={source} timeZone="America/Los_Angeles" />)).not.toContain('data-testid="consult-mentor"')
 })

@@ -30,6 +30,7 @@ import {
 } from '@/app/api/_utils/bookingResponses'
 import { normalizeLocationType } from '@/lib/booking/locationContext'
 import { MAX_CONSULT_ENHANCEMENT_LINE_IDS } from '@/lib/consult/enhancementOffer'
+import { copyBookedConsultCapturesToChart } from '@/lib/consult/chartCopy'
 import { notifyConsultPrepStarted } from '@/lib/notifications/consultPrepReminders'
 import { kickNotificationDrain } from '@/lib/notifications/delivery/kickNotificationDrain'
 import { broadcastChange } from '@/lib/live/broadcastAudience'
@@ -884,6 +885,7 @@ export async function POST(request: Request) {
         // the consult from the booking's own stamped link, never from the
         // request, and never throws.
         await notifyConsultPrepStarted({ bookingId: result.booking.id })
+        await copyBookedConsultCapturesToChart(result.booking.id)
 
         const referralArgs = {
           clientId: ownership.clientId,

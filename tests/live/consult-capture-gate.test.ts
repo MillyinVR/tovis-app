@@ -135,6 +135,14 @@ describe('the capture gate against the live model (v4)', () => {
     },
   )
 
+  it('ACCEPTS a readable chart image through the early-photo entry used by reuse', async () => {
+    const image = await fixture('synthetic-i-hair_back.jpg')
+    const verdict = await checkConsultCapture({ shotKey: 'early_photo', image: { base64: image.toString('base64'), mediaType: 'image/jpeg' } })
+    report('chart reuse early_photo', verdict)
+    expect(verdict.accepted).toBe(true)
+    expect(verdict.reasonCode).toBe('PASS')
+  })
+
   // ── Required success: TIGHT CROP ───────────────────────────────────────
   it('ACCEPTS a tight crop where the subject fills the frame', async () => {
     const image = await tightCrop(await fixture('synthetic-i-hair_back.jpg'))

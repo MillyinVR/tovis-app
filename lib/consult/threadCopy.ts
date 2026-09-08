@@ -17,6 +17,8 @@ import type { UpfrontChargeDisclosure } from '@/lib/booking/categoryDeposit'
 import type { BrandClientConsultThreadCopy } from '@/lib/brand/types'
 
 export type ConsultThreadCopySlots = {
+  date?: string | null
+  answer?: string | null
   /** The professional's public display name. */
   pro?: string | null
   /** The service in the client's own language, where one resolves. */
@@ -52,6 +54,8 @@ export function fillConsultThreadCopy(
   slots: ConsultThreadCopySlots,
 ): string {
   let filled = template
+  if (slots.date?.trim()) filled = filled.split('{date}').join(slots.date.trim())
+  if (slots.answer?.trim()) filled = filled.split('{answer}').join(slots.answer.trim())
   const pro = slots.pro?.trim()
   const service = slots.service?.trim()
   const deadline = slots.deadline?.trim()

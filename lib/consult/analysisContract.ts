@@ -1812,6 +1812,12 @@ export async function executeConsultAnalysisRun(args: {
           finalizedAt,
           actor,
         })
+        const chartPhotoUses = await tx.consultChartPhotoUse.findMany({ where: {
+          consultSessionId: finalContext.session.id, captureId: { in: captureIds },
+        }, select: { id: true } })
+        if (chartPhotoUses.length) await tx.consultAnalysisChartPhoto.createMany({ data: chartPhotoUses.map(use => ({
+          revisionId: revision.id, photoUseId: use.id,
+        })) })
         await completeLockedConsultAnalysisRun(tx, {
           runId: claimed.id,
           analysisRevisionId: revision.id,

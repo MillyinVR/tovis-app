@@ -1,0 +1,17 @@
+export const defaultConsultMentorCopy = {
+  title: 'Mentor mode',
+  enable: 'Show the hair mentor layer on my Look Briefs',
+  lines: 'Your color product lines',
+  lineHelp: 'One brand and line per row, up to 12. These are private profile preferences.',
+  save: 'Save mentor preferences',
+  saved: 'Mentor preferences saved.',
+  error: 'Mentor preferences could not be saved. Please try again.',
+  authority: 'Read alongside the Brief. You make the final call after checking the client in person.',
+  sections: ['What the consult saw', 'What the client likes and dislikes', 'Starting point and suitability', 'Recommended path and why', 'Placement tips'],
+  noInspiration: 'No analyzed inspiration is attached to this Brief.',
+  noPreferences: 'No specific likes or dislikes were recorded. Confirm the intended result with the client.',
+  noPath: 'A path is not ready. Review the outstanding questions with the client.',
+  placementCheck: 'Confirm the hairline, face-framing boundaries and current condition in person before choosing placement. This Brief does not establish a hairline assessment.',
+  noFormulation: 'No formulation data for these product lines is included in this mentor layer.',
+  confidence: 'confidence',
+} as const

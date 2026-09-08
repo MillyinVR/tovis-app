@@ -1,3 +1,4 @@
+import { loadClientChartPhotoOffers } from './chartPhoto'
 import { consultRequiresLookChoice } from './lookPlanning'
 import { loadAuthorizedConsultBookingProposal } from './proposalEntry'
 import 'server-only'
@@ -573,6 +574,7 @@ export async function loadConsultThread(args: {
     out.push({
       kind: 'PHOTO_REQUEST',
       id: `photo:${CONSULT_EARLY_PHOTO_SHOT_KEY}`,
+      ...(!settled && earlyPhotoWritable(session.status) ? { chartPhotos: await loadClientChartPhotoOffers(stageArgs) } : {}),
       author: 'APP',
       // The only step that can be open before the booking; there is nothing
       // ahead of it to wait for. Once a plan exists it is history, not a step.
@@ -601,6 +603,7 @@ export async function loadConsultThread(args: {
 
   // ── Intake ───────────────────────────────────────────────────────────────
   const intake = await optionalStage(() => loadConsultIntakeState(stageArgs))
+  const chartReviewOpen = Boolean(intake?.chartReview && inputWindow.open)
   if (intake) {
     const answers = intake.latestRevision?.answers ?? {}
     // 🔴 `progress.nextQuestionKey` goes NULL the moment every REQUIRED question
@@ -617,13 +620,34 @@ export async function loadConsultThread(args: {
       intake.questionPack.questions.find((entry) => !answers[entry.key])?.key ??
       null
     out.push(text('intake-intro', copy.intakeIntro))
+    if (intake.chartReview && chartReviewOpen) {
+      const review = intake.chartReview
+      out.push({ kind: 'QUESTION', id: 'chart-review', author: 'APP', state: 'OPEN', answer: null,
+        packVersion: intake.questionPack.version, schemaVersion: intake.questionPack.schemaVersion,
+        chartReviewFingerprint: review.fingerprint,
+        question: { key: 'chart_review', kind: 'SINGLE_SELECT', requirement: 'REQUIRED',
+          label: fillConsultThreadCopy(copy.chartReviewQuestion, { date: formatInTimeZone(review.lastVisitAt, DEFAULT_TIME_ZONE,
+            { month: 'long', day: 'numeric', year: 'numeric' }) }),
+          helpText: [copy.chartReviewSummary, ...review.facts.map(fact => `${fact.label} ${fact.answer} (${formatInTimeZone(fact.recordedAt, DEFAULT_TIME_ZONE,
+            { month: 'long', day: 'numeric', year: 'numeric' })})`)].join(' '),
+          options: [{ value: 'CONFIRMED', label: copy.chartReviewConfirm },
+            ...(review.facts.some(fact => fact.questionKey === 'box_dye_history') ? [{ value: 'BOX_DYE_ONLY', label: copy.chartReviewBoxDyeOnly }] : []),
+            { value: 'CHANGED', label: copy.chartReviewChanged }],
+        },
+      })
+    }
+
 
     for (const question of intake.questionPack.questions) {
       const answer = answers[question.key] ?? null
       // Everything after the open question is still unasked — a thread shows
       // what has happened and the one thing being asked, never a form's worth
       // of questions the client has not reached.
-      if (answer === null && question.key !== nextKey) continue
+      if (answer === null && (question.key !== nextKey || chartReviewOpen)) continue
+      const chartSuggestion = answer === null ? intake.prefillSuggestions.find(suggestion =>
+        suggestion.questionKey === question.key && suggestion.provenance.some(source => source.source === 'CHART_FACT')) : undefined
+      const chartSource = chartSuggestion?.provenance.find(source => source.source === 'CHART_FACT')
+      const chartAnswer = question.options.find(option => option.value === chartSuggestion?.value)
       out.push({
         kind: 'QUESTION',
         id: `intake:${question.key}`,
@@ -636,7 +660,13 @@ export async function loadConsultThread(args: {
             : hasPlan
               ? 'BLOCKED'
               : 'OPEN',
-        question,
+        ...(chartSource?.sourceId ? { chartFactSourceId: chartSource.sourceId } : {}),
+        question: chartSource?.recordedAt && chartAnswer ? { ...question,
+          helpText: fillConsultThreadCopy(copy.chartHistoryConfirmation, {
+            date: formatInTimeZone(chartSource.recordedAt, DEFAULT_TIME_ZONE, { month: 'long', day: 'numeric', year: 'numeric' }), answer: chartAnswer.label,
+          }),
+          options: [chartAnswer, ...question.options.filter(option => option.value !== chartAnswer.value)],
+        } : question,
         answer,
         packVersion: intake.questionPack.version,
         schemaVersion: intake.questionPack.schemaVersion,
@@ -956,14 +986,22 @@ export async function loadConsultThread(args: {
           )
         }
         for (const question of round.questions) {
+          if (chartReviewOpen && question.selectedValues === null) continue
           const open = followUp.openQuestionKey === question.key
+          const suggestion = question.selectedValues === null ? intake?.prefillSuggestions.find(item => item.questionKey === question.key) : undefined
+          const source = suggestion?.provenance.find(item => item.source === 'CHART_FACT')
+          const answer = question.options.find(option => option.value === suggestion?.value)
+
           out.push({
             kind: 'FOLLOW_UP',
             id: `follow-up:${round.round}:${question.key}`,
             author: 'APP',
             state:
               question.selectedValues !== null ? 'DONE' : open ? 'OPEN' : 'BLOCKED',
-            text: question.text,
+            ...(source?.sourceId ? { chartFactSourceId: source.sourceId } : {}),
+            text: source?.recordedAt && answer ? `${question.text} ${fillConsultThreadCopy(copy.chartHistoryConfirmation, {
+              date: formatInTimeZone(source.recordedAt, DEFAULT_TIME_ZONE, { month: 'long', day: 'numeric', year: 'numeric' }), answer: answer.label,
+            })}` : question.text,
             questionKey: question.key,
             options: question.options.map((option) => ({ ...option })),
             selectedValues: question.selectedValues ?? [],

@@ -9363,6 +9363,98 @@
       ],
       "type": "object"
     },
+    "ConsultChartPhotoDTO": {
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "mediaAssetId": {
+          "type": "string"
+        },
+        "recordedAt": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mediaAssetId",
+        "url",
+        "label",
+        "recordedAt"
+      ],
+      "type": "object"
+    },
+    "ConsultChartReviewOfferDTO": {
+      "properties": {
+        "facts": {
+          "items": {
+            "properties": {
+              "answer": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "questionKey": {
+                "type": "string"
+              },
+              "recordedAt": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "questionKey",
+              "label",
+              "value",
+              "answer",
+              "recordedAt"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "fingerprint": {
+          "type": "string"
+        },
+        "lastVisitAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "fingerprint",
+        "lastVisitAt",
+        "facts"
+      ],
+      "type": "object"
+    },
+    "ConsultChartSourceDTO": {
+      "properties": {
+        "confirmedAt": {
+          "type": "string"
+        },
+        "questionKey": {
+          "type": "string"
+        },
+        "recordedAt": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "questionKey",
+        "recordedAt",
+        "confirmedAt",
+        "summary"
+      ],
+      "type": "object"
+    },
     "ConsultClientResultsDTO": {
       "properties": {
         "achievabilityDirection": {
@@ -10688,10 +10780,19 @@
     },
     "ConsultIntakePrefillProvenanceDTO": {
       "properties": {
+        "recordedAt": {
+          "type": "string"
+        },
         "source": {
           "$ref": "#/definitions/ConsultIntakePrefillSourceDTO"
         },
         "sourceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "validUntil": {
           "type": [
             "string",
             "null"
@@ -10725,7 +10826,8 @@
         "BOARD",
         "SAVED_LOOK",
         "TASTE_VECTOR",
-        "BOOKING_HISTORY"
+        "BOOKING_HISTORY",
+        "CHART_FACT"
       ],
       "type": "string"
     },
@@ -10883,6 +10985,9 @@
     },
     "ConsultIntakeStateDTO": {
       "properties": {
+        "chartReview": {
+          "$ref": "#/definitions/ConsultChartReviewOfferDTO"
+        },
         "consultId": {
           "type": "string"
         },
@@ -11145,6 +11250,12 @@
         "changes": {
           "items": {
             "type": "string"
+          },
+          "type": "array"
+        },
+        "chartSources": {
+          "items": {
+            "$ref": "#/definitions/ConsultChartSourceDTO"
           },
           "type": "array"
         },
@@ -11720,6 +11831,63 @@
       ],
       "type": "object"
     },
+    "ConsultMentorDTO": {
+      "properties": {
+        "authority": {
+          "type": "string"
+        },
+        "formulationNote": {
+          "type": "string"
+        },
+        "sections": {
+          "items": {
+            "properties": {
+              "id": {
+                "type": "number"
+              },
+              "items": {
+                "items": {
+                  "properties": {
+                    "sourceId": {
+                      "type": "string"
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "text",
+                    "sourceId"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "title",
+              "items"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "authority",
+        "formulationNote",
+        "sections"
+      ],
+      "type": "object"
+    },
     "ConsultPlanDiffEntryDTO": {
       "description": "One line of a plan diff, in the client's language.\n\n`label` is the thing that changed (\"Sessions\", \"What we'd do first\"), `from` and `to` are its values. Never a field path: this is read by a person in bed at eleven at night, not by an engineer reading a changelog.",
       "properties": {
@@ -11858,6 +12026,9 @@
             "string",
             "null"
           ]
+        },
+        "mentor": {
+          "$ref": "#/definitions/ConsultMentorDTO"
         },
         "planChanges": {
           "items": {
@@ -12922,6 +13093,9 @@
           "const": "APP",
           "type": "string"
         },
+        "chartFactSourceId": {
+          "type": "string"
+        },
         "fallback": {
           "type": "boolean"
         },
@@ -13109,6 +13283,12 @@
           "const": "APP",
           "type": "string"
         },
+        "chartPhotos": {
+          "items": {
+            "$ref": "#/definitions/ConsultChartPhotoDTO"
+          },
+          "type": "array"
+        },
         "id": {
           "type": "string"
         },
@@ -13294,6 +13474,12 @@
         },
         "author": {
           "const": "APP",
+          "type": "string"
+        },
+        "chartFactSourceId": {
+          "type": "string"
+        },
+        "chartReviewFingerprint": {
           "type": "string"
         },
         "id": {

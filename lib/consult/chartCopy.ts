@@ -16,10 +16,14 @@ import {
   MediaType,
   MediaVisibility,
   Role,
+  Prisma,
 } from '@prisma/client'
 
 import { buildMediaAssetCreateData } from '@/lib/media/recordMediaAsset'
 import { prisma } from '@/lib/prisma'
+import { requireCurrentConsultAgreementAcceptances } from './agreementContract'
+import { safeError } from '@/lib/security/logging'
+import { CONSULT_OPEN_WINDOW_SELECT, consultLinkedBooking } from './openWindow'
 
 import { findConsultCaptureShot } from './capture/registry'
 import {
@@ -55,8 +59,9 @@ function shotTitle(shotKey: string): string {
 /**
  * Copies the consumed, accepted captures of a completed consult to the
  * client's chart as PRO_CLIENT booking media. Runs post-commit, after the
- * analysis revision is durable and before the raw purge. At most once per
- * consult (chartCopyCompletedAt marker); a consult whose client opted out is
+ * analysis revision is durable, and again after booking. Object paths make
+ * each capture idempotent; a later accepted retake must not be skipped because
+ * an older capture already set the completion marker. Opted-out sessions are
  * a no-op.
  */
 export async function copyConsultCapturesToChart(args: {
@@ -69,65 +74,70 @@ export async function copyConsultCapturesToChart(args: {
   const now = args.now ?? new Date()
   const storage = args.storage ?? consultCaptureStorage
 
-  const session = await prisma.consultSession.findUnique({
-    where: { id: args.consultSessionId },
-    select: {
-      id: true,
-      chartCopyOptIn: true,
-      chartCopyCompletedAt: true,
-      professionalId: true,
-      client: { select: { userId: true } },
-      booking: { select: { id: true, serviceId: true, proTenantId: true } },
-    },
-  })
-  if (!session || !session.chartCopyOptIn || session.chartCopyCompletedAt) {
-    return
-  }
-  // A chart copy is BOOKING media: a MediaAsset is anchored to a booking and a
-  // primary service, and it lands on the pro's booking-media surfaces. A
-  // look-anchored consult has no visit to file the photos under yet (the
-  // booking proposal is B4), so there is nothing honest to write and the copy
-  // is skipped rather than invented against some other booking. The raw
-  // captures still purge on the normal path.
-  const booking = session.booking
-  if (!booking) return
-
-  const captures = await prisma.consultCapture.findMany({
-    where: {
-      id: { in: [...args.captureIds] },
-      consultSessionId: session.id,
-      status: ConsultCaptureStatus.ACCEPTED,
-      purgedAt: null,
-      storagePath: { not: null },
-    },
-    select: {
-      id: true,
-      shotKey: true,
-      storageBucket: true,
-      storagePath: true,
-      contentType: true,
-    },
-    orderBy: [{ shotKey: 'asc' }, { id: 'asc' }],
-  })
-  if (captures.length === 0) return
-
-  const copied: Array<{ path: string; caption: string }> = []
-  for (const capture of captures) {
-    if (!capture.storagePath || capture.storageBucket !== CONSULT_CAPTURE_BUCKET) {
-      continue
-    }
-    const toPath = chartCopyObjectPath({
-      consultSessionId: session.id,
-      captureId: capture.id,
-      shotKey: capture.shotKey,
-      contentType: capture.contentType,
+  return prisma.$transaction(async (tx) => {
+    // Revocation and chart-copy choice use this same session lock. Consent
+    // must remain current until durable chart media is recorded.
+    await tx.$queryRaw(Prisma.sql`SELECT id FROM "ConsultSession" WHERE id = ${args.consultSessionId} FOR UPDATE`)
+    const session = await tx.consultSession.findUnique({
+      where: { id: args.consultSessionId },
+      select: {
+        id: true,
+        chartCopyOptIn: true,
+        bookingId: true,
+        status: true,
+        professionalId: true,
+        client: { select: { userId: true } },
+        booking: { select: { ...CONSULT_OPEN_WINDOW_SELECT.booking.select, serviceId: true, proTenantId: true } },
+        inspiredBookings: { ...CONSULT_OPEN_WINDOW_SELECT.inspiredBookings,
+          select: { ...CONSULT_OPEN_WINDOW_SELECT.inspiredBookings.select, serviceId: true, proTenantId: true } },
+      },
     })
-    await storage.copyObject({ fromPath: capture.storagePath, toPath })
-    copied.push({ path: toPath, caption: shotTitle(capture.shotKey) })
-  }
-  if (copied.length === 0) return
+    if (!session || !session.chartCopyOptIn || session.status === 'CANCELLED') {
+      return
+    }
+    // Resolve the persisted link used by both booking entry paths. Before a
+    // look is booked there is no chart visit; finalize retries after linking it.
+    const booking = consultLinkedBooking(session)
+    if (!booking || ['CANCELLED', 'NO_SHOW'].includes(booking.status)) return
+    await requireCurrentConsultAgreementAcceptances(tx, session.id)
 
-  await prisma.$transaction(async (tx) => {
+    const captures = await tx.consultCapture.findMany({
+      where: {
+        id: { in: [...args.captureIds] },
+        consultSessionId: session.id,
+        status: ConsultCaptureStatus.ACCEPTED,
+        purgedAt: null,
+        purgeRequestedAt: null,
+        rawExpiresAt: { gt: now },
+        storagePath: { not: null },
+      },
+      select: {
+        id: true,
+        shotKey: true,
+        storageBucket: true,
+        storagePath: true,
+        contentType: true,
+      },
+      orderBy: [{ shotKey: 'asc' }, { id: 'asc' }],
+    })
+    if (captures.length === 0) return
+
+    const copied: Array<{ path: string; caption: string }> = []
+    for (const capture of captures) {
+      if (!capture.storagePath || capture.storageBucket !== CONSULT_CAPTURE_BUCKET) {
+        continue
+      }
+      const toPath = chartCopyObjectPath({
+        consultSessionId: session.id,
+        captureId: capture.id,
+        shotKey: capture.shotKey,
+        contentType: capture.contentType,
+      })
+      await storage.copyObject({ fromPath: capture.storagePath, toPath })
+      copied.push({ path: toPath, caption: shotTitle(capture.shotKey) })
+    }
+    if (copied.length === 0) return
+
     await tx.mediaAsset.createMany({
       data: copied.map((object) =>
         buildMediaAssetCreateData({
@@ -151,5 +161,23 @@ export async function copyConsultCapturesToChart(args: {
       where: { id: session.id },
       data: { chartCopyCompletedAt: now },
     })
-  })
+  }, { maxWait: 10_000, timeout: 60_000 })
+}
+
+/** Post-booking retry: use only the booking's committed consultation link. */
+export async function copyBookedConsultCapturesToChart(bookingId: string): Promise<void> {
+  try {
+    const booking = await prisma.booking.findUnique({ where: { id: bookingId },
+      select: { sourceConsultSessionId: true } })
+    if (!booking?.sourceConsultSessionId) return
+    const captures = await prisma.consultCapture.findMany({ where: {
+      consultSessionId: booking.sourceConsultSessionId, status: 'ACCEPTED',
+      purgedAt: null, purgeRequestedAt: null, rawExpiresAt: { gt: new Date() },
+    }, select: { id: true } })
+    await copyConsultCapturesToChart({ consultSessionId: booking.sourceConsultSessionId,
+      captureIds: captures.map(capture => capture.id) })
+  } catch (error) {
+    // The appointment has committed; a storage failure cannot undo booking.
+    console.error('Booked consultation chart copy failed', { bookingId, error: safeError(error) })
+  }
 }
