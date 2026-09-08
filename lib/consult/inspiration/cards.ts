@@ -584,6 +584,13 @@ export function deriveConsultInspirationPreferences(args: {
       continue
     }
 
+    // Neutral answers are excluded from exact details. Preserve this explicit
+    // uncertainty in the preferences the analysis receives.
+    if (question.key === 'look_match' && selected.includes('not-sure')) {
+      preferences.unsure.push(args.copy.cards.lookMatchClauses['not-sure'])
+      continue
+    }
+
     if (question.key === KEEP_AS_IS_KEY) {
       for (const value of selected) {
         if (CONSULT_INSPIRATION_NEUTRAL_VALUES.has(value)) continue

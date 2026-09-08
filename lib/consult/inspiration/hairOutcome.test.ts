@@ -36,6 +36,7 @@ for (const pack of [HAIR_COLOR_INSPIRATION_CARD_PACK, HAIR_GENERAL_INSPIRATION_C
       const progress = evaluateConsultInspirationProgress(pack, { spark_focus: ['not-sure'], keep_as_is: ['nothing-in-particular'] })
       expect(progress.currentQuestion?.key).toBe('look_match')
       expect(progress.canComplete).toBe(false)
+      expect(deriveConsultInspirationPreferences({ pack, answers: { ...answers, look_match: ['not-sure'] }, copy, reading: null }).unsure).toContain(copy.cards.lookMatchClauses['not-sure'])
       expect(evaluateConsultInspirationProgress(pack, { spark_focus: ['not-sure'], keep_as_is: ['nothing-in-particular'], look_match: ['not-sure'], understanding_check: ['thats-right'] }).canComplete).toBe(true)
     })
 
