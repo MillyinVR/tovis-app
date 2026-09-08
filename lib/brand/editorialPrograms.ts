@@ -1,7 +1,7 @@
 /** Shared launch copy for the TOVIS campaign; not a membership entitlement. */
 export const editorialPrograms = {
-  foundingTitle: 'The first 100. Part of our story forever.',
-  foundingBody: 'The Founding 100 celebrates the first 100 professionals who help build the TOVIS community. As a thank-you, founding members will receive a personalized Platinum NFC card with their founding number. Clients can tap it to book directly with you, and you can use it to invite new professionals so qualifying referrals are credited to you. You’ll also receive updates before they reach the wider community and your first year of TOVIS membership free. It’s our way of recognizing the people who were here from the beginning.',
+  foundingTitle: 'Be one of the first 100 TOVIS professionals.',
+  foundingBody: 'The Founding 100 is our thank-you to the first professionals who help shape TOVIS in San Diego. Founding members receive a personalized Platinum NFC card with their number, early product updates, and their first year of TOVIS membership free. Clients can tap the card to book with you, and qualifying professional referrals are credited to your account.',
   foundingCard: 'Only 100 professionals will receive a Platinum Founding Member Card. Platinum recognizes founding membership; Gold remains the higher tier in the separate professional recognition path.',
   foundingPreviewLabel: 'Platinum Founding Member Card · Design preview',
   foundingPreviewNote: 'Illustrative engraving. Your card will be personalized with your founding number.',

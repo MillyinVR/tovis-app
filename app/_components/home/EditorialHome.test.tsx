@@ -32,14 +32,14 @@ describe('editorial homepage', () => {
     )
     fireEvent.click(screen.getByRole('button', { name: 'Barbering' }))
     expect(
-      screen.queryByRole('heading', { name: 'Length, with intention.' }),
+      screen.queryByRole('heading', { name: 'Long, blended extensions' }),
     ).toBeNull()
     fireEvent.click(
-      screen.getByRole('button', { name: 'Save A fresh perspective.' }),
+      screen.getByRole('button', { name: 'Save Textured cut with a clean finish' }),
     )
     expect(screen.getByText('1 saved in this preview')).toBeTruthy()
     fireEvent.click(
-      screen.getByRole('button', { name: /Discover your next appointment/ }),
+      screen.getByRole('button', { name: /Book from the look/ }),
     )
     expect(screen.getByRole('img', { name: secondScreen.alt })).toBeTruthy()
     expect(screen.queryByRole('img', { name: firstScreen.alt })).toBeNull()

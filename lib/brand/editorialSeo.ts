@@ -2,15 +2,33 @@ import { editorialPrograms } from './editorialPrograms'
 /** TOVIS campaign only; kept separate from white-label home copy. */
 export function editorialSeo() {
   return {
-    title: 'TOVIS — Beauty & Barber Booking App | San Diego',
+    title: 'TOVIS | Beauty Booking for Clients & Professionals in San Diego',
     description:
-      'Discover beauty looks and book hairstylists, barbers, nail techs and beauty professionals with TOVIS. Starting in San Diego. Explore the app and its pricing.',
-    audienceTitle: 'Your look. Your people.',
+      'TOVIS helps clients discover and book San Diego beauty professionals by their work, with tools that help independent professionals grow and retain clients.',
+    areaServed: 'San Diego, California',
+    organizationDescription:
+      'TOVIS is a beauty discovery and booking platform for clients and independent beauty professionals, starting in San Diego.',
+    audienceTitle: 'Beauty discovery and booking, built around the work.',
     audienceBody:
-      'TOVIS is a beauty discovery and booking app for clients and independent professionals. Explore hairstylists, barbers, nail techs, lash and brow artists, estheticians, makeup artists, and bridal professionals — starting in San Diego.',
+      'TOVIS is a beauty discovery and booking app for clients and independent professionals. Clients can explore real looks, meet the professional behind each one, review starting prices, and book without having to know the exact service name. Professionals can showcase their work, manage appointments, keep useful client context, share aftercare, and encourage repeat visits. TOVIS is starting with hairstylists, barbers, nail techs, lash and brow artists, estheticians, makeup artists, and bridal professionals in San Diego.',
     membershipOffer: { title: editorialPrograms.offerTitle, body: editorialPrograms.offerBody },
-    faqTitle: 'A few things worth knowing.',
+    faqTitle: 'Questions about TOVIS',
     questions: [
+      {
+        question: 'What is TOVIS?',
+        answer:
+          'TOVIS is a beauty discovery and booking app that connects clients with independent beauty professionals through the work they create. Clients can start with a look they love and find the professional behind it. Professionals can turn their portfolio into a path to their profile, services, availability, and booking.',
+      },
+      {
+        question: 'Why would a client choose TOVIS?',
+        answer:
+          'TOVIS lets clients choose a professional by seeing real work from completed appointments. They can review starting prices, discuss what the look may require, book, join a waitlist, and keep aftercare and rebooking guidance in one place.',
+      },
+      {
+        question: 'Why would a beauty professional choose TOVIS?',
+        answer:
+          'TOVIS helps independent professionals get discovered through their work and gives them tools for scheduling, deposits, client charts, aftercare, rebooking, retention, and last-minute openings. The essential booking tools are available without a monthly membership, and TOVIS does not take a commission from service revenue.',
+      },
       {
         question: 'Newly licensed? Your first year is on us.',
         answer:

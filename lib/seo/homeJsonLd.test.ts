@@ -8,10 +8,20 @@ import { buildHomeJsonLd, liveHomeFeatures } from './homeJsonLd'
 
 const copy = defaultHomeCopy('ACME')
 
+function graphNode(
+  ld: Record<string, unknown>,
+  type: string,
+): Record<string, unknown> {
+  const graph = ld['@graph'] as Record<string, unknown>[]
+  const node = graph.find((item) => item['@type'] === type)
+  if (!node) throw new Error(`Missing ${type} node`)
+  return node
+}
+
 describe('buildHomeJsonLd', () => {
   it('lists only live features — a rolling-out row never becomes a machine-readable claim', () => {
     const ld = buildHomeJsonLd({ brandDisplayName: 'ACME', url: 'https://acme.example/', copy })
-    const featureList = ld.featureList as string[]
+    const featureList = graphNode(ld, 'SoftwareApplication').featureList as string[]
 
     const rollingOut = [
       ...copy.loop.steps,
@@ -33,7 +43,7 @@ describe('buildHomeJsonLd', () => {
   it('keeps editorial program previews out of live capabilities', () => {
     const copy = tovisBrand.home
     const ld = buildHomeJsonLd({ brandDisplayName: tovisBrand.displayName, url: 'https://example.test/', copy })
-    const featureList = ld.featureList as string[]
+    const featureList = graphNode(ld, 'SoftwareApplication').featureList as string[]
     for (const stage of copy.editorial.progression) expect(featureList).not.toContain(stage)
     expect(featureList).not.toContain('Look Brief')
     expect(copy.editorial.journeyNote).toContain('finalize the plan')
@@ -43,18 +53,40 @@ describe('buildHomeJsonLd', () => {
   it('drops the money row from the feature list while it is rolling out', () => {
     const ld = buildHomeJsonLd({ brandDisplayName: 'ACME', url: 'https://acme.example/', copy })
     expect(copy.money.state).toBe('rolling-out')
-    expect(ld.featureList as string[]).not.toContain(copy.money.title)
+    expect(graphNode(ld, 'SoftwareApplication').featureList as string[]).not.toContain(copy.money.title)
   })
 
   it('includes the money row once it is live', () => {
     const live: BrandHomeCopy = { ...copy, money: { ...copy.money, state: 'live' } }
     const ld = buildHomeJsonLd({ brandDisplayName: 'ACME', url: 'https://acme.example/', copy: live })
-    expect(ld.featureList as string[]).toContain(copy.money.title)
+    expect(graphNode(ld, 'SoftwareApplication').featureList as string[]).toContain(copy.money.title)
   })
 
   it('names the brand it was given, never a hardcoded one', () => {
     const ld = buildHomeJsonLd({ brandDisplayName: 'ACME', url: 'https://acme.example/', copy })
-    expect(ld.name).toBe('ACME')
+    expect(graphNode(ld, 'SoftwareApplication').name).toBe('ACME')
     expect(JSON.stringify(ld)).not.toMatch(/tovis/i)
+  })
+
+  it('describes the site, publisher, app audiences, and visible TOVIS FAQs', () => {
+    const copy = tovisBrand.home
+    const ld = buildHomeJsonLd({
+      brandDisplayName: tovisBrand.displayName,
+      url: 'https://example.test/',
+      copy,
+    })
+
+    expect(graphNode(ld, 'Organization').name).toBe('TOVIS')
+    expect(graphNode(ld, 'WebSite').name).toBe('TOVIS')
+    expect(graphNode(ld, 'SoftwareApplication').audience).toEqual([
+      { '@type': 'PeopleAudience', audienceType: 'Beauty clients' },
+      { '@type': 'BusinessAudience', audienceType: 'Independent beauty professionals' },
+    ])
+
+    const faq = graphNode(ld, 'FAQPage')
+    const questions = faq.mainEntity as { name: string }[]
+    expect(questions.map((item) => item.name)).toEqual(
+      copy.campaign?.seo.questions.map((item) => item.question),
+    )
   })
 })

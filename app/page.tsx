@@ -4,7 +4,7 @@ import { platformFeesEnabled } from '@/lib/booking/discoveryFee'
 import { marketingPricing } from '@/lib/brand/marketingPricing'
 import EditorialHome from './_components/home/EditorialHome'
 import './styles/editorial-home.css'
-// Public homepage: tenant copy, explicit editorial placeholders, and gated feature claims.
+// Public homepage: tenant copy, clearly labelled preview inspiration, and gated feature claims.
 import { Fragment } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'

@@ -68,11 +68,11 @@ describe('defaultHomeCopy', () => {
     expect(copy.editorial.progression).toEqual([])
   })
 
-  it('uses plain consultation language and honest generated-image labels', () => {
+  it('uses plain consultation language and identifies preview imagery honestly', () => {
     const rendered = JSON.stringify(copy, (key, value) => key === 'evidence' ? undefined : value)
     expect(rendered).not.toMatch(/\bAI\b/)
-    expect(copy.editorial.placeholderLabel).toContain('Generated editorial imagery')
-    expect(copy.editorial.placeholderLabel).toContain('not professional results')
+    expect(copy.editorial.placeholderLabel).toContain('Preview inspiration')
+    expect(copy.editorial.placeholderLabel).toContain('not client results')
   })
 
   it('counts the tools it claims to replace honestly and carries a receipt for the claim', () => {
