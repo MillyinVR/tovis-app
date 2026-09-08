@@ -77,6 +77,7 @@ let adultVersionId = ''
 
 // The P6 diet: the hair pack is down to what the photographs cannot answer.
 const completeHair = {
+  maintenance_tolerance: 'medium',
   change_scale: 'noticeable',
   chemical_history: 'never',
   prior_lightening: 'over-12-months',
@@ -425,7 +426,7 @@ describe('service-aware consult intake against PostgreSQL', () => {
       version: HAIR_GENERAL_INTAKE_PACK.version,
       schemaVersion: HAIR_GENERAL_INTAKE_PACK.schemaVersion,
     })
-    expect(intake.progress.nextQuestionKey).toBe('change_scale')
+    expect(intake.progress.nextQuestionKey).toBe('maintenance_tolerance')
 
     // The client's colour self-profile is not a question here, so it is not
     // a suggestion — and the signal says so.

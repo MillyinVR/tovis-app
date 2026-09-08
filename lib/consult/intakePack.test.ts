@@ -17,6 +17,7 @@ import {
 
 /** A complete answer set for the CURRENT (v3) colour pack. */
 const completeAnswers = {
+  maintenance_tolerance: 'medium',
   change_scale: 'noticeable',
   box_dye_history: 'over-12-months',
   prior_lightening: '6-12-months',
@@ -54,6 +55,7 @@ describe('hair-color intake pack', () => {
         (question) => question.requirement === 'REQUIRED',
       ).map((question) => question.key),
     ).toEqual([
+      'maintenance_tolerance',
       'change_scale',
       'box_dye_history',
       'prior_lightening',
@@ -130,7 +132,7 @@ describe('hair-color intake pack', () => {
   it('provides one-question progress and plain-language treatment context', () => {
     expect(evaluateHairColorIntakeProgress({})).toEqual({
       canComplete: false,
-      nextQuestionKey: 'change_scale',
+      nextQuestionKey: 'maintenance_tolerance',
       blocker: 'REQUIRED_ANSWERS_MISSING',
     })
     expect(

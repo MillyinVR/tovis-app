@@ -1,3 +1,4 @@
+import { effectiveConsultLookPlan } from './lookBriefPlan'
 import 'server-only'
 
 import { isDeepStrictEqual } from 'node:util'
@@ -5,6 +6,9 @@ import { ConsultRevisionKind, type Prisma } from '@prisma/client'
 
 import { defaultClientConsultInspirationCopy } from '@/lib/brand/defaultClientConsultInspirationCopy'
 import { isRecord } from '@/lib/guards'
+import { loadConsultLookBriefVersion } from './lookBrief'
+import type { ConsultLookBriefVersionDTO, ConsultLookPlanDTO } from '@/lib/dto/consult'
+import { hasConsultLookPlanMinimumIntake } from './lookPlanning'
 
 import { normalizeStoredConsultAnalysisPayload } from './analysisRevision'
 import {
@@ -72,6 +76,8 @@ function briefInspirationRevisionId(payload: Prisma.JsonValue): string | null {
 }
 
 export type ImmutableConsultResult = {
+  lookPlan?: ConsultLookPlanDTO
+  lookBrief?: ConsultLookBriefVersionDTO
   briefRevisionId: string
   briefRevision: number
   analysisRevisionId: string
@@ -146,7 +152,8 @@ export async function loadLatestImmutableConsultResult(
   if (!intake) throw new ImmutableConsultResultError()
 
   const normalizedIntake = normalizeConsultIntakePayload(intake.payload)
-  if (!normalizedIntake?.complete) throw new ImmutableConsultResultError()
+  if (!normalizedIntake) throw new ImmutableConsultResultError()
+  let lookPlan: ConsultLookPlanDTO | undefined
 
   let payload: HairColorProBriefPayload
   try {
@@ -161,6 +168,10 @@ export async function loadLatestImmutableConsultResult(
         analysis.payload,
         analysis.schemaVersion,
       ),
+    }
+    lookPlan = buildArgs.analysis.lookPlan
+    if (!normalizedIntake.complete && !(lookPlan?.provisional && hasConsultLookPlanMinimumIntake(normalizedIntake))) {
+      throw new ImmutableConsultResultError()
     }
     if (brief.schemaVersion === LEGACY_CONSULT_PRO_BRIEF_SCHEMA_VERSION) {
       const legacy = buildLegacyHairColorProBriefPayload(buildArgs)
@@ -243,13 +254,18 @@ export async function loadLatestImmutableConsultResult(
     throw new ImmutableConsultResultError()
   }
 
+  const lookBrief = lookPlan ? await loadConsultLookBriefVersion(tx, consultSessionId) : undefined
+  if (lookPlan && (!lookBrief || lookBrief.sourceAnalysisRevisionId !== analysis.id)) throw new ImmutableConsultResultError()
+  lookPlan = effectiveConsultLookPlan(normalizeStoredConsultAnalysisPayload(analysis.payload, analysis.schemaVersion), lookBrief)
   return {
+    ...(lookBrief ? { lookBrief } : {}),
     briefRevisionId: brief.id,
     briefRevision: brief.revision,
     analysisRevisionId: analysis.id,
     analysisRevision: analysis.revision,
     intakeRevisionId: intake.id,
     payload,
+    ...(lookPlan ? { lookPlan } : {}),
     createdAt: brief.createdAt,
   }
 }

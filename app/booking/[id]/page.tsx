@@ -53,6 +53,8 @@ const bookingReceiptSelect = {
   scheduledFor: true,
   status: true,
   source: true,
+  sourceLookPostId: true,
+  sourceConsultSessionId: true,
   locationType: true,
 
   subtotalSnapshot: true,
@@ -331,7 +333,8 @@ export default async function BookingReceiptPage(props: PageProps) {
   const service = booking.service
 
   const proName = formatProfessionalPublicDisplayName(professional, 'Professional')
-  const serviceName = service?.name || 'Service'
+  const isLookBooking = isClientViewer && Boolean(booking.sourceLookPostId || booking.sourceConsultSessionId)
+  const serviceName = isLookBooking ? 'Your look' : service?.name || 'Service'
 
   const appointmentTz = resolveReceiptTimeZone({
     bookingLocationTimeZone: booking.locationTimeZone,
@@ -600,23 +603,7 @@ export default async function BookingReceiptPage(props: PageProps) {
             {COPY.consultProposal.receiptTitle}
           </h2>
 
-          <ul className="mt-3 grid gap-2">
-            {consultProposal.lines.map((line) => (
-              <li
-                key={line.id}
-                className="flex items-baseline justify-between gap-3 text-[13.5px]"
-              >
-                <span className="min-w-0 font-semibold text-textPrimary">
-                  {line.serviceName}
-                </span>
-                <span className="shrink-0 text-[12px] font-semibold text-textSecondary">
-                  {line.durationMinutes} min ·{' '}
-                  {formatRoundedDollars(line.price) ??
-                    `$${moneyToString(line.price)}`}
-                </span>
-              </li>
-            ))}
-          </ul>
+
 
           {consultStartingAtLabel ? (
             <div className="mt-3 text-[18px] font-black leading-none text-textPrimary">
@@ -701,7 +688,7 @@ export default async function BookingReceiptPage(props: PageProps) {
         </Link>
       </div>
 
-      {items.length ? (
+      {!isLookBooking && items.length ? (
         <div className="mt-4 rounded-card border border-textPrimary/12 bg-bgSurface p-4">
           <div className="text-[12px] font-black text-textSecondary">Service breakdown</div>
 

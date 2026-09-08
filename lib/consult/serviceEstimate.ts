@@ -1,3 +1,4 @@
+import { applyConsultLookOfferingAdjustments, type ConsultLookAdjustment } from './lookAdjustments'
 // lib/consult/serviceEstimate.ts
 //
 // Book the Look, slice B3 — THE TRANSLATION MODULE.
@@ -47,7 +48,8 @@ import {
   validateOfferingScheduling,
   resolveBookingLocationContext,
 } from '@/lib/booking/locationContext'
-import { ceilToStepMinutes, pickModePrice } from '@/lib/booking/serviceItems'
+import { ceilToStepMinutes } from '@/lib/booking/serviceItems'
+import { readConsultLookOfferingAmount } from './lookPathEstimate'
 import type {
   ConsultAnalysisPayloadDTO,
   ConsultServiceEstimateDTO,
@@ -74,7 +76,11 @@ export const CONSULT_SERVICE_ESTIMATE_SCHEMA_VERSION = 1
  * changes, so a stored estimate stays interpretable against the rules that
  * produced it once those rules move on.
  */
-export const CONSULT_SERVICE_ESTIMATE_DERIVATION_VERSION = 'look-estimate-v1'
+export const CONSULT_SERVICE_ESTIMATE_DERIVATION_VERSION = 'look-estimate-v2'
+export function isConsultRequiredEstimateSource(source: ConsultServiceEstimateLineSource): boolean {
+  return source === 'LOOK_LINKED_SERVICE' || source === 'LOOK_PLAN_REQUIRED'
+}
+
 export type ConsultServiceEstimateLineDraft = {
   sortOrder: number
   serviceId: string
@@ -107,7 +113,7 @@ export type ConsultServiceEstimateDraft =
 /** The analysis material the derivation reads — nothing else from the payload. */
 export type ConsultServiceEstimateAnalysisInput = Pick<
   ConsultAnalysisPayloadDTO,
-  'recommendations'
+  'recommendations' | 'lookPlan'
 >
 
 function refused(
@@ -149,6 +155,7 @@ export function priceLine(
   offering: ConsultProMenuOffering,
   locationType: ServiceLocationType,
   stepMinutes: number,
+  options?: { explicitDuration?: boolean },
 ): ConsultOfferingLinePricing {
   const scheduling = validateOfferingScheduling({ offering, locationType })
   if (!scheduling.ok) {
@@ -163,29 +170,18 @@ export function priceLine(
     }
   }
 
-  const price = pickModePrice({
-    locationType,
-    salonPriceStartingAt: offering.salonPriceStartingAt,
-    mobilePriceStartingAt: offering.mobilePriceStartingAt,
-  })
-  // `validateOfferingScheduling` proves the column is SET, not that it holds a
-  // usable amount: its normalizer accepts any finite number, and nothing
-  // constrains the offering's price columns in the database. A NEGATIVE listed
-  // price is not a price the pro can have meant, so it is treated as unset
-  // rather than propagated into an estimate — or, worse, into a proposal.
-  //
-  // Exactly ZERO is left alone. A complimentary service is a real thing a pro
-  // lists, it adds nothing to the money and it still takes time out of her day,
-  // and dropping it would understate the DURATION — the one number decision 11
-  // says must never be understated.
-  if (price == null || price.isNegative()) {
-    return { ok: false, refusalCode: 'MENU_PRICE_UNSET' }
+  const amount = readConsultLookOfferingAmount(offering, locationType, stepMinutes)
+  if (amount.price === null) return { ok: false, refusalCode: 'MENU_PRICE_UNSET' }
+  if (options?.explicitDuration && amount.durationMinutes === null) {
+    return { ok: false, refusalCode: 'MENU_DURATION_UNSET' }
   }
+  const price = new Prisma.Decimal(amount.price)
 
   return {
     ok: true,
     price,
-    durationMinutes: ceilToStepMinutes(scheduling.durationMinutes, stepMinutes),
+    durationMinutes: options?.explicitDuration && amount.durationMinutes !== null
+      ? amount.durationMinutes : ceilToStepMinutes(scheduling.durationMinutes, stepMinutes),
   }
 }
 
@@ -212,10 +208,34 @@ export function deriveConsultServiceEstimate(args: {
   /** The look's linked service, from lib/looks/serviceOwnership.ts. */
   floorServiceId: string | null
   analysis: ConsultServiceEstimateAnalysisInput
+  selectedPathIndex?: number
 }): ConsultServiceEstimateDraft {
   const scheduling = {
     stepMinutes: args.stepMinutes,
     bufferMinutes: args.bufferMinutes,
+  }
+
+  if (args.analysis.lookPlan) {
+    const plan = args.analysis.lookPlan
+    const index = args.selectedPathIndex
+    const path = index !== undefined && Number.isInteger(index) && index >= 0 ? plan.paths[index] : undefined
+    if (plan.status !== 'READY_TO_CHOOSE' || plan.provisional || !path?.visits[0]?.steps.length) {
+      return refused('LOOK_PLAN_SELECTION_REQUIRED', scheduling, args.locationType)
+    }
+    const offerings = new Map(args.menu.map(offering => [offering.id, offering]))
+    const lines: ConsultServiceEstimateLineDraft[] = []
+    for (const [sortOrder, step] of path.visits[0].steps.entries()) {
+      const offering = offerings.get(step.offeringId)
+      if (!offering || offering.serviceId !== step.serviceId || offering.service.categoryId !== step.serviceCategoryId) {
+        return refused('SERVICE_NOT_ON_MENU', scheduling, args.locationType)
+      }
+      const priced = priceLine(offering, args.locationType, args.stepMinutes, { explicitDuration: true })
+      if (!priced.ok) return refused(priced.refusalCode, scheduling, args.locationType)
+      lines.push({ sortOrder, serviceId: step.serviceId, offeringId: step.offeringId, serviceName: offering.service.name,
+        source: 'LOOK_PLAN_REQUIRED', rationale: path.whyThisWorksForYou,
+        estimatedPrice: priced.price, estimatedDurationMinutes: priced.durationMinutes })
+    }
+    return { status: 'ESTIMATED', refusalCode: null, locationType: args.locationType, ...scheduling, lines }
   }
 
   if (!args.floorServiceId) {
@@ -323,6 +343,9 @@ export async function buildConsultServiceEstimate(
     serviceCategoryId: string
     anchorLookPostId: string
     analysis: ConsultServiceEstimateAnalysisInput
+    selectedPathIndex?: number
+    selectedLocationType?: ServiceLocationType
+    adjustments?: ConsultLookAdjustment[]
   },
 ): Promise<ConsultServiceEstimateDraft> {
   // A look-anchored consult has not chosen salon or mobile — the booking
@@ -335,8 +358,9 @@ export async function buildConsultServiceEstimate(
   const menu = await loadConsultProMenu(tx, {
     professionalId: args.professionalId,
     serviceCategoryId: args.serviceCategoryId,
+    ...(args.analysis.lookPlan ? { menuScope: 'HAIR_FAMILY' as const } : {}),
   })
-  const locationType = consultLookLocationType(menu.capability)
+  const locationType = args.selectedLocationType ?? consultLookLocationType(menu.capability)
 
   // Slot granularity and buffer come from the pro's own bookable location —
   // the same ProfessionalLocation columns availability sizes its day against.
@@ -373,9 +397,10 @@ export async function buildConsultServiceEstimate(
     locationType,
     stepMinutes,
     bufferMinutes,
-    menu: menu.offerings,
+    menu: args.selectedPathIndex === undefined ? menu.offerings : menu.offerings.map(offering => applyConsultLookOfferingAdjustments(offering, args.adjustments ?? [], args.selectedPathIndex ?? 0, locationType)),
     floorServiceId,
     analysis: args.analysis,
+    selectedPathIndex: args.selectedPathIndex,
   })
 }
 

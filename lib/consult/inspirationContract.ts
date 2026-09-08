@@ -1,3 +1,5 @@
+import { consultLookPlanningEnabled, hasConsultLookPlanMinimumIntake } from './lookPlanning'
+import { normalizeConsultIntakePayload } from './intake/registry'
 import 'server-only'
 
 import { resolveVisualDialogueQuestion } from './inspiration/visualDialogue'
@@ -542,9 +544,19 @@ export async function advanceLockedConsultToAnalysisIfReady(
   // caller a few lines earlier (lib/consult/analysisRerun.ts).
   const advancing = await tx.consultSession.findUnique({
     where: { id: args.consultSessionId },
-    select: { status: true },
+    select: { status: true, serviceCategory: { select: { consultFamily: true } } },
   })
-  if (advancing?.status !== ConsultSessionStatus.MEDIA_READY) return false
+  const earlyPlan = consultLookPlanningEnabled() && advancing?.serviceCategory.consultFamily === 'HAIR'
+  if (!advancing || (advancing.status !== ConsultSessionStatus.MEDIA_READY &&
+    !(earlyPlan && advancing.status === ConsultSessionStatus.INTAKE_IN_PROGRESS))) return false
+  if (earlyPlan) {
+    const latestIntake = await tx.consultRevision.findFirst({
+      where: { consultSessionId: args.consultSessionId, kind: 'INTAKE' },
+      select: { payload: true }, orderBy: { revision: 'desc' },
+    })
+    const intake = latestIntake ? normalizeConsultIntakePayload(latestIntake.payload) : null
+    if (!intake || (!intake.complete && !hasConsultLookPlanMinimumIntake(intake))) return false
+  }
 
   try {
     await requireCompletedConsultInspiration(tx, args)
@@ -577,7 +589,7 @@ export async function advanceLockedConsultToAnalysisIfReady(
   const accepted = new Set(
     captures
       .map(({ shotKey }) => shotKey)
-      .filter((shotKey) => packShotKeys.has(shotKey)),
+      .filter((shotKey) => packShotKeys.has(shotKey) || (earlyPlan && shotKey === 'early_photo')),
   )
   // A full pack is THIS session's pack — the seven hair views, or the three of
   // the face and area packs. The default used to be the LARGEST pack (seven),
@@ -588,14 +600,14 @@ export async function advanceLockedConsultToAnalysisIfReady(
   // its own (smaller) threshold.
   const minimumAcceptedShots =
     options?.minimumAcceptedShots ??
-    (packShotKeys.size || CONSULT_MAX_CAPTURE_SHOTS)
+    (earlyPlan ? 1 : (packShotKeys.size || CONSULT_MAX_CAPTURE_SHOTS))
   if (accepted.size < minimumAcceptedShots) {
     return false
   }
   await transitionLockedConsultSession(tx, {
     consultSessionId: args.consultSessionId,
     actor: args.actor,
-    fromStatus: ConsultSessionStatus.MEDIA_READY,
+    fromStatus: advancing.status,
     toStatus: ConsultSessionStatus.ANALYSIS_PENDING,
   })
   return true

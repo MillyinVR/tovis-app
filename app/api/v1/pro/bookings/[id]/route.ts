@@ -1,3 +1,4 @@
+import { loadBookingLookBriefLink } from '@/lib/consult/bookingLookBrief'
 // app/api/v1/pro/bookings/[id]/route.ts
 
 import { prisma } from '@/lib/prisma'
@@ -375,11 +376,13 @@ export async function GET(_req: Request, ctx: RouteContext) {
     // nobody asked a confirmation for serialises byte-identically to pre-K13
     // (NOT_REQUESTED is every booking while the loop flag is off).
     const clientConfirmation = deriveClientConfirmationBadge(booking)
+    const lookBrief = await loadBookingLookBriefLink(booking.id, professionalId)
 
     return jsonOk(
       {
         booking: {
           id: booking.id,
+          ...(lookBrief ? { lookBrief } : {}),
           status: booking.status,
           ...(clientConfirmation.significant ? { clientConfirmation } : {}),
           // Phase 2 revenue protection master switch, echoed onto the payload the

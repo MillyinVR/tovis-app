@@ -11,6 +11,7 @@ import {
   validateConsultAnalysisResult,
 } from './analysisEngine'
 import { ConsultWriteError } from './errors'
+import { normalizeStoredConsultLookPlan } from './lookPlan'
 
 /** The last schema whose rows carried `hairColorLens` and colour-only intents. */
 export const LEGACY_HAIR_COLOR_ANALYSIS_SCHEMA_VERSION = 2
@@ -90,7 +91,7 @@ export function normalizeStoredConsultAnalysisPayload(
   const current =
     schemaVersion === LEGACY_HAIR_COLOR_ANALYSIS_SCHEMA_VERSION
       ? upgradeLegacyPayload(payload)
-      : schemaVersion === CONSULT_ANALYSIS_SCHEMA_VERSION || schemaVersion === 4
+      : schemaVersion === CONSULT_ANALYSIS_SCHEMA_VERSION || schemaVersion === 5 || schemaVersion === 4
         ? payload
         : unavailable()
   if (!Array.isArray(current.recommendations)) unavailable()
@@ -157,12 +158,21 @@ export function normalizeStoredConsultAnalysisPayload(
     unavailable()
   }
 
+  let lookPlan
+  if (Object.hasOwn(current, 'lookPlan')) {
+    if (schemaVersion < 6) unavailable()
+    try { lookPlan = normalizeStoredConsultLookPlan(current.lookPlan, sanitized) } catch { unavailable() }
+  }
+
   // Keep old Brief reconstruction byte-identical: an absent observation is
   // not a newly stored UNKNOWN. The new writer still requires the field.
+  const { lookPlan: _providerPlan, ...storedAnalysis } = sanitized
+  void _providerPlan
   const { eyeColor: _eyeColor, ...legacyProfile } = sanitized.profile
   void _eyeColor
   return {
-    ...sanitized,
+    ...storedAnalysis,
+    ...(lookPlan ? { lookPlan } : {}),
     profile: schemaVersion < 5 ? legacyProfile : sanitized.profile,
     recommendations: sanitized.recommendations.map((recommendation, index) => {
       const reference = references[index]

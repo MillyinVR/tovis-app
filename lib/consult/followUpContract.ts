@@ -1,3 +1,6 @@
+import { recordLockedConsultRerunRequest } from './analysisRerun'
+import { requireAuthorizedProposalScope } from './proposalEntry'
+import { consultRequiresLookChoice } from './lookPlanning'
 import 'server-only'
 
 import { readOptionalEnv } from '@/lib/env'
@@ -215,6 +218,7 @@ function answeredValues(
 // ── The situation, read once ────────────────────────────────────────────────
 
 type FollowUpSituation = {
+  needsColorHistory: boolean
   needsCalibration: boolean
   planVersion: number
   /** The pack this consult is PINNED to, not the pack that shipped today. */
@@ -297,7 +301,7 @@ export async function generateConsultFollowUpRound(
   // its photos, and the plan comes after them); it fires for a consult that
   // reached a plan and never booked, which is exactly the case that would have
   // paid for nothing.
-  if (!(await consultHasLiveBooking(args.consultSessionId))) {
+  if (!(await consultHasLiveBooking(args.consultSessionId)) && !(await consultRequiresLookChoice(prisma, args.consultSessionId))) {
     return { created: false, reason: 'NOT_BOOKED' }
   }
   const state = projectConsultFollowUpState(situation)
@@ -519,6 +523,8 @@ async function readConsultFollowUpSituation(
   // on a payload it cannot read; a follow-up is an ADDITION to the thread and
   // must not be the thing that takes it down, so an unreadable plan simply
   // means the prompt is told her hair has not been read.
+  let needsColorHistory = false
+  let lookOutcomeName: string | null = null
   let needsCalibration = false
   let core: ConsultAnalysisCore | null = null
   if (analysisRevision) {
@@ -527,6 +533,12 @@ async function readConsultFollowUpSituation(
         analysisRevision.payload,
         analysisRevision.schemaVersion,
       )
+      if (analysis.lookPlan) {
+        // The inspiration's menu label is not the client's chosen outcome.
+        lookOutcomeName = 'a look like this'
+        const categoryIds = analysis.lookPlan.paths.flatMap(path => path.visits.flatMap(visit => visit.steps.map(step => step.serviceCategoryId)))
+        needsColorHistory = Boolean(await prisma.serviceCategory.findFirst({ where: { id: { in: categoryIds }, slug: 'hair-color' }, select: { id: true } }))
+      }
       core = analysis.core as ConsultAnalysisCore
       needsCalibration = needsConsultProfileCalibration(analysis.profile, readOptionalEnv('AI_CONSULT_PROFILE_CALIBRATION_ENABLED') === 'true')
     } catch (error) {
@@ -574,13 +586,14 @@ async function readConsultFollowUpSituation(
   return {
     session,
     needsCalibration,
+    needsColorHistory,
     planVersion,
     intakePack,
     intakeAnswers,
     inspiration,
     core,
     preferences,
-    serviceName: identity.serviceName,
+    serviceName: lookOutcomeName ?? identity.serviceName,
     professionalDisplayName: identity.professionalDisplayName,
     followUpAnswers,
     rounds: currentRounds.map((row) => ({
@@ -691,6 +704,7 @@ function resolveConsultFollowUpPreferences(args: {
 function resolveVocabularyFor(situation: FollowUpSituation) {
   return resolveConsultFollowUpVocabulary({
     needsCalibration: situation.needsCalibration,
+    needsColorHistory: situation.needsColorHistory,
     intakePack: situation.intakePack,
     intakeAnswers: situation.intakeAnswers,
     serviceName: situation.serviceName,
@@ -828,22 +842,25 @@ export async function answerConsultFollowUpQuestion(
       },
     })
   } else {
-    await prisma.consultFollowUpRound.update({
-      where: { id: round.id },
-      data: {
-        answers: {
-          ...Object.fromEntries(
-            round.questions
-              .filter(
-                (entry) =>
-                  entry.home === 'FOLLOW_UP' && entry.selectedValues !== null,
-              )
-              .map((entry) => [entry.key, entry.selectedValues as string[]]),
-          ),
-          [question.key]: [value],
-        },
-        answeredAt: now,
-      },
+    await prisma.$transaction(async tx => {
+      await requireAuthorizedProposalScope(tx, { consultSessionId: args.consultSessionId, clientId: args.clientId, actorUserId: args.actor.id, now })
+      const currentSession = await tx.consultSession.findUniqueOrThrow({ where: { id: args.consultSessionId }, select: CONSULT_OPEN_WINDOW_SELECT })
+      assertConsultInputOpen(currentSession, now)
+      const currentRound = await tx.consultFollowUpRound.findUniqueOrThrow({ where: { id: round.id } })
+      if (currentRound.consultSessionId !== args.consultSessionId || currentRound.planVersion !== await countConsultPlanVersions(tx, args.consultSessionId)) {
+        throw new ConsultFollowUpAnswerError('NOT_OPEN')
+      }
+      const existing = readStoredAnswers(currentRound.answers)
+      if (existing[question.key]) {
+        if (existing[question.key]?.length !== 1 || existing[question.key]?.[0] !== value) throw new ConsultFollowUpAnswerError('NOT_OPEN')
+        return
+      }
+      await tx.consultFollowUpRound.update({ where: { id: round.id }, data: {
+        answers: { ...existing, [question.key]: [value] }, answeredAt: now,
+      } })
+      if (await consultRequiresLookChoice(tx, args.consultSessionId)) {
+        await recordLockedConsultRerunRequest(tx, { consultSessionId: args.consultSessionId, actor: args.actor })
+      }
     })
   }
 

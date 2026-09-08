@@ -45,7 +45,7 @@ function offering(
 function estimate(
   lines: Array<{
     serviceId: string
-    source?: 'LOOK_LINKED_SERVICE' | 'ANALYSIS_RECOMMENDATION'
+    source?: 'LOOK_LINKED_SERVICE' | 'ANALYSIS_RECOMMENDATION' | 'LOOK_PLAN_REQUIRED'
   }>,
   status: 'ESTIMATED' | 'REFUSED' = 'ESTIMATED',
 ): ConsultBookingProposalEstimateInput {
@@ -646,5 +646,23 @@ describe('the client chooses what is beyond the floor', () => {
 
     if (result.status !== 'PROPOSED') throw new Error('expected a proposal')
     expect(result.lines.map((line) => line.sortOrder)).toEqual([0, 1])
+  })
+})
+
+describe('required look steps', () => {
+  it('keeps all required work when the client declines every optional enhancement', () => {
+    const result = derive({ menu: [floor, offering({ serviceId: 'svc_cut', salonPriceStartingAt: new Prisma.Decimal(0), salonDurationMinutes: 30 })],
+      estimate: estimate([{ serviceId: 'svc_balayage', source: 'LOOK_PLAN_REQUIRED' }, { serviceId: 'svc_cut', source: 'LOOK_PLAN_REQUIRED' }]),
+      enhancementSelection: [] })
+    expect(result.status).toBe('PROPOSED')
+    if (result.status !== 'PROPOSED') throw new Error('Expected required look proposal')
+    expect(result.lines.map(line => line.serviceId)).toEqual(['svc_balayage', 'svc_cut'])
+    expect(result.totalDurationMinutes).toBe(120)
+    expect(result.recommendations).toEqual([])
+  })
+  it('refuses instead of borrowing the catalog duration for required work', () => {
+    const result = derive({ menu: [offering({ serviceId: 'svc_balayage', salonDurationMinutes: null })],
+      estimate: estimate([{ serviceId: 'svc_balayage', source: 'LOOK_PLAN_REQUIRED' }]) })
+    expect(result).toMatchObject({ status: 'REFUSED', refusalCode: 'MODE_DURATION_UNSET', lines: [] })
   })
 })

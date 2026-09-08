@@ -904,28 +904,6 @@ export default function AddOnsClient({
           data-testid="booking-consult-proposal"
           className="tovis-glass mt-4 rounded-card border border-textPrimary/10 bg-bgSecondary p-4"
         >
-          <div className="grid gap-2">
-            {consultProposal.lines.map((line, index) => (
-              <div
-                key={`${index}:${line.serviceName}`}
-                className="flex items-baseline justify-between gap-3 rounded-card border border-textPrimary/10 bg-bgPrimary/35 px-3 py-2.5"
-              >
-                {/* 🔴 `break-words`, not just `min-w-0`: a flex item can be
-                    allowed to shrink and STILL overflow when its content is one
-                    unbroken token. Seen in a browser — a long service name ran
-                    underneath its own "30 min · $45", the same shape as the pro
-                    header card's overlap. */}
-                <span className="min-w-0 break-words text-[13px] font-black text-textPrimary">
-                  {line.serviceName}
-                </span>
-                <span className="shrink-0 text-[11px] font-semibold text-textSecondary">
-                  {formatDurationLabel(line.durationMinutes) ?? '—'} ·{' '}
-                  {formatMoneyLabel(line.price)}
-                </span>
-              </div>
-            ))}
-          </div>
-
           <div className="mt-3 flex items-baseline justify-between gap-3 text-[12px]">
             <span className="font-semibold text-textSecondary">
               {consultCopy.durationLabel}

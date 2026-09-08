@@ -857,7 +857,7 @@ describe('the database refuses a proposal that lies', () => {
                   'LOOK_LINKED_SERVICE', 180.00, ${PROPOSAL_MINUTES})
         `
       }),
-    ).rejects.toThrow(/total duration must equal its lines/)
+    ).rejects.toThrow(/a booking proposal must equal its nonempty lines/)
   })
 
   it('refuses a proposal whose consult is not the one stamped on its booking', async () => {

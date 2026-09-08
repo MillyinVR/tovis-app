@@ -1121,6 +1121,7 @@ export default async function ClientBookingPage(props: {
 
         {showDecisionCard && showConsultationApproval ? (
           <ConsultationDecisionCard
+            isLookBooking={booking.isLookBooking}
             bookingId={booking.id}
             appointmentTz={appointmentTimeZone}
             notes={consultationNotes}
@@ -1259,7 +1260,7 @@ export default async function ClientBookingPage(props: {
             </div>
           ) : null}
 
-          {step !== 'aftercare' && booking.items.length > 0 ? (
+          {!booking.isLookBooking && step !== 'aftercare' && booking.items.length > 0 ? (
             <div className="mt-4">
               <SectionCard
                 title="What’s included"
@@ -1656,7 +1657,7 @@ export default async function ClientBookingPage(props: {
                 outside the finalize path — drew the heading "Final service
                 breakdown" over empty space.
               */}
-              {booking.items.length > 0 ? (
+              {!booking.isLookBooking && booking.items.length > 0 ? (
                 <ClientAftercareCard>
                   <ClientAftercareSectionTitle title="Final service breakdown" />
 

@@ -137,6 +137,16 @@ function outlookArgs(overrides?: {
 // ── resolveConsultationMaterialization ──────────────────────────────────────
 
 describe('resolveConsultationMaterialization', () => {
+  it('uses the server-owned look timing when applying a reviewed look version', async () => {
+    const proposal = makeProposalJson()
+    const offeringId = makeOffering().id
+    const result = await resolveConsultationMaterialization({ tx: makeTx(), professionalId: 'pro_1',
+      locationType: ServiceLocationType.SALON, proposedServicesJson: proposal,
+      lookDurationOverrides: new Map([[offeringId, 105]]),
+    })
+    expect(result.computedDurationMinutes).toBe(105)
+  })
+
   it('takes the duration from the offering catalog, not from the proposal', async () => {
     const result = await resolveConsultationMaterialization({
       tx: makeTx(),

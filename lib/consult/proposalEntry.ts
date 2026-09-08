@@ -1,3 +1,5 @@
+import { effectiveConsultLookPlan } from './lookBriefPlan'
+import { readStoredLookAdjustments } from './lookAdjustments'
 // lib/consult/proposalEntry.ts
 //
 // Book the Look, slice B4 — the client-facing entry to a booking proposal:
@@ -16,6 +18,7 @@
 // consults answer exactly like a client who has none.
 
 import 'server-only'
+import { isConsultRequiredEstimateSource } from './serviceEstimate'
 
 import {
   BookingStatus,
@@ -41,7 +44,7 @@ import { prisma } from '@/lib/prisma'
 
 import { isAiConsultC7ExposureEnabledForPro } from './access'
 import { requireCurrentConsultAgreementAcceptances } from './agreementContract'
-import { CONSULT_ANCHOR_SELECT, evaluateConsultAnchor } from './anchor'
+import { CONSULT_ANCHOR_SELECT, evaluateConsultAnchor, evaluateConsultAnchorScope } from './anchor'
 import {
   buildConsultBookingProposal,
   type ConsultBookingProposalAnalysisInput,
@@ -82,6 +85,7 @@ export type ConsultProposalScope = Prisma.ConsultSessionGetPayload<{
 const PROPOSAL_ESTIMATE_SELECT = {
   id: true,
   status: true,
+  sourceLookBriefVersion: { select: { selectedLocationType: true, selectedPathIndex: true, adjustments: true, professionalPlan: true } },
   // The ANALYSIS revision this estimate was derived from. The safety gate reads
   // its recommendations — the exact payload B3 translated, not a later one.
   sourceAnalysisRevision: { select: { payload: true, schemaVersion: true } },
@@ -116,6 +120,7 @@ export async function requireAuthorizedProposalScope(
     consultSessionId: string
     clientId: string
     actorUserId: string
+    readOnly?: boolean
     now?: Date
   },
 ): Promise<ConsultProposalScope> {
@@ -143,7 +148,7 @@ export async function requireAuthorizedProposalScope(
   if (session.status !== ConsultSessionStatus.COMPLETED) {
     throw new ConsultProposalEntryError('UNAVAILABLE')
   }
-  const anchor = evaluateConsultAnchor(session, args.now ?? new Date())
+  const anchor = args.readOnly ? evaluateConsultAnchorScope(session) : evaluateConsultAnchor(session, args.now ?? new Date())
   if (!anchor.eligible) {
     throw new ConsultProposalEntryError(anchor.hidden ? 'HIDDEN' : 'UNAVAILABLE')
   }
@@ -184,8 +189,29 @@ export async function loadProposalDerivationInputs(
   // analysis version, because a rerun reprices — so the proposal must be built
   // from the newest plan the client has actually been shown, and `findUnique`
   // on `consultSessionId` has stopped being a question with one answer.
+  const latestAnalysis = await tx.consultRevision.findFirst({
+    where: { consultSessionId, kind: 'ANALYSIS' }, orderBy: { revision: 'desc' },
+    select: { id: true, payload: true, schemaVersion: true },
+  })
+  let sourceLookBriefVersionId: string | undefined
+  if (latestAnalysis) {
+    const plan = normalizeStoredConsultAnalysisPayload(latestAnalysis.payload, latestAnalysis.schemaVersion).lookPlan
+    if (plan) {
+      const version = await tx.consultLookBriefVersion.findFirst({
+        where: { consultSessionId }, orderBy: { version: 'desc' },
+        select: { id: true, sourceAnalysisRevisionId: true, selectedPathIndex: true, awaitingAnalysis: true, professionalPlan: true, invalidatedProfessionalPlan: true },
+      })
+      const currentPlan = effectiveConsultLookPlan(normalizeStoredConsultAnalysisPayload(latestAnalysis.payload, latestAnalysis.schemaVersion), version)
+      if (!currentPlan || currentPlan.provisional || currentPlan.status !== 'READY_TO_CHOOSE' || !version ||
+        version.awaitingAnalysis || version.sourceAnalysisRevisionId !== latestAnalysis.id || version.selectedPathIndex === null) {
+        return { estimate: null, analysisRecommendations: [] }
+      }
+      sourceLookBriefVersionId = version.id
+    }
+  }
   const estimate = await tx.consultServiceEstimate.findFirst({
-    where: { consultSessionId },
+    where: { consultSessionId, ...(latestAnalysis ? { sourceAnalysisRevisionId: latestAnalysis.id } : {}),
+      ...(sourceLookBriefVersionId ? { sourceLookBriefVersionId } : {}) },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     select: PROPOSAL_ESTIMATE_SELECT,
   })
@@ -205,7 +231,7 @@ export async function loadProposalDerivationInputs(
     throw new ConsultProposalEntryError('UNAVAILABLE')
   }
 
-  return { estimate, analysisRecommendations }
+  return { estimate, analysisRecommendations: estimate.sourceLookBriefVersion?.professionalPlan ? [] : analysisRecommendations }
 }
 
 export function toProposalEstimateInput(
@@ -214,6 +240,10 @@ export function toProposalEstimateInput(
   if (!row) return null
   return {
     status: row.status,
+    ...(row.sourceLookBriefVersion?.selectedPathIndex !== null && row.sourceLookBriefVersion?.selectedPathIndex !== undefined ? {
+      selectedLook: { pathIndex: row.sourceLookBriefVersion.selectedPathIndex,
+        adjustments: readStoredLookAdjustments(row.sourceLookBriefVersion.adjustments) },
+    } : {}),
     lines: row.lines.map((line) => ({
       id: line.id,
       sortOrder: line.sortOrder,
@@ -247,7 +277,7 @@ export function toConsultBookingProposalDTO(args: {
   autoAcceptBookings: boolean
 }): ConsultBookingProposalDTO | null {
   const floor = args.draft.lines.find(
-    (line) => line.source === 'LOOK_LINKED_SERVICE',
+    (line) => isConsultRequiredEstimateSource(line.source),
   )
   // Unreachable for a stored ESTIMATED estimate (the database trigger requires
   // exactly one floor line), and refused rather than assumed: a proposal with
@@ -335,6 +365,9 @@ export async function loadAuthorizedConsultBookingProposal(args: {
     const { estimate, analysisRecommendations } =
       await loadProposalDerivationInputs(tx, scope.id)
 
+    if (estimate?.sourceLookBriefVersion && estimate.sourceLookBriefVersion.selectedLocationType !== args.locationType) {
+      return { available: false, reason: 'MODE_NOT_OFFERED', proposal: null, professionalId: scope.professionalId }
+    }
     const draft = await buildConsultBookingProposal(tx, {
       professionalId: scope.professionalId,
       serviceCategoryId: scope.serviceCategoryId,

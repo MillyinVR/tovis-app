@@ -29,6 +29,7 @@ export type NotificationTemplateKey =
   | 'rebook_cadence_due'
   | 'saved_look_consult_nudge'
   | 'ai_consult_invitation'
+  | 'look_brief_review'
   | 'ai_consult_analysis_ready'
   | 'ai_consult_analysis_failed'
   | 'consult_prep_reminder'
@@ -214,6 +215,7 @@ export const NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.REBOOK_CADENCE_DUE,
   NotificationEventKey.SAVED_LOOK_CONSULT_NUDGE,
   NotificationEventKey.AI_CONSULT_INVITATION,
+  NotificationEventKey.LOOK_BRIEF_REVIEW,
   NotificationEventKey.AI_CONSULT_ANALYSIS_READY,
   NotificationEventKey.AI_CONSULT_ANALYSIS_FAILED,
   NotificationEventKey.CONSULT_PREP_REMINDER,
@@ -653,6 +655,18 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     },
   },
 
+  [NotificationEventKey.LOOK_BRIEF_REVIEW]: {
+    key: NotificationEventKey.LOOK_BRIEF_REVIEW,
+    defaultPriority: NotificationPriority.NORMAL,
+    transactional: true,
+    allowQuietHoursBypass: false,
+    templateKey: 'look_brief_review',
+    supportedRecipients: [NotificationRecipientKind.CLIENT, NotificationRecipientKind.PRO],
+    defaultChannelsByRecipient: {
+      [NotificationRecipientKind.CLIENT]: [NotificationChannel.IN_APP, NotificationChannel.PUSH],
+      [NotificationRecipientKind.PRO]: PRO_IN_APP_PUSH_CHANNELS,
+    },
+  },
   [NotificationEventKey.AI_CONSULT_ANALYSIS_READY]: {
     // P4b. TRANSACTIONAL, unlike its AI_CONSULT_INVITATION sibling above, and
     // the difference is who started it: the invitation is the app suggesting
@@ -1353,6 +1367,7 @@ export const CLIENT_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.REBOOK_CADENCE_DUE,
   NotificationEventKey.SAVED_LOOK_CONSULT_NUDGE,
   NotificationEventKey.AI_CONSULT_INVITATION,
+  NotificationEventKey.LOOK_BRIEF_REVIEW,
   NotificationEventKey.AI_CONSULT_ANALYSIS_READY,
   NotificationEventKey.AI_CONSULT_ANALYSIS_FAILED,
   NotificationEventKey.CONSULT_PREP_REMINDER,

@@ -1,3 +1,6 @@
+import { normalizeStoredInspirationPayload } from './inspirationPack'
+import { consultIntakeItems, findConsultIntakePack, normalizeConsultIntakePayload } from './intake/registry'
+import { requireAuthorizedProLookScope } from './lookBrief'
 import 'server-only'
 
 import { consultCalibrationAnswerItems } from './profileCalibration'
@@ -168,6 +171,29 @@ async function loadSessionBrief(
     select: { answers: true },
   }))
 
+  let clientIntake = payload.clientIntake
+  let inspiration = payload.inspiration
+  if (result.lookBrief) {
+    const latest = await tx.consultRevision.findFirst({ where: { consultSessionId: session.id, kind: 'INTAKE' }, orderBy: { revision: 'desc' } })
+    const intake = latest ? normalizeConsultIntakePayload(latest.payload) : null
+    const pack = intake ? findConsultIntakePack(intake.packId, intake.packVersion) : null
+    if (intake && pack) clientIntake = consultIntakeItems(pack, intake.answers)
+    const latestReference = await tx.consultRevision.findFirst({ where: { consultSessionId: session.id, kind: 'INSPIRATION' }, orderBy: { revision: 'desc' } })
+    const reference = latestReference ? normalizeStoredInspirationPayload(latestReference.payload) : null
+    if (reference && latestReference) {
+      const source = reference.inspirationId ? await tx.consultInspiration.findFirst({
+        where: { id: reference.inspirationId, consultSessionId: session.id, status: 'ATTACHED' },
+        select: { sourceLookPostId: true },
+      }) : null
+      inspiration = { ...inspiration, revisionId: latestReference.id,
+        source: reference.source, inspirationId: reference.inspirationId,
+        lookPostId: source?.sourceLookPostId ?? null,
+        mediaEndpoint: reference.source === 'EXTERNAL_UPLOAD'
+          ? `/api/v1/pro/consults/${encodeURIComponent(session.id)}/inspiration/media` : null,
+        exactClientDetails: reference.exactClientDetails,
+        possibleProfessionalInterpretation: reference.possibleProfessionalInterpretation, catalogGuidance: reference.catalogGuidance }
+    }
+  }
   const feedback = await tx.consultBriefFeedback.findUnique({
     where: { consultSessionId: session.id },
     select: { rating: true, createdAt: true },
@@ -184,21 +210,23 @@ async function loadSessionBrief(
     sourceAnalysisRevisionId: payload.sourceAnalysisRevisionId,
     sourceAnalysisRevision: payload.sourceAnalysisRevision,
     intakeRevisionId: payload.intakeRevisionId,
-    inspiration: payload.inspiration,
-    clientIntake: [...payload.clientIntake, ...calibrationAnswers],
+    inspiration,
+    clientIntake: [...clientIntake, ...calibrationAnswers],
     aiObservations: payload.aiObservations,
     profile: payload.profile,
     styleDirections: payload.styleDirections,
     safetyFlags: payload.safetyFlags,
     achievabilityDirection: payload.achievabilityDirection,
     recommendationDirections: payload.recommendationDirections,
+    ...(result.lookPlan ? { lookPlan: result.lookPlan } : {}),
+    ...(result.lookBrief ? { lookBrief: result.lookBrief } : {}),
     // Book the Look, B3. Omitted rather than nulled for a booking-anchored
     // consult, which has no estimate to carry.
     ...(session.anchorLookPostId ? { serviceEstimate } : {}),
     inspirationAnalysis: await loadBriefInspirationAnalysis(
       tx,
       session.id,
-      payload.inspiration.inspirationId,
+      inspiration.inspirationId,
     ),
     ...(await loadBriefPlanDiff(session.id, planDiffCopy)),
     feedback: feedback
@@ -380,5 +408,18 @@ export async function recordConsultBriefFeedback(args: {
       },
       replayed: false,
     }
+  })
+}
+
+
+/** The assigned pro can review this consented look before an appointment exists. */
+export async function loadAuthorizedProLookBrief(args: { consultSessionId: string; professionalId: string; actorUserId: string }) {
+  return prisma.$transaction(async tx => {
+    await requireAuthorizedProLookScope(tx, args, { readOnly: true })
+    const session = await tx.consultSession.findUniqueOrThrow({ where: { id: args.consultSessionId }, select: {
+      id: true, bookingId: true, anchorLookPostId: true, professionalId: true, serviceCategoryId: true, createdAt: true,
+    } })
+    const estimates = await loadConsultServiceEstimatesByConsultId(tx, [session.id])
+    return loadSessionBrief(tx, session, estimates.get(session.id) ?? null, defaultClientConsultPlanDiffCopy)
   })
 }

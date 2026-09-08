@@ -65,6 +65,8 @@ export const clientBookingListSelect = {
   id: true,
   status: true,
   source: true,
+  sourceLookPostId: true,
+  sourceConsultSessionId: true,
   // Links a coupled aftercare rebook back to the appointment whose payment gates
   // its approval — so the native next-booking detail can label it "pending —
   // your pro will confirm after payment" (AWAITING_CONFIRMATION coupling).

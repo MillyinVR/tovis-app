@@ -195,6 +195,7 @@ export type ClientBookingPrepDTO = {
 }
 
 export type ClientBookingDTO = {
+  isLookBooking?: boolean
   id: string
   status: string | null
   source: string | null
@@ -609,6 +610,7 @@ type ClientBookingRefundDisputeFields = {
 
 export async function buildClientBookingDTO(input: {
   booking: ClientBookingRow &
+    Partial<Pick<Prisma.BookingGetPayload<Record<string, never>>, 'sourceLookPostId' | 'sourceConsultSessionId'>> &
     ClientBookingDepositFields &
     ClientBookingRebookFields &
     ClientBookingMediaConsentFields &
@@ -640,6 +642,7 @@ export async function buildClientBookingDTO(input: {
   sharedBoardIds?: string[] | null
 }): Promise<ClientBookingDTO> {
   const { booking: b } = input
+  const isLookBooking = Boolean(b.sourceLookPostId || b.sourceConsultSessionId)
 
   // A pro-proposed next appointment is still pending when it's BOOKED_NEXT_APPOINTMENT
   // with a time, not declined, and not already confirmed (no active rebooked booking).
@@ -885,11 +888,12 @@ export async function buildClientBookingDTO(input: {
         }
       : null,
 
+    isLookBooking,
     display: {
-      title,
-      baseName,
-      addOnNames,
-      addOnCount: addOnNames.length,
+      title: isLookBooking ? 'Your look' : title,
+      baseName: isLookBooking ? 'Your look' : baseName,
+      addOnNames: isLookBooking ? [] : addOnNames,
+      addOnCount: isLookBooking ? 0 : addOnNames.length,
     },
 
     items,

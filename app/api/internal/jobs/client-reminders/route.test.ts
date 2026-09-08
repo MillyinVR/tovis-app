@@ -4,6 +4,7 @@ import { NotificationEventKey } from '@prisma/client'
 const NOW = new Date('2026-04-13T18:30:00.000Z')
 
 const mocks = vi.hoisted(() => ({
+  drainLookBriefReminders: vi.fn(),
   jsonFail: vi.fn(),
   jsonOk: vi.fn(),
 
@@ -86,6 +87,8 @@ vi.mock('@/lib/security/logging', () => ({
   safeError: mocks.safeError,
 }))
 
+vi.mock('@/lib/notifications/lookBriefReminders', () => ({ drainLookBriefReminders: mocks.drainLookBriefReminders }))
+
 import { GET, POST } from './route'
 
 type Tx = {
@@ -164,6 +167,7 @@ function makeSendValidation(overrides?: Partial<{
 describe('app/api/internal/jobs/client-reminders/route.ts', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.drainLookBriefReminders.mockResolvedValue({ scanned: 0, processed: 0 })
     vi.useFakeTimers()
     vi.setSystemTime(NOW)
 
@@ -283,6 +287,7 @@ describe('app/api/internal/jobs/client-reminders/route.ts', () => {
     expect(result.status).toBe(200)
     await expect(result.json()).resolves.toEqual({
       ok: true,
+      lookBriefReminders: { scanned: 0, processed: 0 },
       scannedCount: 0,
       processedCount: 0,
       skippedCount: 0,
@@ -321,6 +326,7 @@ describe('app/api/internal/jobs/client-reminders/route.ts', () => {
     expect(result.status).toBe(200)
     await expect(result.json()).resolves.toEqual({
       ok: true,
+      lookBriefReminders: { scanned: 0, processed: 0 },
       scannedCount: 0,
       processedCount: 0,
       skippedCount: 0,
@@ -384,6 +390,7 @@ describe('app/api/internal/jobs/client-reminders/route.ts', () => {
     expect(result.status).toBe(200)
     await expect(result.json()).resolves.toEqual({
       ok: true,
+      lookBriefReminders: { scanned: 0, processed: 0 },
       scannedCount: 1,
       processedCount: 1,
       skippedCount: 0,
@@ -444,6 +451,7 @@ describe('app/api/internal/jobs/client-reminders/route.ts', () => {
     expect(result.status).toBe(200)
     await expect(result.json()).resolves.toMatchObject({
       ok: true,
+      lookBriefReminders: { scanned: 0, processed: 0 },
       scannedCount: 1,
       processedCount: 1,
       skippedCount: 0,
@@ -477,6 +485,7 @@ describe('app/api/internal/jobs/client-reminders/route.ts', () => {
     expect(result.status).toBe(200)
     await expect(result.json()).resolves.toEqual({
       ok: true,
+      lookBriefReminders: { scanned: 0, processed: 0 },
       scannedCount: 1,
       processedCount: 0,
       skippedCount: 1,
@@ -517,6 +526,7 @@ describe('app/api/internal/jobs/client-reminders/route.ts', () => {
     expect(result.status).toBe(200)
     await expect(result.json()).resolves.toEqual({
       ok: true,
+      lookBriefReminders: { scanned: 0, processed: 0 },
       scannedCount: 1,
       processedCount: 0,
       skippedCount: 0,
@@ -580,6 +590,7 @@ describe('app/api/internal/jobs/client-reminders/route.ts', () => {
     expect(result.status).toBe(200)
     await expect(result.json()).resolves.toEqual({
       ok: true,
+      lookBriefReminders: { scanned: 0, processed: 0 },
       scannedCount: 1,
       processedCount: 0,
       skippedCount: 0,
@@ -625,6 +636,7 @@ describe('app/api/internal/jobs/client-reminders/route.ts', () => {
     expect(result.status).toBe(200)
     await expect(result.json()).resolves.toEqual({
       ok: true,
+      lookBriefReminders: { scanned: 0, processed: 0 },
       scannedCount: 1,
       processedCount: 0,
       skippedCount: 1,
@@ -667,6 +679,7 @@ describe('app/api/internal/jobs/client-reminders/route.ts', () => {
     expect(result.status).toBe(200)
     await expect(result.json()).resolves.toEqual({
       ok: true,
+      lookBriefReminders: { scanned: 0, processed: 0 },
       scannedCount: 1,
       processedCount: 0,
       skippedCount: 0,
@@ -706,6 +719,7 @@ describe('app/api/internal/jobs/client-reminders/route.ts', () => {
     expect(result.status).toBe(200)
     await expect(result.json()).resolves.toEqual({
       ok: true,
+      lookBriefReminders: { scanned: 0, processed: 0 },
       scannedCount: 1,
       processedCount: 0,
       skippedCount: 1,

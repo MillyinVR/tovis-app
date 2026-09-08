@@ -1,3 +1,5 @@
+import Link from 'next/link'
+import { loadBookingLookBriefLink } from '@/lib/consult/bookingLookBrief'
 // app/pro/bookings/[id]/session/layout.tsx
 //
 // Mounts the session state poller once for every page in the Pro session
@@ -45,12 +47,14 @@ async function resolvePoller(bookingId: string): Promise<ReactNode> {
   const state = buildProSessionState(booking)
   if (state.terminal) return null
 
-  return (
-    <SessionStatePoller
-      bookingId={bookingId}
-      initialStateHash={computeProSessionStateHash(state)}
-    />
-  )
+  const brief = await loadBookingLookBriefLink(bookingId, professionalId)
+  return <>
+    <SessionStatePoller bookingId={bookingId} initialStateHash={computeProSessionStateHash(state)} />
+    {brief && <Link className="mx-auto my-3 block max-w-4xl rounded-card border border-textPrimary/10 bg-bgSurface p-4 text-sm text-textPrimary"
+      href={`/pro/consults/${encodeURIComponent(brief.consultId)}`}>
+      Look brief · Version {brief.version} · {brief.confirmed ? 'Both confirmed' : 'Confirmation needed'} — review together
+    </Link>}
+  </>
 }
 
 export default async function ProBookingSessionLayout(props: LayoutProps) {

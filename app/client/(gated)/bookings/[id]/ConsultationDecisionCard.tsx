@@ -1,6 +1,7 @@
 // app/client/bookings/[id]/ConsultationDecisionCard.tsx
 'use client'
 
+import { lookProposalDurationMinutes } from '@/lib/consultation/lookProposalSummary'
 import { useRouter } from 'next/navigation'
 import { useMemo, useState } from 'react'
 import { moneyToString } from '@/lib/money'
@@ -84,6 +85,7 @@ type DecisionAction = 'APPROVE' | 'REJECT'
 
 export default function ConsultationDecisionCard(props: {
   bookingId: string
+  isLookBooking?: boolean
   appointmentTz: string
   notes: string
   proposedTotalLabel: string | null
@@ -167,9 +169,14 @@ export default function ConsultationDecisionCard(props: {
         <Pill>{appointmentTz}</Pill>
       </div>
 
-      <div className="mt-3 text-xs font-black text-textSecondary">{COPY.consultationDecisionCard.proposedServices}</div>
+      <div className="mt-3 text-xs font-black text-textSecondary">{props.isLookBooking ? 'Your updated look appointment' : COPY.consultationDecisionCard.proposedServices}</div>
 
-      {items.length ? (
+      {props.isLookBooking ? (
+        <div className="mt-2 text-sm text-textSecondary">
+          <p>Review your shared look brief and the proposed total before approving.</p>
+          {lookProposalDurationMinutes(proposedServicesJson) !== null && <p>Updated appointment: {lookProposalDurationMinutes(proposedServicesJson)} min</p>}
+        </div>
+      ) : items.length ? (
         <div className="mt-2 grid gap-2">
           {items.map((it, idx) => {
             const label =

@@ -52,6 +52,8 @@ const bookingSelect = Prisma.validator<Prisma.BookingSelect>()({
   id: true,
   status: true,
   source: true,
+  sourceLookPostId: true,
+  sourceConsultSessionId: true,
   rebookOfBookingId: true,
   sessionStep: true,
   scheduledFor: true,

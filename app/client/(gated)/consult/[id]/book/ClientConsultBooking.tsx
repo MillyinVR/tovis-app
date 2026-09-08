@@ -246,26 +246,7 @@ export default function ClientConsultBooking({
               {copy.proposalBody}
             </p>
 
-            <ul className="mt-3 grid gap-2">
-              {proposal.lines.map((line, index) => (
-                <li
-                  key={`${index}:${line.serviceName}`}
-                  className="flex items-baseline justify-between gap-3 rounded-xl border border-surfaceGlass/10 bg-bgPrimary px-3 py-2.5"
-                >
-                  {/* `break-words` for the reason the review step's copy of
-                      this row carries it: a flex item that may shrink can still
-                      overflow when its content is one unbroken token, and the
-                      name then runs under its own price. */}
-                  <span className="min-w-0 break-words text-[13px] font-semibold text-textPrimary">
-                    {line.serviceName}
-                  </span>
-                  <span className="shrink-0 text-[12px] font-semibold text-textMuted">
-                    {formatDurationLabel(line.durationMinutes) ?? '—'} ·{' '}
-                    {formatRoundedDollars(line.price) ?? `$${line.price}`}
-                  </span>
-                </li>
-              ))}
-            </ul>
+
 
             <div className="mt-3 flex items-baseline justify-between gap-3 text-[13px]">
               <span className="font-semibold text-textSecondary">

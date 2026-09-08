@@ -98,6 +98,8 @@ export async function GET(_request: Request, ctx: RouteContext<{ token: string }
         booking: {
           select: {
             id: true,
+            sourceLookPostId: true,
+            sourceConsultSessionId: true,
             status: true,
             sessionStep: true,
             scheduledFor: true,
@@ -207,6 +209,7 @@ export async function GET(_request: Request, ctx: RouteContext<{ token: string }
       {
         booking: {
           id: token.booking.id,
+          isLookBooking: Boolean(token.booking.sourceLookPostId || token.booking.sourceConsultSessionId),
           status: token.booking.status,
           sessionStep: token.booking.sessionStep,
           scheduledFor: asIso(token.booking.scheduledFor),

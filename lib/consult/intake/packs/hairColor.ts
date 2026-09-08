@@ -36,6 +36,7 @@ import type {
 
 import {
   BUDGET_OPTIONS,
+  MAINTENANCE_TOLERANCE_OPTIONS,
   CHANGE_SCALE_OPTIONS,
   EVENT_TIMING_OPTIONS,
   GOAL_DIRECTION_UNRESOLVED_VALUE,
@@ -53,7 +54,7 @@ import {
 } from '../types'
 
 export const HAIR_COLOR_INTAKE_PACK_ID = 'hair-color' as const
-export const HAIR_COLOR_INTAKE_PACK_VERSION = 3
+export const HAIR_COLOR_INTAKE_PACK_VERSION = 4
 export const HAIR_COLOR_INTAKE_PACK_V2_VERSION = 2
 export const HAIR_COLOR_INTAKE_SCHEMA_VERSION = 2
 
@@ -253,9 +254,9 @@ export const HAIR_COLOR_INTAKE_V3_QUESTION_KEYS = [
  * colour goal ambiguous is the client asking for a subtle change, which is the
  * same rule every other pack uses.
  */
-export const HAIR_COLOR_INTAKE_PACK: ConsultIntakePackDefinition = dietedIntakePack({
+export const HAIR_COLOR_INTAKE_PACK_V3: ConsultIntakePackDefinition = dietedIntakePack({
   base: HAIR_COLOR_INTAKE_PACK_V2,
-  version: HAIR_COLOR_INTAKE_PACK_VERSION,
+  version: 3,
   keep: HAIR_COLOR_INTAKE_V3_QUESTION_KEYS,
   reword: {
     goal_direction: {
@@ -364,4 +365,13 @@ export function validateHairColorC5EvaluationIntakeAnswers(
     }
   }
   return { ok: true, answers }
+}
+
+
+/** Upkeep comes before a provisional path; historical pack answers stay pinned. */
+export const HAIR_COLOR_INTAKE_PACK: ConsultIntakePackDefinition = {
+  ...HAIR_COLOR_INTAKE_PACK_V3,
+  version: HAIR_COLOR_INTAKE_PACK_VERSION,
+  questions: [intakeQuestion('maintenance_tolerance', 'How much upkeep are you comfortable with?',
+    'REQUIRED', MAINTENANCE_TOLERANCE_OPTIONS), ...HAIR_COLOR_INTAKE_PACK_V3.questions],
 }

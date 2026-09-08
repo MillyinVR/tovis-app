@@ -1,3 +1,9 @@
+import { effectiveConsultLookPlan } from './lookBriefPlan'
+import { readStoredLookAdjustments } from './lookAdjustments'
+import { appendLockedConsultLookBriefVersion } from './lookBrief'
+import { isRecord } from '@/lib/guards'
+import { consultLookPlanningEnabled, hasConsultLookPlanMinimumIntake } from './lookPlanning'
+import { advanceLockedConsultToAnalysisIfReady } from './inspirationContract'
 import {
   ConsultActorType,
   ConsultAgreementKind,
@@ -861,7 +867,8 @@ export async function finalizeLockedHairColorAnalysis(
   const intake = intakeRevision
     ? normalizeConsultIntakePayload(intakeRevision.payload)
     : null
-  if (!intakeRevision || !intake || !intake.complete) {
+  const rawPayload: unknown = args.payload
+  if (!intakeRevision || !intake || (!intake.complete && !(isRecord(rawPayload) && isRecord(rawPayload.lookPlan) && rawPayload.lookPlan.provisional === true && hasConsultLookPlanMinimumIntake(intake)))) {
     throw new ConsultWriteError(
       'ANALYSIS_PREREQUISITES_REQUIRED',
       'Analysis intake changed.',
@@ -963,6 +970,12 @@ export async function finalizeLockedHairColorAnalysis(
     },
   })
 
+  if (briefAnalysis.lookPlan) {
+    await appendLockedConsultLookBriefVersion(tx, {
+      consultSessionId: args.consultSessionId, analysisRevisionId: revision.id,
+      actorType: ConsultActorType.SYSTEM, actorId: null, idempotencyKey: `analysis:${revision.id}`,
+    })
+  }
   await writeLookServiceEstimate(tx, {
     consultSessionId: args.consultSessionId,
     analysisRevisionId: revision.id,
@@ -985,12 +998,15 @@ export async function finalizeLockedHairColorAnalysis(
  * BookingServiceItem prices, so there is nothing to translate, and the shipped
  * booking-attached flow (#1016 / iOS #375) keeps its exact behaviour.
  */
-async function writeLookServiceEstimate(
+export async function writeLookServiceEstimate(
   tx: Prisma.TransactionClient,
   args: {
     consultSessionId: string
     analysisRevisionId: string
     analysis: ConsultServiceEstimateAnalysisInput
+    sourceLookBriefVersionId?: string
+    selectedPathIndex?: number
+    selectedLocationType?: import('@prisma/client').ServiceLocationType
   },
 ) {
   const session = await tx.consultSession.findUnique({
@@ -1003,11 +1019,20 @@ async function writeLookServiceEstimate(
   })
   if (!session?.anchorLookPostId) return
 
+  const version = args.sourceLookBriefVersionId ? await tx.consultLookBriefVersion.findUniqueOrThrow({
+    where: { id: args.sourceLookBriefVersionId }, select: { adjustments: true, professionalPlan: true, invalidatedProfessionalPlan: true, sourceAnalysisRevision: { select: { payload: true, schemaVersion: true } } },
+  }) : null
   const draft = await buildConsultServiceEstimate(tx, {
     professionalId: session.professionalId,
     serviceCategoryId: session.serviceCategoryId,
     anchorLookPostId: session.anchorLookPostId,
-    analysis: args.analysis,
+    analysis: version ? { ...args.analysis, lookPlan: effectiveConsultLookPlan(
+      normalizeStoredConsultAnalysisPayload(version.sourceAnalysisRevision.payload, version.sourceAnalysisRevision.schemaVersion), version),
+      ...(version.professionalPlan ? { recommendations: [] } : {}),
+    } : args.analysis,
+    selectedPathIndex: args.selectedPathIndex,
+    selectedLocationType: args.selectedLocationType,
+    adjustments: version ? readStoredLookAdjustments(version.adjustments) : [],
   })
 
   await tx.consultServiceEstimate.create({
@@ -1015,6 +1040,7 @@ async function writeLookServiceEstimate(
       consultSessionId: args.consultSessionId,
       professionalId: session.professionalId,
       sourceAnalysisRevisionId: args.analysisRevisionId,
+      sourceLookBriefVersionId: args.sourceLookBriefVersionId,
       status: draft.status,
       refusalCode: draft.refusalCode,
       locationType: draft.locationType,
@@ -1316,6 +1342,13 @@ export async function appendConsultIntakeRevision(args: {
       })
     }
 
+    if (consultLookPlanningEnabled() && hasConsultLookPlanMinimumIntake({ packId: pack.id, packVersion: input.packVersion, answers: validated.answers })) {
+      const advanced = await advanceLockedConsultToAnalysisIfReady(tx, {
+        consultSessionId: args.consultSessionId, clientId: scope.clientId, professionalId: scope.professionalId,
+        actor: args.actor, now,
+      })
+      if (advanced) status = ConsultSessionStatus.ANALYSIS_PENDING
+    }
     return { revision, status, replayed: false }
   })
 }

@@ -379,8 +379,8 @@ describe('hair-color consult analysis provider', () => {
       inspiration: noInspiration,
       safetyCodes: [...SAFETY_CODES],
     })
-    expect(CONSULT_ANALYSIS_SCHEMA_VERSION).toBe(5)
-    expect(CONSULT_ANALYSIS_PROMPT_VERSION).toBe('service-analysis-v6')
+    expect(CONSULT_ANALYSIS_SCHEMA_VERSION).toBe(6)
+    expect(CONSULT_ANALYSIS_PROMPT_VERSION).toBe('service-analysis-v7')
     expect(result.model).toBe(CONSULT_ANALYSIS_DEFAULT_MODEL)
 
     // v5 is TWO calls, in order, and the second is the one that can name a
@@ -685,7 +685,7 @@ describe('hair-color consult analysis provider', () => {
     const serialized = JSON.stringify(params.messages[0].content)
     expect(serialized).toContain('Service family: Hair')
     expect(serialized).toContain('Service category: Color')
-    expect(serialized).toContain('Service the client is considering: Balayage')
+    expect(serialized).toContain('Service linked to the reference or booking (context, not a required choice): Balayage')
     expect(serialized).toContain('recommend only these, named exactly): Balayage; Toner Gloss')
     expect(serialized).toContain('Your dream color? → Red [desired_color=red]')
     expect(serialized).toContain('Immutable intake option codes')

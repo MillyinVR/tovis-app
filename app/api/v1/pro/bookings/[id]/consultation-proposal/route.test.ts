@@ -19,6 +19,7 @@ const IDEMPOTENCY_ROUTE =
 const OPERATION = 'POST /api/v1/pro/bookings/[id]/consultation-proposal'
 
 const mocks = vi.hoisted(() => ({
+  loadLookBookingMaterialization: vi.fn(),
   requirePro: vi.fn(),
   jsonFail: vi.fn(),
   jsonOk: vi.fn(),
@@ -57,6 +58,10 @@ const mocks = vi.hoisted(() => ({
   isRouteIdempotencyHandled: vi.fn(),
 
   captureBookingException: vi.fn(),
+}))
+
+vi.mock('@/lib/consult/lookBookingMaterialization', () => ({
+  loadLookBookingMaterialization: mocks.loadLookBookingMaterialization,
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -279,7 +284,7 @@ function makeRawProposalBody(overrides?: {
   }
 }
 
-function makeExpectedProposalJson(): Prisma.InputJsonObject {
+function makeExpectedProposalJson() {
   return {
     currency: 'USD',
     items: [
@@ -879,6 +884,29 @@ describe('app/api/v1/pro/bookings/[id]/consultation-proposal/route.ts', () => {
         }),
       }),
     )
+  })
+
+  it('stores the current look version and resolved times in the client approval', async () => {
+    expectIdempotencyStarted('idem_look_time')
+    mocks.loadLookBookingMaterialization.mockResolvedValue({
+      versionId: 'look-brief-4', durations: new Map([['off_1', 120]]),
+    })
+    mocks.resolveConsultationMaterialization.mockResolvedValue({
+      ...makeMaterialization(),
+      normalizedItems: [{ durationMinutesSnapshot: 120 }, { durationMinutesSnapshot: 30 }],
+    })
+    const response = await POST(makeIdempotentRequest({ key: 'idem_look_time', body: makeRawProposalBody() }), makeCtx())
+    expect(response.status).toBe(200)
+    const expected = makeExpectedProposalJson()
+    expect(mocks.txConsultationApprovalUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({ proposedServicesJson: {
+        ...expected, lookBriefVersionId: 'look-brief-4',
+        items: expected.items.map((item, index) => ({ ...item, durationMinutes: index === 0 ? 120 : 30 })),
+      } }),
+    }))
+    expect(mocks.resolveConsultationMaterialization).toHaveBeenCalledWith(expect.objectContaining({
+      lookDurationOverrides: new Map([['off_1', 120]]),
+    }))
   })
 
   it('sends a consultation proposal, writes notification/audit data, queues delivery, and completes idempotency', async () => {

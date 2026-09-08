@@ -87,7 +87,7 @@ describe('the follow-up vocabulary', () => {
     // P6's diet moved `maintenance_tolerance` OUT of the intake, so its home is
     // the round. This is the assertion that would catch the diet being undone
     // without the routing following it.
-    expect(found.byKey.get('maintenance_tolerance')?.home).toBe('FOLLOW_UP')
+    expect(found.byKey.get('maintenance_tolerance')?.home).toBe('INTAKE')
   })
 
   it('🔴 one key is never offered from two homes at once', () => {
@@ -98,7 +98,7 @@ describe('the follow-up vocabulary', () => {
     const colliding = {
       ...HAIR_GENERAL_INTAKE_PACK,
       questions: [
-        ...HAIR_GENERAL_INTAKE_PACK.questions,
+        ...HAIR_GENERAL_INTAKE_PACK.questions.filter(question => question.key !== 'maintenance_tolerance'),
         intakeQuestion('maintenance_tolerance', 'How much upkeep?', 'SKIPPABLE', [
           ['low', 'As little as possible'],
         ]),

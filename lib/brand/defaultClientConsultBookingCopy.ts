@@ -37,9 +37,9 @@ export const defaultClientConsultBookingCopy: BrandClientConsultBookingCopy = {
   // first.) The hint says there is an answer; selecting the mode gives it.
   modeUnavailableLabel: 'Tap to see why',
 
-  proposalTitle: 'What you’d be booking',
+  proposalTitle: 'Your chosen look',
   proposalBody:
-    'Put together from your photos and this professional’s own service list.',
+    'Created from your photos, preferences, and the direction you chose.',
   durationLabel: 'Time set aside',
   chooseTimeCta: 'Choose a time',
   chooseModeFirst: 'Pick salon or mobile to see times.',

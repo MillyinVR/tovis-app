@@ -1,3 +1,4 @@
+import { appendLockedConsultLookRefinement } from './lookBrief'
 // lib/consult/analysisRerun.ts
 //
 // P7a-3 — the rerun: what happens to a finished plan when the client changes
@@ -105,11 +106,7 @@ export async function recordLockedConsultRerunRequest(
     where: { consultSessionId: args.consultSessionId },
     _max: { planVersion: true },
   })
-  if ((highest._max.planVersion ?? 1) >= CONSULT_MAX_PLAN_VERSIONS) {
-    return { requested: false, reason: 'CAP_REACHED' }
-  }
-
-  await tx.consultAuditEvent.create({
+  const request = await tx.consultAuditEvent.create({
     data: {
       consultSessionId: args.consultSessionId,
       action: ConsultAuditAction.ANALYSIS_RERUN_REQUESTED,
@@ -117,6 +114,10 @@ export async function recordLockedConsultRerunRequest(
       actorId: args.actor.id,
     },
   })
+  await appendLockedConsultLookRefinement(tx, { ...args, mutationId: request.id })
+  if ((highest._max.planVersion ?? 1) >= CONSULT_MAX_PLAN_VERSIONS) {
+    return { requested: false, reason: 'CAP_REACHED' }
+  }
   return { requested: true }
 }
 

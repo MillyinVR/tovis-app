@@ -1,3 +1,5 @@
+import ConsultLookBriefPhotos from './ConsultLookBriefPhotos'
+import ConsultLookPlanCard from '@/app/_components/consult/ConsultLookPlanCard'
 import type {
   ConsultProBriefDTO,
   ConsultServiceEstimateDTO,
@@ -80,6 +82,7 @@ const ESTIMATE_REFUSAL_COPY: Record<
   NonNullable<ConsultServiceEstimateDTO['refusalCode']>,
   string
 > = {
+  LOOK_PLAN_SELECTION_REQUIRED: 'The client needs to choose and confirm the current look before the first appointment can be sized.',
   LOOK_SERVICE_UNLINKED:
     'The look this consult started from no longer names a service, so there was nothing to price.',
   SERVICE_NOT_ON_MENU:
@@ -97,6 +100,7 @@ const ESTIMATE_SOURCE_LABELS: Record<
   ConsultServiceEstimateDTO['lines'][number]['source'],
   string
 > = {
+  LOOK_PLAN_REQUIRED: 'Required for the chosen look',
   LOOK_LINKED_SERVICE: 'From the look',
   ANALYSIS_RECOMMENDATION: 'From the analysis',
 }
@@ -273,6 +277,14 @@ export default function ProConsultBrief({
       ) : null}
 
       <PlanVersionBanner brief={brief} />
+      {brief.inspiration.exactClientDetails.length > 0 && <section aria-label="What the client likes and wants to avoid" className="grid gap-2">
+        <h3 className="text-sm font-bold text-textPrimary">What matters in the inspiration</h3>
+        <p className="text-xs text-textSecondary">{brief.inspiration.referenceNote}</p>
+        {brief.inspiration.exactClientDetails.map((detail, index) => <p key={index} className="text-sm text-textPrimary">
+          <span className="font-semibold">{detail.sentiment === 'LIKE' ? 'Likes' : detail.sentiment === 'DISLIKE' ? 'Avoids' : detail.sentiment === 'GOAL' ? 'Wants' : 'Context'}: </span>{detail.clientWords}
+        </p>)}
+      </section>}
+      {brief.lookBrief && <ConsultLookBriefPhotos consultId={brief.consultId} />}
 
       <section aria-labelledby={`${brief.consultId}-client-words`}>
         <h3
@@ -426,7 +438,7 @@ export default function ProConsultBrief({
         )}
       </section>
 
-      <section aria-labelledby={`${brief.consultId}-directions`}>
+      {brief.lookPlan ? <ConsultLookPlanCard consultId={brief.consultId} plan={brief.lookPlan} brief={brief.lookBrief} professional /> : <section aria-labelledby={`${brief.consultId}-directions`}>
         <h3
           id={`${brief.consultId}-directions`}
           className="text-[14px] font-black text-textPrimary"
@@ -462,7 +474,7 @@ export default function ProConsultBrief({
             </li>
           ))}
         </ul>
-      </section>
+      </section>}
 
       {brief.serviceEstimate ? (
         <ServiceEstimate

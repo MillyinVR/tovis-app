@@ -708,6 +708,7 @@ enum NotificationRecipientKind {
 }
 
 enum NotificationEventKey {
+  LOOK_BRIEF_REVIEW
   BOOKING_REQUEST_CREATED
   BOOKING_CONFIRMED
   // C6: a gentle, budgeted invitation attached to an eligible booking
@@ -3679,6 +3680,7 @@ model ClientNotificationSettings {
 }
 
 model Booking {
+  consultLookVisitOutcome ConsultLookVisitOutcome?
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -7774,6 +7776,8 @@ model ConsultSession {
   serviceEstimates     ConsultServiceEstimate[]
   bookingProposals     ConsultBookingProposal[]
   analysisRuns         ConsultAnalysisRun[]
+  lookVisitOutcomes    ConsultLookVisitOutcome[]
+  lookBriefVersions    ConsultLookBriefVersion[]
   providerCalls        ConsultProviderCall[]
   followUpRounds       ConsultFollowUpRound[]
 
@@ -7923,6 +7927,7 @@ model ConsultRevision {
   auditEvents      ConsultAuditEvent[]
   briefFeedback    ConsultBriefFeedback?
   serviceEstimates ConsultServiceEstimate[] @relation("ConsultServiceEstimateAnalysis")
+  lookBriefVersions ConsultLookBriefVersion[]
 
   @@unique([consultSessionId, revision])
   @@unique([consultSessionId, idempotencyKey])
@@ -8227,6 +8232,8 @@ enum ConsultServiceEstimateStatus {
 }
 
 enum ConsultServiceEstimateRefusalCode {
+  /// A look plan needs a current, explicit path choice before appointment pricing.
+  LOOK_PLAN_SELECTION_REQUIRED
   /// The anchoring Look names no service any more — nothing to price.
   LOOK_SERVICE_UNLINKED
   /// The look's service is not an active offering on this pro's menu.
@@ -8242,6 +8249,8 @@ enum ConsultServiceEstimateRefusalCode {
 }
 
 enum ConsultServiceEstimateLineSource {
+  /// Required work in the selected look path’s first visit; never an optional enhancement.
+  LOOK_PLAN_REQUIRED
   /// The Look's own service linkage (lib/looks/serviceOwnership.ts) — the
   /// deterministic FLOOR of every estimate, priced at the pro's listed price.
   LOOK_LINKED_SERVICE
@@ -8281,6 +8290,10 @@ model ConsultServiceEstimate {
   sourceAnalysisRevisionId String
   sourceAnalysisRevision   ConsultRevision @relation("ConsultServiceEstimateAnalysis", fields: [sourceAnalysisRevisionId], references: [id], onDelete: Cascade)
 
+  /// New look estimates belong to one immutable shared Brief version.
+  sourceLookBriefVersionId String? @unique
+  sourceLookBriefVersion ConsultLookBriefVersion? @relation(fields: [sourceLookBriefVersionId], references: [id], onDelete: Cascade)
+
   status      ConsultServiceEstimateStatus
   refusalCode ConsultServiceEstimateRefusalCode?
 
@@ -8313,7 +8326,8 @@ model ConsultServiceEstimate {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([consultSessionId, sourceAnalysisRevisionId])
+  // Legacy uniqueness when no shared Brief version exists is a partial SQL index.
+  @@index([consultSessionId, sourceAnalysisRevisionId])
   /// "The latest estimate for this consult" — the read every consumer makes.
   @@index([consultSessionId, createdAt])
   @@index([professionalId, createdAt])
@@ -8519,4 +8533,61 @@ model ProCategoryBookingPolicy {
   /// second would make "the deposit for this category" ambiguous on a money path.
   @@unique([professionalId, serviceCategoryId])
   @@index([serviceCategoryId])
+}
+
+
+/// Version-specific decisions layered on immutable consultation evidence.
+/// A choice or adjustment creates a new row; only the two acknowledgments can
+/// be added to that exact version. Old confirmations never acknowledge a new one.
+model ConsultLookBriefVersion {
+  visitOutcomes ConsultLookVisitOutcome[]
+  /// Professional plan stays separate from the AI analysis and requires explicit review.
+  professionalPlan Json?
+  professionalPlanReason String? @db.VarChar(400)
+  invalidatedProfessionalPlan Json?
+
+  additionalClientAnswers Json @default("[]")
+  awaitingAnalysis Boolean @default(false)
+  id String @id @default(cuid())
+  consultSessionId String
+  consultSession ConsultSession @relation(fields: [consultSessionId], references: [id], onDelete: Cascade)
+  version Int
+  sourceAnalysisRevisionId String
+  sourceAnalysisRevision ConsultRevision @relation(fields: [sourceAnalysisRevisionId], references: [id], onDelete: Cascade)
+  selectedPathIndex Int?
+  selectedLocationType ServiceLocationType?
+  /// Server-owned price and time snapshots for each separate alternative/mode.
+  pathEstimates Json @default("[]")
+  /// Per-field professional decisions, validated against the referenced path.
+  adjustments Json @default("{}")
+  /// Prior decisions that require a new professional review after refinement.
+  invalidatedAdjustments Json @default("[]")
+  changeSummary Json @default("[]")
+  createdByActorType ConsultActorType
+  createdByActorId String?
+  clientAcknowledgedAt DateTime?
+  professionalAcknowledgedAt DateTime?
+  idempotencyKey String @db.VarChar(128)
+  estimate ConsultServiceEstimate?
+  createdAt DateTime @default(now())
+
+  @@unique([consultSessionId, version])
+  @@unique([consultSessionId, idempotencyKey])
+  @@index([sourceAnalysisRevisionId])
+}
+
+/// Immutable completed-visit feedback. Observed time excludes payment and aftercare closeout.
+model ConsultLookVisitOutcome {
+  id String @id @default(cuid())
+  bookingId String @unique
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  consultSessionId String
+  consultSession ConsultSession @relation(fields: [consultSessionId], references: [id], onDelete: Cascade)
+  lookBriefVersionId String
+  lookBriefVersion ConsultLookBriefVersion @relation(fields: [lookBriefVersionId], references: [id], onDelete: Cascade)
+  observedServiceMinutes Int?
+  finalServiceSubtotal Decimal? @db.Decimal(10, 2)
+  completedAt DateTime
+  createdAt DateTime @default(now())
+  @@index([consultSessionId, completedAt])
 }

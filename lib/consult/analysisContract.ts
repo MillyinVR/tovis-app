@@ -1,3 +1,4 @@
+import { loadConsultLookHistory, CONSULT_LOOK_COLOR_HISTORY_QUESTIONS } from './lookHistory'
 import 'server-only'
 
 import { createHash } from 'node:crypto'
@@ -8,6 +9,7 @@ import {
   ConsultCaptureStatus,
   ConsultRevisionKind,
   ConsultSessionStatus,
+  ConsultServiceFamily,
   Prisma,
   ServiceLocationType,
   UploadSessionStatus,
@@ -94,6 +96,9 @@ import {
   type ConsultProMenuOffering,
 } from './proMenu'
 import { mapStoredConsultAnalysisRevision } from './analysisRevision'
+import { consultLookPlanningEnabled, hasConsultLookPlanMinimumIntake } from './lookPlanning'
+import { resolveConsultLookPlan } from './lookPlan'
+import { consultPrepSafetyQuestions } from './prepDeadline'
 import {
   consultIntakeItems,
   normalizeConsultIntakePayloadForPack,
@@ -196,6 +201,7 @@ async function loadServiceContext(
       )
   return {
     family: profile.family,
+    ...(lookPlanningForSession(session) ? { lookPlanning: true, menuOfferings: menu } : {}),
     categoryName: profile.categoryName,
     serviceName: identity.proFacingName,
     menuServiceNames: menu.map((offering) => offering.service.name),
@@ -259,6 +265,8 @@ function requestHash(args: {
   intakeRevisionId: string
   inspirationRevisionId: string
   captures: readonly AnalysisCapture[]
+  service: ConsultAnalysisServiceContext
+  followUpItems?: readonly import('./analysisEngine').ConsultAnalysisIntakeItem[]
 }): string {
   return createHash('sha256')
     .update(
@@ -267,6 +275,13 @@ function requestHash(args: {
         promptVersion: args.promptVersion,
         intakeRevisionId: args.intakeRevisionId,
         inspirationRevisionId: args.inspirationRevisionId,
+        followUpItems: args.followUpItems,
+        lookPlanning: args.service.lookPlanning === true,
+        menu: args.service.lookPlanning ? args.service.menuOfferings?.map(offering => ({
+          offeringId: offering.id, serviceId: offering.serviceId,
+          categoryId: offering.service.categoryId, name: offering.service.name, description: offering.service.description,
+          salon: offering.offersInSalon, mobile: offering.offersMobile,
+        })).sort((a, b) => a.offeringId.localeCompare(b.offeringId)) : undefined,
         captures: args.captures.map((capture) => ({
           id: capture.id,
           shotKey: capture.shotKey,
@@ -385,7 +400,7 @@ async function currentCompletedIntake(
   const payload = revision
     ? normalizeConsultIntakePayloadForPack(pack, revision.payload)
     : null
-  if (!revision || !payload || !payload.complete) {
+  if (!revision || !payload || (!payload.complete && !(lookPlanningForSession(session) && hasConsultLookPlanMinimumIntake(payload)))) {
     throw new ConsultWriteError(
       'ANALYSIS_PREREQUISITES_REQUIRED',
       'A current completed intake is required.',
@@ -612,6 +627,10 @@ function offeringByName(
 // matcher never saw.
 type RecommendationOffering = ConsultProMenuOffering
 
+function lookPlanningForSession(session: AnalysisScope): boolean {
+  return consultLookPlanningEnabled() && resolveConsultServiceProfile(session.serviceCategory).family === ConsultServiceFamily.HAIR
+}
+
 async function loadRecommendationOfferings(
   tx: Prisma.TransactionClient,
   session: AnalysisScope,
@@ -619,6 +638,7 @@ async function loadRecommendationOfferings(
   return loadConsultProMenu(tx, {
     professionalId: session.professionalId,
     serviceCategoryId: session.serviceCategoryId,
+    ...(lookPlanningForSession(session) ? { menuScope: 'HAIR_FAMILY' as const } : {}),
   })
 }
 
@@ -752,6 +772,12 @@ function resolveRecommendations(
   routing: ReturnType<typeof determineConsultSafetyRouting>,
 ) {
   const offerings = menu.offerings
+  if (routing.blocksChemicalRecommendations && lookPlanningForSession(session)) return [{
+    serviceIntent: 'CONSULTATION' as const, serviceName: null, title: 'Professional review',
+    rationale: 'Review your history and starting point with your pro before choosing the first appointment.',
+    achievability: 'Your pro needs to confirm the appropriate next step.', discussWithProfessional: true as const,
+    reference: recommendationReference(session, offerings.find(offering => CONSULTATION_OFFERING_PATTERN.test(offering.service.name))),
+  }]
   if (routing.blocksChemicalRecommendations) {
     const safetyOfferings = requireSafetyOfferings(
       safetyMenu,
@@ -946,6 +972,7 @@ export async function loadConsultAnalysisState(args: {
 
 /** Everything the pipeline reads about a consult, gathered once. */
 type ConsultAnalysisRunContext = {
+  lookHistory: Awaited<ReturnType<typeof loadConsultLookHistory>>
   session: AnalysisScope
   intake: Awaited<ReturnType<typeof currentCompletedIntake>>
   inspiration: Awaited<ReturnType<typeof requireCompletedConsultInspiration>>
@@ -1028,6 +1055,7 @@ async function loadConsultAnalysisRunContext(
     now: args.now,
   })
   const captures = await currentCaptures(db, session, args.now)
+  const lookHistory = lookPlanningForSession(session) ? await loadConsultLookHistory(db, session.id) : { answers: {}, items: [] }
   const menu = await loadRecommendationOfferings(db, session)
   const service = await loadServiceContext(db, session, menu.offerings)
   return {
@@ -1037,12 +1065,15 @@ async function loadConsultAnalysisRunContext(
     captures,
     menu,
     service,
+    lookHistory,
     requestHash: requestHash({
       schemaVersion: args.schemaVersion,
       promptVersion: args.promptVersion,
+      followUpItems: lookHistory.items.length ? lookHistory.items : undefined,
       intakeRevisionId: intake.revision.id,
       inspirationRevisionId: inspiration.revisionId,
       captures,
+      service,
     }),
   }
 }
@@ -1067,7 +1098,7 @@ async function requireConsultSafetyOfferings(
     intake: args.intake.payload.answers,
     visibleCondition: args.visibleCondition,
   })
-  if (routing.requirements.length === 0) return []
+  if (lookPlanningForSession(args.session) || routing.requirements.length === 0) return []
 
   const capability = await loadProLocationCapability(args.session.professionalId, db)
   const offerings = await loadSafetyOfferings(
@@ -1604,7 +1635,7 @@ export async function executeConsultAnalysisRun(args: {
         await provider({
           service: context.service,
           intake: context.intake.payload.answers,
-          intakeItems: consultIntakeItems(pack, context.intake.payload.answers),
+          intakeItems: [...consultIntakeItems(pack, context.intake.payload.answers), ...context.lookHistory.items.filter(item => !context.intake.payload.answers[item.questionKey])],
           capturePack: {
             id: profile.capturePack.id,
             shotKeys: profile.capturePack.shots.map((shot) => shot.key),
@@ -1636,6 +1667,7 @@ export async function executeConsultAnalysisRun(args: {
         }),
         {
           menuServiceNames: context.service.menuServiceNames,
+          ...(context.service.lookPlanning ? { lookPlanMenu: context.menu.offerings } : {}),
           suppliedShotKeys: images.map((image) => image.shotKey),
         },
       )
@@ -1733,9 +1765,14 @@ export async function executeConsultAnalysisRun(args: {
           })
         }
 
+        const { lookPlan: rawLookPlan, ...analysis } = providerResult.analysis
+        const answers = { ...finalContext.lookHistory.answers, ...finalContext.intake.payload.answers }
+        const pathNames = new Set(rawLookPlan?.paths.flatMap(path => path.visits.flatMap(visit => visit.services)) ?? [])
+        const pathCategoryIds = finalContext.menu.offerings.filter(offering => pathNames.has(offering.service.name)).map(offering => offering.service.categoryId)
+        const colorPath = Boolean(rawLookPlan && await tx.serviceCategory.findFirst({ where: { id: { in: pathCategoryIds }, slug: 'hair-color' }, select: { id: true } }))
         const routing = determineConsultSafetyRouting({
-          intakePackId: finalContext.intake.payload.packId,
-          intake: finalContext.intake.payload.answers,
+          intakePackId: colorPath ? 'hair-color' : finalContext.intake.payload.packId,
+          intake: answers,
           visibleCondition: providerResult.analysis.core.visibleCondition.value,
         })
         const recommendations = resolveRecommendations(
@@ -1749,7 +1786,21 @@ export async function executeConsultAnalysisRun(args: {
           providerResult.analysis.recommendations,
           routing,
         )
-        const payload = { ...providerResult.analysis, recommendations }
+        const lookPlan = rawLookPlan ? resolveConsultLookPlan(rawLookPlan, {
+          family: ConsultServiceFamily.HAIR, menu: finalContext.menu.offerings, observations: analysis,
+          requiredHistoryComplete: consultPrepSafetyQuestions(finalContext.intake.pack).every(question => Boolean(answers[question.key])) &&
+            (!colorPath || CONSULT_LOOK_COLOR_HISTORY_QUESTIONS.every(question => Boolean(answers[question.key]))),
+          startingPointSufficient: analysis.core.visibleCondition.value !== 'UNKNOWN' &&
+            analysis.core.visibleCondition.confidence.min >= 0.5 &&
+            analysis.core.visibleCondition.evidence.some(key => key !== 'intake'),
+          goalConfirmed: finalContext.inspiration.preferences.wants.length > 0 ||
+            finalContext.inspiration.exactClientDetails.length > 0,
+          maintenanceDecisionResolved: Boolean(answers.maintenance_tolerance),
+          requiresProfessionalReview: routing.blocksChemicalRecommendations ||
+            consultPrepSafetyQuestions(finalContext.intake.pack).some(question => answers[question.key] === 'not-sure') ||
+            (colorPath && CONSULT_LOOK_COLOR_HISTORY_QUESTIONS.some(question => answers[question.key] === 'not-sure')),
+        }) : undefined
+        const payload = { ...analysis, recommendations, ...(lookPlan ? { lookPlan } : {}) }
         const captureIds = finalContext.captures.map((capture) => capture.id)
         const revision = await finalizeLockedHairColorAnalysis(tx, {
           consultSessionId: finalContext.session.id,
