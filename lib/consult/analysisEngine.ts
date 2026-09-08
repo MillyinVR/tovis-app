@@ -32,6 +32,9 @@ import {
 import { toProviderOutputSchema } from './providerSchema'
 import { CONSULT_SERVICE_FAMILY_LABELS } from './serviceScope'
 
+import { ConsultAnalysisProviderError, cleanText, enumValue, exactKeys } from './analysisValidation'
+export { ConsultAnalysisProviderError } from './analysisValidation'
+
 export const CONSULT_ANALYSIS_SCHEMA_VERSION = 5
 // v2 (2026-08-27): the capture pack may be partial — the prompt lists missing
 // views and pins their observations to UNKNOWN.
@@ -584,13 +587,6 @@ export type ConsultAnalysisProviderResult = {
 export type ConsultAnalysisProvider = (
   input: ConsultAnalysisInput,
 ) => Promise<ConsultAnalysisProviderResult>
-
-export class ConsultAnalysisProviderError extends Error {
-  constructor(readonly kind: 'unavailable' | 'refused' | 'bad_output') {
-    super('Consult analysis is unavailable.')
-    this.name = 'ConsultAnalysisProviderError'
-  }
-}
 
 // ── Structured-output schemas ───────────────────────────────────────────────
 //
@@ -1165,27 +1161,6 @@ export const CONSULT_ANALYSIS_DIRECTION_SYSTEM_PROMPT = [
   'Every free-text field states a HARD CHARACTER LIMIT in its description. Those limits are enforced after you answer: a field one character over is not trimmed, it discards the entire analysis. Write to comfortably inside the limit — a shorter, plainer sentence is always the safer answer than a full one.',
 ].join(' ')
 
-// Schema v2 deliberately removed skin-tone/undertone/face-shape/eye-shape from
-// this list (they are now first-class cosmetic observations, per the 2026-08-26
-// decision record). Identity, ethnicity, age, and medical language remain
-// forbidden in every free-text field.
-const FORBIDDEN_LANGUAGE = /\b(diagnos(?:e|is|ed|tic)|dermatolog(?:y|ist|ical)|disease|disorder|infection|psoriasis|eczema|alopecia|medical|doctor|physician|health condition|identity|ethnic(?:ity)?|race|nationality|religion|gender|age|aging|youthful|anti[ -]?age)\b/i
-
-function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
-  const actual = Object.keys(value).sort()
-  const expected = [...keys].sort()
-  return actual.length === expected.length && actual.every((key, index) => key === expected[index])
-}
-
-function cleanText(value: unknown, max: number): string {
-  if (typeof value !== 'string') throw new ConsultAnalysisProviderError('bad_output')
-  const cleaned = value.replace(/\s+/g, ' ').trim()
-  if (!cleaned || cleaned.length > max || FORBIDDEN_LANGUAGE.test(cleaned)) {
-    throw new ConsultAnalysisProviderError('bad_output')
-  }
-  return cleaned
-}
-
 function confidence(value: unknown): ConfidenceRange {
   if (!isRecord(value) || !exactKeys(value, ['min', 'max'])) {
     throw new ConsultAnalysisProviderError('bad_output')
@@ -1223,12 +1198,6 @@ function evidence(
     result.push(key)
   }
   return result
-}
-
-function enumValue<const T extends readonly string[]>(value: unknown, values: T): T[number] {
-  const matched = values.find((candidate) => candidate === value)
-  if (!matched) throw new ConsultAnalysisProviderError('bad_output')
-  return matched
 }
 
 function observed<const T extends readonly string[]>(

@@ -1,3 +1,4 @@
+import { enumValue, exactKeys } from './analysisValidation'
 import { isRecord } from '@/lib/guards'
 
 import {
@@ -211,15 +212,6 @@ const UNSUPPORTED_MANIFEST_KEYS = new Set([
   'health',
 ])
 
-function exactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
-  const actual = Object.keys(value).sort()
-  const sortedExpected = [...expected].sort()
-  return (
-    actual.length === sortedExpected.length &&
-    actual.every((key, index) => key === sortedExpected[index])
-  )
-}
-
 function invalidManifest(): never {
   throw new ConsultEvaluationError('invalid_manifest')
 }
@@ -248,19 +240,13 @@ function nonEmptyString(value: unknown, maxLength = 240): string {
   return value
 }
 
-function enumValue<const T extends readonly string[]>(value: unknown, values: T): T[number] {
-  const match = values.find((candidate) => candidate === value)
-  if (!match) invalidManifest()
-  return match
-}
-
 function uniqueEnumArray<const T extends readonly string[]>(
   value: unknown,
   values: T,
   allowEmpty: boolean,
 ): T[number][] {
   if (!Array.isArray(value) || (!allowEmpty && value.length === 0)) invalidManifest()
-  const result = value.map((item) => enumValue(item, values))
+  const result = value.map((item) => enumValue(item, values, invalidManifest))
   if (new Set(result).size !== result.length) invalidManifest()
   return result
 }
@@ -323,7 +309,7 @@ function parseProvenance(value: unknown): ConsultEvaluationFixture['provenance']
     'SYNTHETIC',
     'LICENSED',
     'CONSENTED_DEIDENTIFIED',
-  ] as const)
+  ] as const, invalidManifest)
   if (
     typeof value.deidentified !== 'boolean' ||
     typeof value.containsRealClientCapture !== 'boolean'
@@ -346,7 +332,7 @@ function parseProvenance(value: unknown): ConsultEvaluationFixture['provenance']
     reviewStatus: enumValue(value.reviewStatus, [
       'DOMAIN_REVIEW_REQUIRED',
       'DOMAIN_REVIEWED',
-    ] as const),
+    ] as const, invalidManifest),
   }
 }
 
@@ -435,6 +421,7 @@ function parseFixture(value: unknown): ConsultEvaluationFixture {
       fitzpatrickStratum: enumValue(
         value.diversity.fitzpatrickStratum,
         FITZPATRICK_STRATA,
+        invalidManifest,
       ),
     },
     provenance: parseProvenance(value.provenance),
@@ -442,7 +429,7 @@ function parseFixture(value: unknown): ConsultEvaluationFixture {
       'image/jpeg',
       'image/png',
       'image/webp',
-    ] as const),
+    ] as const, invalidManifest),
     captures: parseCaptures(value.captures),
     intake: { ...intake.answers },
     expected: parseExpected(value.expected),

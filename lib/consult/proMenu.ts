@@ -1,9 +1,10 @@
 // lib/consult/proMenu.ts
 //
 // The pro's MENU, as a consult is allowed to see it: her active offerings for
-// active services in the consult's own category. The category is the scope;
-// the consult's service family (lib/consult/serviceProfile.ts) decides how the
-// analysis reads the menu, never which rows it may see.
+// active services. Historical estimates retain their starting category. New
+// hair look plans can explicitly read across active hair categories, because
+// the service linked to an inspiration photo is not necessarily the work
+// this client needs. The caller must use the same scope throughout its plan.
 //
 // One definition, deliberately. Every consult surface reads this list and they
 // must read the SAME one:
@@ -30,7 +31,7 @@
 // profile one step earlier. Nothing downstream of this module re-reads the
 // raw flags.
 
-import { ServiceLocationType, type Prisma } from '@prisma/client'
+import { ConsultServiceFamily, ServiceLocationType, type Prisma } from '@prisma/client'
 
 import {
   loadProLocationCapability,
@@ -138,20 +139,37 @@ export async function loadConsultSafetyOfferings(
   )
 }
 
+export type ConsultProMenuRequest = {
+  professionalId: string
+  serviceCategoryId: string
+  /** New look plans may cross hair categories; historical estimates stay scoped. */
+  menuScope?: 'CATEGORY' | 'HAIR_FAMILY'
+}
+
 export async function loadConsultProMenu(
   tx: Prisma.TransactionClient,
-  scope: { professionalId: string; serviceCategoryId: string },
+  scope: ConsultProMenuRequest,
 ): Promise<ConsultProMenu> {
   // Sequential on purpose: both reads share the caller's transaction client.
   const capability = await loadProLocationCapability(scope.professionalId, tx)
+  const category = scope.menuScope === 'HAIR_FAMILY'
+    ? await tx.serviceCategory.findUnique({
+        where: { id: scope.serviceCategoryId },
+        select: { isActive: true, consultFamily: true },
+      })
+    : null
+  const acrossHair = category?.isActive === true && category.consultFamily === ConsultServiceFamily.HAIR
   const rows = await tx.professionalServiceOffering.findMany({
     where: {
       professionalId: scope.professionalId,
       isActive: true,
       service: {
         isActive: true,
-        categoryId: scope.serviceCategoryId,
-        category: { isActive: true },
+        ...(acrossHair ? {} : { categoryId: scope.serviceCategoryId }),
+        category: {
+          isActive: true,
+          ...(acrossHair ? { consultFamily: ConsultServiceFamily.HAIR } : {}),
+        },
       },
     },
     select: CONSULT_PRO_MENU_SELECT,
@@ -163,7 +181,7 @@ export async function loadConsultProMenu(
 /** The narrowed rows alone, for readers whose mode was chosen elsewhere. */
 export async function loadConsultProMenuOfferings(
   tx: Prisma.TransactionClient,
-  scope: { professionalId: string; serviceCategoryId: string },
+  scope: ConsultProMenuRequest,
 ): Promise<ConsultProMenuOffering[]> {
   return (await loadConsultProMenu(tx, scope)).offerings
 }
