@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   requireClient: vi.fn(),
+  deleteSession: vi.fn(),
+  enforceRateLimit: vi.fn(),
   jsonFail: vi.fn((status: number, message: string) => ({ status, message })),
   jsonOk: vi.fn((body: unknown, status = 200) => ({ status, body })),
   findUniqueConsultSession: vi.fn(),
@@ -20,7 +22,11 @@ vi.mock('@/lib/prisma', () => ({
   },
 }))
 
-import { GET } from './route'
+vi.mock('@/lib/consult/clientSessions', () => ({ deleteClientConsultSession: mocks.deleteSession }))
+vi.mock('@/app/api/_utils/rateLimit', () => ({ enforceRateLimit: mocks.enforceRateLimit, rateLimitIdentity: async (id: string) => id }))
+import { GET, DELETE } from './route'
+import { ConsultWriteError } from '@/lib/consult/errors'
+
 
 type Res = { status: number; message?: string; body?: unknown }
 
@@ -141,5 +147,29 @@ describe('GET /api/v1/client/consult/[id]', () => {
     })
     const res = await get('consult_1')
     expect(res.status).toBe(200)
+  })
+})
+
+describe('DELETE owned unbooked consult', () => {
+  beforeEach(() => { mocks.enforceRateLimit.mockResolvedValue(null); mocks.deleteSession.mockResolvedValue(undefined) })
+  it('uses authenticated identity and the requested consult only', async () => {
+    mocks.requireClient.mockResolvedValue({ ok: true, clientId: 'client_owner', user: { id: 'user_owner' } })
+    const result = await DELETE(new Request('http://test'), { params: { id: 'consult_owned' } })
+    expect(result).toMatchObject({ status: 200, body: { deleted: true } })
+    expect(mocks.deleteSession).toHaveBeenCalledWith({ consultSessionId: 'consult_owned', clientId: 'client_owner', actorUserId: 'user_owner' })
+  })
+  it('does not delete while authentication or rate limiting refuses the request', async () => {
+    mocks.requireClient.mockResolvedValue({ ok: false, res: { status: 401 } })
+    expect(await DELETE(new Request('http://test'), { params: { id: 'consult_owned' } })).toMatchObject({ status: 401 })
+    expect(mocks.deleteSession).not.toHaveBeenCalled()
+    mocks.requireClient.mockResolvedValue({ ok: true, clientId: 'client_owner', user: { id: 'user_owner' } })
+    mocks.enforceRateLimit.mockResolvedValue({ status: 429 })
+    expect(await DELETE(new Request('http://test'), { params: { id: 'consult_owned' } })).toMatchObject({ status: 429 })
+    expect(mocks.deleteSession).not.toHaveBeenCalled()
+  })
+  it('refuses appointment-linked consultations', async () => {
+    mocks.requireClient.mockResolvedValue({ ok: true, clientId: 'client_owner', user: { id: 'user_owner' } })
+    mocks.deleteSession.mockRejectedValue(new ConsultWriteError('INVALID_STATE', 'Appointment-linked consultation'))
+    expect(await DELETE(new Request('http://test'), { params: { id: 'consult_owned' } })).toMatchObject({ status: 409 })
   })
 })

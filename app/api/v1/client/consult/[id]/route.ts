@@ -10,6 +10,9 @@
 // both yield a uniform 404 (mirrors requireClientBookingOwnership's no-leak
 // contract).
 
+import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
+import { deleteClientConsultSession } from '@/lib/consult/clientSessions'
+import { consultWriteErrorResponse } from '@/lib/consult/apiErrors'
 import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
 import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import { isAiConsultEnabledForPro } from '@/lib/consult/access'
@@ -48,6 +51,27 @@ export async function GET(_req: Request, ctx: RouteContext) {
     return jsonOk(body)
   } catch (e: unknown) {
     console.error('GET /api/v1/client/consult/[id] error', { error: safeError(e) })
+    return jsonFail(500, 'Internal server error')
+  }
+}
+
+/** Delete only an owned, unbooked look consult. Never cancels an appointment. */
+export async function DELETE(_req: Request, ctx: RouteContext) {
+  try {
+    const auth = await requireClient()
+    if (!auth.ok) return auth.res
+    const limited = await enforceRateLimit({
+      bucket: 'client:consult:write', identity: await rateLimitIdentity(auth.user.id),
+    })
+    if (limited) return limited
+    const { id } = await resolveRouteParams(ctx)
+    if (!id) return jsonFail(404, 'Not found.')
+    await deleteClientConsultSession({ consultSessionId: id, clientId: auth.clientId, actorUserId: auth.user.id })
+    return jsonOk({ deleted: true })
+  } catch (error) {
+    const mapped = consultWriteErrorResponse(error)
+    if (mapped) return mapped
+    console.error('DELETE consult session', { error: safeError(error) })
     return jsonFail(500, 'Internal server error')
   }
 }

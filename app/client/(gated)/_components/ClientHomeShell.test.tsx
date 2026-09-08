@@ -17,6 +17,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 // Every child is stubbed to its own marker: this suite is about what the HEADER
 // contains, not about rendering the whole home page.
+vi.mock('./ClientConsultSessions', () => ({ default: () => <div /> }))
 vi.mock('./ClientGreeting', () => ({ default: () => <span>Good evening</span> }))
 vi.mock('./UpcomingAppointmentCard', () => ({ default: () => <div /> }))
 vi.mock('./ClientActionCard', () => ({ default: () => <div /> }))

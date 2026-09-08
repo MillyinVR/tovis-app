@@ -37,6 +37,7 @@ import {
 } from './openWindow'
 import { CONSULT_MAX_ANALYSIS_CAPTURES } from './capture/registry'
 import { ConsultWriteError } from './errors'
+import { resolveThreadBooking } from './bookingLink'
 import {
   normalizeConsultIntakePayload,
   resolveConsultSessionIntakePack,
@@ -1316,5 +1317,57 @@ export async function appendConsultIntakeRevision(args: {
     }
 
     return { revision, status, replayed: false }
+  })
+}
+
+/** Stop an unbooked look consult before external photo cleanup. Booking commit
+ * takes this same lock, so deletion cannot erase an appointment's consult. */
+export async function prepareClientConsultDeletion(args: {
+  consultSessionId: string; clientId: string; actor: ClientActor
+}) {
+  return prisma.$transaction(async (tx) => {
+    await lockSession(tx, args.consultSessionId)
+    await requireClientOwner(tx, args.consultSessionId, args.actor)
+    const session = await requireUnbookedClientConsult(tx, args)
+    if (session.status !== ConsultSessionStatus.CANCELLED) {
+      await transitionLockedConsultSession(tx, {
+        consultSessionId: session.id, actor: args.actor,
+        fromStatus: session.status, toStatus: ConsultSessionStatus.CANCELLED,
+      })
+    }
+  })
+}
+
+async function requireUnbookedClientConsult(tx: Prisma.TransactionClient, args: {
+  consultSessionId: string; clientId: string
+}) {
+  const session = await tx.consultSession.findUniqueOrThrow({
+    where: { id: args.consultSessionId },
+  })
+  if (session.clientId !== args.clientId) throw new ConsultWriteError('NOT_FOUND', 'Not found.')
+  const appointment = await resolveThreadBooking(tx, {
+    consultSessionId: session.id, clientId: session.clientId, professionalId: session.professionalId,
+    anchorLookPostId: session.anchorLookPostId, consultCreatedAt: session.createdAt, includePastBookings: true,
+  })
+  if (session.bookingId || appointment || !session.anchorLookPostId) {
+    throw new ConsultWriteError('INVALID_STATE', 'This consultation belongs to an appointment.')
+  }
+  return session
+}
+
+/** The raw-object deletion guard remains the final authority, including uploads. */
+export async function finishClientConsultDeletion(args: {
+  consultSessionId: string; clientId: string; actor: ClientActor
+}) {
+  return prisma.$transaction(async (tx) => {
+    await lockSession(tx, args.consultSessionId)
+    await requireClientOwner(tx, args.consultSessionId, args.actor)
+    const session = await requireUnbookedClientConsult(tx, args)
+    if (session.status !== ConsultSessionStatus.CANCELLED) {
+      throw new ConsultWriteError('INVALID_STATE', 'This consultation cannot be deleted.')
+    }
+    // Proposals have Restrict FKs to both the session and its estimates.
+    await tx.consultBookingProposal.deleteMany({ where: { consultSessionId: session.id } })
+    await tx.consultSession.delete({ where: { id: session.id } })
   })
 }

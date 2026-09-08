@@ -1,6 +1,7 @@
 // app/client/(gated)/_components/ClientHomeShell.tsx
 import type { ClientHomeData } from '../_data/getClientHomeData'
 
+import ClientConsultSessions from './ClientConsultSessions'
 import ClientGreeting from './ClientGreeting'
 import UpcomingAppointmentCard from './UpcomingAppointmentCard'
 import ClientActionCard from './ClientActionCard'
@@ -105,6 +106,8 @@ export default function ClientHomeShell({
           <InviteFriendCard />
         </div>
       </div>
+
+      <div className="relative mx-auto max-w-[1040px] px-4 py-5 md:px-8"><ClientConsultSessions /></div>
 
       {/* Viral Looks band */}
       <ViralLooksBand
