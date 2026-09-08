@@ -100,6 +100,11 @@ export const DELETE_BOUNDARY: Readonly<Record<string, DeleteDisposition>> = {
   EmailVerificationToken: { status: 'DELETE', reason: R_CREDENTIAL },
   PhoneVerification: { status: 'DELETE', reason: R_CREDENTIAL },
   SessionHandoffToken: { status: 'DELETE', reason: R_CREDENTIAL },
+  SignupInvite: {
+    status: 'ANONYMIZE',
+    reason:
+      'Preserves the spent-code security audit while unlinking the invited account and replacing the admin-authored person label with a generic tombstone.',
+  },
   BookingHold: {
     status: 'DELETE',
     reason:

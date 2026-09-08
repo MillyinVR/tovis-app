@@ -143,6 +143,17 @@ export const DELETE_RULES: readonly DeleteRule[] = [
     delegate: (db) => db.sessionHandoffToken,
     where: (s) => ({ userId: s.userId }),
   }),
+  anonymizeRule({
+    model: 'SignupInvite',
+    notes:
+      'Keeps the spent-code audit while removing the invited user link and person label.',
+    delegate: (db) => db.signupInvite,
+    where: (s) => ({ usedByUserId: s.userId }),
+    data: {
+      usedByUserId: null,
+      label: 'Deleted user invite',
+    },
+  }),
   deleteRule({
     model: 'ClientActionToken',
     delegate: (db) => db.clientActionToken,
