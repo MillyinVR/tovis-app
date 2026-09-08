@@ -399,7 +399,7 @@ export async function generateConsultFollowUpRound(
 /**
  * One safety question as a round question.
  *
- * 🔴 The pack's OWN words, verbatim, and every one of its options. A fallback
+ * 🔴 The reviewed client wording, verbatim, and every one of its options. A fallback
  * is the moment the model could not help, so nothing here may be a paraphrase
  * — a safety question re-worded by code that has not read the reason it exists
  * is exactly the risk the fallback is protecting against.

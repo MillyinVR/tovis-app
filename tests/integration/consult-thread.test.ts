@@ -1050,7 +1050,7 @@ describe('consult thread projection', () => {
     expect(spark.card?.optionRegions).toEqual([])
     expect(spark.card?.question.kind).toBe('MULTI_SELECT')
     expect(spark.card?.question.options.map((option) => option.label)).toEqual([
-      'The color', 'The cut', 'The layers', 'The movement', 'The length', 'The fullness', 'Not sure',
+      'The color', 'The cut', 'The shorter and longer pieces (layers)', 'How the hair falls and moves', 'The length', 'How thick and full it looks', 'Not sure',
     ])
     // No reading yet, so every crop is the whole picture — the stated fallback,
     // not a blank card.

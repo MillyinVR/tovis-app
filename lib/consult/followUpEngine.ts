@@ -1,3 +1,4 @@
+import { CONSULT_CLIENT_LANGUAGE } from './clientLanguage'
 // lib/consult/followUpEngine.ts
 //
 // P5g — the adaptive follow-up call: "what should I ask her next?"
@@ -64,7 +65,7 @@ export const CONSULT_FOLLOW_UP_SCHEMA_VERSION = 1
 // so the version does — a stored round names the prompt that wrote it, and a
 // version that lied about which words produced a question would make the round
 // unreviewable.
-export const CONSULT_FOLLOW_UP_PROMPT_VERSION = 'consult-follow-up-v2'
+export const CONSULT_FOLLOW_UP_PROMPT_VERSION = 'consult-follow-up-v3'
 
 const DEFAULT_MODEL = 'claude-sonnet-5'
 
@@ -212,6 +213,7 @@ export function buildConsultFollowUpOutputSchema(
 }
 
 export const CONSULT_FOLLOW_UP_SYSTEM_PROMPT = [
+  CONSULT_CLIENT_LANGUAGE,
   'You write the next question in a warm, short beauty consultation. The client tapped a look she liked, booked it, and is now helping her professional get ready.',
   'You are given what a colorist read from her inspiration photograph, what was read from her own photographs, which parts of the reference she loved and which she would change, what she asked to leave alone, and everything she has already answered.',
   'Your job is to choose the next one to three questions from the list you are given, and to word each one so that she can tell you were listening.',

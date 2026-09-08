@@ -1,0 +1,3 @@
+// Shared voice rule for model-written client questions, plans, and style ideas.
+export const CONSULT_CLIENT_LANGUAGE =
+'CLIENT WORDING. Assume the client knows nothing about hair or beauty services. Use short, everyday sentences about what they can see, want, or remember. Say “how straight or curly your hair is” instead of “texture”, “how full it looks” instead of “density”, and “golden or reddish shades” instead of unexplained “warmth”. Explain an essential salon term immediately in ordinary words. Never ask the client to identify a technique, color level, undertone, or color season. Keep uncertainty and safety meaning intact. This rule applies to client-readable prose, not structured keys, enum values, or exact menu references.'

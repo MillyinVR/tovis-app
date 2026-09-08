@@ -13,6 +13,8 @@
 // read, so a session keeps the pack it started with even after resolution
 // rules change.
 
+import { clientConsultQuestion } from '@/lib/brand/consultClientQuestionCopy'
+
 import type { ConsultServiceFamily } from '@prisma/client'
 
 import type {
@@ -113,7 +115,7 @@ export function toConsultIntakeQuestionPackDTO(
     categorySlug: pack.categorySlug,
     version: pack.version,
     schemaVersion: pack.schemaVersion,
-    questions: pack.questions,
+    questions: pack.questions.map(question => clientConsultQuestion(pack.id, question)),
   }
 }
 

@@ -1,5 +1,7 @@
 import 'server-only'
 
+import { consultClientShotCopy } from '@/lib/brand/consultClientQuestionCopy'
+
 import { createHash } from 'node:crypto'
 import {
   ConsultActorType,
@@ -593,8 +595,8 @@ async function buildState(
       shots: pack.shots.map(
         ({ key, title, instruction, requirement, framing }) => ({
           key,
-          title,
-          instruction,
+          title: consultClientShotCopy[key]?.title ?? title,
+          instruction: consultClientShotCopy[key]?.instruction ?? instruction,
           requirement,
           // P3: the camera crops a TIGHT_CROP shot on device. `acceptance` and
           // `gate` stay server-side; `framing` is the one server fact the

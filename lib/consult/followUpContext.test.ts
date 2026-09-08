@@ -154,10 +154,10 @@ describe('the follow-up context', () => {
     // It is composed here, from the plan, so every round of a plan version gets
     // a byte-identical phrase.
     const phrase = consultStartingPointPhrase(CORE, defaultClientConsultInspirationCopy)
-    expect(phrase).toBe('your light brown, golden base')
+    expect(phrase).toBe('your light brown hair with a golden shade')
     for (const round of [1, 2, 3]) {
       const context = render({ roundNumber: round })
-      expect(context).toContain('"your light brown, golden base"')
+      expect(context).toContain('"your light brown hair with a golden shade"')
       expect(context).toContain('use that phrase EXACTLY as written')
     }
   })
@@ -166,11 +166,11 @@ describe('the follow-up context', () => {
     const toneOnly = { ...CORE, baseLevel: core('UNKNOWN', ['hair_back']) }
     expect(
       consultStartingPointPhrase(toneOnly, defaultClientConsultInspirationCopy),
-    ).toBe('your golden base')
+    ).toBe('your golden hair')
     const levelOnly = { ...CORE, currentTone: core('UNKNOWN', ['hair_back']) }
     expect(
       consultStartingPointPhrase(levelOnly, defaultClientConsultInspirationCopy),
-    ).toBe('your light brown base')
+    ).toBe('your light brown hair')
     const neither = {
       ...CORE,
       baseLevel: core('UNKNOWN', ['hair_back']),

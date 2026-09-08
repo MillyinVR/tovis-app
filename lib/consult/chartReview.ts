@@ -1,3 +1,4 @@
+import { clientConsultQuestion } from '@/lib/brand/consultClientQuestionCopy'
 import 'server-only'
 import type { Prisma } from '@prisma/client'
 import { normalizeConsultIntakePayload, findConsultIntakePack } from './intake/registry'
@@ -17,7 +18,7 @@ export function buildConsultChartReview(args: {
   const { chart, pack, answers } = args
   if (!chart.available || chart.completedVisits < 2 || !chart.lastVisitAt) return null
   const keys = ['box_dye_history', 'henna_plant_dye_history', 'other_chemical_history', 'chemical_history', 'prior_lightening']
-  const questions = pack.questions.filter(question => keys.includes(question.key) && !answers[question.key])
+  const questions = pack.questions.map(question => clientConsultQuestion(pack.id, question)).filter(question => keys.includes(question.key) && !answers[question.key])
   if (questions.length < 2) return null
   const sources = questions.flatMap(question => {
     const fact = chart.facts.find(item => item.key === question.key && item.source === 'CLIENT_ANSWER' && item.state === 'CONFIRM' &&
@@ -52,7 +53,8 @@ export async function loadConsultChartSources(tx: Prisma.TransactionClient,
       typeof fact.recordedAt !== 'string' || !Number.isFinite(new Date(fact.recordedAt).getTime()) || payload.answers[fact.key] !== fact.value) return []
     if (seen.has(fact.key)) return []
     seen.add(fact.key)
-    const question = pack.questions.find(question => question.key === fact.key)
+    const definition = pack.questions.find(question => question.key === fact.key)
+    const question = definition ? clientConsultQuestion(pack.id, definition) : undefined
     const option = question?.options.find(option => option.value === fact.value)
     if (!question || !option) return []
     return [{ questionKey: fact.key, recordedAt: fact.recordedAt, confirmedAt: review.createdAt.toISOString(),

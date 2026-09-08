@@ -15,7 +15,7 @@ test('client can expand the photo observations and optional style explanations',
   await page.route(`**${base}/inspiration/read`, route => route.fulfill({ status: 404, json: { ok: false } }))
   await page.route(`**${base}/thread`, route => route.fulfill({ json: { ok: true, thread } }))
   await page.goto(`/client/consult/${CONSULT_FIXTURE_ID}`)
-  const details = page.locator('details').filter({ hasText: 'Your feature profile' })
+  const details = page.locator('details').filter({ hasText: 'What your photos show' })
   await expect(details).toBeVisible()
   await expect(details.getByText('Visible eye color', { exact: true })).not.toBeVisible()
   await details.locator('summary').click()

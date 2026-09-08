@@ -1,3 +1,4 @@
+import { clientConsultQuestion } from '@/lib/brand/consultClientQuestionCopy'
 import { HAIR_COLOR_INTAKE_PACK } from './intake/packs/hairColor'
 // lib/consult/followUpVocabulary.ts
 //
@@ -134,14 +135,14 @@ export function resolveConsultFollowUpVocabulary(args: {
 
   for (const question of args.intakePack.questions) {
     if (args.intakeAnswers[question.key]) continue
-    entries.push(entry(question, 'INTAKE'))
+    entries.push(entry(clientConsultQuestion(args.intakePack.id, question), 'INTAKE'))
   }
 
   if (args.needsColorHistory) {
     for (const question of HAIR_COLOR_INTAKE_PACK.questions) {
       if (!CONSULT_FOLLOW_UP_SAFETY_KEYS.has(question.key) || args.intakeAnswers[question.key] || args.followUpAnswers[question.key] ||
         entries.some(existing => existing.key === question.key)) continue
-      entries.push(entry(question, 'FOLLOW_UP'))
+      entries.push(entry(clientConsultQuestion(HAIR_COLOR_INTAKE_PACK.id, question), 'FOLLOW_UP'))
     }
   }
 

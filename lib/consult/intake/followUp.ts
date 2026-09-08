@@ -24,6 +24,8 @@
 // analysis has already run and must not be read as if it had been available to
 // it.
 
+import { clientConsultQuestion } from '@/lib/brand/consultClientQuestionCopy'
+
 import type { ConsultIntakeQuestionDTO } from '@/lib/dto/consult'
 
 import {
@@ -176,7 +178,7 @@ export function resolveConsultIntakeFollowUpPack(args: {
     ...followUp,
     questions: [
       consultFollowUpServiceExperienceQuestion(args.serviceName),
-      ...followUp.questions,
+      ...followUp.questions.map(question => clientConsultQuestion(args.intakePackId, question)),
     ],
   }
 }

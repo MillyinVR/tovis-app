@@ -12,5 +12,5 @@ export const defaultClientConsultCaptureCopy: BrandClientConsultCaptureCopy = {
   introFaceViews: '{face} of your face',
   introAreaViews: 'the area you’d like treated, and your face',
   introPartialAllowed:
-    'Each one is checked right away, and if one can’t be used you’ll see why. You can run the analysis without all {count} — anything the missing photos would have shown just comes back as unknown.',
+    'Each one is checked right away, and if one can’t be used you’ll see why. You can build your plan without all {count}. Your professional can check the missing details in person.',
 }

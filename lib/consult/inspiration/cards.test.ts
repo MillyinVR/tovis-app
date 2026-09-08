@@ -189,7 +189,7 @@ describe('inspiration cards', () => {
     )
     expect(cards().coarse[1]!.question.options.map((option) => option.label)).toEqual([
       'My length',
-      'My natural roots',
+      'My natural color next to my scalp',
       'Nothing in particular',
     ])
   })
@@ -382,7 +382,7 @@ describe('inspiration cards', () => {
           keep_as_is: ['my-length', 'my-natural-roots'],
         }),
       ).toBe(
-        'You aren’t sure yet what pulled you in, want to keep your length, and want to keep your natural roots. The photo doesn’t clearly show the contrast between light and dark. We’ll help Susie work out the details.',
+        'You aren’t sure yet what pulled you in, want to keep your length, and want to keep your natural color next to your scalp. The photo doesn’t clearly show the contrast between light and dark. We’ll help Susie work out the details.',
       )
     })
 

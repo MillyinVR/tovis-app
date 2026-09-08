@@ -195,7 +195,7 @@ async function tapsToThePhotoStep(
 
     const card = tappable[0]!
     const key = card.getAttribute('data-thread-message')!.slice('intake:'.length)
-    const question = pack.questions.find((entry) => entry.key === key)!
+    const question = toConsultIntakeQuestionPackDTO(pack).questions.find((entry) => entry.key === key)!
     const option =
       (key === 'change_scale'
         ? question.options.find((entry) => entry.value === changeScale)

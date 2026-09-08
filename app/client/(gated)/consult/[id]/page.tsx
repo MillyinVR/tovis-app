@@ -1,3 +1,4 @@
+import { consultClientPlanCopy } from '@/lib/brand/consultClientPlanCopy'
 import { redirect } from 'next/navigation'
 
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
@@ -28,7 +29,7 @@ export default async function ClientConsultFlowPage({ params }: PageProps) {
     <ClientPage
       eyebrow={copy.eyebrow}
       title="A full look at what suits you"
-      lede="Answer a few questions and add daylight photos. You get feature-grounded directions to discuss with your professional at your appointment."
+      lede={consultClientPlanCopy.pageIntro}
       back={{ href: '/client/bookings', label: 'Bookings' }}
       width="wide"
     >

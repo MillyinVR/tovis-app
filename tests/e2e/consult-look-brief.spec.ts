@@ -32,7 +32,7 @@ test(`client chooses and confirms the look with first-visit totals (inputs open:
   await page.goto(`/client/consult/${CONSULT_FIXTURE_ID}`)
   const card = page.getByRole('region', { name: 'Your look plan' })
   await expect(card).toContainText('First appointment: $180.00 · 90 min')
-  await expect(card).toContainText('Whole transformation: $360.00 · 180 min')
+  await expect(card).toContainText('All planned visits: $360.00 · 180 min')
   await expect(card).toContainText('Warm and buttery, with your natural root.')
   await expect(card).not.toContainText('Internal dimensional color service')
   await card.getByRole('button', { name: 'Choose this look' }).click()

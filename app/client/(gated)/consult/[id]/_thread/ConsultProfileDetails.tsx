@@ -1,6 +1,7 @@
 'use client'
 
 import type { ConsultClientResultsDTO } from '@/lib/dto/consult'
+import { clientConsultProfileValue } from '@/lib/brand/consultClientProfileCopy'
 import { useBrand } from '@/lib/brand/BrandProvider'
 
 /** On-demand detail keeps the conversation short without hiding its evidence. */
@@ -18,7 +19,7 @@ export default function ConsultProfileDetails({ results }: { results: ConsultCli
         ]>).map(([field, observation]) => observation ? (
           <div key={field}>
             <dt className="text-xs text-textMuted">{copy.profileLabels[field]}</dt>
-            <dd className="text-sm text-textPrimary">{observation.value.toLowerCase().replaceAll('_', ' ')}</dd>
+            <dd className="text-sm text-textPrimary">{clientConsultProfileValue(field, observation.value)}</dd>
           </div>
         ) : null)}
       </dl>
