@@ -1050,8 +1050,8 @@ export type BrandClientConsultInspirationCardCopy = {
    */
   attributeNames: Readonly<Record<string, string>>
   /**
-   * `${analysisAttribute}` → the clause the understanding check uses for
-   * something the photograph could not settle ("aren’t sure how bright yet").
+   * `${analysisAttribute}` → a full sentence about what the photograph could
+   * not settle. Never describe this as uncertainty in the client’s wishes.
    * Part 0 rule 8: the consult says what it could not see.
    */
   unsureClauses: Readonly<Record<string, string>>
@@ -1060,12 +1060,9 @@ export type BrandClientConsultInspirationCardCopy = {
    * check, with no reading to lean on ("like the color in it").
    */
   sparkClauses: Readonly<Record<string, string>>
-  /**
-   * The same clauses with a `{subject}` slot, used when the reading CAN name
-   * what she pointed at — "like the light blonde" rather than "like the color
-   * in it". The subject comes from `attributeShortNames`.
-   */
-  sparkClausesWithSubject: Readonly<Record<string, string>>
+  /** Explicit visual choices only. `{details}` is a list of chosen attributes. */
+  detailClauses: { wants: string; avoids: string; unsure: string; conflicting: string }
+
   /**
    * `${analysisAttribute}:${value}` → the same thing as a NOUN PHRASE, for
    * dropping into a sentence. `attributeNames` is a whole sentence shown under

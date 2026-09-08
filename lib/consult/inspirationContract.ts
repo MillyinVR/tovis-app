@@ -885,6 +885,7 @@ async function buildState(
   // progress that serves it as the current question.
   const understanding = pack
     ? composeConsultInspirationUnderstanding({
+        pack,
         answers: answersByKey,
         reading,
         copy,

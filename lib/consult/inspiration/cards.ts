@@ -172,26 +172,6 @@ function regionOptionLabel(
 }
 
 /**
- * The subject the understanding check names when she said "the color".
- *
- * How LIGHT it gets is the thing a client means by "the pink" or "the blonde",
- * so it leads; tone is the fallback when the level could not be read. Both are
- * held to the same confidence floor a card is, so the sentence never claims
- * something the cards themselves declined to say.
- */
-function sparkSubject(
-  reading: ConsultInspirationCardReading | null,
-  copy: BrandClientConsultInspirationCopy,
-): string | null {
-  for (const attribute of ['lightestLevel', 'tone'] as const) {
-    if (!consultInspirationAttributeIsCardworthy(reading, attribute)) continue
-    const name = attributeShortName(copy, attribute, reading![attribute].value)
-    if (name) return name
-  }
-  return null
-}
-
-/**
  * The one thing the photograph could not settle, for the understanding check.
  *
  * Priority order, not "the first in the object": what a client most wants to
@@ -236,8 +216,8 @@ function joinClauses(clauses: readonly string[], conjunction: string): string {
  * The understanding check's sentence, composed on the SERVER from her own
  * answers so far and what the photograph did or did not settle.
  *
- * "You like the light blonde, want to keep your length, and aren't sure how
- * bright yet. We'll help Susie work out the details."
+ * "You like the color and want to keep your length. The photo does not clearly
+ * show the contrast. We'll help Susie work out the details."
  *
  * It is composed rather than picked from a list because it is a summary of a
  * particular client's particular taps — the whole point of showing it is that
@@ -245,6 +225,7 @@ function joinClauses(clauses: readonly string[], conjunction: string): string {
  * brand copy; this function only decides which fragments and in what order.
  */
 export function composeConsultInspirationUnderstanding(args: {
+  pack: ConsultInspirationPackDefinition
   answers: Readonly<Record<string, readonly string[]>>
   reading: ConsultInspirationCardReading | null
   copy: BrandClientConsultInspirationCopy
@@ -253,29 +234,45 @@ export function composeConsultInspirationUnderstanding(args: {
   const { cards } = args.copy
   const clauses: string[] = []
 
-  const subject = sparkSubject(args.reading, args.copy)
+  // A broad attraction is not a request for every observed attribute. Saying
+  // "the color" does not confirm the reference's lightest level or tone.
+  // Keep the client's answer distinct from what the model saw in the photo.
   for (const value of args.answers[SPARK_FOCUS_KEY] ?? []) {
-    const withSubject =
-      subject === null ? undefined : cards.sparkClausesWithSubject[value]
-    const clause =
-      withSubject && subject !== null
-        ? withSubject.split('{subject}').join(subject)
-        : cards.sparkClauses[value]
+    const clause = cards.sparkClauses[value]
     if (clause) clauses.push(clause)
+  }
+  // Reuse the same interpretation the analysis receives, including archived
+  // per-attribute cards. Only an explicit visual choice earns a specific
+  // attribute in this summary; merely observing it in the photo does not.
+  const preferences = deriveConsultInspirationPreferences(args)
+  const conflicting = new Set(
+    preferences.wants.filter((pair) => preferences.avoids.includes(pair)),
+  )
+  const groups = [
+    [cards.detailClauses.wants, preferences.wants.filter((pair) => !conflicting.has(pair))],
+    [cards.detailClauses.avoids, preferences.avoids.filter((pair) => !conflicting.has(pair))],
+    [cards.detailClauses.unsure, preferences.unsure.filter((pair) => !conflicting.has(pair))],
+    [cards.detailClauses.conflicting, [...conflicting]],
+  ] as const
+  for (const [template, pairs] of groups) {
+    const names = [...new Set(
+      pairs.map((pair) => cards.attributeShortNames[pair])
+        .filter((name): name is string => typeof name === 'string' && name.length > 0),
+    )]
+    if (names.length > 0) {
+      clauses.push(
+        template.split('{details}').join(joinClauses(names, cards.understandingConjunction)),
+      )
+    }
   }
   for (const value of args.answers[KEEP_AS_IS_KEY] ?? []) {
     if (CONSULT_INSPIRATION_NEUTRAL_VALUES.has(value)) continue
     const clause = cards.keepClauses[value]
     if (clause) clauses.push(clause)
   }
-  // 🔴 The "we couldn't tell yet" clause QUALIFIES what she said; it is not a
-  // summary on its own. Pushed unconditionally, a client who has answered
-  // nothing yet reads "You aren't sure yet how much light and dark you want"
-  // on a card she has not reached — a sentence that puts words in her mouth
-  // about a question nobody asked her. With nothing to qualify, the fallback
-  // is the honest line.
-  const unsure = clauses.length > 0 ? unsureClause(args.reading, args.copy) : null
-  if (unsure) clauses.push(unsure)
+  // Image uncertainty belongs to the image, not to the client's wishes.
+  // With no meaningful answer yet, show the ordinary fallback instead.
+  const observation = clauses.length > 0 ? unsureClause(args.reading, args.copy) : null
 
   const close = cards.understandingClose
     .split('{pro}')
@@ -283,7 +280,11 @@ export function composeConsultInspirationUnderstanding(args: {
   if (clauses.length === 0) {
     return cards.understandingFallback.split('{pro}').join(args.professionalDisplayName)
   }
-  return `${cards.understandingLead} ${joinClauses(clauses, cards.understandingConjunction)}. ${close}`
+  return [
+    `${cards.understandingLead} ${joinClauses(clauses, cards.understandingConjunction)}.`,
+    observation,
+    close,
+  ].filter(Boolean).join(' ')
 }
 
 /**
@@ -408,6 +409,7 @@ export function buildConsultInspirationCard(args: {
   const composed =
     question.key === UNDERSTANDING_CHECK_KEY
       ? composeConsultInspirationUnderstanding({
+          pack: args.pack,
           answers: args.answers,
           reading,
           copy,
