@@ -46,14 +46,14 @@ export type HairColorProBriefPayload = HairColorProBriefCore & {
 function structuredCloneProfile(
   profile: ConsultAnalysisFeatureProfileDTO,
 ): ConsultAnalysisFeatureProfileDTO {
-  const entries = Object.entries(profile).map(([field, observation]) => [
-    field,
-    {
+  const entries = Object.entries(profile).flatMap(([field, observation]) => {
+    if (!observation) return []
+    return [[field, {
       value: observation.value,
       confidence: { ...observation.confidence },
       evidence: [...observation.evidence],
-    },
-  ])
+    }]]
+  })
   return Object.fromEntries(entries) as ConsultAnalysisFeatureProfileDTO
 }
 

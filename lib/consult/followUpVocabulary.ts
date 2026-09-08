@@ -31,6 +31,8 @@
 
 import 'server-only'
 
+import { CONSULT_CALIBRATION_QUESTIONS } from './profileCalibration'
+
 import type { ConsultIntakeQuestionDTO } from '@/lib/dto/consult'
 
 import {
@@ -119,6 +121,7 @@ export type ConsultFollowUpVocabulary = {
  * by falling back to the vague wording rather than leaving a hole.
  */
 export function resolveConsultFollowUpVocabulary(args: {
+  needsCalibration?: boolean
   intakePack: ConsultIntakePackDefinition
   intakeAnswers: Readonly<Record<string, string>>
   serviceName: string | null
@@ -146,6 +149,12 @@ export function resolveConsultFollowUpVocabulary(args: {
     if (entries.some((existing) => existing.key === question.key)) continue
     if (args.intakeAnswers[question.key]) continue
     entries.push(entry(question, 'FOLLOW_UP'))
+  }
+
+  if (args.needsCalibration) {
+    for (const question of CONSULT_CALIBRATION_QUESTIONS) {
+      if (!args.followUpAnswers[question.key]) entries.push(question)
+    }
   }
 
   return {

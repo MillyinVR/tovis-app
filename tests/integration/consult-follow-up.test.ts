@@ -37,6 +37,7 @@ vi.hoisted(() => {
 })
 
 const mockRequireClient = vi.hoisted(() => vi.fn())
+const scenario = vi.hoisted(() => ({ uncertainProfile: false }))
 
 vi.mock('@/app/api/_utils/auth/requireClient', () => ({
   requireClient: mockRequireClient,
@@ -67,7 +68,14 @@ vi.mock('@/lib/consult/analysisEngine', async (importOriginal) => {
   const original =
     await importOriginal<typeof import('@/lib/consult/analysisEngine')>()
   const fakes = await import('./_support/consultLookFakes')
-  return { ...original, runConsultAnalysis: fakes.fakeRunConsultAnalysis }
+  return { ...original, runConsultAnalysis: async (input: Parameters<typeof fakes.fakeRunConsultAnalysis>[0]) => {
+    const result = await fakes.fakeRunConsultAnalysis(input)
+    if (scenario.uncertainProfile) {
+      result.analysis.profile.skinUndertone = { value: 'UNKNOWN', confidence: { min: 0, max: 0.3 }, evidence: [] }
+      result.analysis.profile.contrastLevel = { value: 'UNKNOWN', confidence: { min: 0, max: 0.3 }, evidence: [] }
+    }
+    return result
+  } }
 })
 
 vi.mock('@/lib/consult/inspirationImage', async (importOriginal) => {
@@ -154,6 +162,8 @@ beforeAll(async () => {
 beforeEach(() => {
   vi.clearAllMocks()
   resetConsultLookFakes()
+  scenario.uncertainProfile = false
+  delete process.env.AI_CONSULT_PROFILE_CALIBRATION_ENABLED
   mockRequireClient.mockResolvedValue({
     ok: true,
     clientId: fx.clientId,
@@ -280,6 +290,65 @@ function ofKind<K extends ConsultThreadMessageDTO['kind']>(
 }
 
 describe('a round is bought once', () => {
+  it('keeps old and new analysis writers valid while rejecting mismatched versions and eye evidence', async () => {
+    const sessionId = await completedConsult('p7b-version-window')
+    const source = await db.consultRevision.findFirstOrThrow({ where: { consultSessionId: sessionId, kind: 'ANALYSIS' } })
+    const payload = source.payload as Prisma.JsonObject
+    const profile = payload.profile as Prisma.JsonObject
+    const { eyeColor: _eyeColor, ...oldProfile } = profile
+    void _eyeColor
+    const rollback = new Error('valid test write; roll back')
+    const attempt = (schemaVersion: number, promptVersion: string | null, nextProfile: Prisma.JsonObject) =>
+      db.$transaction(async (tx) => {
+        const session = await tx.consultSession.update({ where: { id: sessionId }, data: { revisionSequence: { increment: 1 } } })
+        const { id: _id, ...data } = source
+        void _id
+        await tx.consultRevision.create({ data: {
+          ...data, revision: session.revisionSequence, schemaVersion, promptVersion,
+          idempotencyKey: `p7b-guard-${sessionId}`, requestHash: 'b'.repeat(64),
+          payload: { ...payload, profile: nextProfile },
+        } })
+        throw rollback
+      })
+    await expect(attempt(4, 'service-analysis-v5', oldProfile)).rejects.toBe(rollback)
+    await expect(attempt(5, 'service-analysis-v6', profile)).rejects.toBe(rollback)
+    const invalidCases: Array<[number, string | null, Prisma.JsonObject]> = [
+      [5, 'service-analysis-v5', profile],
+      [5, null, profile],
+      [5, 'service-analysis-v6', oldProfile],
+      [4, 'service-analysis-v5', profile],
+      [5, 'service-analysis-v6', { ...profile, eyeColor: { value: 'BROWN', confidence: { min: 0.4, max: 0.7 }, evidence: ['hair_back'] } }],
+    ]
+    for (const [schema, prompt, nextProfile] of invalidCases) {
+      await expect(attempt(schema, prompt, nextProfile)).rejects.toThrow(/23514|invalid|violates/i)
+    }
+  })
+
+  it('serves and records optional calibration for uncertain profiles without changing the observations', async () => {
+    process.env.AI_CONSULT_PROFILE_CALIBRATION_ENABLED = 'true'
+    scenario.uncertainProfile = true
+    const sessionId = await completedConsult('p7b-calibration')
+    const provider: ConsultFollowUpProvider = async ({ vocabulary }) => {
+      const entry = vocabulary.byKey.get('color_jewelry_preference')
+      expect(entry).toBeDefined()
+      if (!entry) throw new Error('Calibration question missing')
+      return { model: 'claude-sonnet-5', questions: [{
+        key: entry.key, home: entry.home, text: entry.packLabel,
+        evidence: 'intake; color reading remains uncertain', options: [...entry.options],
+      }] }
+    }
+    await generateConsultFollowUpRound({ consultSessionId: sessionId, actor: client() }, { provider })
+    await answerConsultFollowUpQuestion({
+      consultSessionId: sessionId, clientId: fx.clientId, actor: client(),
+      questionKey: 'color_jewelry_preference', selectedValues: ['unsure'],
+      idempotencyKey: `p7b-calibration-${sessionId}`,
+    })
+    const round = await db.consultFollowUpRound.findFirstOrThrow({ where: { consultSessionId: sessionId } })
+    expect(round.answers).toEqual({ color_jewelry_preference: ['unsure'] })
+    const analysis = await db.consultRevision.findFirstOrThrow({ where: { consultSessionId: sessionId, kind: 'ANALYSIS' } })
+    expect(analysis.payload).toMatchObject({ profile: { skinUndertone: { value: 'UNKNOWN' }, contrastLevel: { value: 'UNKNOWN' } } })
+  })
+
   it('creates the first round when the plan publishes, and never a second for it', async () => {
     const sessionId = await completedConsult('p5g-once')
     const provider = vi.fn(providerAnswering('event_timing', ['no-deadline', '1-3-months']))

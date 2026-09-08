@@ -76,7 +76,7 @@ const reference = {
 }
 
 describe('normalizeStoredConsultAnalysisPayload', () => {
-  it('reads a current-schema row as written', () => {
+  it('reads the previous schema without inventing a historical eye observation', () => {
     const payload = {
       profile: profile(),
       styleDirections: styleDirections(),
@@ -96,6 +96,10 @@ describe('normalizeStoredConsultAnalysisPayload', () => {
       ],
     }
     const result = normalizeStoredConsultAnalysisPayload(payload, 4)
+    expect(result.profile).not.toHaveProperty('eyeColor')
+    const eyeColor = observed('BROWN', ['face_front'])
+    const current = normalizeStoredConsultAnalysisPayload({ ...payload, profile: { ...payload.profile, eyeColor } }, 5)
+    expect(current.profile.eyeColor).toEqual(eyeColor)
     expect(result.core.baseLevel.value).toBe('LEVEL_4')
     expect(result.core.lightestLevel.value).toBe('LEVEL_5')
     expect(result.serviceLens.goal).toBe('A noticeable change.')

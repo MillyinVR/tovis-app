@@ -51,6 +51,7 @@ const PROFILE_LABELS: Record<
   jawline: 'Jawline',
   foreheadProportion: 'Forehead',
   featureBalance: 'Feature balance',
+  eyeColor: 'Visible eye color',
   eyeShape: 'Eye shape',
   eyeSpacing: 'Eye spacing',
   browDensity: 'Brow density',
@@ -353,14 +354,14 @@ export default function ProConsultBrief({
                 ConsultProBriefDTO['profile'][keyof ConsultProBriefDTO['profile']],
               ]
             >
-          ).map(([field, observation]) => (
+          ).map(([field, observation]) => observation ? (
             <Observation
               key={field}
               label={PROFILE_LABELS[field]}
               value={observation.value}
               confidence={observation.confidence}
             />
-          ))}
+          ) : null)}
         </ul>
       </section>
 

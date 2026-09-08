@@ -38,6 +38,18 @@ function vocabulary(
 }
 
 describe('the follow-up vocabulary', () => {
+  it('offers optional calibration only when requested and never repeats its answers', () => {
+    const args = {
+      intakePack: HAIR_COLOR_INTAKE_PACK,
+      intakeAnswers: {}, serviceName: null,
+      followUpAnswers: { color_jewelry_preference: ['unsure'] },
+    }
+    expect(resolveConsultFollowUpVocabulary(args).byKey.has('color_sun_response')).toBe(false)
+    const enabled = resolveConsultFollowUpVocabulary({ ...args, needsCalibration: true })
+    expect(enabled.byKey.has('color_jewelry_preference')).toBe(false)
+    expect(enabled.byKey.get('color_sun_response')?.options.map((option) => option.value)).toContain('unsure')
+  })
+
   it('🔴 an INTAKE key is filed in the intake, so the safety policy can read it', () => {
     const found = vocabulary().byKey.get('henna_plant_dye_history')
     expect(found?.home).toBe('INTAKE')

@@ -626,6 +626,7 @@ export type BrandClientConsultResultsCopy = {
     | 'jawline'
     | 'foreheadProportion'
     | 'featureBalance'
+    | 'eyeColor'
     | 'eyeShape'
     | 'eyeSpacing'
     | 'browDensity'

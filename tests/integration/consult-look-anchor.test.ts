@@ -394,6 +394,7 @@ vi.mock('@/lib/consult/analysisEngine', async (importOriginal) => {
             jawline: observed('SOFTLY_ROUNDED', ['face_side']),
             foreheadProportion: observed('BALANCED', ['face_side']),
             featureBalance: observed('SOFT', ['face_front']),
+            eyeColor: observed('BROWN', ['eyes_closeup']),
             eyeShape: observed('HOODED', ['eyes_closeup']),
             eyeSpacing: observed('BALANCED', ['eyes_closeup']),
             browDensity: observed('FULL', ['eyes_closeup']),
