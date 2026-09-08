@@ -7386,6 +7386,10 @@
         "contrastLevel": {
           "$ref": "#/definitions/ConsultAnalysisObservationDTO%3CConsultProfileContrastDTO%3E"
         },
+        "eyeColor": {
+          "$ref": "#/definitions/ConsultAnalysisObservationDTO%3C(%22BROWN%22%7C%22BLUE%22%7C%22GREEN%22%7C%22HAZEL%22%7C%22GRAY%22%7C%22MIXED%22%7C%22UNKNOWN%22)%3E",
+          "description": "Absent on analyses saved before schema v5."
+        },
         "eyeShape": {
           "$ref": "#/definitions/ConsultAnalysisObservationDTO%3CConsultProfileEyeShapeDTO%3E"
         },
@@ -7441,6 +7445,37 @@
             "GOLDEN",
             "COPPER",
             "RED",
+            "MIXED",
+            "UNKNOWN"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "value",
+        "confidence",
+        "evidence"
+      ],
+      "type": "object"
+    },
+    "ConsultAnalysisObservationDTO<(\"BROWN\"|\"BLUE\"|\"GREEN\"|\"HAZEL\"|\"GRAY\"|\"MIXED\"|\"UNKNOWN\")>": {
+      "properties": {
+        "confidence": {
+          "$ref": "#/definitions/ConsultAnalysisConfidenceDTO"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/definitions/ConsultAnalysisEvidenceDTO"
+          },
+          "type": "array"
+        },
+        "value": {
+          "enum": [
+            "BROWN",
+            "BLUE",
+            "GREEN",
+            "HAZEL",
+            "GRAY",
             "MIXED",
             "UNKNOWN"
           ],

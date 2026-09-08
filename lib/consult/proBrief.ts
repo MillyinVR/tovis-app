@@ -1,5 +1,7 @@
 import 'server-only'
 
+import { consultCalibrationAnswerItems } from './profileCalibration'
+
 import {
   ConsultActorType,
   ConsultAuditAction,
@@ -160,6 +162,11 @@ async function loadSessionBrief(
     throw error
   }
   const { payload } = result
+  const calibrationAnswers = consultCalibrationAnswerItems(await tx.consultFollowUpRound.findMany({
+    where: { consultSessionId: session.id },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    select: { answers: true },
+  }))
 
   const feedback = await tx.consultBriefFeedback.findUnique({
     where: { consultSessionId: session.id },
@@ -178,7 +185,7 @@ async function loadSessionBrief(
     sourceAnalysisRevision: payload.sourceAnalysisRevision,
     intakeRevisionId: payload.intakeRevisionId,
     inspiration: payload.inspiration,
-    clientIntake: payload.clientIntake,
+    clientIntake: [...payload.clientIntake, ...calibrationAnswers],
     aiObservations: payload.aiObservations,
     profile: payload.profile,
     styleDirections: payload.styleDirections,

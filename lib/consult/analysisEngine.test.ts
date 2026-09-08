@@ -37,6 +37,7 @@ import {
   consultInspirationBlock,
   consultProfileBlock,
   runConsultAnalysis,
+  sanitizeConsultProfileResponse,
   validateConsultAnalysisProviderResult,
   validateConsultAnalysisResult,
   type ConsultAnalysisInput,
@@ -156,6 +157,7 @@ function validProfile(): ConsultAnalysisProviderOutput['profile'] {
     jawline: face('SOFTLY_ROUNDED' as const),
     foreheadProportion: face('BALANCED' as const),
     featureBalance: face('SOFT' as const),
+    eyeColor: face('BROWN' as const),
     eyeShape: {
       value: 'HOODED' as const,
       confidence: { min: 0.5, max: 0.8 },
@@ -337,6 +339,17 @@ afterEach(() => {
 })
 
 describe('hair-color consult analysis provider', () => {
+  it('requires visible eye color in new responses and refuses non-eye evidence', () => {
+    const profile = validProfile()
+    expect(sanitizeConsultProfileResponse({ profile }).eyeColor.value).toBe('BROWN')
+    const { eyeColor: _eyeColor, ...missing } = profile
+    void _eyeColor
+    expect(() => sanitizeConsultProfileResponse({ profile: missing })).toThrow(ConsultAnalysisProviderError)
+    expect(() => sanitizeConsultProfileResponse({ profile: { ...profile, eyeColor: {
+      value: 'BROWN', confidence: { min: 0.4, max: 0.7 }, evidence: ['hair_back'],
+    } } })).toThrow(ConsultAnalysisProviderError)
+  })
+
   it('fails closed before sending photos when the model override is not allowlisted', async () => {
     process.env.AI_CONSULT_ANALYSIS_MODEL = 'claude-sonnet-5-typo'
 
@@ -366,8 +379,8 @@ describe('hair-color consult analysis provider', () => {
       inspiration: noInspiration,
       safetyCodes: [...SAFETY_CODES],
     })
-    expect(CONSULT_ANALYSIS_SCHEMA_VERSION).toBe(4)
-    expect(CONSULT_ANALYSIS_PROMPT_VERSION).toBe('service-analysis-v5')
+    expect(CONSULT_ANALYSIS_SCHEMA_VERSION).toBe(5)
+    expect(CONSULT_ANALYSIS_PROMPT_VERSION).toBe('service-analysis-v6')
     expect(result.model).toBe(CONSULT_ANALYSIS_DEFAULT_MODEL)
 
     // v5 is TWO calls, in order, and the second is the one that can name a
@@ -1000,7 +1013,7 @@ describe('P4 — the inspiration reference in the analysis prompt', () => {
     for (const params of [profileCall, directionCall]) {
       const serialized = JSON.stringify(params.messages[0].content)
       expect(serialized).toContain(
-        'Evidence label: hair_back (colour warning: WARM_INDOOR_LIGHT',
+        'Evidence label: hair_back (color warning: WARM_INDOOR_LIGHT',
       )
       // Only the warned frame is labelled; the rest stay plain.
       expect(serialized).toContain('Evidence label: hair_left"')

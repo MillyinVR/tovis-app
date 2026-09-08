@@ -210,7 +210,7 @@ describe('the consult schemas compile and answer against the live model', () => 
     })
 
     const profile = sanitizeConsultProfileResponse(raw)
-    expect(Object.keys(profile)).toHaveLength(11)
+    expect(Object.keys(profile)).toHaveLength(12)
     for (const observation of Object.values(profile)) {
       expect(Object.keys(observation).sort()).toEqual([
         'confidence',

@@ -744,6 +744,7 @@ export function createDeterministicConsultEvaluationResult(
         jawline: unknownProfileObservation('UNKNOWN' as const),
         foreheadProportion: unknownProfileObservation('UNKNOWN' as const),
         featureBalance: unknownProfileObservation('UNKNOWN' as const),
+        eyeColor: unknownProfileObservation('UNKNOWN' as const),
         eyeShape: unknownProfileObservation('UNKNOWN' as const),
         eyeSpacing: unknownProfileObservation('UNKNOWN' as const),
         browDensity: unknownProfileObservation('UNKNOWN' as const),

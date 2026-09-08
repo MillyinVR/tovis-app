@@ -1,5 +1,8 @@
 import 'server-only'
 
+import { readOptionalEnv } from '@/lib/env'
+import { needsConsultProfileCalibration } from './profileCalibration'
+
 // lib/consult/followUpContract.ts
 //
 // P5g — the adaptive follow-up ROUND: when one is generated, what it costs,
@@ -212,6 +215,7 @@ function answeredValues(
 // ── The situation, read once ────────────────────────────────────────────────
 
 type FollowUpSituation = {
+  needsCalibration: boolean
   planVersion: number
   /** The pack this consult is PINNED to, not the pack that shipped today. */
   intakePack: ConsultIntakePackDefinition
@@ -515,13 +519,16 @@ async function readConsultFollowUpSituation(
   // on a payload it cannot read; a follow-up is an ADDITION to the thread and
   // must not be the thing that takes it down, so an unreadable plan simply
   // means the prompt is told her hair has not been read.
+  let needsCalibration = false
   let core: ConsultAnalysisCore | null = null
   if (analysisRevision) {
     try {
-      core = normalizeStoredConsultAnalysisPayload(
+      const analysis = normalizeStoredConsultAnalysisPayload(
         analysisRevision.payload,
         analysisRevision.schemaVersion,
-      ).core as ConsultAnalysisCore
+      )
+      core = analysis.core as ConsultAnalysisCore
+      needsCalibration = needsConsultProfileCalibration(analysis.profile, readOptionalEnv('AI_CONSULT_PROFILE_CALIBRATION_ENABLED') === 'true')
     } catch (error) {
       console.warn('consult follow-up could not read the stored plan', {
         consultSessionId,
@@ -566,6 +573,7 @@ async function readConsultFollowUpSituation(
 
   return {
     session,
+    needsCalibration,
     planVersion,
     intakePack,
     intakeAnswers,
@@ -682,6 +690,7 @@ function resolveConsultFollowUpPreferences(args: {
 /** The vocabulary for one consult — the packs it is on, minus what she answered. */
 function resolveVocabularyFor(situation: FollowUpSituation) {
   return resolveConsultFollowUpVocabulary({
+    needsCalibration: situation.needsCalibration,
     intakePack: situation.intakePack,
     intakeAnswers: situation.intakeAnswers,
     serviceName: situation.serviceName,

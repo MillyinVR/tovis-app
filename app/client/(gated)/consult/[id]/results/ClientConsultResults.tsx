@@ -199,7 +199,7 @@ export default function ClientConsultResults({
                 (typeof results.profile)[keyof typeof results.profile],
               ]
             >
-          ).map(([field, observation]) => (
+          ).map(([field, observation]) => observation ? (
             <Observation
               key={field}
               label={copy.profileLabels[field]}
@@ -207,7 +207,7 @@ export default function ClientConsultResults({
               confidence={observation.confidence}
               copy={copy}
             />
-          ))}
+          ) : null)}
         </ul>
       </section>
 

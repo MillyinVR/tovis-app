@@ -90,7 +90,7 @@ export function normalizeStoredConsultAnalysisPayload(
   const current =
     schemaVersion === LEGACY_HAIR_COLOR_ANALYSIS_SCHEMA_VERSION
       ? upgradeLegacyPayload(payload)
-      : schemaVersion === CONSULT_ANALYSIS_SCHEMA_VERSION
+      : schemaVersion === CONSULT_ANALYSIS_SCHEMA_VERSION || schemaVersion === 4
         ? payload
         : unavailable()
   if (!Array.isArray(current.recommendations)) unavailable()
@@ -143,7 +143,9 @@ export function normalizeStoredConsultAnalysisPayload(
     sanitized = validateConsultAnalysisResult({
       model: 'stored-analysis',
       analysis: {
-        profile: current.profile,
+        profile: schemaVersion < 5 && isRecord(current.profile)
+          ? { ...current.profile, eyeColor: { value: 'UNKNOWN', confidence: { min: 0, max: 0.35 }, evidence: [] } }
+          : current.profile,
         styleDirections: current.styleDirections,
         core: current.core,
         serviceLens: current.serviceLens,
@@ -155,8 +157,13 @@ export function normalizeStoredConsultAnalysisPayload(
     unavailable()
   }
 
+  // Keep old Brief reconstruction byte-identical: an absent observation is
+  // not a newly stored UNKNOWN. The new writer still requires the field.
+  const { eyeColor: _eyeColor, ...legacyProfile } = sanitized.profile
+  void _eyeColor
   return {
     ...sanitized,
+    profile: schemaVersion < 5 ? legacyProfile : sanitized.profile,
     recommendations: sanitized.recommendations.map((recommendation, index) => {
       const reference = references[index]
       if (!reference) unavailable()

@@ -21,6 +21,8 @@
 // All legal wording, questions, shot instructions and system-bubble copy are
 // server-served; this component renders them and owns the mutations.
 
+import ConsultProfileDetails from './_thread/ConsultProfileDetails'
+
 import { useCallback, useEffect, useRef, useState } from 'react'
 import * as Sentry from '@sentry/nextjs'
 import { useRouter } from 'next/navigation'
@@ -1531,14 +1533,7 @@ function PlanMessage({
   )
 }
 
-/**
- * The plan card's PLACEHOLDER body (P5a).
- *
- * It shows the analysis's own headline directions and sends the client to the
- * full results page for the rest. The versioned plan card the handoff describes
- * — the reveal, with its own history — is later work, and inventing half of it
- * here would be a second thing to migrate.
- */
+/** Look directions with optional evidence details; the full plan remains linked. */
 function PlanSummary({
   results,
 }: {
@@ -1556,6 +1551,7 @@ function PlanSummary({
           </li>
         ))}
       </ul>
+      <ConsultProfileDetails results={results} />
     </div>
   )
 }

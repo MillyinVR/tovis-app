@@ -32,7 +32,7 @@ import {
 import { toProviderOutputSchema } from './providerSchema'
 import { CONSULT_SERVICE_FAMILY_LABELS } from './serviceScope'
 
-export const CONSULT_ANALYSIS_SCHEMA_VERSION = 4
+export const CONSULT_ANALYSIS_SCHEMA_VERSION = 5
 // v2 (2026-08-27): the capture pack may be partial — the prompt lists missing
 // views and pins their observations to UNKNOWN.
 // v3 (2026-09-03, service-aware consult): the analysis is told WHICH service
@@ -40,13 +40,13 @@ export const CONSULT_ANALYSIS_SCHEMA_VERSION = 4
 // the professional's menu in that category — and the intake as the labels the
 // client actually saw. `hairColorLens` becomes `serviceLens` (same eight
 // fields, service-neutral wording); recommendations name a service from the
-// menu (or a consultation) instead of choosing from a colour-only intent enum;
+// menu (or a consultation) instead of choosing from a color-only intent enum;
 // safety codes gain service-neutral members. Prompt and schema move together.
 // v4 (2026-09-04, P4): the client's INSPIRATION reference is finally part of
 // the reasoning. The prompt gains a block naming what the vision model read
 // off that photograph (level, tone, technique, placement, root blend, finish,
 // dimension, each with its confidence range) alongside the client's own
-// answers about it, and each supplied capture is labelled with any colour
+// answers about it, and each supplied capture is labelled with any color
 // WARNING its quality check recorded. The output schema is unchanged — this
 // is new INPUT, so the prompt version moves and the schema version does not.
 // v5 (2026-09-04, P4a): the analysis is TWO provider calls, and the levels are
@@ -71,20 +71,11 @@ export const CONSULT_ANALYSIS_SCHEMA_VERSION = 4
 // what comes back as much as a reworded sentence does (at the default the
 // direction call truncated), so moving it is a prompt-version change.
 //
-// ⚠️ This constant and `consult_analysis_payload_guard` are a HARD CUTOVER, and
-// the deploy cannot make them simultaneous. `vercel.json` runs
-// `prisma migrate deploy` inside the PRODUCTION BUILD, which completes while
-// the PREVIOUS deployment is still serving — so for the length of that build
-// the old code writes `service-analysis-v4` into a database that already
-// demands v5, and the guard refuses it with 23514 at the very end of the paid
-// provider calls. Shipping the code first fails identically with the versions
-// swapped; a single-value pin has no safe ordering by construction.
-// Accepted, not overlooked: the analysis is founder-gated, so the blast radius
-// is one account for one build. If it ever opens to real clients, the fix is a
-// two-deploy migration (widen the guard to accept BOTH versions, ship, then
-// narrow it again) — never a permanently looser guard, because the pin is what
-// makes a stored revision provably the product of a known prompt.
-export const CONSULT_ANALYSIS_PROMPT_VERSION = 'service-analysis-v5'
+// v6 adds evidence-bound eye color (schema 5). The accompanying migration
+// accepts only the explicit old (4/v5) and new (5/v6) pairs, allowing the
+// previous deployment to finish requests while the new deployment builds.
+// Historical revisions retain their original profile shape when read.
+export const CONSULT_ANALYSIS_PROMPT_VERSION = 'service-analysis-v6'
 export const CONSULT_ANALYSIS_DEFAULT_MODEL = 'claude-sonnet-5'
 /**
  * Per-call ceilings, because the two calls are nothing like each other.
@@ -317,6 +308,8 @@ export const CONSULT_PROFILE_BROW_SHAPES = [
   'UNKNOWN',
 ] as const
 
+export const CONSULT_PROFILE_EYE_COLORS = ['BROWN', 'BLUE', 'GREEN', 'HAZEL', 'GRAY', 'MIXED', 'UNKNOWN'] as const
+
 export const CONSULT_PROFILE_FIELDS = [
   'skinUndertone',
   'contrastLevel',
@@ -325,6 +318,7 @@ export const CONSULT_PROFILE_FIELDS = [
   'jawline',
   'foreheadProportion',
   'featureBalance',
+  'eyeColor',
   'eyeShape',
   'eyeSpacing',
   'browDensity',
@@ -342,6 +336,7 @@ const PROFILE_FIELD_VALUES: Readonly<
   jawline: CONSULT_PROFILE_JAWLINES,
   foreheadProportion: CONSULT_PROFILE_FOREHEADS,
   featureBalance: CONSULT_PROFILE_FEATURE_BALANCES,
+  eyeColor: CONSULT_PROFILE_EYE_COLORS,
   eyeShape: CONSULT_PROFILE_EYE_SHAPES,
   eyeSpacing: CONSULT_PROFILE_EYE_SPACINGS,
   browDensity: CONSULT_PROFILE_BROW_DENSITIES,
@@ -382,6 +377,7 @@ export type ConsultAnalysisFeatureProfile = {
   featureBalance: ProfileObservation<
     (typeof CONSULT_PROFILE_FEATURE_BALANCES)[number]
   >
+  eyeColor: ProfileObservation<(typeof CONSULT_PROFILE_EYE_COLORS)[number]>
   eyeShape: ProfileObservation<(typeof CONSULT_PROFILE_EYE_SHAPES)[number]>
   eyeSpacing: ProfileObservation<(typeof CONSULT_PROFILE_EYE_SPACINGS)[number]>
   browDensity: ProfileObservation<(typeof CONSULT_PROFILE_BROW_DENSITIES)[number]>
@@ -514,7 +510,7 @@ export type ConsultAnalysisInput = {
     shotKey: ConsultCaptureShotKeyDTO
     image: ConsultCaptureImage
     /**
-     * The colour finding the capture gate recorded on this frame without
+     * The color finding the capture gate recorded on this frame without
      * blocking it (lib/consult/captureVision.ts). Present means the light on
      * this view is not fully trustworthy — the prompt says so, so a warm
      * reading from a warm room does not become a confident tone observation.
@@ -1120,14 +1116,15 @@ const SHARED_CONDUCT = [
 export const CONSULT_ANALYSIS_PROFILE_SYSTEM_PROMPT = [
   'You are a cosmetic-only feature-analysis engine for a professional beauty platform.',
   'Inputs: a consultation context naming the service family, the service category and the capture pack this consult uses; the client’s intake as the questions and answers she saw; and one or more labeled daylight photos from that pack — hair views (hair_back, hair_left, hair_right, hair_crown), face views (face_front, face_side, eyes_closeup), or treatment-area views (area_wide, area_closeup). The client may submit a partial pack; when views are missing, a text line names them.',
-  'You produce ONE thing: the feature profile — eleven cosmetic observations about THIS client, each with a confidence range and the views you read it from.',
+  'You produce ONE thing: the feature profile — twelve cosmetic observations about THIS client, each with a confidence range and the views you read it from.',
   'The question you are answering is not "what does she want" and not "what should she book". It is "what will actually flatter this person": the observations another engine will use to ground every later recommendation.',
   ...SHARED_CONDUCT,
-  'Skin undertone and colour season read from phone photos are approximate even in daylight: widen those confidence ranges, and never report either with high confidence from a single view.',
+  'Skin undertone and color season read from phone photos are approximate even in daylight: widen those confidence ranges, and never report either with high confidence from a single view.',
   'Contrast is the backbone of the profile: judge it between skin, hair and eyes together, not from one of them.',
   'Face proportion, jawline and forehead proportion describe the balance of the face as a whole; feature balance describes whether the features read soft, blended or structured.',
+  'Eye color describes only the visible iris, never identity or natural color behind possible contacts. Read it only from a clear face_front, face_side or eyes_closeup photograph. If the iris is too small, obscured, filtered, color-shifted or inconsistent, use UNKNOWN. Never infer it from hair, skin, intake, or the inspiration.',
   'Eye shape, eye spacing, brow density and brow shape read from the eyes_closeup view where one is supplied, and from face_front otherwise; if neither is supplied they are UNKNOWN.',
-  'A capture may be labelled with a colour warning. That view passed the quality gate but its light is not trustworthy for colour: widen the confidence range on any observation that leans on it — undertone, season and contrast especially — and prefer a view without a warning when one is supplied.',
+  'A capture may be labelled with a color warning. That view passed the quality gate but its light is not trustworthy for color: widen the confidence range on any observation that leans on it — undertone, season and contrast especially — and prefer a view without a warning when one is supplied.',
   'Do not describe the client’s inspiration reference, her goal, or any service. You are not being asked what to do about her hair.',
 ].join(' ')
 
@@ -1141,12 +1138,12 @@ export const CONSULT_ANALYSIS_DIRECTION_SYSTEM_PROMPT = [
   'Inputs: a consultation context naming the service family, the service category, the specific service the client is considering when one is known, the professional’s menu in that category, and the capture pack this consult uses; the client’s intake as the questions and answers she saw (with their immutable option codes); one or more labeled daylight photos from that pack; a reading of the client’s INSPIRATION reference; and the client’s FEATURE PROFILE, already established from these same photographs by an earlier pass.',
   'The feature profile is given to you as settled fact. Do not re-derive it, do not contradict it, and do not restate it as though it were your own observation. Use it: every style direction and every recommendation must lean on the specific profile fields that support it, and a field the profile marked UNKNOWN is not available to lean on.',
   'You produce: the hair core observations, exactly one style direction per domain (HAIR_COLOR_HARMONY, CUT_AND_SHAPE, BANGS, BROWS, LASHES, MAKEUP, COLOR_PALETTE), a service lens, safety flags, and service recommendations.',
-  'The hair core is two levels and four observations. baseLevel is the depth at the root — the darkest dominant colour on the head. lightestLevel is the lightest dominant colour, wherever it sits. They are two separate readings, not a range: a solid single-process has the SAME value in both, and reporting them equal is the correct answer, not a failure. Balayage, highlights and a grown-out root are where they differ. How sure you are goes in each observation’s confidence range, never into the gap between the two levels. Both read from the hair views only.',
+  'The hair core is two levels and four observations. baseLevel is the depth at the root — the darkest dominant color on the head. lightestLevel is the lightest dominant color, wherever it sits. They are two separate readings, not a range: a solid single-process has the SAME value in both, and reporting them equal is the correct answer, not a failure. Balayage, highlights and a grown-out root are where they differ. How sure you are goes in each observation’s confidence range, never into the gap between the two levels. Both read from the hair views only.',
   'Everything you write is FOR the named service. The service lens describes the client’s goal, history, constraints, maintenance and appointment context as they bear on THAT service; recommendations are services from the professional’s menu (named exactly as the menu names them) or a consultation with the professional; the hair core observations are filled from the hair views when hair is the subject and set to UNKNOWN when it is not.',
   ...SHARED_CONDUCT,
   'You are also given what the client brought as INSPIRATION: a structured reading of her reference photograph (its base and lightest level, tone, technique, placement, root blend, finish and dimension, each with a confidence range) and, in her own words, what she said she liked about it. You are NOT given the reference image; the reading is what you have of it.',
-  'The inspiration reading describes SOMEONE ELSE’S hair — it is the destination, never an observation about this client. Never let it colour the hair core observations, which are about the client and come only from her own photos. Where an attribute of the reference was read as UNKNOWN, or with a low confidence range, treat it as not established and say so rather than filling the gap.',
-  'The reference and the client’s words about it are the goal the service lens and the recommendations are FOR. Where her words and the reading disagree — she asked for the length but the reading is mostly about colour — her words win, and the gap is worth naming for the professional.',
+  'The inspiration reading describes SOMEONE ELSE’S hair — it is the destination, never an observation about this client. Never let it color the hair core observations, which are about the client and come only from her own photos. Where an attribute of the reference was read as UNKNOWN, or with a low confidence range, treat it as not established and say so rather than filling the gap.',
+  'The reference and the client’s words about it are the goal the service lens and the recommendations are FOR. Where her words and the reading disagree — she asked for the length but the reading is mostly about color — her words win, and the gap is worth naming for the professional.',
   'Rubric — recommend what harmonizes with the observed features, never what is merely trending:',
   'Contrast is the backbone: low contrast between skin, hair, and eyes favors soft, blended color and diffused makeup; high contrast carries bold, saturated color and defined lines.',
   'Undertone and season guide hair-color tone, makeup color families, and the COLOR_PALETTE direction; name palette families in plain words, and frame every palette direction as a starting point the professional confirms in person with physical draping.',
@@ -1157,8 +1154,8 @@ export const CONSULT_ANALYSIS_DIRECTION_SYSTEM_PROMPT = [
   'Hair texture, density, and the two levels bound which cuts and colors will actually behave well; honor them in CUT_AND_SHAPE and HAIR_COLOR_HARMONY.',
   'Every style direction’s whyItFlatters must name the specific observed feature or features it builds on. Style directions are directions to discuss with the professional, never promises and never treatment prescriptions.',
   'You owe a direction for all seven domains, including the ones this pack cannot show you. When the supplied views do not support a domain — brows, lashes and makeup are the usual ones when only hair was sent — the honest direction is to SAY SO: name what could not be assessed, say it is one to look at together in person, cite "intake", and use a low confidence range. That is a real, useful answer. What is never acceptable is an empty string, a placeholder, or a direction invented from views you were not given: an empty field discards the entire analysis.',
-  'A capture may be labelled with a colour warning. That view passed the quality gate but its light is not trustworthy for colour: widen the confidence range on any tone or level observation that leans on it, and prefer a view without a warning when one is supplied.',
-  'For the service lens: combine visible evidence with the client’s stated goal, treatment and chemical history, prior reactions, sensitivities, budget and event context. If maintenance tolerance, allergies, or other constraints were not asked in the intake, say they are unknown; never invent them. When the service is hair colour, the history covers box dye, prior lightening and the last colour service.',
+  'A capture may be labelled with a color warning. That view passed the quality gate but its light is not trustworthy for color: widen the confidence range on any tone or level observation that leans on it, and prefer a view without a warning when one is supplied.',
+  'For the service lens: combine visible evidence with the client’s stated goal, treatment and chemical history, prior reactions, sensitivities, budget and event context. If maintenance tolerance, allergies, or other constraints were not asked in the intake, say they are unknown; never invent them. When the service is hair color, the history covers box dye, prior lightening and the last color service.',
   'That last rule is checked for a LITERAL WORD. Where the intake did not ask, the constraints and maintenance sentences must contain the exact word "unknown" (or the exact phrase "not collected" or "not provided"). "Not asked", "not captured" and "not recorded" mean the same thing to a reader and are REJECTED — they discard the entire analysis. Write a full, useful sentence that happens to contain the word "unknown"; never reduce the field to that word on its own, because the professional reads it.',
   'Visible condition is a cosmetic visual observation only. Never diagnose hair, scalp, skin, or medical conditions.',
   'All chemical, reaction, allergy, sensitivity, unknown-history, or visibly compromised-hair concerns must be structurally represented in safetyFlags and framed for discussion with the professional.',
@@ -1268,6 +1265,10 @@ function sanitizeProfile(raw: unknown): ConsultAnalysisFeatureProfile {
       observed(raw[field], PROFILE_FIELD_VALUES[field], 'UNKNOWN'),
     ]),
   )
+  const eyeColor = observed(raw.eyeColor, CONSULT_PROFILE_EYE_COLORS, 'UNKNOWN')
+  if (eyeColor.evidence.some((key) => !['face_front', 'face_side', 'eyes_closeup'].includes(key))) {
+    throw new ConsultAnalysisProviderError('bad_output')
+  }
   return profile as ConsultAnalysisFeatureProfile
 }
 
@@ -1834,7 +1835,7 @@ function consultAnalysisImageContent(
     content.push({
       type: 'text',
       text: capture.qualityWarningCode
-        ? `Evidence label: ${shotKey} (colour warning: ${capture.qualityWarningCode} — this frame passed the quality gate but its light is not reliable for colour)`
+        ? `Evidence label: ${shotKey} (color warning: ${capture.qualityWarningCode} — this frame passed the quality gate but its light is not reliable for color)`
         : `Evidence label: ${shotKey}`,
     })
     content.push({
@@ -1972,7 +1973,7 @@ export const runConsultAnalysis: ConsultAnalysisProvider = async (input) => {
   // Given the photographs and the consultation context, but NOT the
   // inspiration: what would flatter this client is not a question about the
   // picture she brought, and feeding it in here is how a reference photograph
-  // starts colouring observations that are supposed to be about her.
+  // starts coloring observations that are supposed to be about her.
   const profile = sanitizeConsultProfileResponse(
     await requestConsultAnalysisJson({
       model,

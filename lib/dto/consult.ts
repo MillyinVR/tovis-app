@@ -1012,6 +1012,8 @@ export type ConsultAnalysisFeatureProfileDTO = {
   jawline: ConsultAnalysisObservationDTO<ConsultProfileJawlineDTO>
   foreheadProportion: ConsultAnalysisObservationDTO<ConsultProfileForeheadDTO>
   featureBalance: ConsultAnalysisObservationDTO<ConsultProfileFeatureBalanceDTO>
+  /** Absent on analyses saved before schema v5. */
+  eyeColor?: ConsultAnalysisObservationDTO<'BROWN' | 'BLUE' | 'GREEN' | 'HAZEL' | 'GRAY' | 'MIXED' | 'UNKNOWN'>
   eyeShape: ConsultAnalysisObservationDTO<ConsultProfileEyeShapeDTO>
   eyeSpacing: ConsultAnalysisObservationDTO<ConsultProfileEyeSpacingDTO>
   browDensity: ConsultAnalysisObservationDTO<ConsultProfileBrowDensityDTO>
