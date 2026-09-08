@@ -45,7 +45,7 @@ test('walks root crops into length crops using the server questions and remember
   await page.goto(`/client/consult/${CONSULT_FIXTURE_ID}`)
   const roots = page.getByRole('button', { name: 'Keep my natural root color', exact: true })
   await expect(roots).toBeVisible()
-  const rootCrop = page.getByRole('button', { name: 'At the roots — tap to see the whole photo', exact: true })
+  const rootCrop = page.getByRole('button', { name: 'Color to consider for your roots — tap to see the whole photo', exact: true })
   const rootSize = await rootCrop.evaluate((element) => getComputedStyle(element).backgroundSize)
   await roots.click()
   await page.getByRole('button', { name: 'Next', exact: true }).last().click()
