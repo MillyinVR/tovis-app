@@ -75,6 +75,11 @@ import {
 } from '@/lib/handles'
 import { waitUntil } from '@vercel/functions'
 import { TRANSACTIONAL_SMS_POLICY_VERSION } from '@/lib/transactionalSmsPolicy'
+import {
+  requireValidSignupInviteCode,
+  signupInviteFailureResponse,
+} from '@/app/api/_utils/auth/signupInviteGate'
+import { SignupInviteError } from '@/lib/auth/signupInvite'
 
 import { buildAddressPrivacyWriteData } from '@/lib/security/addressEncryption'
 import { verifyClaimLinkChannel } from '@/lib/clients/claimLinkChannel'
@@ -129,6 +134,7 @@ type RegisterBody = {
   // native (iOS) App Attest gate — sent in lieu of turnstileToken; see
   // lib/auth/appAttest.ts. `{ keyId, attestation, timestamp }`.
   appAttest?: unknown
+  signupInviteCode?: unknown
 }
 
 /* =========================================================
@@ -251,6 +257,7 @@ export async function POST(request: Request) {
     const transactionalSmsConsentIp = getAuditClientIp(request)
     const transactionalSmsConsentUserAgent = getUserAgent(request)
     const turnstileToken = pickString(body.turnstileToken)
+    const signupInviteCode = pickString(body.signupInviteCode)
 
     const tapIntentId = pickString(body.tapIntentId)
     // Native clients send a stable per-install id so the session can be revoked
@@ -461,6 +468,11 @@ export async function POST(request: Request) {
 
     if (registerRateLimitRes) return registerRateLimitRes
 
+    const signupInviteFailure = await requireValidSignupInviteCode(
+      signupInviteCode,
+    )
+    if (signupInviteFailure) return signupInviteFailure
+
     const phoneIdentity = phoneRateLimitIdentity(phone)
 
     const smsPhoneHourRes = await enforceRateLimit({
@@ -602,6 +614,7 @@ export async function POST(request: Request) {
       attemptClaimAdopt,
       claimInviteToken: verificationInviteToken,
       claimVerifiedChannel,
+      signupInviteCode: signupInviteCode ?? '',
     })
 
     if (proSetup?.dcaTimedOutAtSignup) {
@@ -689,6 +702,10 @@ export async function POST(request: Request) {
 
     return res
   } catch (err: unknown) {
+    if (err instanceof SignupInviteError) {
+      return signupInviteFailureResponse(err.reason)
+    }
+
     const uniqueTargets = readPrismaUniqueTargets(err)
 
     if (targetsContainHandle(uniqueTargets)) {

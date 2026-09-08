@@ -66,6 +66,7 @@ export type NotificationTemplateKey =
   | 'admin_verification_review_needed'
   | 'admin_support_ticket_created'
   | 'admin_viral_request_pending'
+  | 'admin_user_signed_up'
   // Not tied to a single NotificationEventKey — the weekly social digest email
   // (social-first C3) batches many unread social events and renders its own
   // body, so it never flows through the per-event render pipeline. It carries a
@@ -242,6 +243,7 @@ export const NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.ADMIN_VERIFICATION_REVIEW_NEEDED,
   NotificationEventKey.ADMIN_SUPPORT_TICKET_CREATED,
   NotificationEventKey.ADMIN_VIRAL_REQUEST_PENDING,
+  NotificationEventKey.ADMIN_USER_SIGNED_UP,
 ]
 
 export const NOTIFICATION_EVENT_DEFINITIONS: Record<
@@ -1287,6 +1289,18 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       [NotificationRecipientKind.ADMIN]: ADMIN_IN_APP_EMAIL_PUSH_CHANNELS,
     },
   },
+
+  [NotificationEventKey.ADMIN_USER_SIGNED_UP]: {
+    key: NotificationEventKey.ADMIN_USER_SIGNED_UP,
+    defaultPriority: NotificationPriority.NORMAL,
+    transactional: true,
+    allowQuietHoursBypass: false,
+    templateKey: 'admin_user_signed_up',
+    supportedRecipients: [NotificationRecipientKind.ADMIN],
+    defaultChannelsByRecipient: {
+      [NotificationRecipientKind.ADMIN]: ADMIN_IN_APP_EMAIL_PUSH_CHANNELS,
+    },
+  },
 }
 
 export const PRO_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
@@ -1366,6 +1380,7 @@ export const ADMIN_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.ADMIN_VERIFICATION_REVIEW_NEEDED,
   NotificationEventKey.ADMIN_SUPPORT_TICKET_CREATED,
   NotificationEventKey.ADMIN_VIRAL_REQUEST_PENDING,
+  NotificationEventKey.ADMIN_USER_SIGNED_UP,
 ]
 
 export function getNotificationEventDefinition(

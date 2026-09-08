@@ -46,8 +46,10 @@ import {
   formatPhoneInputValue,
   isLikelyValidPhoneInput,
 } from '@/lib/phoneInputFormat'
+import SignupInviteCodeField from './SignupInviteCodeField'
 
 type ClientField =
+  | 'inviteCode'
   | 'firstName'
   | 'lastName'
   | 'zip'
@@ -58,6 +60,7 @@ type ClientField =
   | 'tos'
 
 const FIELD_IDS: Record<ClientField, string> = {
+  inviteCode: 'signup-invite-code',
   firstName: 'signup-first-name',
   lastName: 'signup-last-name',
   zip: 'signup-zip',
@@ -69,6 +72,7 @@ const FIELD_IDS: Record<ClientField, string> = {
 }
 
 const FIELD_ORDER: ClientField[] = [
+  'inviteCode',
   'firstName',
   'lastName',
   'zip',
@@ -124,6 +128,7 @@ export default function SignupClientClient() {
   const [phone, setPhone] = useState(() => formatPhoneInputValue(phonePrefill))
   const [email, setEmail] = useState(emailPrefill)
   const [password, setPassword] = useState('')
+  const [signupInviteCode, setSignupInviteCode] = useState('')
   const [tosAccepted, setTosAccepted] = useState(false)
   const [transactionalSmsConsent, setTransactionalSmsConsent] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -163,6 +168,9 @@ export default function SignupClientClient() {
 
     const errors: Partial<Record<ClientField, string>> = {}
 
+    if (!signupInviteCode.trim()) {
+      errors.inviteCode = 'Invite code is required while signup is private.'
+    }
     if (!firstName.trim()) errors.firstName = 'First name is required.'
     if (!lastName.trim()) errors.lastName = 'Last name is required.'
 
@@ -223,6 +231,7 @@ export default function SignupClientClient() {
           phone: compactPhoneInputForSubmit(phone),
           tosAccepted: true,
           transactionalSmsConsent,
+          signupInviteCode: signupInviteCode.trim(),
           turnstileToken,
           tapIntentId: ti ?? undefined,
           next: nextFromQuery ?? undefined,
@@ -319,6 +328,17 @@ export default function SignupClientClient() {
             verification.
           </div>
         ) : null}
+
+        <SignupInviteCodeField
+          id={FIELD_IDS.inviteCode}
+          value={signupInviteCode}
+          error={fieldErrors.inviteCode}
+          disabled={loading}
+          onChange={(value) => {
+            setSignupInviteCode(value)
+            setFieldError('inviteCode', null)
+          }}
+        />
 
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="grid gap-1.5">

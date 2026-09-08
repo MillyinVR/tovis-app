@@ -45,6 +45,10 @@ const mockFindSelfServeClaimable = vi.hoisted(() => vi.fn())
 const mockSendSelfServeClaimLink = vi.hoisted(() => vi.fn())
 
 const mockFetch = vi.hoisted(() => vi.fn())
+const mockRequireValidSignupInviteCode = vi.hoisted(() => vi.fn())
+const mockSignupInviteFailureResponse = vi.hoisted(() => vi.fn())
+const mockConsumeSignupInvite = vi.hoisted(() => vi.fn())
+const mockEmitAdminUserSignedUp = vi.hoisted(() => vi.fn())
 
 const mockPrisma = vi.hoisted(() => ({
   user: {
@@ -155,6 +159,27 @@ vi.mock('@/lib/clients/selfServeClaim', () => ({
   sendSelfServeClaimLink: mockSendSelfServeClaimLink,
 }))
 
+vi.mock('@/app/api/_utils/auth/signupInviteGate', () => ({
+  requireValidSignupInviteCode: mockRequireValidSignupInviteCode,
+  signupInviteFailureResponse: mockSignupInviteFailureResponse,
+}))
+
+vi.mock('@/lib/auth/signupInvite', () => ({
+  SignupInviteError: class SignupInviteError extends Error {
+    readonly reason: 'missing' | 'invalid' | 'expired' | 'used' | 'revoked'
+
+    constructor(reason: 'missing' | 'invalid' | 'expired' | 'used' | 'revoked') {
+      super(reason)
+      this.reason = reason
+    }
+  },
+  consumeSignupInvite: mockConsumeSignupInvite,
+}))
+
+vi.mock('@/lib/notifications/adminNotifications', () => ({
+  emitAdminUserSignedUp: mockEmitAdminUserSignedUp,
+}))
+
 // Deterministic stand-in for the AEAD dual-write so the assertion does not
 // depend on a keyring being present in the test env (CI has none).
 vi.mock('@/lib/security/phonePrivacy', () => ({
@@ -212,6 +237,7 @@ function makeClientSignupBody() {
     tosAccepted: true,
     transactionalSmsConsent: true,
     turnstileToken: 'ts_signup_ok',
+    signupInviteCode: 'TVS-TEST-CODE',
     signupLocation: {
       kind: 'CLIENT_ZIP',
       postalCode: '92101',
@@ -236,6 +262,7 @@ function makeProSignupBody(overrides?: Record<string, unknown>) {
     tosAccepted: true,
     transactionalSmsConsent: true,
     turnstileToken: 'ts_signup_ok',
+    signupInviteCode: 'TVS-TEST-CODE',
     professionType: 'MAKEUP_ARTIST',
     licenseState: 'CA',
     handle: 'jane-smith',
@@ -268,6 +295,7 @@ function makeProSalonSignupBody() {
     tosAccepted: true,
     transactionalSmsConsent: true,
     turnstileToken: 'ts_signup_ok',
+    signupInviteCode: 'TVS-TEST-CODE',
     businessName: 'TOVIS Studio',
     professionType: 'MAKEUP_ARTIST',
     licenseState: 'CA',
@@ -299,6 +327,7 @@ function makeProMobileSignupBody() {
     tosAccepted: true,
     transactionalSmsConsent: true,
     turnstileToken: 'ts_signup_ok',
+    signupInviteCode: 'TVS-TEST-CODE',
     businessName: 'TOVIS Mobile',
     professionType: 'MAKEUP_ARTIST',
     licenseState: 'CA',
@@ -555,6 +584,24 @@ describe('app/api/v1/auth/register/route', () => {
 
     mockFetch.mockReset()
     vi.stubGlobal('fetch', mockFetch)
+
+    mockRequireValidSignupInviteCode.mockReset()
+    mockRequireValidSignupInviteCode.mockResolvedValue(null)
+    mockSignupInviteFailureResponse.mockReset()
+    mockSignupInviteFailureResponse.mockImplementation(
+      (reason: string) =>
+        new Response(JSON.stringify({ ok: false, code: 'SIGNUP_INVITE_INVALID', reason }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    )
+    mockConsumeSignupInvite.mockReset()
+    mockConsumeSignupInvite.mockResolvedValue({
+      id: 'signup_invite_1',
+      label: 'Tori test',
+    })
+    mockEmitAdminUserSignedUp.mockReset()
+    mockEmitAdminUserSignedUp.mockResolvedValue(undefined)
 
     mockRateLimitIdentity.mockResolvedValue({
       kind: 'ip',
@@ -1002,6 +1049,28 @@ describe('app/api/v1/auth/register/route', () => {
     expect(mockVerifyTurnstileOrFailOpen).not.toHaveBeenCalled()
     expect(mockPrisma.$transaction).not.toHaveBeenCalled()
   })
+
+  it('refuses signup when the private invite gate rejects the code', async () => {
+    mockRequireValidSignupInviteCode.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          ok: false,
+          code: 'SIGNUP_INVITE_REQUIRED',
+          error: 'An invite code is required while signup is private.',
+        }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } },
+      ),
+    )
+
+    const result = await POST(
+      makeRequest({ ...makeClientSignupBody(), signupInviteCode: '' }),
+    )
+
+    expect(result.status).toBe(400)
+    expect(mockHashPassword).not.toHaveBeenCalled()
+    expect(mockConsumeSignupInvite).not.toHaveBeenCalled()
+  })
+
   it('returns 400 when transactional SMS consent is missing', async () => {
     const body = makeClientSignupBody()
     delete (body as { transactionalSmsConsent?: boolean }).transactionalSmsConsent

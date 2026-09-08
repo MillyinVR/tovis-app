@@ -51,8 +51,10 @@ import {
   formatPhoneInputValue,
   isLikelyValidPhoneInput,
 } from '@/lib/phoneInputFormat'
+import SignupInviteCodeField from './SignupInviteCodeField'
 
 type ProField =
+  | 'inviteCode'
   | 'location'
   | 'radius'
   | 'state'
@@ -66,6 +68,7 @@ type ProField =
   | 'tos'
 
 const FIELD_IDS: Record<ProField, string> = {
+  inviteCode: 'signup-invite-code',
   location: 'signup-pro-location',
   radius: 'signup-pro-radius',
   state: 'signup-pro-state',
@@ -88,6 +91,7 @@ const FIELD_ORDER: ProField[] = [
   'lastName',
   'phone',
   'smsConsent',
+  'inviteCode',
   'email',
   'password',
   'tos',
@@ -100,7 +104,7 @@ const LAST_STEP = STEP_LABELS.length - 1
 const STEP_FIELDS: ProField[][] = [
   ['location', 'radius', 'state', 'licenseNumber'],
   ['firstName', 'lastName', 'phone', 'smsConsent'],
-  ['email', 'password', 'tos'],
+  ['inviteCode', 'email', 'password', 'tos'],
 ]
 
 function stepOfField(field: ProField): number {
@@ -144,6 +148,7 @@ export default function SignupProClient() {
   const [phone, setPhone] = useState(() => formatPhoneInputValue(phonePrefill))
   const [email, setEmail] = useState(emailPrefill)
   const [password, setPassword] = useState('')
+  const [signupInviteCode, setSignupInviteCode] = useState('')
   const [tosAccepted, setTosAccepted] = useState(false)
   const [transactionalSmsConsent, setTransactionalSmsConsent] = useState(false)
 
@@ -187,6 +192,12 @@ export default function SignupProClient() {
 
     for (const field of fields) {
       switch (field) {
+        case 'inviteCode':
+          if (!signupInviteCode.trim()) {
+            errors.inviteCode =
+              'Invite code is required while signup is private.'
+          }
+          break
         case 'location': {
           const message = workLocation.validateLocation()
           if (message) errors.location = message
@@ -327,6 +338,7 @@ export default function SignupProClient() {
           licenseExpiry: needsLicense && licenseExpiry ? licenseExpiry : undefined,
           signupLocation,
           transactionalSmsConsent,
+          signupInviteCode: signupInviteCode.trim(),
           tosAccepted: true,
           turnstileToken,
         }),
@@ -552,6 +564,17 @@ export default function SignupProClient() {
 
         {step === LAST_STEP ? (
           <>
+        <SignupInviteCodeField
+          id={FIELD_IDS.inviteCode}
+          value={signupInviteCode}
+          error={fieldErrors.inviteCode}
+          disabled={loading}
+          onChange={(value) => {
+            setSignupInviteCode(value)
+            setFieldError('inviteCode', null)
+          }}
+        />
+
         <label className="grid gap-1.5">
           <FieldLabel>Email address</FieldLabel>
           <Input

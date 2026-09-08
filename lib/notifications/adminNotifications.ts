@@ -464,3 +464,48 @@ export async function emitAdminViralRequestPending(args: {
     },
   })
 }
+
+/**
+ * A private-beta invite was consumed and its account was created. This is
+ * emitted inside the registration transaction so the invite, account, and
+ * durable admin inbox alert either all exist or none do.
+ */
+export async function emitAdminUserSignedUp(args: {
+  userId: string
+  email: string
+  firstName: string
+  lastName: string
+  role: 'CLIENT' | 'PRO'
+  signupInviteId: string
+  signupInviteLabel: string
+  tx: Prisma.TransactionClient
+}): Promise<void> {
+  const userId = normRequiredString(args.userId, MAX_ID)
+  const signupInviteId = normRequiredString(args.signupInviteId, MAX_ID)
+  const firstName = normRequiredString(args.firstName, MAX_LABEL) // pii-plaintext-read-ok: admin-only signup alert names the account that just registered
+  const lastName = normRequiredString(args.lastName, MAX_LABEL) // pii-plaintext-read-ok: admin-only signup alert names the account that just registered
+  const inviteLabel = normRequiredString(args.signupInviteLabel, MAX_LABEL)
+  const email = normRequiredString(args.email, 320) // pii-plaintext-read-ok: admin-only signup alert for the account just created
+
+  if (!userId || !signupInviteId || !firstName || !lastName || !inviteLabel || !email) {
+    throw new Error('emitAdminUserSignedUp: missing required signup context')
+  }
+
+  const roleLabel = args.role === 'PRO' ? 'professional' : 'client'
+
+  await fanOutAdminNotification({
+    tx: args.tx,
+    eventKey: NotificationEventKey.ADMIN_USER_SIGNED_UP,
+    title: 'New invite signup',
+    body: `${firstName} ${lastName} signed up as a ${roleLabel} with ${email} using the invite for “${inviteLabel}.”`,
+    href: '/admin/invite-codes',
+    dedupeKey: `ADMIN_USER_SIGNED_UP:${userId}`,
+    data: {
+      userId,
+      role: args.role,
+      signupInviteId,
+      signupInviteLabel: inviteLabel,
+      notificationReason: 'ADMIN_USER_SIGNED_UP',
+    },
+  })
+}

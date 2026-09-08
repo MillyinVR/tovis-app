@@ -107,6 +107,15 @@ export default async function AdminHomePage() {
             cta="Manage cards"
             tone="highlight"
           />
+          {perms.canManagePermissions ? (
+            <ToolCard
+              title="Signup invite codes"
+              desc="Create one-time private-beta codes, set expirations, and see exactly who used each one."
+              href="/admin/invite-codes"
+              cta="Manage invites"
+              tone="highlight"
+            />
+          ) : null}
         </div>
       </Section>
 

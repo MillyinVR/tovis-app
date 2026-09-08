@@ -851,6 +851,8 @@ enum NotificationEventKey {
   ADMIN_SUPPORT_TICKET_CREATED
   // A new viral-service request is pending an admin decision.
   ADMIN_VIRAL_REQUEST_PENDING
+  // A private-beta invite was consumed and its account was created.
+  ADMIN_USER_SIGNED_UP
 }
 
 enum NotificationChannel {
@@ -1592,9 +1594,9 @@ model User {
   transactionalSmsConsentIp        String?   @db.VarChar(64)
   transactionalSmsConsentUserAgent String?
 
-  authVersion        Int                        @default(1)
-  loginAttempts      Int                        @default(0)
-  lockedUntil        DateTime?
+  authVersion          Int                        @default(1)
+  loginAttempts        Int                        @default(0)
+  lockedUntil          DateTime?
   /// Bcrypt hash of the account's password, or NULL when the account has no
   /// password at all — a social signup completes with a provider credential
   /// and never chooses one. It was NOT NULL until social signup became
@@ -1604,22 +1606,24 @@ model User {
   /// true thing. The login route already reads this as
   /// `user?.password ?? DUMMY_PASSWORD_HASH`, so a null compares (in constant
   /// time) against a hash nothing matches and falls out as invalid credentials.
-  password           String?
+  password             String?
   // Apple "Sign in with Apple" stable user id (the identity-token `sub`). Null
   // for password/other users; set when an account is linked to an Apple id.
-  appleUserId        String?                    @unique @db.VarChar(255)
+  appleUserId          String?                    @unique @db.VarChar(255)
   // Google Sign-In stable user id (the OIDC id-token `sub`). Null for
   // password/other users; set when an account is linked to a Google identity.
-  googleUserId       String?                    @unique @db.VarChar(255)
-  role               Role
-  createdAt          DateTime                   @default(now())
-  updatedAt          DateTime                   @updatedAt
-  reviewHelpfulVotes ReviewHelpful[]
-  favoriteServices   ServiceFavorite[]
-  adminActionLogs    AdminActionLog[]           @relation("AdminUserLogs")
-  adminPermissions   AdminPermission[]
-  sentMessages       Message[]                  @relation("UserSentMessages")
-  threadParticipants MessageThreadParticipant[] @relation("UserThreadParticipants")
+  googleUserId         String?                    @unique @db.VarChar(255)
+  role                 Role
+  createdAt            DateTime                   @default(now())
+  updatedAt            DateTime                   @updatedAt
+  reviewHelpfulVotes   ReviewHelpful[]
+  favoriteServices     ServiceFavorite[]
+  adminActionLogs      AdminActionLog[]           @relation("AdminUserLogs")
+  adminPermissions     AdminPermission[]
+  createdSignupInvites SignupInvite[]             @relation("SignupInviteCreatedBy")
+  usedSignupInvite     SignupInvite?              @relation("SignupInviteUsedBy")
+  sentMessages         Message[]                  @relation("UserSentMessages")
+  threadParticipants   MessageThreadParticipant[] @relation("UserThreadParticipants")
 
   notificationActor                  Notification[]              @relation("NotificationActor")
   adminNotifications                 AdminNotification[]         @relation("AdminNotifications")
@@ -7029,6 +7033,36 @@ model SocialSignupTicket {
   /// scans this table to find the rows it has to remove. Matches NfcCard and
   /// the other tenant-scoped tables.
   @@index([tenantId])
+}
+
+/// A founder-controlled, single-use invitation to create one account while the
+/// product is in private beta. The plaintext code is returned exactly once when
+/// an admin creates it; only its SHA-256 digest is persisted. Consumption lives
+/// in the same transaction as User creation, so two concurrent signup attempts
+/// can never spend the same invitation.
+model SignupInvite {
+  id       String @id @default(cuid())
+  codeHash String @unique @db.VarChar(64)
+  codeHint String @db.VarChar(8)
+
+  /// Human label chosen by the admin (usually the invited person's name).
+  label String @db.VarChar(160)
+
+  createdByAdminUserId String
+  createdByAdminUser   User   @relation("SignupInviteCreatedBy", fields: [createdByAdminUserId], references: [id], onDelete: Restrict)
+
+  expiresAt    DateTime
+  usedAt       DateTime?
+  usedByUserId String?   @unique
+  usedByUser   User?     @relation("SignupInviteUsedBy", fields: [usedByUserId], references: [id], onDelete: SetNull)
+  revokedAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([createdAt])
+  @@index([expiresAt, usedAt, revokedAt])
+  @@index([createdByAdminUserId, createdAt])
 }
 
 model SupportTicket {

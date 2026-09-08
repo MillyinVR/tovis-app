@@ -155,6 +155,7 @@ const EVENT_LABELS: Record<NotificationEventKey, string> = {
   [NotificationEventKey.ADMIN_VERIFICATION_REVIEW_NEEDED]: 'Verification review needed',
   [NotificationEventKey.ADMIN_SUPPORT_TICKET_CREATED]: 'New support ticket',
   [NotificationEventKey.ADMIN_VIRAL_REQUEST_PENDING]: 'Viral request pending',
+  [NotificationEventKey.ADMIN_USER_SIGNED_UP]: 'New invite signup',
 }
 
 type CategoryDef = {

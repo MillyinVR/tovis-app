@@ -59,6 +59,11 @@ import { PrismaClient } from '@prisma/client'
 
 import { POST } from '@/app/api/v1/auth/register/route'
 import { verifyToken } from '@/lib/auth'
+import {
+  generateSignupInviteCode,
+  signupInviteCodeHash,
+  signupInviteCodeHint,
+} from '@/lib/auth/signupInvite'
 import { clearInMemoryRateLimitCountersForTests } from '@/lib/rateLimit/enforce'
 import { emailLookupHashV2, phoneLookupHashV2 } from '@/lib/security/crypto/hashLookup'
 
@@ -79,6 +84,7 @@ const tag = `reg_int_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 let emailCounter = 0
 let phoneCounter = 0
 let waitUntilTasks: Promise<unknown>[] = []
+let inviteCreatorUserId = ''
 
 function nextEmail(label: string): string {
   emailCounter += 1
@@ -211,7 +217,21 @@ function proMobileLocation() {
   }
 }
 
-function makeClientBody(overrides?: Record<string, unknown>) {
+async function issueSignupInvite(): Promise<string> {
+  const code = generateSignupInviteCode()
+  await db.signupInvite.create({
+    data: {
+      codeHash: signupInviteCodeHash(code),
+      codeHint: signupInviteCodeHint(code),
+      label: `${tag} integration signup`,
+      createdByAdminUserId: inviteCreatorUserId,
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    },
+  })
+  return code
+}
+
+async function makeClientBody(overrides?: Record<string, unknown>) {
   return {
     email: nextEmail('client'),
     password: 'SuperSecret123!',
@@ -222,12 +242,13 @@ function makeClientBody(overrides?: Record<string, unknown>) {
     tosAccepted: true,
     transactionalSmsConsent: true,
     turnstileToken: 'ts_integration_ok',
+    signupInviteCode: await issueSignupInvite(),
     signupLocation: clientZipLocation(),
     ...(overrides ?? {}),
   }
 }
 
-function makeProBody(overrides?: Record<string, unknown>) {
+async function makeProBody(overrides?: Record<string, unknown>) {
   return {
     email: nextEmail('pro'),
     password: 'SuperSecret123!',
@@ -238,6 +259,7 @@ function makeProBody(overrides?: Record<string, unknown>) {
     tosAccepted: true,
     transactionalSmsConsent: true,
     turnstileToken: 'ts_integration_ok',
+    signupInviteCode: await issueSignupInvite(),
     professionType: 'MAKEUP_ARTIST',
     businessName: 'TOVIS Integration Studio',
     // Mandatory for every pro — it drives the per-state service gate, not just
@@ -273,6 +295,9 @@ async function cleanupSeededRows() {
   })
   const proIds = pros.map((p) => p.id)
 
+  await db.signupInvite.deleteMany({
+    where: { createdByAdminUserId: inviteCreatorUserId || undefined },
+  })
   await db.professionalLocation.deleteMany({
     where: { professionalId: { in: proIds } },
   })
@@ -290,6 +315,15 @@ describe('POST /api/v1/auth/register (integration)', () => {
       update: {},
       create: { slug: 'tovis-root', name: 'TOVIS', isActive: true },
     })
+    const inviteCreator = await db.user.create({
+      data: {
+        email: `${tag}_invite_admin@example.com`,
+        password: 'integration-only',
+        role: 'ADMIN',
+      },
+      select: { id: true },
+    })
+    inviteCreatorUserId = inviteCreator.id
   })
 
   beforeEach(() => {
@@ -325,7 +359,7 @@ describe('POST /api/v1/auth/register (integration)', () => {
   })
 
   it('creates a client account with profile, lookup hashes, and cookies', async () => {
-    const body = makeClientBody()
+    const body = await makeClientBody()
 
     const res = await POST(makeRequest(body))
     const data = await res.json()
@@ -392,7 +426,7 @@ describe('POST /api/v1/auth/register (integration)', () => {
   })
 
   it('creates a salon pro with a non-bookable primary location and address privacy columns', async () => {
-    const body = makeProBody({ handle: `studio-${tag.slice(-6)}` })
+    const body = await makeProBody({ handle: `studio-${tag.slice(-6)}` })
 
     const res = await POST(makeRequest(body))
     const data = await res.json()
@@ -447,7 +481,7 @@ describe('POST /api/v1/auth/register (integration)', () => {
   })
 
   it('creates a mobile pro with base postal code and rounded radius', async () => {
-    const body = makeProBody({
+    const body = await makeProBody({
       professionType: 'MASSAGE_THERAPIST',
       signupLocation: proMobileLocation(),
       mobileRadiusMiles: 25,
@@ -497,7 +531,7 @@ describe('POST /api/v1/auth/register (integration)', () => {
       }),
     )
 
-    const body = makeProBody({
+    const body = await makeProBody({
       professionType: 'ESTHETICIAN',
       licenseState: 'CA',
       licenseNumber: 'z 123456',
@@ -525,11 +559,11 @@ describe('POST /api/v1/auth/register (integration)', () => {
   })
 
   it('maps a duplicate email to ACCOUNT_EXISTS without leaking constraint details', async () => {
-    const first = makeClientBody()
+    const first = await makeClientBody()
     expect((await POST(makeRequest(first))).status).toBe(201)
 
     const res = await POST(
-      makeRequest(makeClientBody({ email: first.email })),
+      makeRequest(await makeClientBody({ email: first.email })),
     )
     const data = await res.json()
 
@@ -542,11 +576,11 @@ describe('POST /api/v1/auth/register (integration)', () => {
   })
 
   it('maps a duplicate phone to ACCOUNT_EXISTS', async () => {
-    const first = makeClientBody()
+    const first = await makeClientBody()
     expect((await POST(makeRequest(first))).status).toBe(201)
 
     const res = await POST(
-      makeRequest(makeClientBody({ phone: first.phone })),
+      makeRequest(await makeClientBody({ phone: first.phone })),
     )
     const data = await res.json()
 
@@ -564,10 +598,10 @@ describe('POST /api/v1/auth/register (integration)', () => {
     // and the duplicate-handle path under test was never reached.
     const handle = `dup-${tag.replace(/[^a-z0-9]/g, '').slice(-8)}`
 
-    const first = makeProBody({ handle })
+    const first = await makeProBody({ handle })
     expect((await POST(makeRequest(first))).status).toBe(201)
 
-    const res = await POST(makeRequest(makeProBody({ handle })))
+    const res = await POST(makeRequest(await makeProBody({ handle })))
     const data = await res.json()
 
     expect(res.status).toBe(400)
@@ -579,7 +613,7 @@ describe('POST /api/v1/auth/register (integration)', () => {
   })
 
   it('rejects passwords below the policy minimum before touching the database', async () => {
-    const body = makeClientBody({ password: 'short1!' })
+    const body = await makeClientBody({ password: 'short1!' })
 
     const res = await POST(makeRequest(body))
     const data = await res.json()
@@ -596,12 +630,12 @@ describe('POST /api/v1/auth/register (integration)', () => {
 
     // auth:sms-phone-hour allows 5 per hour per phone; each attempt below
     // fails on the duplicate-phone constraint but still consumes quota.
-    const first = makeClientBody({ phone })
+    const first = await makeClientBody({ phone })
     expect((await POST(makeRequest(first))).status).toBe(201)
 
     let lastStatus = 0
     for (let i = 0; i < 5; i += 1) {
-      const res = await POST(makeRequest(makeClientBody({ phone })))
+      const res = await POST(makeRequest(await makeClientBody({ phone })))
       lastStatus = res.status
     }
 

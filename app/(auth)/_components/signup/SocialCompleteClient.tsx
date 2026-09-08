@@ -80,11 +80,13 @@ import {
 } from '@/lib/phoneInputFormat'
 import type { SignupLocation } from '@/lib/auth/registration/signupLocation'
 import type { ProfessionType } from '@prisma/client'
+import SignupInviteCodeField from './SignupInviteCodeField'
 
 type SignupRole = 'CLIENT' | 'PRO'
 
 type SocialField =
   | 'role'
+  | 'inviteCode'
   | 'firstName'
   | 'lastName'
   | 'zip'
@@ -98,6 +100,7 @@ type SocialField =
 
 const FIELD_IDS: Record<SocialField, string> = {
   role: 'social-role',
+  inviteCode: 'social-signup-invite-code',
   firstName: 'social-first-name',
   lastName: 'social-last-name',
   zip: 'social-zip',
@@ -116,12 +119,12 @@ const ROLE_STEP: readonly SocialField[] = ['role']
 const STEPS: Record<SignupRole, ReadonlyArray<readonly SocialField[]>> = {
   CLIENT: [
     ROLE_STEP,
-    ['firstName', 'lastName', 'zip', 'phone', 'smsConsent', 'tos'],
+    ['inviteCode', 'firstName', 'lastName', 'zip', 'phone', 'smsConsent', 'tos'],
   ],
   PRO: [
     ROLE_STEP,
     ['state', 'location', 'radius', 'licenseNumber'],
-    ['firstName', 'lastName', 'phone', 'smsConsent', 'tos'],
+    ['inviteCode', 'firstName', 'lastName', 'phone', 'smsConsent', 'tos'],
   ],
 }
 
@@ -157,6 +160,7 @@ export default function SocialCompleteClient() {
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
   const [phone, setPhone] = useState('')
+  const [signupInviteCode, setSignupInviteCode] = useState('')
   const [tosAccepted, setTosAccepted] = useState(false)
   const [transactionalSmsConsent, setTransactionalSmsConsent] = useState(false)
 
@@ -276,6 +280,12 @@ export default function SocialCompleteClient() {
             errors.role = 'Please choose whether you’re a client or a pro.'
           }
           break
+        case 'inviteCode':
+          if (!signupInviteCode.trim()) {
+            errors.inviteCode =
+              'Invite code is required while signup is private.'
+          }
+          break
         case 'firstName':
           if (!firstName.trim()) errors.firstName = 'First name is required.'
           break
@@ -368,6 +378,7 @@ export default function SocialCompleteClient() {
           phone: compactPhoneInputForSubmit(phone),
           tosAccepted: true,
           transactionalSmsConsent,
+          signupInviteCode: signupInviteCode.trim(),
           signupLocation,
           tapIntentId: ti ?? undefined,
           next: nextFromQuery ?? undefined,
@@ -687,6 +698,17 @@ export default function SocialCompleteClient() {
 
         {role !== null && isLastStep ? (
           <>
+            <SignupInviteCodeField
+              id={FIELD_IDS.inviteCode}
+              value={signupInviteCode}
+              error={fieldErrors.inviteCode}
+              disabled={loading}
+              onChange={(value) => {
+                setSignupInviteCode(value)
+                setFieldError('inviteCode', null)
+              }}
+            />
+
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="grid gap-1.5">
                 <FieldLabel>First name</FieldLabel>

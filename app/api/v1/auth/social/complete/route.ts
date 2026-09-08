@@ -75,6 +75,11 @@ import { validateSmsDestinationCountry } from '@/lib/smsCountryPolicy'
 import { resolveTenantContextForRequest } from '@/lib/tenant/requestContext'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
 import { TRANSACTIONAL_SMS_POLICY_VERSION } from '@/lib/transactionalSmsPolicy'
+import {
+  requireValidSignupInviteCode,
+  signupInviteFailureResponse,
+} from '@/app/api/_utils/auth/signupInviteGate'
+import { SignupInviteError } from '@/lib/auth/signupInvite'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -118,6 +123,7 @@ export async function POST(request: Request) {
     const body = isRecord(rawBody) ? rawBody : {}
 
     const signupTicket = pickString(body.signupTicket)
+    const signupInviteCode = pickString(body.signupInviteCode)
     const role = normalizeRole(body.role)
     const rawPhone = pickString(body.phone) // pii-plaintext-read-ok: phone from the signup form's own request body, not a DB read
     const phone = rawPhone ? normalizePhone(rawPhone) : null
@@ -287,6 +293,11 @@ export async function POST(request: Request) {
     })
     if (smsPhoneDayRes) return smsPhoneDayRes
 
+    const signupInviteFailure = await requireValidSignupInviteCode(
+      signupInviteCode,
+    )
+    if (signupInviteFailure) return signupInviteFailure
+
     // ── The ticket. Spent here, and everything below this line is committed to
     // this identity. A single failure answer for every rejection reason —
     // expired, reused, forged, unknown — so nothing about which one it was is
@@ -423,6 +434,7 @@ export async function POST(request: Request) {
       attemptClaimAdopt,
       claimInviteToken: verificationInviteToken,
       claimVerifiedChannel,
+      signupInviteCode: signupInviteCode ?? '',
     })
 
     if (proSetup?.dcaTimedOutAtSignup) {
@@ -503,6 +515,10 @@ export async function POST(request: Request) {
 
     return res
   } catch (err: unknown) {
+    if (err instanceof SignupInviteError) {
+      return signupInviteFailureResponse(err.reason)
+    }
+
     captureAuthException({
       event: 'auth.social.complete.failed',
       route: 'auth.social.complete',

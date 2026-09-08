@@ -112,6 +112,11 @@ const { createProClientInviteToken, hashProClientInviteToken } = await import(
   '@/lib/clients/proClientInviteTokens'
 )
 const { emailLookupHashV2 } = await import('@/lib/security/crypto/hashLookup')
+const {
+  generateSignupInviteCode,
+  signupInviteCodeHash,
+  signupInviteCodeHint,
+} = await import('@/lib/auth/signupInvite')
 
 const databaseUrl = process.env.DATABASE_URL
 if (!databaseUrl) {
@@ -150,6 +155,7 @@ const nextPhone = () =>
 let tenantId = ''
 let otherTenantId = ''
 let professionalId = ''
+let inviteCreatorUserId = ''
 
 const CLIENT_ZIP = {
   kind: 'CLIENT_ZIP' as const,
@@ -203,10 +209,28 @@ async function issueTicket(args: {
   })
 }
 
+async function issueSignupInvite(): Promise<string> {
+  const code = generateSignupInviteCode()
+  await db.signupInvite.create({
+    data: {
+      codeHash: signupInviteCodeHash(code),
+      codeHint: signupInviteCodeHint(code),
+      label: `${TAG} social integration signup`,
+      createdByAdminUserId: inviteCreatorUserId,
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    },
+  })
+  return code
+}
+
 /** A valid CLIENT completion body; individual tests override what they probe. */
-function clientBody(signupTicket: string, overrides: Record<string, unknown> = {}) {
+async function clientBody(
+  signupTicket: string,
+  overrides: Record<string, unknown> = {},
+) {
   return {
     signupTicket,
+    signupInviteCode: await issueSignupInvite(),
     role: 'CLIENT',
     phone: nextPhone(),
     tosAccepted: true,
@@ -220,6 +244,10 @@ async function cleanup() {
   const ourUsers = await db.user.findMany({
     where: { email: { contains: TAG } },
     select: { id: true },
+  })
+
+  await db.signupInvite.deleteMany({
+    where: { createdByAdminUserId: inviteCreatorUserId || undefined },
   })
 
   await db.proClientInvite.deleteMany({
@@ -276,6 +304,7 @@ beforeAll(async () => {
     },
     select: { id: true },
   })
+  inviteCreatorUserId = proUser.id
 
   const professional = await db.professionalProfile.create({
     data: {
@@ -312,7 +341,13 @@ describe('POST /api/v1/auth/social/complete (integration)', () => {
     const ticket = await issueTicket({ email, subject })
 
     const res = await POST(
-      req(clientBody(ticket.token, { phone, firstName: 'Grace', lastName: 'Hopper' })),
+      req(
+        await clientBody(ticket.token, {
+          phone,
+          firstName: 'Grace',
+          lastName: 'Hopper',
+        }),
+      ),
     )
 
     expect(res.status).toBe(201)
@@ -422,7 +457,7 @@ describe('POST /api/v1/auth/social/complete (integration)', () => {
     const subject = nextSubject('apple')
     const ticket = await issueTicket({ email, subject, provider: 'APPLE' })
 
-    const res = await POST(req(clientBody(ticket.token)))
+    const res = await POST(req(await clientBody(ticket.token)))
     expect(res.status).toBe(201)
     const json = await res.json()
 
@@ -496,7 +531,7 @@ describe('POST /api/v1/auth/social/complete (integration)', () => {
 
     const res = await POST(
       req(
-        clientBody(ticket.token, {
+        await clientBody(ticket.token, {
           phone,
           intent: 'CLAIM_INVITE',
           inviteToken,
@@ -548,7 +583,7 @@ describe('POST /api/v1/auth/social/complete (integration)', () => {
 
     const ticket = await issueTicket({ email })
 
-    const res = await POST(req(clientBody(ticket.token)))
+    const res = await POST(req(await clientBody(ticket.token)))
 
     expect(res.status).toBe(409)
     const json = await res.json()
@@ -573,10 +608,12 @@ describe('POST /api/v1/auth/social/complete (integration)', () => {
     const email = nextEmail('pro')
     const ticket = await issueTicket({ email })
     const handle = nextHandle()
+    const signupInviteCode = await issueSignupInvite()
 
     const res = await POST(
       req({
         signupTicket: ticket.token,
+        signupInviteCode,
         role: 'PRO',
         phone: nextPhone(),
         tosAccepted: true,
@@ -628,7 +665,7 @@ describe('POST /api/v1/auth/social/complete (integration)', () => {
     // swappable between the two steps.
     tenantMock.tenantId = tenantId
 
-    const res = await POST(req(clientBody(ticket.token)))
+    const res = await POST(req(await clientBody(ticket.token)))
     expect(res.status).toBe(201)
     const json = await res.json()
 
@@ -644,10 +681,10 @@ describe('POST /api/v1/auth/social/complete (integration)', () => {
     const email = nextEmail('once')
     const ticket = await issueTicket({ email })
 
-    const first = await POST(req(clientBody(ticket.token)))
+    const first = await POST(req(await clientBody(ticket.token)))
     expect(first.status).toBe(201)
 
-    const second = await POST(req(clientBody(ticket.token)))
+    const second = await POST(req(await clientBody(ticket.token)))
     expect(second.status).toBe(400)
     expect((await second.json()).code).toBe('INVALID_TICKET')
 
@@ -670,7 +707,7 @@ describe('POST /api/v1/auth/social/complete (integration)', () => {
       now: new Date(Date.now() - 60 * 60 * 1000),
     })
 
-    const res = await POST(req(clientBody(ticket.token)))
+    const res = await POST(req(await clientBody(ticket.token)))
     expect(res.status).toBe(400)
     expect((await res.json()).code).toBe('INVALID_TICKET')
 
@@ -683,7 +720,7 @@ describe('POST /api/v1/auth/social/complete (integration)', () => {
     const ticket = await issueTicket({ email })
 
     const forged = `${ticket.id}.${'0'.repeat(64)}`
-    const res = await POST(req(clientBody(forged)))
+    const res = await POST(req(await clientBody(forged)))
     expect(res.status).toBe(400)
 
     // 🔴 A wrong guess must not spend somebody's live ticket — that would be a
@@ -696,18 +733,20 @@ describe('POST /api/v1/auth/social/complete (integration)', () => {
     expect(row?.usedAt).toBeNull()
 
     // And the real ticket still works afterwards.
-    const ok = await POST(req(clientBody(ticket.token)))
+    const ok = await POST(req(await clientBody(ticket.token)))
     expect(ok.status).toBe(201)
   })
 
   it('does NOT burn the ticket when the body is rejected', async () => {
     const email = nextEmail('badbody')
     const ticket = await issueTicket({ email })
+    const signupInviteCode = await issueSignupInvite()
 
     // No phone: a form mistake, not a reason to make someone sign in again.
     const res = await POST(
       req({
         signupTicket: ticket.token,
+        signupInviteCode,
         role: 'CLIENT',
         tosAccepted: true,
         transactionalSmsConsent: true,
@@ -724,7 +763,7 @@ describe('POST /api/v1/auth/social/complete (integration)', () => {
     expect(row?.usedAt).toBeNull()
 
     // Correcting the form works on the same ticket.
-    const ok = await POST(req(clientBody(ticket.token)))
+    const ok = await POST(req(await clientBody(ticket.token)))
     expect(ok.status).toBe(201)
   })
 
@@ -732,9 +771,11 @@ describe('POST /api/v1/auth/social/complete (integration)', () => {
     const email = nextEmail('protypo')
     const ticket = await issueTicket({ email })
     const handle = nextHandle()
+    const signupInviteCode = await issueSignupInvite()
 
     const proBody = (overrides: Record<string, unknown> = {}) => ({
       signupTicket: ticket.token,
+      signupInviteCode,
       role: 'PRO',
       phone: nextPhone(),
       tosAccepted: true,
@@ -772,7 +813,9 @@ describe('POST /api/v1/auth/social/complete (integration)', () => {
     const ticket = await issueTicket({ email })
 
     const res = await POST(
-      req(clientBody(ticket.token, { transactionalSmsConsent: false })),
+      req(
+        await clientBody(ticket.token, { transactionalSmsConsent: false }),
+      ),
     )
     expect(res.status).toBe(400)
     expect((await res.json()).code).toBe('SMS_CONSENT_REQUIRED')
