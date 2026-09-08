@@ -626,7 +626,7 @@ describe('3 — answering the last question stops it', () => {
       ),
     ).toBe(true)
     expect(midwayText.some((text) =>
-      text.startsWith(defaultClientConsultThreadCopy.prepComplete.split('{pro}')[0]),
+      text.startsWith(defaultClientConsultThreadCopy.prepComplete.slice(0, defaultClientConsultThreadCopy.prepComplete.indexOf('{pro}'))),
     )).toBe(false)
     expect(
       (await pendingReminders(sessionId)).filter((row) => !row.cancelledAt).length,
@@ -643,7 +643,7 @@ describe('3 — answering the last question stops it', () => {
     // no change of their own. The deadline line is gone with it.
     const doneText = threadText((await thread(sessionId)).messages)
     expect(doneText.some((text) =>
-      text.startsWith(defaultClientConsultThreadCopy.prepComplete.split('{pro}')[0]),
+      text.startsWith(defaultClientConsultThreadCopy.prepComplete.slice(0, defaultClientConsultThreadCopy.prepComplete.indexOf('{pro}'))),
     )).toBe(true)
     expect(
       doneText.some((text) => text.startsWith('A few of these are the ones')),
