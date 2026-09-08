@@ -59,6 +59,18 @@ const mocks = vi.hoisted(() => ({
     message: {
       findMany: vi.fn(),
     },
+    founderMember: {
+      findUnique: vi.fn(),
+    },
+    founderRoomRead: {
+      findMany: vi.fn(),
+    },
+    founderMessage: {
+      findMany: vi.fn(),
+    },
+    founderMessageReport: {
+      findMany: vi.fn(),
+    },
     notification: {
       findMany: vi.fn(),
     },
@@ -165,6 +177,10 @@ function resetFindManyMocks() {
   mocks.db.proPrepItem.findMany.mockResolvedValue([])
   mocks.db.practiceShot.findMany.mockResolvedValue([])
   mocks.db.message.findMany.mockResolvedValue([])
+  mocks.db.founderMember.findUnique.mockResolvedValue(null)
+  mocks.db.founderRoomRead.findMany.mockResolvedValue([])
+  mocks.db.founderMessage.findMany.mockResolvedValue([])
+  mocks.db.founderMessageReport.findMany.mockResolvedValue([])
   mocks.db.notification.findMany.mockResolvedValue([])
   mocks.db.clientNotification.findMany.mockResolvedValue([])
   mocks.db.scheduledClientNotification.findMany.mockResolvedValue([])
@@ -621,6 +637,10 @@ describe('exportUserData', () => {
             createdAt: '2026-04-08T00:00:00.000Z',
           },
         ],
+        founderMembership: null,
+        founderRoomReads: [],
+        founderMessages: [],
+        founderMessageReports: [],
         notifications: [
           expect.objectContaining({
             id: 'notification_1',

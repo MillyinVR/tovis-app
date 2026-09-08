@@ -395,6 +395,13 @@ export const EXPORT_BOUNDARY: Readonly<Record<string, ExportDisposition>> = {
   MediaLike: { status: 'PENDING', note: PENDING_NOTE },
   MessageThread: { status: 'PENDING', note: PENDING_NOTE },
   MessageThreadParticipant: { status: 'PENDING', note: PENDING_NOTE },
+  FounderMember: { status: 'EXPORTED', keys: ['founderMembership'] },
+  FounderRoomRead: { status: 'EXPORTED', keys: ['founderRoomReads'] },
+  FounderMessage: { status: 'EXPORTED', keys: ['founderMessages'] },
+  FounderMessageReport: {
+    status: 'EXPORTED',
+    keys: ['founderMessageReports'],
+  },
   NfcCard: { status: 'PENDING', note: PENDING_NOTE },
   ProClientInvite: { status: 'PENDING', note: PENDING_NOTE },
   ProFollow: { status: 'PENDING', note: PENDING_NOTE },

@@ -2,7 +2,7 @@
 'use client'
 
 import { useState } from 'react'
-import { LayoutDashboard, LogOut, Scissors, User } from 'lucide-react'
+import { LayoutDashboard, LogOut, Scissors, Sparkles, User } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { Role } from '@prisma/client'
 import { hardNavigate } from '@/lib/clientNavigation'
@@ -13,6 +13,13 @@ const WORKSPACE_ICON: Record<Role, LucideIcon> = {
   CLIENT: User,
   PRO: Scissors,
   ADMIN: LayoutDashboard,
+}
+
+export type WorkspaceDirectLink = {
+  key: string
+  label: string
+  sub: string
+  href: string
 }
 
 /** Read a string `href` off an unknown JSON response, cast-free. */
@@ -38,10 +45,12 @@ export default function SwitchAccountSheet({
   open,
   onClose,
   options,
+  directLinks = [],
 }: {
   open: boolean
   onClose: () => void
   options: WorkspaceOption[]
+  directLinks?: WorkspaceDirectLink[]
 }) {
   const [signingOut, setSigningOut] = useState(false)
   const [switchingTo, setSwitchingTo] = useState<Role | null>(null)
@@ -300,6 +309,66 @@ export default function SwitchAccountSheet({
               </button>
             )
           })}
+          {directLinks.map((link) => (
+            <button
+              key={link.key}
+              type="button"
+              onClick={() => hardNavigate(link.href)}
+              disabled={busy}
+              className="tovis-focus"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                textAlign: 'left',
+                border: '1px solid var(--line)',
+                borderRadius: 12,
+                padding: '11px 13px',
+                background: 'rgb(var(--bg-secondary))',
+                cursor: busy ? 'not-allowed' : 'pointer',
+              }}
+            >
+              <span
+                style={{
+                  display: 'grid',
+                  placeItems: 'center',
+                  width: 36,
+                  height: 36,
+                  borderRadius: '50%',
+                  background: 'rgb(var(--bg-surface))',
+                  border: '1px solid var(--line)',
+                  color: 'rgb(var(--accent-primary))',
+                }}
+              >
+                <Sparkles size={18} aria-hidden="true" />
+              </span>
+              <span style={{ flex: 1 }}>
+                <span
+                  style={{
+                    display: 'block',
+                    fontFamily: 'var(--font-display)',
+                    fontWeight: 600,
+                    fontSize: 14,
+                    color: 'rgb(var(--text-primary))',
+                  }}
+                >
+                  {link.label}
+                </span>
+                <span
+                  style={{
+                    ...mono,
+                    display: 'block',
+                    fontSize: 10,
+                    color: 'rgb(var(--text-muted))',
+                    marginTop: 1,
+                  }}
+                >
+                  {link.sub}
+                </span>
+              </span>
+              <span style={{ color: 'rgb(var(--text-muted))', fontSize: 18 }}>›</span>
+            </button>
+          ))}
         </div>
 
         <div

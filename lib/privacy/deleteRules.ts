@@ -122,6 +122,16 @@ const STORAGE_BYTES_NOTE =
   'Database rows only. Storage object deletion runs through the media/storage write boundary.'
 
 export const DELETE_RULES: readonly DeleteRule[] = [
+  deleteRule({
+    model: 'FounderRoomRead',
+    delegate: (db) => db.founderRoomRead,
+    where: (s) => ({ userId: s.userId }),
+  }),
+  deleteRule({
+    model: 'FounderMember',
+    delegate: (db) => db.founderMember,
+    where: (s) => ({ userId: s.userId }),
+  }),
   // ------------------------------------------------- credentials & tokens
   deleteRule({
     model: 'PasswordResetToken',
