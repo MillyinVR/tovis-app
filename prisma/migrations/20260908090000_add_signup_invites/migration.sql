@@ -18,6 +18,10 @@ CREATE TABLE "SignupInvite" (
     CONSTRAINT "SignupInvite_pkey" PRIMARY KEY ("id")
 );
 
+-- Defense in depth: application tables are never directly accessible through
+-- PostgreSQL's public role, even though all current access is server-side.
+ALTER TABLE "SignupInvite" ENABLE ROW LEVEL SECURITY;
+
 CREATE UNIQUE INDEX "SignupInvite_codeHash_key" ON "SignupInvite"("codeHash");
 CREATE UNIQUE INDEX "SignupInvite_usedByUserId_key" ON "SignupInvite"("usedByUserId");
 CREATE INDEX "SignupInvite_createdAt_idx" ON "SignupInvite"("createdAt");
