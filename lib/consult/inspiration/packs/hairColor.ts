@@ -1,3 +1,4 @@
+import { hairVisualDialogueCards } from '../visualDialogue'
 // lib/consult/inspiration/packs/hairColor.ts
 //
 // The guided-inspiration pack for the hair-COLOUR category — contract v2 of
@@ -269,7 +270,7 @@ export const HAIR_COLOR_INSPIRATION_CARD_PACK_V3: ConsultInspirationPackDefiniti
 }
 
 /** New sessions distinguish attraction, preservation and how closely to match. */
-export const HAIR_COLOR_INSPIRATION_CARD_PACK: ConsultInspirationPackDefinition = {
+export const HAIR_COLOR_INSPIRATION_CARD_PACK_V4: ConsultInspirationPackDefinition = {
   ...HAIR_COLOR_INSPIRATION_CARD_PACK_V3,
   version: 4,
   questions: [...hairOutcomeCards(), ...regionCards()],
@@ -277,4 +278,13 @@ export const HAIR_COLOR_INSPIRATION_CARD_PACK: ConsultInspirationPackDefinition 
     ...Object.fromEntries(Object.entries(HAIR_COLOR_INSPIRATION_CARD_PACK_V3.possibleMeanings).filter(([key]) => key.startsWith('love_regions:') || key.startsWith('change_regions:'))),
     ...HAIR_OUTCOME_MEANINGS,
   },
+}
+
+/** Visual questions are pinned separately so an existing consultation keeps its vocabulary. */
+export const HAIR_COLOR_INSPIRATION_CARD_PACK: ConsultInspirationPackDefinition = {
+  ...HAIR_COLOR_INSPIRATION_CARD_PACK_V4,
+  version: 5,
+  adaptiveVisualDialogue: true,
+  questions: hairVisualDialogueCards(),
+  possibleMeanings: HAIR_OUTCOME_MEANINGS,
 }

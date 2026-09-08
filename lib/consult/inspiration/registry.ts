@@ -30,6 +30,8 @@ import type {
   ConsultInspirationSourceDTO,
 } from '@/lib/dto/consult'
 import { isRecord } from '@/lib/guards'
+import type { ConsultInspirationAnalysisAttributesDTO } from '@/lib/dto/consult'
+import { resolveVisualDialogueQuestion } from './visualDialogue'
 
 import {
   GENERAL_SERVICE_INSPIRATION_CARD_PACK,
@@ -37,12 +39,14 @@ import {
 } from './packs/generalService'
 import {
   HAIR_COLOR_INSPIRATION_CARD_PACK,
+  HAIR_COLOR_INSPIRATION_CARD_PACK_V4,
   HAIR_COLOR_INSPIRATION_CARD_PACK_V2,
   HAIR_COLOR_INSPIRATION_CARD_PACK_V3,
   HAIR_COLOR_INSPIRATION_PACK,
 } from './packs/hairColor'
 import {
   HAIR_GENERAL_INSPIRATION_CARD_PACK,
+  HAIR_GENERAL_INSPIRATION_CARD_PACK_V3,
   HAIR_GENERAL_INSPIRATION_CARD_PACK_V2,
   HAIR_GENERAL_INSPIRATION_PACK,
 } from './packs/hairGeneral'
@@ -85,8 +89,10 @@ export const CONSULT_INSPIRATION_PACK_ARCHIVE: readonly ConsultInspirationPackDe
     GENERAL_SERVICE_INSPIRATION_PACK,
     // P5g: v2's eight per-attribute prep cards. A consult that answered one is
     // read against them forever — see HAIR_COLOR_INSPIRATION_CARD_PACK's note.
+    HAIR_COLOR_INSPIRATION_CARD_PACK_V4,
     HAIR_COLOR_INSPIRATION_CARD_PACK_V2,
     HAIR_COLOR_INSPIRATION_CARD_PACK_V3,
+    HAIR_GENERAL_INSPIRATION_CARD_PACK_V3,
     HAIR_GENERAL_INSPIRATION_CARD_PACK_V2,
   ]
 
@@ -263,7 +269,12 @@ export function evaluateConsultInspirationProgress(
   copy: BrandClientConsultInspirationCopy = defaultClientConsultInspirationCopy,
   /** The composed understanding-check text, when the caller has a reading. */
   composedLabel?: string | null,
+  reading: ConsultInspirationAnalysisAttributesDTO | null = null,
 ): ConsultInspirationProgress {
+  const applicable = pack.questions.flatMap((question) => {
+    const resolved = resolveVisualDialogueQuestion(question, answers, reading)
+    return resolved ? [resolved] : []
+  })
   const answeredQuestionCount = pack.questions.filter(
     (question) => answers[question.key] !== undefined,
   ).length
@@ -275,12 +286,14 @@ export function evaluateConsultInspirationProgress(
     answers,
     copy,
   ).filter((detail) => countsAsDetail.get(detail.questionKey) !== false).length
-  // 🔴 COMPLETION IS THE COARSE TIER, and only it. A prep card exists only
+  // Completion requires every applicable COARSE question. New visual dialogue
+  // questions are coarse, but only exist where the reference and goal support them.
+  // Archived PREP cards remain optional. A prep card exists only
   // where the reference was actually READ as something — a family with no
   // reading has none at all, and a photograph the model could not read has
   // none either. Gating on them would make those consults impossible to
   // finish, which is the same shape of bug as v1's three-detail gate.
-  const unanswered = pack.questions.find(
+  const unanswered = applicable.find(
     (question) =>
       question.tier === 'COARSE' && answers[question.key] === undefined,
   )
@@ -702,6 +715,14 @@ export function assertConsultInspirationCardCopy(
     throw new Error(`Inspiration pack ${pack.id} v${pack.version}: ${message}`)
   }
   for (const question of pack.questions) {
+    if (question.visualDialogue) {
+      if (!copy.cards.visualAreaNames[question.key]?.trim()) fail(`visual card "${question.key}" has no area name.`)
+      for (const option of question.options) {
+        if (option.value !== 'match-reference' && !copy.cards.visualSummaryClauses[`${question.key}:${option.value}`]?.trim()) {
+          fail(`visual card "${question.key}" option "${option.value}" has no summary clause.`)
+        }
+      }
+    }
     if (question.label === null && !question.composedPrompt) {
       const prompt =
         copy.cards.prompts[`${pack.id}:${question.key}`] ??

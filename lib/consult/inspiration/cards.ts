@@ -50,32 +50,9 @@ import {
   type ConsultInspirationPackQuestion,
 } from './types'
 
-/**
- * How sure the reading has to be before a prep card is built from it.
- *
- * The reading answers with a RANGE (`{min, max}`), and this is a floor on the
- * LOW end: "I am at least this sure". A card is a sentence put in front of a
- * client as a description of her reference, so a reading the model itself
- * disclaimed has no business being said out loud. Such an attribute is not
- * silently dropped — it becomes the "we couldn't tell yet" clause in the
- * understanding check, which is the honest version of the same information.
- *
- * 🔴 0.35, and the number is CALIBRATED, not picked. The only inspiration
- * confidences this repo records are 0.4–0.65 for an observation the model made
- * and 0.05–0.3 for one it did not (the shape asserted in
- * tests/live/consult-provider-schema.test.ts and produced by the integration
- * fakes). A floor of 0.5 — the obvious guess, and the one this was first
- * written as — sits ABOVE the low end of a perfectly good reading, so every
- * prep card would have been suppressed and the feature would have looked
- * built and done nothing. The floor's job is only to exclude a KNOWN value the
- * model hedged into the unread band; `value === 'UNKNOWN'` already excludes
- * the rest.
- *
- * ⚠️ NOT calibrated against a real corpus of references — there is no such
- * corpus in this repo. It is one named constant so re-cutting it against real
- * readings is one edit and one test.
- */
-export const CONSULT_INSPIRATION_PREP_CARD_MIN_CONFIDENCE = 0.35
+export { CONSULT_INSPIRATION_PREP_CARD_MIN_CONFIDENCE, consultInspirationAttributeIsCardworthy } from './evidence'
+import { consultInspirationAttributeIsCardworthy } from './evidence'
+import { resolveVisualDialogueQuestion } from './visualDialogue'
 
 /** The reading, in the shape both the DTO and the engine hold it. */
 export type ConsultInspirationCardReading = ConsultInspirationAnalysisAttributesDTO
@@ -122,16 +99,6 @@ export function unionConsultInspirationRegions(
  */
 function round4(value: number): number {
   return Math.round(value * 10_000) / 10_000
-}
-
-/** Is this attribute worth showing the client as a card of its own? */
-export function consultInspirationAttributeIsCardworthy(
-  reading: ConsultInspirationCardReading | null,
-  attribute: ConsultInspirationAnalysisFieldDTO,
-): boolean {
-  const observed = reading?.[attribute]
-  if (!observed || observed.value === 'UNKNOWN') return false
-  return observed.confidence.min >= CONSULT_INSPIRATION_PREP_CARD_MIN_CONFIDENCE
 }
 
 function attributeName(
@@ -265,6 +232,16 @@ export function composeConsultInspirationUnderstanding(args: {
       )
     }
   }
+  for (const question of args.pack.questions) {
+    if (!question.visualDialogue) continue
+    const applicable = resolveVisualDialogueQuestion(question, args.answers, args.reading)
+    if (!applicable) continue
+    for (const value of args.answers[question.key] ?? []) {
+      if (value === 'match-reference' || !applicable.options.some((option) => option.value === value)) continue
+      const clause = cards.visualSummaryClauses[`${question.key}:${value}`]
+      if (clause) clauses.push(clause)
+    }
+  }
   for (const value of args.answers[KEEP_AS_IS_KEY] ?? []) {
     if (CONSULT_INSPIRATION_NEUTRAL_VALUES.has(value)) continue
     const clause = cards.keepClauses[value]
@@ -307,7 +284,9 @@ export function buildConsultInspirationCard(args: {
   professionalDisplayName: string
   answers: Readonly<Record<string, readonly string[]>>
 }): ConsultInspirationCardDTO | null {
-  const { question, reading, copy } = args
+  const { reading, copy } = args
+  const question = resolveVisualDialogueQuestion(args.question, args.answers, reading)
+  if (!question) return null
   const attribute = question.attribute
 
   if (attribute) {
@@ -320,7 +299,7 @@ export function buildConsultInspirationCard(args: {
       // The reading's own value, so a client screen and the pro's brief are
       // describing the same observation rather than two paraphrases of it.
       attributeValue: observed.value,
-      name: attributeName(copy, attribute, observed.value),
+      name: question.visualDialogue ? copy.cards.visualAreaNames[question.key] ?? null : attributeName(copy, attribute, observed.value),
       region: observed.region,
       presentation: 'CROP',
       optionRegions: [],
@@ -522,6 +501,21 @@ export function deriveConsultInspirationPreferences(args: {
     const selected = args.answers[question.key]
     if (!selected || question.label !== null) continue
 
+    if (question.visualDialogue) {
+      const applicable = resolveVisualDialogueQuestion(question, args.answers, args.reading)
+      if (!applicable || !question.attribute) continue
+      const pair = `${question.attribute}:${args.reading![question.attribute].value}`
+      for (const value of selected) {
+        const option = applicable.options.find((candidate) => candidate.value === value)
+        if (!option) continue
+        const detail = `${consultInspirationQuestionLabel(args.pack, question, args.copy)} → ${consultInspirationOptionLabel(question, option, args.copy)}`
+        if (value === 'match-reference') preferences.wants.push(pair)
+        else if (value === 'not-sure') preferences.unsure.push(detail)
+        else if (value === 'keep-natural') preferences.keep.push(detail)
+        else preferences.wants.push(detail)
+      }
+      continue
+    }
     if (question.attribute) {
       // Read the artefact THIS answer was about. An answer with no readable
       // attribute behind it is dropped rather than guessed at — the same rule

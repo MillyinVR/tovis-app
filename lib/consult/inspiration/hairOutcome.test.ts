@@ -58,7 +58,7 @@ for (const pack of [HAIR_COLOR_INSPIRATION_CARD_PACK, HAIR_GENERAL_INSPIRATION_C
     })
 
     it('keeps the previous pack and its single-select answers readable', () => {
-      const previous = findConsultInspirationPack(pack.id, pack.version - 1)!
+      const previous = findConsultInspirationPack(pack.id, pack.id === 'hair-color-inspiration' ? 3 : 2)!
       expect(previous.questions[0]?.kind).toBe('SINGLE_SELECT')
       expect(evaluateConsultInspirationProgress(previous, { spark_focus: ['the-shape'], keep_as_is: ['my-length'], understanding_check: ['thats-right'] }).canComplete).toBe(true)
     })

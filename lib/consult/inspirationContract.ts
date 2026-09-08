@@ -1,5 +1,7 @@
 import 'server-only'
 
+import { resolveVisualDialogueQuestion } from './inspiration/visualDialogue'
+
 import { createHash } from 'node:crypto'
 import {
   ConsultActorType,
@@ -403,6 +405,10 @@ export async function requireCompletedConsultInspiration(
     pack && review.inspirationId
       ? await inspirationAnalysisReading(tx, args.consultSessionId, review.inspirationId)
       : null
+  if (pack?.adaptiveVisualDialogue && review.source !== 'NONE' &&
+    !evaluateConsultInspirationProgressV2(pack, answerMap(review.answers), defaultClientConsultInspirationCopy, null, reading).canComplete) {
+    throw new ConsultWriteError('ANALYSIS_PREREQUISITES_REQUIRED', 'Confirm the current visual preferences first.')
+  }
   const completed: CompletedConsultInspiration = {
     revisionId: review.revisionId,
     source: review.source,
@@ -893,7 +899,7 @@ async function buildState(
       })
     : null
   const progress = pack
-    ? evaluateConsultInspirationProgressV2(pack, answersByKey, copy, understanding)
+    ? evaluateConsultInspirationProgressV2(pack, answersByKey, copy, understanding, reading)
     : evaluateConsultInspirationProgress(answers)
   const cards = pack
     ? buildConsultInspirationCards({
@@ -926,7 +932,12 @@ async function buildState(
           },
     // A consult that skipped the reference has nothing to crop, so it has no
     // cards — the same reason it has no questions.
-    cards: activeReview?.source === 'NONE' ? [] : [...cards.coarse, ...cards.prep],
+    cards: activeReview?.source === 'NONE' ? [] : [
+      ...cards.coarse.filter((card) => !pack?.adaptiveVisualDialogue ||
+        (card.selectedValues.length > 0 && (card.questionKey !== 'understanding_check' || progress.canComplete)) ||
+        card.questionKey === progress.currentQuestion?.key),
+      ...cards.prep,
+    ],
     latestReview: activeReview,
   }
 }
@@ -1614,13 +1625,22 @@ export async function answerConsultInspirationQuestion(args: {
     const previous = await latestReview(tx, session.id, ctx.copy)
     const previousReview = previous?.inspirationId === source.id ? previous : null
     const previousAnswers = previousReview?.answers ?? []
+    const reading = ctx.pack?.adaptiveVisualDialogue
+      ? await inspirationAnalysisReading(tx, session.id, source.id)
+      : null
 
     let write: InspirationWrite
     if (validated.contract === 2 && ctx.pack) {
       const pack = ctx.pack
       const previousMap = answerMap(previousAnswers)
-      const progress = evaluateConsultInspirationProgressV2(pack, previousMap, ctx.copy)
+      const progress = evaluateConsultInspirationProgressV2(pack, previousMap, ctx.copy, null, reading)
       const question = findConsultInspirationCardQuestion(pack, validated.questionKey)
+      if (question?.visualDialogue) {
+        const applicable = resolveVisualDialogueQuestion(question, previousMap, reading)
+        if (!applicable || validated.selectedValues.some((value) => !applicable.options.some((option) => option.value === value))) {
+          throw new ConsultWriteError('INSPIRATION_QUESTION_OUT_OF_ORDER', 'This question or choice is not available for this reference and goal.')
+        }
+      }
       // 🔴 The order rule is the COARSE tier's, and only its. Prep cards are
       // asked after the booking, they never gate completion, and she may
       // answer them in any order or not at all — so holding them to "answer
@@ -1629,7 +1649,7 @@ export async function answerConsultInspirationQuestion(args: {
       // after that any card, coarse or prep, is answerable again (which is
       // what "living document until the appointment" means here).
       if (
-        !previousReview?.complete &&
+        (!previousReview?.complete || (pack.adaptiveVisualDialogue && previousMap[validated.questionKey] === undefined)) &&
         question?.tier !== 'PREP' &&
         progress.currentQuestion?.key !== validated.questionKey
       ) {
@@ -1652,7 +1672,7 @@ export async function answerConsultInspirationQuestion(args: {
           schemaVersion: pack.schemaVersion,
           source: source.source,
           inspirationId: source.id,
-          complete: evaluateConsultInspirationProgressV2(pack, answers, ctx.copy)
+          complete: evaluateConsultInspirationProgressV2(pack, answers, ctx.copy, null, reading)
             .canComplete,
           answers,
           // Enums only. The sentence is filled in on read from brand copy.
