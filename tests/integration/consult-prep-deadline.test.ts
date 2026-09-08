@@ -625,9 +625,9 @@ describe('3 — answering the last question stops it', () => {
         text.startsWith('A few of these are the ones'),
       ),
     ).toBe(true)
-    expect(midwayText).not.toContain(
-      defaultClientConsultThreadCopy.prepComplete.replace('{pro}', 'your professional'),
-    )
+    expect(midwayText.some((text) =>
+      text.startsWith(defaultClientConsultThreadCopy.prepComplete.split('{pro}')[0]),
+    )).toBe(false)
     expect(
       (await pendingReminders(sessionId)).filter((row) => !row.cancelledAt).length,
     ).toBe(3)
@@ -642,9 +642,9 @@ describe('3 — answering the last question stops it', () => {
     // 🔴 And the thread SAYS so — a TEXT bubble, so both clients render it with
     // no change of their own. The deadline line is gone with it.
     const doneText = threadText((await thread(sessionId)).messages)
-    expect(doneText.some((text) => text.includes('That’s the safety bit done'))).toBe(
-      true,
-    )
+    expect(doneText.some((text) =>
+      text.startsWith(defaultClientConsultThreadCopy.prepComplete.split('{pro}')[0]),
+    )).toBe(true)
     expect(
       doneText.some((text) => text.startsWith('A few of these are the ones')),
     ).toBe(false)
