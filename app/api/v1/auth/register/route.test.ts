@@ -352,8 +352,10 @@ function makeProMobileSignupBody() {
  */
 function makeHandleClaimTxSurface(professionalId = 'pro_profile_1') {
   return {
+    $queryRaw: vi.fn().mockResolvedValue([{ foundingNumber: 1 }]),
     professionalProfile: {
       findUniqueOrThrow: vi.fn().mockResolvedValue({ id: professionalId }),
+      update: vi.fn().mockResolvedValue({ id: professionalId }),
     },
     handleRegistration: {
       findUnique: vi.fn().mockResolvedValue(null),

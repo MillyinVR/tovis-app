@@ -5,6 +5,7 @@ import { AdminPermissionRole, ProfessionalLocationType } from '@prisma/client'
 import AdminProActions from './AdminProActions'
 import { formatInTimeZone } from '@/lib/time'
 import { formatPublicProfileDisplayName } from '@/lib/profiles/publicProfileFormatting'
+import { formatFoundingMemberNumber } from '@/lib/founding/professionalRecognition'
 
 export const dynamic = 'force-dynamic'
 
@@ -106,6 +107,8 @@ export default async function AdminProfessionalDetailPage({ params }: PageProps)
       licenseExpiry: true,
       licenseVerified: true,
       verificationStatus: true,
+      foundingMemberNumber: true,
+      foundingMemberAwardedAt: true,
 
       user: {
         select: {
@@ -211,6 +214,12 @@ export default async function AdminProfessionalDetailPage({ params }: PageProps)
 
                 <div className={`${hint} mt-1`}>{licenseLine}</div>
 
+                {pro.foundingMemberNumber != null ? (
+                  <div className="mt-3 inline-flex rounded-full border border-microAccent/40 bg-microAccent/10 px-3 py-1 text-[12px] font-black text-microAccent">
+                    Founding Member {formatFoundingMemberNumber(pro.foundingMemberNumber)}
+                  </div>
+                ) : null}
+
                 {primaryLoc ? (
                   <div className={`${hint} mt-1`}>
                     Location type:{' '}
@@ -237,6 +246,11 @@ export default async function AdminProfessionalDetailPage({ params }: PageProps)
             <div className={`${hint} mt-3`}>
               Current: <span className="font-black text-textPrimary">{pro.verificationStatus}</span> · License
               verified: <span className="font-black text-textPrimary">{String(pro.licenseVerified)}</span>
+              {pro.foundingMemberAwardedAt ? (
+                <span className="ml-2 opacity-80">
+                  · Founding recognition awarded {fmtUtcDateTime(pro.foundingMemberAwardedAt)}
+                </span>
+              ) : null}
               <span className="ml-2 opacity-80">· Times shown in UTC</span>
             </div>
           </section>

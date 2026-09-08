@@ -9,6 +9,7 @@ import AdminGuard from '../_components/AdminGuard'
 import { getAdminUiPerms } from '@/lib/adminUiPermissions'
 import { formatPublicProfileDisplayName } from '@/lib/profiles/publicProfileFormatting'
 import { ProfessionalLocationType, VerificationStatus } from '@prisma/client'
+import { formatFoundingMemberNumber } from '@/lib/founding/professionalRecognition'
 
 export const dynamic = 'force-dynamic'
 
@@ -54,8 +55,11 @@ function formatLocationLabel(loc: {
   return where ? `${where} · ${mode}` : mode || 'Location set'
 }
 
-function parseVerificationStatus(raw: unknown): VerificationStatus {
+type ProfessionalFilter = VerificationStatus | 'FOUNDING'
+
+function parseProfessionalFilter(raw: unknown): ProfessionalFilter {
   const s = typeof raw === 'string' ? raw.trim().toUpperCase() : ''
+  if (s === 'FOUNDING') return 'FOUNDING'
   if (s === VerificationStatus.PENDING) return VerificationStatus.PENDING
   if (s === VerificationStatus.APPROVED) return VerificationStatus.APPROVED
   if (s === VerificationStatus.REJECTED) return VerificationStatus.REJECTED
@@ -73,12 +77,20 @@ export default async function AdminProfessionalsPage({
   if (!info.perms.canReviewPros) redirect('/admin')
 
   const sp = await searchParams
-  const verificationStatus = parseVerificationStatus(sp.status)
+  const professionalFilter = parseProfessionalFilter(sp.status)
 
   const pros = await prisma.professionalProfile.findMany({
     // Platform-operator surface: intentionally reads across all tenants.
-    where: { ...platformCrossTenantProVisibilityFilter(), verificationStatus },
-    orderBy: [{ licenseVerified: 'asc' }, { id: 'asc' }],
+    where: {
+      ...platformCrossTenantProVisibilityFilter(),
+      ...(professionalFilter === 'FOUNDING'
+        ? { foundingMemberNumber: { not: null } }
+        : { verificationStatus: professionalFilter }),
+    },
+    orderBy:
+      professionalFilter === 'FOUNDING'
+        ? [{ foundingMemberNumber: 'asc' }, { id: 'asc' }]
+        : [{ licenseVerified: 'asc' }, { id: 'asc' }],
     select: {
       id: true,
       businessName: true,
@@ -89,6 +101,7 @@ export default async function AdminProfessionalsPage({
       licenseExpiry: true,
       licenseVerified: true,
       verificationStatus: true,
+      foundingMemberNumber: true,
       user: { select: { email: true } },
 
       // ✅ New location system (primary ProfessionalLocation)
@@ -125,24 +138,29 @@ export default async function AdminProfessionalsPage({
 
           <div className="flex flex-wrap justify-end gap-2">
             <Tab
+              href="/admin/professionals?status=FOUNDING"
+              label="Founding 100"
+              active={professionalFilter === 'FOUNDING'}
+            />
+            <Tab
               href="/admin/professionals?status=PENDING"
               label="Pending"
-              active={verificationStatus === VerificationStatus.PENDING}
+              active={professionalFilter === VerificationStatus.PENDING}
             />
             <Tab
               href="/admin/professionals?status=NEEDS_INFO"
               label="Needs info"
-              active={verificationStatus === VerificationStatus.NEEDS_INFO}
+              active={professionalFilter === VerificationStatus.NEEDS_INFO}
             />
             <Tab
               href="/admin/professionals?status=APPROVED"
               label="Approved"
-              active={verificationStatus === VerificationStatus.APPROVED}
+              active={professionalFilter === VerificationStatus.APPROVED}
             />
             <Tab
               href="/admin/professionals?status=REJECTED"
               label="Rejected"
-              active={verificationStatus === VerificationStatus.REJECTED}
+              active={professionalFilter === VerificationStatus.REJECTED}
             />
           </div>
         </div>
@@ -194,6 +212,11 @@ export default async function AdminProfessionalsPage({
                       </div>
 
                       <div className="flex flex-wrap items-center gap-2">
+                        {p.foundingMemberNumber != null ? (
+                          <Badge fill="soft">
+                            Founding Member {formatFoundingMemberNumber(p.foundingMemberNumber)}
+                          </Badge>
+                        ) : null}
                         <Badge fill="soft">Status: {String(p.verificationStatus)}</Badge>
                         <Badge fill="soft">{p.licenseVerified ? 'License Verified' : 'License NOT Verified'}</Badge>
                         <Badge fill="soft">Docs: {p.verificationDocs.length}</Badge>

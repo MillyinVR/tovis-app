@@ -47,6 +47,7 @@ import { isRecord } from '@/lib/guards'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
 import { resolveTenantContextForRequest } from '@/lib/tenant/requestContext'
 import { captureAuthException } from '@/lib/observability/authEvents'
+import { awardFoundingProfessionalRecognition } from '@/lib/founding/professionalRecognition'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -205,6 +206,12 @@ export async function POST(request: Request) {
           professionalId: created.id,
         })
       }
+
+
+      await awardFoundingProfessionalRecognition({
+        tx,
+        professionalId: created.id,
+      })
 
       // See the DECISION note at the top of this file.
       await tx.user.update({

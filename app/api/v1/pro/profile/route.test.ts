@@ -108,6 +108,7 @@ function makeUpdatedProfile(args?: {
     avatarUrl: args?.avatarUrl ?? null,
     professionType: args?.professionType ?? null,
     isPremium: false,
+    foundingMemberAwardedAt: null,
   }
 }
 
@@ -242,6 +243,7 @@ describe('app/api/v1/pro/profile/route.ts', () => {
         instagramHandle: true,
         tiktokHandle: true,
         websiteUrl: true,
+        foundingMemberAwardedAt: true,
       },
     })
 
@@ -256,6 +258,7 @@ describe('app/api/v1/pro/profile/route.ts', () => {
         avatarUrl: null,
         professionType: null,
         isPremium: false,
+        isFoundingMember: false,
       },
     })
   })
@@ -308,6 +311,7 @@ describe('app/api/v1/pro/profile/route.ts', () => {
         instagramHandle: true,
         tiktokHandle: true,
         websiteUrl: true,
+        foundingMemberAwardedAt: true,
       },
     })
 
@@ -363,6 +367,7 @@ describe('app/api/v1/pro/profile/route.ts', () => {
         instagramHandle: true,
         tiktokHandle: true,
         websiteUrl: true,
+        foundingMemberAwardedAt: true,
       },
     })
 
@@ -377,6 +382,7 @@ describe('app/api/v1/pro/profile/route.ts', () => {
         avatarUrl: null,
         professionType: null,
         isPremium: false,
+        isFoundingMember: false,
       },
     })
   })
@@ -458,13 +464,20 @@ describe('GET /api/v1/pro/profile', () => {
       professionType: ProfessionType.HAIRSTYLIST,
       nameDisplay: 'BUSINESS_NAME',
       isPremium: true,
+      foundingMemberAwardedAt: new Date('2026-09-01T00:00:00.000Z'),
     })
 
     const result = await GET()
-    const body = await readJson<{ ok: true; profile: { id: string } }>(result)
+    const body = await readJson<{
+      ok: true
+      profile: { id: string; isFoundingMember: boolean }
+    }>(result)
 
     expect(result.status).toBe(200)
     expect(body.profile.id).toBe('pro_1')
+    expect(body.profile.isFoundingMember).toBe(true)
+    expect(body.profile).not.toHaveProperty('foundingMemberNumber')
+    expect(body.profile).not.toHaveProperty('foundingMemberAwardedAt')
     expect(mocks.prisma.professionalProfile.findUnique).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: 'pro_1' } }),
     )

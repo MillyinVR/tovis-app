@@ -33,6 +33,8 @@ type ProHeaderProps = {
    * "Switch workspace" row in the account menu — empty/single = row hidden.
    */
   workspaceOptions?: WorkspaceOption[]
+  /** Recognition only; the private physical-card number never reaches this UI. */
+  isFoundingMember?: boolean
 }
 
 type NotificationSummaryResponse = {
@@ -126,6 +128,7 @@ export default function ProHeader({
   migrationEnabled = false,
   formsEnabled = false,
   workspaceOptions,
+  isFoundingMember = false,
 }: ProHeaderProps) {
   const pathname = usePathname()
   const { brand } = useBrand()
@@ -179,6 +182,11 @@ export default function ProHeader({
             <div>
               <div className="brand-cap brand-pro-overview-kicker">
                 ◆ PRO MODE
+                {isFoundingMember ? (
+                  <span className="ml-2 rounded-full border border-microAccent/40 px-2 py-1 text-[9px] tracking-[0.12em] text-microAccent">
+                    FOUNDING MEMBER
+                  </span>
+                ) : null}
               </div>
 
               <h1 id="pro-page-title" className="brand-pro-overview-title">

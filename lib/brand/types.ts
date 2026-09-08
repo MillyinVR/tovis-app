@@ -1228,7 +1228,7 @@ export type BrandHomeCardPreview = {
   markSrc: string
   serial: string
   note: string
-  finish: 'neutral' | 'gold'
+  finish: 'neutral' | 'gold' | 'black-holographic'
 }
 
 /** Public homepage copy (app/page.tsx). See lib/brand/defaultHomeCopy.ts. */

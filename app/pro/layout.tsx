@@ -108,6 +108,7 @@ export default async function ProRootLayout({
           migrationEnabled={isProMigrationEnabled()}
           formsEnabled={isClientTechnicalRecordEnabled(pro.id)}
           workspaceOptions={workspaceOptions}
+          isFoundingMember={Boolean(pro.foundingMemberAwardedAt)}
         />
 
         {/*

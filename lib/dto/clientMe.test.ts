@@ -64,6 +64,7 @@ function makePageData(args: {
                 location: 'Portland, OR',
                 phoneVerifiedAt: null,
                 verificationStatus: args.professionalProfile.verificationStatus,
+                foundingMemberAwardedAt: null,
               },
       // The ACTING role — always CLIENT for this payload (requireClient-gated).
       role: 'CLIENT',
