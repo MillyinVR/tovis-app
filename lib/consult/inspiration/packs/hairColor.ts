@@ -20,6 +20,8 @@
 
 import {
   coarseCards,
+  hairOutcomeCards,
+  HAIR_OUTCOME_MEANINGS,
   HAIR_COLOR_KEEP_VALUES,
   prepCards,
   regionCards,
@@ -227,7 +229,7 @@ export const HAIR_COLOR_INSPIRATION_CARD_PACK_V2: ConsultInspirationPackDefiniti
  * who is unsure about the root blend specifically simply taps neither move,
  * and an untapped attribute already means "she did not point at this".
  */
-export const HAIR_COLOR_INSPIRATION_CARD_PACK: ConsultInspirationPackDefinition = {
+export const HAIR_COLOR_INSPIRATION_CARD_PACK_V3: ConsultInspirationPackDefinition = {
   id: HAIR_COLOR_INSPIRATION_PACK_ID,
   categorySlug: HAIR_COLOR_INSPIRATION_CATEGORY_SLUG,
   version: 3,
@@ -263,5 +265,16 @@ export const HAIR_COLOR_INSPIRATION_CARD_PACK: ConsultInspirationPackDefinition 
     'change_regions:root-blend': 'The client asked to change what the roots do.',
     'change_regions:finish': 'The client asked to change how much the colour shines.',
     'change_regions:dimension': 'The client asked to change how much light and dark the colour has.',
+  },
+}
+
+/** New sessions distinguish attraction, preservation and how closely to match. */
+export const HAIR_COLOR_INSPIRATION_CARD_PACK: ConsultInspirationPackDefinition = {
+  ...HAIR_COLOR_INSPIRATION_CARD_PACK_V3,
+  version: 4,
+  questions: [...hairOutcomeCards(), ...regionCards()],
+  possibleMeanings: {
+    ...Object.fromEntries(Object.entries(HAIR_COLOR_INSPIRATION_CARD_PACK_V3.possibleMeanings).filter(([key]) => key.startsWith('love_regions:') || key.startsWith('change_regions:'))),
+    ...HAIR_OUTCOME_MEANINGS,
   },
 }

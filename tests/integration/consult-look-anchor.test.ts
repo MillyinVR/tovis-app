@@ -582,13 +582,14 @@ const completeAnswers = {
 /**
  * P5d — the colour pack's COARSE cards, in the order it asks them.
  *
- * Three taps. The coarse tier is what completes the step and gates the
+ * Four questions. The coarse tier is what completes the step and gates the
  * analysis; the PREP cards come after the booking and never gate anything, so
  * a fixture that answered them would be walking a flow no client walks.
  */
 const INSPIRATION_ANSWERS: ReadonlyArray<[string, string[]]> = [
   ['spark_focus', ['the-color']],
   ['keep_as_is', ['my-length']],
+  ['look_match', ['adapt-selected-parts']],
   ['understanding_check', ['thats-right']],
 ]
 
@@ -2129,6 +2130,7 @@ describe('P5b — the reference is read in its own MEDIA_READY stage', () => {
     expect(beforeRead.cards?.map((card) => card.questionKey)).toEqual([
       'spark_focus',
       'keep_as_is',
+      'look_match',
       'understanding_check',
     ])
 
@@ -2226,6 +2228,7 @@ describe('P5b — the reference is read in its own MEDIA_READY stage', () => {
     expect((stored.payload as { answers: Record<string, string[]> }).answers).toEqual({
       spark_focus: ['the-color'],
       keep_as_is: ['my-length'],
+      look_match: ['adapt-selected-parts'],
       understanding_check: ['thats-right'],
       love_regions: ['lightest-level', 'tone'],
       change_regions: ['base-level'],

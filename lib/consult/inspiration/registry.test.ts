@@ -93,7 +93,7 @@ describe('inspiration pack registry', () => {
     // while BOTH archived versions stay reachable by version. That is what
     // keeps a consult readable whichever prep tier it started in: v1's wizard,
     // v2's eight per-attribute cards, v3's two moves.
-    expect(findConsultInspirationPack(HAIR_COLOR_INSPIRATION_PACK.id)?.version).toBe(3)
+    expect(findConsultInspirationPack(HAIR_COLOR_INSPIRATION_PACK.id)?.version).toBe(4)
     expect(findConsultInspirationPack(HAIR_COLOR_INSPIRATION_PACK.id, 1)?.version).toBe(1)
     expect(findConsultInspirationPack(HAIR_COLOR_INSPIRATION_PACK.id, 2)?.version).toBe(2)
     expect(findConsultInspirationPack(HAIR_COLOR_INSPIRATION_PACK.id, 3)?.version).toBe(3)

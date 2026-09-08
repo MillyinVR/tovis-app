@@ -1060,6 +1060,8 @@ export type BrandClientConsultInspirationCardCopy = {
    * check, with no reading to lean on ("like the color in it").
    */
   sparkClauses: Readonly<Record<string, string>>
+  /** How closely the client wants the selected features to match. */
+  lookMatchClauses: Readonly<Record<string, string>>
   /** Explicit visual choices only. `{details}` is a list of chosen attributes. */
   detailClauses: { wants: string; avoids: string; unsure: string; conflicting: string }
 

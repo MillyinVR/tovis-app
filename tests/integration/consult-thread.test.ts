@@ -946,6 +946,7 @@ describe('consult thread projection', () => {
       'inspiration',
       'inspiration:spark_focus',
       'inspiration:keep_as_is',
+      'inspiration:look_match',
       'inspiration:understanding_check',
     ])
     // 🔴 DONE, not OPEN: for a card consult this message is a bubble and the
@@ -975,11 +976,10 @@ describe('consult thread projection', () => {
     expect(t.nextOpenMessageId).toBe('inspiration:spark_focus')
     expect(spark.card?.tier).toBe('COARSE')
     expect(spark.card?.question.label).toBe('What made you stop scrolling?')
-    expect(spark.card?.optionRegions.map((option) => option.label)).toEqual([
-      'The color',
-      'The shape of it',
-      'The whole thing',
-      'Not sure',
+    expect(spark.card?.optionRegions).toEqual([])
+    expect(spark.card?.question.kind).toBe('MULTI_SELECT')
+    expect(spark.card?.question.options.map((option) => option.label)).toEqual([
+      'The color', 'The cut', 'The layers', 'The movement', 'The length', 'The fullness', 'Not sure',
     ])
     // No reading yet, so every crop is the whole picture — the stated fallback,
     // not a blank card.
@@ -989,7 +989,7 @@ describe('consult thread projection', () => {
     expect(inspiration[2]?.state).toBe('BLOCKED')
     // The understanding check's text is COMPOSED by the server. With nothing
     // answered yet it is the honest fallback, naming the pro.
-    expect(inspiration[3]?.card?.question.label).toContain('work out the details')
+    expect(inspiration.find((message) => message.card?.questionKey === 'understanding_check')?.card?.question.label).toContain('work out the details')
 
     for (const [questionKey, selectedValues] of INSPIRATION_ANSWERS) {
       await answerConsultInspirationQuestion({
@@ -1021,8 +1021,8 @@ describe('consult thread projection', () => {
     // point: this consult has no READING, so there is no particular attribute
     // the photograph failed to settle. Claiming one would be a sentence about
     // a reading that was never made.
-    expect(afterCards[3]?.card?.question.label).toBe(
-      'You like the color and want to keep your length. We’ll help ' +
+    expect(afterCards.find((message) => message.card?.questionKey === 'understanding_check')?.card?.question.label).toBe(
+      'You like the color, want to keep your length, and want those parts adapted to you. We’ll help ' +
         after.professionalDisplayName +
         ' work out the details.',
     )
@@ -1044,7 +1044,7 @@ describe('consult thread projection', () => {
         answers: completeAnswers,
       }),
     })
-    for (const [questionKey, selectedValues] of INSPIRATION_ANSWERS.slice(0, 2)) {
+    for (const [questionKey, selectedValues] of INSPIRATION_ANSWERS.filter(([key]) => key !== 'understanding_check')) {
       await answerConsultInspirationQuestion({
         consultSessionId: sessionId,
         clientId: fx.clientId,

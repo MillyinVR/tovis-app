@@ -270,6 +270,10 @@ export function composeConsultInspirationUnderstanding(args: {
     const clause = cards.keepClauses[value]
     if (clause) clauses.push(clause)
   }
+  for (const value of args.answers.look_match ?? []) {
+    const clause = cards.lookMatchClauses[value]
+    if (clause) clauses.push(clause)
+  }
   // Image uncertainty belongs to the image, not to the client's wishes.
   // With no meaningful answer yet, show the ordinary fallback instead.
   const observation = clauses.length > 0 ? unsureClause(args.reading, args.copy) : null
@@ -577,6 +581,15 @@ export function deriveConsultInspirationPreferences(args: {
         if (value === 'not-sure') preferences.unsure.push(label)
         else preferences.wants.push(label)
       }
+      continue
+    }
+
+    // Neutral answers are excluded from exact details. Preserve this explicit
+    // uncertainty in the preferences the analysis receives.
+    if (question.key === 'look_match' && selected.includes('not-sure')) {
+      preferences.unsure.push(
+        `${consultInspirationQuestionLabel(args.pack, question, args.copy)} → ${consultInspirationOptionLabel(question, { value: 'not-sure', label: null }, args.copy)}`,
+      )
       continue
     }
 

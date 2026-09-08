@@ -2724,11 +2724,8 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
     const itemCountBefore = await db.bookingServiceItem.count({
       where: { bookingId: consult.bookingId },
     })
-    // 🔴 P5d: a CUT, not a style finish. The card pack's catalogue pointer is
-    // LENGTH — "the shape of it" and "the whole thing" are what can imply a
-    // service of their own — because those are the only things the coarse tier
-    // asks about. STYLING and FULLNESS are no longer asked at all, so nothing
-    // can point at them; see the note on `spark_focus` in ../cardQuestions.ts.
+    // Explicit interest in length can point to the pro’s cut offering.
+    // Color or layers alone must not imply a length service.
     const stylingService = await db.service.create({
       data: {
         name: `${tag} Cut and Finish`,
@@ -2769,11 +2766,12 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
       }),
     ).rejects.toMatchObject({ code: 'INSPIRATION_QUESTION_OUT_OF_ORDER' })
 
-    // P5d: the colour pack's three COARSE cards, which are what completes the
+    // The color pack's four COARSE cards, which are what completes the
     // step. The prep tier comes after the booking and gates nothing.
     const answers = [
-      ['spark_focus', ['the-shape']],
+      ['spark_focus', ['the-length']],
       ['keep_as_is', ['my-length']],
+      ['look_match', ['adapt-selected-parts']],
       ['understanding_check', ['thats-right']],
     ] as const
     let completed: Awaited<ReturnType<typeof answerConsultInspirationQuestion>> | null = null
@@ -2803,7 +2801,7 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
       // Her words come from the brand copy table now, resolved on read — the
       // payload holds `spark_focus: ['the-color']` and nothing else.
       exactClientDetails: expect.arrayContaining([
-        expect.objectContaining({ clientWords: 'The shape of it' }),
+        expect.objectContaining({ clientWords: 'The length' }),
       ]),
       possibleProfessionalInterpretation: expect.arrayContaining([
         expect.objectContaining({ confidence: 'POSSIBLE', evidence: 'CLIENT_SELECTION' }),
@@ -2818,10 +2816,10 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
       ],
     })
     expect(completed?.state.progress).toMatchObject({
-      // P5d: THREE coarse cards, and the coarse tier is what completes.
-      answeredQuestionCount: 3,
-      // Two of the three are details she pointed at; the understanding check
-      // is a confirmation, not a detail (`countsAsDetail: false`).
+      // Four outcome cards complete the current pack.
+      answeredQuestionCount: 4,
+      // Attraction and preservation are details; match intent and confirmation
+      // do not add details about the reference.
       specificDetailCount: 2,
       canComplete: true,
       requiredSpecificDetailCount: 0,
@@ -2835,7 +2833,7 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
           idempotencyKey: 'answer-spark_focus',
           schemaVersion: INSPIRATION_SCHEMA_VERSION,
           questionKey: 'spark_focus',
-          selectedValues: ['the-shape'],
+          selectedValues: ['the-length'],
         },
       })).replayed,
     ).toBe(true)
@@ -2932,7 +2930,7 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
           source: 'EXTERNAL_UPLOAD',
           inspirationId: row.id,
           exactClientDetails: expect.arrayContaining([
-            expect.objectContaining({ clientWords: 'The shape of it' }),
+            expect.objectContaining({ clientWords: 'The length' }),
           ]),
           possibleProfessionalInterpretation: expect.arrayContaining([
             expect.objectContaining({ confidence: 'POSSIBLE' }),
@@ -2967,6 +2965,7 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
     const answers = [
       ['spark_focus', ['the-color']],
       ['keep_as_is', ['my-length']],
+      ['look_match', ['adapt-selected-parts']],
       ['understanding_check', ['thats-right']],
     ] as const
     let completed: Awaited<ReturnType<typeof answerConsultInspirationQuestion>> | null = null
@@ -2986,7 +2985,7 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
     // Guards against a vacuous pass: confirm the flow actually completed
     // before asserting nothing else moved.
     expect(completed?.state.progress).toMatchObject({
-      answeredQuestionCount: 3,
+      answeredQuestionCount: 4,
       canComplete: true,
     })
 

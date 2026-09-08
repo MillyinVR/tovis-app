@@ -303,3 +303,63 @@ export function changeRegionsCard(): ConsultInspirationPackQuestion {
 export function regionCards(): ConsultInspirationPackQuestion[] {
   return [loveRegionsCard(), changeRegionsCard()]
 }
+
+/** Outcome-first hair cards. A photo's service tag never defines these choices.
+ * Keep the earlier constructors unchanged for sessions pinned to older packs.
+ */
+export function hairOutcomeCards(): ConsultInspirationPackQuestion[] {
+  const goalKey = 'look_match'
+  const check = understandingCheckCard()
+  const reset = [SPARK_FOCUS_KEY, KEEP_AS_IS_KEY, goalKey, UNDERSTANDING_CHECK_KEY]
+  const cards = [
+    inspirationCard({
+      key: SPARK_FOCUS_KEY,
+      tier: 'COARSE',
+      kind: 'MULTI_SELECT',
+      values: ['the-color', 'the-cut', 'the-layers', 'the-movement', 'the-length', 'the-fullness', 'not-sure'],
+      minSelections: 1,
+      maxSelections: 6,
+      detailSentiment: 'LIKE',
+      // Cut, layers and movement have no established reading/crop yet.
+      // Show the actual whole reference rather than a colour-placement box.
+    }),
+    keepAsIsCard(['my-length', 'my-color', 'my-natural-roots', 'my-natural-texture', 'nothing-in-particular']),
+    inspirationCard({
+      key: goalKey,
+      countsAsDetail: false,
+      tier: 'COARSE',
+      kind: 'SINGLE_SELECT',
+      values: ['match-selected-parts', 'adapt-selected-parts', 'not-sure'],
+      detailSentiment: 'GOAL',
+    }),
+    { ...check, reopens: { 'change-something': reset } },
+  ]
+  // An edited preference withdraws confirmation of the old summary. The
+  // generic write path applies this even after a consult was completed.
+  return cards.map((card) => card.key === UNDERSTANDING_CHECK_KEY ? card : {
+    ...card,
+    ...(card.key === SPARK_FOCUS_KEY ? { valueCatalogDetails: { 'the-length': 'LENGTH' as const, 'the-fullness': 'FULLNESS' as const } } : {}),
+    reopens: Object.fromEntries(card.options.map((option) => [
+      option.value,
+      card.key === SPARK_FOCUS_KEY || card.key === KEEP_AS_IS_KEY
+        ? [goalKey, UNDERSTANDING_CHECK_KEY]
+        : [UNDERSTANDING_CHECK_KEY],
+    ])),
+  })
+}
+
+export const HAIR_OUTCOME_MEANINGS: Readonly<Record<string, string>> = {
+  'spark_focus:the-color': 'The client is drawn to the color. This does not establish an exact tone, brightness or amount of contrast; clarify those visually.',
+  'spark_focus:the-cut': 'The client is drawn to the cut. Do not infer a request to copy the length.',
+  'spark_focus:the-layers': 'The client is drawn to the layers. Length and styling preferences remain separate.',
+  'spark_focus:the-movement': 'The client is drawn to the movement. Clarify whether this is the cut, styling, or both rather than assuming a technique.',
+  'spark_focus:the-length': 'The reference length caught the client’s attention. Compare their starting length and what they want to keep before proposing any length change.',
+  'spark_focus:the-fullness': 'The client likes the fullness. This is not consent to extensions; establish whether cut, styling, or added hair is appropriate.',
+  'keep_as_is:my-length': 'The client asked for their current length to be preserved.',
+  'keep_as_is:my-color': 'The client asked for their current color to be preserved.',
+  'keep_as_is:my-natural-roots': 'The client asked for their natural roots to be preserved.',
+  'keep_as_is:my-natural-texture': 'The client asked for their natural texture to be preserved.',
+  'look_match:match-selected-parts': 'The client wants the selected parts to resemble the reference closely, while preserving what they asked to keep. Unselected features are not requested.',
+  'look_match:adapt-selected-parts': 'The client wants an adaptation of the selected parts. Confirm the proposed differences rather than treating the reference as an exact target.',
+  'understanding_check:thats-right': 'The client confirmed this summary of their preferences, not a service plan or a guaranteed result.',
+}

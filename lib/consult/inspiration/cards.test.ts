@@ -12,20 +12,19 @@ import {
 } from './cards'
 import { GENERAL_SERVICE_INSPIRATION_CARD_PACK } from './packs/generalService'
 import {
-  HAIR_COLOR_INSPIRATION_CARD_PACK,
+  HAIR_COLOR_INSPIRATION_CARD_PACK_V3,
   HAIR_COLOR_INSPIRATION_CARD_PACK_V2,
 } from './packs/hairColor'
 import { evaluateConsultInspirationProgress } from './registry'
 
 const copy = defaultClientConsultInspirationCopy
 /**
- * 🔴 TWO packs, and both are current in the sense that matters: v3 is what a
- * new consult is served, and v2 is what a consult that started before P5g is
- * PINNED to for the rest of its life (`resolveConsultSessionInspirationPack`).
+ * Archived v2 and v3 packs remain readable for sessions pinned to them.
+ * The outcome-first packs have their own regression suite in hairOutcome.test.ts.
  * A test suite that only exercised the newest pack would let the archived one
  * rot silently, which is the one failure archiving exists to prevent.
  */
-const pack = HAIR_COLOR_INSPIRATION_CARD_PACK
+const pack = HAIR_COLOR_INSPIRATION_CARD_PACK_V3
 const packV2 = HAIR_COLOR_INSPIRATION_CARD_PACK_V2
 const PRO = 'Susie'
 
