@@ -41,8 +41,8 @@ export const defaultClientConsultInspirationCopy: BrandClientConsultInspirationC
 
     cards: {
       visualAreaNames: {
-        "color_roots": "At the roots",
-        "color_root_change": "Your root color",
+        "color_roots": "Color to consider for your roots",
+        "color_root_change": "Choosing your root color",
         "color_root_blend": "Where the color meets the roots",
         "color_lightness": "The lightest part",
         "color_tone": "The shade in this part",
@@ -76,7 +76,7 @@ export const defaultClientConsultInspirationCopy: BrandClientConsultInspirationC
       // A pack may word a shared question its own way by prefixing the key
       // with its pack id; the bare key is the fallback every pack gets.
       prompts: {
-        "color_roots": "How do you feel about the root color in this part of the picture?",
+        "color_roots": "For your roots, do you like how light or dark this area is?",
         "color_root_change": "Would you like your own root color lighter or darker?",
         "color_root_blend": "Looking here, where would you like the brightness to start?",
         "color_lightness": "How do you feel about how light this part is?",
@@ -105,7 +105,7 @@ export const defaultClientConsultInspirationCopy: BrandClientConsultInspirationC
       },
 
       optionLabels: {
-        "color_roots:match-reference": "I like this root color",
+        "color_roots:match-reference": "This light or dark at my roots",
         "color_roots:keep-natural": "Keep my natural root color",
         "color_roots:change-base": "I want to change my root color",
         "color_roots:not-sure": "Help me decide",
