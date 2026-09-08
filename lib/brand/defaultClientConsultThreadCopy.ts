@@ -11,6 +11,12 @@ import type { BrandClientConsultThreadCopy } from './types'
 // see", never a question that sounds like a test, and never a step that reads
 // as the app protecting itself from the client.
 export const defaultClientConsultThreadCopy: BrandClientConsultThreadCopy = {
+  management: {
+    edit: 'Edit answers', done: 'Done editing', revoke: 'Privacy & revoke consent',
+    revokeTitle: 'Stop this consult and revoke consent?',
+    revokeBody: 'No more intake, photos, or analysis can be added until you agree again. Temporary consult photos will be removed. Photos already saved to your chart stay on your chart.',
+    revokeConfirm: 'Revoke consent', keep: 'Keep consult',
+  },
   chartPhotoUsed: 'Starting-point chart photo dated {date}, confirmed by the client for this consultation.',
   chartPhotoConfirm: 'Chart photo from {date}. Still looks like this? Use this photo.',
   chartReviewUsed: 'Confirmed from the chart dated {date}: {answer}',

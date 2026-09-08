@@ -4,10 +4,12 @@ import { cardInspiration, CONSULT_FIXTURE_ID, threadFixture } from './fixtures/c
 import profileResults from './fixtures/consultProfileResults.json'
 import { plan, brief } from './fixtures/consultLookBrief'
 
-test('client chooses and confirms the look with first-visit totals and the proâ€™s expectation note', async ({ page }, testInfo) => {
+for (const inputsOpen of [true, false]) {
+test(`client chooses and confirms the look with first-visit totals (inputs open: ${inputsOpen})`, async ({ page }, testInfo) => {
   const base = `/api/v1/client/consult/${CONSULT_FIXTURE_ID}`
   const thread = threadFixture({ inspiration: cardInspiration, status: 'COMPLETED', plan: { version: 1 } })
-  let current = structuredClone(brief)
+  thread.controls = { inputsOpen, canEditAnswers: inputsOpen, canDelete: false, revokeAcceptanceId: null }
+  let current = { ...structuredClone(brief), inputOpen: inputsOpen }
   function results(): ConsultClientResultsDTO {
     return { ...profileResults as ConsultClientResultsDTO, consultId: CONSULT_FIXTURE_ID, lookPlan: plan, lookBrief: current }
   }
@@ -43,3 +45,4 @@ test('client chooses and confirms the look with first-visit totals and the proâ€
   expect(box).not.toBeNull()
   expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(page.viewportSize()?.width ?? 0)
 })
+}

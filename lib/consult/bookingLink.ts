@@ -203,3 +203,11 @@ export async function consultHasLiveBooking(
   })
   return booking !== null
 }
+
+/** Shared display/write eligibility. Resolve past bookings too before calling. */
+export function canDeleteUnbookedConsult(
+  session: Pick<Prisma.ConsultSessionGetPayload<Record<string, never>>, 'bookingId' | 'anchorLookPostId'>,
+  appointment: ConsultThreadBooking | null,
+): boolean {
+  return !session.bookingId && !appointment && Boolean(session.anchorLookPostId)
+}

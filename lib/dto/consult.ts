@@ -2418,7 +2418,17 @@ export type ConsultThreadBookCtaDTO = {
   gateNote: string | null
 }
 
+export type ConsultThreadControlsDTO = {
+  inputsOpen: boolean
+  canEditAnswers: boolean
+  canDelete: boolean
+  revokeAcceptanceId: string | null
+}
+
 export type ConsultThreadDTO = {
+  /** Optional for compatibility with older cached threads. Mutations remain authoritative. */
+  controls?: ConsultThreadControlsDTO
+
   consultId: string
   status: ConsultSessionStatus
   /** The consult's professional, and her public display name (honors nameDisplay). */

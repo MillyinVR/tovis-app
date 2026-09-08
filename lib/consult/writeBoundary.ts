@@ -45,7 +45,7 @@ import {
 } from './openWindow'
 import { CONSULT_MAX_ANALYSIS_CAPTURES } from './capture/registry'
 import { ConsultWriteError } from './errors'
-import { resolveThreadBooking } from './bookingLink'
+import { canDeleteUnbookedConsult, resolveThreadBooking } from './bookingLink'
 import {
   normalizeConsultIntakePayload,
   resolveConsultSessionIntakePack,
@@ -1393,7 +1393,7 @@ async function requireUnbookedClientConsult(tx: Prisma.TransactionClient, args: 
     consultSessionId: session.id, clientId: session.clientId, professionalId: session.professionalId,
     anchorLookPostId: session.anchorLookPostId, consultCreatedAt: session.createdAt, includePastBookings: true,
   })
-  if (session.bookingId || appointment || !session.anchorLookPostId) {
+  if (!canDeleteUnbookedConsult(session, appointment)) {
     throw new ConsultWriteError('INVALID_STATE', 'This consultation belongs to an appointment.')
   }
   return session

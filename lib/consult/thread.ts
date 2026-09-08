@@ -43,6 +43,7 @@ import type {
   ConsultThreadBookCtaDTO,
   ConsultThreadBookGateReasonDTO,
   ConsultThreadDTO,
+  ConsultThreadControlsDTO,
   ConsultThreadMessageDTO,
   ConsultThreadMessageStateDTO,
 } from '@/lib/dto/consult'
@@ -84,7 +85,7 @@ import {
   loadConsultCaptureState,
 } from './captureContract'
 import { loadAuthorizedClientConsultResults } from './clientResults'
-import { resolveThreadBooking, type ConsultThreadBooking } from './bookingLink'
+import { canDeleteUnbookedConsult, resolveThreadBooking, type ConsultThreadBooking } from './bookingLink'
 import { loadConsultFollowUpState } from './followUpContract'
 import { loadConsultInspirationState } from './inspirationContract'
 import { loadConsultIntakeState } from './intakeContract'
@@ -409,10 +410,20 @@ export async function loadConsultThread(args: {
     consultCreatedAt: session.createdAt,
   })
 
+  const deletionBooking = session.bookingId || booking ? booking : await resolveThreadBooking(prisma, {
+    consultSessionId: session.id, clientId: args.clientId, professionalId: session.professionalId,
+    anchorLookPostId: session.anchorLookPostId, consultCreatedAt: session.createdAt, includePastBookings: true,
+  })
+  const controls: ConsultThreadControlsDTO = {
+    inputsOpen: false, canEditAnswers: false,
+    canDelete: canDeleteUnbookedConsult(session, deletionBooking), revokeAcceptanceId: null,
+  }
+
   // ── Stopped ──────────────────────────────────────────────────────────────
   if (STOPPED_STATUSES.has(session.status)) {
     out.push(text('stopped', copy.stopped))
     return {
+      controls,
       consultId: session.id,
       status: session.status,
       professionalId: session.professionalId,
@@ -444,6 +455,10 @@ export async function loadConsultThread(args: {
   const consentOutstanding =
     !agreements || !agreements.requirements.every((r) => Boolean(r.currentAcceptance))
 
+  controls.inputsOpen = inputWindow.open && !consentOutstanding
+  controls.canEditAnswers = controls.inputsOpen
+  controls.revokeAcceptanceId = agreements?.requirements.find(r => r.kind === 'SENSITIVE_DATA_CONSENT')?.currentAcceptance?.id ?? null
+
   out.push(text('opening', consultThreadOpening(copy, { pro, service })))
 
   if (agreements) {
@@ -462,6 +477,7 @@ export async function loadConsultThread(args: {
 
   if (consentOutstanding) {
     return finish({
+      controls,
       session,
       look,
       pro,
@@ -574,7 +590,7 @@ export async function loadConsultThread(args: {
     out.push({
       kind: 'PHOTO_REQUEST',
       id: `photo:${CONSULT_EARLY_PHOTO_SHOT_KEY}`,
-      ...(!settled && earlyPhotoWritable(session.status) ? { chartPhotos: await loadClientChartPhotoOffers(stageArgs) } : {}),
+      ...(controls.inputsOpen && !settled && earlyPhotoWritable(session.status) ? { chartPhotos: await loadClientChartPhotoOffers(stageArgs) } : {}),
       author: 'APP',
       // The only step that can be open before the booking; there is nothing
       // ahead of it to wait for. Once a plan exists it is history, not a step.
@@ -582,7 +598,7 @@ export async function loadConsultThread(args: {
       // 🔴 Its own predicate, not the pack's: the early photo may be taken in
       // the early stage AND replaced later, which is exactly why one shared
       // "is capture open" flag would be wrong for one of the two.
-      shootable: earlyPhotoWritable(session.status),
+      shootable: controls.inputsOpen && earlyPhotoWritable(session.status),
       shot: EARLY_PHOTO_SHOT_DTO,
       shotPackVersion: CONSULT_EARLY_PHOTO_PACK_VERSION,
       schemaVersion: capture.shotPack.schemaVersion,
@@ -746,10 +762,9 @@ export async function loadConsultThread(args: {
         shotPackVersion: capture.shotPack.version,
         schemaVersion: capture.shotPack.schemaVersion,
         slot,
-        // True by construction inside this block — but stated rather than
-        // assumed, so a client never has to infer it from `state` (which means
-        // something else) or from the status (which is not its business).
-        shootable: guidedCaptureWritable(session.status),
+        // The stage and appointment window must both permit another photo.
+        // Message state still only determines the next step in the thread.
+        shootable: controls.inputsOpen && guidedCaptureWritable(session.status),
       })
     }
     const accepted = capture.slots.filter((s) => s.state === 'ACCEPTED').length
@@ -1031,6 +1046,7 @@ export async function loadConsultThread(args: {
   }
 
   return finish({
+    controls,
     session,
     look,
     pro,
@@ -1050,6 +1066,7 @@ type ThreadLook = Prisma.LookPostGetPayload<{
 }> | null
 
 async function finish(args: {
+  controls: ConsultThreadControlsDTO
   session: {
     id: string
     status: ConsultSessionStatus
@@ -1128,6 +1145,7 @@ async function finish(args: {
   })
 
   return {
+    controls: args.controls,
     consultId: args.session.id,
     status: args.session.status,
     professionalId: args.session.professionalId,
