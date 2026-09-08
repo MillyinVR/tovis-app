@@ -1,3 +1,15 @@
+import { loadLookBookingMaterialization } from '@/lib/consult/lookBookingMaterialization'
+import { consultLookServiceReadiness } from '@/lib/consult/lookConfirmation'
+import { authorProfessionalLookPlan } from '@/lib/consult/professionalLookPlan'
+import { loadProLookBriefPhotos } from '@/lib/consult/lookBriefPhotos'
+import { drainLookBriefReminders } from '@/lib/notifications/lookBriefReminders'
+import { createHold, finalizeBookingFromHold, approveConsultationAndMaterializeBooking } from '@/lib/booking/writeBoundary'
+import { resolveDiscoveryFinalize } from '@/lib/booking/resolveDiscoveryFinalize'
+import { getClientSubmittedBookingStatus } from '@/lib/booking/statusRules'
+import { minutesSinceMidnightInTimeZone } from '@/lib/time'
+import { answerConsultFollowUpQuestion } from '@/lib/consult/followUpContract'
+import { chooseClientConsultLookPath, acknowledgeConsultLookBrief, adjustProfessionalConsultLook } from '@/lib/consult/lookBrief'
+import { loadAuthorizedConsultBookingProposal } from '@/lib/consult/proposalEntry'
 // tests/integration/consult-lifecycle-open.test.ts
 //
 // P7a-3 — run-complete ≠ consult-closed, against real PostgreSQL.
@@ -19,6 +31,7 @@
 //     booking-anchored one. That arm did not exist at all before this slice.
 
 import {
+  BookingSource,
   BookingStatus,
   ConsultActorType,
   ConsultAnalysisRunStatus,
@@ -112,6 +125,7 @@ import type { ConsultThreadMessageDTO } from '@/lib/dto/consult'
 
 import {
   resetConsultLookFakes,
+  setFakeLookServices,
   setFakeAnalysisAchievability,
 } from './_support/consultLookFakes'
 import {
@@ -144,7 +158,9 @@ const client = () =>
   ({ type: ConsultActorType.CLIENT, id: fx.clientUserId }) as const
 
 beforeAll(async () => {
-  await seedLookConsultFixture(db, { tagPrefix: 'p7a3_open' })
+  const day = { enabled: true, start: '09:00', end: '18:00' }
+  await seedLookConsultFixture(db, { tagPrefix: 'p7a3_open', bookable: true, advanceNoticeMinutes: 0, maxDaysAhead: 365,
+    workingHours: { mon: day, tue: day, wed: day, thu: day, fri: day, sat: day, sun: day } })
 })
 
 beforeEach(() => {
@@ -157,9 +173,14 @@ beforeEach(() => {
   })
 })
 
+const extraServiceIds: string[] = []
+const extraCategoryIds: string[] = []
+
 afterAll(async () => {
   await db.booking.deleteMany({ where: { id: { in: bookingIds } } })
   await teardownLookConsultFixture(db)
+  await db.service.deleteMany({ where: { id: { in: extraServiceIds } } })
+  await db.serviceCategory.deleteMany({ where: { id: { in: extraCategoryIds } } })
   await db.$disconnect()
 })
 
@@ -691,4 +712,281 @@ describe('the appointment closes the document', () => {
     expect(early?.state).toBe('DONE')
     expect(t.nextOpenMessageId).toBeNull()
   })
+})
+
+
+describe('the first look plan is an honest draft', () => {
+  it('runs from one selfie, inspiration cards and upkeep without claiming completed history', async () => {
+    vi.stubEnv('AI_CONSULT_LOOK_PLANS_ENABLED', 'true')
+    try {
+      const lookId = await createLook(db, fx.balayageServiceId)
+      const sessionId = await runConsultToCompletion(db, lookId, 'p8-minimum',
+        { maintenance_tolerance: 'medium' }, { provisional: true })
+      const current = await thread(sessionId)
+      const plan = ofKind(current.messages, 'PLAN')[0]?.results?.lookPlan
+      expect(plan?.status).toBe('NEEDS_INPUT')
+      expect(plan?.provisional).toBe(true)
+      expect(plan?.summary).toContain('Keep your length')
+      expect(plan?.paths[0]?.visits[0]?.steps[0]?.serviceId).toBe(fx.balayageServiceId)
+      const intake = await db.consultRevision.findFirstOrThrow({
+        where: { consultSessionId: sessionId, kind: 'INTAKE' }, orderBy: { revision: 'desc' },
+      })
+      expect(intake.payload).toMatchObject({ complete: false, answers: { maintenance_tolerance: 'medium' } })
+      expect(await db.consultCapture.count({ where: { consultSessionId: sessionId, status: 'ACCEPTED' } })).toBe(1)
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+})
+
+describe('choosing a versioned look', () => {
+  it('requires an explicit choice, saves a separate required-step estimate and rejects a stale choice', async () => {
+    vi.stubEnv('AI_CONSULT_LOOK_PLANS_ENABLED', 'true')
+    try {
+      const lookId = await createLook(db, fx.balayageServiceId)
+      const sessionId = await runConsultToCompletion(db, lookId, 'p8-choice')
+      const current = await thread(sessionId)
+      const results = ofKind(current.messages, 'PLAN')[0]?.results
+      expect(results?.lookPlan?.status).toBe('READY_TO_CHOOSE')
+      expect(results?.lookBrief?.version).toBe(1)
+      expect(current.book.enabled).toBe(false)
+      expect(current.book.reason).toBe('LOOK_CHOICE_REQUIRED')
+      const scope = { consultSessionId: sessionId, clientId: fx.clientId, actorUserId: fx.clientUserId }
+      const args = { ...scope, expectedVersion: 1, pathIndex: 0, locationType: 'SALON' as const, idempotencyKey: 'p8-choice-once' }
+      const chosen = await chooseClientConsultLookPath(args)
+      expect(chosen).toMatchObject({ version: 2, selectedPathIndex: 0, selectedLocationType: 'SALON', clientConfirmed: false, professionalConfirmed: false })
+      expect(await chooseClientConsultLookPath(args)).toEqual(chosen)
+      await expect(chooseClientConsultLookPath({ ...args, idempotencyKey: 'stale' })).rejects.toMatchObject({ code: 'ANALYSIS_SUPERSEDED' })
+      const estimates = await db.consultServiceEstimate.findMany({ where: { consultSessionId: sessionId }, orderBy: { createdAt: 'asc' }, include: { lines: true } })
+      expect(estimates).toHaveLength(2)
+      expect(estimates[0]?.refusalCode).toBe('LOOK_PLAN_SELECTION_REQUIRED')
+      expect(estimates[1]?.lines.map(line => line.source)).toEqual(['LOOK_PLAN_REQUIRED'])
+      const proposal = await loadAuthorizedConsultBookingProposal({ ...scope, locationType: 'SALON', enhancementSelection: [] })
+      expect(proposal.available).toBe(true)
+      expect(proposal.proposal?.lines).toHaveLength(1)
+      expect((await thread(sessionId)).book.proposalConsultId).toBe(sessionId)
+      const clientConfirmed = await acknowledgeConsultLookBrief({ ...scope, expectedVersion: 2 })
+      expect(clientConfirmed?.clientConfirmed).toBe(true)
+      const proScope = { consultSessionId: sessionId, professionalId: fx.professionalId, actorUserId: fx.proUserId }
+      expect((await acknowledgeConsultLookBrief({ ...proScope, expectedVersion: 2 }))?.professionalConfirmed).toBe(true)
+      const offeringId = chosen?.pathEstimates[0]?.visits[0]?.steps[0]?.offeringId
+      if (!offeringId) throw new Error('Missing selected offering')
+      const adjustment = { field: 'PRICE' as const, pathIndex: 0, visitIndex: 0, offeringId,
+        locationType: 'SALON' as const, value: '125.50', reason: 'The client wants a softer first step.', professionalId: fx.professionalId }
+      const adjusted = await adjustProfessionalConsultLook({ ...proScope, expectedVersion: 2, adjustments: [adjustment], idempotencyKey: 'pro-adjust-once' })
+      expect(adjusted).toMatchObject({ version: 3, clientConfirmed: false, professionalConfirmed: false })
+      expect(adjusted?.pathEstimates[0]?.firstAppointment.price).toBe('125.50')
+      expect((await loadAuthorizedConsultBookingProposal({ ...scope, locationType: 'SALON', enhancementSelection: [] })).proposal?.startingAtPrice).toBe('125.50')
+      await expect(acknowledgeConsultLookBrief({ ...scope, expectedVersion: 2 })).rejects.toMatchObject({ code: 'ANALYSIS_SUPERSEDED' })
+      const old = await db.consultLookBriefVersion.findFirstOrThrow({ where: { consultSessionId: sessionId, version: 2 } })
+      expect(old.clientAcknowledgedAt).not.toBeNull()
+      expect(old.professionalAcknowledgedAt).not.toBeNull()
+      await changeAnIntakeAnswer(sessionId, 'p10-confirmation-reset')
+      const updated = ofKind((await thread(sessionId)).messages, 'PLAN')[0]?.results?.lookBrief
+      expect(updated).toMatchObject({ version: 4, awaitingAnalysis: true, clientConfirmed: false, professionalConfirmed: false })
+      expect(updated?.adjustments).toEqual([adjustment])
+      await expect(acknowledgeConsultLookBrief({ ...scope, expectedVersion: 4 })).rejects.toMatchObject({ code: 'ANALYSIS_SUPERSEDED' })
+      expect((await thread(sessionId)).book.enabled).toBe(false)
+      const manualInput = { expectedVersion: 4, idempotencyKey: 'pro-authored-plan', tier: 'CLOSE' as const,
+        title: 'Soft dimension', summary: 'Keep your length with softer brightness around your face.',
+        whyThisWorksForYou: 'This matches your preferred softness and upkeep.', reviewNote: 'Reviewed the new history and current starting point.',
+        reviewedClientDetails: true as const, visits: [[fx.balayageOfferingId], [fx.balayageOfferingId]] }
+      const authored = await authorProfessionalLookPlan({ ...proScope, input: manualInput })
+      expect(authored).toMatchObject({ version: 5, awaitingAnalysis: false, selectedPathIndex: null, invalidatedProfessionalPlan: false })
+      expect(authored?.professionalPlan?.paths[0]?.sessionCount).toBe(2)
+      expect(await authorProfessionalLookPlan({ ...proScope, input: manualInput })).toEqual(authored)
+      const proResults = ofKind((await thread(sessionId)).messages, 'PLAN')[0]?.results
+      expect(proResults?.lookPlan?.tier).toBe('CLOSE')
+      expect(proResults?.lookPlan?.status).toBe('READY_TO_CHOOSE')
+      await chooseClientConsultLookPath({ ...scope, expectedVersion: 5, pathIndex: 0, locationType: 'SALON', idempotencyKey: 'choose-pro-plan' })
+      const proProposal = await loadAuthorizedConsultBookingProposal({ ...scope, locationType: 'SALON', enhancementSelection: [] })
+      expect(proProposal.proposal?.totalDurationMinutes).toBe(60)
+      expect(proProposal.proposal?.startingAtPrice).toBe('180.00')
+      expect((await rerunNow(sessionId)).result).toBe('COMPLETED')
+      const refreshed = ofKind((await thread(sessionId)).messages, 'PLAN')[0]?.results
+      expect(refreshed?.lookBrief?.invalidatedProfessionalPlan).toBe(true)
+      expect(refreshed?.lookPlan?.status).toBe('PRO_REVIEW')
+      expect((await thread(sessionId)).book.enabled).toBe(false)
+
+    } finally { vi.unstubAllEnvs() }
+  }, 30_000)
+})
+
+describe('color and layers from an extensions reference', () => {
+  it('asks the relevant color history before choosing required color and cut, never extensions', async () => {
+    vi.stubEnv('AI_CONSULT_LOOK_PLANS_ENABLED', 'true')
+    try {
+      const category = await db.serviceCategory.create({ data: { name: `${fx.tag} hair shape`, slug: `${fx.tag}-hair-shape`, consultFamily: 'HAIR' } })
+      extraCategoryIds.push(category.id)
+      const extensions = await db.service.create({ data: { name: `${fx.tag} Extensions`, categoryId: category.id, defaultDurationMinutes: 180, minPrice: 300 } })
+      const cut = await db.service.create({ data: { name: `${fx.tag} Layered cut`, categoryId: category.id, defaultDurationMinutes: 30, minPrice: 0 } })
+      extraServiceIds.push(extensions.id, cut.id)
+      await db.professionalServiceOffering.createMany({ data: [
+        { professionalId: fx.professionalId, serviceId: extensions.id, offersInSalon: true, salonPriceStartingAt: 300, salonDurationMinutes: 180 },
+        { professionalId: fx.professionalId, serviceId: cut.id, offersInSalon: true, salonPriceStartingAt: 0, salonDurationMinutes: 30 },
+      ] })
+      const color = await db.service.findUniqueOrThrow({ where: { id: fx.balayageServiceId } })
+      setFakeLookServices([color.name, cut.name])
+      const lookId = await createLook(db, extensions.id)
+      const sessionId = await runConsultToCompletion(db, lookId, 'p8-color-not-extensions', {
+        maintenance_tolerance: 'medium', change_scale: 'noticeable', chemical_history: 'over-12-months', prior_lightening: 'never', prior_reaction: 'no',
+      }, { packVersion: 3 })
+      const first = await thread(sessionId)
+      const result = ofKind(first.messages, 'PLAN')[0]?.results
+      expect(result?.lookPlan?.status).toBe('NEEDS_INPUT')
+      expect(result?.lookPlan?.paths[0]?.visits[0]?.steps.map(step => step.serviceId)).toEqual([color.id, cut.id])
+      expect(first.book.enabled).toBe(false)
+      const fallback = { provider: async () => { throw new Error('Test uses canonical safety questions') } }
+      for (const key of ['box_dye_history', 'henna_plant_dye_history', 'other_chemical_history']) {
+        const current = await thread(sessionId)
+        expect(current.messages.some(message => message.kind === 'FOLLOW_UP' && message.questionKey === key)).toBe(true)
+        await answerConsultFollowUpQuestion({ consultSessionId: sessionId, clientId: fx.clientId, actor: client(),
+          questionKey: key, selectedValues: ['never'], idempotencyKey: `cross-history-${key}` }, fallback)
+      }
+      // The caller kept chart copies, so the rerun can reuse the accepted images.
+      expect((await rerunNow(sessionId)).result).toBe('COMPLETED')
+      const ready = ofKind((await thread(sessionId)).messages, 'PLAN')[0]?.results
+      expect(ready?.lookPlan?.status).toBe('READY_TO_CHOOSE')
+      const version = ready?.lookBrief?.version
+      if (!version) throw new Error('Missing current look version')
+      const chosen = await chooseClientConsultLookPath({ consultSessionId: sessionId, clientId: fx.clientId, actorUserId: fx.clientUserId,
+        expectedVersion: version, pathIndex: 0, locationType: 'SALON', idempotencyKey: 'choose-color-cut' })
+      expect(chosen?.additionalClientAnswers.map(item => item.questionKey)).toEqual(['box_dye_history', 'henna_plant_dye_history', 'other_chemical_history'])
+      const proposal = await loadAuthorizedConsultBookingProposal({ consultSessionId: sessionId, clientId: fx.clientId, actorUserId: fx.clientUserId,
+        locationType: 'SALON', enhancementSelection: [] })
+      expect(proposal.available).toBe(true)
+      expect(proposal.proposal?.serviceId).toBe(color.id)
+      expect(proposal.proposal?.lines.map(line => line.serviceName)).toEqual([color.name, cut.name])
+      expect(proposal.proposal?.totalDurationMinutes).toBe(90)
+      expect(proposal.proposal?.startingAtPrice).toBe('180.00')
+      const offering = {
+        id: fx.balayageOfferingId, professionalId: fx.professionalId, serviceId: color.id,
+        serviceCategoryId: fx.categoryId, offersInSalon: true, offersMobile: false,
+        salonDurationMinutes: 50, mobileDurationMinutes: null,
+        salonPriceStartingAt: new Prisma.Decimal('180'), mobilePriceStartingAt: null, professionalTimeZone: ZONE,
+      }
+      const anchor = new Date(Date.now() + 4 * 24 * 60 * 60_000)
+      anchor.setUTCHours(20, 0, 0, 0)
+      const start = new Date(anchor.getTime() + (600 - minutesSinceMidnightInTimeZone(anchor, ZONE)) * 60_000)
+      const held = await createHold({ clientId: fx.clientId, bookingEntryPoint: 'DIRECT_PROFILE', addOnIds: [],
+        consultId: sessionId, offering, requestedStart: start, requestedLocationId: fx.locationId,
+        locationType: 'SALON', clientAddressId: null })
+      expect(held.hold.durationMinutes).toBe(90)
+      const discovery = await resolveDiscoveryFinalize({ clientId: fx.clientId, clientUserId: fx.clientUserId,
+        professionalId: fx.professionalId, offeringId: offering.id, lookPostId: lookId, mediaId: null,
+        source: BookingSource.REQUESTED, aftercare: false })
+      expect(discovery.sourceLookPostId).toBe(lookId)
+      const finalized = await finalizeBookingFromHold({ clientId: fx.clientId, bookingEntryPoint: 'DIRECT_PROFILE',
+        holdId: held.hold.id, openingId: null, addOnIds: [], consultEnhancementLineIds: [], locationType: 'SALON',
+        source: BookingSource.REQUESTED, consultId: sessionId, initialStatus: getClientSubmittedBookingStatus(true),
+        rebookOfBookingId: null, offering, discovery, cancellationPolicySnapshot: null,
+        cancellationPolicyAcceptedAt: null, fallbackTimeZone: 'UTC', idempotencyKey: 'cross-color-cut-booking' })
+      bookingIds.push(finalized.booking.id)
+      const booked = await db.booking.findUniqueOrThrow({ where: { id: finalized.booking.id }, select: {
+        totalDurationMinutes: true, sourceConsultSessionId: true, sourceLookPostId: true,
+        serviceItems: { select: { serviceId: true } },
+      } })
+      expect(booked.totalDurationMinutes).toBe(90)
+      expect(booked.sourceConsultSessionId).toBe(sessionId)
+      expect(booked.sourceLookPostId).toBe(lookId)
+      expect(booked.serviceItems.map(item => item.serviceId).sort()).toEqual([color.id, cut.id].sort())
+      const reviewScope = { consultSessionId: sessionId, professionalId: fx.professionalId, actorUserId: fx.proUserId }
+      const photos = await loadProLookBriefPhotos(reviewScope)
+      expect(photos.captures.length).toBeGreaterThan(0)
+      expect(photos.inspirationUrl).not.toBeNull()
+      await expect(loadProLookBriefPhotos({ ...reviewScope, actorUserId: fx.clientUserId })).rejects.toMatchObject({ code: 'NOT_FOUND' })
+      expect(await db.$transaction(tx => consultLookServiceReadiness(tx, sessionId, booked.sourceConsultSessionId ? finalized.booking.id : 'missing'))).toContain('must confirm')
+      const remindAt = new Date(start.getTime() - 60 * 60_000)
+      await drainLookBriefReminders(remindAt)
+      const reminderWhere = { professionalId: fx.professionalId, dedupeKey: { startsWith: `look-review:${chosen?.id}:` } }
+      expect(await db.notification.count({ where: reminderWhere })).toBe(1)
+      await drainLookBriefReminders(remindAt)
+      expect(await db.notification.count({ where: reminderWhere })).toBe(1)
+      if (!chosen) throw new Error('Missing chosen version')
+      await acknowledgeConsultLookBrief({ ...reviewScope, expectedVersion: chosen.version })
+      await acknowledgeConsultLookBrief({ consultSessionId: sessionId, clientId: fx.clientId,
+        actorUserId: fx.clientUserId, expectedVersion: chosen.version })
+      await drainLookBriefReminders(new Date(start.getTime() - 30 * 60_000))
+      expect(await db.notification.count({ where: reminderWhere })).toBe(1)
+      expect(await db.$transaction(tx => consultLookServiceReadiness(tx, sessionId, finalized.booking.id))).toBeNull()
+      // Arrival closes client refinements, but the pro can still correct the
+      // shared plan during the in-person consultation before service begins.
+      await db.booking.update({ where: { id: finalized.booking.id }, data: { status: 'IN_PROGRESS', sessionStep: 'CONSULTATION' } })
+      await expect(changeAnIntakeAnswer(sessionId, 'client-after-arrival')).rejects.toThrow()
+      // A later pro correction does not silently resize or reprice the booking.
+      let revised = await adjustProfessionalConsultLook({ ...reviewScope, expectedVersion: chosen.version,
+        idempotencyKey: 'booked-look-revised-time', adjustments: [
+          { field: 'PRICE', pathIndex: 0, visitIndex: 0, offeringId: fx.balayageOfferingId, locationType: 'SALON',
+            value: '200.00', reason: 'More work for this starting point', professionalId: fx.professionalId },
+          { field: 'DURATION', pathIndex: 0, visitIndex: 0, offeringId: fx.balayageOfferingId, locationType: 'SALON',
+            value: '120', reason: 'Allow enough time', professionalId: fx.professionalId },
+        ] })
+      if (!revised) throw new Error('Missing revised brief')
+      revised = await chooseClientConsultLookPath({ consultSessionId: sessionId, clientId: fx.clientId,
+        actorUserId: fx.clientUserId, expectedVersion: revised.version, pathIndex: 0,
+        locationType: 'SALON', idempotencyKey: 'arrival-reviewed-choice' })
+      if (!revised) throw new Error('Missing arrival choice')
+      expect(revised.reservedDurationMinutes).toBe(90)
+      expect(revised.pathEstimates[0]?.firstAppointment.durationMinutes).toBe(150)
+      const timing = await db.$transaction(tx => loadLookBookingMaterialization(tx, { consultSessionId: sessionId, locationType: 'SALON' }))
+      expect(timing?.durations.get(fx.balayageOfferingId)).toBe(120)
+      const cutOffering = await db.professionalServiceOffering.findFirstOrThrow({ where: { professionalId: fx.professionalId, serviceId: cut.id } })
+      const quotedItems = [
+        { offeringId: fx.balayageOfferingId, serviceId: color.id, itemType: 'BASE', sortOrder: 0, price: '200.00', durationMinutes: 1 },
+        { offeringId: cutOffering.id, serviceId: cut.id, itemType: 'BASE', sortOrder: 1, price: '0.00', durationMinutes: 1 },
+      ]
+      const approval = await db.consultationApproval.create({ data: { bookingId: finalized.booking.id, clientId: fx.clientId,
+        proId: fx.professionalId, status: 'PENDING', proposedTotal: 200,
+        proposedServicesJson: { items: quotedItems, lookBriefVersionId: chosen.id } } })
+      const approveArgs = { bookingId: finalized.booking.id, clientId: fx.clientId, professionalId: fx.professionalId }
+      await expect(approveConsultationAndMaterializeBooking(approveArgs)).rejects.toMatchObject({ code: 'INVALID_SERVICE_ITEMS' })
+      await db.consultationApproval.update({ where: { id: approval.id }, data: {
+        proposedServicesJson: { items: quotedItems, lookBriefVersionId: revised.id } } })
+      const block = await db.calendarBlock.create({ data: { professionalId: fx.professionalId, locationId: fx.locationId,
+        startsAt: new Date(start.getTime() + 120 * 60_000), endsAt: new Date(start.getTime() + 140 * 60_000), note: 'Look extension test' } })
+      try { await expect(approveConsultationAndMaterializeBooking(approveArgs)).rejects.toMatchObject({ code: 'TIME_BLOCKED' }) }
+      finally { await db.calendarBlock.delete({ where: { id: block.id } }) }
+      expect((await db.booking.findUniqueOrThrow({ where: { id: finalized.booking.id } })).totalDurationMinutes).toBe(90)
+      await approveConsultationAndMaterializeBooking(approveArgs)
+      const agreedBooking = await db.booking.findUniqueOrThrow({ where: { id: finalized.booking.id } })
+      expect(agreedBooking.totalDurationMinutes).toBe(150)
+      expect(agreedBooking.serviceSubtotalSnapshot?.toFixed(2)).toBe('200.00')
+      await expect(db.$executeRaw`UPDATE "Booking" SET "sessionStep" = 'SERVICE_IN_PROGRESS' WHERE id = ${finalized.booking.id}`)
+        .rejects.toThrow('both participants must confirm')
+      await acknowledgeConsultLookBrief({ ...reviewScope, expectedVersion: revised.version })
+      await acknowledgeConsultLookBrief({ consultSessionId: sessionId, clientId: fx.clientId, actorUserId: fx.clientUserId, expectedVersion: revised.version })
+      expect(await db.$transaction(tx => consultLookServiceReadiness(tx, sessionId, finalized.booking.id))).toBeNull()
+      await expect(db.$transaction(async tx => {
+        await tx.$executeRaw`UPDATE "Booking" SET "sessionStep" = 'SERVICE_IN_PROGRESS' WHERE id = ${finalized.booking.id}`
+        expect((await tx.booking.findUniqueOrThrow({ where: { id: finalized.booking.id } })).sessionStep).toBe('SERVICE_IN_PROGRESS')
+        throw new Error('verified service start; roll back test transition')
+      })).rejects.toThrow('verified service start; roll back test transition')
+      const serviceStart = new Date(Date.now() - 10 * 60 * 60_000)
+      const serviceEnd = new Date(serviceStart.getTime() + 75 * 60_000)
+      await db.bookingCloseoutAuditLog.createMany({ data: [
+        { bookingId: finalized.booking.id, professionalId: fx.professionalId, action: 'SESSION_STEP_CHANGED', route: 'test-service-start',
+          createdAt: serviceStart, oldValue: { sessionStep: 'BEFORE_PHOTOS' }, newValue: { sessionStep: 'SERVICE_IN_PROGRESS' } },
+        { bookingId: finalized.booking.id, professionalId: fx.professionalId, action: 'SESSION_STEP_CHANGED', route: 'test-service-finish',
+          createdAt: serviceEnd, oldValue: { sessionStep: 'SERVICE_IN_PROGRESS' }, newValue: { sessionStep: 'FINISH_REVIEW' } },
+      ] })
+      // Exercise the database completion hook. Delayed payment/aftercare closeout
+      // must not teach the consult that 75 minutes of service took ten hours.
+      await db.booking.update({ where: { id: finalized.booking.id }, data: { status: 'COMPLETED', sessionStep: 'DONE',
+        startedAt: serviceStart, finishedAt: new Date(), serviceSubtotalSnapshot: 200 } })
+      const outcome = await db.consultLookVisitOutcome.findUniqueOrThrow({ where: { bookingId: finalized.booking.id } })
+      expect(outcome.observedServiceMinutes).toBe(75)
+      expect(outcome.finalServiceSubtotal?.toFixed(2)).toBe('200.00')
+      await expect(db.consultLookVisitOutcome.update({ where: { id: outcome.id }, data: { observedServiceMinutes: 999 } })).rejects.toThrow('immutable')
+      const completed = ofKind((await thread(sessionId)).messages, 'PLAN')[0]?.results?.lookBrief
+      expect(completed?.completedVisit).toMatchObject({ observedServiceMinutes: 75, finalServiceSubtotal: '200.00', aftercare: null })
+      const care = await db.aftercareSummary.create({ data: { bookingId: finalized.booking.id, notes: 'Private draft',
+        careSections: { create: { label: 'At home', body: 'Use the agreed gentle routine.', sortOrder: 0 } } } })
+      expect(ofKind((await thread(sessionId)).messages, 'PLAN')[0]?.results?.lookBrief?.completedVisit?.aftercare).toBeNull()
+      await db.aftercareSummary.update({ where: { id: care.id }, data: { sentToClientAt: new Date(), notes: 'Your home care plan' } })
+      expect(ofKind((await thread(sessionId)).messages, 'PLAN')[0]?.results?.lookBrief?.completedVisit?.aftercare)
+        .toMatchObject({ notes: 'Your home care plan', sections: [{ label: 'At home', body: 'Use the agreed gentle routine.' }] })
+      await expect(db.consultLookVisitOutcome.create({ data: { ...outcome, id: 'forged-outcome', bookingId: 'missing-booking-for-forged-feedback' } }))
+        .rejects.toThrow('completed consultation feedback requires')
+    } finally { vi.unstubAllEnvs() }
+  }, 30_000)
 })

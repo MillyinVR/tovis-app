@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
-import { ConsultProviderCallKind, type ConsultServiceFamily } from '@prisma/client'
+import { ConsultProviderCallKind, ConsultServiceFamily } from '@prisma/client'
 
 import type {
   ConsultAnalysisEvidenceDTO,
@@ -35,7 +35,14 @@ import { CONSULT_SERVICE_FAMILY_LABELS } from './serviceScope'
 import { ConsultAnalysisProviderError, cleanText, enumValue, exactKeys } from './analysisValidation'
 export { ConsultAnalysisProviderError } from './analysisValidation'
 
-export const CONSULT_ANALYSIS_SCHEMA_VERSION = 5
+import {
+  buildConsultLookPlanOutputSchema, consultLookPlanMenuContext,
+  CONSULT_LOOK_PLAN_INSTRUCTIONS, sanitizeConsultLookPlan,
+  type ConsultLookPlanProviderOutput,
+} from './lookPlan'
+import type { ConsultProMenuOffering } from './proMenu'
+
+export const CONSULT_ANALYSIS_SCHEMA_VERSION = 6
 // v2 (2026-08-27): the capture pack may be partial — the prompt lists missing
 // views and pins their observations to UNKNOWN.
 // v3 (2026-09-03, service-aware consult): the analysis is told WHICH service
@@ -78,7 +85,7 @@ export const CONSULT_ANALYSIS_SCHEMA_VERSION = 5
 // accepts only the explicit old (4/v5) and new (5/v6) pairs, allowing the
 // previous deployment to finish requests while the new deployment builds.
 // Historical revisions retain their original profile shape when read.
-export const CONSULT_ANALYSIS_PROMPT_VERSION = 'service-analysis-v6'
+export const CONSULT_ANALYSIS_PROMPT_VERSION = 'service-analysis-v7'
 export const CONSULT_ANALYSIS_DEFAULT_MODEL = 'claude-sonnet-5'
 /**
  * Per-call ceilings, because the two calls are nothing like each other.
@@ -451,6 +458,7 @@ export const CONSULT_ANALYSIS_CORE_FIELDS = [
 
 
 export type ConsultAnalysisProviderOutput = {
+  lookPlan?: ConsultLookPlanProviderOutput
   profile: ConsultAnalysisFeatureProfile
   styleDirections: ConsultStyleDirection[]
   core: ConsultAnalysisCore
@@ -492,6 +500,8 @@ export type ConsultAnalysisServiceContext = {
   serviceName: string | null
   /** The professional's active menu in this category, by exact name. */
   menuServiceNames: readonly string[]
+  menuOfferings?: readonly ConsultProMenuOffering[]
+  lookPlanning?: boolean
 }
 
 export type ConsultAnalysisIntakeItem = {
@@ -850,14 +860,28 @@ export function recommendationServiceOptions(
  * Call 1 of 2 — the feature profile (Stage 3b): what will flatter this client.
  * Measured at 50 of the ~72-unit budget.
  */
+const STYLE_DIRECTIONS_SCHEMA = {
+        type: 'object',
+        additionalProperties: false,
+        required: [...CONSULT_STYLE_DOMAINS],
+        properties: Object.fromEntries(
+          CONSULT_STYLE_DOMAINS.map((domain) => [
+            domain,
+            { $ref: '#/$defs/styleDirection' },
+          ]),
+        ),
+      }
+
 export function buildConsultProfileOutputSchema(args: {
   suppliedShotKeys: readonly ConsultCaptureShotKeyDTO[]
+  includeStyleDirections?: boolean
 }): Record<string, unknown> {
   return {
     type: 'object',
     additionalProperties: false,
-    required: ['profile'],
+    required: args.includeStyleDirections ? ['profile', 'styleDirections'] : ['profile'],
     properties: {
+      ...(args.includeStyleDirections ? { styleDirections: STYLE_DIRECTIONS_SCHEMA } : {}),
       profile: {
         type: 'object',
         additionalProperties: false,
@@ -871,6 +895,7 @@ export function buildConsultProfileOutputSchema(args: {
       },
     },
     $defs: {
+      ...(args.includeStyleDirections ? { styleDirection: STYLE_DIRECTION_DEF, citedEvidence: citedEvidenceDef(args.suppliedShotKeys) } : {}),
       confidence: CONFIDENCE_DEF,
       evidence: evidenceDef(args.suppliedShotKeys),
     },
@@ -914,8 +939,9 @@ export function buildConsultDirectionOutputSchema(args: {
   menuServiceNames: readonly string[]
   safetyCodes: readonly ConsultAnalysisSafetyCode[]
   suppliedShotKeys: readonly ConsultCaptureShotKeyDTO[]
+  lookPlanContext?: { menu: readonly ConsultProMenuOffering[]; profile: ConsultAnalysisFeatureProfile; styleDirections: ConsultStyleDirection[] }
 }): Record<string, unknown> {
-  return {
+  const schema = {
     type: 'object',
     additionalProperties: false,
     required: [
@@ -956,17 +982,7 @@ export function buildConsultDirectionOutputSchema(args: {
       // stored artefact is still the ordered ARRAY every reader expects —
       // `sanitizeStyleDirections` turns the object into it, in domain order,
       // which is the ordering it used to have to impose by hand.
-      styleDirections: {
-        type: 'object',
-        additionalProperties: false,
-        required: [...CONSULT_STYLE_DOMAINS],
-        properties: Object.fromEntries(
-          CONSULT_STYLE_DOMAINS.map((domain) => [
-            domain,
-            { $ref: '#/$defs/styleDirection' },
-          ]),
-        ),
-      },
+      styleDirections: STYLE_DIRECTIONS_SCHEMA,
       serviceLens: {
         type: 'object',
         additionalProperties: false,
@@ -1030,17 +1046,7 @@ export function buildConsultDirectionOutputSchema(args: {
         type: 'array',
         minItems: 1,
         maxItems: 3,
-        // 🔴 TWO is the real minimum, and the grammar cannot say so: `minItems`
-        // survives this boundary only at 0 or 1
-        // (lib/consult/providerSchema.ts). The client results screen refuses
-        // to serve fewer than two recommendation directions
-        // (`requireClientResultFraming`), so a one-item answer produces a
-        // consult that completes, stores, and then cannot be shown to the
-        // client who paid for it. Measured on 2026-09-04: three consecutive
-        // live runs each returned exactly one. Hence the description and the
-        // prompt rule; the array bound is the most the schema can carry.
-        description:
-          'TWO or three recommendations — never one. Naming a service from the menu AND the consultation option is a valid, complete pair, and is the right answer whenever only one menu service fits.',
+        description: 'One to three useful recommendations; do not invent choices to fill a count.',
         items: {
           type: 'object',
           additionalProperties: false,
@@ -1070,6 +1076,23 @@ export function buildConsultDirectionOutputSchema(args: {
       citedEvidence: citedEvidenceDef(args.suppliedShotKeys),
       hairEvidence: hairEvidenceDef(args.suppliedShotKeys),
       styleDirection: STYLE_DIRECTION_DEF,
+    },
+  }
+  if (!args.lookPlanContext) return schema
+  const { recommendations: _legacy, styleDirections: _styles, ...properties } = schema.properties
+  const { styleDirection: _styleDef, citedEvidence: _citedDef, ...definitions } = schema.$defs
+  void _legacy; void _styles; void _styleDef; void _citedDef
+  return {
+    ...schema,
+    $defs: definitions,
+    required: [...schema.required.filter(key => key !== 'recommendations' && key !== 'styleDirections'), 'lookPlan'],
+    properties: {
+      ...properties,
+      lookPlan: buildConsultLookPlanOutputSchema({
+        family: ConsultServiceFamily.HAIR,
+        menu: args.lookPlanContext.menu,
+        observations: { profile: args.lookPlanContext.profile },
+      }),
     },
   }
 }
@@ -1129,17 +1152,7 @@ export const CONSULT_ANALYSIS_PROFILE_SYSTEM_PROMPT = [
  * arrives as text; this call reads where she is starting from and says what it
  * means for the named service.
  */
-export const CONSULT_ANALYSIS_DIRECTION_SYSTEM_PROMPT = [
-  'You are a cosmetic-only styling consultation engine for a professional beauty platform.',
-  'Inputs: a consultation context naming the service family, the service category, the specific service the client is considering when one is known, the professional’s menu in that category, and the capture pack this consult uses; the client’s intake as the questions and answers she saw (with their immutable option codes); one or more labeled daylight photos from that pack; a reading of the client’s INSPIRATION reference; and the client’s FEATURE PROFILE, already established from these same photographs by an earlier pass.',
-  'The feature profile is given to you as settled fact. Do not re-derive it, do not contradict it, and do not restate it as though it were your own observation. Use it: every style direction and every recommendation must lean on the specific profile fields that support it, and a field the profile marked UNKNOWN is not available to lean on.',
-  'You produce: the hair core observations, exactly one style direction per domain (HAIR_COLOR_HARMONY, CUT_AND_SHAPE, BANGS, BROWS, LASHES, MAKEUP, COLOR_PALETTE), a service lens, safety flags, and service recommendations.',
-  'The hair core is two levels and four observations. baseLevel is the depth at the root — the darkest dominant color on the head. lightestLevel is the lightest dominant color, wherever it sits. They are two separate readings, not a range: a solid single-process has the SAME value in both, and reporting them equal is the correct answer, not a failure. Balayage, highlights and a grown-out root are where they differ. How sure you are goes in each observation’s confidence range, never into the gap between the two levels. Both read from the hair views only.',
-  'Everything you write is FOR the named service. The service lens describes the client’s goal, history, constraints, maintenance and appointment context as they bear on THAT service; recommendations are services from the professional’s menu (named exactly as the menu names them) or a consultation with the professional; the hair core observations are filled from the hair views when hair is the subject and set to UNKNOWN when it is not.',
-  ...SHARED_CONDUCT,
-  'You are also given what the client brought as INSPIRATION: a structured reading of her reference photograph (its base and lightest level, tone, technique, placement, root blend, finish and dimension, each with a confidence range) and, in her own words, what she said she liked about it. You are NOT given the reference image; the reading is what you have of it.',
-  'The inspiration reading describes SOMEONE ELSE’S hair — it is the destination, never an observation about this client. Never let it color the hair core observations, which are about the client and come only from her own photos. Where an attribute of the reference was read as UNKNOWN, or with a low confidence range, treat it as not established and say so rather than filling the gap.',
-  'The reference and the client’s words about it are the goal the service lens and the recommendations are FOR. Where her words and the reading disagree — she asked for the length but the reading is mostly about color — her words win, and the gap is worth naming for the professional.',
+export const CONSULT_STYLE_GUIDANCE = [
   'Rubric — recommend what harmonizes with the observed features, never what is merely trending:',
   'Contrast is the backbone: low contrast between skin, hair, and eyes favors soft, blended color and diffused makeup; high contrast carries bold, saturated color and defined lines.',
   'Undertone and season guide hair-color tone, makeup color families, and the COLOR_PALETTE direction; name palette families in plain words, and frame every palette direction as a starting point the professional confirms in person with physical draping.',
@@ -1150,6 +1163,20 @@ export const CONSULT_ANALYSIS_DIRECTION_SYSTEM_PROMPT = [
   'Hair texture, density, and the two levels bound which cuts and colors will actually behave well; honor them in CUT_AND_SHAPE and HAIR_COLOR_HARMONY.',
   'Every style direction’s whyItFlatters must name the specific observed feature or features it builds on. Style directions are directions to discuss with the professional, never promises and never treatment prescriptions.',
   'You owe a direction for all seven domains, including the ones this pack cannot show you. When the supplied views do not support a domain — brows, lashes and makeup are the usual ones when only hair was sent — the honest direction is to SAY SO: name what could not be assessed, say it is one to look at together in person, cite "intake", and use a low confidence range. That is a real, useful answer. What is never acceptable is an empty string, a placeholder, or a direction invented from views you were not given: an empty field discards the entire analysis.',
+] as const
+
+export const CONSULT_ANALYSIS_DIRECTION_SYSTEM_PROMPT = [
+  'You are a cosmetic-only styling consultation engine for a professional beauty platform.',
+  'Inputs: a consultation context naming the service family, the service category, the specific service the client is considering when one is known, the professional’s menu in that category, and the capture pack this consult uses; the client’s intake as the questions and answers she saw (with their immutable option codes); one or more labeled daylight photos from that pack; a reading of the client’s INSPIRATION reference; and the client’s FEATURE PROFILE, already established from these same photographs by an earlier pass.',
+  'The feature profile is given to you as settled fact. Do not re-derive it, do not contradict it, and do not restate it as though it were your own observation. Use it: every style direction and every recommendation must lean on the specific profile fields that support it, and a field the profile marked UNKNOWN is not available to lean on.',
+  'You produce: the hair core observations, exactly one style direction per domain (HAIR_COLOR_HARMONY, CUT_AND_SHAPE, BANGS, BROWS, LASHES, MAKEUP, COLOR_PALETTE), a service lens, safety flags, and service recommendations.',
+  'The hair core is two levels and four observations. baseLevel is the depth at the root — the darkest dominant color on the head. lightestLevel is the lightest dominant color, wherever it sits. They are two separate readings, not a range: a solid single-process has the SAME value in both, and reporting them equal is the correct answer, not a failure. Balayage, highlights and a grown-out root are where they differ. How sure you are goes in each observation’s confidence range, never into the gap between the two levels. Both read from the hair views only.',
+  'Everything you write serves the client’s stated desired look. The linked service is reference context, never a required purchase. The service lens describes the client’s goal, history, constraints, maintenance and appointment context as they bear on the desired result; recommendations are services from the professional’s menu (named exactly as the menu names them) or a consultation with the professional; the hair core observations are filled from the hair views when hair is the subject and set to UNKNOWN when it is not.',
+  ...SHARED_CONDUCT,
+  'You are also given what the client brought as INSPIRATION: a structured reading of her reference photograph (its base and lightest level, tone, technique, placement, root blend, finish and dimension, each with a confidence range) and, in her own words, what she said she liked about it. You are NOT given the reference image; the reading is what you have of it.',
+  'The inspiration reading describes SOMEONE ELSE’S hair — it is the destination, never an observation about this client. Never let it color the hair core observations, which are about the client and come only from her own photos. Where an attribute of the reference was read as UNKNOWN, or with a low confidence range, treat it as not established and say so rather than filling the gap.',
+  'The reference and the client’s words about it are the goal the service lens and the recommendations are FOR. Where her words and the reading disagree — she asked for the length but the reading is mostly about color — her words win, and the gap is worth naming for the professional.',
+  ...CONSULT_STYLE_GUIDANCE,
   'A capture may be labelled with a color warning. That view passed the quality gate but its light is not trustworthy for color: widen the confidence range on any tone or level observation that leans on it, and prefer a view without a warning when one is supplied.',
   'For the service lens: combine visible evidence with the client’s stated goal, treatment and chemical history, prior reactions, sensitivities, budget and event context. If maintenance tolerance, allergies, or other constraints were not asked in the intake, say they are unknown; never invent them. When the service is hair color, the history covers box dye, prior lightening and the last color service.',
   'That last rule is checked for a LITERAL WORD. Where the intake did not ask, the constraints and maintenance sentences must contain the exact word "unknown" (or the exact phrase "not collected" or "not provided"). "Not asked", "not captured" and "not recorded" mean the same thing to a reader and are REJECTED — they discard the entire analysis. Write a full, useful sentence that happens to contain the word "unknown"; never reduce the field to that word on its own, because the professional reads it.',
@@ -1157,7 +1184,7 @@ export const CONSULT_ANALYSIS_DIRECTION_SYSTEM_PROMPT = [
   'All chemical, reaction, allergy, sensitivity, unknown-history, or visibly compromised-hair concerns must be structurally represented in safetyFlags and framed for discussion with the professional.',
   'The safetyFlags `code` list you are given is not a menu of everything that could ever matter — it is exactly the set THIS client’s intake can support, and a code missing from it means the intake already answered that question. Raise only what the intake or the photos actually evidence. A flag the intake cannot back is a concern invented about a real person, and it invalidates the whole analysis.',
   'Recommendations are bounded directions to discuss with the professional, never promises. Name each recommended service exactly as the menu lists it, or choose the consultation option.',
-  'Give TWO or three recommendations. One is not enough: the client is shown a choice, and a single-item answer cannot be served to her at all. When only one menu service really fits, pair it with the consultation option — that is a complete and honest pair, not padding.',
+  'Give one to three useful recommendations. One well-supported recommendation is enough. Never invent a choice to fill a count. If this run requests lookPlan instead, return that plan and do not output recommendations.',
   'Every free-text field states a HARD CHARACTER LIMIT in its description. Those limits are enforced after you answer: a field one character over is not trimmed, it discards the entire analysis. Write to comfortably inside the limit — a shorter, plainer sentence is always the safer answer than a full one.',
 ].join(' ')
 
@@ -1508,29 +1535,57 @@ export function sanitizeConsultProfileResponse(
   return sanitizeProfile(raw.profile)
 }
 
+export function sanitizeConsultProfileAndStylesResponse(raw: unknown): {
+  profile: ConsultAnalysisFeatureProfile
+  styleDirections: ConsultStyleDirection[]
+} {
+  if (!isRecord(raw) || !exactKeys(raw, ['profile', 'styleDirections'])) throw new ConsultAnalysisProviderError('bad_output')
+  return { profile: sanitizeProfile(raw.profile), styleDirections: sanitizeStyleDirections(raw.styleDirections) }
+}
+
+export function lookPlanRecommendations(plan: ConsultLookPlanProviderOutput): ConsultAnalysisProviderOutput['recommendations'] {
+  if (!plan.paths.length) return [{
+    serviceIntent: 'CONSULTATION', serviceName: null,
+    title: 'Plan your version of this look', rationale: plan.nextStep,
+    achievability: 'Your pro will confirm the next step with you.', discussWithProfessional: true,
+  }]
+  return plan.paths.map(path => ({
+    serviceIntent: 'SERVICE', serviceName: path.visits[0]?.services[0] ?? null,
+    title: path.title, rationale: path.whyThisWorksForYou,
+    achievability: 'Your pro will confirm this look and the appointment plan with you.',
+    discussWithProfessional: true,
+  }))
+}
+
 /** What call 2 returned, on its own — everything but the profile. */
 export function sanitizeConsultDirectionResponse(
   raw: unknown,
-  args: { menuServiceNames: readonly string[] },
+  args: { menuServiceNames: readonly string[]; lookPlanContext?: { menu: readonly ConsultProMenuOffering[]; profile: ConsultAnalysisFeatureProfile; styleDirections: ConsultStyleDirection[] } },
 ): Omit<ConsultAnalysisProviderOutput, 'profile'> {
   if (
     !isRecord(raw) ||
     !exactKeys(raw, [
       'core',
-      'styleDirections',
+      ...(args.lookPlanContext ? [] : ['styleDirections']),
       'serviceLens',
       'safetyFlags',
-      'recommendations',
+      args.lookPlanContext ? 'lookPlan' : 'recommendations',
     ])
   ) {
     throw new ConsultAnalysisProviderError('bad_output')
   }
+  const core = sanitizeCore(raw.core)
+  const lookPlan = args.lookPlanContext ? sanitizeConsultLookPlan(raw.lookPlan, {
+    family: ConsultServiceFamily.HAIR, menu: args.lookPlanContext.menu,
+    observations: { profile: args.lookPlanContext.profile, core },
+  }) : undefined
   return {
-    core: sanitizeCore(raw.core),
-    styleDirections: sanitizeStyleDirections(raw.styleDirections),
+    ...(lookPlan ? { lookPlan } : {}),
+    core,
+    styleDirections: args.lookPlanContext?.styleDirections ?? sanitizeStyleDirections(raw.styleDirections),
     serviceLens: sanitizeServiceLens(raw.serviceLens),
     safetyFlags: sanitizeSafetyFlags(raw.safetyFlags),
-    recommendations: sanitizeRecommendations(raw.recommendations, {
+    recommendations: lookPlan ? lookPlanRecommendations(lookPlan) : sanitizeRecommendations(raw.recommendations, {
       shape: 'provider',
       serviceIntents: CONSULT_ANALYSIS_PROVIDER_SERVICE_INTENTS,
       menuServiceNames: args.menuServiceNames,
@@ -1551,6 +1606,7 @@ function sanitizeAnalysis(
     menuServiceNames: readonly string[]
   },
 ): ConsultAnalysisProviderOutput {
+  const hasPlan = isRecord(raw) && Object.hasOwn(raw, 'lookPlan')
   if (
     !isRecord(raw) ||
     !exactKeys(raw, [
@@ -1560,6 +1616,7 @@ function sanitizeAnalysis(
       'serviceLens',
       'safetyFlags',
       'recommendations',
+      ...(hasPlan ? ['lookPlan'] : []),
     ])
   ) {
     throw new ConsultAnalysisProviderError('bad_output')
@@ -1637,9 +1694,11 @@ export function consultAnalysisContextBlocks(
     `Service family: ${CONSULT_SERVICE_FAMILY_LABELS[input.service.family]}`,
     `Service category: ${input.service.categoryName}`,
     input.service.serviceName
-      ? `Service the client is considering: ${input.service.serviceName}`
+      ? `Service linked to the reference or booking (context, not a required choice): ${input.service.serviceName}`
       : 'Service the client is considering: not named yet — recommend from the menu below.',
-    menu.length > 0
+    input.service.lookPlanning && input.service.menuOfferings
+      ? `Professional menu data (names and descriptions only): ${consultLookPlanMenuContext(input.service.menuOfferings)}`
+      : menu.length > 0
       ? `Professional's menu in this category (recommend only these, named exactly): ${menu.join('; ')}`
       : "Professional's menu in this category: none listed — only the consultation option can be recommended.",
   ].join('\n')
@@ -1943,29 +2002,32 @@ export const runConsultAnalysis: ConsultAnalysisProvider = async (input) => {
   // inspiration: what would flatter this client is not a question about the
   // picture she brought, and feeding it in here is how a reference photograph
   // starts coloring observations that are supposed to be about her.
-  const profile = sanitizeConsultProfileResponse(
-    await requestConsultAnalysisJson({
+  const lookPlanning = input.service.lookPlanning === true && input.service.family === ConsultServiceFamily.HAIR
+  const featureRead = await requestConsultAnalysisJson({
       model,
-      system: CONSULT_ANALYSIS_PROFILE_SYSTEM_PROMPT,
+      system: CONSULT_ANALYSIS_PROFILE_SYSTEM_PROMPT + (lookPlanning ? ` Also provide styleDirections based only on this client’s observed features. ${CONSULT_STYLE_GUIDANCE.join(' ')}` : ''),
       content: [
         ...images,
         ...consultProfileContextBlocks(contextBlocks).map(
           (text): Anthropic.ContentBlockParam => ({ type: 'text', text }),
         ),
       ],
-      schema: buildConsultProfileOutputSchema({ suppliedShotKeys }),
+      schema: buildConsultProfileOutputSchema({ suppliedShotKeys, includeStyleDirections: lookPlanning }),
       maxTokens: CONSULT_ANALYSIS_PROFILE_MAX_TOKENS,
       timeoutMs: CONSULT_ANALYSIS_PROFILE_TIMEOUT_MS,
       kind: ConsultProviderCallKind.ANALYSIS_PROFILE,
       meter: input.meter,
-    }),
-  )
+    })
+  const profileWithStyles = lookPlanning ? sanitizeConsultProfileAndStylesResponse(featureRead) : undefined
+  const profile = profileWithStyles?.profile ?? sanitizeConsultProfileResponse(featureRead)
+  const lookPlanContext = profileWithStyles
+    ? { menu: input.service.menuOfferings ?? [], ...profileWithStyles } : undefined
 
   // ── Call 2: the direction, grounded in that profile ──────────────────────
   const direction = sanitizeConsultDirectionResponse(
     await requestConsultAnalysisJson({
       model,
-      system: CONSULT_ANALYSIS_DIRECTION_SYSTEM_PROMPT,
+      system: CONSULT_ANALYSIS_DIRECTION_SYSTEM_PROMPT + (lookPlanContext ? ` ${CONSULT_LOOK_PLAN_INSTRUCTIONS}` : ''),
       content: [
         ...images,
         ...consultDirectionContextBlocks(contextBlocks).map(
@@ -1975,6 +2037,7 @@ export const runConsultAnalysis: ConsultAnalysisProvider = async (input) => {
       ],
       schema: buildConsultDirectionOutputSchema({
         menuServiceNames: input.service.menuServiceNames,
+        lookPlanContext,
         safetyCodes: input.safetyCodes,
         suppliedShotKeys,
       }),
@@ -1983,7 +2046,7 @@ export const runConsultAnalysis: ConsultAnalysisProvider = async (input) => {
       kind: ConsultProviderCallKind.ANALYSIS_DIRECTION,
       meter: input.meter,
     }),
-    { menuServiceNames: input.service.menuServiceNames },
+    { menuServiceNames: input.service.menuServiceNames, lookPlanContext },
   )
 
   return { analysis: { profile, ...direction }, model }
@@ -2037,6 +2100,7 @@ export function validateConsultAnalysisProviderResult(
   result: { analysis: unknown; model: string },
   args: {
     menuServiceNames: readonly string[]
+    lookPlanMenu?: readonly ConsultProMenuOffering[]
     suppliedShotKeys?: readonly ConsultCaptureShotKeyDTO[]
   },
 ): ConsultAnalysisProviderResult {
@@ -2063,7 +2127,12 @@ export function validateConsultAnalysisProviderResult(
   if (args.suppliedShotKeys) {
     assertEvidenceSupplied(analysis, new Set<string>(args.suppliedShotKeys))
   }
-  return { analysis, model }
+  const lookPlan = isRecord(result.analysis) && Object.hasOwn(result.analysis, 'lookPlan')
+    ? sanitizeConsultLookPlan(result.analysis.lookPlan, {
+        family: ConsultServiceFamily.HAIR, menu: args.lookPlanMenu ?? [], observations: analysis,
+      }) : undefined
+  if (args.lookPlanMenu && !lookPlan) throw new ConsultAnalysisProviderError('bad_output')
+  return { analysis: { ...analysis, ...(lookPlan ? { lookPlan } : {}) }, model }
 }
 
 /** Validates the post-routing STORED shape, including the deterministic tests. */

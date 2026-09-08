@@ -1,3 +1,4 @@
+import type { ConsultLookAdjustment } from '@/lib/consult/lookAdjustments'
 // lib/dto/consult.ts
 //
 // Wire DTO for the AI Consult Phase 0 booking-attached hair-color pilot.
@@ -1042,7 +1043,73 @@ export type ConsultStyleDirectionDTO = {
   discussWithProfessional: true
 }
 
+export type ConsultLookEstimateAmountDTO = {
+  price: string | null
+  priceStatus: 'PAID' | 'COMPLIMENTARY' | 'UNSET'
+  knownSubtotal: string
+  durationMinutes: number | null
+}
+
+export type ConsultLookPathEstimateDTO = {
+  pathIndex: number
+  locationType: ServiceLocationType
+  firstAppointment: ConsultLookEstimateAmountDTO
+  transformation: ConsultLookEstimateAmountDTO
+  visits: Array<ConsultLookEstimateAmountDTO & {
+    steps: Array<ConsultLookEstimateAmountDTO & { offeringId: string; serviceId: string; available: boolean }>
+  }>
+}
+
+export type ConsultLookBriefVersionDTO = {
+  bookingId: string | null
+  confirmationOpen: boolean
+  completedVisit: ConsultLookCompletedVisitDTO | null
+  professionalPlan: ConsultLookPlanDTO | null
+  professionalPlanReason: string | null
+  invalidatedProfessionalPlan: boolean
+  inputOpen: boolean
+  additionalClientAnswers: ConsultBriefClientIntakeItemDTO[]
+  adjustments: ConsultLookAdjustment[]
+  invalidatedAdjustments: ConsultLookAdjustment[]
+  awaitingAnalysis: boolean
+  changes: string[]
+
+  id: string
+  version: number
+  sourceAnalysisRevisionId: string
+  selectedPathIndex: number | null
+  selectedLocationType: ServiceLocationType | null
+  clientConfirmed: boolean
+  professionalConfirmed: boolean
+  pathEstimates: ConsultLookPathEstimateDTO[]
+  reservedDurationMinutes: number | null
+}
+
+/** A server-resolved hair path. Client surfaces render outcome titles, not step names. */
+export type ConsultLookPlanDTO = {
+  schemaVersion: 1
+  tier: 'EXACT' | 'CLOSE' | 'TOWARD'
+  status: 'READY_TO_CHOOSE' | 'NEEDS_INPUT' | 'PRO_REVIEW' | 'NO_OFFERING'
+  provisional: boolean
+  summary: string
+  nextStep: string
+  paths: Array<{
+    title: string
+    whyThisWorksForYou: string
+    featureEvidence: Array<`profile.${keyof ConsultAnalysisFeatureProfileDTO}` | `core.${keyof ConsultAnalysisPayloadDTO['core']}`>
+    sessionCount: number
+    visits: Array<{ steps: Array<{
+      serviceId: string
+      offeringId: string
+      serviceCategoryId: string
+      serviceName: string
+    }> }>
+  }>
+}
+
 export type ConsultAnalysisPayloadDTO = {
+  /** Present on result-first hair analyses; absent on historical versions. */
+  lookPlan?: ConsultLookPlanDTO
   profile: ConsultAnalysisFeatureProfileDTO
   styleDirections: ConsultStyleDirectionDTO[]
   // Schema v4: two NAMED levels replace v3's positional `currentLevel:
@@ -1563,6 +1630,8 @@ export type ConsultProposalReviewLineDTO = {
 }
 
 export type ConsultProposalReviewDTO = {
+  /** Versioned looks use the shared brief editor rather than shared estimate-line corrections. */
+  lookBriefHref?: string
   bookingId: string
   consultId: string
   /**
@@ -1673,6 +1742,8 @@ export type ConsultProposalReviewErrorDTO = {
 }
 
 export type ConsultProBriefDTO = {
+  lookBrief?: ConsultLookBriefVersionDTO
+  lookPlan?: ConsultLookPlanDTO
   consultId: string
   // See ConsultClientResultsDTO: exactly one anchor is set, and `lookPostId`
   // is optional on the wire to keep the fixture contract purely additive.
@@ -1761,6 +1832,8 @@ export type ConsultResultsPhotoLightDTO = {
 }
 
 export type ConsultClientResultsDTO = {
+  lookBrief?: ConsultLookBriefVersionDTO
+  lookPlan?: ConsultLookPlanDTO
   consultId: string
   // Exactly one of these is set — a consult is anchored to a booking or, since
   // Book the Look (B2), to a look. `bookingId` widened rather than being joined
@@ -2253,6 +2326,7 @@ export type ConsultThreadMessageDTO =
  * shot is an accepted shot — `qualityWarningCode` is only ever set on one).
  */
 export type ConsultThreadBookGateReasonDTO =
+  | 'LOOK_CHOICE_REQUIRED'
   | 'SELFIE_REQUIRED'
   | 'ALREADY_BOOKED'
   | 'NOT_LOOK_ANCHORED'
@@ -2282,6 +2356,8 @@ export type ConsultThreadBookGateReasonDTO =
  * stays exactly as it is.
  */
 export type ConsultThreadBookCtaDTO = {
+  /** New plans enter the proposal flow rather than the reference-service spark. */
+  proposalConsultId?: string
   enabled: boolean
   reason: ConsultThreadBookGateReasonDTO | null
   /** The look this consult is anchored to. Null on a booking-anchored consult. */
@@ -2361,4 +2437,20 @@ export type ClientConsultSessionsDTO = {
     canResume: boolean
   }>
   nextCursor: string | null
+}
+
+/** Short-lived authorized media reads; storage paths never cross the wire. */
+export type ConsultLookBriefPhotosDTO = {
+  captures: Array<{ id: string; label: string; url: string }>
+  inspirationUrl: string | null
+  expiresInSeconds: number
+}
+
+export type ConsultLookCompletedVisitDTO = {
+  bookingId: string
+  lookBriefVersionId: string
+  observedServiceMinutes: number | null
+  finalServiceSubtotal: string | null
+  completedAt: string
+  aftercare: { notes: string | null; sections: Array<{ label: string; body: string }>; products: Array<{ name: string; note: string | null }> } | null
 }

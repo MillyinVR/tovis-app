@@ -1,3 +1,4 @@
+import { effectiveConsultLookPlan } from './lookBriefPlan'
 // lib/consult/commitScope.ts
 //
 // "May this consult inform the booking this client is committing to right now?"
@@ -20,6 +21,7 @@ import { Prisma } from '@prisma/client'
 import { isFinalizeConsultAttributionOwned } from '@/lib/booking/consultAttribution'
 
 import { isAiConsultC6ExposureEnabledForPro } from './access'
+import { normalizeStoredConsultAnalysisPayload } from './analysisRevision'
 import { CONSULT_ANCHOR_SELECT, evaluateConsultAnchor } from './anchor'
 
 export const CONSULT_COMMIT_SCOPE_SELECT = {
@@ -74,13 +76,26 @@ export async function resolveConsultCommitScope(
     select: CONSULT_COMMIT_SCOPE_SELECT,
   })
 
+  // A selected hair look may start in a different category from its reference.
+  // Match the saved first step, never just any other service this pro offers.
+  let categoryMatchesSelectedLook = false
+  if (consult && consult.clientId === args.clientId && consult.professionalId === args.professionalId && consult.anchorLookPostId) {
+    const version = await tx.consultLookBriefVersion.findFirst({ where: { consultSessionId: consult.id }, orderBy: { version: 'desc' },
+      select: { selectedPathIndex: true, professionalPlan: true, invalidatedProfessionalPlan: true, sourceAnalysisRevision: { select: { payload: true, schemaVersion: true } } } })
+    if (version?.selectedPathIndex !== null && version?.selectedPathIndex !== undefined) {
+      const source = version.sourceAnalysisRevision
+      const plan = effectiveConsultLookPlan(normalizeStoredConsultAnalysisPayload(source.payload, source.schemaVersion), version)
+      categoryMatchesSelectedLook = plan?.paths[version.selectedPathIndex]?.visits[0]?.steps[0]?.serviceCategoryId === args.serviceCategoryId
+    }
+  }
+
   if (
     !consult ||
     !isFinalizeConsultAttributionOwned({
       candidate: consult,
       clientId: args.clientId,
       professionalId: args.professionalId,
-      serviceCategoryId: args.serviceCategoryId,
+      serviceCategoryId: categoryMatchesSelectedLook ? consult.serviceCategoryId : args.serviceCategoryId,
     })
   ) {
     return { ok: false, hidden: true }

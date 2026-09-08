@@ -254,6 +254,7 @@ export type NoShowFeeStatus =
   (typeof NoShowFeeStatus)[keyof typeof NoShowFeeStatus]
 
 export const NotificationEventKey = {
+  LOOK_BRIEF_REVIEW: 'LOOK_BRIEF_REVIEW',
   BOOKING_REQUEST_CREATED: 'BOOKING_REQUEST_CREATED',
   BOOKING_CONFIRMED: 'BOOKING_CONFIRMED',
   AI_CONSULT_INVITATION: 'AI_CONSULT_INVITATION',

@@ -1,3 +1,4 @@
+import { loadLookBookingMaterialization } from '@/lib/consult/lookBookingMaterialization'
 // app/api/v1/pro/bookings/[id]/consultation-proposal/route.ts
 import { prisma } from '@/lib/prisma'
 import { inferPreferredContactMethod } from '@/lib/notifications/contactMethod'
@@ -666,6 +667,8 @@ export async function POST(req: Request, ctx: RouteContext) {
           startedAt: true,
           finishedAt: true,
           sessionStep: true,
+          sourceConsultSessionId: true,
+          consultSession: { select: { id: true } },
           // F12 — the columns the propose-time schedule check reads.
           // `locationId` because calendar blocks are location-aware; the rest
           // to place the extension window and judge it against working hours.
@@ -867,11 +870,15 @@ export async function POST(req: Request, ctx: RouteContext) {
       // returns plain objects from the tx callback, and a `return` COMMITS),
       // and the informational half can never take down a proposal that
       // otherwise succeeded.
+      const lookMaterialization = await loadLookBookingMaterialization(tx, {
+        consultSessionId: booking.sourceConsultSessionId ?? booking.consultSession?.id, locationType: booking.locationType,
+      })
       const materialization = await resolveConsultationMaterialization({
         tx,
         professionalId,
         locationType: booking.locationType,
         proposedServicesJson: proposal.proposedServicesJson,
+        lookDurationOverrides: lookMaterialization?.durations,
       }).catch((error: unknown) => {
         // The approval rebuilds every line item from the offering catalog and
         // refuses what it cannot rebuild. The route's own validation above is
@@ -889,6 +896,21 @@ export async function POST(req: Request, ctx: RouteContext) {
         }
         throw error
       })
+
+      if (lookMaterialization) {
+        const resolvedItems = proposal.items.map((item, index) => {
+          const normalized = materialization.normalizedItems[index]
+          if (!normalized) throw bookingError('INVALID_SERVICE_ITEMS')
+          return { ...item, durationMinutes: normalized.durationMinutesSnapshot }
+        })
+        const resolvedJson = buildProposalJson(resolvedItems)
+        if (isRecord(resolvedJson)) {
+          proposal.proposedServicesJson = {
+            ...resolvedJson,
+            lookBriefVersionId: lookMaterialization.versionId,
+          }
+        }
+      }
 
       const extension = consultationExtensionWindow({
         scheduledFor: booking.scheduledFor,

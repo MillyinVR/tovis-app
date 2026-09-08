@@ -78,6 +78,7 @@ let lookId = ''
 // cannot read off the photographs.
 const partialAnswers = { change_scale: 'noticeable' }
 const completeAnswers = {
+  maintenance_tolerance: 'medium',
   change_scale: 'noticeable',
   box_dye_history: 'over-12-months',
   prior_lightening: '6-12-months',
@@ -590,7 +591,7 @@ describe('client hair-color consult intake API against PostgreSQL', () => {
         },
         progress: {
           canComplete: false,
-          nextQuestionKey: 'change_scale',
+          nextQuestionKey: 'maintenance_tolerance',
           blocker: 'REQUIRED_ANSWERS_MISSING',
         },
         latestRevision: null,

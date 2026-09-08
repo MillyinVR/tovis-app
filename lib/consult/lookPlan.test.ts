@@ -10,6 +10,7 @@ import {
   consultLookPlanMenu,
   consultLookPlanMenuContext,
   resolveConsultLookPlan,
+  normalizeStoredConsultLookPlan,
   sanitizeConsultLookPlan,
   type ConsultLookPlanProviderOutput,
 } from './lookPlan'
@@ -229,5 +230,47 @@ describe('look-plan boundaries', () => {
     expect(text).not.toContain('maxItems')
     expect(text).not.toContain('uniqueItems')
     expect(text).toContain('additionalProperties')
+  })
+})
+
+
+describe('immutable look-plan snapshots', () => {
+  it('round trips all tiers, repeated visits, and alternatives without a current menu', () => {
+    const input = plan()
+    input.paths.push({ ...input.paths[0]!, title: 'Gradual brightness',
+      visits: [{ services: ['Dimensional color'] }, { services: ['Dimensional color', 'Layered cut'] }] })
+    for (const tier of ['EXACT', 'CLOSE', 'TOWARD'] as const) {
+      const saved = resolveConsultLookPlan({ ...input, tier }, context())
+      expect(normalizeStoredConsultLookPlan(JSON.parse(JSON.stringify(saved)), observations())).toEqual(saved)
+    }
+  })
+
+  it.each(['MORE_INFORMATION', 'PRO_REVIEW', 'NO_MATCHING_OFFERING'] as const)('preserves %s with no path', blocker => {
+    const saved = resolveConsultLookPlan({ ...plan(), paths: [], blocker }, context())
+    expect(normalizeStoredConsultLookPlan(saved, observations())).toEqual(saved)
+  })
+
+  it('rejects inconsistent readiness and derived visit counts', () => {
+    const saved = resolveConsultLookPlan(plan(), context())
+    expect(() => normalizeStoredConsultLookPlan({ ...saved, provisional: true }, observations())).toThrow()
+    expect(() => normalizeStoredConsultLookPlan({ ...saved, paths: [] }, observations())).toThrow()
+    expect(() => normalizeStoredConsultLookPlan({ ...saved, status: 'PRO_REVIEW', provisional: true }, observations())).toThrow()
+    expect(() => normalizeStoredConsultLookPlan({ ...saved, paths: [{ ...saved.paths[0], sessionCount: 2 }] }, observations())).toThrow()
+  })
+
+  it('rejects conflicting stored identities across visits', () => {
+    const saved = resolveConsultLookPlan(plan(), context())
+    const path = saved.paths[0]!
+    const visit = path.visits[0]!
+    path.visits.push({ steps: [{ ...visit.steps[0]!, offeringId: 'different-offering' }] })
+    path.sessionCount = 2
+    expect(() => normalizeStoredConsultLookPlan(saved, observations())).toThrow()
+  })
+
+  it('rejects fabricated evidence and injected fields instead of dropping them', () => {
+    const saved = resolveConsultLookPlan(plan(), context())
+    expect(() => normalizeStoredConsultLookPlan({ ...saved, price: 200 }, observations())).toThrow()
+    saved.paths[0]!.featureEvidence = ['profile.colorSeason']
+    expect(() => normalizeStoredConsultLookPlan(saved, observations())).toThrow()
   })
 })

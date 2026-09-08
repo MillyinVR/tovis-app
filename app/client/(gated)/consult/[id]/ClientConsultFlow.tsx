@@ -21,6 +21,7 @@
 // All legal wording, questions, shot instructions and system-bubble copy are
 // server-served; this component renders them and owns the mutations.
 
+import ConsultLookPlanCard, { type ChooseConsultLook } from '@/app/_components/consult/ConsultLookPlanCard'
 import ConsultProfileDetails from './_thread/ConsultProfileDetails'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -359,6 +360,14 @@ export default function ClientConsultFlow({
     },
     [refresh],
   )
+
+  const chooseLook: ChooseConsultLook = (expectedVersion, pathIndex, locationType) => {
+    void run(async () => {
+      await api(`${base}/look-plan/choice`, { method: 'POST', body: JSON.stringify({
+        expectedVersion, pathIndex, locationType, idempotencyKey: newKey(),
+      }) })
+    })
+  }
 
   // ── Consent ───────────────────────────────────────────────────────────────
   const acceptAgreement = (kind: string, agreementVersionId: string) =>
@@ -827,6 +836,7 @@ export default function ClientConsultFlow({
             inspirationReadError={inspirationReadError}
             onRetryInspirationRead={readInspiration}
             onUploadShot={uploadShot}
+            onChooseLook={chooseLook}
             onStartAnalysis={startAnalysis}
             onRefresh={() => void refresh()}
           />
@@ -871,6 +881,7 @@ function ConsultThreadMessage({
   onRetryInspirationRead,
   onUploadShot,
   onStartAnalysis,
+  onChooseLook,
   onRefresh,
 }: {
   message: ConsultThreadMessageDTO
@@ -908,6 +919,7 @@ function ConsultThreadMessage({
     message: ConsultThreadPhotoRequestMessageDTO,
     file: File,
   ) => void
+  onChooseLook: ChooseConsultLook
   onStartAnalysis: (message: ConsultThreadPlanMessageDTO) => void
   onRefresh: () => void
 }) {
@@ -983,6 +995,7 @@ function ConsultThreadMessage({
           busy={busy}
           analyzing={analyzing}
           onStart={onStartAnalysis}
+          onChooseLook={onChooseLook}
           onRefresh={onRefresh}
         />
       )
@@ -1476,11 +1489,13 @@ function PlanMessage({
   busy,
   analyzing,
   onStart,
+  onChooseLook,
   onRefresh,
 }: {
   message: ConsultThreadPlanMessageDTO
   busy: boolean
   analyzing: boolean
+  onChooseLook: ChooseConsultLook
   onStart: (message: ConsultThreadPlanMessageDTO) => void
   onRefresh: () => void
 }) {
@@ -1516,7 +1531,7 @@ function PlanMessage({
 
         {message.results ? (
           <div className="grid gap-3">
-            <PlanSummary results={message.results} />
+            <PlanSummary results={message.results} busy={busy || analyzing} onChooseLook={onChooseLook} />
             <a
               className={`${BUTTON_SECONDARY} justify-self-start`}
               href={`/client/consult/${encodeURIComponent(
@@ -1535,12 +1550,15 @@ function PlanMessage({
 
 /** Look directions with optional evidence details; the full plan remains linked. */
 function PlanSummary({
-  results,
+  results, busy, onChooseLook,
 }: {
   results: NonNullable<ConsultThreadPlanMessageDTO['results']>
+  busy: boolean
+  onChooseLook: ChooseConsultLook
 }) {
   return (
     <div className="grid gap-2">
+      {results.lookPlan ? <ConsultLookPlanCard consultId={results.consultId} plan={results.lookPlan} brief={results.lookBrief} busy={busy} onChoose={onChooseLook} /> : <>
       <h3 className="text-base font-black text-textPrimary">
         {results.directionsTitle}
       </h3>
@@ -1551,6 +1569,7 @@ function PlanSummary({
           </li>
         ))}
       </ul>
+      </>}
       <ConsultProfileDetails results={results} />
     </div>
   )
@@ -1655,6 +1674,7 @@ function CapturePrepControls({
  * consult then continues as prep.
  */
 function bookTheLookHref(thread: ConsultThreadDTO): string {
+  if (thread.book.proposalConsultId) return `/client/consult/${encodeURIComponent(thread.book.proposalConsultId)}/book`
   const params = new URLSearchParams()
   if (thread.book.serviceId) params.set('serviceId', thread.book.serviceId)
   if (thread.book.lookMediaId) params.set('mediaId', thread.book.lookMediaId)

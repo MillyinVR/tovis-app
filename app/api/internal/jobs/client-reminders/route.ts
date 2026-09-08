@@ -1,3 +1,4 @@
+import { drainLookBriefReminders } from '@/lib/notifications/lookBriefReminders'
 // app/api/internal/jobs/client-reminders/route.ts
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { getInternalJobSecret, isAuthorizedJobRequest } from '@/app/api/_utils/auth/internalJob'
@@ -374,7 +375,9 @@ async function runJob(req: Request) {
       row.status === 'failed',
   )
 
+  const lookBriefReminders = await drainLookBriefReminders(now)
   return jsonOk({
+    lookBriefReminders,
     scannedCount: dueRows.length,
     processedCount,
     skippedCount,

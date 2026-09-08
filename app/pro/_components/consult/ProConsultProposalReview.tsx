@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useMemo, useState, useTransition } from 'react'
 
@@ -50,6 +51,7 @@ const STATUS_TONE: Record<ConsultProposalReviewLineStatusDTO, string> = {
 }
 
 const SOURCE_LABEL: Record<ConsultProposalReviewLineDTO['source'], string> = {
+  LOOK_PLAN_REQUIRED: 'Required for the chosen look',
   LOOK_LINKED_SERVICE: 'From the look',
   ANALYSIS_RECOMMENDATION: 'From the analysis',
 }
@@ -217,6 +219,8 @@ export default function ProConsultProposalReview({
       <p className="mt-1 text-[12px] text-textMuted">
         {PLACEMENT_NOTE[review.placement]}
       </p>
+
+      {review.lookBriefHref && <Link href={review.lookBriefHref} className="mt-3 inline-block font-semibold underline">Review and adjust the current look brief</Link>}
 
       {/* WHAT SHE AGREED TO — echoed from the stored proposal, never re-derived. */}
       <div className="mt-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-xl border border-surfaceGlass/10 bg-bgPrimary p-3">

@@ -25,6 +25,7 @@ import {
 } from './registry'
 
 const completeHairGeneral = {
+  maintenance_tolerance: 'medium',
   change_scale: 'noticeable',
   chemical_history: 'never',
   prior_lightening: 'over-12-months',
@@ -82,10 +83,11 @@ describe('consult intake registry', () => {
   // asserted rather than described: a question quietly re-entering a pack is a
   // regression against the product principle, not a detail.
   it('ships a dieted current version of every pack and keeps the previous one registered', () => {
-    expect(HAIR_COLOR_INTAKE_PACK.version).toBe(3)
+    expect(HAIR_COLOR_INTAKE_PACK.version).toBe(4)
     expect(HAIR_COLOR_INTAKE_PACK_V2.version).toBe(2)
     expect(HAIR_COLOR_INTAKE_PACK_V2.questions).toHaveLength(15)
     expect(HAIR_COLOR_INTAKE_PACK.questions.map((entry) => entry.key)).toEqual([
+      'maintenance_tolerance',
       'change_scale',
       'goal_direction',
       'box_dye_history',
@@ -95,9 +97,10 @@ describe('consult intake registry', () => {
       'prior_reaction',
     ])
 
-    expect(HAIR_GENERAL_INTAKE_PACK.version).toBe(2)
+    expect(HAIR_GENERAL_INTAKE_PACK.version).toBe(3)
     expect(HAIR_GENERAL_INTAKE_PACK_V1.questions).toHaveLength(12)
     expect(HAIR_GENERAL_INTAKE_PACK.questions.map((entry) => entry.key)).toEqual([
+      'maintenance_tolerance',
       'change_scale',
       'goal_direction',
       'chemical_history',
@@ -136,6 +139,11 @@ describe('consult intake registry', () => {
     ] as const
     for (const [current, previous] of pairs) {
       for (const question of current.questions) {
+        if (question.key === 'maintenance_tolerance') {
+          expect(question.requirement).toBe('REQUIRED')
+          expect(question.options.map(option => option.value)).toEqual(['low', 'medium', 'high'])
+          continue
+        }
         const before = previous.questions.find((entry) => entry.key === question.key)
         expect(before, `${current.id}.${question.key}`).toBeDefined()
         expect(question.options).toEqual(before?.options)
@@ -186,13 +194,13 @@ describe('consult intake registry', () => {
       'schemaVersion',
       'version',
     ])
-    expect(dto).toMatchObject({ id: 'hair-general', version: 2, schemaVersion: 2 })
+    expect(dto).toMatchObject({ id: 'hair-general', version: 3, schemaVersion: 2 })
   })
 
   it('walks the hair pack: required answers, then the conditional goal direction', () => {
     expect(evaluateConsultIntakeProgress(HAIR_GENERAL_INTAKE_PACK, {})).toEqual({
       canComplete: false,
-      nextQuestionKey: 'change_scale',
+      nextQuestionKey: 'maintenance_tolerance',
       blocker: 'REQUIRED_ANSWERS_MISSING',
     })
     expect(
@@ -233,6 +241,7 @@ describe('consult intake registry', () => {
   // well. Those questions are gone, so "subtle" is the whole rule now.
   it('asks the colour goal direction only on a subtle change', () => {
     const complete = {
+      maintenance_tolerance: 'medium',
       change_scale: 'noticeable',
       box_dye_history: 'never',
       prior_lightening: 'never',

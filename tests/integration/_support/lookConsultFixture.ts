@@ -124,6 +124,7 @@ const sessionIds: string[] = []
  * false — a "not-sure" or a recent box dye anywhere here flips it.
  */
 export const completeAnswers = {
+  maintenance_tolerance: 'medium',
   change_scale: 'noticeable',
   box_dye_history: 'over-12-months',
   prior_lightening: '6-12-months',
@@ -292,6 +293,7 @@ export async function runConsultToCompletion(
   lookPostId: string,
   label: string,
   answers: Readonly<Record<string, string>> = completeAnswers,
+  options?: { provisional?: boolean; packVersion?: number },
 ): Promise<string> {
   const created = await startLookConsult(
     jsonRequest('/api/v1/client/consult/look', { lookPostId }),
@@ -323,17 +325,18 @@ export async function runConsultToCompletion(
     `early-${label}`,
   )
 
-  await appendConsultIntakeRevision({
+  const writeIntake = () => appendConsultIntakeRevision({
     consultSessionId: sessionId,
     actor: { type: ConsultActorType.CLIENT, id: fx.clientUserId },
     loadInput: async () => ({
       idempotencyKey: `intake-${label}`,
-      packVersion: HAIR_COLOR_INTAKE_PACK_VERSION,
+      packVersion: options?.packVersion ?? HAIR_COLOR_INTAKE_PACK_VERSION,
       schemaVersion: HAIR_COLOR_INTAKE_SCHEMA_VERSION,
-      complete: true,
+      complete: !options?.provisional,
       answers,
     }),
   })
+  if (!options?.provisional) await writeIntake()
   await readConsultInspiration({ consultSessionId: sessionId, clientId: fx.clientId, actor: { type: ConsultActorType.CLIENT, id: fx.clientUserId }, idempotencyKey: `${label}-reference` })
   for (const [questionKey, selectedValues] of INSPIRATION_ANSWERS) {
     if (questionKey === 'understanding_check') await answerVisualInspiration({ consultSessionId: sessionId, clientId: fx.clientId, actorUserId: fx.clientUserId, label })
@@ -349,7 +352,8 @@ export async function runConsultToCompletion(
       },
     })
   }
-  for (const shotKey of [
+  if (options?.provisional) await writeIntake()
+  for (const shotKey of (options?.provisional ? [] : [
     'hair_back',
     'hair_left',
     'hair_right',
@@ -357,7 +361,7 @@ export async function runConsultToCompletion(
     'face_front',
     'face_side',
     'eyes_closeup',
-  ] as const) {
+  ] as const)) {
     await attachAcceptedCapture(db, sessionId, shotKey, label)
   }
 
@@ -369,7 +373,7 @@ export async function runConsultToCompletion(
     }),
     context(sessionId),
   )
-  expect(analysis.status).toBe(200)
+  expect(analysis.status, await analysis.clone().text()).toBe(200)
 
   // P4b: the start request claims the analysis and queues a run; it does not
   // analyze. Every suite that reaches through this fixture wants a FINISHED
@@ -517,7 +521,7 @@ export async function seedLookConsultFixture(
   const category =
     existingCategory ??
     (await db.serviceCategory.create({
-      data: { name: `${fx.tag} hair`, slug: 'hair-color' },
+      data: { name: `${fx.tag} hair`, slug: 'hair-color', consultFamily: 'HAIR' },
       select: { id: true },
     }))
   fx.categoryId = category.id

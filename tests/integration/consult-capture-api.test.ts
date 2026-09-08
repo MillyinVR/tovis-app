@@ -405,6 +405,7 @@ type ReadyConsult = {
 }
 
 const completeAnswers = {
+  maintenance_tolerance: 'medium',
   change_scale: 'noticeable',
   box_dye_history: 'over-12-months',
   prior_lightening: '6-12-months',

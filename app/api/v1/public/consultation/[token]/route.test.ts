@@ -316,6 +316,7 @@ describe('GET /api/v1/public/consultation/[token]', () => {
       revision: null,
       booking: {
         id: 'booking_1',
+        isLookBooking: false,
         status: 'ACCEPTED',
         sessionStep: 'CONSULTATION_PENDING_CLIENT',
         scheduledFor: '2026-04-22T18:00:00.000Z',

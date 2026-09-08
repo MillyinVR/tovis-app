@@ -84,3 +84,36 @@ describe('the menu follows the client’s hair goal', () => {
     })
   })
 })
+
+
+describe('look-plan database snapshot validation', () => {
+  it('allows cross-category hair steps only on the same active professional menu', async () => {
+    await withMenu(async (tx, fixture) => {
+      const menu = await loadConsultProMenu(tx, { professionalId: fixture.professionalId,
+        serviceCategoryId: fixture.extensions.id, menuScope: 'HAIR_FAMILY' })
+      const steps = menu.offerings.filter(item => item.service.name !== 'Extensions').map(item => ({
+        serviceId: item.serviceId, offeringId: item.id, serviceCategoryId: item.service.categoryId, serviceName: item.service.name,
+      }))
+      const plan = { schemaVersion: 1, tier: 'EXACT', status: 'READY_TO_CHOOSE', provisional: false,
+        summary: 'Keep your length with warm dimension and soft movement.', nextStep: 'Confirm your look.',
+        paths: [{ title: 'Warm dimension', whyThisWorksForYou: 'Keeps the length you love.', featureEvidence: [],
+          sessionCount: 1, visits: [{ steps }] }] }
+      const valid = async (value: unknown, categoryId = fixture.extensions.id) => {
+        const result = await tx.$queryRaw<Array<{ valid: boolean }>>`
+          SELECT public.consult_look_plan_snapshot_valid(${JSON.stringify(value)}::jsonb, '{}'::jsonb,
+            ${fixture.professionalId}::text, ${categoryId}::text) AS valid`
+        return result[0]?.valid
+      }
+      expect(await valid(plan)).toBe(true)
+      expect(await valid(plan, fixture.nails.id)).toBe(false)
+      expect(await valid({ ...plan, provisional: true })).toBe(false)
+      expect(await valid({ ...plan, paths: [] })).toBe(false)
+      expect(await valid({ ...plan, schemaVersion: 2 })).toBe(false)
+      expect(await valid({ ...plan, price: 99 })).toBe(false)
+      expect(await valid({ ...plan, paths: [{ ...plan.paths[0], sessionCount: 2 }] })).toBe(false)
+      expect(await valid({ ...plan, paths: [{ ...plan.paths[0], featureEvidence: ['profile.skinUndertone'] }] })).toBe(false)
+      expect(await valid({ ...plan, paths: [{ ...plan.paths[0], visits: [{ steps: [{ ...steps[0], offeringId: 'invented' }] }] }] })).toBe(false)
+      expect(await valid({ ...plan, paths: [{ ...plan.paths[0], visits: [{ steps: [steps[0], steps[0]] }] }] })).toBe(false)
+    })
+  })
+})

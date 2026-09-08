@@ -1,3 +1,4 @@
+import ConsultLookPlanCard from '@/app/_components/consult/ConsultLookPlanCard'
 import Link from 'next/link'
 
 import ClientPage from '../../../_components/ClientPage'
@@ -297,7 +298,13 @@ export default function ClientConsultResults({
         </p>
       </section>
 
-      <section aria-labelledby={`${results.consultId}-directions`}>
+      {results.lookPlan ? <section className="grid gap-3">
+        <ConsultLookPlanCard consultId={results.consultId} plan={results.lookPlan} brief={results.lookBrief} />
+        <Link href={`/client/consult/${encodeURIComponent(results.consultId)}`}
+          className="text-sm font-bold text-accentPrimary underline underline-offset-4">
+          Review and choose your look
+        </Link>
+      </section> : <section aria-labelledby={`${results.consultId}-directions`}>
         <h2
           id={`${results.consultId}-directions`}
           className="text-lg font-black text-textPrimary"
@@ -331,7 +338,7 @@ export default function ClientConsultResults({
             </li>
           ))}
         </ol>
-      </section>
+      </section>}
 
       {/* Book the Look, B4b — the door from a finished consult to a booking.
           Rendered only for a LOOK-anchored consult: a booking-anchored one

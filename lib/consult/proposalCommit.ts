@@ -28,6 +28,7 @@
 // opting in fills space already held and the commit can only ever be narrower.
 
 import 'server-only'
+import { isConsultRequiredEstimateSource } from './serviceEstimate'
 
 import { Prisma, type ServiceLocationType } from '@prisma/client'
 
@@ -135,6 +136,9 @@ export async function resolveConsultProposalForCommit(
     return { ok: false, kind: 'NO_PROPOSAL', reason: 'RESULT_UNAVAILABLE' }
   }
 
+  if (inputs.estimate?.sourceLookBriefVersion && inputs.estimate.sourceLookBriefVersion.selectedLocationType !== args.locationType) {
+    return { ok: false, kind: 'NO_PROPOSAL', reason: 'MODE_NOT_OFFERED' }
+  }
   const draft = await buildConsultBookingProposal(tx, {
     professionalId: scope.session.professionalId,
     serviceCategoryId: scope.session.serviceCategoryId,
@@ -149,7 +153,7 @@ export async function resolveConsultProposalForCommit(
   }
 
   const floor = draft.lines.find(
-    (line) => line.source === 'LOOK_LINKED_SERVICE',
+    (line) => isConsultRequiredEstimateSource(line.source),
   )
   // Unreachable for a stored ESTIMATED estimate (its database trigger requires
   // exactly one floor line). Refused rather than assumed.

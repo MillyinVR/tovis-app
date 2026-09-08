@@ -221,6 +221,7 @@ export async function resolveConsultationMaterialization(args: {
   professionalId: string
   locationType: ServiceLocationType
   proposedServicesJson: unknown
+  lookDurationOverrides?: ReadonlyMap<string, number>
 }): Promise<ConsultationMaterialization> {
   const proposedItems = parseConsultationProposedItems(
     args.proposedServicesJson,
@@ -280,8 +281,9 @@ export async function resolveConsultationMaterialization(args: {
   // offering's catalog price.
   const normalizedItems = normalizedItemsFromCatalog.map((item, index) => {
     const agreedPrice = proposedItems[index]?.agreedPrice ?? null
-    if (!agreedPrice) return item
-    return { ...item, priceSnapshot: agreedPrice }
+    const lookDuration = item.offeringId ? args.lookDurationOverrides?.get(item.offeringId) : undefined
+    return { ...item, ...(agreedPrice ? { priceSnapshot: agreedPrice } : {}),
+      ...(lookDuration !== undefined ? { durationMinutesSnapshot: lookDuration } : {}) }
   })
 
   const {

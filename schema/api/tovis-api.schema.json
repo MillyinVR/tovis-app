@@ -133,6 +133,7 @@
     },
     "$Enums.ConsultServiceEstimateLineSource": {
       "enum": [
+        "LOOK_PLAN_REQUIRED",
         "LOOK_LINKED_SERVICE",
         "ANALYSIS_RECOMMENDATION"
       ],
@@ -140,6 +141,7 @@
     },
     "$Enums.ConsultServiceEstimateRefusalCode": {
       "enum": [
+        "LOOK_PLAN_SELECTION_REQUIRED",
         "LOOK_SERVICE_UNLINKED",
         "SERVICE_NOT_ON_MENU",
         "MENU_MODE_UNAVAILABLE",
@@ -402,6 +404,7 @@
     },
     "$Enums.NotificationEventKey": {
       "enum": [
+        "LOOK_BRIEF_REVIEW",
         "BOOKING_REQUEST_CREATED",
         "BOOKING_CONFIRMED",
         "AI_CONSULT_INVITATION",
@@ -3807,6 +3810,9 @@
         },
         "id": {
           "type": "string"
+        },
+        "isLookBooking": {
+          "type": "boolean"
         },
         "items": {
           "items": {
@@ -7939,6 +7945,10 @@
           ],
           "type": "object"
         },
+        "lookPlan": {
+          "$ref": "#/definitions/ConsultLookPlanDTO",
+          "description": "Present on result-first hair analyses; absent on historical versions."
+        },
         "profile": {
           "$ref": "#/definitions/ConsultAnalysisFeatureProfileDTO"
         },
@@ -9396,6 +9406,12 @@
         },
         "intakeRevisionId": {
           "type": "string"
+        },
+        "lookBrief": {
+          "$ref": "#/definitions/ConsultLookBriefVersionDTO"
+        },
+        "lookPlan": {
+          "$ref": "#/definitions/ConsultLookPlanDTO"
         },
         "lookPostId": {
           "type": [
@@ -10998,6 +11014,67 @@
       ],
       "type": "object"
     },
+    "ConsultLookAdjustment": {
+      "properties": {
+        "field": {
+          "enum": [
+            "PRICE",
+            "DURATION",
+            "EXPECTATIONS"
+          ],
+          "type": "string"
+        },
+        "locationType": {
+          "enum": [
+            "SALON",
+            "MOBILE",
+            null
+          ],
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "offeringId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pathIndex": {
+          "type": "number"
+        },
+        "professionalId": {
+          "type": "string"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "value": {
+          "type": "string"
+        },
+        "visitIndex": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "field",
+        "pathIndex",
+        "visitIndex",
+        "offeringId",
+        "locationType",
+        "value",
+        "reason",
+        "professionalId"
+      ],
+      "type": "object"
+    },
     "ConsultLookAvailabilityDTO": {
       "properties": {
         "available": {
@@ -11039,6 +11116,518 @@
       },
       "required": [
         "availability"
+      ],
+      "type": "object"
+    },
+    "ConsultLookBriefVersionDTO": {
+      "properties": {
+        "additionalClientAnswers": {
+          "items": {
+            "$ref": "#/definitions/ConsultBriefClientIntakeItemDTO"
+          },
+          "type": "array"
+        },
+        "adjustments": {
+          "items": {
+            "$ref": "#/definitions/ConsultLookAdjustment"
+          },
+          "type": "array"
+        },
+        "awaitingAnalysis": {
+          "type": "boolean"
+        },
+        "bookingId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "changes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "clientConfirmed": {
+          "type": "boolean"
+        },
+        "completedVisit": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultLookCompletedVisitDTO"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "confirmationOpen": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "inputOpen": {
+          "type": "boolean"
+        },
+        "invalidatedAdjustments": {
+          "items": {
+            "$ref": "#/definitions/ConsultLookAdjustment"
+          },
+          "type": "array"
+        },
+        "invalidatedProfessionalPlan": {
+          "type": "boolean"
+        },
+        "pathEstimates": {
+          "items": {
+            "$ref": "#/definitions/ConsultLookPathEstimateDTO"
+          },
+          "type": "array"
+        },
+        "professionalConfirmed": {
+          "type": "boolean"
+        },
+        "professionalPlan": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConsultLookPlanDTO"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "professionalPlanReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reservedDurationMinutes": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "selectedLocationType": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ServiceLocationType"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "selectedPathIndex": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "sourceAnalysisRevisionId": {
+          "type": "string"
+        },
+        "version": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "bookingId",
+        "confirmationOpen",
+        "completedVisit",
+        "professionalPlan",
+        "professionalPlanReason",
+        "invalidatedProfessionalPlan",
+        "inputOpen",
+        "additionalClientAnswers",
+        "adjustments",
+        "invalidatedAdjustments",
+        "awaitingAnalysis",
+        "changes",
+        "id",
+        "version",
+        "sourceAnalysisRevisionId",
+        "selectedPathIndex",
+        "selectedLocationType",
+        "clientConfirmed",
+        "professionalConfirmed",
+        "pathEstimates",
+        "reservedDurationMinutes"
+      ],
+      "type": "object"
+    },
+    "ConsultLookCompletedVisitDTO": {
+      "properties": {
+        "aftercare": {
+          "anyOf": [
+            {
+              "properties": {
+                "notes": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "products": {
+                  "items": {
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "note": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "note"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "sections": {
+                  "items": {
+                    "properties": {
+                      "body": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "label",
+                      "body"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "notes",
+                "sections",
+                "products"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "bookingId": {
+          "type": "string"
+        },
+        "completedAt": {
+          "type": "string"
+        },
+        "finalServiceSubtotal": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lookBriefVersionId": {
+          "type": "string"
+        },
+        "observedServiceMinutes": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "bookingId",
+        "lookBriefVersionId",
+        "observedServiceMinutes",
+        "finalServiceSubtotal",
+        "completedAt",
+        "aftercare"
+      ],
+      "type": "object"
+    },
+    "ConsultLookEstimateAmountDTO": {
+      "properties": {
+        "durationMinutes": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "knownSubtotal": {
+          "type": "string"
+        },
+        "price": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "priceStatus": {
+          "enum": [
+            "PAID",
+            "COMPLIMENTARY",
+            "UNSET"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "price",
+        "priceStatus",
+        "knownSubtotal",
+        "durationMinutes"
+      ],
+      "type": "object"
+    },
+    "ConsultLookPathEstimateDTO": {
+      "properties": {
+        "firstAppointment": {
+          "$ref": "#/definitions/ConsultLookEstimateAmountDTO"
+        },
+        "locationType": {
+          "$ref": "#/definitions/ServiceLocationType"
+        },
+        "pathIndex": {
+          "type": "number"
+        },
+        "transformation": {
+          "$ref": "#/definitions/ConsultLookEstimateAmountDTO"
+        },
+        "visits": {
+          "items": {
+            "properties": {
+              "durationMinutes": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "knownSubtotal": {
+                "type": "string"
+              },
+              "price": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "priceStatus": {
+                "enum": [
+                  "PAID",
+                  "COMPLIMENTARY",
+                  "UNSET"
+                ],
+                "type": "string"
+              },
+              "steps": {
+                "items": {
+                  "properties": {
+                    "available": {
+                      "type": "boolean"
+                    },
+                    "durationMinutes": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "knownSubtotal": {
+                      "type": "string"
+                    },
+                    "offeringId": {
+                      "type": "string"
+                    },
+                    "price": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "priceStatus": {
+                      "enum": [
+                        "PAID",
+                        "COMPLIMENTARY",
+                        "UNSET"
+                      ],
+                      "type": "string"
+                    },
+                    "serviceId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "available",
+                    "durationMinutes",
+                    "knownSubtotal",
+                    "offeringId",
+                    "price",
+                    "priceStatus",
+                    "serviceId"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "durationMinutes",
+              "knownSubtotal",
+              "price",
+              "priceStatus",
+              "steps"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "pathIndex",
+        "locationType",
+        "firstAppointment",
+        "transformation",
+        "visits"
+      ],
+      "type": "object"
+    },
+    "ConsultLookPlanDTO": {
+      "description": "A server-resolved hair path. Client surfaces render outcome titles, not step names.",
+      "properties": {
+        "nextStep": {
+          "type": "string"
+        },
+        "paths": {
+          "items": {
+            "properties": {
+              "featureEvidence": {
+                "items": {
+                  "enum": [
+                    "profile.skinUndertone",
+                    "profile.contrastLevel",
+                    "profile.colorSeason",
+                    "profile.faceProportion",
+                    "profile.jawline",
+                    "profile.foreheadProportion",
+                    "profile.featureBalance",
+                    "profile.eyeColor",
+                    "profile.eyeShape",
+                    "profile.eyeSpacing",
+                    "profile.browDensity",
+                    "profile.browShape",
+                    "core.baseLevel",
+                    "core.lightestLevel",
+                    "core.currentTone",
+                    "core.visibleCondition",
+                    "core.density",
+                    "core.texture"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "sessionCount": {
+                "type": "number"
+              },
+              "title": {
+                "type": "string"
+              },
+              "visits": {
+                "items": {
+                  "properties": {
+                    "steps": {
+                      "items": {
+                        "properties": {
+                          "offeringId": {
+                            "type": "string"
+                          },
+                          "serviceCategoryId": {
+                            "type": "string"
+                          },
+                          "serviceId": {
+                            "type": "string"
+                          },
+                          "serviceName": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "serviceId",
+                          "offeringId",
+                          "serviceCategoryId",
+                          "serviceName"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "steps"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "whyThisWorksForYou": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "title",
+              "whyThisWorksForYou",
+              "featureEvidence",
+              "sessionCount",
+              "visits"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "provisional": {
+          "type": "boolean"
+        },
+        "schemaVersion": {
+          "const": 1,
+          "type": "number"
+        },
+        "status": {
+          "enum": [
+            "READY_TO_CHOOSE",
+            "NEEDS_INPUT",
+            "PRO_REVIEW",
+            "NO_OFFERING"
+          ],
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "tier": {
+          "enum": [
+            "EXACT",
+            "CLOSE",
+            "TOWARD"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "tier",
+        "status",
+        "provisional",
+        "summary",
+        "nextStep",
+        "paths"
       ],
       "type": "object"
     },
@@ -11257,6 +11846,12 @@
         },
         "intakeRevisionId": {
           "type": "string"
+        },
+        "lookBrief": {
+          "$ref": "#/definitions/ConsultLookBriefVersionDTO"
+        },
+        "lookPlan": {
+          "$ref": "#/definitions/ConsultLookPlanDTO"
         },
         "lookPostId": {
           "type": [
@@ -11569,6 +12164,10 @@
         "locationType": {
           "$ref": "#/definitions/ServiceLocationType",
           "description": "The mode the client chose; every proposed number below is read from it."
+        },
+        "lookBriefHref": {
+          "description": "Versioned looks use the shared brief editor rather than shared estimate-line corrections.",
+          "type": "string"
         },
         "placement": {
           "description": "Decision 4's pro half: ONE review surface, and the booking's own status decides only WHERE the page puts it. A booking still waiting on her is reviewed BEFORE the accept/decline she already has; one her auto-accept toggle already accepted is reviewed AFTER it.\n\nAnswered by the server so the placement and the sentence that explains it cannot be decided twice.",
@@ -12144,6 +12743,10 @@
             "null"
           ]
         },
+        "proposalConsultId": {
+          "description": "New plans enter the proposal flow rather than the reference-service spark.",
+          "type": "string"
+        },
         "reason": {
           "anyOf": [
             {
@@ -12176,6 +12779,7 @@
     "ConsultThreadBookGateReasonDTO": {
       "description": "Why the sticky Book the look button is not live yet.\n\n`SELFIE_REQUIRED` is the ordinary one: the handoff unlocks booking \"once one selfie is in\", so the gate is the face_front slot being accepted (a WARNED shot is an accepted shot — `qualityWarningCode` is only ever set on one).",
       "enum": [
+        "LOOK_CHOICE_REQUIRED",
         "SELFIE_REQUIRED",
         "ALREADY_BOOKED",
         "NOT_LOOK_ANCHORED",

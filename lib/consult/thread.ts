@@ -1,3 +1,5 @@
+import { consultRequiresLookChoice } from './lookPlanning'
+import { loadAuthorizedConsultBookingProposal } from './proposalEntry'
 import 'server-only'
 
 // lib/consult/thread.ts
@@ -888,6 +890,10 @@ export async function loadConsultThread(args: {
         )
       }
     }
+  }
+
+  // A result-first look resolves visual details before reserving its work.
+  if (booking || results?.lookPlan) {
     // ── Inspiration, prep tier ─────────────────────────────────────────────
     //
     // AFTER the booking, because that is what they are for: "help {pro} get
@@ -910,7 +916,7 @@ export async function loadConsultThread(args: {
     // The moment the provisional price firms up. Derived, not written: P5a is
     // presentation only, so this ANNOUNCES that an estimate now exists — it does
     // not reprice the booking. That write is the next slice.
-    if (results) {
+    if (results && booking) {
       out.push(
         text(
           'estimate-ready',
@@ -973,6 +979,16 @@ export async function loadConsultThread(args: {
           text('follow-up-done', fillConsultThreadCopy(copy.followUpDone, { pro })),
         )
       }
+    }
+  }
+
+  if (results?.lookPlan) {
+    const planIndex = out.messages.findIndex(message => message.kind === 'PLAN')
+    const pendingIndex = out.messages.findIndex(message => message.state === 'OPEN' &&
+      (message.kind === 'QUESTION' || message.kind === 'PHOTO_REQUEST'))
+    if (pendingIndex >= 0 && planIndex > pendingIndex) {
+      const [planMessage] = out.messages.splice(planIndex, 1)
+      if (planMessage) out.messages.splice(pendingIndex, 0, planMessage)
     }
   }
 
@@ -1123,7 +1139,7 @@ function consultThreadBookedText(
 
 async function resolveBookCta(args: {
   reason: ConsultThreadBookGateReasonDTO | null
-  session: { anchorLookPostId: string | null; professionalId: string }
+  session: { id: string; anchorLookPostId: string | null; professionalId: string }
   look: ThreadLook
   booking: ConsultThreadBooking | null
   pro: string
@@ -1161,6 +1177,23 @@ async function resolveBookCta(args: {
   }
   if (args.reason === 'CONSULT_STOPPED') {
     return { enabled: false, reason: args.reason, ...quiet }
+  }
+
+  if (await consultRequiresLookChoice(prisma, args.session.id)) {
+    const version = await prisma.consultLookBriefVersion.findFirst({ where: { consultSessionId: args.session.id }, orderBy: { version: 'desc' },
+      select: { selectedLocationType: true } })
+    if (version?.selectedLocationType) {
+      try {
+        const answer = await loadAuthorizedConsultBookingProposal({ consultSessionId: args.session.id, clientId: args.clientId,
+          actorUserId: args.actorUserId, locationType: version.selectedLocationType, enhancementSelection: [] })
+        if (answer.available && answer.proposal) return { ...quiet, enabled: true, reason: null,
+          serviceId: answer.proposal.serviceId, proposalConsultId: args.session.id, priceNote: answer.proposal.startingAtLabel }
+      } catch {
+        // A stale/unavailable plan cannot restore the reference-service shortcut.
+      }
+    }
+    return { ...quiet, enabled: false, reason: 'LOOK_CHOICE_REQUIRED',
+      gateNote: 'Confirm the remaining details and choose your look before booking.' }
   }
 
   // Live, or held only by something she can clear herself in this same thread.

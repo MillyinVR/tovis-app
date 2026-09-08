@@ -244,6 +244,7 @@ const PROPOSAL_REVIEW_SELECT = {
   // and that list is scoped by the consult's own category.
   consultSession: { select: { serviceCategoryId: true, professionalId: true } },
   estimateId: true,
+  estimate: { select: { sourceLookBriefVersionId: true } },
   locationType: true,
   stepMinutes: true,
   bufferMinutes: true,
@@ -424,7 +425,8 @@ function toReviewDTO(args: {
       args.bookingStatus === BookingStatus.PENDING
         ? 'BEFORE_DECISION'
         : 'AFTER_ACCEPTANCE',
-    editable: EDITABLE_BOOKING_STATUSES.has(args.bookingStatus),
+    editable: !args.proposal.estimate.sourceLookBriefVersionId && EDITABLE_BOOKING_STATUSES.has(args.bookingStatus),
+    ...(args.proposal.estimate.sourceLookBriefVersionId ? { lookBriefHref: `/pro/consults/${encodeURIComponent(args.proposal.consultSessionId)}` } : {}),
     locationType: args.proposal.locationType as ServiceLocationType,
     stepMinutes: args.proposal.stepMinutes,
     bufferMinutes: args.proposal.bufferMinutes,
@@ -604,7 +606,7 @@ export async function recordProProposalReview(args: {
 
     const found = await readAuthorizedProposal(tx, args)
     if (!found) throw new ProProposalReviewError('NOT_FOUND')
-    if (!EDITABLE_BOOKING_STATUSES.has(found.bookingStatus)) {
+    if (found.proposal.estimate.sourceLookBriefVersionId || !EDITABLE_BOOKING_STATUSES.has(found.bookingStatus)) {
       throw new ProProposalReviewError('NOT_EDITABLE')
     }
 

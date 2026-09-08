@@ -153,6 +153,8 @@ function clientResultsDto(args: {
     safetyFlags: args.result.payload.safetyFlags,
     achievabilityDirection: args.result.payload.achievabilityDirection,
     recommendationDirections: directions,
+    ...(args.result.lookPlan ? { lookPlan: args.result.lookPlan } : {}),
+    ...(args.result.lookBrief ? { lookBrief: args.result.lookBrief } : {}),
     photoLight: args.photoLight,
     meCardTeaser: { locked: true, tapped: args.teaserTapped },
     createdAt: args.result.createdAt.toISOString(),

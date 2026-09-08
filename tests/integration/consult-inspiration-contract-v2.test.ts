@@ -92,6 +92,7 @@ let consentVersionId = ''
 let adultVersionId = ''
 
 const completeHairIntake = {
+  maintenance_tolerance: 'medium',
   change_scale: 'noticeable',
   chemical_history: 'never',
   prior_lightening: 'over-12-months',

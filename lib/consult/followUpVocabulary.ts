@@ -1,3 +1,4 @@
+import { HAIR_COLOR_INTAKE_PACK } from './intake/packs/hairColor'
 // lib/consult/followUpVocabulary.ts
 //
 // P5g — WHICH questions an adaptive follow-up is allowed to ask, and where each
@@ -122,6 +123,7 @@ export type ConsultFollowUpVocabulary = {
  */
 export function resolveConsultFollowUpVocabulary(args: {
   needsCalibration?: boolean
+  needsColorHistory?: boolean
   intakePack: ConsultIntakePackDefinition
   intakeAnswers: Readonly<Record<string, string>>
   serviceName: string | null
@@ -133,6 +135,14 @@ export function resolveConsultFollowUpVocabulary(args: {
   for (const question of args.intakePack.questions) {
     if (args.intakeAnswers[question.key]) continue
     entries.push(entry(question, 'INTAKE'))
+  }
+
+  if (args.needsColorHistory) {
+    for (const question of HAIR_COLOR_INTAKE_PACK.questions) {
+      if (!CONSULT_FOLLOW_UP_SAFETY_KEYS.has(question.key) || args.intakeAnswers[question.key] || args.followUpAnswers[question.key] ||
+        entries.some(existing => existing.key === question.key)) continue
+      entries.push(entry(question, 'FOLLOW_UP'))
+    }
   }
 
   const followUpPack: ConsultIntakeFollowUpPackDefinition | null =

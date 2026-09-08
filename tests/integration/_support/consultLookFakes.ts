@@ -45,6 +45,7 @@ process.env.NEXT_PUBLIC_SUPABASE_URL ||= 'https://storage.test'
 export const fakeStorageObjects = new Map<string, FakeStorageObject>()
 
 const state = {
+  lookServices: [] as string[],
   pathSequence: 0,
   runId: Math.floor(Math.random() * 0xffffffff)
     .toString(16)
@@ -75,6 +76,7 @@ const state = {
 
 export function resetConsultLookFakes(): void {
   fakeStorageObjects.clear()
+  state.lookServices = []
   state.safetyFlags = []
   state.achievability = 'REQUIRES_PRO_ASSESSMENT'
 }
@@ -85,6 +87,8 @@ export function setFakeAnalysisAchievability(
 ): void {
   state.achievability = value
 }
+
+export function setFakeLookServices(names: string[]) { state.lookServices = names }
 
 /** Route the faked analysis to safety prerequisites on its next run. */
 export function setFakeAnalysisSafetyFlag(code: string): void {
@@ -180,12 +184,13 @@ function recommended(service: string) {
 }
 
 export async function fakeRunConsultAnalysis(input: {
-  service: { menuServiceNames: readonly string[] }
+  service: { menuServiceNames: readonly string[]; lookPlanning?: boolean }
+  captures?: readonly { shotKey: string }[]
 }) {
   const menu = input.service.menuServiceNames
   const named = (pattern: RegExp) =>
     menu.find((name) => pattern.test(name)) ?? 'A consultation with the professional'
-  return {
+  const result = {
     model: 'fake-analysis-model',
     analysis: {
       profile: {
@@ -272,6 +277,32 @@ export async function fakeRunConsultAnalysis(input: {
       ],
     },
   }
+  if (input.service.lookPlanning) {
+    result.analysis.core.visibleCondition.confidence = { min: 0.6, max: 0.8 }
+    if (input.captures?.every(image => image.shotKey === 'early_photo')) {
+      for (const key of Object.keys(result.analysis.profile)) {
+        const field = key as keyof typeof result.analysis.profile
+        result.analysis.profile[field] = observed('UNKNOWN', [])
+      }
+      for (const key of Object.keys(result.analysis.core)) {
+        const field = key as keyof typeof result.analysis.core
+        result.analysis.core[field] = observed('UNKNOWN', [])
+      }
+      result.analysis.styleDirections = result.analysis.styleDirections.map(direction => ({
+        ...direction, evidence: ['intake'], confidence: { min: 0, max: 0.3 },
+        direction: 'Add clear views before choosing feature-specific styling.',
+        whyItFlatters: 'Your preferences guide the look while these features are uncertain.',
+      }))
+    }
+    return { ...result, analysis: { ...result.analysis, lookPlan: {
+      tier: 'EXACT', blocker: input.captures?.every(image => image.shotKey === 'early_photo') ? 'MORE_INFORMATION' : 'NONE', summary: 'Keep your length with warm dimension.',
+      nextStep: 'Confirm your starting point and history.',
+      paths: [{ title: 'Warm dimension', whyThisWorksForYou: 'Keeps the length you love.', featureEvidence: [],
+        visits: [{ services: state.lookServices.length ? state.lookServices : [named(/balayage/i)] }] }],
+    } } }
+  }
+  return result
+
 }
 
 /**

@@ -1,7 +1,7 @@
 {
   "manifestVersion": "hair-color-eval-manifest-v2",
-  "analysisSchemaVersion": 5,
-  "promptVersion": "service-analysis-v6",
+  "analysisSchemaVersion": 6,
+  "promptVersion": "service-analysis-v7",
   "requestedModel": "claude-sonnet-5",
   "fixtures": [
     {

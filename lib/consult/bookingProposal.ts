@@ -1,3 +1,4 @@
+import { applyConsultLookOfferingAdjustments, type ConsultLookAdjustment } from './lookAdjustments'
 // lib/consult/bookingProposal.ts
 //
 // Book the Look, slice B4 — THE BOOKING PROPOSAL.
@@ -75,7 +76,7 @@ import {
   loadConsultProMenuOfferings,
   type ConsultProMenuOffering,
 } from './proMenu'
-import { priceLine } from './serviceEstimate'
+import { priceLine, isConsultRequiredEstimateSource } from './serviceEstimate'
 
 /** This contract's own version. */
 export const CONSULT_BOOKING_PROPOSAL_SCHEMA_VERSION = 1
@@ -206,6 +207,7 @@ export type ConsultBookingProposalDraft =
  * mobile booking is the exact bug rule 2 exists to prevent.
  */
 export type ConsultBookingProposalEstimateInput = {
+  selectedLook?: { pathIndex: number; adjustments: ConsultLookAdjustment[] }
   status: 'ESTIMATED' | 'REFUSED'
   lines: ReadonlyArray<{
     id: string
@@ -275,6 +277,8 @@ function toProposalRefusal(
   code: ConsultServiceEstimateRefusalCode,
 ): ConsultBookingProposalRefusalCode {
   switch (code) {
+    case 'LOOK_PLAN_SELECTION_REQUIRED':
+      return 'ESTIMATE_REFUSED'
     case 'MENU_MODE_UNAVAILABLE':
       return 'MODE_NOT_OFFERED'
     case 'MENU_PRICE_UNSET':
@@ -354,7 +358,7 @@ export function deriveConsultBookingProposal(args: {
   )
 
   for (const estimateLine of ordered) {
-    const isFloor = estimateLine.source === 'LOOK_LINKED_SERVICE'
+    const isFloor = isConsultRequiredEstimateSource(estimateLine.source)
     // B7, rule 5. The floor is the look she tapped Book on — never declinable.
     const selected =
       isFloor || selectAll || Boolean(selectedLineIds?.has(estimateLine.id))
@@ -374,7 +378,8 @@ export function deriveConsultBookingProposal(args: {
       continue
     }
 
-    const priced = priceLine(offering, locationType, args.stepMinutes)
+    const adjustedOffering = args.estimate.selectedLook ? applyConsultLookOfferingAdjustments(offering, args.estimate.selectedLook.adjustments, args.estimate.selectedLook.pathIndex, locationType) : offering
+    const priced = priceLine(adjustedOffering, locationType, args.stepMinutes, { explicitDuration: estimateLine.source === 'LOOK_PLAN_REQUIRED' })
     if (!priced.ok) {
       // Same asymmetry, same reason: a mode the pro no longer prices refuses
       // only if that line is on the booking.
@@ -493,6 +498,7 @@ export async function buildConsultBookingProposal(
   const menu = await loadConsultProMenuOfferings(tx, {
     professionalId: args.professionalId,
     serviceCategoryId: args.serviceCategoryId,
+    ...(args.estimate?.lines.some(line => line.source === 'LOOK_PLAN_REQUIRED') ? { menuScope: 'HAIR_FAMILY' as const } : {}),
   })
 
   return deriveConsultBookingProposal({

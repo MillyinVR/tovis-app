@@ -28,10 +28,12 @@ import {
 import {
   HAIR_COLOR_INTAKE_PACK,
   HAIR_COLOR_INTAKE_PACK_V2,
+  HAIR_COLOR_INTAKE_PACK_V3,
 } from './packs/hairColor'
 import {
   HAIR_GENERAL_INTAKE_PACK,
   HAIR_GENERAL_INTAKE_PACK_V1,
+  HAIR_GENERAL_INTAKE_PACK_V2,
 } from './packs/hairGeneral'
 import type {
   ConsultIntakePackDefinition,
@@ -56,7 +58,9 @@ export const CONSULT_INTAKE_PACKS: readonly ConsultIntakePackDefinition[] = [
 export const CONSULT_INTAKE_PACK_ARCHIVE: readonly ConsultIntakePackDefinition[] =
   [
     HAIR_COLOR_INTAKE_PACK_V2,
+    HAIR_COLOR_INTAKE_PACK_V3,
     HAIR_GENERAL_INTAKE_PACK_V1,
+    HAIR_GENERAL_INTAKE_PACK_V2,
     GENERAL_SERVICE_INTAKE_PACK_V1,
   ]
 

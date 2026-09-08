@@ -19,10 +19,13 @@
 // runs nightly and on demand (.github/workflows/live-model-contract.yml).
 // `pnpm test:live:consult-schema`.
 
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 
 import Anthropic from '@anthropic-ai/sdk'
+import { Prisma } from '@prisma/client'
+import type { ConsultProMenuOffering } from '@/lib/consult/proMenu'
+import { CONSULT_LOOK_PLAN_INSTRUCTIONS, consultLookPlanMenuContext } from '@/lib/consult/lookPlan'
 import { beforeAll, describe, expect, it } from 'vitest'
 
 import {
@@ -36,6 +39,8 @@ import {
   CONSULT_ANALYSIS_PROFILE_SYSTEM_PROMPT,
   sanitizeConsultDirectionResponse,
   sanitizeConsultProfileResponse,
+  sanitizeConsultProfileAndStylesResponse,
+  CONSULT_STYLE_GUIDANCE,
 } from '@/lib/consult/analysisEngine'
 import {
   CONSULT_INSPIRATION_ANALYSIS_OUTPUT_SCHEMA,
@@ -140,6 +145,8 @@ function labeledImages(): Content {
  * — correct in production, useless here, where the 400's own words ("the
  * compiled grammar is too large") are the finding.
  */
+let responseSequence = 0
+
 async function send(args: {
   system: string
   content: Content
@@ -179,6 +186,7 @@ async function send(args: {
     .map((block) => block.text)
     .join('')
   expect(text).not.toBe('')
+  if (process.env.CONSULT_LIVE_ARTIFACT_DIR) writeFileSync(path.join(process.env.CONSULT_LIVE_ARTIFACT_DIR, `consult-schema-response-${++responseSequence}.json`), text)
   return JSON.parse(text) as unknown
 }
 
@@ -219,6 +227,45 @@ describe('the consult schemas compile and answer against the live model', () => 
       ])
       expect(observation.confidence.min).toBeLessThan(observation.confidence.max)
     }
+  })
+
+  it('result-first hair plan — real schema separates the desired color and shape from an extensions reference', async () => {
+    const profileWithStyles = sanitizeConsultProfileAndStylesResponse(await send({
+      system: CONSULT_ANALYSIS_PROFILE_SYSTEM_PROMPT + ' Also provide styleDirections. ' + CONSULT_STYLE_GUIDANCE.join(' '),
+      content: [...labeledImages(), { type: 'text', text: 'Observe this client only. Unclear features stay UNKNOWN.' }],
+      schema: buildConsultProfileOutputSchema({ suppliedShotKeys: SHOT_KEYS, includeStyleDirections: true }),
+      maxTokens: CONSULT_ANALYSIS_PROFILE_MAX_TOKENS,
+    }))
+    const menu: ConsultProMenuOffering[] = [
+      ['Extensions', 'Adds length and fullness using additional hair.'],
+      ['Dimensional color', 'Creates lighter pieces and a blended warm tone in the existing hair.'],
+      ['Layered cut', 'Shapes movement with layers while preserving the requested length.'],
+    ].map(([name, description], index) => ({
+      id: `offering-${index}`, serviceId: `service-${index}`,
+      offersInSalon: true, offersMobile: false,
+      salonPriceStartingAt: new Prisma.Decimal(200), salonDurationMinutes: 120,
+      mobilePriceStartingAt: null, mobileDurationMinutes: null,
+      service: { name: name!, description: description!, categoryId: `category-${index}`, defaultDurationMinutes: 120 },
+    }))
+    const lookPlanContext = { menu, ...profileWithStyles }
+    const raw = await send({
+      system: CONSULT_ANALYSIS_DIRECTION_SYSTEM_PROMPT + ' ' + CONSULT_LOOK_PLAN_INSTRUCTIONS,
+      content: [...labeledImages(), { type: 'text', text: [
+        'The reference was tagged Extensions. That is context about the photo, not the client’s desired work.',
+        'Client goal: I love the warm dimension and soft layers. Keep my own length. I do NOT want extensions or added length.',
+        'Client reports: natural hair, no prior chemical color, no previous lightening, no prior reactions; moderate upkeep is comfortable.',
+        'Allergy history and budget are unknown. Confirm any uncertain photo observations rather than inventing them.',
+        `Professional menu data: ${consultLookPlanMenuContext(menu)}`,
+        `Observed client profile: ${JSON.stringify(profileWithStyles.profile)}`,
+      ].join('\n') }],
+      schema: buildConsultDirectionOutputSchema({ menuServiceNames: menu.map(item => item.service.name), safetyCodes: SAFETY_CODES, suppliedShotKeys: SHOT_KEYS, lookPlanContext }),
+      maxTokens: CONSULT_ANALYSIS_DIRECTION_MAX_TOKENS,
+    })
+    const output = sanitizeConsultDirectionResponse(raw, { menuServiceNames: menu.map(item => item.service.name), lookPlanContext })
+    expect(output.lookPlan?.summary).toBeTruthy()
+    expect(output.lookPlan?.nextStep).toBeTruthy()
+    expect(output.lookPlan?.paths.flatMap(path => path.visits.flatMap(visit => visit.services))).not.toContain('Extensions')
+    expect(output.lookPlan?.paths.length).toBeLessThanOrEqual(3)
   })
 
   it('call 2 — the direction schema returns a payload the sanitizer accepts', async () => {

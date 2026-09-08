@@ -94,7 +94,7 @@ function hairColorPolicy(
   if (visibleCondition === 'POSSIBLE_COMPROMISE') required.add('VISIBLE_COMPROMISE')
   // On the colour pack every supported flag is also required — the intake
   // either demands it or cannot support it.
-  return policy(required, required, { constraints: true, maintenance: true })
+  return policy(required, required, { constraints: true, maintenance: !intake.maintenance_tolerance })
 }
 
 /** Extensions, cuts, any hair service that is not colour. */

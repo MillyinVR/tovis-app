@@ -47,7 +47,7 @@ import {
 } from '../types'
 
 export const HAIR_GENERAL_INTAKE_PACK_ID = 'hair-general' as const
-export const HAIR_GENERAL_INTAKE_PACK_VERSION = 2
+export const HAIR_GENERAL_INTAKE_PACK_VERSION = 3
 export const HAIR_GENERAL_INTAKE_PACK_V1_VERSION = 1
 export const HAIR_GENERAL_INTAKE_SCHEMA_VERSION = 2
 
@@ -209,9 +209,9 @@ export const HAIR_GENERAL_INTAKE_V2_QUESTION_KEYS = [
 ] as const satisfies readonly HairGeneralIntakeQuestionKey[]
 
 /** v2 — CURRENT. */
-export const HAIR_GENERAL_INTAKE_PACK: ConsultIntakePackDefinition = dietedIntakePack({
+export const HAIR_GENERAL_INTAKE_PACK_V2: ConsultIntakePackDefinition = dietedIntakePack({
   base: HAIR_GENERAL_INTAKE_PACK_V1,
-  version: HAIR_GENERAL_INTAKE_PACK_VERSION,
+  version: 2,
   keep: HAIR_GENERAL_INTAKE_V2_QUESTION_KEYS,
   goalDirection: {
     questionKey: 'goal_direction',
@@ -219,3 +219,11 @@ export const HAIR_GENERAL_INTAKE_PACK: ConsultIntakePackDefinition = dietedIntak
     requiredWhen: goalNeedsDirection,
   },
 })
+
+
+export const HAIR_GENERAL_INTAKE_PACK: ConsultIntakePackDefinition = {
+  ...HAIR_GENERAL_INTAKE_PACK_V2,
+  version: HAIR_GENERAL_INTAKE_PACK_VERSION,
+  questions: [question('maintenance_tolerance', 'How much upkeep are you comfortable with?',
+    'REQUIRED', MAINTENANCE_TOLERANCE_OPTIONS), ...HAIR_GENERAL_INTAKE_PACK_V2.questions],
+}

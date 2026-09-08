@@ -35,6 +35,7 @@ import {
   Prisma,
 } from '@prisma/client'
 
+import { consultRequiresLookChoice } from './lookPlanning'
 import { CONSULT_ANCHOR_SELECT, evaluateConsultAnchorScope } from './anchor'
 import { deriveConsultPrepState, CONSULT_PREP_SESSION_SELECT } from './prepDeadline'
 import { consultSparkGateBlocked, loadConsultSparkGatePolicy } from './sparkGate'
@@ -161,6 +162,8 @@ export async function resolveConsultSparkLink(
 
   // The gate the thread already passed. Scope, not the booking-window arm:
   // a spark consult is look-anchored and has no appointment to be inside of.
+  if (await consultRequiresLookChoice(tx, consult.id)) return { ok: false, reason: 'PREP_REQUIRED' }
+
   const scope = evaluateConsultAnchorScope(consult)
   if (!scope.eligible) return { ok: false, reason: 'HIDDEN' }
 

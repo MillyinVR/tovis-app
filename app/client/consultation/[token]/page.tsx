@@ -1,5 +1,6 @@
 'use client'
 
+import { lookProposalDurationMinutes } from '@/lib/consultation/lookProposalSummary'
 import { ProNameDisplay } from '@/lib/prismaEnums'
 import Link from 'next/link'
 import { use, useEffect, useMemo, useState } from 'react'
@@ -90,6 +91,7 @@ type ApprovalDto = {
 }
 
 type BookingDto = {
+  isLookBooking: boolean
   id: string
   status: string
   sessionStep: string | null
@@ -455,6 +457,7 @@ function parseBooking(value: unknown): BookingDto | null {
     scheduledFor: readStringOrNull(value.scheduledFor),
     startedAt: readStringOrNull(value.startedAt),
     finishedAt: readStringOrNull(value.finishedAt),
+    isLookBooking: value.isLookBooking === true,
     locationType: readStringOrNull(value.locationType),
     appointmentTimeZone: readStringOrNull(value.appointmentTimeZone),
     service,
@@ -880,7 +883,7 @@ export default function PublicConsultationPage({ params }: PageProps) {
     safeText(data.booking.appointmentTimeZone) ||
     safeText(data.booking.professional.timeZone, 'UTC')
   const serviceTitle =
-    safeText(data.booking.service?.name) || 'Consultation'
+    data.booking.isLookBooking ? 'Your look' : safeText(data.booking.service?.name) || 'Consultation'
   const clientLabel = [data.booking.client.firstName, data.booking.client.lastName]
     .map((part) => safeText(part))
     .filter(Boolean)
@@ -946,7 +949,7 @@ export default function PublicConsultationPage({ params }: PageProps) {
         <SectionCard
           gap="roomy"
           title="Proposal"
-          subtitle="Review the recommended services and pricing"
+          subtitle={data.booking.isLookBooking ? "Review your updated look and pricing" : "Review the recommended services and pricing"}
           right={
             proposalTotalLabel ? (
               <span className="inline-flex items-center rounded-full border border-textPrimary/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textPrimary">
@@ -957,7 +960,12 @@ export default function PublicConsultationPage({ params }: PageProps) {
         >
           <ConsultRevisionNotice notice={data.revision} />
 
-          {proposedItems.length > 0 ? (
+          {data.booking.isLookBooking ? (
+            <div className="text-sm text-textSecondary">
+              <p>Review your shared look brief and the proposed total before approving.</p>
+              {lookProposalDurationMinutes(data.approval.proposedServicesJson) !== null && <p>Updated appointment: {lookProposalDurationMinutes(data.approval.proposedServicesJson)} min</p>}
+            </div>
+          ) : proposedItems.length > 0 ? (
             <div className="grid gap-2">
               {proposedItems.map((item) => (
                 <div

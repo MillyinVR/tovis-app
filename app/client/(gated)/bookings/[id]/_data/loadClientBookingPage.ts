@@ -28,6 +28,8 @@ const bookingPageBookingSelect = {
   clientId: true,
   status: true,
   source: true,
+  sourceLookPostId: true,
+  sourceConsultSessionId: true,
   // Rebook-chain link (buildClientBookingDTO surfaces it as rebookOfBookingId) —
   // part of the canonical ClientBookingRow shape.
   rebookOfBookingId: true,

@@ -242,11 +242,11 @@ describe('the web consult intake, one question at a time', () => {
     expect(await tapsToThePhotoStep(HAIR_COLOR_INTAKE_PACK_V2)).toBe(15)
   })
 
-  it('reaches the photo step in seven taps on the shipped pack', async () => {
+  it('includes one upkeep tap before the remaining history on the shipped pack', async () => {
     expect(
       await tapsToThePhotoStep(
         resolveConsultIntakePack({ categorySlug: 'hair-color', family: 'HAIR' }),
       ),
-    ).toBe(7)
+    ).toBe(8)
   })
 })

@@ -1,3 +1,5 @@
+import { loadLookBookingMaterialization } from '@/lib/consult/lookBookingMaterialization'
+import { consultLookServiceReadiness } from '@/lib/consult/lookConfirmation'
 // lib/booking/writeBoundary.ts
 import {
   AftercareRebookMode,
@@ -1301,7 +1303,7 @@ type RecommendedProductInput =
       externalUrl: string
       note: string | null
     }
-    
+
 
 type ConfirmBookingFinalReviewResult = {
   booking: {
@@ -1749,6 +1751,8 @@ const UPDATE_HOLD_ADDONS_OFFERING_SELECT = {
 } satisfies Prisma.ProfessionalServiceOfferingSelect
 
 const APPROVE_CONSULTATION_BOOKING_SELECT = {
+  sourceConsultSessionId: true,
+  consultSession: { select: { id: true } },
   id: true,
   clientId: true,
   professionalId: true,
@@ -1948,6 +1952,8 @@ type FinalReviewBookingRecord = Prisma.BookingGetPayload<{
 }>
 
 const TRANSITION_BOOKING_SELECT = {
+  sourceConsultSessionId: true,
+  consultSession: { select: { id: true } },
   id: true,
   professionalId: true,
   status: true,
@@ -6592,7 +6598,7 @@ await maybeCreateBookingCancelledNotification({
     actor: args.actor,
     reason: args.reason,
   })
-  
+
 
   await bumpProfessionalScheduleVersion(booking.professionalId)
 
@@ -8018,6 +8024,11 @@ async function performLockedTransitionSessionStep(args: {
   }
 
   if (args.nextStep === SessionStep.SERVICE_IN_PROGRESS) {
+    const lookConsultId = booking.sourceConsultSessionId ?? booking.consultSession?.id
+    if (lookConsultId) {
+      const lookReadiness = await consultLookServiceReadiness(args.tx, lookConsultId, booking.id)
+      if (lookReadiness) return { ok: false, status: 409, error: lookReadiness, meta: buildMeta(false) }
+    }
     const beforeCount = await args.tx.mediaAsset.count({
       where: {
         bookingId: booking.id,
@@ -9590,6 +9601,10 @@ async function performLockedApproveConsultationMaterialization(
     professionalId: booking.professionalId,
     locationType: booking.locationType,
     proposedServicesJson: approval.proposedServicesJson,
+    lookDurationOverrides: (await loadLookBookingMaterialization(args.tx, {
+      consultSessionId: booking.sourceConsultSessionId ?? booking.consultSession?.id,
+      locationType: booking.locationType, approvingProposal: approval.proposedServicesJson,
+    }))?.durations,
   })
 
   const extension = consultationExtensionWindow({
@@ -10493,27 +10508,6 @@ async function performLockedFinalizeBookingFromHold(args: {
     ramp: pickOfferingModeRamp(args.offering.priceRamps, args.locationType),
   })
 
-  const subtotal = chargedBasePrice.add(addOnsPriceTotal)
-
-  // Apply the claimed opening's incentive to the subtotal. computeLastMinuteDiscount re-applies
-  // the pro's eligibility gates (enabled / day-disabled / minCollectedSubtotal floor), so a
-  // voided discount safely returns 0 and the booking proceeds at full price.
-  let lastMinuteDiscount = zeroMoney()
-  if (openingIncentive) {
-    const discountResult = await computeLastMinuteDiscount({
-      professionalId: args.offering.professionalId,
-      serviceId: args.offering.serviceId,
-      scheduledFor: requestedStart,
-      basePrice: Number(subtotal.toString()),
-      timeZone: openingIncentive.timeZone,
-      offerType: openingIncentive.offerType,
-      percentOff: openingIncentive.percentOff,
-      amountOff: openingIncentive.amountOff,
-    })
-    lastMinuteDiscount = parseMoney(discountResult.discountAmount)
-  }
-  const lastMinuteTotal = subtotal.sub(lastMinuteDiscount)
-
   const addOnsDurationTotal = resolvedAddOns.reduce(
     (sum, row) => sum + (row.durationMinutesSnapshot ?? 0),
     0,
@@ -10549,6 +10543,32 @@ async function performLockedFinalizeBookingFromHold(args: {
         enhancementSelection: args.consultEnhancementLineIds,
       })
     : null
+
+  // Required look steps are the chosen appointment, including complimentary
+  // work. Legacy optional enhancements retain their existing estimate behavior.
+  const requiredLookLines = consultProposal?.lines.filter(line => line.source === 'LOOK_PLAN_REQUIRED') ?? []
+  const subtotal = requiredLookLines.length
+    ? requiredLookLines.reduce((sum, line) => sum.add(line.price), new Prisma.Decimal(0))
+    : chargedBasePrice.add(addOnsPriceTotal)
+
+  // Apply the claimed opening's incentive to the subtotal. computeLastMinuteDiscount re-applies
+  // the pro's eligibility gates (enabled / day-disabled / minCollectedSubtotal floor), so a
+  // voided discount safely returns 0 and the booking proceeds at full price.
+  let lastMinuteDiscount = zeroMoney()
+  if (openingIncentive) {
+    const discountResult = await computeLastMinuteDiscount({
+      professionalId: args.offering.professionalId,
+      serviceId: args.offering.serviceId,
+      scheduledFor: requestedStart,
+      basePrice: Number(subtotal.toString()),
+      timeZone: openingIncentive.timeZone,
+      offerType: openingIncentive.offerType,
+      percentOff: openingIncentive.percentOff,
+      amountOff: openingIncentive.amountOff,
+    })
+    lastMinuteDiscount = parseMoney(discountResult.discountAmount)
+  }
+  const lastMinuteTotal = subtotal.sub(lastMinuteDiscount)
 
   // `OfferingAddOn` add-ons on top of a consult proposal stay refused; the hold
   // refuses the combination too, and this is the commit-site half of that same
@@ -10737,7 +10757,7 @@ async function performLockedFinalizeBookingFromHold(args: {
             settings: args.discovery.depositSettings,
             serviceSubtotalCents: Math.round(Number(subtotal) * 100),
             prepayScope: args.discovery.depositRequirement.prepayScope,
-            baseServiceCents: Math.round(Number(chargedBasePrice) * 100),
+            baseServiceCents: Math.round(Number(requiredLookLines.find(line => line.offeringId === args.offering.id)?.price ?? chargedBasePrice) * 100),
             bookingTotalCents: Math.round(Number(lastMinuteTotal) * 100),
           }),
           feeEligible: args.discovery.feeEligible,
@@ -10928,17 +10948,9 @@ async function performLockedFinalizeBookingFromHold(args: {
     throw error
   }
 
-  // Book the Look, B4: the record of what this client committed to, beside the
-  // booking and inside the same transaction. Written BEFORE the service item so
-  // that a booking carrying `sourceConsultServiceEstimateId` never exists in a
-  // committed state without the proposal that explains it.
-  //
-  // 🔴 The base service item below stays the FLOOR offering at the floor's own
-  // charged price. The beyond-floor lines size the slot and the "Starting at"
-  // figure the client was shown, but they are not BookingServiceItem rows: they
-  // are not add-ons she selected, and the pro sets the real total in the chair
-  // (decision 8, B6). The proposal row is where those lines live meanwhile, so
-  // nothing about the number she agreed to is lost.
+  // Keep the exact selected proposal alongside the appointment. New look plans
+  // also persist every required step as booked work; legacy optional estimates
+  // keep their original base-item behavior.
   if (consultProposal) {
     await persistConsultBookingProposal(args.tx, {
       bookingId: created.id,
@@ -10946,27 +10958,35 @@ async function performLockedFinalizeBookingFromHold(args: {
     })
   }
 
-  const baseItem = await args.tx.bookingServiceItem.create({
-    data: {
-      bookingId: created.id,
-      serviceId: args.offering.serviceId,
-      offeringId: args.offering.id,
-      itemType: BookingServiceItemType.BASE,
-      priceSnapshot: chargedBasePrice,
-      durationMinutesSnapshot: baseDurationMinutes,
-      sortOrder: 0,
-    },
-    select: { id: true },
-  })
-
-  if (resolvedAddOns.length) {
-    await args.tx.bookingServiceItem.createMany({
-      data: buildResolvedAddOnServiceItemRows({
+  if (requiredLookLines.length) {
+    await args.tx.bookingServiceItem.createMany({ data: requiredLookLines.map((line, sortOrder) => ({
+      bookingId: created.id, serviceId: line.serviceId, offeringId: line.offeringId,
+      itemType: BookingServiceItemType.BASE, priceSnapshot: line.price,
+      durationMinutesSnapshot: line.durationMinutes, sortOrder,
+    })) })
+  } else {
+    const baseItem = await args.tx.bookingServiceItem.create({
+      data: {
         bookingId: created.id,
-        parentItemId: baseItem.id,
-        addOns: resolvedAddOns,
-      }),
+        serviceId: args.offering.serviceId,
+        offeringId: args.offering.id,
+        itemType: BookingServiceItemType.BASE,
+        priceSnapshot: chargedBasePrice,
+        durationMinutesSnapshot: baseDurationMinutes,
+        sortOrder: 0,
+      },
+      select: { id: true },
     })
+
+    if (resolvedAddOns.length) {
+      await args.tx.bookingServiceItem.createMany({
+        data: buildResolvedAddOnServiceItemRows({
+          bookingId: created.id,
+          parentItemId: baseItem.id,
+          addOns: resolvedAddOns,
+        }),
+      })
+    }
   }
 
 if (args.openingId) {
@@ -14717,7 +14737,7 @@ if (areAuditValuesEqual(oldCheckoutState, nextCheckoutState)) {
     route: 'lib/booking/writeBoundary.ts:updateBookingCheckout',
   })
 
-  
+
 await createCheckoutAuditLogs({
   tx: args.tx,
   bookingId: booking.id,
