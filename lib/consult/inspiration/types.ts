@@ -127,6 +127,8 @@ export type ConsultInspirationPackQuestion = Omit<
   /** Null when the question text is brand copy — see `ConsultInspirationPackOption`. */
   readonly label: string | null
   readonly options: readonly ConsultInspirationPackOption[]
+  /** Only explicitly selected features can point to a catalogue detail. */
+  readonly valueCatalogDetails?: Readonly<Record<string, ConsultInspirationCatalogDetail>>
   readonly tier: ConsultInspirationCardTier
   /**
    * The analysis attribute this card is about, and therefore the region it

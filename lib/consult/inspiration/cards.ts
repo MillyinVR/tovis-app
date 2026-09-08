@@ -270,6 +270,10 @@ export function composeConsultInspirationUnderstanding(args: {
     const clause = cards.keepClauses[value]
     if (clause) clauses.push(clause)
   }
+  for (const value of args.answers.look_match ?? []) {
+    const clause = cards.lookMatchClauses[value]
+    if (clause) clauses.push(clause)
+  }
   // Image uncertainty belongs to the image, not to the client's wishes.
   // With no meaningful answer yet, show the ordinary fallback instead.
   const observation = clauses.length > 0 ? unsureClause(args.reading, args.copy) : null

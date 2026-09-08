@@ -11,7 +11,7 @@
 // pro brief reads the same answer the same way whichever hair service the
 // consult is about.
 
-import { coarseCards, HAIR_GENERAL_KEEP_VALUES } from '../cardQuestions'
+import { coarseCards, hairOutcomeCards, HAIR_OUTCOME_MEANINGS, HAIR_GENERAL_KEEP_VALUES } from '../cardQuestions'
 import {
   CURRENT_UPKEEP_OPTIONS,
   FULLNESS_GOAL_OPTIONS,
@@ -152,7 +152,7 @@ export const HAIR_GENERAL_INSPIRATION_PACK: ConsultInspirationPackDefinition = {
  * then, inventing eight cards out of nothing would be Part 0 rule 4 with extra
  * steps.
  */
-export const HAIR_GENERAL_INSPIRATION_CARD_PACK: ConsultInspirationPackDefinition = {
+export const HAIR_GENERAL_INSPIRATION_CARD_PACK_V2: ConsultInspirationPackDefinition = {
   id: HAIR_GENERAL_INSPIRATION_PACK_ID,
   categorySlug: null,
   version: 2,
@@ -167,4 +167,12 @@ export const HAIR_GENERAL_INSPIRATION_CARD_PACK: ConsultInspirationPackDefinitio
     'keep_as_is:my-natural-texture': 'The client asked for her natural texture to be left alone.',
     'understanding_check:thats-right': 'The client confirmed the summary of what she is after.',
   },
+}
+
+/** New sessions distinguish attraction, preservation and how closely to match. */
+export const HAIR_GENERAL_INSPIRATION_CARD_PACK: ConsultInspirationPackDefinition = {
+  ...HAIR_GENERAL_INSPIRATION_CARD_PACK_V2,
+  version: 3,
+  questions: hairOutcomeCards(),
+  possibleMeanings: HAIR_OUTCOME_MEANINGS,
 }

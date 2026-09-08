@@ -38,10 +38,12 @@ import {
 import {
   HAIR_COLOR_INSPIRATION_CARD_PACK,
   HAIR_COLOR_INSPIRATION_CARD_PACK_V2,
+  HAIR_COLOR_INSPIRATION_CARD_PACK_V3,
   HAIR_COLOR_INSPIRATION_PACK,
 } from './packs/hairColor'
 import {
   HAIR_GENERAL_INSPIRATION_CARD_PACK,
+  HAIR_GENERAL_INSPIRATION_CARD_PACK_V2,
   HAIR_GENERAL_INSPIRATION_PACK,
 } from './packs/hairGeneral'
 import {
@@ -84,6 +86,8 @@ export const CONSULT_INSPIRATION_PACK_ARCHIVE: readonly ConsultInspirationPackDe
     // P5g: v2's eight per-attribute prep cards. A consult that answered one is
     // read against them forever — see HAIR_COLOR_INSPIRATION_CARD_PACK's note.
     HAIR_COLOR_INSPIRATION_CARD_PACK_V2,
+    HAIR_COLOR_INSPIRATION_CARD_PACK_V3,
+    HAIR_GENERAL_INSPIRATION_CARD_PACK_V2,
   ]
 
 const PACKS_BY_ID = new Map(CONSULT_INSPIRATION_PACKS.map((pack) => [pack.id, pack]))
@@ -380,11 +384,9 @@ export function deriveConsultInspirationCatalogDetails(
   const requested: ConsultInspirationCatalogDetail[] = []
   for (const detail of buildConsultInspirationExactDetails(pack, answers)) {
     const question = questionsByKey(pack).get(detail.questionKey)
-    if (
-      question?.catalogDetail &&
-      !requested.includes(question.catalogDetail)
-    ) {
-      requested.push(question.catalogDetail)
+    const catalogDetail = question?.valueCatalogDetails?.[detail.value] ?? question?.catalogDetail
+    if (catalogDetail && !requested.includes(catalogDetail)) {
+      requested.push(catalogDetail)
     }
   }
   return requested

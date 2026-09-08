@@ -44,6 +44,7 @@ export const defaultClientConsultInspirationCopy: BrandClientConsultInspirationC
       // with its pack id; the bare key is the fallback every pack gets.
       prompts: {
         'spark_focus': 'What made you stop scrolling?',
+        'look_match': 'For the parts you chose, how close do you want to stay to this picture?',
         'hair-color-inspiration:keep_as_is': 'Anything about your hair you don’t want to change?',
         'hair-general-inspiration:keep_as_is': 'Anything about your hair you don’t want to change?',
         'keep_as_is': 'Anything you don’t want to change?',
@@ -64,6 +65,15 @@ export const defaultClientConsultInspirationCopy: BrandClientConsultInspirationC
 
       optionLabels: {
         'spark_focus:the-color': 'The color',
+        'spark_focus:the-cut': 'The cut',
+        'spark_focus:the-layers': 'The layers',
+        'spark_focus:the-movement': 'The movement',
+        'spark_focus:the-length': 'The length',
+        'spark_focus:the-fullness': 'The fullness',
+        'look_match:match-selected-parts': 'As close as possible, keeping what I chose to keep',
+        'look_match:adapt-selected-parts': 'Make those parts work for me',
+        'look_match:not-sure': 'Help me decide',
+        'keep_as_is:my-color': 'My color',
         'spark_focus:the-shape': 'The shape of it',
         'spark_focus:the-whole-thing': 'The whole thing',
         'spark_focus:not-sure': 'Not sure',
@@ -282,9 +292,19 @@ export const defaultClientConsultInspirationCopy: BrandClientConsultInspirationC
 
       sparkClauses: {
         'the-color': 'like the color',
+        'the-cut': 'like the cut',
+        'the-layers': 'like the layers',
+        'the-movement': 'like the movement',
+        'the-length': 'like the length in the picture',
+        'the-fullness': 'like the fullness',
         'the-shape': 'like the shape of it',
         'the-whole-thing': 'like the whole thing',
         'not-sure': 'aren’t sure yet what pulled you in',
+      },
+      lookMatchClauses: {
+        'match-selected-parts': 'want those parts as close to the picture as possible, with what you chose to keep preserved',
+        'adapt-selected-parts': 'want those parts adapted to you',
+        'not-sure': 'want help deciding how closely to match those parts',
       },
       detailClauses: {
         wants: 'are drawn to the {details}',
@@ -294,6 +314,7 @@ export const defaultClientConsultInspirationCopy: BrandClientConsultInspirationC
       },
       keepClauses: {
         'my-length': 'want to keep your length',
+        'my-color': 'want to keep your color',
         'my-natural-roots': 'want to keep your natural roots',
         'my-natural-texture': 'want to keep your natural texture',
         'my-natural-shape': 'want to keep your natural shape',

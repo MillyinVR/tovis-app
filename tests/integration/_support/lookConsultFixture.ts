@@ -142,6 +142,7 @@ export const completeAnswers = {
 export const INSPIRATION_ANSWERS: ReadonlyArray<[string, string[]]> = [
   ['spark_focus', ['the-color']],
   ['keep_as_is', ['my-length']],
+  ['look_match', ['adapt-selected-parts']],
   ['understanding_check', ['thats-right']],
 ]
 
