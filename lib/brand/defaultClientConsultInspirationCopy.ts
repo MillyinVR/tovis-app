@@ -270,14 +270,14 @@ export const defaultClientConsultInspirationCopy: BrandClientConsultInspirationC
       // Part 0 rule 8: the consult says what it could not see rather than
       // filling the gap.
       unsureClauses: {
-        'baseLevel': 'aren’t sure yet how dark it should start',
-        'lightestLevel': 'aren’t sure how bright yet',
-        'tone': 'aren’t sure how warm or cool yet',
-        'technique': 'aren’t sure yet how it should be done',
-        'placement': 'aren’t sure yet where it should sit',
-        'rootBlend': 'aren’t sure yet what the roots should do',
-        'finish': 'aren’t sure yet how shiny it should be',
-        'dimension': 'aren’t sure yet how much light and dark you want',
+        'baseLevel': 'The photo doesn’t clearly show how dark the base is.',
+        'lightestLevel': 'The photo doesn’t clearly show how light the brightest pieces are.',
+        'tone': 'The photo doesn’t clearly show how warm or cool the color is.',
+        'technique': 'The photo doesn’t tell us how this result was created.',
+        'placement': 'The photo doesn’t clearly show where the color is placed.',
+        'rootBlend': 'The photo doesn’t clearly show how the roots blend in.',
+        'finish': 'The photo doesn’t clearly show the finish.',
+        'dimension': 'The photo doesn’t clearly show the contrast between light and dark.',
       },
 
       sparkClauses: {
@@ -286,11 +286,11 @@ export const defaultClientConsultInspirationCopy: BrandClientConsultInspirationC
         'the-whole-thing': 'like the whole thing',
         'not-sure': 'aren’t sure yet what pulled you in',
       },
-      sparkClausesWithSubject: {
-        'the-color': 'like the {subject}',
-        'the-shape': 'like the shape of it',
-        'the-whole-thing': 'like the whole thing',
-        'not-sure': 'aren’t sure yet what pulled you in',
+      detailClauses: {
+        wants: 'are drawn to the {details}',
+        avoids: 'want to change the {details}',
+        unsure: 'aren’t sure about the {details}',
+        conflicting: 'want to clarify what to keep or change about the {details}',
       },
       keepClauses: {
         'my-length': 'want to keep your length',
@@ -303,6 +303,6 @@ export const defaultClientConsultInspirationCopy: BrandClientConsultInspirationC
       understandingConjunction: 'and',
       understandingClose: 'We’ll help {pro} work out the details.',
       understandingFallback:
-        'You’ve shown me the picture you’re after. We’ll help {pro} work out the details.',
+        'You’ve shared a picture to explore. We’ll help {pro} work out the details.',
     },
   }

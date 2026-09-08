@@ -35,8 +35,8 @@ const PRO = 'Susie'
  * the default here on purpose: a test that used 0.7–0.9 would have passed
  * happily with a floor set above every real reading.
  */
-function observed(
-  value: string,
+function observed<TValue extends string>(
+  value: TValue,
   region: { x: number; y: number; w: number; h: number } | null,
   confidence = { min: 0.4, max: 0.65 },
 ) {
@@ -350,17 +350,18 @@ describe('inspiration cards', () => {
       reading: ConsultInspirationAnalysisAttributesDTO | null = BLONDE,
     ) =>
       composeConsultInspirationUnderstanding({
+        pack,
         answers,
         reading,
         copy,
         professionalDisplayName: PRO,
       })
 
-    it('names the colour she pointed at, what she is keeping, and what is still open', () => {
+    it('reflects broad attraction without turning it into an exact blonde request', () => {
       expect(
         sentence({ spark_focus: ['the-color'], keep_as_is: ['my-length'] }),
       ).toBe(
-        'You like the light blonde, want to keep your length, and aren’t sure yet how much light and dark you want. We’ll help Susie work out the details.',
+        'You like the color and want to keep your length. The photo doesn’t clearly show the contrast between light and dark. We’ll help Susie work out the details.',
       )
     })
 
@@ -371,7 +372,7 @@ describe('inspiration cards', () => {
           keep_as_is: ['nothing-in-particular'],
         }),
       ).toBe(
-        'You like the shape of it and aren’t sure yet how much light and dark you want. We’ll help Susie work out the details.',
+        'You like the shape of it. The photo doesn’t clearly show the contrast between light and dark. We’ll help Susie work out the details.',
       )
     })
 
@@ -382,13 +383,13 @@ describe('inspiration cards', () => {
           keep_as_is: ['my-length', 'my-natural-roots'],
         }),
       ).toBe(
-        'You aren’t sure yet what pulled you in, want to keep your length, want to keep your natural roots, and aren’t sure yet how much light and dark you want. We’ll help Susie work out the details.',
+        'You aren’t sure yet what pulled you in, want to keep your length, and want to keep your natural roots. The photo doesn’t clearly show the contrast between light and dark. We’ll help Susie work out the details.',
       )
     })
 
     it('falls back rather than composing a sentence out of nothing', () => {
       expect(sentence({}, null)).toBe(
-        'You’ve shown me the picture you’re after. We’ll help Susie work out the details.',
+        'You’ve shared a picture to explore. We’ll help Susie work out the details.',
       )
     })
 
@@ -397,11 +398,65 @@ describe('inspiration cards', () => {
       // answered, a lone "aren't sure" clause reads as words put in her mouth
       // about a question nobody asked — so the fallback stands instead.
       expect(sentence({})).toBe(
-        'You’ve shown me the picture you’re after. We’ll help Susie work out the details.',
+        'You’ve shared a picture to explore. We’ll help Susie work out the details.',
       )
       expect(sentence({ keep_as_is: ['nothing-in-particular'] })).toBe(
-        'You’ve shown me the picture you’re after. We’ll help Susie work out the details.',
+        'You’ve shared a picture to explore. We’ll help Susie work out the details.',
       )
+    })
+
+    it('keeps a broad color preference unchanged when the photo reading changes', () => {
+      const answers = { spark_focus: ['the-color'], keep_as_is: ['my-length'] }
+      const warmer = { ...BLONDE, tone: observed('WARM', BLONDE.tone.region) }
+      const darker = { ...BLONDE, lightestLevel: observed('LEVEL_6', BLONDE.lightestLevel.region) }
+      expect(sentence(answers, warmer)).toBe(sentence(answers))
+      expect(sentence(answers, darker)).toBe(sentence(answers))
+      expect(sentence(answers)).not.toContain('You like the light blonde')
+    })
+
+    it('includes the specific parts she chose and the parts she would change', () => {
+      const result = sentence({
+        spark_focus: ['the-color'],
+        keep_as_is: ['my-length'],
+        love_regions: ['lightest-level'],
+        change_regions: ['tone'],
+      })
+      expect(result).toContain('are drawn to the light blonde')
+      expect(result).toContain('want to change the cool, silvery cast')
+      expect(result).toContain('want to keep your length')
+      expect(result).not.toContain('are drawn to the cool, silvery cast')
+    })
+
+    it('does not turn an unreadable attribute into either a preference or client uncertainty', () => {
+      const result = sentence({
+        spark_focus: ['the-color'],
+        love_regions: ['dimension'],
+        change_regions: ['dimension'],
+      })
+      expect(result).toContain('The photo doesn’t clearly show the contrast')
+      expect(result).not.toContain('You aren’t sure')
+      expect(result).not.toContain('want to clarify')
+      expect(result).not.toContain('are drawn to')
+    })
+
+    it('leaves contradictory visual selections open instead of choosing for the client', () => {
+      const result = sentence({ love_regions: ['tone'], change_regions: ['tone'] })
+      expect(result).toContain('want to clarify what to keep or change about the cool, silvery cast')
+      expect(result).not.toContain('are drawn to')
+      expect(result).not.toContain('want to change the')
+    })
+
+    it('uses the archived pack to interpret old per-attribute answers', () => {
+      const result = composeConsultInspirationUnderstanding({
+        pack: packV2,
+        answers: { attr_lightest_level: ['yes'], attr_tone: ['not-this'], attr_finish: ['not-sure'] },
+        reading: BLONDE,
+        copy,
+        professionalDisplayName: PRO,
+      })
+      expect(result).toContain('are drawn to the light blonde')
+      expect(result).toContain('want to change the cool, silvery cast')
+      expect(result).toContain('aren’t sure about the glassy shine')
     })
 
     it('is what the card actually asks', () => {
