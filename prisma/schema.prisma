@@ -2062,6 +2062,12 @@ model ProfessionalProfile {
   id     String @id @default(cuid())
   userId String @unique
 
+  // Permanent Founding 100 recognition. The number is intentionally kept off
+  // member-facing DTOs/UI: professionals see only "Founding Member", while
+  // admins use the immutable 001-100 value to fulfil physical cards.
+  foundingMemberNumber    Int?      @unique
+  foundingMemberAwardedAt DateTime?
+
   // The Pro's one home tenant (contract phase: required; creation sites
   // stamp it). Drives discovery visibility.
   homeTenantId String
@@ -2257,6 +2263,16 @@ model ProfessionalProfile {
   @@index([homeTenantId])
   @@index([coverMediaAssetId])
   @@index([signatureMediaAssetId])
+}
+
+// A single-row, transaction-safe allocator for permanent Founding 100 numbers.
+// Keeping this separate from FounderProgram matters: FounderProgram controls
+// access to the opt-in research community, which is a different promise.
+model FoundingProfessionalProgram {
+  id         String   @id
+  nextNumber Int      @default(1)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 }
 
 model ProfessionalMonthlyAnalytics {

@@ -70,6 +70,20 @@ describe('app/pro/ProHeader', () => {
     ).toBeInTheDocument()
   })
 
+  it('shows founding recognition without exposing the private card number', () => {
+    render(
+      <ProHeader
+        businessName="TOVIS Studio"
+        subtitle="@tovisstudio"
+        publicUrl="/professionals/pro_1"
+        isFoundingMember
+      />,
+    )
+
+    expect(screen.getByText('FOUNDING MEMBER')).toBeInTheDocument()
+    expect(screen.queryByText(/FOUNDING MEMBER 001/i)).not.toBeInTheDocument()
+  })
+
   it('exposes sign out from the account menu', async () => {
     const user = userEvent.setup()
 

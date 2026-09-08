@@ -74,7 +74,22 @@ const PRO_PROFILE_SELECT = {
   instagramHandle: true,
   tiktokHandle: true,
   websiteUrl: true,
+  // Converted to a boolean before crossing the API boundary. The permanent
+  // 001-100 number remains admin-only.
+  foundingMemberAwardedAt: true,
 } satisfies Prisma.ProfessionalProfileSelect
+
+function proProfileResponse(
+  profile: Prisma.ProfessionalProfileGetPayload<{
+    select: typeof PRO_PROFILE_SELECT
+  }>,
+) {
+  const { foundingMemberAwardedAt, ...editableProfile } = profile
+  return {
+    ...editableProfile,
+    isFoundingMember: Boolean(foundingMemberAwardedAt),
+  }
+}
 
 export async function GET() {
   try {
@@ -90,7 +105,7 @@ export async function GET() {
       return jsonFail(404, 'Professional profile not found.')
     }
 
-    return jsonOk({ profile }, 200)
+    return jsonOk({ profile: proProfileResponse(profile) }, 200)
   } catch (e: unknown) {
     const res = prismaErrorToResponse(e)
     if (res) return res
@@ -274,7 +289,7 @@ export async function PATCH(req: Request) {
         })
       })
 
-      return jsonOk({ ok: true, profile: updated }, 200)
+      return jsonOk({ ok: true, profile: proProfileResponse(updated) }, 200)
     } catch (e: unknown) {
       const res = prismaErrorToResponse(e)
       if (res) return res

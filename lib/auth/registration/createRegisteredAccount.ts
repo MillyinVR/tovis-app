@@ -41,6 +41,7 @@ import {
 import { socialProviderIdCreateData } from '@/lib/auth/socialProviderColumns'
 import { consumeSignupInvite } from '@/lib/auth/signupInvite'
 import { emitAdminUserSignedUp } from '@/lib/notifications/adminNotifications'
+import { awardFoundingProfessionalRecognition } from '@/lib/founding/professionalRecognition'
 import type { SignupLocation } from './signupLocation'
 
 const CREATED_USER_SELECT = {
@@ -273,6 +274,17 @@ export async function createRegisteredAccount(
       })
       await claimHandle(tx, proSetup.normalizedHandle, {
         kind: 'PRO',
+        professionalId: created.id,
+      })
+    }
+
+    if (role === 'PRO') {
+      const created = await tx.professionalProfile.findUniqueOrThrow({
+        where: { userId: user.id },
+        select: { id: true },
+      })
+      await awardFoundingProfessionalRecognition({
+        tx,
         professionalId: created.id,
       })
     }

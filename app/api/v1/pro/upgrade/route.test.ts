@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   claimHandle: vi.fn(),
   createActiveToken: vi.fn(),
   captureAuthException: vi.fn(),
+  awardFoundingProfessionalRecognition: vi.fn(),
   tx: {
     professionalProfile: { create: vi.fn() },
     user: { update: vi.fn() },
@@ -43,6 +44,9 @@ vi.mock('@/lib/tenant/requestContext', () => ({
 }))
 vi.mock('@/lib/observability/authEvents', () => ({
   captureAuthException: mocks.captureAuthException,
+}))
+vi.mock('@/lib/founding/professionalRecognition', () => ({
+  awardFoundingProfessionalRecognition: mocks.awardFoundingProfessionalRecognition,
 }))
 
 import { POST } from './route'
@@ -124,6 +128,7 @@ describe('POST /api/v1/pro/upgrade', () => {
     mocks.resolveProProfileSetup.mockResolvedValue({ ok: true, value: RESOLVED })
     mocks.buildProfessionalProfileCreateData.mockReturnValue({ firstName: 'Tori' })
     mocks.createActiveToken.mockReturnValue('active_token')
+    mocks.awardFoundingProfessionalRecognition.mockResolvedValue(1)
     mocks.tx.professionalProfile.create.mockResolvedValue({ id: 'pro_1' })
     mocks.tx.user.update.mockResolvedValue({})
     mocks.prisma.$transaction.mockImplementation(
@@ -243,6 +248,10 @@ describe('POST /api/v1/pro/upgrade', () => {
 
     expect(mocks.claimHandle).toHaveBeenCalledWith(mocks.tx, 'tori', {
       kind: 'PRO',
+      professionalId: 'pro_1',
+    })
+    expect(mocks.awardFoundingProfessionalRecognition).toHaveBeenCalledWith({
+      tx: mocks.tx,
       professionalId: 'pro_1',
     })
 

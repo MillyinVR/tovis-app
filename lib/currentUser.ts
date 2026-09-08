@@ -63,6 +63,8 @@ export const currentUserSelect = {
       location: true,
       phoneVerifiedAt: true,
       verificationStatus: true,
+      // Presence only: the private 001-100 card number stays admin-only.
+      foundingMemberAwardedAt: true,
     },
   },
 } satisfies Prisma.UserSelect

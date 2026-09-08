@@ -32,7 +32,7 @@ home.editorial = {
   foundingTitle: editorialPrograms.foundingTitle,
   foundingBody: editorialPrograms.foundingBody,
   foundingCard: editorialPrograms.foundingCard,
-  foundingPreview: { ...cardPreview, previewLabel: editorialPrograms.foundingPreviewLabel, note: editorialPrograms.foundingPreviewNote, tier: 'FOUNDING MEMBER', serial: 'No. — / 100', finish: 'neutral' },
+  foundingPreview: { ...cardPreview, previewLabel: editorialPrograms.foundingPreviewLabel, note: editorialPrograms.foundingPreviewNote, tier: 'FOUNDING MEMBER', serial: 'No. — / 100', finish: 'black-holographic' },
   progressionCards: {
     'Numbered Gold TOVIS Card': { ...cardPreview, tier: 'ELITE MEMBER', serial: 'No. —', finish: 'gold' },
   },
