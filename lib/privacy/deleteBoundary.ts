@@ -130,6 +130,14 @@ export const DELETE_BOUNDARY: Readonly<Record<string, DeleteDisposition>> = {
     reason:
       'Push credentials. These MUST die: a surviving token keeps delivering notifications to a deleted account.',
   },
+  FounderMember: {
+    status: 'DELETE',
+    reason: 'Community access grant. Removing it immediately revokes every founder room.',
+  },
+  FounderRoomRead: {
+    status: 'DELETE',
+    reason: 'User-owned unread-position state with no other-party retention need.',
+  },
   ClientPaymentMethod: {
     status: 'DELETE',
     reason:
@@ -410,6 +418,11 @@ export const DELETE_BOUNDARY: Readonly<Record<string, DeleteDisposition>> = {
   },
   MessageThread: { status: 'RETAIN', reason: R_OTHER_PARTY },
   MessageThreadParticipant: { status: 'RETAIN', reason: R_OTHER_PARTY },
+  FounderMessage: {
+    status: 'RETAIN',
+    reason: `${R_OTHER_PARTY} The departed author is de-identified through User/profile anonymization.`,
+  },
+  FounderMessageReport: { status: 'RETAIN', reason: R_MODERATION },
   ClientConsentRecord: {
     status: 'RETAIN',
     reason:

@@ -225,6 +225,73 @@
       ],
       "type": "string"
     },
+    "$Enums.FounderAudience": {
+      "enum": [
+        "PRO",
+        "CLIENT"
+      ],
+      "type": "string"
+    },
+    "$Enums.FounderMemberRole": {
+      "enum": [
+        "MEMBER",
+        "MODERATOR",
+        "OWNER"
+      ],
+      "type": "string"
+    },
+    "$Enums.FounderMessageKind": {
+      "enum": [
+        "CHAT",
+        "QUESTION",
+        "BUG",
+        "IDEA",
+        "LOVE",
+        "ANNOUNCEMENT"
+      ],
+      "type": "string"
+    },
+    "$Enums.FounderMessageReportReason": {
+      "enum": [
+        "SPAM",
+        "HARASSMENT",
+        "PRIVATE_INFORMATION",
+        "OTHER"
+      ],
+      "type": "string"
+    },
+    "$Enums.FounderRoomKey": {
+      "enum": [
+        "PRO_ALL",
+        "PRO_HAIR",
+        "PRO_NAILS",
+        "PRO_LASHES_BROWS",
+        "PRO_SKINCARE",
+        "PRO_MAKEUP",
+        "PRO_PERMANENT_MAKEUP",
+        "PRO_EXTENSIONS",
+        "PRO_WAXING_SPRAY_TAN",
+        "PRO_BARBER",
+        "CLIENT_ONE",
+        "CLIENT_TWO",
+        "CLIENT_THREE"
+      ],
+      "type": "string"
+    },
+    "$Enums.FounderSpecialty": {
+      "enum": [
+        "HAIR",
+        "NAILS",
+        "LASHES_BROWS",
+        "SKINCARE",
+        "MAKEUP",
+        "PERMANENT_MAKEUP",
+        "EXTENSIONS",
+        "WAXING_SPRAY_TAN",
+        "BARBER"
+      ],
+      "type": "string"
+    },
     "$Enums.LastMinuteOfferType": {
       "enum": [
         "NONE",
@@ -13068,6 +13135,342 @@
         "professional"
       ],
       "type": "object"
+    },
+    "FounderAdminMemberDTO": {
+      "properties": {
+        "audience": {
+          "$ref": "#/definitions/FounderAudience"
+        },
+        "clientSlot": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "joinedAt": {
+          "type": "string"
+        },
+        "removedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "role": {
+          "$ref": "#/definitions/FounderMemberRole"
+        },
+        "specialty": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FounderSpecialty"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sponsorName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "userId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "userId",
+        "displayName",
+        "audience",
+        "role",
+        "specialty",
+        "clientSlot",
+        "sponsorName",
+        "joinedAt",
+        "removedAt"
+      ],
+      "type": "object"
+    },
+    "FounderAdminSummaryDTO": {
+      "properties": {
+        "activeClients": {
+          "type": "number"
+        },
+        "members": {
+          "items": {
+            "$ref": "#/definitions/FounderAdminMemberDTO"
+          },
+          "type": "array"
+        },
+        "openReports": {
+          "type": "number"
+        },
+        "proSeatsRemaining": {
+          "type": "number"
+        },
+        "proSeatsUsed": {
+          "type": "number"
+        },
+        "reports": {
+          "items": {
+            "$ref": "#/definitions/FounderMessageReportDTO"
+          },
+          "type": "array"
+        },
+        "unansweredQuestions": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "proSeatsUsed",
+        "proSeatsRemaining",
+        "activeClients",
+        "unansweredQuestions",
+        "openReports",
+        "reports",
+        "members"
+      ],
+      "type": "object"
+    },
+    "FounderAudience": {
+      "$ref": "#/definitions/%24Enums.FounderAudience"
+    },
+    "FounderMemberRole": {
+      "$ref": "#/definitions/%24Enums.FounderMemberRole"
+    },
+    "FounderMessageAuthorDTO": {
+      "properties": {
+        "audience": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FounderAudience"
+            },
+            {
+              "const": "ADMIN",
+              "type": "string"
+            }
+          ]
+        },
+        "avatarUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FounderMemberRole"
+            },
+            {
+              "const": "ADMIN",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "displayName",
+        "avatarUrl",
+        "audience",
+        "role"
+      ],
+      "type": "object"
+    },
+    "FounderMessageCreateResponseDTO": {
+      "properties": {
+        "message": {
+          "$ref": "#/definitions/FounderMessageDTO"
+        }
+      },
+      "required": [
+        "message"
+      ],
+      "type": "object"
+    },
+    "FounderMessageDTO": {
+      "properties": {
+        "answeredAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "author": {
+          "$ref": "#/definitions/FounderMessageAuthorDTO"
+        },
+        "body": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/definitions/FounderMessageKind"
+        },
+        "replyToId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "room": {
+          "$ref": "#/definitions/FounderRoomKey"
+        }
+      },
+      "required": [
+        "id",
+        "room",
+        "kind",
+        "body",
+        "createdAt",
+        "answeredAt",
+        "replyToId",
+        "author"
+      ],
+      "type": "object"
+    },
+    "FounderMessageKind": {
+      "$ref": "#/definitions/%24Enums.FounderMessageKind"
+    },
+    "FounderMessageReportDTO": {
+      "properties": {
+        "createdAt": {
+          "type": "string"
+        },
+        "details": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "message": {
+          "$ref": "#/definitions/FounderMessageDTO"
+        },
+        "reason": {
+          "$ref": "#/definitions/FounderMessageReportReason"
+        }
+      },
+      "required": [
+        "id",
+        "reason",
+        "details",
+        "createdAt",
+        "message"
+      ],
+      "type": "object"
+    },
+    "FounderMessageReportReason": {
+      "$ref": "#/definitions/%24Enums.FounderMessageReportReason"
+    },
+    "FounderMessagesResponseDTO": {
+      "properties": {
+        "hasMore": {
+          "type": "boolean"
+        },
+        "messages": {
+          "items": {
+            "$ref": "#/definitions/FounderMessageDTO"
+          },
+          "type": "array"
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "room": {
+          "$ref": "#/definitions/FounderRoomDTO"
+        }
+      },
+      "required": [
+        "room",
+        "messages",
+        "nextCursor",
+        "hasMore"
+      ],
+      "type": "object"
+    },
+    "FounderPortalDTO": {
+      "properties": {
+        "canAdminister": {
+          "type": "boolean"
+        },
+        "canModerate": {
+          "type": "boolean"
+        },
+        "isOwner": {
+          "type": "boolean"
+        },
+        "rooms": {
+          "items": {
+            "$ref": "#/definitions/FounderRoomDTO"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "canModerate",
+        "canAdminister",
+        "isOwner",
+        "rooms"
+      ],
+      "type": "object"
+    },
+    "FounderRoomDTO": {
+      "properties": {
+        "audience": {
+          "$ref": "#/definitions/FounderAudience"
+        },
+        "description": {
+          "type": "string"
+        },
+        "key": {
+          "$ref": "#/definitions/FounderRoomKey"
+        },
+        "label": {
+          "type": "string"
+        },
+        "unreadCount": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "key",
+        "label",
+        "description",
+        "audience",
+        "unreadCount"
+      ],
+      "type": "object"
+    },
+    "FounderRoomKey": {
+      "$ref": "#/definitions/%24Enums.FounderRoomKey"
+    },
+    "FounderSpecialty": {
+      "$ref": "#/definitions/%24Enums.FounderSpecialty"
     },
     "JsonArray": {
       "description": "From https://github.com/sindresorhus/type-fest/ Matches a JSON array.",

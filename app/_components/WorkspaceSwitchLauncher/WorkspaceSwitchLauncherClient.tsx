@@ -38,9 +38,11 @@ export const WS_SWITCH_RESERVE_VAR = '--ws-switch-reserve'
 export default function WorkspaceSwitchLauncherClient({
   options,
   current,
+  hasFounderPortal,
 }: {
   options: WorkspaceOption[]
   current: Role
+  hasFounderPortal: boolean
 }) {
   const [open, setOpen] = useState(false)
 
@@ -124,6 +126,18 @@ export default function WorkspaceSwitchLauncherClient({
         open={open}
         onClose={() => setOpen(false)}
         options={options}
+        directLinks={
+          hasFounderPortal
+            ? [
+                {
+                  key: 'founders',
+                  label: 'Founders Portal',
+                  sub: 'Private product feedback community',
+                  href: '/founders',
+                },
+              ]
+            : []
+        }
       />
     </>
   )

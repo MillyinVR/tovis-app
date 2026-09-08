@@ -37,6 +37,10 @@ export type ExportedUserData = {
     proPrepItems: unknown[]
     practiceShots: unknown[]
     messages: unknown[]
+    founderMembership: unknown
+    founderRoomReads: unknown[]
+    founderMessages: unknown[]
+    founderMessageReports: unknown[]
     notifications: unknown[]
     clientNotifications: unknown[]
     scheduledClientNotifications: unknown[]
@@ -624,6 +628,10 @@ export async function exportUserData(
     proPrepItems,
     practiceShots,
     messages,
+    founderMembership,
+    founderRoomReads,
+    founderMessages,
+    founderMessageReports,
     notifications,
     clientNotifications,
     scheduledClientNotifications,
@@ -655,6 +663,10 @@ export async function exportUserData(
     findProPrepItems(input.db, professionalProfileId),
     findPracticeShots(input.db, professionalProfileId),
     findMessages(input.db, input.userId, clientProfileId, professionalProfileId),
+    findFounderMembership(input.db, input.userId),
+    findFounderRoomReads(input.db, input.userId),
+    findFounderMessages(input.db, input.userId),
+    findFounderMessageReports(input.db, input.userId),
     findNotifications(input.db, professionalProfileId),
     findClientNotifications(input.db, clientProfileId),
     findScheduledClientNotifications(input.db, clientProfileId),
@@ -722,6 +734,10 @@ export async function exportUserData(
       proPrepItems: normalizeJsonArray(proPrepItems),
       practiceShots: normalizeJsonArray(practiceShots),
       messages: normalizeJsonArray(messages),
+      founderMembership: normalizeJson(founderMembership),
+      founderRoomReads: normalizeJsonArray(founderRoomReads),
+      founderMessages: normalizeJsonArray(founderMessages),
+      founderMessageReports: normalizeJsonArray(founderMessageReports),
       notifications: normalizeJsonArray(notifications),
       clientNotifications: normalizeJsonArray(clientNotifications),
       scheduledClientNotifications: normalizeJsonArray(
@@ -1053,6 +1069,86 @@ async function findMessages(
     },
     orderBy: { createdAt: 'asc' },
     select: messageExportSelect,
+  })
+}
+
+async function findFounderMembership(
+  db: PrismaClient | Prisma.TransactionClient,
+  userId: string,
+): Promise<unknown> {
+  return db.founderMember.findUnique({
+    where: { userId },
+    select: {
+      id: true,
+      audience: true,
+      role: true,
+      status: true,
+      specialty: true,
+      clientSlot: true,
+      professionalId: true,
+      clientId: true,
+      sponsorProfessionalId: true,
+      joinedAt: true,
+      removedAt: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  })
+}
+
+async function findFounderRoomReads(
+  db: PrismaClient | Prisma.TransactionClient,
+  userId: string,
+): Promise<unknown[]> {
+  return db.founderRoomRead.findMany({
+    where: { userId },
+    orderBy: { createdAt: 'asc' },
+    select: {
+      id: true,
+      room: true,
+      lastReadAt: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  })
+}
+
+async function findFounderMessages(
+  db: PrismaClient | Prisma.TransactionClient,
+  userId: string,
+): Promise<unknown[]> {
+  return db.founderMessage.findMany({
+    where: { senderUserId: userId },
+    orderBy: { createdAt: 'asc' },
+    select: {
+      id: true,
+      room: true,
+      kind: true,
+      body: true,
+      replyToId: true,
+      answeredAt: true,
+      hiddenAt: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  })
+}
+
+async function findFounderMessageReports(
+  db: PrismaClient | Prisma.TransactionClient,
+  userId: string,
+): Promise<unknown[]> {
+  return db.founderMessageReport.findMany({
+    where: { reporterUserId: userId },
+    orderBy: { createdAt: 'asc' },
+    select: {
+      id: true,
+      messageId: true,
+      reason: true,
+      details: true,
+      resolvedAt: true,
+      createdAt: true,
+    },
   })
 }
 

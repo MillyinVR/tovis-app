@@ -1,6 +1,7 @@
 // app/_components/WorkspaceSwitchLauncher/WorkspaceSwitchLauncher.tsx
 import { getCurrentUser } from '@/lib/currentUser'
 import { buildWorkspaceOptions, workspaceCapabilityOf } from '@/lib/auth/workspaces'
+import { resolveFounderPortalAccess } from '@/lib/founders/access'
 
 import WorkspaceSwitchLauncherClient from './WorkspaceSwitchLauncherClient'
 
@@ -17,11 +18,17 @@ export default async function WorkspaceSwitchLauncher() {
   if (!user) return null
 
   const options = buildWorkspaceOptions(workspaceCapabilityOf(user), user.role)
+  const founderAccess = await resolveFounderPortalAccess(user)
 
-  // buildWorkspaceOptions returns [] when there is only one workspace.
-  if (options.length <= 1) return null
+  // A founder with one conventional role still needs the launcher because the
+  // portal is a separate destination inside this same identity.
+  if (options.length <= 1 && !founderAccess.canAccess) return null
 
   return (
-    <WorkspaceSwitchLauncherClient options={options} current={user.role} />
+    <WorkspaceSwitchLauncherClient
+      options={options}
+      current={user.role}
+      hasFounderPortal={founderAccess.canAccess}
+    />
   )
 }

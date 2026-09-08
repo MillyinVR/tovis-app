@@ -33,6 +33,66 @@ enum Role {
   ADMIN
 }
 
+enum FounderAudience {
+  PRO
+  CLIENT
+}
+
+enum FounderMemberRole {
+  MEMBER
+  MODERATOR
+  OWNER
+}
+
+enum FounderMemberStatus {
+  ACTIVE
+  REMOVED
+}
+
+enum FounderSpecialty {
+  HAIR
+  NAILS
+  LASHES_BROWS
+  SKINCARE
+  MAKEUP
+  PERMANENT_MAKEUP
+  EXTENSIONS
+  WAXING_SPRAY_TAN
+  BARBER
+}
+
+enum FounderRoomKey {
+  PRO_ALL
+  PRO_HAIR
+  PRO_NAILS
+  PRO_LASHES_BROWS
+  PRO_SKINCARE
+  PRO_MAKEUP
+  PRO_PERMANENT_MAKEUP
+  PRO_EXTENSIONS
+  PRO_WAXING_SPRAY_TAN
+  PRO_BARBER
+  CLIENT_ONE
+  CLIENT_TWO
+  CLIENT_THREE
+}
+
+enum FounderMessageKind {
+  CHAT
+  QUESTION
+  BUG
+  IDEA
+  LOVE
+  ANNOUNCEMENT
+}
+
+enum FounderMessageReportReason {
+  SPAM
+  HARASSMENT
+  PRIVATE_INFORMATION
+  OTHER
+}
+
 enum IdempotencyStatus {
   STARTED
   COMPLETED
@@ -1624,6 +1684,12 @@ model User {
   usedSignupInvite     SignupInvite?              @relation("SignupInviteUsedBy")
   sentMessages         Message[]                  @relation("UserSentMessages")
   threadParticipants   MessageThreadParticipant[] @relation("UserThreadParticipants")
+  founderMembership  FounderMember?
+  founderMessages    FounderMessage[]           @relation("FounderMessageSender")
+  founderAnswers     FounderMessage[]           @relation("FounderMessageAnsweredBy")
+  founderModerations FounderMessage[]           @relation("FounderMessageHiddenBy")
+  founderReports     FounderMessageReport[]     @relation("FounderMessageReporter")
+  founderRoomReads   FounderRoomRead[]
 
   notificationActor                  Notification[]              @relation("NotificationActor")
   adminNotifications                 AdminNotification[]         @relation("AdminNotifications")
@@ -1901,8 +1967,9 @@ model ClientProfile {
 
   // Global visual taste vector (personalization spec §6.0) — decayed,
   // signal-weighted average of the embeddings of what this client liked/saved.
-  tasteVector   ClientTasteVector?
-  bookingSeries BookingSeries[]
+  tasteVector       ClientTasteVector?
+  bookingSeries     BookingSeries[]
+  founderMembership FounderMember?     @relation("FounderClientMembership")
 
   @@index([claimStatus])
   @@index([emailHashKeyVersion])
@@ -2071,6 +2138,8 @@ model ProfessionalProfile {
 
   // Relationships
   user                    User                          @relation(fields: [userId], references: [id])
+  founderMembership       FounderMember?                @relation("FounderProfessionalMembership")
+  sponsoredFounderClients FounderMember[]               @relation("FounderClientSponsor")
   locations               ProfessionalLocation[]
   offerings               ProfessionalServiceOffering[]
   bookings                Booking[]
@@ -6601,6 +6670,114 @@ model MessageAttachment {
   createdAt DateTime  @default(now())
 
   message Message @relation(fields: [messageId], references: [id])
+}
+
+// Invite-only research community for the first founding cohort. Kept separate
+// from appointment MessageThread: those threads are private client↔pro records,
+// while founder rooms are multi-person community spaces with different access,
+// moderation, retention, and notification rules.
+model FounderProgram {
+  id           String   @id
+  proSeatsUsed Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model FounderMember {
+  id       String              @id @default(cuid())
+  userId   String              @unique
+  audience FounderAudience
+  role     FounderMemberRole   @default(MEMBER)
+  status   FounderMemberStatus @default(ACTIVE)
+
+  // PRO members have exactly one specialty and see exactly that specialty room
+  // plus PRO_ALL. CLIENT members have no specialty and see exactly the room
+  // selected by clientSlot (1, 2, or 3).
+  specialty  FounderSpecialty?
+  clientSlot Int?
+
+  professionalId String? @unique
+  clientId       String? @unique
+
+  // Every founding client is sponsored by one admitted founding pro. The
+  // compound uniqueness below is the hard three-client ceiling: one row for
+  // slot 1, one for slot 2, and one for slot 3 per sponsor.
+  sponsorProfessionalId String?
+
+  joinedAt  DateTime  @default(now())
+  removedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user         User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  professional ProfessionalProfile? @relation("FounderProfessionalMembership", fields: [professionalId], references: [id], onDelete: Cascade)
+  client       ClientProfile?       @relation("FounderClientMembership", fields: [clientId], references: [id], onDelete: Cascade)
+  sponsor      ProfessionalProfile? @relation("FounderClientSponsor", fields: [sponsorProfessionalId], references: [id], onDelete: Cascade)
+
+  @@unique([sponsorProfessionalId, clientSlot])
+  @@index([audience, status, joinedAt])
+  @@index([specialty, status])
+  @@index([sponsorProfessionalId, status])
+}
+
+model FounderRoomRead {
+  id         String         @id @default(cuid())
+  userId     String
+  room       FounderRoomKey
+  lastReadAt DateTime       @default(now())
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, room])
+  @@index([room, lastReadAt])
+}
+
+model FounderMessage {
+  id           String             @id @default(cuid())
+  room         FounderRoomKey
+  kind         FounderMessageKind @default(CHAT)
+  senderUserId String
+  body         String             @db.VarChar(4000)
+  replyToId    String?
+
+  answeredAt       DateTime?
+  answeredByUserId String?
+  hiddenAt         DateTime?
+  hiddenByUserId   String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  sender     User                   @relation("FounderMessageSender", fields: [senderUserId], references: [id], onDelete: Cascade)
+  replyTo    FounderMessage?        @relation("FounderMessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies    FounderMessage[]       @relation("FounderMessageReplies")
+  answeredBy User?                  @relation("FounderMessageAnsweredBy", fields: [answeredByUserId], references: [id], onDelete: SetNull)
+  hiddenBy   User?                  @relation("FounderMessageHiddenBy", fields: [hiddenByUserId], references: [id], onDelete: SetNull)
+  reports    FounderMessageReport[]
+
+  @@index([room, createdAt])
+  @@index([kind, answeredAt, createdAt])
+  @@index([senderUserId, createdAt])
+  @@index([replyToId, createdAt])
+  @@index([hiddenAt, createdAt])
+}
+
+model FounderMessageReport {
+  id             String                     @id @default(cuid())
+  messageId      String
+  reporterUserId String
+  reason         FounderMessageReportReason
+  details        String?                    @db.VarChar(1000)
+  resolvedAt     DateTime?
+  createdAt      DateTime                   @default(now())
+
+  message  FounderMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  reporter User           @relation("FounderMessageReporter", fields: [reporterUserId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, reporterUserId])
+  @@index([resolvedAt, createdAt])
+  @@index([reporterUserId, createdAt])
 }
 
 model Quote {

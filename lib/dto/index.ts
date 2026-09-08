@@ -145,6 +145,18 @@ export type {
   MessagesUnreadCountResponseDTO,
 } from '@/lib/dto/messaging'
 
+// ── Invite-only Founding Circle portal ─────────────────────────────────────
+export type {
+  FounderRoomDTO,
+  FounderPortalDTO,
+  FounderMessageAuthorDTO,
+  FounderMessageDTO,
+  FounderMessagesResponseDTO,
+  FounderMessageCreateResponseDTO,
+  FounderAdminMemberDTO,
+  FounderAdminSummaryDTO,
+} from '@/lib/dto/founders'
+
 // ── Auth + workspace switch (POST /api/v1/auth/*, /api/v1/workspace/switch) ──
 export type {
   AuthUserDTO,
