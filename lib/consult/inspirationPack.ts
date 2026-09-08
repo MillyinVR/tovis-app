@@ -1,3 +1,4 @@
+import { exactKeys } from './analysisValidation'
 import { isDeepStrictEqual } from 'node:util'
 import type { Prisma } from '@prisma/client'
 
@@ -443,15 +444,6 @@ export function toInspirationJsonPayload(
       payload.possibleProfessionalInterpretation.map((item) => ({ ...item })),
     catalogGuidance: payload.catalogGuidance.map((item) => ({ ...item })),
   }
-}
-
-function exactKeys(value: Record<string, unknown>, expected: readonly string[]) {
-  const actual = Object.keys(value).sort()
-  const sortedExpected = [...expected].sort()
-  return (
-    actual.length === sortedExpected.length &&
-    actual.every((key, index) => key === sortedExpected[index])
-  )
 }
 
 export function normalizeStoredInspirationPayloadV1(
