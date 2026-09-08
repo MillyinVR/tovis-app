@@ -157,6 +157,9 @@ async function confirmZip(zip = '92024') {
  * `prefill.lastName` is the ordinary case, not an edge one.
  */
 function fillPersonalDetails({ lastName = 'Lovelace' } = {}) {
+  fireEvent.change(screen.getByPlaceholderText('TVS-XXXX-XXXX-XXXX-XXXX-XXXX'), {
+    target: { value: 'TVS-TEST-CODE' },
+  })
   const lastNameInput = document.getElementById(
     'social-last-name',
   ) as HTMLInputElement
@@ -292,6 +295,7 @@ describe('app/(auth)/_components/signup/SocialCompleteClient.tsx', () => {
     const body = lastRequestBody(fetchMock)
     expect(body).toMatchObject({
       signupTicket: TICKET_SECRET,
+      signupInviteCode: 'TVS-TEST-CODE',
       role: 'CLIENT',
       firstName: 'Ada',
       phone: '+16195551234',

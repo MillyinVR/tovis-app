@@ -22,7 +22,6 @@
 import {
   ContactMethod,
   Prisma,
-  type Role,
   type SocialAuthProvider,
 } from '@prisma/client'
 
@@ -40,6 +39,8 @@ import {
   type ResolvedProProfileSetup,
 } from '@/lib/pro/proProfileSetup'
 import { socialProviderIdCreateData } from '@/lib/auth/socialProviderColumns'
+import { consumeSignupInvite } from '@/lib/auth/signupInvite'
+import { emitAdminUserSignedUp } from '@/lib/notifications/adminNotifications'
 import type { SignupLocation } from './signupLocation'
 
 const CREATED_USER_SELECT = {
@@ -95,7 +96,7 @@ export type CreateRegisteredAccountArgs = {
   phone: string | null
   /** How the person proved who they are. See SignupCredential. */
   credential: SignupCredential
-  role: Role
+  role: 'CLIENT' | 'PRO'
   firstName: string
   lastName: string
   /** The tenant whose domain served the signup; the profile's permanent home. */
@@ -127,6 +128,8 @@ export type CreateRegisteredAccountArgs = {
   claimInviteToken: string | null
   /** Channel proven by the claim link's marker, or null when it did not validate. */
   claimVerifiedChannel: ContactMethod | null
+  /** Founder-issued, single-use private-beta code. */
+  signupInviteCode: string
 }
 
 export type CreateRegisteredAccountResult = {
@@ -157,6 +160,7 @@ export async function createRegisteredAccount(
     attemptClaimAdopt,
     claimInviteToken,
     claimVerifiedChannel,
+    signupInviteCode,
   } = args
 
   const clientProfileCreateData = {
@@ -228,6 +232,12 @@ export async function createRegisteredAccount(
       select: CREATED_USER_SELECT,
     })
 
+    const signupInvite = await consumeSignupInvite({
+      rawCode: signupInviteCode,
+      userId: user.id,
+      tx,
+    })
+
     let adoptionVerifiedChannel: ContactMethod | null = null
 
     if (role === 'CLIENT' && attemptClaimAdopt) {
@@ -266,6 +276,17 @@ export async function createRegisteredAccount(
         professionalId: created.id,
       })
     }
+
+    await emitAdminUserSignedUp({
+      userId: user.id,
+      email: user.email,
+      firstName,
+      lastName,
+      role,
+      signupInviteId: signupInvite.id,
+      signupInviteLabel: signupInvite.label,
+      tx,
+    })
 
     return { user, adoptionVerifiedChannel }
   })

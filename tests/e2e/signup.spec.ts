@@ -18,6 +18,12 @@
 import { expect, test, type Page } from '@playwright/test'
 import { PrismaClient } from '@prisma/client'
 
+import {
+  generateSignupInviteCode,
+  signupInviteCodeHash,
+  signupInviteCodeHint,
+} from '@/lib/auth/signupInvite'
+
 test.use({ storageState: { cookies: [], origins: [] } })
 
 const tag = `e2e_signup_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
@@ -109,15 +115,44 @@ async function completeProIdentityStep(page: Page, args: { phone: string }) {
 /** Pro wizard step 3 ("Account") and final submit. */
 async function completeProAccountStepAndSubmit(
   page: Page,
-  args: { email: string },
+  args: { email: string; signupInviteCode: string },
 ) {
   await page.getByLabel('Email address').fill(args.email)
   await page.getByLabel(/^Password/).fill('SuperSecret123!')
+  await page.getByPlaceholder('TVS-XXXX-XXXX-XXXX-XXXX-XXXX').fill(
+    args.signupInviteCode,
+  )
   await page.getByRole('checkbox', { name: /I agree to the Terms/i }).check()
 
   const submit = page.getByRole('button', { name: 'Create Pro Account' })
   await expect(submit).toBeEnabled()
   await submit.click()
+}
+
+async function issueSignupInvite(label: string): Promise<string> {
+  const databaseUrl = process.env.DATABASE_URL
+  if (!databaseUrl) throw new Error('DATABASE_URL is required for signup E2E')
+
+  const db = new PrismaClient({ datasources: { db: { url: databaseUrl } } })
+  try {
+    const permission = await db.adminPermission.findFirstOrThrow({
+      where: { role: 'SUPER_ADMIN' },
+      select: { adminUserId: true },
+    })
+    const code = generateSignupInviteCode()
+    await db.signupInvite.create({
+      data: {
+        codeHash: signupInviteCodeHash(code),
+        codeHint: signupInviteCodeHint(code),
+        label: `${tag}_${label}`,
+        createdByAdminUserId: permission.adminUserId,
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      },
+    })
+    return code
+  } finally {
+    await db.$disconnect()
+  }
 }
 
 async function expectSignedUpAndOnVerifyPhone(page: Page) {
@@ -159,6 +194,9 @@ test.describe('signup flows', () => {
         where: { userId: { in: userIds } },
       })
       await db.user.deleteMany({ where: { id: { in: userIds } } })
+      await db.signupInvite.deleteMany({
+        where: { label: { contains: tag } },
+      })
     } finally {
       await db.$disconnect()
     }
@@ -194,6 +232,7 @@ test.describe('signup flows', () => {
 
     const email = nextEmail('client')
     const phone = nextPhone()
+    const signupInviteCode = await issueSignupInvite('client')
 
     await page.getByLabel('First name').fill('E2E')
     await page.getByLabel('Last name').fill('Client')
@@ -207,6 +246,9 @@ test.describe('signup flows', () => {
     await page.getByLabel(/^Phone/).fill(phone)
     await page.getByLabel('Email address').fill(email)
     await page.getByLabel(/^Password/).fill('SuperSecret123!')
+    await page
+      .getByPlaceholder('TVS-XXXX-XXXX-XXXX-XXXX-XXXX')
+      .fill(signupInviteCode)
     await page.getByRole('checkbox', { name: /transactional SMS/i }).check()
     await page
       .getByRole('checkbox', { name: /I agree to the Terms/i })
@@ -244,6 +286,7 @@ test.describe('signup flows', () => {
     await completeProIdentityStep(page, { phone: nextPhone() })
     await completeProAccountStepAndSubmit(page, {
       email: nextEmail('pro_salon'),
+      signupInviteCode: await issueSignupInvite('pro_salon'),
     })
 
     await expectSignedUpAndOnVerifyPhone(page)
@@ -274,6 +317,7 @@ test.describe('signup flows', () => {
     await completeProIdentityStep(page, { phone: nextPhone() })
     await completeProAccountStepAndSubmit(page, {
       email: nextEmail('pro_mobile'),
+      signupInviteCode: await issueSignupInvite('pro_mobile'),
     })
 
     await expectSignedUpAndOnVerifyPhone(page)
@@ -301,6 +345,7 @@ test.describe('signup flows', () => {
     await completeProIdentityStep(page, { phone: nextPhone() })
     await completeProAccountStepAndSubmit(page, {
       email: nextEmail('pro_licensed'),
+      signupInviteCode: await issueSignupInvite('pro_licensed'),
     })
 
     // DCA is intentionally unconfigured in the e2e env, so signup must

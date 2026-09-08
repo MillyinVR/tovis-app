@@ -394,7 +394,8 @@
         "PRO_LICENSE_EXPIRED",
         "ADMIN_VERIFICATION_REVIEW_NEEDED",
         "ADMIN_SUPPORT_TICKET_CREATED",
-        "ADMIN_VIRAL_REQUEST_PENDING"
+        "ADMIN_VIRAL_REQUEST_PENDING",
+        "ADMIN_USER_SIGNED_UP"
       ],
       "type": "string"
     },

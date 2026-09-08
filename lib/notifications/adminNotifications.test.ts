@@ -20,6 +20,7 @@ vi.mock('@/lib/prisma', () => ({
 
 import {
   emitAdminSupportTicketCreated,
+  emitAdminUserSignedUp,
   emitAdminVerificationReviewNeeded,
   emitAdminViralRequestPending,
 } from './adminNotifications'
@@ -202,5 +203,31 @@ describe('emitAdminViralRequestPending', () => {
 
     const createArg = create.mock.calls[0]?.[0]
     expect(createArg?.data.dedupeKey).toBe('ADMIN_VIRAL_REQUEST_PENDING:vr_5')
+  })
+})
+
+describe('emitAdminUserSignedUp', () => {
+  it('tells every admin which person and invite produced the account', async () => {
+    await emitAdminUserSignedUp({
+      tx: makeTx(),
+      userId: 'user_9',
+      email: 'jane@example.com',
+      firstName: 'Jane',
+      lastName: 'Smith',
+      role: 'PRO',
+      signupInviteId: 'invite_9',
+      signupInviteLabel: 'Jane beta',
+    })
+
+    const args = mockEnqueueDispatch.mock.calls[0]?.[0]
+    expect(args.key).toBe(NotificationEventKey.ADMIN_USER_SIGNED_UP)
+    expect(args.href).toBe('/admin/invite-codes')
+    expect(args.title).toBe('New invite signup')
+    expect(args.body).toContain('Jane Smith')
+    expect(args.body).toContain('jane@example.com')
+    expect(args.body).toContain('Jane beta')
+
+    const createArg = create.mock.calls[0]?.[0]
+    expect(createArg?.data.dedupeKey).toBe('ADMIN_USER_SIGNED_UP:user_9')
   })
 })

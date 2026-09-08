@@ -326,6 +326,11 @@ export const EXPORT_BOUNDARY: Readonly<Record<string, ExportDisposition>> = {
     reason:
       "Pro-facing translation of the consult onto the professional's own service menu: her list prices and durations, plus the reason each line is there. It states nothing about the client that consultSessions does not already export, and it is the professional's commercial record rather than the client's personal data, so it is disclosed in neither party's user export.",
   },
+  SignupInvite: {
+    status: 'OMITTED',
+    reason:
+      'Single-use access-control credential and admin audit record. The raw code is never stored; its hash and admin-authored label are internal security metadata rather than user-facing profile data.',
+  },
 
   // ------------------------------------------------- undecided (K16-A backlog)
   // Recorded, not resolved. Each of these links to the subject and is neither

@@ -137,6 +137,9 @@ function checkTransactionalSmsConsent() {
 }
 
 function checkAllRequiredConsents() {
+  fireEvent.change(screen.getByPlaceholderText('TVS-XXXX-XXXX-XXXX-XXXX-XXXX'), {
+    target: { value: 'TVS-TEST-CODE' },
+  })
   checkTransactionalSmsConsent()
   checkTermsConsent()
 }
@@ -285,6 +288,7 @@ describe('app/(auth)/_components/signup/SignupClientClient.tsx', () => {
       firstName: 'Tori',
       lastName: 'Morales',
       phone: '+16195551234',
+      signupInviteCode: 'TVS-TEST-CODE',
       transactionalSmsConsent: true,
       tosAccepted: true,
       turnstileToken: 'ts_client_ok',
@@ -544,7 +548,10 @@ describe('app/(auth)/_components/signup/SignupClientClient.tsx', () => {
     fireEvent.click(submitButton)
 
     await waitFor(() => {
-      expect(screen.getByText('First name is required.')).toBeTruthy()
+    expect(screen.getByText('First name is required.')).toBeTruthy()
+    expect(
+      screen.getByText('Invite code is required while signup is private.'),
+    ).toBeTruthy()
     })
 
     expect(screen.getByText('Last name is required.')).toBeTruthy()
@@ -557,7 +564,7 @@ describe('app/(auth)/_components/signup/SignupClientClient.tsx', () => {
     ).toBeTruthy()
 
     // Focus lands on the first invalid field.
-    expect(document.activeElement?.id).toBe('signup-first-name')
+    expect(document.activeElement?.id).toBe('signup-invite-code')
 
     expect(mocks.getTurnstileToken).not.toHaveBeenCalled()
     expect(mocks.router.refresh).not.toHaveBeenCalled()

@@ -225,6 +225,9 @@ async function completeIdentityStep() {
 
 /** Step 3 ("Account") field fills, without the terms checkbox. */
 function fillAccountFields(email = 'pro@example.com') {
+  fireEvent.change(screen.getByPlaceholderText('TVS-XXXX-XXXX-XXXX-XXXX-XXXX'), {
+    target: { value: 'TVS-TEST-CODE' },
+  })
   fireEvent.change(screen.getByLabelText(/Email address/i), {
     target: { value: email },
   })
@@ -414,6 +417,7 @@ describe('app/(auth)/_components/signup/SignupProClient.tsx', () => {
       firstName: 'Tori',
       lastName: 'Morales',
       phone: '+16195551234',
+      signupInviteCode: 'TVS-TEST-CODE',
       transactionalSmsConsent: true,
       tosAccepted: true,
       turnstileToken: 'ts_pro_ok',
@@ -528,6 +532,9 @@ describe('app/(auth)/_components/signup/SignupProClient.tsx', () => {
     fireEvent.change(getPasswordInput(), {
       target: { value: 'longpassword' },
     })
+    fireEvent.change(screen.getByPlaceholderText('TVS-XXXX-XXXX-XXXX-XXXX-XXXX'), {
+      target: { value: 'TVS-TEST-CODE' },
+    })
     checkTermsConsent()
     clickCreateAccount()
 
@@ -546,6 +553,7 @@ describe('app/(auth)/_components/signup/SignupProClient.tsx', () => {
       inviteToken: 'invite_token_1',
       email: 'prefill-pro@example.com',
       phone: '+16195550000',
+      signupInviteCode: 'TVS-TEST-CODE',
       firstName: 'Pre',
       lastName: 'Filled Pro',
     })
