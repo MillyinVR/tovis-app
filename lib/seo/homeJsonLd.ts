@@ -29,18 +29,65 @@ export function buildHomeJsonLd(args: {
   copy: BrandHomeCopy
 }): Record<string, unknown> {
   const { brandDisplayName, url, copy } = args
-
-  return {
-    '@context': 'https://schema.org',
+  const organizationId = `${url}#organization`
+  const websiteId = `${url}#website`
+  const applicationId = `${url}#application`
+  const seo = copy.campaign?.seo
+  const application = {
     '@type': 'SoftwareApplication',
+    '@id': applicationId,
     name: brandDisplayName,
     url,
     applicationCategory: 'BusinessApplication',
+    applicationSubCategory: 'Beauty discovery, booking, and client management',
     operatingSystem: 'Web',
-    description: copy.campaign?.seo.description ?? copy.hero.intro,
+    description: seo?.description ?? copy.hero.intro,
+    publisher: { '@id': organizationId },
+    isPartOf: { '@id': websiteId },
+    audience: [
+      { '@type': 'PeopleAudience', audienceType: 'Beauty clients' },
+      { '@type': 'BusinessAudience', audienceType: 'Independent beauty professionals' },
+    ],
+    ...(seo?.areaServed
+      ? { areaServed: { '@type': 'AdministrativeArea', name: seo.areaServed } }
+      : {}),
     // The free tier is live: taking bookings needs no subscription
     // (lib/membership/plans.ts, `free`).
     offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
     featureList: liveHomeFeatures(copy).map((feature) => feature.title),
+  }
+  const graph: Record<string, unknown>[] = [
+    {
+      '@type': 'Organization',
+      '@id': organizationId,
+      name: brandDisplayName,
+      url,
+      description: seo?.organizationDescription ?? seo?.description ?? copy.hero.intro,
+    },
+    {
+      '@type': 'WebSite',
+      '@id': websiteId,
+      name: brandDisplayName,
+      url,
+      publisher: { '@id': organizationId },
+    },
+    application,
+  ]
+
+  if (seo?.questions.length) {
+    graph.push({
+      '@type': 'FAQPage',
+      '@id': `${url}#faq`,
+      mainEntity: seo.questions.map((item) => ({
+        '@type': 'Question',
+        name: item.question,
+        acceptedAnswer: { '@type': 'Answer', text: item.answer },
+      })),
+    })
+  }
+
+  return {
+    '@context': 'https://schema.org',
+    '@graph': graph,
   }
 }

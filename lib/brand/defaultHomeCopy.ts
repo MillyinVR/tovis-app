@@ -36,16 +36,16 @@ import type { BrandHomeCopy } from './types'
 export function defaultHomeCopy(brandName: string): BrandHomeCopy {
   return {
     editorial: {
-      heroImage: { src: '/editorial/placeholders/next-self-inclusive-hero.webp', alt: 'Generated editorial portrait of two men and two women with textured cuts, a groomed beard, natural curls, and copper waves' },
+      heroImage: { src: '/editorial/placeholders/next-self-inclusive-hero.webp', alt: 'Editorial portrait of two men and two women with textured cuts, a groomed beard, natural curls, and copper waves' },
       looks: [
-        { src: '/editorial/placeholders/golden-hour-blonde.webp', label: 'Blonde', alt: 'Generated editorial portrait featuring long honey blonde waves' },
-        { src: '/editorial/placeholders/precision-barbering.webp', label: 'Barbering', alt: 'Generated editorial portrait featuring a textured short haircut and a shaped salt-and-pepper beard' },
-        { src: '/editorial/placeholders/silk-glaze-nails.webp', label: 'Nails', alt: 'Generated editorial close-up of champagne glazed almond nails' },
-        { src: '/editorial/placeholders/soft-focus-brows.webp', label: 'Brows & lashes', alt: 'Generated editorial beauty portrait highlighting natural brows and lifted lashes' },
+        { src: '/editorial/placeholders/golden-hour-blonde.webp', label: 'Blonde', alt: 'Editorial portrait featuring long honey blonde waves' },
+        { src: '/editorial/placeholders/precision-barbering.webp', label: 'Barbering', alt: 'Editorial portrait featuring a textured short haircut and a shaped salt-and-pepper beard' },
+        { src: '/editorial/placeholders/silk-glaze-nails.webp', label: 'Nails', alt: 'Editorial close-up of champagne glazed almond nails' },
+        { src: '/editorial/placeholders/soft-focus-brows.webp', label: 'Brows & lashes', alt: 'Editorial beauty portrait highlighting natural brows and lifted lashes' },
       ],
       location: 'Discover your next look',
       discoveryTitle: 'What are you becoming next?',
-      placeholderLabel: 'Generated editorial imagery · Placeholder inspiration, not professional results',
+      placeholderLabel: 'Preview inspiration created for this page. These are not client results or bookable looks.',
       categories: ['Barbering', 'Cuts & color', 'Beards', 'Curls', 'Extensions', 'Nails', 'Brows & lashes', 'Skin & makeup', 'Bridal'],
       journey: [
         { title: 'Bring the inspiration', body: 'Start with a saved photo and tell us what you love about it.' },
@@ -71,8 +71,8 @@ export function defaultHomeCopy(brandName: string): BrandHomeCopy {
 
     hero: {
       eyebrow: 'BEAUTY, REIMAGINED',
-      headlineTop: 'See the look.',
-      headlineBottom: 'Make it yours.',
+      headlineTop: 'Find a look you love.',
+      headlineBottom: 'Book the pro behind it.',
       intro:
         `Start with what inspires you. Discover looks, find the professional behind them, and take the next step toward your next version of you with ${brandName}.`,
       ctaClient: 'Find your look',
