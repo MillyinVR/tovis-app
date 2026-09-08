@@ -58,13 +58,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # tsc runs COLD here — `incremental: true` in tsconfig.json only helps
-      # when tsconfig.tsbuildinfo survives, and a fresh checkout has none. A
-      # cold full check measured 4.71GB peak RSS at this ceiling and 5.38GB at
-      # 8192, so the previous 4096 was BELOW the requirement, not merely tight:
-      # it OOM'd with `Ineffective mark-compacts near heap limit` / exit 134
-      # after ~2min on 97c489fb, which reads as "unit tests failed" even though
-      # no test had run yet. 6144 matches e2e.yml and perf-availability.yml.
+      # `pnpm typecheck` owns its 6GB TypeScript heap so this check behaves the
+      # same locally and in CI. Keep the step-level value as a belt-and-braces
+      # guard for Prisma generation and any future Node subprocesses.
       - name: Typecheck
         run: pnpm typecheck
         env:
