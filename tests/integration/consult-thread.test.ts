@@ -363,6 +363,8 @@ describe('consult thread projection', () => {
 
     // ── EARLY_PHOTO_READY: the selfie, the CTA, and nothing shootable beyond.
     const early = await thread(sessionId)
+    expect(early.controls).toMatchObject({ inputsOpen: true, canEditAnswers: true, canDelete: true })
+    expect(early.controls?.revokeAcceptanceId).toEqual(expect.any(String))
     expect(early.status).toBe('EARLY_PHOTO_READY')
     expect(early.book.enabled).toBe(true)
 
@@ -702,6 +704,7 @@ describe('consult thread projection', () => {
 
     // And the CTA steps aside rather than offering a second appointment.
     expect(after.book.enabled).toBe(false)
+    expect(after.controls?.canDelete).toBe(false)
     expect(after.book.reason).toBe('ALREADY_BOOKED')
 
     await db.booking.deleteMany({ where: { id: booking.id } })
@@ -861,6 +864,12 @@ describe('consult thread projection', () => {
     expect(ofKind(after.messages, 'BOOKING')).toHaveLength(0)
     // The Book button comes BACK rather than being held by a dead appointment.
     expect(after.book.reason).toBe('SELFIE_REQUIRED')
+    expect(after.controls?.canDelete).toBe(false)
+    if (status === BookingStatus.COMPLETED) {
+      expect(after.controls?.inputsOpen).toBe(false)
+      expect(after.controls?.canEditAnswers).toBe(false)
+      expect(ofKind(after.messages, 'PHOTO_REQUEST').every(photo => !photo.shootable)).toBe(true)
+    }
 
     await db.booking.deleteMany({ where: { id: booking.id } })
   })

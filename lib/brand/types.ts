@@ -889,6 +889,11 @@ export type BrandClientConsultThreadCopy = {
    */
   chartCopyLabel: string
 
+  /** Consultation management, shared with the native client’s wording. */
+  management: {
+    edit: string; done: string; revoke: string; revokeTitle: string; revokeBody: string; revokeConfirm: string; keep: string
+  }
+
   /** The sticky CTA's label, and the hints under it while it is not live. */
   bookCtaLabel: string
   bookCtaSelfieRequired: string

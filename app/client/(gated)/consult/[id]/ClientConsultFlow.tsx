@@ -24,7 +24,7 @@
 import ConsultLookPlanCard, { type ChooseConsultLook } from '@/app/_components/consult/ConsultLookPlanCard'
 import ConsultProfileDetails from './_thread/ConsultProfileDetails'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { createContext, useContext, useCallback, useEffect, useRef, useState } from 'react'
 import * as Sentry from '@sentry/nextjs'
 import { useRouter } from 'next/navigation'
 
@@ -71,6 +71,8 @@ import {
   ThreadMessageSlot,
   ThreadShell,
 } from './_thread/ThreadShell'
+
+const ConsultInputState = createContext({ editing: false, inputsOpen: true })
 
 type ApiEnvelope = { ok?: boolean; error?: string; code?: string }
 
@@ -282,6 +284,9 @@ export default function ClientConsultFlow({
   const [thread, setThread] = useState<ConsultThreadDTO | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const working = useRef(false)
+  const [editing, setEditing] = useState(false)
+  const [managementAction, setManagementAction] = useState<'delete' | 'revoke' | null>(null)
   const [analyzing, setAnalyzing] = useState(false)
   const analysisKey = useRef<string>(newKey())
   // P5b — the inspiration read stage: its own busy flag, its own error, and
@@ -336,12 +341,14 @@ export default function ClientConsultFlow({
   }, [load])
 
   const run = useCallback(
-    async (work: () => Promise<void>) => {
+    async (work: () => Promise<void>, reload = true) => {
+      if (working.current) return
+      working.current = true
       setBusy(true)
       setError(null)
       try {
         await work()
-        await refresh()
+        if (reload) await refresh()
       } catch (caught) {
         setError(
           // ImagePreparationError is named alongside the API error because it
@@ -356,11 +363,28 @@ export default function ClientConsultFlow({
             : 'Something went wrong. Please try again.',
         )
       } finally {
+        working.current = false
         setBusy(false)
       }
     },
     [refresh],
   )
+
+  const confirmManagement = () => void run(async () => {
+    if (managementAction === 'delete' && thread?.controls?.canDelete) {
+      const response = await fetch(base, { method: 'DELETE' })
+      if (!response.ok && response.status !== 404) throw new ConsultFlowApiError(copy.homeSessions.failed, null)
+      router.replace('/client')
+      router.refresh()
+    } else if (managementAction === 'revoke' && thread?.controls?.revokeAcceptanceId) {
+      await api(`${base}/agreements/revoke`, { method: 'POST', body: JSON.stringify({
+        acceptanceId: thread.controls.revokeAcceptanceId, reason: 'Client revoked consent from consultation',
+      }) })
+      setEditing(false)
+      await refresh()
+    }
+    setManagementAction(null)
+  }, false)
 
   const useChartPhoto = (mediaAssetId: string) => void run(async () => {
     await api(`${base}/chart-photo`, { method: 'POST', body: JSON.stringify({ mediaAssetId,
@@ -803,6 +827,7 @@ export default function ClientConsultFlow({
   }
 
   return (
+    <ConsultInputState.Provider value={{ editing: editing && Boolean(thread.controls?.canEditAnswers), inputsOpen: thread.controls?.inputsOpen !== false }}>
     <ThreadShell
       openMessageId={thread.nextOpenMessageId}
       footer={
@@ -815,6 +840,21 @@ export default function ClientConsultFlow({
       }
     >
       <ErrorNote message={error} />
+      <div className="flex flex-wrap gap-2" aria-label={copy.management.edit}>
+        {thread.controls?.canEditAnswers && thread.messages.some(m => m.kind === 'QUESTION' && m.answer !== null || m.kind === 'INSPIRATION' && (m.card?.selectedValues.length ?? 0) > 0) ? <button type="button" className={BUTTON_SECONDARY} disabled={busy} onClick={() => setEditing(!editing)}>{editing ? copy.management.done : copy.management.edit}</button> : null}
+        {thread.controls?.canDelete ? <button type="button" className={BUTTON_SECONDARY} disabled={busy} onClick={() => setManagementAction('delete')}>{copy.homeSessions.delete}</button> : null}
+        {thread.controls?.revokeAcceptanceId ? <button type="button" className={BUTTON_SECONDARY} disabled={busy} onClick={() => setManagementAction('revoke')}>{copy.management.revoke}</button> : null}
+      </div>
+      {managementAction ? <ThreadCard>
+        <div role="alertdialog" aria-modal="false" aria-labelledby="consult-management-title" aria-describedby="consult-management-description">
+          <h2 id="consult-management-title" className="font-bold">{managementAction === 'delete' ? copy.homeSessions.confirmTitle : copy.management.revokeTitle}</h2>
+          <p id="consult-management-description" className="my-3 text-sm text-textSecondary">{managementAction === 'delete' ? copy.homeSessions.confirmBody : copy.management.revokeBody}</p>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className={BUTTON_SECONDARY} disabled={busy} onClick={confirmManagement}>{managementAction === 'delete' ? copy.homeSessions.delete : copy.management.revokeConfirm}</button>
+            <button type="button" className={BUTTON_SECONDARY} disabled={busy} onClick={() => setManagementAction(null)}>{managementAction === 'delete' ? copy.homeSessions.keep : copy.management.keep}</button>
+          </div>
+        </div>
+      </ThreadCard> : null}
       {inspirationFullscreen && inspirationImage.url ? (
         <div
           className="fixed inset-0 z-50 grid place-items-center bg-scrim/80 p-4"
@@ -839,7 +879,7 @@ export default function ClientConsultFlow({
         <ThreadMessageSlot key={message.id} id={message.id}>
           <ConsultThreadMessage
             message={message}
-            busy={busy}
+            busy={busy || (thread.controls?.inputsOpen === false && message.kind !== 'CONSENT' && message.kind !== 'PLAN')}
             analyzing={analyzing}
             slotPreviews={slotPreviews}
             slotErrors={slotErrors}
@@ -872,6 +912,7 @@ export default function ClientConsultFlow({
         onProceed={proceedWithAccepted}
       />
     </ThreadShell>
+    </ConsultInputState.Provider>
   )
 }
 
@@ -1148,6 +1189,7 @@ function QuestionMessage({
     value: string,
   ) => void
 }) {
+  const { editing } = useContext(ConsultInputState)
   const { question, answer } = message
   const answeredLabel =
     answer === null
@@ -1157,7 +1199,7 @@ function QuestionMessage({
 
   return (
     <div className="grid gap-2">
-      <ThreadCard dimmed={answer !== null}>
+      <ThreadCard dimmed={answer !== null && !editing}>
         <h3 className="text-base font-black text-textPrimary">
           {question.label}
         </h3>
@@ -1166,7 +1208,7 @@ function QuestionMessage({
             {question.helpText}
           </p>
         ) : null}
-        {answer === null ? (
+        {answer === null || editing ? (
           <div className="mt-3 grid gap-2">
             {question.options.map((option) => (
               <button
@@ -1533,6 +1575,7 @@ function PlanMessage({
   onStart: (message: ConsultThreadPlanMessageDTO) => void
   onRefresh: () => void
 }) {
+  const { inputsOpen } = useContext(ConsultInputState)
   return (
     <div className="grid gap-2">
       <ThreadBubble author="APP">{message.text}</ThreadBubble>
@@ -1548,7 +1591,7 @@ function PlanMessage({
         {message.run ? (
           <AnalysisRunProgress
             run={message.run}
-            busy={busy || analyzing}
+            busy={busy || analyzing || !inputsOpen}
             onRetry={() => onStart(message)}
             onRefresh={onRefresh}
           />
@@ -1556,7 +1599,7 @@ function PlanMessage({
           <button
             type="button"
             className={BUTTON_PRIMARY}
-            disabled={busy || analyzing}
+            disabled={busy || analyzing || !inputsOpen}
             onClick={() => onStart(message)}
           >
             {analyzing ? 'Starting…' : 'Build my plan'}
@@ -1646,13 +1689,13 @@ function CapturePrepControls({
       entry.kind === 'PHOTO_REQUEST' &&
       entry.shot.key !== CONSULT_EARLY_PHOTO_SHOT_KEY,
   )
-  if (photos.length === 0 || !thread.chartCopy) return null
+  if (!thread.chartCopy) return null
 
   const accepted = photos.filter(
     (entry) => entry.slot.state === 'ACCEPTED',
   ).length
   const canProceed =
-    thread.status === 'MEDIA_READY' && accepted >= 1 && accepted < photos.length
+    thread.controls?.inputsOpen !== false && thread.status === 'MEDIA_READY' && accepted >= 1 && accepted < photos.length
 
   return (
     <div className="grid gap-3">
@@ -1662,7 +1705,7 @@ function CapturePrepControls({
             type="checkbox"
             className="mt-1"
             checked={thread.chartCopy.optIn}
-            disabled={busy}
+            disabled={busy || thread.controls?.inputsOpen === false}
             onChange={(event) => onChartCopy(event.target.checked)}
           />
           {/*
@@ -2246,12 +2289,13 @@ function InspirationCardMessage({
   ) => void
   onOpenFull: () => void
 }) {
+  const { editing } = useContext(ConsultInputState)
   const answered = card.selectedValues.length > 0
   const optionCrops = card.optionRegions.filter((option) => option.region !== null)
 
   // P5g — the two region moves render as a picker over the whole photograph.
   // Everything else is P5d's crop card, unchanged.
-  if (card.presentation === 'REGION_PICKER' && !answered) {
+  if (card.presentation === 'REGION_PICKER' && (!answered || editing)) {
     return (
       <ThreadCard>
         <InspirationRegionPicker
@@ -2266,7 +2310,7 @@ function InspirationCardMessage({
   }
 
   return (
-    <ThreadCard dimmed={answered}>
+    <ThreadCard dimmed={answered && !editing}>
       {image.url ? (
         <div className="relative grid gap-2">
           <InspirationRegionCrop
@@ -2335,7 +2379,7 @@ function InspirationCardMessage({
         {card.question.label}
       </p>
 
-      {answered ? (
+      {answered && !editing ? (
         <p className="mt-2 text-xs leading-5 text-textSecondary">
           {card.question.options
             .filter((option) => card.selectedValues.includes(option.value))
@@ -2348,6 +2392,7 @@ function InspirationCardMessage({
           question={card.question}
           busy={busy}
           showLabel={false}
+          initialSelection={card.selectedValues}
           onAnswer={(question, values) => onAnswer(message, question, values)}
         />
       )}
@@ -2386,7 +2431,7 @@ function InspirationRegionPicker({
   onAnswer: (values: string[]) => void
   onOpenFull: () => void
 }) {
-  const [selected, setSelected] = useState<string[]>([])
+  const [selected, setSelected] = useState<string[]>(card.selectedValues)
   const [zoomed, setZoomed] = useState<string | null>(null)
 
   const regions = card.optionRegions.filter((option) => option.region !== null)
@@ -2636,6 +2681,7 @@ function InspirationQuestionForm({
   question,
   busy,
   showLabel = true,
+  initialSelection = [],
   onAnswer,
 }: {
   question: ConsultInspirationQuestionDTO
@@ -2648,13 +2694,14 @@ function InspirationQuestionForm({
    * asked. Caught in a browser (tests/e2e/consult-inspiration-cards.spec.ts);
    * no unit test could see it, because both copies are correct on their own.
    */
+  initialSelection?: string[]
   showLabel?: boolean
   onAnswer: (
     question: ConsultInspirationQuestionDTO,
     selectedValues: string[],
   ) => void
 }) {
-  const [selected, setSelected] = useState<string[]>([])
+  const [selected, setSelected] = useState<string[]>(initialSelection)
 
   const needsSelection =
     question.kind !== 'TEXT' && selected.length < question.minSelections
