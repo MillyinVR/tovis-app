@@ -12,24 +12,24 @@ import type { BrandClientConsultThreadCopy } from './types'
 // as the app protecting itself from the client.
 export const defaultClientConsultThreadCopy: BrandClientConsultThreadCopy = {
   management: {
-    edit: 'Edit answers', done: 'Done editing', revoke: 'Privacy & revoke consent',
-    revokeTitle: 'Stop this consult and revoke consent?',
-    revokeBody: 'No more intake, photos, or analysis can be added until you agree again. Temporary consult photos will be removed. Photos already saved to your chart stay on your chart.',
-    revokeConfirm: 'Revoke consent', keep: 'Keep consult',
+    edit: 'Edit answers', done: 'Done editing', revoke: 'Privacy & stop this consult',
+    revokeTitle: 'Stop this consult and withdraw your permission?',
+    revokeBody: 'You won’t be able to add answers or photos, or create a plan, until you agree again. Temporary consult photos will be removed. Photos already saved in your appointment record will stay there.',
+    revokeConfirm: 'Withdraw permission', keep: 'Keep consult',
   },
-  chartPhotoUsed: 'Starting-point chart photo dated {date}, confirmed by the client for this consultation.',
-  chartPhotoConfirm: 'Chart photo from {date}. Still looks like this? Use this photo.',
-  chartReviewUsed: 'Confirmed from the chart dated {date}: {answer}',
+  chartPhotoUsed: 'Photo from your appointment record, dated {date}. You confirmed it still shows how you look now.',
+  chartPhotoConfirm: 'Photo saved from {date}. Do you still look like this? Use this photo.',
+  chartReviewUsed: 'You confirmed these details saved on {date}: {answer}',
   chartReviewQuestion: 'Anything done outside the app since your last visit on {date}?',
   chartReviewConfirm: 'No, these details are still right',
-  chartReviewBoxDyeOnly: 'Only box dye at home; the other details are still right',
+  chartReviewBoxDyeOnly: 'Only store-bought hair dye at home; the other details are still right',
   chartReviewChanged: 'Something has changed',
-  chartReviewSummary: 'Please check these chart details before confirming:',
-  chartHistoryConfirmation: 'Your chart from {date} says “{answer}”. Still right? Tap that answer to confirm, or choose what fits now.',
+  chartReviewSummary: 'Please check these details saved from your last visit:',
+  chartHistoryConfirmation: 'Your appointment record from {date} says “{answer}”. Still right? Tap that answer to confirm, or choose what fits now.',
   homeSessions: {
     title: 'Your look consultations', empty: 'Start with a look you love. Your unbooked consultations will be here.',
     resume: 'Continue consultation', delete: 'Delete consultation', confirmTitle: 'Delete this consultation?',
-    confirmBody: 'Your answers and temporary consult photos will be deleted. You can start this look again. Photos already saved to your chart stay on your chart.',
+    confirmBody: 'Your answers and temporary consult photos will be deleted. You can start this look again. Photos already saved in your appointment record will stay there.',
     keep: 'Keep consultation', deleting: 'Deleting…', failed: 'We couldn’t finish deleting this consultation. Please try again.',
     loadFailed: 'We couldn’t load your consultations.', retry: 'Try again', more: 'Show more', proFallback: 'Your pro',
     stopped: 'This consultation can’t be continued. You can delete it here.',
@@ -44,7 +44,7 @@ export const defaultClientConsultThreadCopy: BrandClientConsultThreadCopy = {
   consentResume:
     'You stopped this one earlier, so it’s been sitting right where you left it. Agree again and we pick up from there.',
 
-  intakeIntro: 'A few quick things about you. Tap what fits.',
+  intakeIntro: 'A few quick things about you. Choose what fits. If you don’t know, use “Not sure” when it’s offered.',
   intakeDone: 'That’s everything I needed from you in words.',
 
   inspirationSourceIntro:
@@ -76,7 +76,7 @@ export const defaultClientConsultThreadCopy: BrandClientConsultThreadCopy = {
   prepIntro:
     'Now let’s help {pro} get ready. Everything you add from here sharpens what she sees before you walk in — do it now, or come back to it later.',
   prepComplete:
-    'That’s the safety bit done — everything {pro} needs to work safely is in. No more nudges from me about it.',
+    'You’ve answered the questions {pro} needs before your visit. She’ll go over them with you before starting.',
   prepDeadlineDue:
     'A few of these are the ones {pro} needs before she can safely start, so they’re due by {deadline}. They take about a minute.',
 
@@ -94,7 +94,7 @@ export const defaultClientConsultThreadCopy: BrandClientConsultThreadCopy = {
     'That’s everything I need. {pro} has the rest — see you at your appointment.',
 
   chartCopyLabel:
-    'Keep these photos on my chart with {pro}, so we can come back to them — and so I can rework your plan if you change anything before your appointment. Untick this and they’re deleted as soon as your plan is built.',
+    'Save these photos in my appointment record with {pro}, so we can come back to them — and so I can rework your plan if you change anything before your appointment. Untick this and they’re deleted as soon as your plan is built.',
 
   bookCtaLabel: 'Book the look',
   bookCtaSelfieRequired: 'Send one photo of yourself and this opens up.',
@@ -124,7 +124,7 @@ export const defaultClientConsultThreadCopy: BrandClientConsultThreadCopy = {
 
   stopped: 'This consult was stopped. Nothing more can be added to it.',
   stoppedRevoked:
-    'You revoked consent, so this stopped where it was. You can start it again from the look any time.',
+    'You withdrew your permission, so this consult stopped. You can start it again from the look any time.',
 
   proFallback: 'your professional',
 }

@@ -1,3 +1,4 @@
+import { CONSULT_CLIENT_LANGUAGE } from './clientLanguage'
 import Anthropic from '@anthropic-ai/sdk'
 import { ConsultProviderCallKind, ConsultServiceFamily } from '@prisma/client'
 
@@ -85,7 +86,7 @@ export const CONSULT_ANALYSIS_SCHEMA_VERSION = 6
 // accepts only the explicit old (4/v5) and new (5/v6) pairs, allowing the
 // previous deployment to finish requests while the new deployment builds.
 // Historical revisions retain their original profile shape when read.
-export const CONSULT_ANALYSIS_PROMPT_VERSION = 'service-analysis-v7'
+export const CONSULT_ANALYSIS_PROMPT_VERSION = 'service-analysis-v8'
 export const CONSULT_ANALYSIS_DEFAULT_MODEL = 'claude-sonnet-5'
 /**
  * Per-call ceilings, because the two calls are nothing like each other.
@@ -1153,6 +1154,7 @@ export const CONSULT_ANALYSIS_PROFILE_SYSTEM_PROMPT = [
  * means for the named service.
  */
 export const CONSULT_STYLE_GUIDANCE = [
+  CONSULT_CLIENT_LANGUAGE,
   'Rubric — recommend what harmonizes with the observed features, never what is merely trending:',
   'Contrast is the backbone: low contrast between skin, hair, and eyes favors soft, blended color and diffused makeup; high contrast carries bold, saturated color and defined lines.',
   'Undertone and season guide hair-color tone, makeup color families, and the COLOR_PALETTE direction; name palette families in plain words, and frame every palette direction as a starting point the professional confirms in person with physical draping.',
@@ -1166,6 +1168,7 @@ export const CONSULT_STYLE_GUIDANCE = [
 ] as const
 
 export const CONSULT_ANALYSIS_DIRECTION_SYSTEM_PROMPT = [
+  CONSULT_CLIENT_LANGUAGE,
   'You are a cosmetic-only styling consultation engine for a professional beauty platform.',
   'Inputs: a consultation context naming the service family, the service category, the specific service the client is considering when one is known, the professional’s menu in that category, and the capture pack this consult uses; the client’s intake as the questions and answers she saw (with their immutable option codes); one or more labeled daylight photos from that pack; a reading of the client’s INSPIRATION reference; and the client’s FEATURE PROFILE, already established from these same photographs by an earlier pass.',
   'The feature profile is given to you as settled fact. Do not re-derive it, do not contradict it, and do not restate it as though it were your own observation. Use it: every style direction and every recommendation must lean on the specific profile fields that support it, and a field the profile marked UNKNOWN is not available to lean on.',

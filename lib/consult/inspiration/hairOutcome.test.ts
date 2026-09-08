@@ -17,9 +17,9 @@ for (const pack of [HAIR_COLOR_INSPIRATION_CARD_PACK, HAIR_GENERAL_INSPIRATION_C
     it('lets a client select color and layers while keeping their length, regardless of the linked category', () => {
       expect(validateConsultInspirationAnswer(pack, { questionKey: 'spark_focus', selectedValues: answers.spark_focus }).ok).toBe(true)
       const preferences = deriveConsultInspirationPreferences({ pack, answers, copy, reading: null })
-      expect(preferences).toEqual({ wants: ['The color', 'The layers'], avoids: [], unsure: [], keep: ['My length'] })
+      expect(preferences).toEqual({ wants: ['The color', 'The shorter and longer pieces (layers)'], avoids: [], unsure: [], keep: ['My length'] })
       const summary = composeConsultInspirationUnderstanding({ pack, answers, copy, reading: null, professionalDisplayName: 'Sam' })
-      expect(summary).toContain('like the color, like the layers')
+      expect(summary).toContain('like the color, like the shorter and longer pieces')
       expect(summary).toContain('want to keep your length')
       expect(summary).toContain('want those parts adapted to you')
       expect(summary).not.toMatch(/extensions|blonde|balayage/i)

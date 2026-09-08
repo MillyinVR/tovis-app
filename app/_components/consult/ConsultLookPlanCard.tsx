@@ -1,4 +1,5 @@
 'use client'
+import { consultClientPlanCopy as copy } from '@/lib/brand/consultClientPlanCopy'
 import ConsultProfessionalPlanForm from './ConsultProfessionalPlanForm'
 import ConsultLookExpectationsForm from './ConsultLookExpectationsForm'
 
@@ -41,7 +42,7 @@ export default function ConsultLookPlanCard({ plan: sourcePlan, brief: savedBrie
   const plan = brief?.professionalPlan ?? sourcePlan
   const inputClosed = brief?.inputOpen === false
   const correctionsNeedReview = Boolean(brief?.invalidatedProfessionalPlan || brief?.invalidatedAdjustments.length)
-  const tier = { EXACT: 'Your look', CLOSE: 'A close direction', TOWARD: 'A first step toward your look' }[plan.tier]
+  const tier = { EXACT: 'Your look', CLOSE: copy.close, TOWARD: 'A first step toward your look' }[plan.tier]
   return (
     <section className="grid gap-3" aria-label="Your look plan">
       <div>
@@ -51,10 +52,10 @@ export default function ConsultLookPlanCard({ plan: sourcePlan, brief: savedBrie
       </div>
       <p className="text-sm leading-6 text-textPrimary">{plan.summary}</p>
       {professional && brief && <ConsultProfessionalPlanForm key={brief.version} consultId={consultId} plan={plan} brief={brief} onSaved={setBrief} />}
-      {brief?.professionalPlan && <p className="text-xs text-textSecondary">Plan authored by your pro after reviewing your details.</p>}
-      {brief?.invalidatedProfessionalPlan && <p className="text-sm text-textSecondary">The client’s details changed. The previous professional plan needs a fresh review.</p>}
+      {brief?.professionalPlan && <p className="text-xs text-textSecondary">{copy.authored}</p>}
+      {brief?.invalidatedProfessionalPlan && <p className="text-sm text-textSecondary">{copy.changed}</p>}
       {brief && brief.invalidatedAdjustments.length > 0 && <div className="rounded-lg border border-toneWarn/30 bg-toneWarn/10 p-3 text-sm text-textPrimary">
-        <p>Earlier professional corrections need review before this look can be chosen or confirmed.</p>
+        <p>{copy.review}</p>
         {professional && <ul>{brief.invalidatedAdjustments.map((entry, index) => <li key={index}>Option {entry.pathIndex + 1}{entry.visitIndex !== null ? `, visit ${entry.visitIndex + 1}` : ''}: {entry.field.toLowerCase()} — {entry.value}{entry.reason ? ` (${entry.reason})` : ''}</li>)}</ul>}
       </div>}
       <ol className="grid gap-3">
@@ -72,9 +73,9 @@ export default function ConsultLookPlanCard({ plan: sourcePlan, brief: savedBrie
               const selected = brief.selectedPathIndex === pathIndex && brief.selectedLocationType === estimate.locationType
               const available = estimate.visits.every(visit => visit.steps.every(step => step.available))
               return <div key={estimate.locationType} className="mt-3 grid gap-1 border-t border-surfaceGlass/10 pt-3 text-xs text-textSecondary">
-                <p className="font-semibold text-textPrimary">{estimate.locationType === 'SALON' ? 'At the salon' : 'Mobile appointment'}{selected ? ' · Your chosen look' : ''}</p>
+                <p className="font-semibold text-textPrimary">{estimate.locationType === 'SALON' ? 'At the salon' : copy.mobile}{selected ? ' · Your chosen look' : ''}</p>
                 <p>First appointment: <EstimateAmount amount={estimate.firstAppointment} /></p>
-                {path.sessionCount > 1 && <p>Whole transformation: <EstimateAmount amount={estimate.transformation} /></p>}
+                {path.sessionCount > 1 && <p>{copy.allVisits} <EstimateAmount amount={estimate.transformation} /></p>}
                 {professional && estimate.visits.map((visit, visitIndex) => <div key={visitIndex} className="grid gap-2">
                   {visit.steps.map(step => <ConsultLookAdjustmentForm key={`${step.offeringId}:${brief.version}`} consultId={consultId} brief={brief}
                     target={{ pathIndex, visitIndex, offeringId: step.offeringId, locationType: estimate.locationType }}

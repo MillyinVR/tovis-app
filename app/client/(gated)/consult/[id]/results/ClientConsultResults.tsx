@@ -1,3 +1,5 @@
+import { clientConsultProfileValue } from '@/lib/brand/consultClientProfileCopy'
+import { defaultClientConsultInspirationCopy } from '@/lib/brand/defaultClientConsultInspirationCopy'
 import ConsultLookPlanCard from '@/app/_components/consult/ConsultLookPlanCard'
 import Link from 'next/link'
 
@@ -64,7 +66,7 @@ export default function ClientConsultResults({
   // as base-to-lightest, from a field that never said that was what it meant.
   const levelText = (level: ConsultHairLevelDTO): string => {
     const number = consultHairLevelNumber(level)
-    return number === null ? copy.unknownLabel : `${copy.levelPrefix} ${number}`
+    return number === null ? copy.unknownLabel : defaultClientConsultInspirationCopy.cards.attributeShortNames[`baseLevel:${level}`] ?? copy.unknownLabel
   }
 
   // A consult is anchored to a booking or, since Book the Look, to a look —
@@ -156,25 +158,29 @@ export default function ClientConsultResults({
           />
           <Observation
             label={copy.toneLabel}
-            value={observations.currentTone.value}
+            value={clientConsultProfileValue('currentTone', observations.currentTone.value)}
+            preformatted
             confidence={observations.currentTone.confidence}
             copy={copy}
           />
           <Observation
             label={copy.conditionLabel}
-            value={observations.visibleCondition.value}
+            value={clientConsultProfileValue('visibleCondition', observations.visibleCondition.value)}
+            preformatted
             confidence={observations.visibleCondition.confidence}
             copy={copy}
           />
           <Observation
             label={copy.densityLabel}
-            value={observations.density.value}
+            value={clientConsultProfileValue('density', observations.density.value)}
+            preformatted
             confidence={observations.density.confidence}
             copy={copy}
           />
           <Observation
             label={copy.textureLabel}
-            value={observations.texture.value}
+            value={clientConsultProfileValue('texture', observations.texture.value)}
+            preformatted
             confidence={observations.texture.confidence}
             copy={copy}
           />
@@ -204,7 +210,8 @@ export default function ClientConsultResults({
             <Observation
               key={field}
               label={copy.profileLabels[field]}
-              value={observation.value}
+              value={clientConsultProfileValue(field, observation.value)}
+              preformatted
               confidence={observation.confidence}
               copy={copy}
             />

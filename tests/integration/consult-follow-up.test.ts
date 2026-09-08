@@ -312,7 +312,12 @@ describe('a round is bought once', () => {
       })
     await expect(attempt(4, 'service-analysis-v5', oldProfile)).rejects.toBe(rollback)
     await expect(attempt(5, 'service-analysis-v6', profile)).rejects.toBe(rollback)
+    await expect(attempt(6, 'service-analysis-v7', profile)).rejects.toBe(rollback)
+    await expect(attempt(6, 'service-analysis-v8', profile)).rejects.toBe(rollback)
     const invalidCases: Array<[number, string | null, Prisma.JsonObject]> = [
+      [6, null, profile],
+      [6, 'service-analysis-v6', profile],
+      [5, 'service-analysis-v8', profile],
       [5, 'service-analysis-v5', profile],
       [5, null, profile],
       [5, 'service-analysis-v6', oldProfile],
@@ -510,10 +515,10 @@ describe('🔴 the fallback, forced', () => {
     expect(questions).toHaveLength(1)
     const [only] = questions as [Prisma.JsonObject]
     expect(only.key).toBe('prior_lightening')
-    // 🔴 The pack's OWN words, verbatim — never a paraphrase. A safety question
+    // 🔴 The reviewed client wording, verbatim — never a model paraphrase. A safety question
     // re-worded by code that has not read why it exists is the risk the
     // fallback is protecting against.
-    expect(only.text).toBe('When was your hair last lightened?')
+    expect(only.text).toBe('When was your hair last made lighter with hair color or bleach?')
     expect(only.home).toBe('INTAKE')
 
     // And the client is TOLD. Part 0 rule 4 forbids a silent fallback, and one

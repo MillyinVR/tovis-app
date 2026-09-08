@@ -51,7 +51,7 @@ test('walks root crops into length crops using the server questions and remember
   await page.getByRole('button', { name: 'Next', exact: true }).last().click()
   await expect(page.getByText('Looking here, where would you like the brightness to start?', { exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Closer to my roots', exact: true })).toHaveCount(0)
-  await page.getByRole('button', { name: 'A soft blend from my roots', exact: true }).click()
+  await page.getByRole('button', { name: 'A gradual change from dark to light near my scalp', exact: true }).click()
   await page.getByRole('button', { name: 'Next', exact: true }).last().click()
   await expect(page.getByText('How do you feel about how light this part is?', { exact: true })).toBeVisible()
   const endsCrop = page.getByRole('button', { name: 'The lightest part — tap to see the whole photo', exact: true })

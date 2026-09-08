@@ -12,7 +12,7 @@ const copy = defaultClientConsultCaptureCopy
 describe('formatConsultCaptureIntro', () => {
   it('reads the hair pack exactly as the pilot copy did', () => {
     expect(formatConsultCaptureIntro(copy, HAIR_COLOR_CAPTURE_PACK)).toBe(
-      'Seven daylight photos: four of your hair and three of your face. Each one is checked right away, and if one can’t be used you’ll see why. You can run the analysis without all seven — anything the missing photos would have shown just comes back as unknown.',
+      'Seven daylight photos: four of your hair and three of your face. Each one is checked right away, and if one can’t be used you’ll see why. You can build your plan without all seven. Your professional can check the missing details in person.',
     )
   })
 
