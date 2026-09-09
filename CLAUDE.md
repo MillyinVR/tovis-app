@@ -195,13 +195,3 @@ remains and why instead of leaving it silently dirty.
   `SessionStart` hook (it reads the session payload). A manual
   `bash scripts/git-sync-check.sh` run is always **strict** — which is what you
   want for the end-of-session check.
-
-## Multi-model orchestration
-
-Astra owns architecture and final verification. Use the scoped, tool-free workers
-in [tools/orchestration/README.md](tools/orchestration/README.md): Hermes/GLM for
-bounded low-risk investigation; Claude Code for complex independent review.
-One task per prompt. Worker findings require file:line evidence and Astra review.
-Read-only wrappers cannot edit. Delegated implementation requires a dedicated
-worktree with exactly one editing owner; never share a tree between editing agents.
-Never auto-merge delegated work. Preserve all house rules and explicit task limits.
