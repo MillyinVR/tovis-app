@@ -22,6 +22,27 @@ class PoolTests(unittest.TestCase):
             self.assertEqual(p.dispatch('free',PROMPT,CONFIG,'symbol-search')['next_worker'],'astra')
             call.assert_not_called()
 
+    def test_model_identity_mismatch_rejected(self):
+        response={'model':'different/model','choices':[{'finish_reason':'stop','message':{'content':json.dumps(GOOD)}}]}
+        with patch.object(p,'credential',return_value='testkey'),patch.object(p,'openrouter_prices',return_value={'prompt':p.Decimal(0),'completion':p.Decimal(0)}),patch.object(p,'http',return_value=response),self.assertRaisesRegex(p.PoolError,'Unexpected model identity'):
+            p.call('free','test/model:free',PROMPT,{})
+
+    def test_catalog_and_inference_have_distinct_byte_caps(self):
+        import io
+        from unittest.mock import MagicMock
+        body=b'{"data": []}'+b' '*300000
+        opener=MagicMock()
+        opener.open.return_value=io.BytesIO(body)
+        with patch.object(p.urllib.request,'build_opener',return_value=opener):
+            self.assertEqual(p.http('models/user','testkey'),{'data':[]})
+        opener.open.return_value=io.BytesIO(body)
+        with patch.object(p.urllib.request,'build_opener',return_value=opener),self.assertRaisesRegex(p.PoolError,'byte ceiling'):
+            p.http('chat/completions','testkey',{})
+
+    def test_redirect_refused(self):
+        with self.assertRaisesRegex(p.PoolError,'redirect refused'):
+            p.NoRedirect().redirect_request(None,None,None,None,None,None)
+
     def test_valid_evidence(self):
         self.assertEqual(p.validate_result(json.dumps(GOOD),PROMPT),GOOD)
 
@@ -87,7 +108,7 @@ class PoolTests(unittest.TestCase):
             self.assertFalse(body['provider']['allow_fallbacks'])
 
     def test_truncation_and_tool_output_rejected(self):
-        for response in [{'choices':[{'finish_reason':'length','message':{'content':json.dumps(GOOD)}}]}, {'choices':[{'finish_reason':'stop','message':{'content':json.dumps(GOOD),'tool_calls':[{}]}}]}]:
-            with patch.object(p,'credential',return_value='testkey'),patch.object(p,'openrouter_prices',return_value={'prompt':p.Decimal(0),'completion':p.Decimal(0)}),patch.object(p,'http',return_value=response),self.assertRaises(p.PoolError):p.call('free','test/model:free',PROMPT,{})
+        for response in [{'model':'test/model:free','choices':[{'finish_reason':'length','message':{'content':json.dumps(GOOD)}}]}, {'model':'test/model:free','choices':[{'finish_reason':'stop','message':{'content':json.dumps(GOOD),'tool_calls':[{}]}}]}]:
+            with patch.object(p,'credential',return_value='testkey'),patch.object(p,'openrouter_prices',return_value={'prompt':p.Decimal(0),'completion':p.Decimal(0)}),patch.object(p,'http',return_value=response),self.assertRaisesRegex(p.PoolError,'Truncated/unfinished/tool response'):p.call('free','test/model:free',PROMPT,{})
 
 if __name__=='__main__':unittest.main()

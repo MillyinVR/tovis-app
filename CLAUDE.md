@@ -205,4 +205,3 @@ One task per prompt. Worker findings require file:line evidence and Astra review
 Read-only wrappers cannot edit. Delegated implementation requires a dedicated
 worktree with exactly one editing owner; never share a tree between editing agents.
 Never auto-merge delegated work. Preserve all house rules and explicit task limits.
-
