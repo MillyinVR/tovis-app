@@ -30,6 +30,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 
 import {
   buildConsultDirectionOutputSchema,
+  buildConsultFaceColorOutputSchema,
   buildConsultProfileOutputSchema,
   CONSULT_ANALYSIS_DEFAULT_MODEL,
   CONSULT_ANALYSIS_DIRECTION_MAX_TOKENS,
@@ -37,7 +38,9 @@ import {
   CONSULT_ANALYSIS_EFFORT,
   CONSULT_ANALYSIS_PROFILE_MAX_TOKENS,
   CONSULT_ANALYSIS_PROFILE_SYSTEM_PROMPT,
+  CONSULT_FACE_COLOR_SYSTEM_PROMPT,
   sanitizeConsultDirectionResponse,
+  sanitizeConsultFaceColorResponse,
   sanitizeConsultProfileResponse,
   sanitizeConsultProfileAndStylesResponse,
   CONSULT_STYLE_GUIDANCE,
@@ -225,6 +228,30 @@ describe('the consult schemas compile and answer against the live model', () => 
         'evidence',
         'value',
       ])
+      expect(observation.confidence.min).toBeLessThan(observation.confidence.max)
+    }
+  })
+
+  it('C2-1 — the companion face/color schema compiles and returns a sanitizable payload', async () => {
+    const raw = await send({
+      system: CONSULT_FACE_COLOR_SYSTEM_PROMPT,
+      content: [
+        ...labeledImages(),
+        {
+          type: 'text',
+          text: [
+            'Consultation context:',
+            'Capture pack: hair-color-daylight (views: ' + SHOT_KEYS.join(', ') + ')',
+            'Observe this client only. Unclear fields must be UNKNOWN.',
+          ].join('\n'),
+        },
+      ],
+      schema: buildConsultFaceColorOutputSchema({ suppliedShotKeys: [...SHOT_KEYS] }),
+      maxTokens: CONSULT_ANALYSIS_PROFILE_MAX_TOKENS,
+    })
+    const profile = sanitizeConsultFaceColorResponse(raw)
+    expect(Object.keys(profile)).toHaveLength(9)
+    for (const observation of Object.values(profile)) {
       expect(observation.confidence.min).toBeLessThan(observation.confidence.max)
     }
   })

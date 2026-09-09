@@ -31,12 +31,16 @@ import {
   resetConsultAnalysisClientForTests,
   CONSULT_ANALYSIS_CONSULTATION_OPTION,
   buildConsultDirectionOutputSchema,
+  buildConsultFaceColorOutputSchema,
   buildConsultProfileOutputSchema,
   consultAnalysisSafetyCodeOptions,
   consultAnalysisContextBlocks,
   consultInspirationBlock,
   consultProfileBlock,
+  mergeConsultFeatureProfiles,
   runConsultAnalysis,
+  runConsultFaceColorCompanion,
+  sanitizeConsultFaceColorResponse,
   sanitizeConsultProfileResponse,
   validateConsultAnalysisProviderResult,
   validateConsultAnalysisResult,
@@ -348,6 +352,82 @@ describe('hair-color consult analysis provider', () => {
     expect(() => sanitizeConsultProfileResponse({ profile: { ...profile, eyeColor: {
       value: 'BROWN', confidence: { min: 0.4, max: 0.7 }, evidence: ['hair_back'],
     } } })).toThrow(ConsultAnalysisProviderError)
+  })
+
+  it('C2-1 sanitizes the companion face/color profile and merges it without replacing settled fields', () => {
+    const observation = (value: string, evidence: string[] = ['face_front']) => ({
+      value, confidence: { min: 0.45, max: 0.7 }, evidence,
+    })
+    const faceColor = sanitizeConsultFaceColorResponse({ profile: {
+      skinDepth: observation('MEDIUM'),
+      surfaceOvertone: observation('VISIBLE_REDNESS'),
+      faceWidthBalance: observation('CHEEKBONE_DOMINANT'),
+      chinContour: observation('TAPERED', ['face_side']),
+      eyeTilt: observation('LEVEL', ['eyes_closeup']),
+      lidVisibility: observation('PARTIAL', ['eyes_closeup']),
+      browBoneRelationship: observation('BALANCED', ['eyes_closeup']),
+      browArchPosition: observation('OUTER', ['eyes_closeup']),
+      browTailDirection: observation('LIFTED', ['eyes_closeup']),
+    } })
+    const base = sanitizeConsultProfileResponse({ profile: validProfile() })
+    const merged = mergeConsultFeatureProfiles(base, faceColor)
+    expect(merged.skinUndertone).toEqual(base.skinUndertone)
+    expect(merged.skinDepth.value).toBe('MEDIUM')
+    expect(merged.surfaceOvertone.value).toBe('VISIBLE_REDNESS')
+    expect(Object.keys(merged)).toHaveLength(21)
+  })
+
+  it('C2-1 never treats the any-light early selfie as color evidence', () => {
+    const unknown = { value: 'UNKNOWN', confidence: { min: 0, max: 0.35 }, evidence: [] }
+    const profile = Object.fromEntries([
+      'skinDepth', 'surfaceOvertone', 'faceWidthBalance', 'chinContour', 'eyeTilt',
+      'lidVisibility', 'browBoneRelationship', 'browArchPosition', 'browTailDirection',
+    ].map((field) => [field, { ...unknown }])) as Record<string, unknown>
+    profile.skinDepth = { value: 'MEDIUM', confidence: { min: 0.4, max: 0.6 }, evidence: ['early_photo'] }
+    expect(() => sanitizeConsultFaceColorResponse({ profile })).toThrow(ConsultAnalysisProviderError)
+  })
+
+  it('C2-1 companion schema is a separate provider-safe grammar', () => {
+    const schema = toProviderOutputSchema(buildConsultFaceColorOutputSchema({ suppliedShotKeys: SUPPLIED }))
+    expect(findUnsupportedProviderSchemaKeywords(schema)).toEqual([])
+    expect(JSON.stringify(schema)).toContain('surfaceOvertone')
+    expect(JSON.stringify(schema)).toContain('browTailDirection')
+    expect(JSON.stringify(schema)).not.toContain('styleDirections')
+  })
+
+  it('C2-1 companion provider sends only face evidence and returns the strict profile', async () => {
+    const observation = (value: string, evidence: string[] = ['face_front']) => ({
+      value, confidence: { min: 0.45, max: 0.7 }, evidence,
+    })
+    mocks.create.mockResolvedValueOnce(message({ profile: {
+      skinDepth: observation('MEDIUM'),
+      surfaceOvertone: observation('BALANCED'),
+      faceWidthBalance: observation('CHEEKBONE_DOMINANT'),
+      chinContour: observation('TAPERED', ['face_side']),
+      eyeTilt: observation('LEVEL', ['eyes_closeup']),
+      lidVisibility: observation('PARTIAL', ['eyes_closeup']),
+      browBoneRelationship: observation('BALANCED', ['eyes_closeup']),
+      browArchPosition: observation('OUTER', ['eyes_closeup']),
+      browTailDirection: observation('LIFTED', ['eyes_closeup']),
+    } }))
+    const result = await runConsultFaceColorCompanion({
+      service,
+      capturePack,
+      intake: { desired_color: 'red', prior_reaction: 'no' },
+      intakeItems,
+      captures,
+      inspiration: noInspiration,
+      safetyCodes: [...SAFETY_CODES],
+    })
+    expect(result.faceWidthBalance.value).toBe('CHEEKBONE_DOMINANT')
+    expect(mocks.create).toHaveBeenCalledTimes(1)
+    const [params] = mocks.create.mock.calls[0] ?? []
+    expect(params.system).toContain('face and color observation engine')
+    const wire = JSON.stringify(params.messages[0].content)
+    expect(wire).toContain('face_front')
+    expect(wire).toContain('eyes_closeup')
+    expect(wire).not.toContain('Evidence label: hair_back')
+    expect(params.messages[0].content.filter((item: { type: string }) => item.type === 'image')).toHaveLength(3)
   })
 
   it('fails closed before sending photos when the model override is not allowlisted', async () => {

@@ -321,6 +321,44 @@ export const CONSULT_PROFILE_BROW_SHAPES = [
 
 export const CONSULT_PROFILE_EYE_COLORS = ['BROWN', 'BLUE', 'GREEN', 'HAZEL', 'GRAY', 'MIXED', 'UNKNOWN'] as const
 
+// C2-1: richer face/color observations live in a separate provider call so the
+// already-near-limit Stage 3b grammar does not grow until it stops compiling.
+// They are merged server-side with the durable profile before later reasoning.
+export const CONSULT_FACE_COLOR_SKIN_DEPTHS = ['VERY_LIGHT', 'LIGHT', 'MEDIUM', 'DEEP', 'VERY_DEEP', 'UNKNOWN'] as const
+export const CONSULT_FACE_COLOR_SURFACE_OVERTONES = ['BALANCED', 'VISIBLE_REDNESS', 'VISIBLE_GOLDEN_CAST', 'VISIBLE_OLIVE_CAST', 'UNKNOWN'] as const
+export const CONSULT_FACE_COLOR_WIDTH_BALANCES = ['FOREHEAD_DOMINANT', 'CHEEKBONE_DOMINANT', 'JAW_DOMINANT', 'BALANCED', 'UNKNOWN'] as const
+export const CONSULT_FACE_COLOR_CHIN_CONTOURS = ['SOFT', 'TAPERED', 'BROAD', 'ANGULAR', 'UNKNOWN'] as const
+export const CONSULT_FACE_COLOR_EYE_TILTS = ['UPTURNED', 'LEVEL', 'DOWNTURNED', 'UNKNOWN'] as const
+export const CONSULT_FACE_COLOR_LID_VISIBILITY = ['OPEN', 'PARTIAL', 'MINIMAL', 'DEEP_SET', 'PROMINENT', 'UNKNOWN'] as const
+export const CONSULT_FACE_COLOR_BROW_BONE_RELATIONSHIPS = ['LOW', 'BALANCED', 'HIGH', 'UNKNOWN'] as const
+export const CONSULT_FACE_COLOR_BROW_ARCH_POSITIONS = ['INNER', 'CENTER', 'OUTER', 'STRAIGHT', 'UNKNOWN'] as const
+export const CONSULT_FACE_COLOR_BROW_TAIL_DIRECTIONS = ['LIFTED', 'LEVEL', 'DROPPED', 'UNKNOWN'] as const
+
+export const CONSULT_FACE_COLOR_FIELDS = [
+  'skinDepth',
+  'surfaceOvertone',
+  'faceWidthBalance',
+  'chinContour',
+  'eyeTilt',
+  'lidVisibility',
+  'browBoneRelationship',
+  'browArchPosition',
+  'browTailDirection',
+] as const
+export type ConsultFaceColorField = (typeof CONSULT_FACE_COLOR_FIELDS)[number]
+
+const FACE_COLOR_FIELD_VALUES: Readonly<Record<ConsultFaceColorField, readonly string[]>> = {
+  skinDepth: CONSULT_FACE_COLOR_SKIN_DEPTHS,
+  surfaceOvertone: CONSULT_FACE_COLOR_SURFACE_OVERTONES,
+  faceWidthBalance: CONSULT_FACE_COLOR_WIDTH_BALANCES,
+  chinContour: CONSULT_FACE_COLOR_CHIN_CONTOURS,
+  eyeTilt: CONSULT_FACE_COLOR_EYE_TILTS,
+  lidVisibility: CONSULT_FACE_COLOR_LID_VISIBILITY,
+  browBoneRelationship: CONSULT_FACE_COLOR_BROW_BONE_RELATIONSHIPS,
+  browArchPosition: CONSULT_FACE_COLOR_BROW_ARCH_POSITIONS,
+  browTailDirection: CONSULT_FACE_COLOR_BROW_TAIL_DIRECTIONS,
+}
+
 export const CONSULT_PROFILE_FIELDS = [
   'skinUndertone',
   'contrastLevel',
@@ -394,6 +432,20 @@ export type ConsultAnalysisFeatureProfile = {
   browDensity: ProfileObservation<(typeof CONSULT_PROFILE_BROW_DENSITIES)[number]>
   browShape: ProfileObservation<(typeof CONSULT_PROFILE_BROW_SHAPES)[number]>
 }
+
+export type ConsultFaceColorProfile = {
+  skinDepth: ProfileObservation<(typeof CONSULT_FACE_COLOR_SKIN_DEPTHS)[number]>
+  surfaceOvertone: ProfileObservation<(typeof CONSULT_FACE_COLOR_SURFACE_OVERTONES)[number]>
+  faceWidthBalance: ProfileObservation<(typeof CONSULT_FACE_COLOR_WIDTH_BALANCES)[number]>
+  chinContour: ProfileObservation<(typeof CONSULT_FACE_COLOR_CHIN_CONTOURS)[number]>
+  eyeTilt: ProfileObservation<(typeof CONSULT_FACE_COLOR_EYE_TILTS)[number]>
+  lidVisibility: ProfileObservation<(typeof CONSULT_FACE_COLOR_LID_VISIBILITY)[number]>
+  browBoneRelationship: ProfileObservation<(typeof CONSULT_FACE_COLOR_BROW_BONE_RELATIONSHIPS)[number]>
+  browArchPosition: ProfileObservation<(typeof CONSULT_FACE_COLOR_BROW_ARCH_POSITIONS)[number]>
+  browTailDirection: ProfileObservation<(typeof CONSULT_FACE_COLOR_BROW_TAIL_DIRECTIONS)[number]>
+}
+
+export type ConsultMergedFeatureProfile = ConsultAnalysisFeatureProfile & ConsultFaceColorProfile
 
 export type ConsultStyleDirection = {
   domain: ConsultStyleDomain
@@ -903,6 +955,34 @@ export function buildConsultProfileOutputSchema(args: {
   }
 }
 
+/** C2-1 companion call: richer face/color geometry without inflating call 1. */
+export function buildConsultFaceColorOutputSchema(args: {
+  suppliedShotKeys: readonly ConsultCaptureShotKeyDTO[]
+}): Record<string, unknown> {
+  return {
+    type: 'object',
+    additionalProperties: false,
+    required: ['profile'],
+    properties: {
+      profile: {
+        type: 'object',
+        additionalProperties: false,
+        required: [...CONSULT_FACE_COLOR_FIELDS],
+        properties: Object.fromEntries(
+          CONSULT_FACE_COLOR_FIELDS.map((field) => [
+            field,
+            observationSchema(FACE_COLOR_FIELD_VALUES[field]),
+          ]),
+        ),
+      },
+    },
+    $defs: {
+      confidence: CONFIDENCE_DEF,
+      evidence: evidenceDef(args.suppliedShotKeys),
+    },
+  }
+}
+
 /**
  * Call 2 of 2 — the direction (Stages 3 and 4): where she is starting from,
  * what it means for this service, and what to book. The profile from call 1
@@ -1148,6 +1228,18 @@ export const CONSULT_ANALYSIS_PROFILE_SYSTEM_PROMPT = [
   'Do not describe the client’s inspiration reference, her goal, or any service. You are not being asked what to do about her hair.',
 ].join(' ')
 
+export const CONSULT_FACE_COLOR_SYSTEM_PROMPT = [
+  'You are a cosmetic-only face and color observation engine for a professional beauty platform.',
+  'You are the companion to an existing feature profile. Do not repeat undertone, contrast, season, general face proportion, jawline, eye shape, eye spacing, brow density, or brow shape. Produce only the nine companion observations in the schema.',
+  ...SHARED_CONDUCT,
+  'skinDepth describes visible cosmetic depth only, never race or ethnicity. surfaceOvertone describes only visible surface cast/redness and is NOT undertone.',
+  'skinDepth and surfaceOvertone require a trustworthy face_front or face_side image. Never cite early_photo for either field because that selfie is explicitly allowed in any light.',
+  'faceWidthBalance compares the visible forehead, cheekbone and jaw widths. chinContour is neutral geometry. Neither is an attractiveness score.',
+  'eyeTilt, lidVisibility, browBoneRelationship, browArchPosition and browTailDirection prefer eyes_closeup, then face_front. Use UNKNOWN when framing or angle cannot support the distinction.',
+  'An early_photo may support provisional non-color geometry only. If it is the only face view, color fields must be UNKNOWN.',
+  'A capture with a color warning is not trustworthy for skinDepth or surfaceOvertone; prefer UNKNOWN over a color guess.',
+].join(' ')
+
 /**
  * Call 2 — the direction (Stages 3 and 4). The profile is already settled and
  * arrives as text; this call reads where she is starting from and says what it
@@ -1269,6 +1361,57 @@ function sanitizeProfile(raw: unknown): ConsultAnalysisFeatureProfile {
     throw new ConsultAnalysisProviderError('bad_output')
   }
   return profile as ConsultAnalysisFeatureProfile
+}
+
+function unknownFaceColorProfile(): ConsultFaceColorProfile {
+  const unknown = <T extends string>(value: T): ProfileObservation<T> => ({
+    value,
+    confidence: { min: 0, max: 0.35 },
+    evidence: [],
+  })
+  return {
+    skinDepth: unknown('UNKNOWN'),
+    surfaceOvertone: unknown('UNKNOWN'),
+    faceWidthBalance: unknown('UNKNOWN'),
+    chinContour: unknown('UNKNOWN'),
+    eyeTilt: unknown('UNKNOWN'),
+    lidVisibility: unknown('UNKNOWN'),
+    browBoneRelationship: unknown('UNKNOWN'),
+    browArchPosition: unknown('UNKNOWN'),
+    browTailDirection: unknown('UNKNOWN'),
+  }
+}
+
+function sanitizeFaceColorProfile(raw: unknown): ConsultFaceColorProfile {
+  if (!isRecord(raw) || !exactKeys(raw, CONSULT_FACE_COLOR_FIELDS)) {
+    throw new ConsultAnalysisProviderError('bad_output')
+  }
+  const profile = Object.fromEntries(
+    CONSULT_FACE_COLOR_FIELDS.map((field) => [
+      field,
+      observed(raw[field], FACE_COLOR_FIELD_VALUES[field], 'UNKNOWN'),
+    ]),
+  ) as ConsultFaceColorProfile
+  for (const field of ['skinDepth', 'surfaceOvertone'] as const) {
+    if (profile[field].evidence.includes('early_photo')) {
+      throw new ConsultAnalysisProviderError('bad_output')
+    }
+  }
+  return profile
+}
+
+export function sanitizeConsultFaceColorResponse(raw: unknown): ConsultFaceColorProfile {
+  if (!isRecord(raw) || !exactKeys(raw, ['profile'])) {
+    throw new ConsultAnalysisProviderError('bad_output')
+  }
+  return sanitizeFaceColorProfile(raw.profile)
+}
+
+export function mergeConsultFeatureProfiles(
+  profile: ConsultAnalysisFeatureProfile,
+  faceColorProfile: ConsultFaceColorProfile,
+): ConsultMergedFeatureProfile {
+  return { ...profile, ...faceColorProfile }
 }
 
 /**
@@ -1966,6 +2109,56 @@ async function requestConsultAnalysisJsonUnmetered(
   } catch {
     throw new ConsultAnalysisProviderError('bad_output')
   }
+}
+
+const CONSULT_FACE_COLOR_EVIDENCE_KEYS = new Set<ConsultCaptureShotKeyDTO>([
+  'early_photo', 'face_front', 'face_side', 'eyes_closeup',
+])
+
+function consultFaceColorImageContent(input: ConsultAnalysisInput): Anthropic.ContentBlockParam[] {
+  const content: Anthropic.ContentBlockParam[] = []
+  for (const capture of input.captures) {
+    if (!CONSULT_FACE_COLOR_EVIDENCE_KEYS.has(capture.shotKey)) continue
+    content.push({
+      type: 'text',
+      text: capture.qualityWarningCode
+        ? `Evidence label: ${capture.shotKey} (color warning: ${capture.qualityWarningCode})`
+        : `Evidence label: ${capture.shotKey}`,
+    })
+    content.push({
+      type: 'image',
+      source: { type: 'base64', media_type: capture.image.mediaType, data: capture.image.base64 },
+    })
+  }
+  return content
+}
+
+/** C2-1 provider path. Kept separate from the existing profile grammar by design. */
+export async function runConsultFaceColorCompanion(
+  input: ConsultAnalysisInput,
+): Promise<ConsultFaceColorProfile> {
+  const faceCaptures = input.captures.filter((capture) =>
+    CONSULT_FACE_COLOR_EVIDENCE_KEYS.has(capture.shotKey),
+  )
+  if (faceCaptures.length === 0) return unknownFaceColorProfile()
+  const suppliedShotKeys = faceCaptures.map((capture) => capture.shotKey)
+  const blocks = consultAnalysisContextBlocks(input)
+  const raw = await requestConsultAnalysisJson({
+    model: analysisModel(),
+    system: CONSULT_FACE_COLOR_SYSTEM_PROMPT,
+    content: [
+      ...consultFaceColorImageContent(input),
+      ...consultProfileContextBlocks(blocks).map(
+        (text): Anthropic.ContentBlockParam => ({ type: 'text', text }),
+      ),
+    ],
+    schema: buildConsultFaceColorOutputSchema({ suppliedShotKeys }),
+    maxTokens: CONSULT_ANALYSIS_PROFILE_MAX_TOKENS,
+    timeoutMs: CONSULT_ANALYSIS_PROFILE_TIMEOUT_MS,
+    kind: ConsultProviderCallKind.ANALYSIS_PROFILE,
+    meter: input.meter,
+  })
+  return sanitizeConsultFaceColorResponse(raw)
 }
 
 /**
