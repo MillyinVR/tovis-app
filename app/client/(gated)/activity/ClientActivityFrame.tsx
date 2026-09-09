@@ -20,7 +20,11 @@ import {
 import EmptyState from '@/app/_components/boundaries/EmptyState'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import { COPY } from '@/lib/copy'
-import { formatRelativeTimeAgo } from '@/lib/time'
+import {
+  DEFAULT_TIME_ZONE,
+  formatRelativeTimeAgo,
+  getViewerTimeZone,
+} from '@/lib/time'
 
 import ClientMarkAllReadButton from '../_components/ClientMarkAllReadButton'
 import ClientPage from '../_components/ClientPage'
@@ -268,7 +272,10 @@ function ActivityRow({
   item: ClientActivityItem
   withDivider: boolean
 }) {
-  const time = formatRelativeTimeAgo(item.timestamp)
+  const time = formatRelativeTimeAgo(
+    item.timestamp,
+    getViewerTimeZone() ?? DEFAULT_TIME_ZONE,
+  )
 
   return (
     <div

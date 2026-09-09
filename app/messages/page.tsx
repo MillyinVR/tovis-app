@@ -9,7 +9,8 @@ import { RefreshOnFocus } from '@/app/_components/live/RefreshOnFocus'
 import { liveChannelForUser } from '@/lib/live/broadcast'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
-import { formatRelativeTimeCompact } from '@/lib/time'
+import { DEFAULT_TIME_ZONE, formatRelativeTimeCompact } from '@/lib/time'
+import InboxTimeLabel from './_components/InboxTimeLabel'
 import { initialsForName } from '@/lib/initials'
 import { resolveThreadCounterparty } from '@/lib/messages/counterparty'
 import {
@@ -68,6 +69,13 @@ type ThreadPresentation = {
   initials: string
   eyebrow: string
   preview: string
+  /** The instant behind `timeLabel`, for the client to re-render in the viewer's zone. */
+  lastActivityAt: string
+  /**
+   * Server-frame label. This is a server component with no viewer zone, so the
+   * dated fallback is rendered in DEFAULT_TIME_ZONE here and `InboxTimeLabel`
+   * swaps in the viewer-zone label after hydration.
+   */
   timeLabel: string
   isUnread: boolean
   isAccent: boolean
@@ -194,7 +202,8 @@ function buildThreadPresentation(params: {
     initials: initialsForName(title, '?'),
     eyebrow: eyebrow.eyebrow,
     preview: previewText(thread.lastMessagePreview),
-    timeLabel: formatRelativeTimeCompact(lastActivityAt),
+    lastActivityAt: lastActivityAt.toISOString(),
+    timeLabel: formatRelativeTimeCompact(lastActivityAt, DEFAULT_TIME_ZONE),
     isUnread: isThreadUnread(thread),
     isAccent: eyebrow.isAccentContext,
   }
@@ -416,7 +425,10 @@ export default async function MessagesInboxPage(props: PageProps) {
 
                     <div className="flex flex-col items-end gap-[7px] pt-[3px]">
                       <span className="whitespace-nowrap font-mono text-[10.5px] text-textMuted">
-                        {item.timeLabel}
+                        <InboxTimeLabel
+                          at={item.lastActivityAt}
+                          serverLabel={item.timeLabel}
+                        />
                       </span>
                     </div>
                   </Link>

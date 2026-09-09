@@ -2,8 +2,8 @@
 //
 // Single import surface for all date/time + timezone handling.
 //
-// Import time helpers from `@/lib/time` — not from raw `Intl.DateTimeFormat`,
-// `Date.prototype.toLocale*String`, or the individual helper modules. The
+// Import time helpers from `@/lib/time` — not from the raw `Intl` date
+// formatter, `Date.prototype.toLocale*String`, or the individual helper modules. The
 // `check:no-raw-datetime-format` guard enforces "no raw Intl/toLocale*"; this
 // barrel is the place that answers "then what do I import instead?".
 //
