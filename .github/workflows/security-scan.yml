@@ -18,6 +18,8 @@ jobs:
     name: Dependency audit
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
 
     steps:
       - name: Check out repository
@@ -61,8 +63,10 @@ jobs:
       # call burns ~4 minutes of pnpm's own retries. One outage therefore ate
       # this job's whole 10-minute budget and reddened every open PR.
       #
-      # So the npm-backed audit is bounded and best-effort, and the floor under it is the
-      # dependency-review step below, which reads GitHub's own data and never
+      # On public PRs the npm-backed audit is bounded and best-effort, with
+      # dependency review below as the floor. Private-repository runs require
+      # both npm-backed audits to succeed because that fallback is unavailable.
+      # The public dependency-review step reads GitHub's own data and never
       # touches npm. Tolerating an unreachable service here is not a hole in
       # what a PR can introduce: an outage means this step has no opinion, and
       # dependency review still has one about what the PR ADDS. It does mean
@@ -75,6 +79,10 @@ jobs:
           rc=$?
           echo "$output"
           if [ "$rc" -ne 0 ] && { [ "$rc" -eq 124 ] || echo "$output" | grep -qE 'ERR_SOCKET_TIMEOUT|ERR_PNPM_AUDIT_BAD_RESPONSE|ECONNRESET|ETIMEDOUT|EAI_AGAIN'; }; then
+            if [ "$REPOSITORY_PRIVATE" = "true" ]; then
+              echo "::error::Production dependency audit unavailable. Private-repository CI requires a successful audit."
+              exit "$rc"
+            fi
             echo "::warning::pnpm audit (prod) skipped: npm's advisory service did not answer. The dependency-review step still gates what this PR adds; the pre-existing tree is unchecked on this run."
             exit 0
           fi
@@ -98,6 +106,10 @@ jobs:
           rc=$?
           echo "$output"
           if [ "$rc" -ne 0 ] && { [ "$rc" -eq 124 ] || echo "$output" | grep -qE 'ERR_SOCKET_TIMEOUT|ERR_PNPM_AUDIT_BAD_RESPONSE|ECONNRESET|ETIMEDOUT|EAI_AGAIN'; }; then
+            if [ "$REPOSITORY_PRIVATE" = "true" ]; then
+              echo "::error::Dependency audit unavailable. Private-repository CI requires a successful audit."
+              exit "$rc"
+            fi
             echo "::warning::pnpm audit (all) skipped: npm's advisory service did not answer. The dependency-review step still gates what this PR adds; the pre-existing tree is unchecked on this run."
             exit 0
           fi
@@ -109,6 +121,10 @@ jobs:
       # grants it (the Actions token has no Dependabot-alerts scope; a PAT with
       # `security_events` would be needed). So this reads the Dependency Review
       # API instead, which the Actions token CAN use on a public repo.
+      # On this private repo without the required GitHub security feature,
+      # dependency review returns "not supported". Both full-tree pnpm audits
+      # above are mandatory there, including on registry outages: there is no
+      # dependency-review fallback to justify silently skipping either audit.
       #
       # What it covers: dependencies this PR ADDS or CHANGES, computed by GitHub
       # from the lockfile, with no call to npm. So an npm outage can no longer
@@ -120,7 +136,7 @@ jobs:
       # whole tree in CI needs a PAT secret with `security_events` — a decision
       # about a long-lived token, deliberately not taken here.
       - name: Dependency review (blocks a PR that adds a high+ vulnerability)
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && !github.event.repository.private
         uses: actions/dependency-review-action@v5
         with:
           fail-on-severity: high
