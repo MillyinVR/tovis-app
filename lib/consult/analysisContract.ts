@@ -1811,6 +1811,9 @@ export async function executeConsultAnalysisRun(args: {
           captureIds,
           finalizedAt,
           actor,
+          ...(providerResult.faceColorProfile ? {
+            faceColorProfile: providerResult.faceColorProfile,
+          } : {}),
         })
         const chartPhotoUses = await tx.consultChartPhotoUse.findMany({ where: {
           consultSessionId: finalContext.session.id, captureId: { in: captureIds },

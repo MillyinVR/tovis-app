@@ -1,0 +1,17 @@
+name: Install Playwright browsers
+description: Install Playwright browsers without depending on the runner's unused Chrome APT feed.
+runs:
+  using: composite
+  steps:
+    - name: Remove unused runner Chrome package source
+      shell: bash
+      run: |
+        # Playwright downloads its own browsers; it needs Ubuntu libraries,
+        # not Google's google-chrome-stable package. A stale Google APT index
+        # can fail the entire dependency install with a hash mismatch.
+        # Discover entries by URL: current runners can use deb822 .sources
+        # files rather than the historical google-chrome.list filename.
+        sudo python3 scripts/ci/remove-unused-chrome-source.py /etc/apt/sources.list.d
+    - name: Install browsers and system dependencies
+      shell: bash
+      run: pnpm exec playwright install --with-deps
