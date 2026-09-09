@@ -14,4 +14,4 @@ runs:
         sudo python3 scripts/ci/remove-unused-chrome-source.py /etc/apt/sources.list.d
     - name: Install browsers and system dependencies
       shell: bash
-      run: pnpm exec playwright install --with-deps
+      run: pnpm exec playwright install --with-deps chromium

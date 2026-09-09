@@ -1,0 +1,17 @@
+#!/bin/sh
+# Provision only. Starting an editing agent is a separate, explicit action.
+set -eu
+if [ "$#" -ne 3 ]; then
+  echo 'Usage: create-worktree REPO NEW-BRANCH ABSOLUTE-NEW-DIRECTORY' >&2
+  exit 2
+fi
+repo=$1
+branch=$2
+destination=$3
+case "$destination" in /*) ;; *) echo 'Destination must be absolute.' >&2; exit 2;; esac
+case "$branch" in -*|main|master) echo 'Use a new focused feature branch.' >&2; exit 2;; esac
+if [ -e "$destination" ]; then echo 'Destination already exists; refusing reuse.' >&2; exit 1; fi
+git -C "$repo" check-ref-format --branch "$branch" >/dev/null
+git -C "$repo" fetch origin main
+git -C "$repo" worktree add -b "$branch" "$destination" origin/main
+printf 'Dedicated tree created: %s\nNo agent started. Assign one editing owner; never auto-merge.\n' "$destination"

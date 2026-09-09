@@ -10,6 +10,12 @@ on:
 permissions:
   contents: read
 
+# Superseded PR commits need no further runner time. Main/manual/scheduled
+# runs keep unique groups so every final verification still completes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   static-guards:
     name: Static boundary guards
@@ -45,6 +51,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Test orchestration boundaries (no model calls)
+        run: python3 -m unittest discover -s tools/orchestration -p 'test_*.py'
 
       - name: Run static guards
         run: pnpm check:static-guards
