@@ -183,6 +183,20 @@ function recommended(service: string) {
     : { serviceIntent: 'SERVICE' as const, serviceName: service }
 }
 
+function fakeFaceColorProfile() {
+  return {
+    skinDepth: observed('MEDIUM', ['face_front']),
+    surfaceOvertone: observed('BALANCED', ['face_front']),
+    faceWidthBalance: observed('CHEEKBONE_DOMINANT', ['face_front']),
+    chinContour: observed('TAPERED', ['face_side']),
+    eyeTilt: observed('LEVEL', ['eyes_closeup']),
+    lidVisibility: observed('PARTIAL', ['eyes_closeup']),
+    browBoneRelationship: observed('BALANCED', ['eyes_closeup']),
+    browArchPosition: observed('OUTER', ['eyes_closeup']),
+    browTailDirection: observed('LIFTED', ['eyes_closeup']),
+  }
+}
+
 export async function fakeRunConsultAnalysis(input: {
   service: { menuServiceNames: readonly string[]; lookPlanning?: boolean }
   captures?: readonly { shotKey: string }[]
@@ -191,6 +205,7 @@ export async function fakeRunConsultAnalysis(input: {
   const named = (pattern: RegExp) =>
     menu.find((name) => pattern.test(name)) ?? 'A consultation with the professional'
   const result = {
+    ...(process.env.AI_CONSULT_FACE_COLOR_ENABLED === 'true' ? { faceColorProfile: fakeFaceColorProfile() } : {}),
     model: 'fake-analysis-model',
     analysis: {
       profile: {
