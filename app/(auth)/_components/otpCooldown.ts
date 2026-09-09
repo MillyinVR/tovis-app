@@ -21,12 +21,12 @@ export function formatCooldown(seconds: number): string {
  * null when absent/unparseable.
  *
  * The hint lives at `details.retryAfterSeconds`, NOT at the top level:
- * `buildRateLimitResponse` (app/api/_utils/rateLimit.ts) nests the whole
- * decision under `details`, and `jsonFail` spreads that as-is, so a real 429 is
+ * `rateLimitExceededResponse` (lib/rateLimit/response.ts) — the ONE 429 builder
+ * every rate-limited route goes through — nests the whole decision under
+ * `details`, and `jsonFail` spreads that as-is, so a real 429 is
  *   { ok: false, error, code: 'RATE_LIMITED', details: { retryAfterSeconds, … } }
- * That one site is the only emitter of the field anywhere in the API — reading
- * the top level instead silently yielded null on every real response, which is
- * exactly the bug this shape comment exists to prevent.
+ * Reading the top level instead silently yielded null on every real response,
+ * which is exactly the bug this shape comment exists to prevent.
  */
 export function readRetryAfterSeconds(
   data: Record<string, unknown> | null,
