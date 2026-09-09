@@ -46,5 +46,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Test orchestration boundaries (no model calls)
+        run: python3 -m unittest discover -s tools/orchestration -p 'test_*.py'
+
       - name: Run static guards
         run: pnpm check:static-guards
