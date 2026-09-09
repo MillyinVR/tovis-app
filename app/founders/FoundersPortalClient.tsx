@@ -20,7 +20,11 @@ import type {
   FounderMessagesResponseDTO,
   FounderPortalDTO,
 } from '@/lib/dto/founders'
-import { formatRelativeTimeAgo } from '@/lib/time'
+import {
+  DEFAULT_TIME_ZONE,
+  formatRelativeTimeAgo,
+  getViewerTimeZone,
+} from '@/lib/time'
 
 type MessagesEnvelope = FounderMessagesResponseDTO & { ok: true }
 type CreateEnvelope = { ok: true; message: FounderMessageDTO }
@@ -44,6 +48,7 @@ export default function FoundersPortalClient({
   initialPortal: FounderPortalDTO
   currentUserId: string
 }) {
+  const viewerTimeZone = getViewerTimeZone() ?? DEFAULT_TIME_ZONE
   const [selectedRoom, setSelectedRoom] = useState<FounderRoomKey>(
     initialPortal.rooms[0]?.key ?? 'PRO_ALL',
   )
@@ -193,7 +198,7 @@ export default function FoundersPortalClient({
             return (
               <article key={message.id} className={mine ? 'founders-message mine' : 'founders-message'}>
                 <div className="founders-avatar">{message.author.displayName.charAt(0).toUpperCase()}</div>
-                <div><div className="founders-message-meta"><strong>{message.author.displayName}</strong><span className={`founders-kind kind-${message.kind.toLowerCase()}`}>{message.kind.toLowerCase()}</span><time>{formatRelativeTimeAgo(message.createdAt)}</time></div><p>{message.body}</p><div className="founders-message-actions">{message.answeredAt ? <small className="founders-answered">✓ Answered by the team</small> : null}<button type="button" onClick={() => setReplyTo(message)}>{initialPortal.canModerate && message.kind === 'QUESTION' ? 'Answer' : 'Reply'}</button>{!mine && !initialPortal.canModerate ? <button type="button" onClick={() => void reportMessage(message)} disabled={reportedIds.has(message.id)}>{reportedIds.has(message.id) ? 'Reported' : 'Report'}</button> : null}</div></div>
+                <div><div className="founders-message-meta"><strong>{message.author.displayName}</strong><span className={`founders-kind kind-${message.kind.toLowerCase()}`}>{message.kind.toLowerCase()}</span><time>{formatRelativeTimeAgo(message.createdAt, viewerTimeZone)}</time></div><p>{message.body}</p><div className="founders-message-actions">{message.answeredAt ? <small className="founders-answered">✓ Answered by the team</small> : null}<button type="button" onClick={() => setReplyTo(message)}>{initialPortal.canModerate && message.kind === 'QUESTION' ? 'Answer' : 'Reply'}</button>{!mine && !initialPortal.canModerate ? <button type="button" onClick={() => void reportMessage(message)} disabled={reportedIds.has(message.id)}>{reportedIds.has(message.id) ? 'Reported' : 'Report'}</button> : null}</div></div>
               </article>
             )
           })}

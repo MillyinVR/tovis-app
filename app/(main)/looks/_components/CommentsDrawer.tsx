@@ -8,7 +8,11 @@ import { Heart, User as UserIcon, X } from 'lucide-react'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import { formatCompactCount } from '@/lib/format/compactCount'
 import { initialsForName } from '@/lib/initials'
-import { formatRelativeTimeCompact } from '@/lib/time/relativeTime'
+import {
+  DEFAULT_TIME_ZONE,
+  formatRelativeTimeCompact,
+  getViewerTimeZone,
+} from '@/lib/time'
 import { zClass } from '@/lib/zIndex'
 import { useLookComments } from './useLookComments'
 import { REPORT_LABEL, type ReportState } from './reportState'
@@ -67,6 +71,7 @@ function CommentRow({
   onReport: (comment: UiComment) => Promise<'ok' | 'auth' | 'error'>
 }) {
   const [reportState, setReportState] = useState<ReportState>('idle')
+  const viewerTimeZone = getViewerTimeZone() ?? DEFAULT_TIME_ZONE
 
   async function handleReport() {
     if (reportState !== 'idle') return
@@ -128,7 +133,7 @@ function CommentRow({
             </span>
           ) : null}
           <span className="flex-[0_0_auto] text-[11px] text-textSecondary">
-            {formatRelativeTimeCompact(comment.createdAt)}
+            {formatRelativeTimeCompact(comment.createdAt, viewerTimeZone)}
           </span>
         </div>
 

@@ -12,55 +12,75 @@ const HOUR = 60 * MIN
 const DAY = 24 * HOUR
 const WEEK = 7 * DAY
 
+const NY = 'America/New_York'
+
 // Offset from "now" with a small margin so floor() lands inside the bucket and
 // never on a boundary, independent of the few ms Date.now() advances mid-call.
 function ago(ms: number): Date {
   return new Date(Date.now() - ms - 500)
 }
 
+function pinNow(iso: string): void {
+  vi.useFakeTimers()
+  vi.setSystemTime(new Date(iso))
+}
+
+afterEach(() => {
+  vi.useRealTimers()
+})
+
 describe('formatRelativeTimeCompact', () => {
   it('buckets into compact units, then a dated fallback with year', () => {
-    expect(formatRelativeTimeCompact(ago(20_000))).toBe('now')
-    expect(formatRelativeTimeCompact(ago(5 * MIN))).toBe('5m')
-    expect(formatRelativeTimeCompact(ago(3 * HOUR))).toBe('3h')
-    expect(formatRelativeTimeCompact(ago(2 * DAY))).toBe('2d')
-    expect(formatRelativeTimeCompact(ago(4 * WEEK))).toBe('4w')
-    expect(formatRelativeTimeCompact(ago(60 * WEEK))).toMatch(/\d{4}$/)
+    expect(formatRelativeTimeCompact(ago(20_000), 'UTC')).toBe('now')
+    expect(formatRelativeTimeCompact(ago(5 * MIN), 'UTC')).toBe('5m')
+    expect(formatRelativeTimeCompact(ago(3 * HOUR), 'UTC')).toBe('3h')
+    expect(formatRelativeTimeCompact(ago(2 * DAY), 'UTC')).toBe('2d')
+    expect(formatRelativeTimeCompact(ago(4 * WEEK), 'UTC')).toBe('4w')
+    expect(formatRelativeTimeCompact(ago(60 * WEEK), 'UTC')).toMatch(/\d{4}$/)
+  })
+
+  it('renders the dated fallback in the given zone, not the runtime zone', () => {
+    pinNow('2027-03-15T12:00:00Z')
+
+    // 02:00Z on Feb 1 is still 21:00 on Jan 31 in New York. A server render
+    // in UTC used to print the next day's date for a US viewer.
+    expect(formatRelativeTimeCompact('2026-02-01T02:00:00Z', NY)).toBe(
+      'Jan 31, 2026',
+    )
+    expect(formatRelativeTimeCompact('2026-02-01T02:00:00Z', 'UTC')).toBe(
+      'Feb 1, 2026',
+    )
   })
 
   it('returns empty string for unparseable input', () => {
-    expect(formatRelativeTimeCompact('not-a-date')).toBe('')
+    expect(formatRelativeTimeCompact('not-a-date', 'UTC')).toBe('')
   })
 })
 
 describe('formatRelativeTimeAgo', () => {
   it('keeps the "ago" wording and a no-year fallback after ~a month', () => {
-    expect(formatRelativeTimeAgo(ago(20_000))).toBe('just now')
-    expect(formatRelativeTimeAgo(ago(5 * MIN))).toBe('5m ago')
-    expect(formatRelativeTimeAgo(ago(3 * HOUR))).toBe('3h ago')
-    expect(formatRelativeTimeAgo(ago(2 * DAY))).toBe('2d ago')
-    expect(formatRelativeTimeAgo(ago(3 * WEEK))).toBe('3w ago')
+    expect(formatRelativeTimeAgo(ago(20_000), 'UTC')).toBe('just now')
+    expect(formatRelativeTimeAgo(ago(5 * MIN), 'UTC')).toBe('5m ago')
+    expect(formatRelativeTimeAgo(ago(3 * HOUR), 'UTC')).toBe('3h ago')
+    expect(formatRelativeTimeAgo(ago(2 * DAY), 'UTC')).toBe('2d ago')
+    expect(formatRelativeTimeAgo(ago(3 * WEEK), 'UTC')).toBe('3w ago')
     // > 5 weeks falls through to a short date with no year.
-    expect(formatRelativeTimeAgo(ago(8 * WEEK))).not.toContain('ago')
+    expect(formatRelativeTimeAgo(ago(8 * WEEK), 'UTC')).not.toContain('ago')
+  })
+
+  it('renders the dated fallback in the given zone, not the runtime zone', () => {
+    pinNow('2026-03-15T12:00:00Z')
+
+    expect(formatRelativeTimeAgo('2026-02-01T02:00:00Z', NY)).toBe('Jan 31')
+    expect(formatRelativeTimeAgo('2026-02-01T02:00:00Z', 'UTC')).toBe('Feb 1')
   })
 
   it('returns empty string for unparseable input', () => {
-    expect(formatRelativeTimeAgo('not-a-date')).toBe('')
+    expect(formatRelativeTimeAgo('not-a-date', 'UTC')).toBe('')
   })
 })
 
 describe('formatRelativeDayAgo', () => {
-  const NY = 'America/New_York'
-
-  afterEach(() => {
-    vi.useRealTimers()
-  })
-
-  function pinNow(iso: string): void {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date(iso))
-  }
-
   it('buckets by day, then week, then a calendar date', () => {
     // 2026-03-15T12:00:00Z is 08:00 on Mar 15 in New York.
     pinNow('2026-03-15T12:00:00Z')

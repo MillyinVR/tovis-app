@@ -24,7 +24,11 @@ import {
   idempotencyHeaders,
 } from '@/lib/idempotency/client'
 import { formatCents } from '@/lib/money'
-import { formatRelativeTimeAgo } from '@/lib/time'
+import {
+  DEFAULT_TIME_ZONE,
+  formatRelativeTimeAgo,
+  getViewerTimeZone,
+} from '@/lib/time'
 import { safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
 
@@ -319,6 +323,7 @@ export default function MoneyTrailInspector({ bookingId, heading }: Props) {
   const [flash, setFlash] = useState<string | null>(null)
 
   const abortRef = useRef<AbortController | null>(null)
+  const viewerTimeZone = getViewerTimeZone() ?? DEFAULT_TIME_ZONE
 
   const load = useCallback(async () => {
     abortRef.current?.abort()
@@ -604,7 +609,10 @@ export default function MoneyTrailInspector({ bookingId, heading }: Props) {
                   </div>
                   {e.detail || e.at ? (
                     <div className="truncate text-[11px] text-textMuted">
-                      {[e.detail, e.at ? formatRelativeTimeAgo(e.at) : null]
+                      {[
+                        e.detail,
+                        e.at ? formatRelativeTimeAgo(e.at, viewerTimeZone) : null,
+                      ]
                         .filter(Boolean)
                         .join(' · ')}
                     </div>

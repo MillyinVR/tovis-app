@@ -1,7 +1,6 @@
 // lib/time/relativeTime.ts
 import { formatInTimeZone } from '@/lib/formatInTimeZone'
 import { daySerialInTimeZone } from '@/lib/timeZone'
-import { DISPLAY_LOCALE } from '@/lib/locale'
 
 type RelativeBucket =
   | { unit: 'now' }
@@ -43,8 +42,19 @@ function bucketRelativeTime(
  * "4w") that falls back to a short calendar date once it's older than ~a year.
  * Matches how TikTok/Instagram label comments. Accepts an ISO string or Date;
  * returns '' for unparseable input.
+ *
+ * The relative buckets are pure elapsed time and need no zone, but the dated
+ * fallback is a calendar claim, so it is rendered in `timeZone` — never in the
+ * runtime's zone, which on a server render is UTC and turns a late-evening
+ * instant into the next day's date. Pass the viewer's zone
+ * (`getViewerTimeZone() ?? DEFAULT_TIME_ZONE`) on client surfaces; a server
+ * component has no viewer zone and must hand the instant to a client component
+ * (see `InboxTimeLabel`).
  */
-export function formatRelativeTimeCompact(input: string | Date): string {
+export function formatRelativeTimeCompact(
+  input: string | Date,
+  timeZone: string,
+): string {
   const bucket = bucketRelativeTime(input, 52)
   if (!bucket) return ''
 
@@ -60,7 +70,7 @@ export function formatRelativeTimeCompact(input: string | Date): string {
     case 'week':
       return `${bucket.value}w`
     case 'older':
-      return bucket.at.toLocaleDateString(DISPLAY_LOCALE, {
+      return formatInTimeZone(bucket.at, timeZone, {
         month: 'short',
         day: 'numeric',
         year: 'numeric',
@@ -72,9 +82,13 @@ export function formatRelativeTimeCompact(input: string | Date): string {
  * "ago"-suffixed relative timestamp ("just now", "5m ago", "3h ago", "2d ago",
  * "4w ago") for activity-feed surfaces, falling back to a short month/day date
  * after ~a month. Same bucketing as {@link formatRelativeTimeCompact}; only the
- * wording and fallback differ. Returns '' for unparseable input.
+ * wording and fallback differ, and the fallback is rendered in `timeZone` for
+ * the same reason. Returns '' for unparseable input.
  */
-export function formatRelativeTimeAgo(input: string | Date): string {
+export function formatRelativeTimeAgo(
+  input: string | Date,
+  timeZone: string,
+): string {
   const bucket = bucketRelativeTime(input, 5)
   if (!bucket) return ''
 
@@ -90,7 +104,7 @@ export function formatRelativeTimeAgo(input: string | Date): string {
     case 'week':
       return `${bucket.value}w ago`
     case 'older':
-      return bucket.at.toLocaleDateString(DISPLAY_LOCALE, {
+      return formatInTimeZone(bucket.at, timeZone, {
         month: 'short',
         day: 'numeric',
       })

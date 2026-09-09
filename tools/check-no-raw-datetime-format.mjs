@@ -56,8 +56,11 @@ const DATE_OPTION_KEYWORD =
 // A `new Date(...)` receiver on the same line is a strong date signal.
 const NEW_DATE_RECEIVER = /new Date\([^)]*\)\s*\.toLocaleString\(/
 
+// `lib/time/` (the barrel + dateShort/relativeTime/instant) is deliberately NOT
+// here: everything in it formats through `formatInTimeZone`, so the guard
+// should see it. Its whole-prefix exemption is how `relativeTime.ts` shipped a
+// zone-less `toLocaleDateString` fallback that rendered the inbox in UTC.
 const ALLOWED_PATH_PREFIXES = [
-  'lib/time/', // the facade + relative-time helper
   'lib/timeZone.ts', // timezone math engine (single source of truth)
   'lib/formatInTimeZone.ts', // sanitized display formatters
   'lib/bookingTime.ts', // booking-edge time helpers
