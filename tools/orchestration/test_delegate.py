@@ -1,5 +1,9 @@
 """Boundary tests: no inference, credentials or network required."""
 import os
+import io
+import contextlib
+import json
+from types import SimpleNamespace
 from pathlib import Path
 import subprocess
 import tempfile
@@ -64,6 +68,40 @@ class Boundaries(unittest.TestCase):
         with self.assertRaises(ValueError) as result:
             delegate.run(['sh', '-c', 'echo sensitive-diagnostic >&2; exit 1'], cwd=self.repo)
         self.assertNotIn('sensitive-diagnostic', str(result.exception))
+
+
+class RuntimeChecks(unittest.TestCase):
+    setUp = Boundaries.setUp
+
+    @staticmethod
+    def stream(**overrides):
+        state = dict(type='system', subtype='init', tools=[], mcp_servers=[],
+                     apiKeySource='none', permissionMode='dontAsk')
+        state.update(overrides)
+        return json.dumps(state) + '\n' + json.dumps(dict(type='result', result='finding', is_error=False))
+
+    def test_runtime_tool_and_billing_mismatch_refused(self):
+        self.assertEqual(delegate.claude_result(self.stream()), 'finding')
+        for override in [dict(tools=['Bash']), dict(mcp_servers=['server']),
+                         dict(apiKeySource='environment'), dict(permissionMode='auto')]:
+            with self.subTest(override=override), self.assertRaises(ValueError):
+                delegate.claude_result(self.stream(**override))
+
+    def test_stale_result_never_reaches_stdout(self):
+        original = delegate.run
+        def fake_run(argv, **kwargs):
+            if argv[:3] == ['claude', 'auth', 'status']:
+                return json.dumps(dict(loggedIn=True, authMethod='claude.ai', subscriptionType='max'))
+            if argv[0] == 'claude':
+                (self.repo / 'sample.ts').write_text('changed while reviewing')
+                return self.stream()
+            return original(argv, **kwargs)
+        args = SimpleNamespace(task='Review', repo=self.repo, path=['sample.ts'], dry_run=False, worker='claude')
+        output = io.StringIO()
+        with patch.object(delegate, 'run', fake_run), contextlib.redirect_stdout(output):
+            with self.assertRaisesRegex(ValueError, 'Stale findings withheld'):
+                delegate.delegate(args)
+        self.assertEqual(output.getvalue(), '')
 
 
 class WorktreeIsolation(unittest.TestCase):

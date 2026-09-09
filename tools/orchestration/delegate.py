@@ -11,6 +11,8 @@ import subprocess
 import sys
 import tempfile
 
+from worker_policy import HERMES_MODEL, HERMES_PROVIDER
+
 ROOT = Path(__file__).resolve().parents[2]
 PATTERNS = [
     r'-----BEGIN [A-Z ]*PRIVATE KEY-----',
@@ -111,6 +113,21 @@ def clean_env():
     return {k: os.environ[k] for k in ['HOME', 'PATH', 'TMPDIR', 'LANG', 'USER', 'LOGNAME'] if k in os.environ}
 
 
+def claude_result(raw):
+    events = [json.loads(line) for line in raw.splitlines() if line.strip()]
+    initial = [event for event in events if event.get('type') == 'system' and event.get('subtype') == 'init']
+    if len(initial) != 1:
+        raise ValueError('Claude runtime controls could not be verified; output withheld.')
+    state = initial[0]
+    if (state.get('tools') != [] or state.get('mcp_servers') != []
+            or state.get('apiKeySource') != 'none' or state.get('permissionMode') != 'dontAsk'):
+        raise ValueError('Claude runtime controls differ from the required policy; output withheld.')
+    results = [event for event in events if event.get('type') == 'result']
+    if len(results) != 1 or results[0].get('is_error') or results[0].get('permission_denials'):
+        raise ValueError('Claude did not complete the bounded task; output withheld.')
+    return results[0].get('result', '')
+
+
 def delegate(args):
     task = args.task if args.task is not None else sys.stdin.read(8001)
     prompt, hashes = packet(args.repo, args.path, task)
@@ -128,18 +145,15 @@ def delegate(args):
             cmd = ['claude', '--print', '--safe-mode', '--tools', '', '--strict-mcp-config',
                    '--mcp-config', '{"mcpServers":{}}', '--setting-sources', '',
                    '--permission-mode', 'dontAsk', '--no-session-persistence', '--no-chrome',
-                   '--model', 'opus', '--output-format', 'json']
-            response = json.loads(run(cmd, cwd=tmp, env=env, input=prompt))
-            if response.get('is_error') or response.get('permission_denials'):
-                raise ValueError('Claude did not complete the bounded task; response withheld.')
-            output = response.get('result', '')
+                   '--model', 'opus', '--output-format', 'stream-json', '--verbose']
+            output = claude_result(run(cmd, cwd=tmp, env=env, input=prompt))
         else:
             import yaml
             from dotenv import dotenv_values
             home = Path.home() / '.hermes'
             config = yaml.safe_load((home / 'config.yaml').read_text())
             model = config.get('model', {})
-            if model.get('provider') != 'openrouter' or model.get('default') != 'z-ai/glm-5.3' or model.get('base_url'):
+            if model.get('provider') != HERMES_PROVIDER or model.get('default') != HERMES_MODEL or model.get('base_url'):
                 raise ValueError('Expected existing OpenRouter z-ai/glm-5.3 configuration; review config before changing routing.')
             key = dotenv_values(home / '.env', interpolate=False).get('OPENROUTER_API_KEY')
             if not key:
@@ -155,11 +169,11 @@ def delegate(args):
         output = screen(output, secrets)
         changed = [name for name, digest in hashes.items()
                    if not (args.repo / name).exists() or hashlib.sha256((args.repo / name).read_bytes()).hexdigest() != digest]
+        if changed:
+            raise ValueError('Source changed during review. Stale findings withheld; rerun after edits stop.')
         print(json.dumps({'worker': args.worker, 'mode': 'read-only; tools disabled',
                           'context_sha256': hashlib.sha256(prompt.encode()).hexdigest(),
                           'stale_files': changed, 'finding': output.strip()}, indent=2))
-        if changed:
-            raise ValueError('Source changed during review. Do not accept stale evidence; rerun after edits stop.')
 
 
 def main():

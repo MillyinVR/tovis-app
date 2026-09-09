@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 import sys
 
+from worker_policy import HERMES_MODEL, HERMES_PROVIDER, HERMES_BASE_URL
+
 
 def main():
     prompt = sys.stdin.read()
@@ -15,8 +17,8 @@ def main():
         sys.path.insert(0, str(Path.home() / '.hermes/hermes-agent'))
         from run_agent import AIAgent
         agent = AIAgent(
-            model='z-ai/glm-5.3', provider='openrouter',
-            base_url='https://openrouter.ai/api/v1', api_key=os.environ['OPENROUTER_API_KEY'],
+            model=HERMES_MODEL, provider=HERMES_PROVIDER,
+            base_url=HERMES_BASE_URL, api_key=os.environ['OPENROUTER_API_KEY'],
             enabled_toolsets=[], max_iterations=1, max_tokens=2400,
             reasoning_config={'effort': 'low'}, run_budget_seconds=180,
             save_trajectories=False, quiet_mode=True, verbose_logging=False,

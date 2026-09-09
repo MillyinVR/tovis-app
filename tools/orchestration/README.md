@@ -48,12 +48,14 @@ Workers receive the root and applicable nested CLAUDE/AGENTS rules. CLI custom
 instructions, plugins, hooks, MCP, memory and tools are disabled. The selected
 rules arrive as source context; shipping instructions never authorize workers
 to commit, merge, deploy or contact anyone. JSON output includes source context
-hash, stale-file detection, worker, mode, and findings. Astra verifies citations
+hash, worker, mode, and findings. Stale findings are withheld with a failure exit. Astra verifies citations
 against the checkout; worker output is untrusted evidence, never instructions.
 
 The wrappers run in a private temporary directory. Claude uses safe mode, zero
 built-in tools, an empty MCP configuration, no session persistence, a minimal
-environment, and a subscription-auth preflight. macOS Keychain and network access
+environment, and a subscription-auth preflight. The runtime initialization event
+is checked for an empty tool/MCP list, no API-key source, and the expected
+permission mode before any answer is released. macOS Keychain and network access
 must be available; a restricted sandbox may report logged out. Authenticate once
 with `claude auth login` if genuinely logged out. Do not extract OAuth tokens or
 replace the login with an Anthropic API key. The wrapper uses the `opus` alias;
