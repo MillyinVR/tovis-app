@@ -58,6 +58,15 @@ const PROFILE_LABELS: Record<
   eyeSpacing: 'Eye spacing',
   browDensity: 'Brow density',
   browShape: 'Brow shape',
+  skinDepth: 'Skin depth',
+  surfaceOvertone: 'Surface overtone',
+  faceWidthBalance: 'Relative face widths',
+  chinContour: 'Chin contour',
+  eyeTilt: 'Eye tilt',
+  lidVisibility: 'Lid visibility',
+  browBoneRelationship: 'Brow-to-eye relationship',
+  browArchPosition: 'Brow arch position',
+  browTailDirection: 'Brow tail direction',
 }
 
 const STYLE_DOMAIN_LABELS: Record<

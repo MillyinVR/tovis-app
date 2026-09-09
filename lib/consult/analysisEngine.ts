@@ -87,6 +87,8 @@ export const CONSULT_ANALYSIS_SCHEMA_VERSION = 6
 // previous deployment to finish requests while the new deployment builds.
 // Historical revisions retain their original profile shape when read.
 export const CONSULT_ANALYSIS_PROMPT_VERSION = 'service-analysis-v8'
+export const CONSULT_FACE_COLOR_SCHEMA_VERSION = 1
+export const CONSULT_FACE_COLOR_PROMPT_VERSION = 'face-color-companion-v1'
 export const CONSULT_ANALYSIS_DEFAULT_MODEL = 'claude-sonnet-5'
 /**
  * Per-call ceilings, because the two calls are nothing like each other.
@@ -102,12 +104,16 @@ export const CONSULT_ANALYSIS_DEFAULT_MODEL = 'claude-sonnet-5'
  * the median: the profile gets 5x its worst measurement, the direction gets
  * room for a run half again as slow as the slowest observed.
  *
- * 🔴 The sum is the analysis route's budget. 50 (inspiration) + 45 + 150 =
- * 245s, inside `maxDuration = 300` with room for the database work either
- * side. Raising either of these means raising that, and the engine test pins
- * the arithmetic so the two cannot drift apart.
+ * 🔴 The sum is the analysis route's budget. With C2-1 enabled: 50
+ * (inspiration) + 45 (profile) + 30 (face/color companion) + 150 (direction)
+ * = 275s, inside `maxDuration = 300` with 25s for database/finalize work.
+ * Raising any ceiling means re-checking that arithmetic; the engine test pins it.
  */
 export const CONSULT_ANALYSIS_PROFILE_TIMEOUT_MS = 45_000
+// C2-1 companion measured ~11.5s live. Keep its ceiling separate from the
+// larger profile call so the optional fourth provider call still leaves worker
+// headroom under Vercel Pro's 300s function ceiling.
+export const CONSULT_FACE_COLOR_TIMEOUT_MS = 30_000
 export const CONSULT_ANALYSIS_DIRECTION_TIMEOUT_MS = 150_000
 
 /**
@@ -645,6 +651,7 @@ export type ConsultAnalysisInspirationInput = {
 export type ConsultAnalysisProviderResult = {
   analysis: ConsultAnalysisProviderOutput
   model: string
+  faceColorProfile?: ConsultFaceColorProfile
 }
 
 export type ConsultAnalysisProvider = (
@@ -1363,7 +1370,7 @@ function sanitizeProfile(raw: unknown): ConsultAnalysisFeatureProfile {
   return profile as ConsultAnalysisFeatureProfile
 }
 
-function unknownFaceColorProfile(): ConsultFaceColorProfile {
+export function unknownFaceColorProfile(): ConsultFaceColorProfile {
   const unknown = <T extends string>(value: T): ProfileObservation<T> => ({
     value,
     confidence: { min: 0, max: 0.35 },
@@ -1392,8 +1399,13 @@ function sanitizeFaceColorProfile(raw: unknown): ConsultFaceColorProfile {
       observed(raw[field], FACE_COLOR_FIELD_VALUES[field], 'UNKNOWN'),
     ]),
   ) as ConsultFaceColorProfile
+  for (const field of CONSULT_FACE_COLOR_FIELDS) {
+    if (profile[field].evidence.some(key => !CONSULT_FACE_COLOR_EVIDENCE_KEYS.has(key))) {
+      throw new ConsultAnalysisProviderError('bad_output')
+    }
+  }
   for (const field of ['skinDepth', 'surfaceOvertone'] as const) {
-    if (profile[field].evidence.includes('early_photo')) {
+    if (profile[field].evidence.some(key => key !== 'face_front' && key !== 'face_side')) {
       throw new ConsultAnalysisProviderError('bad_output')
     }
   }
@@ -1407,10 +1419,12 @@ export function sanitizeConsultFaceColorResponse(raw: unknown): ConsultFaceColor
   return sanitizeFaceColorProfile(raw.profile)
 }
 
-export function mergeConsultFeatureProfiles(
-  profile: ConsultAnalysisFeatureProfile,
-  faceColorProfile: ConsultFaceColorProfile,
-): ConsultMergedFeatureProfile {
+export function mergeConsultFeatureProfiles<
+  T extends Omit<ConsultAnalysisFeatureProfile, 'eyeColor'> & Partial<Pick<ConsultAnalysisFeatureProfile, 'eyeColor'>>,
+>(
+  profile: T,
+  faceColorProfile: ConsultFaceColorProfile = unknownFaceColorProfile(),
+): T & ConsultFaceColorProfile {
   return { ...profile, ...faceColorProfile }
 }
 
@@ -2111,7 +2125,7 @@ async function requestConsultAnalysisJsonUnmetered(
   }
 }
 
-const CONSULT_FACE_COLOR_EVIDENCE_KEYS = new Set<ConsultCaptureShotKeyDTO>([
+const CONSULT_FACE_COLOR_EVIDENCE_KEYS = new Set<string>([
   'early_photo', 'face_front', 'face_side', 'eyes_closeup',
 ])
 
@@ -2154,22 +2168,50 @@ export async function runConsultFaceColorCompanion(
     ],
     schema: buildConsultFaceColorOutputSchema({ suppliedShotKeys }),
     maxTokens: CONSULT_ANALYSIS_PROFILE_MAX_TOKENS,
-    timeoutMs: CONSULT_ANALYSIS_PROFILE_TIMEOUT_MS,
-    kind: ConsultProviderCallKind.ANALYSIS_PROFILE,
+    timeoutMs: CONSULT_FACE_COLOR_TIMEOUT_MS,
+    kind: ConsultProviderCallKind.ANALYSIS_FACE_COLOR,
     meter: input.meter,
   })
-  return sanitizeConsultFaceColorResponse(raw)
+  const profile = sanitizeConsultFaceColorResponse(raw)
+  assertFaceColorEvidenceSupplied(profile, new Set(suppliedShotKeys))
+  // A warned view cannot establish color. Preserve supported geometry and
+  // require fresh, trustworthy evidence for depth/overtone.
+  const trustedColorShots = new Set<string>(faceCaptures.filter(capture =>
+    capture.shotKey !== 'early_photo' && !capture.qualityWarningCode,
+  ).map(capture => capture.shotKey))
+  for (const field of ['skinDepth', 'surfaceOvertone'] as const) {
+    if (profile[field].evidence.some(key => !trustedColorShots.has(key))) {
+      profile[field] = { value: 'UNKNOWN', confidence: { min: 0, max: 0.35 }, evidence: [] }
+    }
+  }
+  return profile
+}
+
+function assertFaceColorEvidenceSupplied(profile: ConsultFaceColorProfile, supplied: ReadonlySet<string>): void {
+  for (const field of CONSULT_FACE_COLOR_FIELDS) {
+    if (profile[field].evidence.some(key => !supplied.has(key))) {
+      throw new ConsultAnalysisProviderError('bad_output')
+    }
+  }
+}
+
+async function optionalFaceColorCompanion(input: ConsultAnalysisInput): Promise<ConsultFaceColorProfile> {
+  try {
+    return await runConsultFaceColorCompanion(input)
+  } catch (error) {
+    if (!(error instanceof ConsultAnalysisProviderError)) throw error
+    return unknownFaceColorProfile()
+  }
 }
 
 /**
- * TWO paid provider calls, in sequence, merged into the one stored artefact.
+ * The analysis provider calls, in sequence. The durable feature profile comes
+ * first; C2-1 may add its separate face/color companion; direction comes last.
  *
- * Not an architectural preference — a measured constraint. No single-call
- * arrangement of these fields compiles (see the v5 note at the top of this
- * file), so the split is where the consultation itself already splits: the
- * feature profile first, then the direction that is grounded in it. The second
- * call cannot start until the first has answered, because its whole job is to
- * reason FROM that answer.
+ * The split is a measured grammar constraint, not an architectural preference.
+ * Direction cannot start until the durable profile has answered because its
+ * whole job is to reason FROM that answer. C2-2 will decide how the companion
+ * joins that reasoning without mutating historical stored analyses.
  */
 export const runConsultAnalysis: ConsultAnalysisProvider = async (input) => {
   const capturesByShot = new Map(
@@ -2216,10 +2258,13 @@ export const runConsultAnalysis: ConsultAnalysisProvider = async (input) => {
     })
   const profileWithStyles = lookPlanning ? sanitizeConsultProfileAndStylesResponse(featureRead) : undefined
   const profile = profileWithStyles?.profile ?? sanitizeConsultProfileResponse(featureRead)
+  const faceColorProfile = readOptionalEnv('AI_CONSULT_FACE_COLOR_ENABLED') === 'true'
+    ? await optionalFaceColorCompanion(input)
+    : undefined
   const lookPlanContext = profileWithStyles
     ? { menu: input.service.menuOfferings ?? [], ...profileWithStyles } : undefined
 
-  // ── Call 2: the direction, grounded in that profile ──────────────────────
+  // ── Final call: the direction, grounded in the durable profile ───────────
   const direction = sanitizeConsultDirectionResponse(
     await requestConsultAnalysisJson({
       model,
@@ -2245,7 +2290,7 @@ export const runConsultAnalysis: ConsultAnalysisProvider = async (input) => {
     { menuServiceNames: input.service.menuServiceNames, lookPlanContext },
   )
 
-  return { analysis: { profile, ...direction }, model }
+  return { analysis: { profile, ...direction }, model, ...(faceColorProfile ? { faceColorProfile } : {}) }
 }
 
 /**
@@ -2293,7 +2338,7 @@ function assertEvidenceSupplied(
  * seven provider calls succeeded and the consult still died here.
  */
 export function validateConsultAnalysisProviderResult(
-  result: { analysis: unknown; model: string },
+  result: { analysis: unknown; model: string; faceColorProfile?: unknown },
   args: {
     menuServiceNames: readonly string[]
     lookPlanMenu?: readonly ConsultProMenuOffering[]
@@ -2320,15 +2365,26 @@ export function validateConsultAnalysisProviderResult(
       throw new ConsultAnalysisProviderError('bad_output')
     }
   }
+  const faceColorProfile = result.faceColorProfile === undefined
+    ? undefined
+    : sanitizeFaceColorProfile(result.faceColorProfile)
   if (args.suppliedShotKeys) {
-    assertEvidenceSupplied(analysis, new Set<string>(args.suppliedShotKeys))
+    const supplied = new Set<string>(args.suppliedShotKeys)
+    assertEvidenceSupplied(analysis, supplied)
+    if (faceColorProfile) {
+      assertFaceColorEvidenceSupplied(faceColorProfile, supplied)
+    }
   }
   const lookPlan = isRecord(result.analysis) && Object.hasOwn(result.analysis, 'lookPlan')
     ? sanitizeConsultLookPlan(result.analysis.lookPlan, {
         family: ConsultServiceFamily.HAIR, menu: args.lookPlanMenu ?? [], observations: analysis,
       }) : undefined
   if (args.lookPlanMenu && !lookPlan) throw new ConsultAnalysisProviderError('bad_output')
-  return { analysis: { ...analysis, ...(lookPlan ? { lookPlan } : {}) }, model }
+  return {
+    analysis: { ...analysis, ...(lookPlan ? { lookPlan } : {}) },
+    model,
+    ...(faceColorProfile ? { faceColorProfile } : {}),
+  }
 }
 
 /** Validates the post-routing STORED shape, including the deterministic tests. */

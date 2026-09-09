@@ -6,6 +6,7 @@ import type {
   ConsultServiceEstimateDTO,
 } from '@/lib/dto/consult'
 
+import { unknownFaceColorProfile } from '@/lib/consult/analysisEngine'
 import { buildConsultMentor } from '@/lib/consult/mentor'
 import { plan } from '@/tests/e2e/fixtures/consultLookBrief'
 import ProConsultBrief from './ProConsultBrief'
@@ -209,6 +210,19 @@ describe('ProConsultBrief', () => {
     expect(html).toContain('Skin undertone')
     expect(html).toContain('Soft curtain bangs')
     expect(html).toContain('Hooded eyes are opened by a lifted curl.')
+  })
+
+  it('renders the additive face/color observations in the existing profile, including UNKNOWN', () => {
+    const html = renderToStaticMarkup(<ProConsultBrief brief={{ ...brief, profile: {
+      ...brief.profile, ...unknownFaceColorProfile(),
+      surfaceOvertone: { value: 'VISIBLE_REDNESS', confidence, evidence: ['face_front'] },
+    } }} timeZone="America/Los_Angeles" />)
+    expect(html).toContain('Skin undertone')
+    expect(html).toContain('Skin depth')
+    expect(html).toContain('Surface overtone')
+    expect(html).toContain('Visible Redness')
+    expect(html).toContain('Brow tail direction')
+    expect(html).not.toContain('undefined')
   })
 
   it('renders no service-estimate section for a booking-anchored brief', () => {
