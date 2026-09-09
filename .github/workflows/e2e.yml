@@ -162,7 +162,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Install Playwright browsers
-        run: pnpm exec playwright install --with-deps
+        uses: ./.github/actions/install-playwright
 
       - name: Enable pgvector
         # The bundle image ships vector.control but only auto-enables postgis;
