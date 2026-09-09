@@ -1,0 +1,50 @@
+{
+  "free": {
+    "enabled": true,
+    "model": "nex-agi/nex-n2.5-mini:free",
+    "passed_classes": [
+      "symbol-search",
+      "test-coverage"
+    ],
+    "timeout_seconds": 45,
+    "max_output_tokens": 1800,
+    "max_input_bytes": 32000,
+    "qualification": "2026-09-09: A/B passed twice each; guidance failed once and remains unqualified"
+  },
+  "hf": {
+    "enabled": false,
+    "model": null,
+    "passed_classes": [],
+    "timeout_seconds": 30,
+    "max_output_tokens": 1000,
+    "max_input_bytes": 16000,
+    "reason": "No local auth or verified included-credit-only boundary; no inference allowed"
+  },
+  "glm": {
+    "enabled": true,
+    "model": "z-ai/glm-5.3",
+    "passed_classes": [
+      "symbol-search",
+      "test-coverage",
+      "guidance",
+      "log-summary",
+      "docs-comparison",
+      "todo-extraction",
+      "scaffolding",
+      "classification",
+      "summarization",
+      "extraction"
+    ],
+    "timeout_seconds": 90,
+    "max_output_tokens": 2400,
+    "max_input_bytes": 96000,
+    "qualification": "Base b1627088 Hermes/GLM smoke passed; strict wrapper response validated each call, no premium benchmark",
+    "max_cost_usd": "0.02"
+  },
+  "policy": {
+    "edits": false,
+    "final_verifier": "astra",
+    "premium_benchmark": false,
+    "max_attempts_per_job": 2
+  }
+}

@@ -205,3 +205,15 @@ One task per prompt. Worker findings require file:line evidence and Astra review
 Read-only wrappers cannot edit. Delegated implementation requires a dedicated
 worktree with exactly one editing owner; never share a tree between editing agents.
 Never auto-merge delegated work. Preserve all house rules and explicit task limits.
+
+### Optional cost-aware worker pools
+
+For the full routing ladder, model qualification and spending boundaries, read
+`tools/orchestration/POOLS.md` and `tools/orchestration/pools.json` before delegating.
+Astra owns architecture, ambiguous reasoning, schema/migrations, security/privacy,
+concurrency, final verification and go/no-go. Use only smoke-qualified free models
+for bounded read-only extraction; use GLM for unsupported or failed classes, then
+Claude/Astra for complexity or uncertainty. Free/HF workers never edit or decide
+merges. Model claims require exact evidence and an independent Astra check.
+No paid escalation without an explicit per-job budget; no HF inference until its
+access and billing guard are verified. Never merge this tooling work automatically.

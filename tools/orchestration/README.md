@@ -17,6 +17,10 @@ Claude. Escalate incomplete or conflicting evidence; never accept a cheaper
 answer solely because it sounds plausible. Suggested fixtures/patches are text
 for Astra to review, not automatically applied changes.
 
+For optional free/Hugging Face workers, the current qualified model, strict
+acceptance contracts, and automatic escalation policy, see [POOLS.md](POOLS.md).
+The base commands below remain available.
+
 ## Read-only commands
 
 Requires the existing Hermes Python environment at
