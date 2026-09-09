@@ -1,4 +1,11 @@
 // Shared boundary checks for analysis observations and look-plan output.
+import type { ConsultAnalysisObservationDTO } from '@/lib/dto/consult'
+
+/** Existing look-plan evidence floor, shared with Suitability Translation. */
+export function isSupportedConsultObservation(value: ConsultAnalysisObservationDTO<string>): boolean {
+  return value.value !== 'UNKNOWN' && value.confidence.min >= 0.5 &&
+    value.evidence.some(key => key !== 'intake')
+}
 
 export class ConsultAnalysisProviderError extends Error {
   constructor(readonly kind: 'unavailable' | 'refused' | 'bad_output') {
@@ -37,4 +44,3 @@ export function enumValue<const T extends readonly string[]>(
   if (!matched) return onInvalid()
   return matched
 }
-
