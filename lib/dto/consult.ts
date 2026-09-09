@@ -1026,6 +1026,18 @@ export type ConsultAnalysisFeatureProfileDTO = {
   browShape: ConsultAnalysisObservationDTO<ConsultProfileBrowShapeDTO>
 }
 
+export type ConsultFaceColorProfileDTO = {
+  skinDepth: ConsultAnalysisObservationDTO<'VERY_LIGHT' | 'LIGHT' | 'MEDIUM' | 'DEEP' | 'VERY_DEEP' | 'UNKNOWN'>
+  surfaceOvertone: ConsultAnalysisObservationDTO<'BALANCED' | 'VISIBLE_REDNESS' | 'VISIBLE_GOLDEN_CAST' | 'VISIBLE_OLIVE_CAST' | 'UNKNOWN'>
+  faceWidthBalance: ConsultAnalysisObservationDTO<'FOREHEAD_DOMINANT' | 'CHEEKBONE_DOMINANT' | 'JAW_DOMINANT' | 'BALANCED' | 'UNKNOWN'>
+  chinContour: ConsultAnalysisObservationDTO<'SOFT' | 'TAPERED' | 'BROAD' | 'ANGULAR' | 'UNKNOWN'>
+  eyeTilt: ConsultAnalysisObservationDTO<'UPTURNED' | 'LEVEL' | 'DOWNTURNED' | 'UNKNOWN'>
+  lidVisibility: ConsultAnalysisObservationDTO<'OPEN' | 'PARTIAL' | 'MINIMAL' | 'DEEP_SET' | 'PROMINENT' | 'UNKNOWN'>
+  browBoneRelationship: ConsultAnalysisObservationDTO<'LOW' | 'BALANCED' | 'HIGH' | 'UNKNOWN'>
+  browArchPosition: ConsultAnalysisObservationDTO<'INNER' | 'CENTER' | 'OUTER' | 'STRAIGHT' | 'UNKNOWN'>
+  browTailDirection: ConsultAnalysisObservationDTO<'LIFTED' | 'LEVEL' | 'DROPPED' | 'UNKNOWN'>
+}
+
 export type ConsultStyleDomainDTO =
   | 'HAIR_COLOR_HARMONY'
   | 'CUT_AND_SHAPE'
@@ -1776,7 +1788,7 @@ export type ConsultProBriefDTO = {
   aiObservations: ConsultBriefAiObservationsDTO
   // Brief schema v3: the full feature profile and per-domain style directions
   // sit beside the hair observations, never blended into the client's words.
-  profile: ConsultAnalysisFeatureProfileDTO
+  profile: ConsultAnalysisFeatureProfileDTO & Partial<ConsultFaceColorProfileDTO>
   styleDirections: ConsultStyleDirectionDTO[]
   safetyFlags: ConsultAnalysisPayloadDTO['safetyFlags']
   achievabilityDirection: ConsultBriefAchievabilityDirectionDTO

@@ -28,6 +28,9 @@ import {
 import {
   CONSULT_ANALYSIS_PROMPT_VERSION,
   CONSULT_ANALYSIS_SCHEMA_VERSION,
+  CONSULT_FACE_COLOR_PROMPT_VERSION,
+  CONSULT_FACE_COLOR_SCHEMA_VERSION,
+  type ConsultFaceColorProfile,
 } from './analysisEngine'
 import { normalizeStoredConsultAnalysisPayload } from './analysisRevision'
 import { CONSULT_EARLY_PHOTO_SHOT_KEY } from './capture/earlyPhoto'
@@ -721,6 +724,7 @@ export async function finalizeLockedHairColorAnalysis(
     captureIds: readonly string[]
     finalizedAt: Date
     actor: ConsultActor
+    faceColorProfile?: ConsultFaceColorProfile
   },
 ) {
   // Partial packs (Tori, 2026-08-27): between one and the full pack of
@@ -763,6 +767,18 @@ export async function finalizeLockedHairColorAnalysis(
       revisionId: revision.id,
     },
   })
+  if (args.faceColorProfile) {
+    await tx.consultFaceColorProfile.create({
+      data: {
+        consultSessionId: args.consultSessionId,
+        analysisRevisionId: revision.id,
+        schemaVersion: CONSULT_FACE_COLOR_SCHEMA_VERSION,
+        promptVersion: CONSULT_FACE_COLOR_PROMPT_VERSION,
+        model: args.model,
+        payload: toPrismaJson(args.faceColorProfile),
+      },
+    })
+  }
   // ── P7a-3: what completion does to the photos ─────────────────────────────
   //
   // Before this step, finalize purge-marked every capture it had just read, and
