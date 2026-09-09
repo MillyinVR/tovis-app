@@ -21,6 +21,7 @@ import type { BrandClientConsultPlanDiffCopy } from '@/lib/brand/types'
 import { assertProCanViewClient } from '@/lib/clientVisibility'
 import type {
   ConsultBriefFeedbackRatingDTO,
+  ConsultFaceColorProfileDTO,
   ConsultInspirationAnalysisDTO,
   ConsultPlanDiffEntryDTO,
   ConsultProBriefDTO,
@@ -29,6 +30,12 @@ import type {
 import { prisma } from '@/lib/prisma'
 
 import { isAiConsultC6ExposureEnabledForPro } from './access'
+import {
+  CONSULT_FACE_COLOR_PROMPT_VERSION,
+  CONSULT_FACE_COLOR_SCHEMA_VERSION,
+  sanitizeConsultFaceColorResponse,
+  mergeConsultFeatureProfiles,
+} from './analysisEngine'
 import { loadConsultPlanVersions } from './analysisRerun'
 import {
   ImmutableConsultResultError,
@@ -116,6 +123,24 @@ async function loadBriefInspirationAnalysis(
   if (!revision) return null
   const analysis = normalizeStoredConsultInspirationAnalysis(revision)
   return analysis?.inspirationId === inspirationId ? analysis : null
+}
+
+async function loadBriefFaceColorProfile(
+  tx: Prisma.TransactionClient,
+  consultSessionId: string,
+  analysisRevisionId: string,
+): Promise<ConsultFaceColorProfileDTO | null> {
+  const row = await tx.consultFaceColorProfile.findFirst({
+    where: { consultSessionId, analysisRevisionId },
+    select: { payload: true, schemaVersion: true, promptVersion: true, model: true },
+  })
+  if (!row || row.schemaVersion !== CONSULT_FACE_COLOR_SCHEMA_VERSION || row.promptVersion !== CONSULT_FACE_COLOR_PROMPT_VERSION) return null
+  if (!row.model.trim() || row.model !== row.model.trim() || row.model.length > 128) return null
+  try {
+    return sanitizeConsultFaceColorResponse({ profile: row.payload })
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -215,7 +240,8 @@ async function loadSessionBrief(
     inspiration,
     clientIntake: [...clientIntake, ...calibrationAnswers],
     aiObservations: payload.aiObservations,
-    profile: payload.profile,
+    profile: mergeConsultFeatureProfiles(payload.profile,
+      await loadBriefFaceColorProfile(tx, session.id, payload.sourceAnalysisRevisionId) ?? undefined),
     styleDirections: payload.styleDirections,
     safetyFlags: payload.safetyFlags,
     achievabilityDirection: payload.achievabilityDirection,

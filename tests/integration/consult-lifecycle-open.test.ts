@@ -36,6 +36,7 @@ import {
   ConsultActorType,
   ConsultAnalysisRunStatus,
   ConsultCaptureStatus,
+  ConsultRevisionKind,
   ConsultSessionStatus,
   Prisma,
   PrismaClient,
@@ -110,6 +111,7 @@ import {
   executeConsultAnalysisRun,
   startConsultAnalysisRerun,
 } from '@/lib/consult/analysisContract'
+import { unknownFaceColorProfile, validateConsultAnalysisProviderResult } from '@/lib/consult/analysisEngine'
 import { CONSULT_EARLY_PHOTO_SHOT_KEY } from '@/lib/consult/capture/earlyPhoto'
 import type { HairColorCaptureShotKey } from '@/lib/consult/capture/packs/hairColorDaylight'
 import { deleteConsultCapture } from '@/lib/consult/captureContract'
@@ -127,6 +129,7 @@ import {
   resetConsultLookFakes,
   setFakeLookServices,
   setFakeAnalysisAchievability,
+  fakeRunConsultAnalysis,
 } from './_support/consultLookFakes'
 import {
   BALAYAGE_PRICE,
@@ -164,6 +167,7 @@ beforeAll(async () => {
 })
 
 beforeEach(() => {
+  delete process.env.AI_CONSULT_FACE_COLOR_ENABLED
   vi.clearAllMocks()
   resetConsultLookFakes()
   mockRequireClient.mockResolvedValue({
@@ -348,6 +352,107 @@ async function retakePhoto(
 }
 
 describe('a completed consult still takes input', () => {
+  it('C2-1 pins the Face & Color sibling to the exact completed analysis revision', async () => {
+    process.env.AI_CONSULT_FACE_COLOR_ENABLED = 'true'
+    const sessionId = await completedConsult('c2-face-color-persist')
+    const analysis = await db.consultRevision.findFirstOrThrow({
+      where: { consultSessionId: sessionId, kind: ConsultRevisionKind.ANALYSIS },
+      orderBy: [{ revision: 'desc' }, { id: 'desc' }],
+      select: { id: true },
+    })
+    const faceColor = await db.consultFaceColorProfile.findUniqueOrThrow({
+      where: { analysisRevisionId: analysis.id },
+      select: { consultSessionId: true, schemaVersion: true, promptVersion: true, model: true, payload: true },
+    })
+    expect(faceColor.consultSessionId).toBe(sessionId)
+    expect(faceColor.schemaVersion).toBe(1)
+    expect(faceColor.promptVersion).toBe('face-color-companion-v1')
+    expect(faceColor.model).toBe('fake-analysis-model')
+    expect(faceColor.payload).toMatchObject({
+      skinDepth: { value: 'MEDIUM' },
+      surfaceOvertone: { value: 'BALANCED' },
+      faceWidthBalance: { value: 'CHEEKBONE_DOMINANT' },
+      browTailDirection: { value: 'LIFTED' },
+    })
+    expect(await db.consultFaceColorProfile.count({ where: { consultSessionId: sessionId } })).toBe(1)
+
+    const brief = (await loadAuthorizedProConsultBriefs({
+      professionalId: fx.professionalId,
+      clientId: fx.clientId,
+    })).find((item) => item.consultId === sessionId)
+    expect(brief?.sourceAnalysisRevisionId).toBe(analysis.id)
+    expect(brief?.profile).toMatchObject({
+      skinDepth: { value: 'MEDIUM' },
+      faceWidthBalance: { value: 'CHEEKBONE_DOMINANT' },
+      browTailDirection: { value: 'LIFTED' },
+    })
+  })
+
+  it('C2-1 database guards enforce immutable same-analysis evidence and deny direct access', async () => {
+    const sessionId = await completedConsult('c2-guards')
+    const analysis = await db.consultRevision.findFirstOrThrow({ where: { consultSessionId: sessionId, kind: 'ANALYSIS' } })
+    const intake = await db.consultRevision.findFirstOrThrow({ where: { consultSessionId: sessionId, kind: 'INTAKE' } })
+    const base = { consultSessionId: sessionId, analysisRevisionId: analysis.id,
+      schemaVersion: 1, promptVersion: 'face-color-companion-v1', model: 'fake-analysis-model',
+      payload: JSON.parse(JSON.stringify(unknownFaceColorProfile())) as Prisma.InputJsonObject }
+    await expect(db.consultFaceColorProfile.create({ data: { ...base, analysisRevisionId: intake.id } })).rejects.toThrow()
+    for (const skinDepth of [null, { value: null, confidence: { min: 0, max: 0.3 }, evidence: [] },
+      { value: 'MEDIUM', confidence: { min: 0.4, max: 0.7 }, evidence: ['early_photo'] },
+      { value: 'MEDIUM', confidence: { min: 0.4, max: 0.7 }, evidence: ['hair_back'] },
+      { value: 'MEDIUM', confidence: { min: 0.4, max: 0.7 }, evidence: ['eyes_closeup'] }]) {
+      await expect(db.consultFaceColorProfile.create({ data: { ...base, payload: { ...base.payload, skinDepth } } })).rejects.toThrow()
+    }
+    const otherSessionId = await completedConsult('c2-other-session')
+    await expect(db.consultFaceColorProfile.create({ data: { ...base, consultSessionId: otherSessionId } })).rejects.toThrow()
+    const row = await db.consultFaceColorProfile.create({ data: base })
+    await expect(db.consultFaceColorProfile.update({ where: { id: row.id }, data: { model: 'edited' } })).rejects.toThrow()
+    await expect(db.consultFaceColorProfile.create({ data: base })).rejects.toThrow()
+    const security = await db.$queryRaw<Array<{ enabled: boolean; policies: bigint }>>`
+      SELECT relrowsecurity AS enabled,
+        (SELECT count(*) FROM pg_policies WHERE tablename = 'ConsultFaceColorProfile') AS policies
+      FROM pg_class WHERE oid = 'public."ConsultFaceColorProfile"'::regclass`
+    expect(security).toEqual([{ enabled: true, policies: BigInt(0) }])
+  })
+
+  it('C2-1 historical and flag-disabled reruns keep the old profile and do not borrow older companion evidence', async () => {
+    const sessionId = await completedConsult('c2-historical')
+    const readBrief = async () => (await loadAuthorizedProConsultBriefs({ professionalId: fx.professionalId, clientId: fx.clientId }))
+      .find(item => item.consultId === sessionId)
+    const historical = await readBrief()
+    expect(historical?.profile.skinDepth?.value).toBe('UNKNOWN')
+    expect(await db.consultFaceColorProfile.count({ where: { consultSessionId: sessionId } })).toBe(0)
+    process.env.AI_CONSULT_FACE_COLOR_ENABLED = 'true'
+    await changeAnIntakeAnswer(sessionId, 'c2-on')
+    expect((await rerunNow(sessionId)).result).toBe('COMPLETED')
+    expect((await readBrief())?.profile.skinDepth?.value).toBe('MEDIUM')
+    delete process.env.AI_CONSULT_FACE_COLOR_ENABLED
+    await changeAnIntakeAnswer(sessionId, 'c2-off')
+    expect((await rerunNow(sessionId)).result).toBe('COMPLETED')
+    expect((await readBrief())?.profile.skinDepth?.value).toBe('UNKNOWN')
+    expect((await readBrief())?.profile.skinUndertone).toEqual(historical?.profile.skinUndertone)
+    expect(await db.consultFaceColorProfile.count({ where: { consultSessionId: sessionId } })).toBe(1)
+  })
+
+  it('C2-1 discards companion evidence when client input changes during provider work', async () => {
+    process.env.AI_CONSULT_FACE_COLOR_ENABLED = 'true'
+    const sessionId = await completedConsult('c2-stale')
+    await changeAnIntakeAnswer(sessionId, 'c2-stale-queue')
+    const now = afterTheDebounce()
+    const started = await startConsultAnalysisRerun({ consultSessionId: sessionId, now })
+    if (!started.started) throw new Error(started.reason)
+    const result = await executeConsultAnalysisRun({ runId: started.run.runId, now,
+      provider: async input => {
+        const result = await fakeRunConsultAnalysis(input)
+        await changeAnIntakeAnswer(sessionId, 'c2-stale-inflight')
+        return validateConsultAnalysisProviderResult(result, { menuServiceNames: input.service.menuServiceNames,
+          suppliedShotKeys: input.captures.map(capture => capture.shotKey) })
+      },
+    })
+    expect(result.result).not.toBe('COMPLETED')
+    expect(await db.consultRevision.count({ where: { consultSessionId: sessionId, kind: 'ANALYSIS' } })).toBe(1)
+    expect(await db.consultFaceColorProfile.count({ where: { consultSessionId: sessionId } })).toBe(1)
+  })
+
   it('accepts a changed intake answer, a changed card, and a new photo', async () => {
     const sessionId = await completedConsult('open-input')
 
@@ -815,6 +920,7 @@ describe('choosing a versioned look', () => {
 describe('color and layers from an extensions reference', () => {
   it('asks the relevant color history before choosing required color and cut, never extensions', async () => {
     vi.stubEnv('AI_CONSULT_LOOK_PLANS_ENABLED', 'true')
+    vi.stubEnv('AI_CONSULT_FACE_COLOR_ENABLED', 'true')
     try {
       const category = await db.serviceCategory.create({ data: { name: `${fx.tag} hair shape`, slug: `${fx.tag}-hair-shape`, consultFamily: 'HAIR' } })
       extraCategoryIds.push(category.id)
@@ -845,6 +951,10 @@ describe('color and layers from an extensions reference', () => {
       }
       // The caller kept chart copies, so the rerun can reuse the accepted images.
       expect((await rerunNow(sessionId)).result).toBe('COMPLETED')
+      const proBrief = (await loadAuthorizedProConsultBriefs({ professionalId: fx.professionalId, clientId: fx.clientId }))
+        .find(item => item.consultId === sessionId)
+      expect(proBrief?.profile.skinDepth?.value).toBe('MEDIUM')
+      expect(await db.consultFaceColorProfile.count({ where: { consultSessionId: sessionId } })).toBe(2)
       const ready = ofKind((await thread(sessionId)).messages, 'PLAN')[0]?.results
       expect(ready?.lookPlan?.status).toBe('READY_TO_CHOOSE')
       const version = ready?.lookBrief?.version

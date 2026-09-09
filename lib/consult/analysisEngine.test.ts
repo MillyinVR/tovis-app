@@ -25,6 +25,7 @@ import {
   CONSULT_ANALYSIS_PROMPT_VERSION,
   CONSULT_ANALYSIS_DIRECTION_TIMEOUT_MS,
   CONSULT_ANALYSIS_PROFILE_TIMEOUT_MS,
+  CONSULT_FACE_COLOR_TIMEOUT_MS,
   CONSULT_ANALYSIS_SCHEMA_VERSION,
   CONSULT_STYLE_DOMAINS,
   ConsultAnalysisProviderError,
@@ -40,6 +41,7 @@ import {
   mergeConsultFeatureProfiles,
   runConsultAnalysis,
   runConsultFaceColorCompanion,
+  unknownFaceColorProfile,
   sanitizeConsultFaceColorResponse,
   sanitizeConsultProfileResponse,
   validateConsultAnalysisProviderResult,
@@ -332,6 +334,7 @@ function callParams() {
 
 beforeEach(() => {
   process.env.ANTHROPIC_API_KEY = 'test-key'
+  delete process.env.AI_CONSULT_FACE_COLOR_ENABLED
   delete process.env.AI_CONSULT_ANALYSIS_MODEL
   resetConsultAnalysisClientForTests()
   mocks.create.mockReset()
@@ -339,6 +342,7 @@ beforeEach(() => {
 
 afterEach(() => {
   delete process.env.ANTHROPIC_API_KEY
+  delete process.env.AI_CONSULT_FACE_COLOR_ENABLED
   delete process.env.AI_CONSULT_ANALYSIS_MODEL
 })
 
@@ -387,6 +391,12 @@ describe('hair-color consult analysis provider', () => {
     expect(() => sanitizeConsultFaceColorResponse({ profile })).toThrow(ConsultAnalysisProviderError)
   })
 
+  it.each(['skinDepth', 'surfaceOvertone'])('C2-1 rejects eyes_closeup as %s color evidence', (field) => {
+    expect(() => sanitizeConsultFaceColorResponse({ profile: { ...unknownFaceColorProfile(),
+      [field]: { value: field === 'skinDepth' ? 'MEDIUM' : 'BALANCED', confidence: { min: 0.4, max: 0.7 }, evidence: ['eyes_closeup'] },
+    } })).toThrow(ConsultAnalysisProviderError)
+  })
+
   it('C2-1 companion schema is a separate provider-safe grammar', () => {
     const schema = toProviderOutputSchema(buildConsultFaceColorOutputSchema({ suppliedShotKeys: SUPPLIED }))
     expect(findUnsupportedProviderSchemaKeywords(schema)).toEqual([])
@@ -428,6 +438,67 @@ describe('hair-color consult analysis provider', () => {
     expect(wire).toContain('eyes_closeup')
     expect(wire).not.toContain('Evidence label: hair_back')
     expect(params.messages[0].content.filter((item: { type: string }) => item.type === 'image')).toHaveLength(3)
+  })
+
+  it.each(['true', 'false', undefined])('C2-1 activates only for the exact flag value %s', async (flag) => {
+    if (flag !== undefined) process.env.AI_CONSULT_FACE_COLOR_ENABLED = flag
+    const { profile, direction } = mockBothCalls()
+    mocks.create.mockReset()
+    mocks.create.mockResolvedValueOnce(message({ profile }))
+    if (flag === 'true') mocks.create.mockResolvedValueOnce(message({ profile: unknownFaceColorProfile() }))
+    mocks.create.mockResolvedValueOnce(message(direction))
+    const result = await runConsultAnalysis({ service, capturePack, intake: {}, intakeItems, captures,
+      inspiration: noInspiration, safetyCodes: [...SAFETY_CODES] })
+    expect(result.analysis.profile).toEqual(profile)
+    expect(result.faceColorProfile).toEqual(flag === 'true' ? unknownFaceColorProfile() : undefined)
+    expect(mocks.create).toHaveBeenCalledTimes(flag === 'true' ? 3 : 2)
+    if (flag === 'true') expect(mocks.create.mock.calls[1]?.[1].timeout).toBe(CONSULT_FACE_COLOR_TIMEOUT_MS)
+  })
+
+  it.each(['timeout', 'refusal', 'invalid', 'unsupplied'])('C2-1 preserves the consultation on companion %s', async (failure) => {
+    process.env.AI_CONSULT_FACE_COLOR_ENABLED = 'true'
+    const { profile, direction } = mockBothCalls()
+    mocks.create.mockReset()
+    mocks.create.mockResolvedValueOnce(message({ profile }))
+    if (failure === 'timeout') mocks.create.mockRejectedValueOnce(new Error('timeout'))
+    if (failure === 'refusal') mocks.create.mockResolvedValueOnce(message({}, 'refusal'))
+    if (failure === 'invalid') mocks.create.mockResolvedValueOnce(message({ profile: {} }))
+    if (failure === 'unsupplied') mocks.create.mockResolvedValueOnce(message({ profile: {
+      ...unknownFaceColorProfile(), chinContour: { value: 'TAPERED', confidence: { min: 0.4, max: 0.7 }, evidence: ['early_photo'] },
+    } }))
+    mocks.create.mockResolvedValueOnce(message(direction))
+    const result = await runConsultAnalysis({ service, capturePack, intake: {}, intakeItems, captures,
+      inspiration: noInspiration, safetyCodes: [...SAFETY_CODES] })
+    expect(result.analysis.profile).toEqual(profile)
+    expect(result.faceColorProfile).toEqual(unknownFaceColorProfile())
+    expect(validateConsultAnalysisProviderResult(result, { menuServiceNames: MENU, suppliedShotKeys: SUPPLIED })).toEqual(result)
+    expect(result.analysis.recommendations).not.toHaveLength(0)
+  })
+
+  it('C2-1 skips paid companion work with no face views', async () => {
+    const result = await runConsultFaceColorCompanion({ service, capturePack, intake: {}, intakeItems,
+      captures: captures.filter(capture => capture.shotKey === 'hair_back'),
+      inspiration: noInspiration, safetyCodes: [...SAFETY_CODES] })
+    expect(result).toEqual(unknownFaceColorProfile())
+    expect(mocks.create).not.toHaveBeenCalled()
+  })
+
+  it('C2-1 removes color claims from warned images while preserving geometry', async () => {
+    const observation = { value: 'MEDIUM', confidence: { min: 0.4, max: 0.7 }, evidence: ['face_front'] }
+    mocks.create.mockResolvedValueOnce(message({ profile: { ...unknownFaceColorProfile(),
+      skinDepth: observation, chinContour: { ...observation, value: 'TAPERED' },
+    } }))
+    const result = await runConsultFaceColorCompanion({ service, capturePack, intake: {}, intakeItems,
+      captures: captures.map(capture => ({ ...capture, qualityWarningCode: 'COLOR_CAST' })),
+      inspiration: noInspiration, safetyCodes: [...SAFETY_CODES] })
+    expect(result.skinDepth).toEqual(unknownFaceColorProfile().skinDepth)
+    expect(result.chinContour.value).toBe('TAPERED')
+  })
+
+  it('C2-1 rejects non-face evidence even if it was supplied to the main analysis', () => {
+    expect(() => sanitizeConsultFaceColorResponse({ profile: { ...unknownFaceColorProfile(),
+      chinContour: { value: 'TAPERED', confidence: { min: 0.4, max: 0.7 }, evidence: ['hair_back'] },
+    } })).toThrow(ConsultAnalysisProviderError)
   })
 
   it('fails closed before sending photos when the model override is not allowlisted', async () => {
@@ -564,13 +635,13 @@ describe('hair-color consult analysis provider', () => {
     })
     expect(directionOptions.timeout).toBe(CONSULT_ANALYSIS_DIRECTION_TIMEOUT_MS)
     // 🔴 The arithmetic the analysis route's `maxDuration` has to satisfy.
-    // ONE request makes the inspiration read and then BOTH of these calls, so
-    // the worst case is 50s + 2 x this. If someone raises this constant, the
-    // route's ceiling has to move with it — otherwise the failure is a gateway
-    // timeout AFTER the client has been billed for every one of those calls.
+    // With C2-1 enabled, one run may make inspiration + profile + face/color +
+    // direction calls. If someone raises a ceiling, this must stay inside the
+    // platform's 300s worker cap or the client can be billed before a timeout.
     expect(
       CONSULT_INSPIRATION_REQUEST_TIMEOUT_MS +
         CONSULT_ANALYSIS_PROFILE_TIMEOUT_MS +
+        CONSULT_FACE_COLOR_TIMEOUT_MS +
         CONSULT_ANALYSIS_DIRECTION_TIMEOUT_MS,
     ).toBeLessThanOrEqual(CONSULT_ANALYSIS_ROUTE_MAX_DURATION_SECONDS * 1000)
   })

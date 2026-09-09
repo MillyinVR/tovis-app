@@ -30,7 +30,6 @@ import { beforeAll, describe, expect, it } from 'vitest'
 
 import {
   buildConsultDirectionOutputSchema,
-  buildConsultFaceColorOutputSchema,
   buildConsultProfileOutputSchema,
   CONSULT_ANALYSIS_DEFAULT_MODEL,
   CONSULT_ANALYSIS_DIRECTION_MAX_TOKENS,
@@ -38,9 +37,8 @@ import {
   CONSULT_ANALYSIS_EFFORT,
   CONSULT_ANALYSIS_PROFILE_MAX_TOKENS,
   CONSULT_ANALYSIS_PROFILE_SYSTEM_PROMPT,
-  CONSULT_FACE_COLOR_SYSTEM_PROMPT,
   sanitizeConsultDirectionResponse,
-  sanitizeConsultFaceColorResponse,
+  runConsultFaceColorCompanion,
   sanitizeConsultProfileResponse,
   sanitizeConsultProfileAndStylesResponse,
   CONSULT_STYLE_GUIDANCE,
@@ -233,23 +231,17 @@ describe('the consult schemas compile and answer against the live model', () => 
   })
 
   it('C2-1 — the companion face/color schema compiles and returns a sanitizable payload', async () => {
-    const raw = await send({
-      system: CONSULT_FACE_COLOR_SYSTEM_PROMPT,
-      content: [
-        ...labeledImages(),
-        {
-          type: 'text',
-          text: [
-            'Consultation context:',
-            'Capture pack: hair-color-daylight (views: ' + SHOT_KEYS.join(', ') + ')',
-            'Observe this client only. Unclear fields must be UNKNOWN.',
-          ].join('\n'),
-        },
-      ],
-      schema: buildConsultFaceColorOutputSchema({ suppliedShotKeys: [...SHOT_KEYS] }),
-      maxTokens: CONSULT_ANALYSIS_PROFILE_MAX_TOKENS,
+    // Exercise the actual paid companion path, including its narrowed images,
+    // prompt, timeout, sanitizer and supplied-evidence check. No fallback here:
+    // the required-success contract must fail when the provider cannot answer.
+    const profile = await runConsultFaceColorCompanion({
+      service: { family: 'HAIR', categoryName: 'Color', serviceName: 'Full balayage', menuServiceNames: MENU },
+      intake: {}, intakeItems: [],
+      capturePack: { id: 'hair-color-daylight', shotKeys: SHOT_KEYS },
+      captures: SHOT_KEYS.map(shotKey => ({ shotKey, image: fixture(`synthetic-i-${shotKey}`), qualityWarningCode: null })),
+      inspiration: { source: 'NONE', analysis: null, answers: [], wants: [], avoids: [], unsure: [], keep: [] },
+      safetyCodes: SAFETY_CODES,
     })
-    const profile = sanitizeConsultFaceColorResponse(raw)
     expect(Object.keys(profile)).toHaveLength(9)
     for (const observation of Object.values(profile)) {
       expect(observation.confidence.min).toBeLessThan(observation.confidence.max)

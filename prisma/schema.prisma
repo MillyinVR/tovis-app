@@ -7688,7 +7688,9 @@ enum ConsultProviderCallKind {
   INSPIRATION_READ
   /// lib/consult/analysisEngine.ts, call 1 — the feature profile.
   ANALYSIS_PROFILE
-  /// lib/consult/analysisEngine.ts, call 2 — the direction.
+  /// lib/consult/analysisEngine.ts, C2 companion — richer face/color evidence.
+  ANALYSIS_FACE_COLOR
+  /// lib/consult/analysisEngine.ts, final call — the direction.
   ANALYSIS_DIRECTION
   /// lib/consult/followUpEngine.ts — P5g, the adaptive follow-up questions.
   /// Text only: no image is sent, so this is the one consult call that costs
@@ -7800,6 +7802,7 @@ model ConsultSession {
   lookVisitOutcomes    ConsultLookVisitOutcome[]
   lookBriefVersions    ConsultLookBriefVersion[]
   providerCalls        ConsultProviderCall[]
+  faceColorProfiles    ConsultFaceColorProfile[]
   followUpRounds       ConsultFollowUpRound[]
 
   createdAt DateTime @default(now())
@@ -7952,9 +7955,29 @@ model ConsultRevision {
   briefFeedback    ConsultBriefFeedback?
   serviceEstimates ConsultServiceEstimate[] @relation("ConsultServiceEstimateAnalysis")
   lookBriefVersions ConsultLookBriefVersion[]
+  faceColorProfile  ConsultFaceColorProfile? @relation("ConsultFaceColorProfileAnalysis")
 
   @@unique([consultSessionId, revision])
   @@unique([consultSessionId, idempotencyKey])
+  @@index([consultSessionId, createdAt])
+}
+
+/// C2-1 additive evidence, immutable and pinned to one analysis revision.
+model ConsultFaceColorProfile {
+  id String @id @default(cuid())
+
+  consultSessionId String
+  consultSession   ConsultSession @relation(fields: [consultSessionId], references: [id], onDelete: Cascade)
+
+  analysisRevisionId String @unique
+  analysisRevision   ConsultRevision @relation("ConsultFaceColorProfileAnalysis", fields: [analysisRevisionId], references: [id], onDelete: Cascade)
+
+  schemaVersion Int
+  promptVersion String
+  model String
+  payload Json
+  createdAt DateTime @default(now())
+
   @@index([consultSessionId, createdAt])
 }
 

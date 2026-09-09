@@ -36,9 +36,9 @@ export const runtime = 'nodejs'
  *
  * It validates the prerequisites, claims the session, writes a
  * ConsultAnalysisRun and returns — a handful of queries in one short
- * transaction. The three paid calls (inspiration read, profile, direction; up
- * to 245s combined) happen in the background worker, drained by
- * /api/internal/jobs/consult-analysis/process at `maxDuration = 300`.
+ * transaction. The paid calls happen in the background worker: inspiration,
+ * profile, optional C2-1 face/color companion, then direction. With C2-1 on,
+ * their provider ceilings total 275s; the worker remains capped at 300s.
  *
  * The duration here is still generous, and deliberately so: `kickConsultAnalysisRun`
  * uses `waitUntil`, which keeps THIS invocation alive after the response is
