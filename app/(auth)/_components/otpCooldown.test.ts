@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
+import { rateLimitExceededResponse } from '@/lib/rateLimit/response'
+
 import {
   RESEND_COOLDOWN_SECONDS,
   formatCooldown,
@@ -30,8 +32,11 @@ describe('readRetryAfterSeconds', () => {
   // fired in production. Pin the real wire body instead.
   const REAL_RATE_LIMIT_BODY = {
     ok: false,
-    error: 'Too many requests. Please slow down.',
+    error: 'Too many requests. Please try again later.',
     code: 'RATE_LIMITED',
+    retryable: true,
+    uiAction: 'RETRY_LATER',
+    message: 'Rate limit exceeded for auth:email:send.',
     details: {
       bucket: 'auth:email:send',
       limit: 5,
@@ -45,6 +50,25 @@ describe('readRetryAfterSeconds', () => {
 
   it('reads the hint from a real rate-limit response body', () => {
     expect(readRetryAfterSeconds(REAL_RATE_LIMIT_BODY)).toBe(899)
+  })
+
+  it('reads the hint from what the API builder ACTUALLY emits today', async () => {
+    // A hand-copied body can go stale the moment the builder changes. Run the
+    // reader over the live builder's output so writer and reader are pinned to
+    // each other, not to a snapshot of one of them.
+    const res = rateLimitExceededResponse({
+      allowed: false,
+      bucket: 'auth:email:send',
+      key: 'ip:198.51.100.7',
+      limit: 5,
+      remaining: 0,
+      resetAt: new Date(1784241270333),
+      retryAfterSeconds: 899,
+      source: 'redis',
+      reason: 'rate_limited',
+    })
+
+    expect(readRetryAfterSeconds(await res.json())).toBe(899)
   })
 
   it('ignores a top-level hint — the API only ever nests it under details', () => {

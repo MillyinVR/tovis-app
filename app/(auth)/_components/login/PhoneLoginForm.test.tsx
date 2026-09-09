@@ -210,8 +210,8 @@ describe('PhoneLoginForm', () => {
 
   it('keeps the phone step when the send is throttled', async () => {
     const fetchMock = setFetchSequence([
-      // `details` mirrors the real rate-limit body (buildRateLimitResponse in
-      // app/api/_utils/rateLimit.ts); a top-level hint here passed while the
+      // `details` mirrors the real rate-limit body (rateLimitExceededResponse
+      // in lib/rateLimit/response.ts); a top-level hint here passed while the
       // real countdown never fired.
       jsonResponse(
         { error: 'Too many requests.', details: { retryAfterSeconds: 42 } },

@@ -50,6 +50,38 @@ describe('rateLimitExceededResponse', () => {
     expect(res.headers.get('Retry-After')).toBe('47')
   })
 
+  it('nests the decision under `details` — the field the clients act on', async () => {
+    const res = rateLimitExceededResponse(makeBlockedDecision())
+    const body = await res.json()
+
+    // Web (`otpCooldown.readRetryAfterSeconds`) and iOS (`APIErrorBody.Details`)
+    // read `details.retryAfterSeconds`, nested and nowhere else. Before
+    // 2026-09-08 this builder sent no `details` at all while the auth path's
+    // builder did, so the same status had two bodies. `toEqual`, not
+    // `toMatchObject`: an extra or missing key here IS the drift.
+    expect(body.details).toEqual({
+      bucket: 'waitlist:write',
+      limit: 20,
+      remaining: 0,
+      reset: new Date('2026-07-25T12:01:00.000Z').getTime(),
+      retryAfterSeconds: 47,
+      source: 'redis',
+      reason: 'rate_limited',
+    })
+    expect(body.retryAfterSeconds).toBeUndefined()
+  })
+
+  it('also sends the legacy X-RateLimit-* headers the auth path always sent', () => {
+    const res = rateLimitExceededResponse(makeBlockedDecision())
+
+    expect(res.headers.get('X-RateLimit-Limit')).toBe('20')
+    expect(res.headers.get('X-RateLimit-Remaining')).toBe('0')
+    // Epoch MILLISECONDS, unlike `RateLimit-Reset` (seconds).
+    expect(res.headers.get('X-RateLimit-Reset')).toBe(
+      `${new Date('2026-07-25T12:01:00.000Z').getTime()}`,
+    )
+  })
+
   it('names the bucket in the body without leaking the rate-limit key', async () => {
     const res = rateLimitExceededResponse(
       makeBlockedDecision({ bucket: 'holds:create' }),
@@ -58,10 +90,12 @@ describe('rateLimitExceededResponse', () => {
 
     expect(body).toMatchObject({
       ok: false,
+      error: 'Too many requests. Please try again later.',
       code: 'RATE_LIMITED',
       retryable: true,
       uiAction: 'RETRY_LATER',
       message: 'Rate limit exceeded for holds:create.',
+      details: { bucket: 'holds:create' },
     })
 
     // The key carries a user id and an IP; it must never ride in the response.

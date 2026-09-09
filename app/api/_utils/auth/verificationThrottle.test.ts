@@ -28,7 +28,7 @@ function makeRateLimitResponse() {
   return new Response(
     JSON.stringify({
       ok: false,
-      error: 'Too many requests. Please slow down.',
+      error: 'Too many requests. Please try again later.',
       code: 'RATE_LIMITED',
     }),
     {

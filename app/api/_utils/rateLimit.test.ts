@@ -372,11 +372,18 @@ describe('app/api/_utils/rateLimit', () => {
     expect(res?.headers.get('X-RateLimit-Remaining')).toBe('0')
     expect(res?.headers.get('X-RateLimit-Reset')).toBe('1700000030000')
 
+    // The SAME body `lib/rateLimit/response.ts` builds for every other route:
+    // this path used to carry its own copy, and the two drifted (the other one
+    // had no `details` at all, so a client reading `details.retryAfterSeconds`
+    // off it got nothing).
     const body = await res!.json()
     expect(body).toEqual({
       ok: false,
-      error: 'Too many requests. Please slow down.',
+      error: 'Too many requests. Please try again later.',
       code: 'RATE_LIMITED',
+      retryable: true,
+      uiAction: 'RETRY_LATER',
+      message: 'Rate limit exceeded for auth:register.',
       details: {
         bucket: 'auth:register',
         limit: 5,

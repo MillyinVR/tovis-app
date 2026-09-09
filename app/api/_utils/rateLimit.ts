@@ -4,13 +4,8 @@ import { createHash } from 'node:crypto'
 
 import type { NextResponse } from 'next/server'
 
-import { jsonFail } from './responses'
-
-import {
-  enforceRateLimit as enforceRateLimitDecision,
-  getRateLimitHeaders,
-  type BlockedRateLimitDecision,
-} from '@/lib/rateLimit/enforce'
+import { enforceRateLimit as enforceRateLimitDecision } from '@/lib/rateLimit/enforce'
+import { rateLimitExceededResponse } from '@/lib/rateLimit/response'
 import { type RateLimitBucket } from '@/lib/rateLimit/policies'
 import { logAuthEvent } from '@/lib/observability/authEvents'
 import { getTrustedClientIpFromNextHeaders } from '@/lib/trustedClientIp'
@@ -83,33 +78,6 @@ function buildIdentityKey(
   }
 
   return `${base}:${keySuffix.trim()}`
-}
-
-function buildRateLimitResponse(decision: BlockedRateLimitDecision) {
-  return jsonFail(
-    429,
-    'Too many requests. Please slow down.',
-    {
-      code: 'RATE_LIMITED',
-      details: {
-        bucket: decision.bucket,
-        limit: decision.limit,
-        remaining: decision.remaining,
-        reset: decision.resetAt.getTime(),
-        retryAfterSeconds: decision.retryAfterSeconds,
-        source: decision.source,
-        reason: decision.reason,
-      },
-    },
-    {
-      headers: {
-        ...getRateLimitHeaders(decision),
-        'X-RateLimit-Limit': String(decision.limit),
-        'X-RateLimit-Remaining': String(decision.remaining),
-        'X-RateLimit-Reset': String(decision.resetAt.getTime()),
-      },
-    },
-  )
 }
 
 function buildIdentityEventFields(identity: RateLimitIdentity): {
@@ -251,5 +219,6 @@ export async function enforceRateLimit(args: {
     return null
   }
 
-  return buildRateLimitResponse(decision)
+  // ONE 429 body for the whole API — see lib/rateLimit/response.ts.
+  return rateLimitExceededResponse(decision)
 }
