@@ -54,7 +54,7 @@ def git(repo, *args):
     return run(['git', '-C', str(repo), *args], cwd=repo)
 
 
-def packet(repo, paths, task):
+def packet(repo, paths, task, *, exact_files=False):
     repo = repo.resolve()
     if Path(git(repo, 'rev-parse', '--show-toplevel').strip()).resolve() != repo:
         raise ValueError('--repo must be the repository root.')
@@ -62,7 +62,7 @@ def packet(repo, paths, task):
         raise ValueError('Provide one scoped task of 1–8000 characters.')
     screen(task)
     selected = list(paths)
-    # Preserve applicable house rules, including nested guidance.
+    # Discover guidance locally; never silently expand the approved payload.
     for name in ['CLAUDE.md', 'AGENTS.md']:
         if (repo / name).exists():
             selected.append(name)
@@ -73,6 +73,11 @@ def packet(repo, paths, task):
             for rule in ['CLAUDE.md', 'AGENTS.md']:
                 if (repo / parent / rule).exists():
                     selected.append(str(parent / rule))
+    if set(selected) - set(paths) and not exact_files:
+        raise ValueError('Local house rules fall outside --path. Read applicable rules locally, then use --exact-files; no extra files will be sent.')
+    # Astra applies local prose rules during scoping and final review.
+    # This transport cannot mechanically enforce arbitrary house-rule prose.
+    selected = list(paths)
     chunks, hashes = [], {}
     for name in dict.fromkeys(selected):
         rel = Path(name)
@@ -130,7 +135,7 @@ def claude_result(raw):
 
 def delegate(args):
     task = args.task if args.task is not None else sys.stdin.read(8001)
-    prompt, hashes = packet(args.repo, args.path, task)
+    prompt, hashes = packet(args.repo, args.path, task, exact_files=getattr(args, 'exact_files', False))
     if args.dry_run:
         print(json.dumps({'mode': 'read-only', 'files': hashes, 'context_chars': len(prompt)}, indent=2))
         return
@@ -182,6 +187,7 @@ def main():
     parser.add_argument('--repo', type=Path, default=ROOT)
     parser.add_argument('--path', action='append', required=True, help='Explicit tracked text file; repeat for more files.')
     parser.add_argument('--task', help='One task; omit to read stdin. Do not include secrets.')
+    parser.add_argument('--exact-files', action='store_true', help='Send only --path files. Astra must read and apply house rules locally; they are not appended.')
     parser.add_argument('--dry-run', action='store_true', help='Validate scope; print hashes only; no model call.')
     args = parser.parse_args()
     try:
