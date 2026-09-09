@@ -1,9 +1,9 @@
 import { ConsultServiceFamily } from '@prisma/client'
 
-import type { ConsultAnalysisObservationDTO, ConsultAnalysisPayloadDTO, ConsultLookPlanDTO } from '@/lib/dto/consult'
+import type { ConsultAnalysisPayloadDTO, ConsultLookPlanDTO } from '@/lib/dto/consult'
 import { isRecord } from '@/lib/guards'
 
-import { cleanText, enumValue, exactKeys, ConsultAnalysisProviderError } from './analysisValidation'
+import { cleanText, enumValue, exactKeys, isSupportedConsultObservation, ConsultAnalysisProviderError } from './analysisValidation'
 import type { ConsultProMenuOffering } from './proMenu'
 
 export const CONSULT_LOOK_PLAN_SCHEMA_VERSION = 1
@@ -71,18 +71,13 @@ export function consultLookPlanEvidence(observations: SchemaObservations): Consu
   for (const key of Object.keys(observations.profile)) {
     const field = key as keyof Observations['profile']
     const value = observations.profile[field]
-    if (value && usableObservation(value)) result.push(`profile.${field}`)
+    if (value && isSupportedConsultObservation(value)) result.push(`profile.${field}`)
   }
   for (const key of Object.keys(observations.core ?? {})) {
     const field = key as keyof Observations['core']
-    if (observations.core && usableObservation(observations.core[field])) result.push(`core.${field}`)
+    if (observations.core && isSupportedConsultObservation(observations.core[field])) result.push(`core.${field}`)
   }
   return result
-}
-
-function usableObservation(value: ConsultAnalysisObservationDTO<string>): boolean {
-  return value.value !== 'UNKNOWN' && value.confidence.min >= 0.5 &&
-    value.evidence.some(key => key !== 'intake')
 }
 
 export const CONSULT_LOOK_PLAN_INSTRUCTIONS = [

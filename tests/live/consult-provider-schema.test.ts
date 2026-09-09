@@ -74,6 +74,12 @@ import type {
   ConsultFollowUpVocabularyEntry,
 } from '@/lib/consult/followUpVocabulary'
 import { toProviderOutputSchema } from '@/lib/consult/providerSchema'
+import { syntheticSuitabilityInput } from '@/tests/fixtures/consultSuitability'
+import {
+  buildConsultSuitabilityContext, buildConsultSuitabilityOutputSchema,
+  consultSuitabilityProviderContext, sanitizeConsultSuitabilityResponse,
+  CONSULT_SUITABILITY_SYSTEM_PROMPT, CONSULT_SUITABILITY_MAX_TOKENS,
+} from '@/lib/consult/suitabilityTranslation'
 
 /**
  * The eval fixtures: synthetic, committed, and the only images in this repo
@@ -192,6 +198,23 @@ async function send(args: {
 }
 
 describe('the consult schemas compile and answer against the live model', () => {
+  it.each([false, true])('C2-2 — dual-language suitability contract answers (unknown observations: %s)', async unknown => {
+    const input = syntheticSuitabilityInput()
+    if (unknown) {
+      input.faceColor = undefined
+      input.analysis.profile.skinUndertone = { value: 'UNKNOWN', confidence: { min: 0, max: 0.35 }, evidence: [] }
+    }
+    const context = buildConsultSuitabilityContext(input)
+    const raw = await send({ system: CONSULT_SUITABILITY_SYSTEM_PROMPT,
+      content: [{ type: 'text', text: consultSuitabilityProviderContext(context) }],
+      schema: buildConsultSuitabilityOutputSchema(context), maxTokens: CONSULT_SUITABILITY_MAX_TOKENS })
+    const result = sanitizeConsultSuitabilityResponse(raw, context)
+    expect(result.whatYouLoved.map(source => source.value)).toEqual(input.clientChoices.slice(0, 2).map(choice => choice.clientWords))
+    expect(result.tailoring.length).toBeGreaterThan(0)
+    expect(result.proConfirmations.length).toBeGreaterThan(0)
+    if (unknown) expect(result.tailoring.every(item => item.status === 'NEEDS_PRO_CONFIRMATION')).toBe(true)
+  })
+
   it('call 1 — the feature profile schema returns a payload the sanitizer accepts', async () => {
     const raw = await send({
       system: CONSULT_ANALYSIS_PROFILE_SYSTEM_PROMPT,
