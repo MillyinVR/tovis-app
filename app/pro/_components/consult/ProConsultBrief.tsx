@@ -1,3 +1,5 @@
+import ProConsultSuitability from './ProConsultSuitability'
+import { consultProProfileLabels as PROFILE_LABELS } from '@/lib/brand/consultProProfileCopy'
 import ConsultLookBriefPhotos from './ConsultLookBriefPhotos'
 import ConsultLookPlanCard from '@/app/_components/consult/ConsultLookPlanCard'
 import type {
@@ -42,32 +44,6 @@ function Observation({
   )
 }
 
-const PROFILE_LABELS: Record<
-  keyof ConsultProBriefDTO['profile'],
-  string
-> = {
-  skinUndertone: 'Skin undertone',
-  contrastLevel: 'Natural contrast',
-  colorSeason: 'Color season',
-  faceProportion: 'Face proportion',
-  jawline: 'Jawline',
-  foreheadProportion: 'Forehead',
-  featureBalance: 'Feature balance',
-  eyeColor: 'Visible eye color',
-  eyeShape: 'Eye shape',
-  eyeSpacing: 'Eye spacing',
-  browDensity: 'Brow density',
-  browShape: 'Brow shape',
-  skinDepth: 'Skin depth',
-  surfaceOvertone: 'Surface overtone',
-  faceWidthBalance: 'Relative face widths',
-  chinContour: 'Chin contour',
-  eyeTilt: 'Eye tilt',
-  lidVisibility: 'Lid visibility',
-  browBoneRelationship: 'Brow-to-eye relationship',
-  browArchPosition: 'Brow arch position',
-  browTailDirection: 'Brow tail direction',
-}
 
 const STYLE_DOMAIN_LABELS: Record<
   ConsultProBriefDTO['styleDirections'][number]['domain'],
@@ -275,6 +251,7 @@ export default function ProConsultBrief({
 
   return (
     <article className="grid gap-5" data-consult-brief-id={brief.briefRevisionId}>
+      <ProConsultSuitability suitability={brief.suitability} analysisRevisionId={brief.sourceAnalysisRevisionId} />
       {brief.mentor ? <section className="rounded-2xl border border-surfaceGlass/20 bg-bgPrimary p-4" data-testid="consult-mentor">
         <h2 className="text-lg font-bold text-textPrimary">{brief.mentor.title}</h2>
         <p className="mt-1 text-sm text-textSecondary">{brief.mentor.authority}</p>

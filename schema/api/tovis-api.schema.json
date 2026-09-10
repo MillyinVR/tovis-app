@@ -9831,6 +9831,9 @@
             "$ref": "#/definitions/ConsultStyleDirectionDTO"
           },
           "type": "array"
+        },
+        "suitability": {
+          "$ref": "#/definitions/ConsultClientSuitabilityDTO"
         }
       },
       "required": [
@@ -9889,6 +9892,54 @@
       },
       "required": [
         "results"
+      ],
+      "type": "object"
+    },
+    "ConsultClientSuitabilityDTO": {
+      "properties": {
+        "analysisRevisionId": {
+          "type": "string"
+        },
+        "clientRevisionId": {
+          "type": "string"
+        },
+        "proConfirmations": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "tailoring": {
+          "items": {
+            "properties": {
+              "explanation": {
+                "type": "string"
+              },
+              "needsConfirmation": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "explanation",
+              "needsConfirmation"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "whatYouLoved": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "analysisRevisionId",
+        "clientRevisionId",
+        "whatYouLoved",
+        "tailoring",
+        "proConfirmations"
       ],
       "type": "object"
     },
@@ -12438,6 +12489,9 @@
             "$ref": "#/definitions/ConsultStyleDirectionDTO"
           },
           "type": "array"
+        },
+        "suitability": {
+          "$ref": "#/definitions/ConsultProSuitabilityDTO"
         }
       },
       "required": [
@@ -12485,6 +12539,76 @@
       },
       "required": [
         "brief"
+      ],
+      "type": "object"
+    },
+    "ConsultProSuitabilityDTO": {
+      "properties": {
+        "analysisRevisionId": {
+          "type": "string"
+        },
+        "clientRevisionId": {
+          "type": "string"
+        },
+        "proConfirmations": {
+          "items": {
+            "properties": {
+              "check": {
+                "type": "string"
+              },
+              "sources": {
+                "items": {
+                  "$ref": "#/definitions/ConsultSuitabilityEvidenceDTO"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "check",
+              "sources"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "tailoring": {
+          "items": {
+            "properties": {
+              "direction": {
+                "type": "string"
+              },
+              "needsConfirmation": {
+                "type": "boolean"
+              },
+              "sources": {
+                "items": {
+                  "$ref": "#/definitions/ConsultSuitabilityEvidenceDTO"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "direction",
+              "needsConfirmation",
+              "sources"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "whatYouLoved": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "analysisRevisionId",
+        "clientRevisionId",
+        "whatYouLoved",
+        "tailoring",
+        "proConfirmations"
       ],
       "type": "object"
     },
@@ -13210,6 +13334,43 @@
         "COLOR_PALETTE"
       ],
       "type": "string"
+    },
+    "ConsultSuitabilityEvidenceDTO": {
+      "description": "Optional C2-2 role projections. Historical result payloads are unchanged.",
+      "properties": {
+        "confidence": {
+          "$ref": "#/definitions/ConsultAnalysisConfidenceDTO"
+        },
+        "evidence": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "label": {
+          "type": "string"
+        },
+        "provenance": {
+          "enum": [
+            "CLIENT_REPORTED",
+            "OBSERVED"
+          ],
+          "type": "string"
+        },
+        "revisionId": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "value",
+        "provenance",
+        "revisionId"
+      ],
+      "type": "object"
     },
     "ConsultThreadAuthorDTO": {
       "description": "Who a message is from.\n\n`APP` is the app's own voice — warm, short, and never impersonating the pro (handoff: \"the pro is the recipient of the Brief\"). `CLIENT` is the client's own answer echoed back into the thread as history.",

@@ -1,6 +1,8 @@
+import { consultSuitabilityCopy } from './consultSuitabilityCopy'
 import type { BrandClientConsultResultsCopy } from './types'
 
 export const defaultClientConsultResultsCopy: BrandClientConsultResultsCopy = {
+  suitability: consultSuitabilityCopy,
   // Names the DESTINATION only — ClientPage renders the ← glyph itself, and
   // lib/copy.ts's glossary says "booking", never "appointment".
   backToBooking: 'Booking',
