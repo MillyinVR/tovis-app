@@ -14,7 +14,7 @@
 //   2. a consult that already holds a contract-v1 review keeps being served
 //      v1 — questions, schema version and all — and can still answer;
 //   3. the booking gate says "complete" for both contracts;
-//   4. the guard still refuses free text, and still refuses a v1 payload that
+//   4. the guard refuses sentences in enum fields and a v1 payload that
 //      would have failed before P5c.
 
 import {
@@ -550,6 +550,31 @@ describe('the guided inspiration is per-family now', () => {
       'source',
     ])
     await expect(bookingGateSaysComplete(nailsSessionId)).resolves.toBe(true)
+  })
+
+  it('preserves client words through revisions, reopen and retry without treating them as model observations', async () => {
+    const pack = GENERAL_SERVICE_INSPIRATION_PACK
+    const question = pack.questions[0]!
+    const input = { idempotencyKey: 'client-words-retry', schemaVersion: pack.schemaVersion,
+      questionKey: question.key, selectedValues: [], text: 'I mean the face-framing detail, not the clothing.' }
+    const args = { consultSessionId: nailsSessionId, clientId,
+      actor: { type: ConsultActorType.CLIENT, id: userId }, input }
+    const before = await db.consultRevision.findFirst({ where: { consultSessionId: nailsSessionId, kind: 'INSPIRATION' }, orderBy: { revision: 'desc' } })
+    const result = await answerConsultInspirationQuestion(args)
+    expect(result.replayed).toBe(false)
+    expect(result.state.latestReview?.answers.find(answer => answer.questionKey === question.key)?.text).toBe(input.text)
+    expect(result.state.cards?.find(card => card.questionKey === question.key)?.selectedText).toBe(input.text)
+    expect(result.state.latestReview?.exactClientDetails).toContainEqual({ questionKey: question.key, value: 'client-words', clientWords: input.text, sentiment: 'CONTEXT' })
+    expect((await answerConsultInspirationQuestion(args)).replayed).toBe(true)
+    await expect(answerConsultInspirationQuestion({ ...args, input: { ...input, text: 'Different words' } })).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' })
+    expect((await db.consultRevision.findUnique({ where: { id: before!.id } }))?.payload).toEqual(before!.payload)
+    await expect(answerConsultInspirationQuestion({ ...args, input: { ...input, idempotencyKey: 'oversized-words', text: 'x'.repeat(601) } })).rejects.toMatchObject({ code: 'INSPIRATION_INVALID_ANSWER' })
+    const clear = { ...input, idempotencyKey: 'clear-client-words', selectedValues: [question.options[0]!.value], text: null }
+    const cleared = await answerConsultInspirationQuestion({ ...args, input: clear })
+    expect(cleared.state.latestReview?.answers.find(answer => answer.questionKey === question.key)?.text).toBeNull()
+    expect((await answerConsultInspirationQuestion({ ...args, input: clear })).replayed).toBe(true)
+    // Omission preserves old text; null clears it. They cannot share a retry key.
+    await expect(answerConsultInspirationQuestion({ ...args, input: { ...clear, text: undefined } })).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' })
   })
 
   it('serves a non-colour HAIR consult the hair pack, and records a skip', async () => {

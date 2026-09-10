@@ -184,6 +184,7 @@ describe('inspiration pack registry', () => {
       }),
     ).toEqual({
       ok: true,
+      text: null,
       questionKey: 'favorite_colors',
       selectedValues: ['warm-golden', 'cool-smoky'],
     })
@@ -376,5 +377,26 @@ describe('inspiration pack registry', () => {
         resolveConsultSessionInspirationPack(pack, [{ garbage: true }, payload(pack)])?.id,
       ).toBe(pack.id)
     })
+  })
+})
+
+
+describe('client-authored inspiration words', () => {
+  it('round-trips a text-only answer to the shared review and professional details', () => {
+    const pack = HAIR_COLOR_INSPIRATION_PACK
+    const raw = payload(pack, { answers: { ...fullAnswers(pack), favorite_colors: [] }, textAnswers: { favorite_colors: 'I mean the face-framing hair, not the sweatpants.' } })
+    const resolved = resolveConsultInspirationPayloadV2(raw)
+    expect(resolved).not.toBeNull()
+    const review = toConsultInspirationReviewV2(pack, resolved!.payload, copy)
+    expect(review.answers.find(answer => answer.questionKey === 'favorite_colors')?.text).toBe('I mean the face-framing hair, not the sweatpants.')
+    expect(review.exactClientDetails).toContainEqual({ questionKey: 'favorite_colors', value: 'client-words', clientWords: 'I mean the face-framing hair, not the sweatpants.', sentiment: 'CONTEXT' })
+  })
+  it('refuses orphan, blank and oversized words and empty answers without words', () => {
+    const pack = HAIR_COLOR_INSPIRATION_PACK
+    for (const textAnswers of [{ unknown: 'hello' }, { favorite_colors: '' }, { favorite_colors: 'x'.repeat(601) }]) {
+      expect(resolveConsultInspirationPayloadV2(payload(pack, { textAnswers }))).toBeNull()
+    }
+    expect(validateConsultInspirationAnswer(pack, { questionKey: 'favorite_colors', selectedValues: [], text: '  ' })).toEqual({ ok: false })
+    expect(validateConsultInspirationAnswer(pack, { questionKey: 'favorite_colors', selectedValues: [], text: 'Something softer' })).toMatchObject({ ok: true, selectedValues: [], text: 'Something softer' })
   })
 })

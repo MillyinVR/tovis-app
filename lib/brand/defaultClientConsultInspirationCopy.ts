@@ -18,6 +18,7 @@ import type { BrandClientConsultInspirationCopy } from './types'
 // its words come from here, so nothing a client sees is stored in her payload.
 export const defaultClientConsultInspirationCopy: BrandClientConsultInspirationCopy =
   {
+    clientResponse: { summary: 'You added: {words}', label: 'Say it in your own words', placeholder: 'Tell me what you mean, or correct what I noticed…' },
     introduction:
       'An inspiration picture is optional. It can help you and your professional get visually on the same page.',
 

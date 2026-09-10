@@ -1,5 +1,8 @@
 'use client'
 
+import { visibleConsultThreadMessages } from '@/lib/consult/visibleThread'
+import { CONSULT_INSPIRATION_CLIENT_TEXT_LIMIT } from '@/lib/consult/inspiration/clientText'
+import { defaultClientConsultInspirationCopy } from '@/lib/brand/defaultClientConsultInspirationCopy'
 import ClientConsultSuitability from '@/app/_components/consult/ClientConsultSuitability'
 import { useBrand } from '@/lib/brand/BrandProvider'
 
@@ -15,8 +18,7 @@ import { useBrand } from '@/lib/brand/BrandProvider'
 //     unchanged and remain the only way to ANSWER anything.
 //   * Earlier steps stay on screen as history. A wizard that replaces the
 //     question you just answered gives you nothing to scroll back to.
-//   * No free-text input, anywhere. Every prompt is a tappable card, which is
-//     what makes the thread deterministic, instant and free per message.
+//   * Inspiration cards accept pack choices and optional client-authored words.
 //   * The sticky Book the look CTA unlocks on the SELFIE, not on the analysis.
 //     Booking runs the ORDINARY look-booking path — the analysis takes ~100s,
 //     which is longer than a spark lasts.
@@ -600,20 +602,16 @@ export default function ClientConsultFlow({
     void readInspiration(source.inspirationId)
   }, [thread, readingInspiration, readInspiration])
 
-  /**
-   * 🔴 No free text reaches this call, by construction: the thread has no text
-   * input at all. A question that allows a note is answered with its own
-   * tappable "nothing else" option instead, which is the value the server
-   * requires when there is no note.
-   */
+  /** Save choices and optional client-authored corrections. */
   const answerInspiration = (
     message: ConsultThreadInspirationMessageDTO,
     question: ConsultInspirationQuestionDTO,
     selectedValues: string[],
+    text?: string,
   ) =>
     run(async () => {
       const values =
-        question.allowText && selectedValues.length === 0
+        question.allowText && selectedValues.length === 0 && !text?.trim() && message.schemaVersion === 1
           ? ['nothing-else']
           : selectedValues
       await api(`${base}/inspiration/answers`, {
@@ -623,6 +621,7 @@ export default function ClientConsultFlow({
           schemaVersion: message.schemaVersion,
           questionKey: question.key,
           selectedValues: values,
+          ...(question.allowText ? { text: text?.trim() || null } : {}),
         }),
       })
     })
@@ -829,22 +828,25 @@ export default function ClientConsultFlow({
     )
   }
 
+  const visibleMessages = visibleConsultThreadMessages(thread)
+  const photosReached = visibleMessages.some(message => message.kind === 'PHOTO_REQUEST')
+
   return (
     <ConsultInputState.Provider value={{ editing: editing && Boolean(thread.controls?.canEditAnswers), inputsOpen: thread.controls?.inputsOpen !== false }}>
     <ThreadShell
       openMessageId={thread.nextOpenMessageId}
-      footer={
+      footer={photosReached || thread.book.enabled ?
         <BookTheLookCta
           thread={thread}
           copy={copy}
           busy={busy}
           onBook={() => router.push(bookTheLookHref(thread))}
-        />
+        /> : null
       }
     >
       <ErrorNote message={error} />
       <div className="flex flex-wrap gap-2" aria-label={copy.management.edit}>
-        {thread.controls?.canEditAnswers && thread.messages.some(m => m.kind === 'QUESTION' && m.answer !== null || m.kind === 'INSPIRATION' && (m.card?.selectedValues.length ?? 0) > 0) ? <button type="button" className={BUTTON_SECONDARY} disabled={busy} onClick={() => setEditing(!editing)}>{editing ? copy.management.done : copy.management.edit}</button> : null}
+        {thread.controls?.canEditAnswers && thread.messages.some(m => m.kind === 'QUESTION' && m.answer !== null || m.kind === 'INSPIRATION' && ((m.card?.selectedValues.length ?? 0) > 0 || Boolean(m.card?.selectedText))) ? <button type="button" className={BUTTON_SECONDARY} disabled={busy} onClick={() => setEditing(!editing)}>{editing ? copy.management.done : copy.management.edit}</button> : null}
         {thread.controls?.canDelete ? <button type="button" className={BUTTON_SECONDARY} disabled={busy} onClick={() => setManagementAction('delete')}>{copy.homeSessions.delete}</button> : null}
         {thread.controls?.revokeAcceptanceId ? <button type="button" className={BUTTON_SECONDARY} disabled={busy} onClick={() => setManagementAction('revoke')}>{copy.management.revoke}</button> : null}
       </div>
@@ -878,7 +880,7 @@ export default function ClientConsultFlow({
           </div>
         </div>
       ) : null}
-      {thread.messages.map((message) => (
+      {visibleMessages.map((message) => (
         <ThreadMessageSlot key={message.id} id={message.id}>
           <ConsultThreadMessage
             message={message}
@@ -906,14 +908,14 @@ export default function ClientConsultFlow({
           />
         </ThreadMessageSlot>
       ))}
-      <CapturePrepControls
+      {photosReached ? <CapturePrepControls
         thread={thread}
         busy={busy}
         copy={copy}
         pro={thread.professionalDisplayName}
         onChartCopy={setChartCopy}
         onProceed={proceedWithAccepted}
-      />
+      /> : null}
     </ThreadShell>
     </ConsultInputState.Provider>
   )
@@ -980,6 +982,7 @@ function ConsultThreadMessage({
     message: ConsultThreadInspirationMessageDTO,
     question: ConsultInspirationQuestionDTO,
     selectedValues: string[],
+    text?: string,
   ) => void
   onUploadShot: (
     message: ConsultThreadPhotoRequestMessageDTO,
@@ -1272,6 +1275,7 @@ function InspirationMessage({
     message: ConsultThreadInspirationMessageDTO,
     question: ConsultInspirationQuestionDTO,
     selectedValues: string[],
+    text?: string,
   ) => void
 }) {
   const done = message.state === 'DONE'
@@ -1361,9 +1365,10 @@ function InspirationMessage({
             <InspirationQuestionForm
               key={message.question.key}
               question={message.question}
+              allowClientWords={message.schemaVersion === 2}
               busy={busy}
-              onAnswer={(question, values) =>
-                onAnswer(message, question, values)
+              onAnswer={(question, values, text) =>
+                onAnswer(message, question, values, text)
               }
             />
           ) : null}
@@ -2291,12 +2296,24 @@ function InspirationCardMessage({
     message: ConsultThreadInspirationMessageDTO,
     question: ConsultInspirationQuestionDTO,
     selectedValues: string[],
+    text?: string,
   ) => void
   onOpenFull: () => void
 }) {
   const { editing } = useContext(ConsultInputState)
-  const answered = card.selectedValues.length > 0
+  const answered = card.selectedValues.length > 0 || Boolean(card.selectedText)
   const optionCrops = card.optionRegions.filter((option) => option.region !== null)
+
+  if (answered && !editing) {
+    const selectedLabels = card.question.options.filter(option => card.selectedValues.includes(option.value)).map(option => option.label).join(', ')
+    return <div className="grid gap-2">
+      <ThreadBubble author="APP">{card.question.label}</ThreadBubble>
+      <ThreadBubble author="CLIENT">
+        {selectedLabels ? <p>{selectedLabels}</p> : null}
+        {card.selectedText ? <p className="whitespace-pre-wrap">{card.selectedText}</p> : null}
+      </ThreadBubble>
+    </div>
+  }
 
   // P5g — the two region moves render as a picker over the whole photograph.
   // Everything else is P5d's crop card, unchanged.
@@ -2307,7 +2324,7 @@ function InspirationCardMessage({
           card={card}
           busy={busy}
           image={image}
-          onAnswer={(values) => onAnswer(message, card.question, values)}
+          onAnswer={(values, text) => onAnswer(message, card.question, values, text)}
           onOpenFull={onOpenFull}
         />
       </ThreadCard>
@@ -2390,15 +2407,17 @@ function InspirationCardMessage({
             .filter((option) => card.selectedValues.includes(option.value))
             .map((option) => option.label)
             .join(', ')}
+          {card.selectedText ? <span className="block whitespace-pre-wrap">{card.selectedText}</span> : null}
         </p>
       ) : (
         <InspirationQuestionForm
-          key={`${card.questionKey}:${card.selectedValues.join(',')}`}
+          key={`${card.questionKey}:${card.selectedValues.join(',')}:${card.selectedText ?? ''}`}
+          initialText={card.selectedText ?? ''}
           question={card.question}
           busy={busy}
           showLabel={false}
           initialSelection={card.selectedValues}
-          onAnswer={(question, values) => onAnswer(message, question, values)}
+          onAnswer={(question, values, text) => onAnswer(message, question, values, text)}
         />
       )}
     </ThreadCard>
@@ -2433,11 +2452,13 @@ function InspirationRegionPicker({
   card: ConsultInspirationCardDTO
   busy: boolean
   image: ReturnType<typeof useConsultInspirationImage>
-  onAnswer: (values: string[]) => void
+  onAnswer: (values: string[], text?: string) => void
   onOpenFull: () => void
 }) {
   const [selected, setSelected] = useState<string[]>(card.selectedValues)
   const [zoomed, setZoomed] = useState<string | null>(null)
+  const [text, setText] = useState(card.selectedText ?? '')
+
 
   const regions = card.optionRegions.filter((option) => option.region !== null)
   const neutral = card.optionRegions.filter((option) => option.region === null)
@@ -2571,6 +2592,8 @@ function InspirationRegionPicker({
         </div>
       ) : null}
 
+      {card.question.allowText ? <ClientWordsInput text={text} onChange={setText} busy={busy} /> : null}
+
       {/* What she has tapped so far, in words. A row of highlighted boxes is
           not a receipt — she should be able to read back what she said. */}
       {selected.length > 0 ? (
@@ -2592,16 +2615,16 @@ function InspirationRegionPicker({
             type="button"
             disabled={busy}
             className={`${BUTTON_SECONDARY} text-left`}
-            onClick={() => onAnswer([option.value])}
+            onClick={() => onAnswer([option.value], text)}
           >
             {option.label}
           </button>
         ))}
         <button
           type="button"
-          disabled={busy || selected.length === 0}
+          disabled={busy || (selected.length === 0 && !text.trim())}
           className={`${BUTTON_PRIMARY} justify-self-start`}
-          onClick={() => onAnswer(selected)}
+          onClick={() => onAnswer(selected, text)}
         >
           Next
         </button>
@@ -2672,21 +2695,14 @@ function FollowUpMessage({
   )
 }
 
-/**
- * The inspiration question, as taps only.
- *
- * 🔴 The free-text note and its GOOD/BAD/BOTH sentiment picker are GONE from
- * the thread (P5a: "no free-text input"). Nothing is lost from the contract:
- * every question that allowed a note also carries a tappable option, and the
- * server treats a blank note as that option. What the removal buys is the
- * property that makes a scripted thread worth having — every prompt is
- * deterministic, instant, and free per message.
- */
+/** Pack choices with optional client-authored corrections. */
 function InspirationQuestionForm({
   question,
   busy,
   showLabel = true,
   initialSelection = [],
+  initialText = '',
+  allowClientWords = true,
   onAnswer,
 }: {
   question: ConsultInspirationQuestionDTO
@@ -2700,16 +2716,20 @@ function InspirationQuestionForm({
    * no unit test could see it, because both copies are correct on their own.
    */
   initialSelection?: string[]
+  initialText?: string
+  allowClientWords?: boolean
   showLabel?: boolean
   onAnswer: (
     question: ConsultInspirationQuestionDTO,
     selectedValues: string[],
+    text?: string,
   ) => void
 }) {
   const [selected, setSelected] = useState<string[]>(initialSelection)
+  const [text, setText] = useState(initialText)
 
   const needsSelection =
-    question.kind !== 'TEXT' && selected.length < question.minSelections
+    !(allowClientWords && question.allowText && text.trim() && question.key !== 'understanding_check') && question.kind !== 'TEXT' && selected.length < question.minSelections
 
   const toggleOption = (value: string) => {
     setSelected((current) => {
@@ -2755,14 +2775,26 @@ function InspirationQuestionForm({
           )
         })}
       </div>
+      {allowClientWords && question.allowText ? <ClientWordsInput text={text} onChange={setText} busy={busy} /> : null}
       <button
         type="button"
         disabled={busy || needsSelection}
         className={`${BUTTON_PRIMARY} justify-self-start`}
-        onClick={() => onAnswer(question, selected)}
+        onClick={() => onAnswer(question, selected, text)}
       >
         Next
       </button>
     </div>
   )
+}
+
+function ClientWordsInput({ text, onChange, busy }: { text: string; onChange: (text: string) => void; busy: boolean }) {
+  const { brand } = useBrand()
+  const copy = brand.clientConsultInspiration.clientResponse ?? defaultClientConsultInspirationCopy.clientResponse!
+  return <label className="grid gap-2 text-sm text-textSecondary">
+    {copy.label}
+    <textarea value={text} onChange={event => onChange(event.target.value)} disabled={busy}
+      maxLength={CONSULT_INSPIRATION_CLIENT_TEXT_LIMIT} rows={3} placeholder={copy.placeholder}
+      className="w-full rounded-xl border border-surfaceGlass/20 bg-bgPrimary p-3 text-textPrimary" />
+  </label>
 }

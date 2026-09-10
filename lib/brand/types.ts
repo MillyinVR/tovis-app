@@ -1170,6 +1170,7 @@ export type BrandClientConsultStartingPointCopy = {
  * CARD pack's labels ARE here, in `cards` — see the type above for why.
  */
 export type BrandClientConsultInspirationCopy = {
+  clientResponse?: { label: string; placeholder: string; summary?: string }
   /** What a reference picture is for, shown before she is asked for one. */
   introduction: string
   /** 🔴 That it is a reference and not a promise. Shown with the picture. */

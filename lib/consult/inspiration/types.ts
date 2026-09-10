@@ -11,21 +11,10 @@
 // so a second family could not be asked a single different question without a
 // migration.
 //
-// v2 keeps the same idea and moves the vocabulary into DATA. A pack is a list
-// of questions with enum options; the payload stores the pack it was written
-// under and the KEYS AND VALUES she picked, nothing else. Everything the pro
-// brief and the analysis prompt read — her words, the possible professional
-// reading, the catalogue note — is DERIVED on read from the pack the payload
-// names, so there is exactly one definition of each and a stored row cannot
-// disagree with it.
-//
-// What is NOT here, on purpose:
-//   * free text. "Keys and enums only" is the storage contract, and it is what
-//     lets the database guard validate a payload for a family it has never
-//     heard of (a slug-shaped key, a token-shaped value) instead of pinning a
-//     question list it would need a migration to widen.
-//   * user-facing sentences that are not a question or an option label. The
-//     step's own copy is the brand's (lib/brand/defaultClientConsultInspirationCopy.ts).
+// v2 stores pack-defined choices and optional bounded client-authored notes.
+// Choice meanings are derived from the named pack; notes retain the client's
+// exact words and never become inferred professional observations.
+// Display copy belongs to lib/brand.
 
 import type { BrandClientConsultInspirationCopy } from '@/lib/brand/types'
 import type {
@@ -260,6 +249,8 @@ export type ConsultInspirationPayloadV2 = {
   readonly complete: boolean
   /** Question key → the option values she picked, in pack option order. */
   readonly answers: Readonly<Record<string, readonly string[]>>
+  /** Optional client-authored context, retained with this immutable revision. */
+  readonly textAnswers?: Readonly<Record<string, string>>
   /** Catalogue details this answer set pointed at, as ENUMS — the sentence is copy. */
   readonly catalogGuidance: readonly ConsultInspirationCatalogDetail[]
 }

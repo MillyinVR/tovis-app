@@ -908,6 +908,7 @@ async function buildState(
         reading,
         copy,
         professionalDisplayName: ctx.professionalDisplayName,
+        clientWords: answers.flatMap(answer => answer.text ? [answer.text] : []),
       })
     : null
   const progress = pack
@@ -919,6 +920,7 @@ async function buildState(
         reading,
         copy,
         professionalDisplayName: ctx.professionalDisplayName,
+        clientWords: answers.flatMap(answer => answer.text ? [answer.text] : []),
         answers: answersByKey,
       })
     : { coarse: [], prep: [] }
@@ -946,10 +948,10 @@ async function buildState(
     // cards — the same reason it has no questions.
     cards: activeReview?.source === 'NONE' ? [] : [
       ...cards.coarse.filter((card) => !pack?.adaptiveVisualDialogue ||
-        (card.selectedValues.length > 0 && (card.questionKey !== 'understanding_check' || progress.canComplete)) ||
+        ((card.selectedValues.length > 0 || answers.some(answer => answer.questionKey === card.questionKey && answer.text)) && (card.questionKey !== 'understanding_check' || progress.canComplete)) ||
         card.questionKey === progress.currentQuestion?.key),
       ...cards.prep,
-    ],
+    ].map(card => ({ ...card, selectedText: answers.find(answer => answer.questionKey === card.questionKey)?.text ?? null })),
     latestReview: activeReview,
   }
 }
@@ -1524,7 +1526,7 @@ async function catalogGuidance(
  */
 type ValidatedInspirationAnswer =
   | { contract: 1; answer: ConsultInspirationAnswerDTO }
-  | { contract: 2; questionKey: string; selectedValues: string[] }
+  | { contract: 2; questionKey: string; selectedValues: string[]; text: string | null }
 
 function validateAnswerForContract(
   pack: ConsultInspirationPackDefinition | null,
@@ -1542,12 +1544,9 @@ function validateAnswerForContract(
       throw new ConsultWriteError('INSPIRATION_INVALID_ANSWER', 'Invalid answer.')
     }
   }
-  // 🔴 Contract v2 records no free text at all, so text or a sentiment on the
-  // wire is refused rather than dropped: silently discarding something a
-  // client believed she had said is worse than telling her it did not go
-  // through.
+  // V2 accepts bounded client words while legacy sentiment remains unsupported.
   const validated =
-    input.text == null && input.sentiment == null
+    input.sentiment == null
       ? validateConsultInspirationAnswerV2(pack, input)
       : ({ ok: false } as const)
   if (!validated.ok) {
@@ -1557,6 +1556,7 @@ function validateAnswerForContract(
     contract: 2,
     questionKey: validated.questionKey,
     selectedValues: validated.selectedValues,
+    text: validated.text,
   }
 }
 
@@ -1609,6 +1609,7 @@ export async function answerConsultInspirationQuestion(args: {
           : {
               questionKey: validated.questionKey,
               selectedValues: validated.selectedValues,
+              ...(args.input.text !== undefined ? { text: validated.text } : {}),
             },
     })
     const existing = await tx.consultRevision.findFirst({
@@ -1676,6 +1677,11 @@ export async function answerConsultInspirationQuestion(args: {
       const answers: Record<string, readonly string[]> = question
         ? applyConsultInspirationReopen(question, validated.selectedValues, previousMap)
         : { ...previousMap, [validated.questionKey]: validated.selectedValues }
+      const textAnswers: Record<string, string> = Object.fromEntries(previousAnswers
+        .filter(answer => answer.text && answers[answer.questionKey] !== undefined)
+        .map(answer => [answer.questionKey, answer.text!]))
+      if (validated.text && answers[validated.questionKey] !== undefined) textAnswers[validated.questionKey] = validated.text
+      else if (args.input.text !== undefined) delete textAnswers[validated.questionKey]
       write = {
         contract: 2,
         payload: {
@@ -1687,6 +1693,7 @@ export async function answerConsultInspirationQuestion(args: {
           complete: evaluateConsultInspirationProgressV2(pack, answers, ctx.copy, null, reading)
             .canComplete,
           answers,
+          ...(Object.keys(textAnswers).length ? { textAnswers } : {}),
           // Enums only. The sentence is filled in on read from brand copy.
           catalogGuidance: await catalogDetailsOfferedByPro(
             tx,

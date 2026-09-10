@@ -433,6 +433,8 @@ export type ConsultInspirationCardDTO = {
   question: ConsultInspirationQuestionDTO
   /** What she has already chosen here — the thread's own history. */
   selectedValues: string[]
+  /** Optional client-authored response, preserved with the inspiration revision. */
+  selectedText?: string | null
 }
 
 export type ConsultInspirationSourceStateDTO = {

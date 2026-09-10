@@ -150,7 +150,7 @@ function inspirationCardMessage(args: {
   inspiration: ConsultInspirationStateDTO | null
   open: boolean
 }): ConsultThreadMessageDTO {
-  const answered = args.card.selectedValues.length > 0
+  const answered = args.card.selectedValues.length > 0 || Boolean(args.card.selectedText)
   return {
     kind: 'INSPIRATION',
     id: `inspiration:${args.card.questionKey}`,

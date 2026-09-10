@@ -1,3 +1,4 @@
+import { validateInspirationClientText } from './clientText'
 // lib/consult/inspiration/registry.ts
 //
 // Every guided-inspiration pack the consult can serve, and the ONE engine that
@@ -207,7 +208,7 @@ export function toConsultInspirationQuestionDTO(
     })),
     minSelections: question.minSelections,
     maxSelections: question.maxSelections,
-    allowText: question.allowText,
+    allowText: true,
   }
 }
 
@@ -216,7 +217,7 @@ function questionsByKey(pack: ConsultInspirationPackDefinition) {
 }
 
 export type ConsultInspirationAnswerValidation =
-  | { ok: true; questionKey: string; selectedValues: string[] }
+  | { ok: true; questionKey: string; selectedValues: string[]; text: string | null }
   | { ok: false }
 
 /**
@@ -227,8 +228,10 @@ export type ConsultInspirationAnswerValidation =
  */
 export function validateConsultInspirationAnswer(
   pack: ConsultInspirationPackDefinition,
-  raw: { questionKey: unknown; selectedValues: unknown },
+  raw: { questionKey: unknown; selectedValues: unknown; text?: unknown },
 ): ConsultInspirationAnswerValidation {
+  const note = validateInspirationClientText(raw.text)
+  if (!note.ok) return { ok: false }
   if (typeof raw.questionKey !== 'string') return { ok: false }
   const question = questionsByKey(pack).get(raw.questionKey)
   if (!question || !Array.isArray(raw.selectedValues)) return { ok: false }
@@ -239,7 +242,7 @@ export function validateConsultInspirationAnswer(
   }
   if (
     new Set(selectedValues).size !== selectedValues.length ||
-    selectedValues.length < question.minSelections ||
+    (selectedValues.length < question.minSelections && (!note.text || question.key === 'understanding_check')) ||
     selectedValues.length > question.maxSelections ||
     selectedValues.some(
       (value) => !question.options.some((option) => option.value === value),
@@ -251,7 +254,7 @@ export function validateConsultInspirationAnswer(
     CONSULT_INSPIRATION_NEUTRAL_VALUES.has(value),
   )
   if (neutral.length > 0 && selectedValues.length > 1) return { ok: false }
-  return { ok: true, questionKey: question.key, selectedValues }
+  return { ok: true, questionKey: question.key, selectedValues, text: note.text }
 }
 
 /**
@@ -330,7 +333,7 @@ export function applyConsultInspirationReopen(
 ): Record<string, readonly string[]> {
   const next: Record<string, readonly string[]> = { ...answers }
   const cleared = new Set(
-    selectedValues.flatMap((value) => [...(question.reopens?.[value] ?? [])]),
+    (selectedValues.length ? selectedValues : Object.keys(question.reopens ?? {})).flatMap((value) => [...(question.reopens?.[value] ?? [])]),
   )
   for (const key of cleared) delete next[key]
   if (!cleared.has(question.key)) next[question.key] = [...selectedValues]
@@ -460,8 +463,8 @@ export function resolveConsultInspirationPayloadV2(
   payload: ConsultInspirationPayloadV2
 } | null {
   if (!isRecord(raw)) return null
-  if (Object.keys(raw).some((key) => !V2_PAYLOAD_KEYS.has(key))) return null
-  if (Object.keys(raw).length !== V2_PAYLOAD_KEYS.size) return null
+  if (Object.keys(raw).some((key) => key !== 'textAnswers' && !V2_PAYLOAD_KEYS.has(key))) return null
+  if ([...V2_PAYLOAD_KEYS].some(key => !(key in raw))) return null
   if (typeof raw.packId !== 'string' || typeof raw.packVersion !== 'number') {
     return null
   }
@@ -481,11 +484,21 @@ export function resolveConsultInspirationPayloadV2(
   }
   if (!isRecord(raw.answers)) return null
 
+  const textAnswers: Record<string, string> = {}
+  if (raw.textAnswers !== undefined) {
+    if (!isRecord(raw.textAnswers)) return null
+    for (const [key, value] of Object.entries(raw.textAnswers)) {
+      const note = validateInspirationClientText(value)
+      if (!note.ok || !note.text || note.text !== value || !(key in raw.answers)) return null
+      textAnswers[key] = note.text
+    }
+  }
   const answers: Record<string, readonly string[]> = {}
   for (const [questionKey, selectedValues] of Object.entries(raw.answers)) {
     const validated = validateConsultInspirationAnswer(pack, {
       questionKey,
       selectedValues,
+      text: textAnswers[questionKey],
     })
     if (!validated.ok) return null
     answers[validated.questionKey] = validated.selectedValues
@@ -520,6 +533,7 @@ export function resolveConsultInspirationPayloadV2(
       inspirationId,
       complete: raw.complete,
       answers,
+      ...(Object.keys(textAnswers).length ? { textAnswers } : {}),
       catalogGuidance,
     },
   }
@@ -539,6 +553,7 @@ export function toConsultInspirationJsonPayloadV2(
     answers: Object.fromEntries(
       Object.entries(payload.answers).map(([key, values]) => [key, [...values]]),
     ),
+    ...(payload.textAnswers && Object.keys(payload.textAnswers).length ? { textAnswers: { ...payload.textAnswers } } : {}),
     catalogGuidance: [...payload.catalogGuidance],
   }
 }
@@ -559,6 +574,10 @@ export function toConsultInspirationReviewV2(
     payload.answers,
     copy,
   )
+  for (const question of pack.questions) {
+    const text = payload.textAnswers?.[question.key]
+    if (text) exactClientDetails.push({ questionKey: question.key, value: 'client-words', clientWords: text, sentiment: 'CONTEXT' })
+  }
   const answers: ConsultInspirationAnswerDTO[] = pack.questions.flatMap((question) => {
     const selectedValues = payload.answers[question.key]
     return selectedValues
@@ -566,7 +585,7 @@ export function toConsultInspirationReviewV2(
           {
             questionKey: question.key,
             selectedValues: [...selectedValues],
-            text: null,
+            text: payload.textAnswers?.[question.key] ?? null,
             sentiment: null,
           },
         ]

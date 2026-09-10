@@ -17,6 +17,7 @@ import {
   resetConsultInspirationVisionClientForTests,
   runConsultInspirationVision,
   sanitizeConsultInspirationAnalysis,
+  sanitizeLocalizedInspirationAnalysis,
 } from './inspirationVision'
 import { findUnsupportedProviderSchemaKeywords } from './providerSchema'
 
@@ -71,7 +72,7 @@ describe('inspiration vision schema', () => {
     // The schema constant keeps its bounds as a statement of intent; what
     // actually goes on the wire must be free of them, or the call 400s before
     // a single photo is read. See lib/consult/providerSchema.ts.
-    mocks.create.mockResolvedValue(message(output()))
+    mocks.create.mockResolvedValue(message({ hairRegion: '0,0,1,1', ...output() }))
     return runConsultInspirationVision({ image: IMAGE }).then(() => {
       const [params] = mocks.create.mock.calls[0] ?? []
       const sent = params.output_config.format.schema
@@ -92,7 +93,7 @@ describe('inspiration vision schema', () => {
     // writes an artefact through the live guard is the proof.
     expect(CONSULT_INSPIRATION_ANALYSIS_SCHEMA_VERSION).toBe(3)
     expect(CONSULT_INSPIRATION_ANALYSIS_PROMPT_VERSION).toBe(
-      'inspiration-hair-color-v2',
+      'inspiration-hair-color-v3',
     )
     expect([...CONSULT_INSPIRATION_ANALYSIS_FIELDS]).toEqual([
       'baseLevel',
@@ -227,7 +228,7 @@ describe('runConsultInspirationVision', () => {
   })
 
   it('sends exactly one image and returns the sanitized read', async () => {
-    mocks.create.mockResolvedValue(message(output()))
+    mocks.create.mockResolvedValue(message({ hairRegion: '0,0,1,1', ...output() }))
     const result = await runConsultInspirationVision({ image: IMAGE })
     expect(result.model).toBe('claude-sonnet-5')
     expect(result.analysis.technique.value).toBe('BALAYAGE')
@@ -240,7 +241,7 @@ describe('runConsultInspirationVision', () => {
   })
 
   it('never lets the prompt invite a description of the person', async () => {
-    mocks.create.mockResolvedValue(message(output()))
+    mocks.create.mockResolvedValue(message({ hairRegion: '0,0,1,1', ...output() }))
     await runConsultInspirationVision({ image: IMAGE })
     const [params] = mocks.create.mock.calls[0] ?? []
     expect(params.system).toContain('Never describe, infer, or mention anything about the person')
@@ -266,5 +267,22 @@ describe('runConsultInspirationVision', () => {
     await expect(runConsultInspirationVision({ image: IMAGE })).rejects.toMatchObject({
       kind: 'bad_output',
     })
+  })
+})
+
+
+describe('localized inspiration crops', () => {
+  it('rejects a garment crop below the identified hair in a mirror shot', () => {
+    expect(() => sanitizeLocalizedInspirationAnalysis({ hairRegion: '0.05,0.05,0.8,0.85',
+      ...output({ tone: known('WARM', '0.2,0.92,0.3,0.07') }),
+    })).toThrowError(ConsultInspirationVisionError)
+  })
+  it('requires a located head of hair and never invents an area', () => {
+    expect(() => sanitizeLocalizedInspirationAnalysis({ hairRegion: null, ...output() })).toThrowError(ConsultInspirationVisionError)
+    expect(() => sanitizeLocalizedInspirationAnalysis(output())).toThrowError(ConsultInspirationVisionError)
+  })
+  it('keeps valid image coordinates without mirroring them a second time', () => {
+    const result = sanitizeLocalizedInspirationAnalysis({ hairRegion: '0.05,0.05,0.8,0.85', ...output() })
+    expect(result.tone.region).toEqual({ x: 0.1, y: 0.2, w: 0.5, h: 0.6 })
   })
 })
