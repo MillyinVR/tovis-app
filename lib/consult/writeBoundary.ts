@@ -1,3 +1,4 @@
+import type { ConsultSuitabilityResult } from './suitabilityRuntime'
 import type { ClientChartFact } from './chartFacts'
 import { toPrismaJson } from '@/lib/typed/prismaJson'
 import { effectiveConsultLookPlan } from './lookBriefPlan'
@@ -725,6 +726,8 @@ export async function finalizeLockedHairColorAnalysis(
     finalizedAt: Date
     actor: ConsultActor
     faceColorProfile?: ConsultFaceColorProfile
+    analysisRevisionId?: string
+    suitability?: ConsultSuitabilityResult
   },
 ) {
   // Partial packs (Tori, 2026-08-27): between one and the full pack of
@@ -747,6 +750,7 @@ export async function finalizeLockedHairColorAnalysis(
   })
   const revision = await tx.consultRevision.create({
     data: {
+      ...(args.analysisRevisionId ? { id: args.analysisRevisionId } : {}),
       consultSessionId: args.consultSessionId,
       revision: sequenced.revisionSequence,
       kind: ConsultRevisionKind.ANALYSIS,
@@ -778,6 +782,21 @@ export async function finalizeLockedHairColorAnalysis(
         payload: toPrismaJson(args.faceColorProfile),
       },
     })
+  }
+  if (args.suitability) {
+    const { translation, model } = args.suitability
+    if (translation.analysisRevisionId !== revision.id) {
+      throw new ConsultWriteError('ANALYSIS_PREREQUISITES_REQUIRED', 'Suitability revision changed.')
+    }
+    await tx.consultSuitabilityTranslation.create({ data: {
+      consultSessionId: args.consultSessionId,
+      analysisRevisionId: revision.id,
+      clientRevisionId: translation.clientRevisionId,
+      schemaVersion: translation.schemaVersion,
+      promptVersion: translation.promptVersion,
+      model,
+      payload: toPrismaJson(translation),
+    } })
   }
   // ── P7a-3: what completion does to the photos ─────────────────────────────
   //

@@ -10,8 +10,8 @@ import { isRecord } from '@/lib/guards'
 import { CONSULT_ANALYSIS_CORE_FIELDS, CONSULT_FACE_COLOR_FIELDS, CONSULT_PROFILE_FIELDS, sanitizeConsultFaceColorResponse } from './analysisEngine'
 import { cleanText, enumValue, exactKeys, isSupportedConsultObservation, ConsultAnalysisProviderError } from './analysisValidation'
 
-// C2-2's independent contract. Not part of historical ANALYSIS/BRIEF JSON or
-// the published iOS DTOs. Provider/persistence/UI integration is a later slice.
+// C2-2's independent contract. The runtime persists it as a revision-bound
+// sibling, outside historical ANALYSIS/BRIEF JSON and published iOS DTOs.
 export const CONSULT_SUITABILITY_SCHEMA_VERSION = 1
 export const CONSULT_SUITABILITY_PROMPT_VERSION = 'suitability-translation-v1'
 export const CONSULT_SUITABILITY_MAX_TOKENS = 2400

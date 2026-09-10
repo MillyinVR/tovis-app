@@ -1,7 +1,8 @@
+import { optionalConsultSuitability, type ConsultSuitabilityProvider } from './suitabilityRuntime'
 import { loadConsultLookHistory, CONSULT_LOOK_COLOR_HISTORY_QUESTIONS } from './lookHistory'
 import 'server-only'
 
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import {
   ConsultActorType,
   ConsultAnalysisRunStage,
@@ -1535,7 +1536,9 @@ export async function executeConsultAnalysisRun(args: {
   provider?: ConsultAnalysisProvider
   inspirationStorage?: ConsultInspirationStorage
   inspirationProvider?: ConsultInspirationVisionProvider
+  suitabilityProvider?: ConsultSuitabilityProvider
 }): Promise<ConsultAnalysisRunOutcome> {
+  const startedAt = Date.now()
   const now = args.now ?? new Date()
   const claimed = await claimConsultAnalysisRun({ runId: args.runId, now })
   if (!claimed) return { result: 'NOT_CLAIMABLE', runId: args.runId }
@@ -1689,6 +1692,26 @@ export async function executeConsultAnalysisRun(args: {
       throw error
     }
 
+    // Reserve the analysis ID before the optional call so every citation names
+    // the exact revision created below. Nothing is persisted until revalidation.
+    const analysisRevisionId = randomUUID()
+    const suitability = await optionalConsultSuitability({
+      family: context.service.family,
+      startedAt,
+      input: {
+        analysisRevisionId,
+        clientRevisionId: context.inspiration.revisionId,
+        clientSource: 'INSPIRATION',
+        clientChoices: context.inspiration.exactClientDetails,
+        analysis: providerResult.analysis,
+        ...(providerResult.faceColorProfile ? { faceColor: {
+          analysisRevisionId, profile: providerResult.faceColorProfile,
+        } } : {}),
+      },
+      meter,
+      provider: args.suitabilityProvider,
+    })
+
     // ── Phase C: finalize, under the lock again ──────────────────────────
     await advanceConsultAnalysisRunStage({
       runId: claimed.id,
@@ -1805,6 +1828,7 @@ export async function executeConsultAnalysisRun(args: {
         const revision = await finalizeLockedHairColorAnalysis(tx, {
           consultSessionId: finalContext.session.id,
           payload,
+          ...(suitability ? { analysisRevisionId, suitability } : {}),
           model: providerResult.model,
           idempotencyKey: claimed.idempotencyKey,
           requestHash: claimed.requestHash,

@@ -1,3 +1,5 @@
+import { isRecord } from '@/lib/guards'
+import { toPrismaJson } from '@/lib/typed/prismaJson'
 import { loadLookBookingMaterialization } from '@/lib/consult/lookBookingMaterialization'
 import { consultLookServiceReadiness } from '@/lib/consult/lookConfirmation'
 import { authorProfessionalLookPlan } from '@/lib/consult/professionalLookPlan'
@@ -49,6 +51,12 @@ vi.hoisted(() => {
 })
 
 const mockRequireClient = vi.hoisted(() => vi.fn())
+const mockSuitability = vi.hoisted(() => vi.fn())
+vi.mock('@/lib/consult/suitabilityRuntime', async importOriginal => {
+  const original = await importOriginal<typeof import('@/lib/consult/suitabilityRuntime')>()
+  return { ...original, optionalConsultSuitability: (args: Parameters<typeof original.optionalConsultSuitability>[0]) =>
+    original.optionalConsultSuitability({ ...args, provider: mockSuitability }) }
+})
 
 vi.mock('@/app/api/_utils/auth/requireClient', () => ({
   requireClient: mockRequireClient,
@@ -168,6 +176,7 @@ beforeAll(async () => {
 
 beforeEach(() => {
   delete process.env.AI_CONSULT_FACE_COLOR_ENABLED
+  delete process.env.AI_CONSULT_SUITABILITY_ENABLED
   vi.clearAllMocks()
   resetConsultLookFakes()
   mockRequireClient.mockResolvedValue({
@@ -352,6 +361,107 @@ async function retakePhoto(
 }
 
 describe('a completed consult still takes input', () => {
+  const suitabilityReply = (context: import('@/lib/consult/suitabilityTranslation').ConsultSuitabilityContext) => {
+    const choice = context.sources.find(s => s.provenance === 'CLIENT_REPORTED' && (s.sentiment === 'LIKE' || s.sentiment === 'GOAL'))
+    if (!choice) throw new Error('Fixture needs a desired choice')
+    return { model: 'test-suitability-model', raw: {
+      tailoring: [{ clientExplanation: 'Discuss soft placement with your pro.', professionalDirection: 'Consider soft placement.', clientChoiceIds: [choice.id], observationIds: [] }],
+      proConfirmations: [{ clientExplanation: 'Your pro can check your starting color.', professionalCheck: 'Assess current tone in person.', sourceIds: [choice.id] }],
+    } }
+  }
+
+  it('C2-2 persists exact source revisions atomically and keeps historical wire payloads unchanged', async () => {
+    mockSuitability.mockImplementation(async ({ context }) => suitabilityReply(context))
+    process.env.AI_CONSULT_SUITABILITY_ENABLED = 'true'
+    const sessionId = await completedConsult('c2-suitability-persist')
+    const row = await db.consultSuitabilityTranslation.findFirstOrThrow({ where: { consultSessionId: sessionId } })
+    const analysis = await db.consultRevision.findUniqueOrThrow({ where: { id: row.analysisRevisionId } })
+    const clientRevision = await db.consultRevision.findUniqueOrThrow({ where: { id: row.clientRevisionId } })
+    expect(clientRevision.kind).toBe('INSPIRATION')
+    expect(clientRevision.consultSessionId).toBe(sessionId)
+    expect(clientRevision.revision).toBeLessThan(analysis.revision)
+    expect(row.payload).toMatchObject({ analysisRevisionId: analysis.id, clientRevisionId: clientRevision.id, requiresProfessionalReview: true })
+    expect(analysis.payload).not.toHaveProperty('suitability')
+    expect(row.model).toBe('test-suitability-model')
+    expect(mockSuitability).toHaveBeenCalledOnce()
+    await expect(db.consultSuitabilityTranslation.update({ where: { id: row.id }, data: { model: 'changed' } })).rejects.toThrow()
+    const duplicate = { consultSessionId: row.consultSessionId, analysisRevisionId: row.analysisRevisionId, clientRevisionId: row.clientRevisionId, schemaVersion: row.schemaVersion, promptVersion: row.promptVersion, model: row.model }
+    if (!isRecord(row.payload)) throw new Error('Expected object payload')
+    await expect(db.consultSuitabilityTranslation.create({ data: { ...duplicate, payload: toPrismaJson(row.payload) } })).rejects.toThrow()
+    const security = await db.$queryRaw<Array<{ enabled: boolean; policies: bigint }>>`
+      SELECT relrowsecurity AS enabled,
+        (SELECT count(*) FROM pg_policies WHERE tablename = 'ConsultSuitabilityTranslation') AS policies
+      FROM pg_class WHERE oid = 'public."ConsultSuitabilityTranslation"'::regclass`
+    expect(security).toEqual([{ enabled: true, policies: BigInt(0) }])
+    delete process.env.AI_CONSULT_SUITABILITY_ENABLED
+    await changeAnIntakeAnswer(sessionId, 'c2-suitability-off')
+    expect((await rerunNow(sessionId)).result).toBe('COMPLETED')
+    expect(await db.consultSuitabilityTranslation.count({ where: { consultSessionId: sessionId } })).toBe(1)
+    const current = await db.consultRevision.findFirstOrThrow({ where: { consultSessionId: sessionId, kind: 'ANALYSIS' }, orderBy: { revision: 'desc' } })
+    expect(current.id).not.toBe(row.analysisRevisionId)
+    expect(await db.consultSuitabilityTranslation.findUnique({ where: { analysisRevisionId: current.id } })).toBeNull()
+    for (const sources of [undefined, [], {}, [{ provenance: 'OBSERVED', revisionId: 'wrong-revision' }], [{ provenance: 'OBSERVED' }]]) {
+      const payload = { ...row.payload, analysisRevisionId: current.id,
+        tailoring: [{ clientExplanation: 'Discuss placement.', professionalDirection: 'Consider soft placement.',
+          ...(sources === undefined ? {} : { sources }) }] }
+      await expect(db.consultSuitabilityTranslation.create({ data: { ...duplicate,
+        analysisRevisionId: current.id, payload: toPrismaJson(payload) } })).rejects.toThrow(/suitability (guidance requires source citations|citation must pin its source revision)/)
+    }
+    const otherId = await completedConsult('c2-suitability-other')
+    const other = await db.consultRevision.findFirstOrThrow({ where: { consultSessionId: otherId, kind: 'ANALYSIS' } })
+    await expect(db.consultSuitabilityTranslation.create({ data: { ...duplicate, analysisRevisionId: other.id,
+      payload: toPrismaJson({ ...row.payload, analysisRevisionId: other.id }) } })).rejects.toThrow()
+  })
+
+  it('C2-2 failure preserves the consultation and writes no false successful translation', async () => {
+    process.env.AI_CONSULT_SUITABILITY_ENABLED = 'true'
+    mockSuitability.mockRejectedValue(new Error('provider unavailable'))
+    const sessionId = await completedConsult('c2-suitability-unavailable')
+    expect(mockSuitability).toHaveBeenCalledOnce()
+    expect(await db.consultSuitabilityTranslation.count({ where: { consultSessionId: sessionId } })).toBe(0)
+    expect(await db.consultRevision.count({ where: { consultSessionId: sessionId, kind: 'ANALYSIS' } })).toBe(1)
+  })
+
+  it('C2-2 publishes only the winning translation when a slow worker loses its lease', async () => {
+    const sessionId = await completedConsult('c2-suitability-lease')
+    await changeAnIntakeAnswer(sessionId, 'c2-suitability-lease')
+    const now = afterTheDebounce()
+    const started = await startConsultAnalysisRerun({ consultSessionId: sessionId, now })
+    if (!started.started) throw new Error('Expected queued rerun')
+    process.env.AI_CONSULT_SUITABILITY_ENABLED = 'true'
+    let calls = 0
+    mockSuitability.mockImplementation(async ({ context }) => {
+      calls++
+      if (calls === 1) {
+        // Advance the clock beyond the real lease while A is inside its call.
+        const winner = await executeConsultAnalysisRun({ runId: started.run.runId, now: new Date(now.getTime() + 421_000) })
+        expect(winner.result).toBe('COMPLETED')
+      }
+      return suitabilityReply(context)
+    })
+    const loser = await executeConsultAnalysisRun({ runId: started.run.runId, now })
+    expect(loser.result).not.toBe('COMPLETED')
+    expect(calls).toBe(2)
+    expect(await db.consultSuitabilityTranslation.count({ where: { consultSessionId: sessionId } })).toBe(1)
+    expect(await db.consultRevision.count({ where: { consultSessionId: sessionId, kind: 'ANALYSIS' } })).toBe(2)
+    expect((await db.consultAnalysisRun.findUniqueOrThrow({ where: { id: started.run.runId } })).status).toBe('COMPLETED')
+  })
+
+  it('C2-2 discards paid suitability output when client inputs change during that call', async () => {
+    const sessionId = await completedConsult('c2-suitability-race')
+    await changeAnIntakeAnswer(sessionId, 'c2-suitability-race-before')
+    process.env.AI_CONSULT_SUITABILITY_ENABLED = 'true'
+    mockSuitability.mockImplementation(async ({ context }) => {
+      await retakePhoto(sessionId, 'hair_back', 'c2-suitability-race-during')
+      return suitabilityReply(context)
+    })
+    const result = await rerunNow(sessionId)
+    expect(mockSuitability).toHaveBeenCalledOnce()
+    expect(result.result).not.toBe('COMPLETED')
+    expect(await db.consultSuitabilityTranslation.count({ where: { consultSessionId: sessionId } })).toBe(0)
+    expect(await db.consultRevision.count({ where: { consultSessionId: sessionId, kind: 'ANALYSIS' } })).toBe(1)
+  })
+
   it('C2-1 pins the Face & Color sibling to the exact completed analysis revision', async () => {
     process.env.AI_CONSULT_FACE_COLOR_ENABLED = 'true'
     const sessionId = await completedConsult('c2-face-color-persist')

@@ -1793,7 +1793,7 @@ function sanitizeAnalysis(
 
 let cachedClient: Anthropic | null = null
 
-function analysisModel(): string {
+export function analysisModel(): string {
   const model =
     readOptionalEnv('AI_CONSULT_ANALYSIS_MODEL') ?? CONSULT_ANALYSIS_DEFAULT_MODEL
   if (!isAllowedConsultProviderModel(model)) {
@@ -2045,21 +2045,27 @@ function consultAnalysisImageContent(
 }
 
 /** One structured-output request. Every provider failure is `unavailable`. */
-async function requestConsultAnalysisJson(args: {
+export async function requestConsultAnalysisJson(args: {
   model: string
   system: string
   content: Anthropic.ContentBlockParam[]
   schema: Record<string, unknown>
   maxTokens: number
   timeoutMs: number
-  /** P4b: which of the two analysis calls this is, and where its cost lands. */
+  /** Optional validation runs inside metering so rejected output is billed as BAD_OUTPUT. */
+  validate?: (raw: unknown) => void
+  /** Which analysis call this is, and where its cost lands. */
   kind: ConsultProviderCallKind
   meter?: ConsultProviderMeterSink | null
 }): Promise<unknown> {
   return meterConsultProviderCall(
     args.meter,
     { kind: args.kind, model: args.model },
-    (reportUsage) => requestConsultAnalysisJsonUnmetered(args, reportUsage),
+    async (reportUsage) => {
+      const raw = await requestConsultAnalysisJsonUnmetered(args, reportUsage)
+      args.validate?.(raw)
+      return raw
+    },
   )
 }
 
