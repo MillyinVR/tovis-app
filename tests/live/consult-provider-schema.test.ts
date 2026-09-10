@@ -48,7 +48,7 @@ import {
   CONSULT_INSPIRATION_ANALYSIS_SYSTEM_PROMPT,
   CONSULT_INSPIRATION_MAX_TOKENS,
   ConsultInspirationVisionError,
-  sanitizeConsultInspirationAnalysis,
+  sanitizeLocalizedInspirationAnalysis,
 } from '@/lib/consult/inspirationVision'
 import {
   buildConsultFollowUpOutputSchema,
@@ -387,7 +387,7 @@ describe('the consult schemas compile and answer against the live model', () => 
     // the sanitizer working, not failing — but it is the ONLY failure this
     // test tolerates, and it still proves the schema compiled and answered.
     try {
-      const analysis = sanitizeConsultInspirationAnalysis(raw)
+      const analysis = sanitizeLocalizedInspirationAnalysis(raw)
       expect(Object.keys(analysis)).toHaveLength(8)
       expect(analysis.baseLevel.value).toMatch(/^(LEVEL_(10|[1-9])|UNKNOWN)$/)
     } catch (error) {

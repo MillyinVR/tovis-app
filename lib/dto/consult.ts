@@ -433,6 +433,8 @@ export type ConsultInspirationCardDTO = {
   question: ConsultInspirationQuestionDTO
   /** What she has already chosen here — the thread's own history. */
   selectedValues: string[]
+  /** Optional client-authored response, preserved with the inspiration revision. */
+  selectedText?: string | null
 }
 
 export type ConsultInspirationSourceStateDTO = {
@@ -2543,4 +2545,19 @@ export type ConsultChartPhotoDTO = {
   url: string
   label: string
   recordedAt: string
+}
+
+/** Read-only stored history. No raw provider payloads or media locations. */
+export type ConsultProTranscriptEventDTO = {
+  id: string
+  createdAt: string
+  title: string
+  items: Array<{ label: string; value: string }>
+  unavailable: boolean
+}
+export type ConsultProTranscriptDTO = {
+  consultId: string
+  events: ConsultProTranscriptEventDTO[]
+  nextCursor: string | null
+  historyNote: string
 }

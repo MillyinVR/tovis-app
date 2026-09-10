@@ -197,6 +197,7 @@ export function composeConsultInspirationUnderstanding(args: {
   reading: ConsultInspirationCardReading | null
   copy: BrandClientConsultInspirationCopy
   professionalDisplayName: string
+  clientWords?: readonly string[]
 }): string {
   const { cards } = args.copy
   const clauses: string[] = []
@@ -258,11 +259,15 @@ export function composeConsultInspirationUnderstanding(args: {
   const close = cards.understandingClose
     .split('{pro}')
     .join(args.professionalDisplayName)
-  if (clauses.length === 0) {
+  const clientWords = args.clientWords?.length
+    ? args.copy.clientResponse.summary.replace('{words}', args.clientWords.join('; '))
+    : null
+  if (clauses.length === 0 && !clientWords) {
     return cards.understandingFallback.split('{pro}').join(args.professionalDisplayName)
   }
   return [
-    `${cards.understandingLead} ${joinClauses(clauses, cards.understandingConjunction)}.`,
+    clauses.length ? `${cards.understandingLead} ${joinClauses(clauses, cards.understandingConjunction)}.` : null,
+    clientWords,
     observation,
     close,
   ].filter(Boolean).join(' ')
@@ -282,6 +287,7 @@ export function buildConsultInspirationCard(args: {
   reading: ConsultInspirationCardReading | null
   copy: BrandClientConsultInspirationCopy
   professionalDisplayName: string
+  clientWords?: readonly string[]
   answers: Readonly<Record<string, readonly string[]>>
 }): ConsultInspirationCardDTO | null {
   const { reading, copy } = args
@@ -397,6 +403,7 @@ export function buildConsultInspirationCard(args: {
           reading,
           copy,
           professionalDisplayName: args.professionalDisplayName,
+          clientWords: args.clientWords,
         })
       : null
 
@@ -445,6 +452,7 @@ export function buildConsultInspirationCards(args: {
   reading: ConsultInspirationCardReading | null
   copy: BrandClientConsultInspirationCopy
   professionalDisplayName: string
+  clientWords?: readonly string[]
   answers: Readonly<Record<string, readonly string[]>>
 }): ConsultInspirationCardSet {
   const cards: ConsultInspirationCardSet = { coarse: [], prep: [] }

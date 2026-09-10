@@ -10479,6 +10479,13 @@
           ],
           "description": "The crop for the card. Null means show the whole reference."
         },
+        "selectedText": {
+          "description": "Optional client-authored response, preserved with the inspiration revision.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "selectedValues": {
           "description": "What she has already chosen here — the thread's own history.",
           "items": {

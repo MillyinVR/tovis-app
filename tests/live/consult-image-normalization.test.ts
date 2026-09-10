@@ -41,7 +41,7 @@ import {
   CONSULT_INSPIRATION_ANALYSIS_SYSTEM_PROMPT,
   CONSULT_INSPIRATION_MAX_TOKENS,
   ConsultInspirationVisionError,
-  sanitizeConsultInspirationAnalysis,
+  sanitizeLocalizedInspirationAnalysis,
 } from '@/lib/consult/inspirationVision'
 import { toProviderOutputSchema } from '@/lib/consult/providerSchema'
 import type { NormalizedImage } from '@/lib/media/normalizeImage'
@@ -230,7 +230,7 @@ describe('an oversized image through every consult entry path', () => {
       // what `send` already asserts: the point of this test is that an image
       // that used to be refused before inference now reaches the model.
       try {
-        const analysis = sanitizeConsultInspirationAnalysis(raw)
+        const analysis = sanitizeLocalizedInspirationAnalysis(raw)
         expect(Object.keys(analysis)).toHaveLength(8)
       } catch (error) {
         expect(error).toBeInstanceOf(ConsultInspirationVisionError)

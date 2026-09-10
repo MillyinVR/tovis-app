@@ -62,11 +62,9 @@ export const CONSULT_INSPIRATION_ANALYSIS_SCHEMA_VERSION = 3
 // review revision to pin to, and pinning to one made the analysis pay to read
 // the same photograph a second time.
 //
-// 🔴 The PROMPT version is deliberately unchanged: v3 sends byte-identical
-// system text, schema and image to the model, so a v2 reading and a v3 reading
-// of the same photograph are the same reading. Bumping it would have
-// invalidated nothing and re-billed everything.
-export const CONSULT_INSPIRATION_ANALYSIS_PROMPT_VERSION = 'inspiration-hair-color-v2'
+// Prompt v3 locates the hair/head before reading attributes. Older cached
+// readings must be refreshed because they did not validate crop localization.
+export const CONSULT_INSPIRATION_ANALYSIS_PROMPT_VERSION = 'inspiration-hair-color-v3'
 
 const DEFAULT_MODEL = 'claude-sonnet-5'
 /**
@@ -292,13 +290,13 @@ function observationSchema(values: readonly string[]) {
 export const CONSULT_INSPIRATION_ANALYSIS_OUTPUT_SCHEMA: Record<string, unknown> = {
   type: 'object',
   additionalProperties: false,
-  required: [...CONSULT_INSPIRATION_ANALYSIS_FIELDS],
-  properties: Object.fromEntries(
+  required: ['hairRegion', ...CONSULT_INSPIRATION_ANALYSIS_FIELDS],
+  properties: { hairRegion: REGION_REF, ...Object.fromEntries(
     CONSULT_INSPIRATION_ANALYSIS_FIELDS.map((field) => [
       field,
       observationSchema(CONSULT_INSPIRATION_FIELD_VALUES[field]),
     ]),
-  ),
+  ) },
   $defs: {
     confidence: CONFIDENCE_SCHEMA,
     evidence: EVIDENCE_SCHEMA,
@@ -309,6 +307,9 @@ export const CONSULT_INSPIRATION_ANALYSIS_OUTPUT_SCHEMA: Record<string, unknown>
 export const CONSULT_INSPIRATION_ANALYSIS_SYSTEM_PROMPT = [
   'You are a salon colourist reading ONE inspiration photograph for a beauty consultation.',
   'Your only job is to describe the HAIR COLOUR in the picture, as a colourist would write it on a service ticket.',
+  'First localize the intended head and its visible hair. Use the face or head silhouette only as a spatial anchor, never as a source of personal traits. In a mirror selfie, use the reflected head and hair in the displayed image coordinates; do not flip or invert coordinates. A phone may cover the face.',
+  'Return hairRegion as a tight normalized x,y,w,h box containing the visible hair of that one subject. Clothing, sweatpants, sleeves, skin, phone, mirror frame and background are NEVER hair color evidence, even if their color is similar. A tight hair-only reference is valid; a visible face is not required. If you cannot confidently locate the visible hair of one intended subject, hairRegion must be null and every attribute UNKNOWN.',
+  'Every non-null attribute region must lie entirely inside hairRegion and visibly show HAIR for that attribute. Do not center a crop on clothing or copy colors from garments. Check every crop against the head/hair location before returning it.',
   'Never describe, infer, or mention anything about the person in the photograph: no identity, ethnicity, race, nationality, religion, gender, age, health, face, skin, or body. If the picture contains a person, read their hair and nothing else.',
   'Answer only with the structured fields you are given. There is no free-text field and you must not attempt to add one.',
   'Every field is an observation with four parts: value, a confidence range, an evidence list, and a region.',
@@ -452,6 +453,26 @@ function observation<const T extends readonly string[]>(
  * network and must run its payload through THE policy, not a second copy of
  * it — the same reason `sanitizeConsultCaptureQuality` is exported.
  */
+/** Provider localization is checked before retaining any attribute crop.
+ * The stored attribute schema stays unchanged; promptVersion marks this check.
+ * Containment validates geometry, not the semantic accuracy of model localization.
+ */
+export function sanitizeLocalizedInspirationAnalysis(raw: unknown): ConsultInspirationAnalysis {
+  if (!isRecord(raw) || !Object.hasOwn(raw, 'hairRegion')) throw new ConsultInspirationVisionError('bad_output')
+  const { hairRegion, ...attributes } = raw
+  const hair = region(hairRegion)
+  if (!hair) throw new ConsultInspirationVisionError('unreadable')
+  const analysis = sanitizeConsultInspirationAnalysis(attributes)
+  for (const field of CONSULT_INSPIRATION_ANALYSIS_FIELDS) {
+    const box = analysis[field].region
+    if (box && (box.x < hair.x - ROUNDING_TOLERANCE || box.y < hair.y - ROUNDING_TOLERANCE ||
+      box.x + box.w > hair.x + hair.w + ROUNDING_TOLERANCE || box.y + box.h > hair.y + hair.h + ROUNDING_TOLERANCE)) {
+      throw new ConsultInspirationVisionError('bad_output')
+    }
+  }
+  return analysis
+}
+
 export function sanitizeConsultInspirationAnalysis(
   raw: unknown,
 ): ConsultInspirationAnalysis {
@@ -609,7 +630,7 @@ export const runConsultInspirationVision: ConsultInspirationVisionProvider =
     if (!text) throw new ConsultInspirationVisionError('bad_output')
 
     try {
-      return { analysis: sanitizeConsultInspirationAnalysis(JSON.parse(text)), model }
+      return { analysis: sanitizeLocalizedInspirationAnalysis(JSON.parse(text)), model }
     } catch (error) {
       if (error instanceof ConsultInspirationVisionError) throw error
       throw new ConsultInspirationVisionError('bad_output')

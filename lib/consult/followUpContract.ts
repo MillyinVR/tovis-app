@@ -148,7 +148,7 @@ export type ConsultFollowUpState = {
  * dropped rather than thrown on: a follow-up round is an ADDITION to the
  * thread, and one unreadable round must not take the consult down with it.
  */
-function readStoredQuestions(payload: Prisma.JsonValue): ConsultFollowUpQuestion[] {
+export function readStoredQuestions(payload: Prisma.JsonValue): ConsultFollowUpQuestion[] {
   if (!Array.isArray(payload)) return []
   const questions: ConsultFollowUpQuestion[] = []
   for (const raw of payload) {
@@ -179,7 +179,7 @@ function readStoredQuestions(payload: Prisma.JsonValue): ConsultFollowUpQuestion
   return questions
 }
 
-function readStoredAnswers(
+export function readStoredAnswers(
   payload: Prisma.JsonValue,
 ): Record<string, string[]> {
   if (!isRecord(payload)) return {}

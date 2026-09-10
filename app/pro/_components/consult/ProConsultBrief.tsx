@@ -1,3 +1,4 @@
+import ConsultTranscript from './ConsultTranscript'
 import ProConsultSuitability from './ProConsultSuitability'
 import { consultProProfileLabels as PROFILE_LABELS } from '@/lib/brand/consultProProfileCopy'
 import ConsultLookBriefPhotos from './ConsultLookBriefPhotos'
@@ -273,6 +274,7 @@ export default function ProConsultBrief({
       ) : null}
 
       <PlanVersionBanner brief={brief} />
+      <ConsultTranscript key={brief.consultId} consultId={brief.consultId} timeZone={timeZone} />
       {brief.inspiration.exactClientDetails.length > 0 && <section aria-label="What the client likes and wants to avoid" className="grid gap-2">
         <h3 className="text-sm font-bold text-textPrimary">What matters in the inspiration</h3>
         <p className="text-xs text-textSecondary">{brief.inspiration.referenceNote}</p>
