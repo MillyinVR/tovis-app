@@ -1,5 +1,8 @@
 'use client'
 
+import ClientConsultSuitability from '@/app/_components/consult/ClientConsultSuitability'
+import { useBrand } from '@/lib/brand/BrandProvider'
+
 // The client consult, as a THREAD (P5a — "the consult is a chat", handoff
 // Part 2). It replaces the four-step wizard this file used to be.
 //
@@ -1633,6 +1636,7 @@ function PlanSummary({
   busy: boolean
   onChooseLook: ChooseConsultLook
 }) {
+  const { brand } = useBrand()
   return (
     <div className="grid gap-2">
       {results.lookPlan ? <ConsultLookPlanCard consultId={results.consultId} plan={results.lookPlan} brief={results.lookBrief} busy={busy} onChoose={onChooseLook} /> : <>
@@ -1647,6 +1651,7 @@ function PlanSummary({
         ))}
       </ul>
       </>}
+      <ClientConsultSuitability suitability={results.suitability} analysisRevisionId={results.analysisRevisionId} copy={brand.clientConsultResults.suitability} />
       <ConsultProfileDetails results={results} />
     </div>
   )

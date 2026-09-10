@@ -1,3 +1,4 @@
+import { loadAuthorizedClientConsultResults } from '@/lib/consult/clientResults'
 import { isRecord } from '@/lib/guards'
 import { toPrismaJson } from '@/lib/typed/prismaJson'
 import { loadLookBookingMaterialization } from '@/lib/consult/lookBookingMaterialization'
@@ -384,6 +385,15 @@ describe('a completed consult still takes input', () => {
     expect(analysis.payload).not.toHaveProperty('suitability')
     expect(row.model).toBe('test-suitability-model')
     expect(mockSuitability).toHaveBeenCalledOnce()
+    const clientResult = await loadAuthorizedClientConsultResults({ consultSessionId: sessionId, clientId: fx.clientId, actorUserId: fx.clientUserId })
+    const proResult = (await loadAuthorizedProConsultBriefs({ professionalId: fx.professionalId, clientId: fx.clientId })).find(item => item.consultId === sessionId)
+    expect(clientResult.suitability).toMatchObject({ analysisRevisionId: row.analysisRevisionId, clientRevisionId: row.clientRevisionId })
+    expect(clientResult.suitability?.tailoring[0]?.explanation).toBe('Discuss soft placement with your pro.')
+    expect(proResult?.suitability?.tailoring[0]?.direction).toBe('Consider soft placement.')
+    expect(proResult?.suitability?.tailoring[0]?.sources[0]?.provenance).toBe('CLIENT_REPORTED')
+    expect(JSON.stringify(clientResult.suitability)).not.toContain('sources')
+    await expect(loadAuthorizedClientConsultResults({ consultSessionId: sessionId, clientId: 'other-client', actorUserId: 'other-user' })).rejects.toThrow()
+
     await expect(db.consultSuitabilityTranslation.update({ where: { id: row.id }, data: { model: 'changed' } })).rejects.toThrow()
     const duplicate = { consultSessionId: row.consultSessionId, analysisRevisionId: row.analysisRevisionId, clientRevisionId: row.clientRevisionId, schemaVersion: row.schemaVersion, promptVersion: row.promptVersion, model: row.model }
     if (!isRecord(row.payload)) throw new Error('Expected object payload')
@@ -407,6 +417,8 @@ describe('a completed consult still takes input', () => {
       await expect(db.consultSuitabilityTranslation.create({ data: { ...duplicate,
         analysisRevisionId: current.id, payload: toPrismaJson(payload) } })).rejects.toThrow(/suitability (guidance requires source citations|citation must pin its source revision)/)
     }
+    const currentClientResult = await loadAuthorizedClientConsultResults({ consultSessionId: sessionId, clientId: fx.clientId, actorUserId: fx.clientUserId })
+    expect(currentClientResult.suitability).toBeUndefined()
     const otherId = await completedConsult('c2-suitability-other')
     const other = await db.consultRevision.findFirstOrThrow({ where: { consultSessionId: otherId, kind: 'ANALYSIS' } })
     await expect(db.consultSuitabilityTranslation.create({ data: { ...duplicate, analysisRevisionId: other.id,

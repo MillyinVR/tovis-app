@@ -1766,7 +1766,33 @@ export type ConsultMentorDTO = {
   sections: Array<{ id: number; title: string; items: Array<{ text: string; sourceId: string }> }>
 }
 
+/** Optional C2-2 role projections. Historical result payloads are unchanged. */
+export type ConsultSuitabilityEvidenceDTO = {
+  label: string
+  value: string
+  provenance: 'CLIENT_REPORTED' | 'OBSERVED'
+  revisionId: string
+  confidence?: ConsultAnalysisConfidenceDTO
+  evidence?: string[]
+}
+export type ConsultClientSuitabilityDTO = {
+  analysisRevisionId: string
+  clientRevisionId: string
+  whatYouLoved: string[]
+  tailoring: Array<{ explanation: string; needsConfirmation: boolean }>
+  proConfirmations: string[]
+}
+export type ConsultProSuitabilityDTO = {
+  analysisRevisionId: string
+  clientRevisionId: string
+  whatYouLoved: string[]
+  tailoring: Array<{ direction: string; needsConfirmation: boolean; sources: ConsultSuitabilityEvidenceDTO[] }>
+  proConfirmations: Array<{ check: string; sources: ConsultSuitabilityEvidenceDTO[] }>
+}
+
 export type ConsultProBriefDTO = {
+  suitability?: ConsultProSuitabilityDTO
+
   mentor?: ConsultMentorDTO
 
   lookBrief?: ConsultLookBriefVersionDTO
@@ -1859,6 +1885,8 @@ export type ConsultResultsPhotoLightDTO = {
 }
 
 export type ConsultClientResultsDTO = {
+  suitability?: ConsultClientSuitabilityDTO
+
   lookBrief?: ConsultLookBriefVersionDTO
   lookPlan?: ConsultLookPlanDTO
   consultId: string
