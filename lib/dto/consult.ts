@@ -2546,3 +2546,18 @@ export type ConsultChartPhotoDTO = {
   label: string
   recordedAt: string
 }
+
+/** Read-only stored history. No raw provider payloads or media locations. */
+export type ConsultProTranscriptEventDTO = {
+  id: string
+  createdAt: string
+  title: string
+  items: Array<{ label: string; value: string }>
+  unavailable: boolean
+}
+export type ConsultProTranscriptDTO = {
+  consultId: string
+  events: ConsultProTranscriptEventDTO[]
+  nextCursor: string | null
+  historyNote: string
+}

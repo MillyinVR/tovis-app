@@ -44,8 +44,8 @@ it('can replace an answered reference and cancel without changing its saved sour
   vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })))
   const NativeURL = URL
   class LocalURL extends NativeURL {
-    static createObjectURL = vi.fn(() => 'blob:replacement')
-    static revokeObjectURL = vi.fn()
+    static override createObjectURL = vi.fn(() => 'blob:replacement')
+    static override revokeObjectURL = vi.fn()
   }
   vi.stubGlobal('URL', LocalURL)
   const thread = threadFixture({ inspiration: cardInspiration })

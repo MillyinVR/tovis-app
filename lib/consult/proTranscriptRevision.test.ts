@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { projectTranscriptInspiration } from './proTranscriptInspiration'
 import { projectProTranscriptRevisions } from './proTranscriptRevision'
 import { HAIR_GENERAL_INTAKE_PACK_V1 } from './intake/packs/hairGeneral'
 import { buildExactClientDetails, buildPossibleProfessionalInterpretation } from './inspirationPack'
@@ -79,4 +80,15 @@ describe('professional transcript revision foundation', () => {
   it('returns an empty history for a session with no stored revisions', () => {
     expect(projectProTranscriptRevisions('consult-1', [])).toEqual([])
   })
+})
+
+it('keeps neutral reference answers in history even though they are omitted from the brief', () => {
+  const answers = [{ questionKey: 'favorite_colors' as const, selectedValues: ['not-sure'], text: null, sentiment: null }]
+  const payload = { contractId: 'hair-color-guided-inspiration', contractVersion: 1, schemaVersion: 1,
+    source: 'EXTERNAL_UPLOAD', inspirationId: 'private-media', complete: false, answers,
+    exactClientDetails: buildExactClientDetails(answers), possibleProfessionalInterpretation: [], catalogGuidance: [] }
+  const items = projectTranscriptInspiration(payload)
+  expect(items).toHaveLength(1)
+  expect(items[0]?.value).toBe('Not sure')
+  expect(JSON.stringify(items)).not.toContain('private-media')
 })
