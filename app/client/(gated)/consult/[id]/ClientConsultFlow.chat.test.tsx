@@ -9,7 +9,7 @@ import ClientConsultFlow from './ClientConsultFlow'
 
 afterEach(() => vi.unstubAllGlobals())
 
-it('shows one current question, saves a typed correction, and retains it as chat history', async () => {
+it('saves a typed correction and retains it as chat history, with later steps still on screen', async () => {
   vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })))
   const original = cardInspiration.cards!.find(card => card.questionKey === 'attr_tone')!
   const card = { ...original, selectedValues: [], selectedText: null, question: { ...original.question, allowText: true } }
@@ -30,8 +30,8 @@ it('shows one current question, saves a typed correction, and retains it as chat
   }))
   render(<BrandProvider><ClientConsultFlow consultId={thread.consultId} copy={defaultClientConsultThreadCopy} /></BrandProvider>)
   const input = await screen.findByRole('textbox', { name: 'Say it in your own words' })
-  expect(screen.queryByText('Now a few of you, in daylight if you can.')).not.toBeInTheDocument()
-  expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+  // Later steps stay on the page, locked — the thread is not a wizard (P5a).
+  expect(screen.getByText('Now a few of you, in daylight if you can.')).toBeInTheDocument()
   fireEvent.change(input, { target: { value: 'The hair is warmer; that is her clothing.' } })
   fireEvent.click(screen.getByRole('button', { name: /^Next$/ }))
   await waitFor(() => expect(saved).toMatchObject({ selectedValues: [], text: 'The hair is warmer; that is her clothing.' }))
