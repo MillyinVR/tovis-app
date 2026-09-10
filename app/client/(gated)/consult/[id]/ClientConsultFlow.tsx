@@ -2,7 +2,6 @@
 
 import ConsultInspirationFocus from '@/app/_components/consult/ConsultInspirationFocus'
 import type { CropRect } from '@/lib/media/cropRect'
-import { visibleConsultThreadMessages } from '@/lib/consult/visibleThread'
 import { CONSULT_INSPIRATION_CLIENT_TEXT_LIMIT } from '@/lib/consult/inspiration/clientText'
 import ClientConsultSuitability from '@/app/_components/consult/ClientConsultSuitability'
 import { useBrand } from '@/lib/brand/BrandProvider'
@@ -830,20 +829,17 @@ export default function ClientConsultFlow({
     )
   }
 
-  const visibleMessages = visibleConsultThreadMessages(thread)
-  const photosReached = visibleMessages.some(message => message.kind === 'PHOTO_REQUEST')
-
   return (
     <ConsultInputState.Provider value={{ editing: editing && Boolean(thread.controls?.canEditAnswers), inputsOpen: thread.controls?.inputsOpen !== false }}>
     <ThreadShell
       openMessageId={thread.nextOpenMessageId}
-      footer={photosReached || thread.book.enabled ?
+      footer={
         <BookTheLookCta
           thread={thread}
           copy={copy}
           busy={busy}
           onBook={() => router.push(bookTheLookHref(thread))}
-        /> : null
+        />
       }
     >
       <ErrorNote message={error} />
@@ -882,7 +878,7 @@ export default function ClientConsultFlow({
           </div>
         </div>
       ) : null}
-      {visibleMessages.map((message) => (
+      {thread.messages.map((message) => (
         <ThreadMessageSlot key={message.id} id={message.id}>
           <ConsultThreadMessage
             message={message}
@@ -910,14 +906,14 @@ export default function ClientConsultFlow({
           />
         </ThreadMessageSlot>
       ))}
-      {photosReached ? <CapturePrepControls
+      <CapturePrepControls
         thread={thread}
         busy={busy}
         copy={copy}
         pro={thread.professionalDisplayName}
         onChartCopy={setChartCopy}
         onProceed={proceedWithAccepted}
-      /> : null}
+      />
     </ThreadShell>
     </ConsultInputState.Provider>
   )
