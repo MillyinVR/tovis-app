@@ -1176,8 +1176,10 @@ export type BrandConsultFocusCopy = {
 }
 
 export type BrandClientConsultInspirationCopy = {
-  focus?: BrandConsultFocusCopy
-  clientResponse?: { label: string; placeholder: string; summary?: string }
+  /** Choosing the person/area of a reference photo before any pixels upload. */
+  focus: BrandConsultFocusCopy
+  /** The optional "in your own words" note on a v2 inspiration question. */
+  clientResponse: { label: string; placeholder: string; summary: string }
   /** What a reference picture is for, shown before she is asked for one. */
   introduction: string
   /** 🔴 That it is a reference and not a promise. Shown with the picture. */

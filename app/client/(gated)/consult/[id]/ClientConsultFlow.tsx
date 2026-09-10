@@ -4,7 +4,6 @@ import ConsultInspirationFocus from '@/app/_components/consult/ConsultInspiratio
 import type { CropRect } from '@/lib/media/cropRect'
 import { visibleConsultThreadMessages } from '@/lib/consult/visibleThread'
 import { CONSULT_INSPIRATION_CLIENT_TEXT_LIMIT } from '@/lib/consult/inspiration/clientText'
-import { defaultClientConsultInspirationCopy } from '@/lib/brand/defaultClientConsultInspirationCopy'
 import ClientConsultSuitability from '@/app/_components/consult/ClientConsultSuitability'
 import { useBrand } from '@/lib/brand/BrandProvider'
 
@@ -1300,7 +1299,7 @@ function InspirationMessage({
 }) {
   const [pending, setPending] = useState<{ file: File; url: string } | null>(null)
   const { brand } = useBrand()
-  const focusCopy = brand.clientConsultInspiration.focus ?? defaultClientConsultInspirationCopy.focus!
+  const focusCopy = brand.clientConsultInspiration.focus
   useEffect(() => () => { if (pending) URL.revokeObjectURL(pending.url) }, [pending])
   const done = message.state === 'DONE'
   // Bound once rather than re-narrowed at each use: the retry handler needs the
@@ -2814,7 +2813,7 @@ function InspirationQuestionForm({
 
 function ClientWordsInput({ text, onChange, busy }: { text: string; onChange: (text: string) => void; busy: boolean }) {
   const { brand } = useBrand()
-  const copy = brand.clientConsultInspiration.clientResponse ?? defaultClientConsultInspirationCopy.clientResponse!
+  const copy = brand.clientConsultInspiration.clientResponse
   return <label className="grid gap-2 text-sm text-textSecondary">
     {copy.label}
     <textarea value={text} onChange={event => onChange(event.target.value)} disabled={busy}

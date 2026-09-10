@@ -898,6 +898,8 @@ async function buildState(
       : null
   const answers = activeReview?.answers ?? []
   const answersByKey = answerMap(answers)
+  // Her own words on any answered question, in question order — never a model observation.
+  const clientWords = answers.flatMap((answer) => (answer.text ? [answer.text] : []))
   // The understanding check's text is composed per client from her own taps
   // and what the photograph did not settle, so it has to be built before the
   // progress that serves it as the current question.
@@ -908,7 +910,7 @@ async function buildState(
         reading,
         copy,
         professionalDisplayName: ctx.professionalDisplayName,
-        clientWords: answers.flatMap(answer => answer.text ? [answer.text] : []),
+        clientWords,
       })
     : null
   const progress = pack
@@ -920,7 +922,7 @@ async function buildState(
         reading,
         copy,
         professionalDisplayName: ctx.professionalDisplayName,
-        clientWords: answers.flatMap(answer => answer.text ? [answer.text] : []),
+        clientWords,
         answers: answersByKey,
       })
     : { coarse: [], prep: [] }

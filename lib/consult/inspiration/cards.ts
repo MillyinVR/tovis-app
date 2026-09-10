@@ -1,4 +1,3 @@
-import { defaultClientConsultInspirationCopy } from '@/lib/brand/defaultClientConsultInspirationCopy'
 // lib/consult/inspiration/cards.ts
 //
 // P5d — turning ONE reading of ONE photograph into the cards a client taps.
@@ -260,7 +259,9 @@ export function composeConsultInspirationUnderstanding(args: {
   const close = cards.understandingClose
     .split('{pro}')
     .join(args.professionalDisplayName)
-  const clientWords = args.clientWords?.length ? (args.copy.clientResponse?.summary ?? defaultClientConsultInspirationCopy.clientResponse!.summary!).replace('{words}', args.clientWords.join('; ')) : null
+  const clientWords = args.clientWords?.length
+    ? args.copy.clientResponse.summary.replace('{words}', args.clientWords.join('; '))
+    : null
   if (clauses.length === 0 && !clientWords) {
     return cards.understandingFallback.split('{pro}').join(args.professionalDisplayName)
   }

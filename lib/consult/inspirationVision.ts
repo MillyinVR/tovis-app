@@ -459,9 +459,9 @@ function observation<const T extends readonly string[]>(
  */
 export function sanitizeLocalizedInspirationAnalysis(raw: unknown): ConsultInspirationAnalysis {
   if (!isRecord(raw) || !Object.hasOwn(raw, 'hairRegion')) throw new ConsultInspirationVisionError('bad_output')
-  const hair = region(raw.hairRegion)
+  const { hairRegion, ...attributes } = raw
+  const hair = region(hairRegion)
   if (!hair) throw new ConsultInspirationVisionError('unreadable')
-  const { hairRegion: _hairRegion, ...attributes } = raw
   const analysis = sanitizeConsultInspirationAnalysis(attributes)
   for (const field of CONSULT_INSPIRATION_ANALYSIS_FIELDS) {
     const box = analysis[field].region
