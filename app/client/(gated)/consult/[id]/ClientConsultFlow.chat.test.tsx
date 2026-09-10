@@ -39,3 +39,30 @@ it('shows one current question, saves a typed correction, and retains it as chat
   expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
   expect(screen.getByText('Now a few of you, in daylight if you can.')).toBeInTheDocument()
 })
+
+it('can replace an answered reference and cancel without changing its saved source', async () => {
+  vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })))
+  const NativeURL = URL
+  class LocalURL extends NativeURL {
+    static createObjectURL = vi.fn(() => 'blob:replacement')
+    static revokeObjectURL = vi.fn()
+  }
+  vi.stubGlobal('URL', LocalURL)
+  const thread = threadFixture({ inspiration: cardInspiration })
+  const writes: string[] = []
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (init?.method === 'POST' || init?.method === 'PUT') writes.push(url)
+    if (url.endsWith('/thread')) return new Response(JSON.stringify({ ok: true, thread }), { headers: { 'content-type': 'application/json' } })
+    return new Response('{}', { status: 404 })
+  }))
+  render(<BrandProvider><ClientConsultFlow consultId={thread.consultId} copy={defaultClientConsultThreadCopy} /></BrandProvider>)
+  const input = await screen.findByLabelText('Change reference photo')
+  fireEvent.change(input, { target: { files: [new File(['local'], 'reference.jpg', { type: 'image/jpeg' })] } })
+  expect(await screen.findByText('Whose look should we focus on?')).toBeInTheDocument()
+  expect(writes).toEqual([])
+  fireEvent.click(screen.getByRole('button', { name: 'Choose another photo' }))
+  expect(screen.getByLabelText('Change reference photo')).toBeInTheDocument()
+  expect(writes).toEqual([])
+  expect(LocalURL.revokeObjectURL).toHaveBeenCalledWith('blob:replacement')
+})

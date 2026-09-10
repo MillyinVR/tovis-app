@@ -1171,7 +1171,7 @@ export type BrandClientConsultStartingPointCopy = {
  */
 export type BrandConsultFocusCopy = {
   title: string; instruction: string; center: string; confirm: string; cancel: string
-  preview: string; photo: string; left: string; right: string; top: string; bottom: string
+  addPhoto: string; replace: string; preview: string; photo: string; left: string; right: string; top: string; bottom: string
   loadError: string; closer: string
 }
 

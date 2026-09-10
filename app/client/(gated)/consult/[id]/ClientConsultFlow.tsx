@@ -1250,6 +1250,20 @@ function QuestionMessage({
  * of what you like?"). The card is what is being fixed in place here, not the
  * wording inside it.
  */
+function InspirationFileChoice({ label, busy, onChoose }: {
+  label: string; busy: boolean; onChoose: (file: File) => void
+}) {
+  return <label className={`inline-block cursor-pointer ${BUTTON_SECONDARY}`}>
+    {label}
+    <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" disabled={busy}
+      onChange={(event) => {
+        const file = event.target.files?.[0]
+        if (file) onChoose(file)
+        event.target.value = ''
+      }} />
+  </label>
+}
+
 function InspirationMessage({
   message,
   busy,
@@ -1299,28 +1313,24 @@ function InspirationMessage({
       {message.text ? (
         <ThreadBubble author="APP">{message.text}</ThreadBubble>
       ) : null}
-      {done ? null : (
+      {pending ? (
         <ThreadCard>
-          {message.sourceDecisionRequired && pending ? (
-            <ConsultInspirationFocus key={pending.url} src={pending.url} copy={focusCopy}
-              busy={busy} onCancel={() => setPending(null)}
-              onConfirm={(crop) => onUpload(message, pending.file, crop)} />
-          ) : message.sourceDecisionRequired ? (
+          <ConsultInspirationFocus key={pending.url} src={pending.url} copy={focusCopy}
+            busy={busy} onCancel={() => setPending(null)}
+            onConfirm={(crop) => onUpload(message, pending.file, crop)} />
+        </ThreadCard>
+      ) : source ? (
+        <div className="justify-self-start">
+          <InspirationFileChoice label={focusCopy.replace} busy={busy}
+            onChoose={(file) => setPending({ file, url: URL.createObjectURL(file) })} />
+        </div>
+      ) : null}
+      {done || pending ? null : (
+        <ThreadCard>
+          {message.sourceDecisionRequired ? (
             <div className="grid gap-3">
-              <label className={`inline-block cursor-pointer ${BUTTON_PRIMARY}`}>
-                Add a photo
-                <input
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                  className="hidden"
-                  disabled={busy}
-                  onChange={(event) => {
-                    const file = event.target.files?.[0]
-                    if (file) setPending({ file, url: URL.createObjectURL(file) })
-                    event.target.value = ''
-                  }}
-                />
-              </label>
+              <InspirationFileChoice label={focusCopy.addPhoto} busy={busy}
+                onChoose={(file) => setPending({ file, url: URL.createObjectURL(file) })} />
               <button
                 type="button"
                 className={`${BUTTON_SECONDARY} justify-self-start`}

@@ -22,7 +22,7 @@ export const defaultClientConsultInspirationCopy: BrandClientConsultInspirationC
       title: 'Whose look should we focus on?',
       instruction: 'Tap the person, then adjust the box around the hair or feature you want to discuss. Leave out other people and unrelated details.',
       center: 'Start with the person in the center', confirm: 'Use this area', cancel: 'Choose another photo',
-      preview: 'This is the area we will use', photo: 'Choose the person in your inspiration photo',
+      addPhoto: 'Add a reference photo', replace: 'Change reference photo', preview: 'This is the area we will use', photo: 'Choose the person in your inspiration photo',
       left: 'Left edge', right: 'Right edge', top: 'Top edge', bottom: 'Bottom edge',
       loadError: 'That photo could not be opened. Choose another photo.',
       closer: 'If you cannot isolate the look clearly, choose a closer photo.',
