@@ -74,11 +74,10 @@ import type {
   ConsultFollowUpVocabularyEntry,
 } from '@/lib/consult/followUpVocabulary'
 import { toProviderOutputSchema } from '@/lib/consult/providerSchema'
+import { runConsultSuitability } from '@/lib/consult/suitabilityRuntime'
 import { syntheticSuitabilityInput } from '@/tests/fixtures/consultSuitability'
 import {
-  buildConsultSuitabilityContext, buildConsultSuitabilityOutputSchema,
-  consultSuitabilityProviderContext, sanitizeConsultSuitabilityResponse,
-  CONSULT_SUITABILITY_SYSTEM_PROMPT, CONSULT_SUITABILITY_MAX_TOKENS,
+  buildConsultSuitabilityContext, sanitizeConsultSuitabilityResponse,
 } from '@/lib/consult/suitabilityTranslation'
 
 /**
@@ -205,9 +204,7 @@ describe('the consult schemas compile and answer against the live model', () => 
       input.analysis.profile.skinUndertone = { value: 'UNKNOWN', confidence: { min: 0, max: 0.35 }, evidence: [] }
     }
     const context = buildConsultSuitabilityContext(input)
-    const raw = await send({ system: CONSULT_SUITABILITY_SYSTEM_PROMPT,
-      content: [{ type: 'text', text: consultSuitabilityProviderContext(context) }],
-      schema: buildConsultSuitabilityOutputSchema(context), maxTokens: CONSULT_SUITABILITY_MAX_TOKENS })
+    const { raw } = await runConsultSuitability({ context })
     const result = sanitizeConsultSuitabilityResponse(raw, context)
     expect(result.whatYouLoved.map(source => source.value)).toEqual(input.clientChoices.slice(0, 2).map(choice => choice.clientWords))
     expect(result.tailoring.length).toBeGreaterThan(0)

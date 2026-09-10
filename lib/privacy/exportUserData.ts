@@ -512,6 +512,13 @@ const consultSessionExportSelect = {
     },
     orderBy: { revision: 'asc' },
   },
+  suitabilityTranslations: {
+    select: {
+      id: true, analysisRevisionId: true, clientRevisionId: true,
+      schemaVersion: true, promptVersion: true, model: true, payload: true, createdAt: true,
+    },
+    orderBy: { createdAt: 'asc' },
+  },
   agreementAcceptances: {
     select: {
       id: true,
@@ -577,6 +584,9 @@ function normalizeConsultSessions(rows: ConsultSessionExportRow[]): unknown[] {
   return normalizeJsonArray(
     rows.map((session) => ({
       ...session,
+      suitabilityTranslations: session.suitabilityTranslations.map(({ payload, ...translation }) => ({
+        ...translation, content: payload,
+      })),
       revisions: session.revisions.map(({ payload, ...revision }) => ({
         ...revision,
         content: payload,

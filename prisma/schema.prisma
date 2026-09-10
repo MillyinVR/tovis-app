@@ -7690,6 +7690,8 @@ enum ConsultProviderCallKind {
   ANALYSIS_PROFILE
   /// lib/consult/analysisEngine.ts, C2 companion — richer face/color evidence.
   ANALYSIS_FACE_COLOR
+  /// lib/consult/suitabilityRuntime.ts, optional derived guidance.
+  ANALYSIS_SUITABILITY
   /// lib/consult/analysisEngine.ts, final call — the direction.
   ANALYSIS_DIRECTION
   /// lib/consult/followUpEngine.ts — P5g, the adaptive follow-up questions.
@@ -7802,6 +7804,7 @@ model ConsultSession {
   lookVisitOutcomes    ConsultLookVisitOutcome[]
   lookBriefVersions    ConsultLookBriefVersion[]
   providerCalls        ConsultProviderCall[]
+  suitabilityTranslations ConsultSuitabilityTranslation[]
   faceColorProfiles    ConsultFaceColorProfile[]
   followUpRounds       ConsultFollowUpRound[]
 
@@ -7955,11 +7958,32 @@ model ConsultRevision {
   briefFeedback    ConsultBriefFeedback?
   serviceEstimates ConsultServiceEstimate[] @relation("ConsultServiceEstimateAnalysis")
   lookBriefVersions ConsultLookBriefVersion[]
+  suitabilityTranslation ConsultSuitabilityTranslation? @relation("ConsultSuitabilityAnalysis")
+  suitabilityClientSources ConsultSuitabilityTranslation[] @relation("ConsultSuitabilityClient")
   faceColorProfile  ConsultFaceColorProfile? @relation("ConsultFaceColorProfileAnalysis")
 
   @@unique([consultSessionId, revision])
   @@unique([consultSessionId, idempotencyKey])
   @@index([consultSessionId, createdAt])
+}
+
+/// C2-2 optional derived guidance; immutable, same-session source revisions.
+model ConsultSuitabilityTranslation {
+  id String @id @default(cuid())
+  consultSessionId String
+  consultSession ConsultSession @relation(fields: [consultSessionId], references: [id], onDelete: Cascade)
+  analysisRevisionId String @unique
+  analysisRevision ConsultRevision @relation("ConsultSuitabilityAnalysis", fields: [analysisRevisionId], references: [id], onDelete: Cascade)
+  clientRevisionId String
+  clientRevision ConsultRevision @relation("ConsultSuitabilityClient", fields: [clientRevisionId], references: [id], onDelete: Cascade)
+  schemaVersion Int
+  promptVersion String
+  model String
+  payload Json
+  createdAt DateTime @default(now())
+
+  @@index([consultSessionId, createdAt])
+  @@index([clientRevisionId])
 }
 
 /// C2-1 additive evidence, immutable and pinned to one analysis revision.

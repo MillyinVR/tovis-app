@@ -780,6 +780,7 @@ describe('exportUserData', () => {
             payload: { answers: { current_color: 'brunette' } },
           },
         ],
+        suitabilityTranslations: [{ id: 'suitability_1', analysisRevisionId: 'analysis_1', clientRevisionId: 'inspiration_1', payload: { requiresProfessionalReview: true } }],
         agreementAcceptances: [],
         auditEvents: [],
       },
@@ -790,6 +791,7 @@ describe('exportUserData', () => {
     expect(result.data.consultSessions).toEqual([
       expect.objectContaining({
         id: 'consult_1',
+        suitabilityTranslations: [{ id: 'suitability_1', analysisRevisionId: 'analysis_1', clientRevisionId: 'inspiration_1', content: { requiresProfessionalReview: true } }],
         revisions: [
           expect.objectContaining({
             id: 'revision_1',
@@ -805,6 +807,7 @@ describe('exportUserData', () => {
         revisions: {
           select: { payload: true },
         },
+        suitabilityTranslations: { select: expect.objectContaining({ payload: true, analysisRevisionId: true, clientRevisionId: true }) },
         agreementAcceptances: expect.any(Object),
         auditEvents: expect.any(Object),
       },
