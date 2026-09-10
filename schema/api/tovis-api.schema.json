@@ -9831,6 +9831,9 @@
             "$ref": "#/definitions/ConsultStyleDirectionDTO"
           },
           "type": "array"
+        },
+        "suitability": {
+          "$ref": "#/definitions/ConsultSuitabilityTranslationDTO"
         }
       },
       "required": [
@@ -12438,6 +12441,9 @@
             "$ref": "#/definitions/ConsultStyleDirectionDTO"
           },
           "type": "array"
+        },
+        "suitability": {
+          "$ref": "#/definitions/ConsultSuitabilityTranslationDTO"
         }
       },
       "required": [
@@ -13210,6 +13216,171 @@
         "COLOR_PALETTE"
       ],
       "type": "string"
+    },
+    "ConsultSuitabilityProfessionalConfirmationDTO": {
+      "properties": {
+        "clientExplanation": {
+          "type": "string"
+        },
+        "professionalCheck": {
+          "type": "string"
+        },
+        "provenance": {
+          "const": "NEEDS_PRO_CONFIRMATION",
+          "type": "string"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/definitions/ConsultSuitabilitySourceDTO"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "clientExplanation",
+        "professionalCheck",
+        "provenance",
+        "sources"
+      ],
+      "type": "object"
+    },
+    "ConsultSuitabilitySourceDTO": {
+      "properties": {
+        "confidence": {
+          "$ref": "#/definitions/ConsultAnalysisConfidenceDTO"
+        },
+        "evidence": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "provenance": {
+          "enum": [
+            "CLIENT_REPORTED",
+            "OBSERVED"
+          ],
+          "type": "string"
+        },
+        "revisionId": {
+          "type": "string"
+        },
+        "sentiment": {
+          "enum": [
+            "LIKE",
+            "DISLIKE",
+            "GOAL",
+            "CONTEXT"
+          ],
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "revisionId",
+        "value",
+        "provenance"
+      ],
+      "type": "object"
+    },
+    "ConsultSuitabilityTailoringDirectionDTO": {
+      "properties": {
+        "clientExplanation": {
+          "type": "string"
+        },
+        "professionalDirection": {
+          "type": "string"
+        },
+        "provenance": {
+          "const": "DERIVED_GUIDANCE",
+          "type": "string"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/definitions/ConsultSuitabilitySourceDTO"
+          },
+          "type": "array"
+        },
+        "status": {
+          "enum": [
+            "SUPPORTED",
+            "NEEDS_PRO_CONFIRMATION"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "clientExplanation",
+        "professionalDirection",
+        "status",
+        "provenance",
+        "sources"
+      ],
+      "type": "object"
+    },
+    "ConsultSuitabilityTranslationDTO": {
+      "properties": {
+        "analysisRevisionId": {
+          "type": "string"
+        },
+        "clientRevisionId": {
+          "type": "string"
+        },
+        "clientSource": {
+          "enum": [
+            "INTAKE",
+            "INSPIRATION"
+          ],
+          "type": "string"
+        },
+        "proConfirmations": {
+          "items": {
+            "$ref": "#/definitions/ConsultSuitabilityProfessionalConfirmationDTO"
+          },
+          "type": "array"
+        },
+        "promptVersion": {
+          "type": "string"
+        },
+        "requiresProfessionalReview": {
+          "const": true,
+          "type": "boolean"
+        },
+        "schemaVersion": {
+          "const": 1,
+          "type": "number"
+        },
+        "tailoring": {
+          "items": {
+            "$ref": "#/definitions/ConsultSuitabilityTailoringDirectionDTO"
+          },
+          "type": "array"
+        },
+        "whatYouLoved": {
+          "items": {
+            "$ref": "#/definitions/ConsultSuitabilitySourceDTO"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "promptVersion",
+        "requiresProfessionalReview",
+        "analysisRevisionId",
+        "clientRevisionId",
+        "clientSource",
+        "whatYouLoved",
+        "tailoring",
+        "proConfirmations"
+      ],
+      "type": "object"
     },
     "ConsultThreadAuthorDTO": {
       "description": "Who a message is from.\n\n`APP` is the app's own voice — warm, short, and never impersonating the pro (handoff: \"the pro is the recipient of the Brief\"). `CLIENT` is the client's own answer echoed back into the thread as history.",

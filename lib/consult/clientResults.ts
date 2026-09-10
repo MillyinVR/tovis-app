@@ -153,6 +153,7 @@ function clientResultsDto(args: {
     safetyFlags: args.result.payload.safetyFlags,
     achievabilityDirection: args.result.payload.achievabilityDirection,
     recommendationDirections: directions,
+    ...(args.result.suitability ? { suitability: args.result.suitability } : {}),
     ...(args.result.lookPlan ? { lookPlan: args.result.lookPlan } : {}),
     ...(args.result.lookBrief ? { lookBrief: args.result.lookBrief } : {}),
     photoLight: args.photoLight,

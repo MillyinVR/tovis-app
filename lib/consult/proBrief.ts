@@ -246,6 +246,7 @@ async function loadSessionBrief(
     safetyFlags: payload.safetyFlags,
     achievabilityDirection: payload.achievabilityDirection,
     recommendationDirections: payload.recommendationDirections,
+    ...(result.suitability ? { suitability: result.suitability } : {}),
     ...(result.lookPlan ? { lookPlan: result.lookPlan } : {}),
     ...(result.lookBrief ? { lookBrief: result.lookBrief } : {}),
     // Book the Look, B3. Omitted rather than nulled for a booking-anchored
