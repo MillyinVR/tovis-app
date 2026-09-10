@@ -111,4 +111,21 @@ class PoolTests(unittest.TestCase):
         for response in [{'model':'test/model:free','choices':[{'finish_reason':'length','message':{'content':json.dumps(GOOD)}}]}, {'model':'test/model:free','choices':[{'finish_reason':'stop','message':{'content':json.dumps(GOOD),'tool_calls':[{}]}}]}]:
             with patch.object(p,'credential',return_value='testkey'),patch.object(p,'openrouter_prices',return_value={'prompt':p.Decimal(0),'completion':p.Decimal(0)}),patch.object(p,'http',return_value=response),self.assertRaisesRegex(p.PoolError,'Truncated/unfinished/tool response'):p.call('free','test/model:free',PROMPT,{})
 
+
+class ExactFileCliTests(unittest.TestCase):
+    def test_explicit_scope_is_forwarded_without_adding_guidance(self):
+        import contextlib
+        import io
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / 'pools.json'
+            config.write_text(json.dumps(CONFIG))
+            argv = ['pool_worker', 'free', '--path', 'x.ts', '--task', 'Find DTO',
+                    '--task-class', 'symbol-search', '--config', str(config),
+                    '--exact-files', '--dry-run']
+            with patch('sys.argv', argv), patch('delegate.packet', return_value=(PROMPT, {})) as packet, contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(p.main(), 0)
+                self.assertEqual(packet.call_args.args[1], ['x.ts'])
+                self.assertTrue(packet.call_args.kwargs['exact_files'])
+
 if __name__=='__main__':unittest.main()

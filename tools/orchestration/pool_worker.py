@@ -258,6 +258,7 @@ def main():
     parser.add_argument('pool',choices=['free','hf'])
     parser.add_argument('--repo',type=Path,default=HERE.parents[1])
     parser.add_argument('--path',action='append',required=True)
+    parser.add_argument('--exact-files',action='store_true',help='Confirm applicable house rules were read locally; send only explicit paths')
     parser.add_argument('--task')
     parser.add_argument('--task-class',required=True,help='Astra-selected scope; unknown/high-risk classes route to Astra')
     parser.add_argument('--config',type=Path,default=HERE/'pools.json')
@@ -268,7 +269,7 @@ def main():
     args=parser.parse_args()
     try:
         from delegate import packet
-        prompt,hashes=packet(args.repo,args.path,args.task if args.task is not None else sys.stdin.read(8001))
+        prompt,hashes=packet(args.repo,args.path,args.task if args.task is not None else sys.stdin.read(8001),exact_files=args.exact_files)
         screen(prompt)
         config=json.loads(args.config.read_text())
         if args.dry_run:
