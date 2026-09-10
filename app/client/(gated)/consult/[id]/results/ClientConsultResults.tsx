@@ -1,3 +1,4 @@
+import ClientConsultSuitability from '@/app/_components/consult/ClientConsultSuitability'
 import { clientConsultProfileValue } from '@/lib/brand/consultClientProfileCopy'
 import { defaultClientConsultInspirationCopy } from '@/lib/brand/defaultClientConsultInspirationCopy'
 import ConsultLookPlanCard from '@/app/_components/consult/ConsultLookPlanCard'
@@ -93,6 +94,7 @@ export default function ClientConsultResults({
       width="wide"
     >
       <div className="grid gap-6">
+      <ClientConsultSuitability suitability={results.suitability} analysisRevisionId={results.analysisRevisionId} copy={copy.suitability} />
       <section
         aria-labelledby={`${results.consultId}-client-words`}
         className="rounded-2xl border border-surfaceGlass/10 bg-bgSurface p-5"

@@ -1283,43 +1283,6 @@ export type ConsultBriefRecommendationDirectionDTO = {
   discussWithProfessional: true
 }
 
-export type ConsultSuitabilitySourceDTO = {
-  id: string
-  revisionId: string
-  value: string
-  provenance: 'CLIENT_REPORTED' | 'OBSERVED'
-  confidence?: ConsultAnalysisConfidenceDTO
-  evidence?: Array<'image' | 'inspiration' | 'profile' | 'core' | string>
-  sentiment?: 'LIKE' | 'DISLIKE' | 'GOAL' | 'CONTEXT'
-}
-
-export type ConsultSuitabilityTailoringDirectionDTO = {
-  clientExplanation: string
-  professionalDirection: string
-  status: 'SUPPORTED' | 'NEEDS_PRO_CONFIRMATION'
-  provenance: 'DERIVED_GUIDANCE'
-  sources: ConsultSuitabilitySourceDTO[]
-}
-
-export type ConsultSuitabilityProfessionalConfirmationDTO = {
-  clientExplanation: string
-  professionalCheck: string
-  provenance: 'NEEDS_PRO_CONFIRMATION'
-  sources: ConsultSuitabilitySourceDTO[]
-}
-
-export type ConsultSuitabilityTranslationDTO = {
-  schemaVersion: 1
-  promptVersion: string
-  requiresProfessionalReview: true
-  analysisRevisionId: string
-  clientRevisionId: string
-  clientSource: 'INTAKE' | 'INSPIRATION'
-  whatYouLoved: ConsultSuitabilitySourceDTO[]
-  tailoring: ConsultSuitabilityTailoringDirectionDTO[]
-  proConfirmations: ConsultSuitabilityProfessionalConfirmationDTO[]
-}
-
 export type ConsultBriefInspirationDTO = {
   revisionId: string | null
   source: ConsultInspirationSourceDTO
@@ -1803,7 +1766,33 @@ export type ConsultMentorDTO = {
   sections: Array<{ id: number; title: string; items: Array<{ text: string; sourceId: string }> }>
 }
 
+/** Optional C2-2 role projections. Historical result payloads are unchanged. */
+export type ConsultSuitabilityEvidenceDTO = {
+  label: string
+  value: string
+  provenance: 'CLIENT_REPORTED' | 'OBSERVED'
+  revisionId: string
+  confidence?: ConsultAnalysisConfidenceDTO
+  evidence?: string[]
+}
+export type ConsultClientSuitabilityDTO = {
+  analysisRevisionId: string
+  clientRevisionId: string
+  whatYouLoved: string[]
+  tailoring: Array<{ explanation: string; needsConfirmation: boolean }>
+  proConfirmations: string[]
+}
+export type ConsultProSuitabilityDTO = {
+  analysisRevisionId: string
+  clientRevisionId: string
+  whatYouLoved: string[]
+  tailoring: Array<{ direction: string; needsConfirmation: boolean; sources: ConsultSuitabilityEvidenceDTO[] }>
+  proConfirmations: Array<{ check: string; sources: ConsultSuitabilityEvidenceDTO[] }>
+}
+
 export type ConsultProBriefDTO = {
+  suitability?: ConsultProSuitabilityDTO
+
   mentor?: ConsultMentorDTO
 
   lookBrief?: ConsultLookBriefVersionDTO
@@ -1830,7 +1819,6 @@ export type ConsultProBriefDTO = {
   safetyFlags: ConsultAnalysisPayloadDTO['safetyFlags']
   achievabilityDirection: ConsultBriefAchievabilityDirectionDTO
   recommendationDirections: ConsultBriefRecommendationDirectionDTO[]
-  suitability?: ConsultSuitabilityTranslationDTO
   // Book the Look, B3. OPTIONAL on the wire — like `lookPostId` above, so the
   // published schema grows by addition only and shipped iOS fixtures stay
   // valid. Present only for a LOOK-anchored consult; a booking-anchored one has
@@ -1897,6 +1885,8 @@ export type ConsultResultsPhotoLightDTO = {
 }
 
 export type ConsultClientResultsDTO = {
+  suitability?: ConsultClientSuitabilityDTO
+
   lookBrief?: ConsultLookBriefVersionDTO
   lookPlan?: ConsultLookPlanDTO
   consultId: string
@@ -1929,7 +1919,6 @@ export type ConsultClientResultsDTO = {
   safetyFlags: ConsultAnalysisPayloadDTO['safetyFlags']
   achievabilityDirection: ConsultBriefAchievabilityDirectionDTO
   recommendationDirections: ConsultBriefRecommendationDirectionDTO[]
-  suitability?: ConsultSuitabilityTranslationDTO
   // The heading the client sees over `recommendationDirections`, resolved
   // from the serving tenant's brand copy (lib/brand). OPTIONAL on the wire —
   // a purely additive field, so shipped native builds (which hardcode the

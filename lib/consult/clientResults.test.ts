@@ -17,7 +17,12 @@ const mocks = vi.hoisted(() => ({
   transaction: vi.fn(),
   requireAgreements: vi.fn(),
   loadImmutable: vi.fn(),
+  loadSuitability: vi.fn(),
   logServe: vi.fn(),
+}))
+
+vi.mock('./suitabilityRead', async importOriginal => ({
+  ...await importOriginal<typeof import('./suitabilityRead')>(), loadConsultSuitability: mocks.loadSuitability,
 }))
 
 vi.mock('./access', () => ({
@@ -170,6 +175,7 @@ function transactionClient() {
 
 describe('authorized client consult results', () => {
   beforeEach(() => {
+    mocks.loadSuitability.mockResolvedValue(null)
     mocks.exposureEnabled = true
     mocks.queryRaw.mockResolvedValue([{ id: 'consult_1' }])
     mocks.sessionFindUnique.mockResolvedValue(scope)
@@ -195,6 +201,7 @@ describe('authorized client consult results', () => {
     await expect(loadAuthorizedClientConsultResults(request)).rejects.toMatchObject({
       code: 'HIDDEN',
     } satisfies Partial<ClientConsultResultsError>)
+    expect(mocks.loadSuitability).not.toHaveBeenCalled()
     expect(mocks.loadImmutable).not.toHaveBeenCalled()
     expect(mocks.auditCreate).not.toHaveBeenCalled()
     expect(mocks.logServe).not.toHaveBeenCalled()

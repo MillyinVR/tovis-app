@@ -9833,7 +9833,7 @@
           "type": "array"
         },
         "suitability": {
-          "$ref": "#/definitions/ConsultSuitabilityTranslationDTO"
+          "$ref": "#/definitions/ConsultClientSuitabilityDTO"
         }
       },
       "required": [
@@ -9892,6 +9892,54 @@
       },
       "required": [
         "results"
+      ],
+      "type": "object"
+    },
+    "ConsultClientSuitabilityDTO": {
+      "properties": {
+        "analysisRevisionId": {
+          "type": "string"
+        },
+        "clientRevisionId": {
+          "type": "string"
+        },
+        "proConfirmations": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "tailoring": {
+          "items": {
+            "properties": {
+              "explanation": {
+                "type": "string"
+              },
+              "needsConfirmation": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "explanation",
+              "needsConfirmation"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "whatYouLoved": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "analysisRevisionId",
+        "clientRevisionId",
+        "whatYouLoved",
+        "tailoring",
+        "proConfirmations"
       ],
       "type": "object"
     },
@@ -12443,7 +12491,7 @@
           "type": "array"
         },
         "suitability": {
-          "$ref": "#/definitions/ConsultSuitabilityTranslationDTO"
+          "$ref": "#/definitions/ConsultProSuitabilityDTO"
         }
       },
       "required": [
@@ -12491,6 +12539,76 @@
       },
       "required": [
         "brief"
+      ],
+      "type": "object"
+    },
+    "ConsultProSuitabilityDTO": {
+      "properties": {
+        "analysisRevisionId": {
+          "type": "string"
+        },
+        "clientRevisionId": {
+          "type": "string"
+        },
+        "proConfirmations": {
+          "items": {
+            "properties": {
+              "check": {
+                "type": "string"
+              },
+              "sources": {
+                "items": {
+                  "$ref": "#/definitions/ConsultSuitabilityEvidenceDTO"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "check",
+              "sources"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "tailoring": {
+          "items": {
+            "properties": {
+              "direction": {
+                "type": "string"
+              },
+              "needsConfirmation": {
+                "type": "boolean"
+              },
+              "sources": {
+                "items": {
+                  "$ref": "#/definitions/ConsultSuitabilityEvidenceDTO"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "direction",
+              "needsConfirmation",
+              "sources"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "whatYouLoved": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "analysisRevisionId",
+        "clientRevisionId",
+        "whatYouLoved",
+        "tailoring",
+        "proConfirmations"
       ],
       "type": "object"
     },
@@ -13217,34 +13335,8 @@
       ],
       "type": "string"
     },
-    "ConsultSuitabilityProfessionalConfirmationDTO": {
-      "properties": {
-        "clientExplanation": {
-          "type": "string"
-        },
-        "professionalCheck": {
-          "type": "string"
-        },
-        "provenance": {
-          "const": "NEEDS_PRO_CONFIRMATION",
-          "type": "string"
-        },
-        "sources": {
-          "items": {
-            "$ref": "#/definitions/ConsultSuitabilitySourceDTO"
-          },
-          "type": "array"
-        }
-      },
-      "required": [
-        "clientExplanation",
-        "professionalCheck",
-        "provenance",
-        "sources"
-      ],
-      "type": "object"
-    },
-    "ConsultSuitabilitySourceDTO": {
+    "ConsultSuitabilityEvidenceDTO": {
+      "description": "Optional C2-2 role projections. Historical result payloads are unchanged.",
       "properties": {
         "confidence": {
           "$ref": "#/definitions/ConsultAnalysisConfidenceDTO"
@@ -13255,7 +13347,7 @@
           },
           "type": "array"
         },
-        "id": {
+        "label": {
           "type": "string"
         },
         "provenance": {
@@ -13268,117 +13360,15 @@
         "revisionId": {
           "type": "string"
         },
-        "sentiment": {
-          "enum": [
-            "LIKE",
-            "DISLIKE",
-            "GOAL",
-            "CONTEXT"
-          ],
-          "type": "string"
-        },
         "value": {
           "type": "string"
         }
       },
       "required": [
-        "id",
-        "revisionId",
+        "label",
         "value",
-        "provenance"
-      ],
-      "type": "object"
-    },
-    "ConsultSuitabilityTailoringDirectionDTO": {
-      "properties": {
-        "clientExplanation": {
-          "type": "string"
-        },
-        "professionalDirection": {
-          "type": "string"
-        },
-        "provenance": {
-          "const": "DERIVED_GUIDANCE",
-          "type": "string"
-        },
-        "sources": {
-          "items": {
-            "$ref": "#/definitions/ConsultSuitabilitySourceDTO"
-          },
-          "type": "array"
-        },
-        "status": {
-          "enum": [
-            "SUPPORTED",
-            "NEEDS_PRO_CONFIRMATION"
-          ],
-          "type": "string"
-        }
-      },
-      "required": [
-        "clientExplanation",
-        "professionalDirection",
-        "status",
         "provenance",
-        "sources"
-      ],
-      "type": "object"
-    },
-    "ConsultSuitabilityTranslationDTO": {
-      "properties": {
-        "analysisRevisionId": {
-          "type": "string"
-        },
-        "clientRevisionId": {
-          "type": "string"
-        },
-        "clientSource": {
-          "enum": [
-            "INTAKE",
-            "INSPIRATION"
-          ],
-          "type": "string"
-        },
-        "proConfirmations": {
-          "items": {
-            "$ref": "#/definitions/ConsultSuitabilityProfessionalConfirmationDTO"
-          },
-          "type": "array"
-        },
-        "promptVersion": {
-          "type": "string"
-        },
-        "requiresProfessionalReview": {
-          "const": true,
-          "type": "boolean"
-        },
-        "schemaVersion": {
-          "const": 1,
-          "type": "number"
-        },
-        "tailoring": {
-          "items": {
-            "$ref": "#/definitions/ConsultSuitabilityTailoringDirectionDTO"
-          },
-          "type": "array"
-        },
-        "whatYouLoved": {
-          "items": {
-            "$ref": "#/definitions/ConsultSuitabilitySourceDTO"
-          },
-          "type": "array"
-        }
-      },
-      "required": [
-        "schemaVersion",
-        "promptVersion",
-        "requiresProfessionalReview",
-        "analysisRevisionId",
-        "clientRevisionId",
-        "clientSource",
-        "whatYouLoved",
-        "tailoring",
-        "proConfirmations"
+        "revisionId"
       ],
       "type": "object"
     },

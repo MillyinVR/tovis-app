@@ -1,3 +1,4 @@
+import { loadConsultSuitability, clientSuitability } from './suitabilityRead'
 import 'server-only'
 
 import {
@@ -133,10 +134,12 @@ function clientResultsDto(args: {
   result: Awaited<ReturnType<typeof loadLatestImmutableConsultResult>>
   teaserTapped: boolean
   photoLight: ConsultResultsPhotoLightDTO
+  suitability?: ConsultClientResultsDTO['suitability']
 }): ConsultClientResultsDTO {
   const directions = args.result.payload.recommendationDirections
 
   return {
+    ...(args.suitability ? { suitability: args.suitability } : {}),
     consultId: args.scope.id,
     bookingId: args.scope.bookingId,
     lookPostId: args.scope.anchorLookPostId,
@@ -153,7 +156,6 @@ function clientResultsDto(args: {
     safetyFlags: args.result.payload.safetyFlags,
     achievabilityDirection: args.result.payload.achievabilityDirection,
     recommendationDirections: directions,
-    ...(args.result.suitability ? { suitability: args.result.suitability } : {}),
     ...(args.result.lookPlan ? { lookPlan: args.result.lookPlan } : {}),
     ...(args.result.lookBrief ? { lookBrief: args.result.lookBrief } : {}),
     photoLight: args.photoLight,
@@ -206,6 +208,7 @@ export async function loadAuthorizedClientConsultResults(
       }
 
       requireClientResultFraming(result)
+      const suitability = await loadConsultSuitability(tx, scope.id, result.analysisRevisionId)
 
       const existingEvents = await tx.consultAuditEvent.findMany({
         where: {
@@ -251,6 +254,7 @@ export async function loadAuthorizedClientConsultResults(
           result,
           teaserTapped: actions.has(ConsultAuditAction.ME_CARD_TEASER_TAPPED),
           photoLight: photoLightFor(captures),
+          ...(suitability ? { suitability: clientSuitability(suitability) } : {}),
         }),
         firstServe,
         acceptedPhotoCount: captures.filter(

@@ -1,3 +1,5 @@
+import ProConsultSuitability from './ProConsultSuitability'
+import { consultProProfileLabels as PROFILE_LABELS } from '@/lib/brand/consultProProfileCopy'
 import ConsultLookBriefPhotos from './ConsultLookBriefPhotos'
 import ConsultLookPlanCard from '@/app/_components/consult/ConsultLookPlanCard'
 import type {
@@ -42,32 +44,6 @@ function Observation({
   )
 }
 
-const PROFILE_LABELS: Record<
-  keyof ConsultProBriefDTO['profile'],
-  string
-> = {
-  skinUndertone: 'Skin undertone',
-  contrastLevel: 'Natural contrast',
-  colorSeason: 'Color season',
-  faceProportion: 'Face proportion',
-  jawline: 'Jawline',
-  foreheadProportion: 'Forehead',
-  featureBalance: 'Feature balance',
-  eyeColor: 'Visible eye color',
-  eyeShape: 'Eye shape',
-  eyeSpacing: 'Eye spacing',
-  browDensity: 'Brow density',
-  browShape: 'Brow shape',
-  skinDepth: 'Skin depth',
-  surfaceOvertone: 'Surface overtone',
-  faceWidthBalance: 'Relative face widths',
-  chinContour: 'Chin contour',
-  eyeTilt: 'Eye tilt',
-  lidVisibility: 'Lid visibility',
-  browBoneRelationship: 'Brow-to-eye relationship',
-  browArchPosition: 'Brow arch position',
-  browTailDirection: 'Brow tail direction',
-}
 
 const STYLE_DOMAIN_LABELS: Record<
   ConsultProBriefDTO['styleDirections'][number]['domain'],
@@ -120,81 +96,6 @@ const ESTIMATE_MODE_LABELS: Record<
 > = {
   SALON: 'in-salon',
   MOBILE: 'mobile',
-}
-
-function SuitabilitySection({
-  suitability,
-}: {
-  suitability: ConsultProBriefDTO['suitability']
-}) {
-  if (!suitability) return null
-  return (
-    <section aria-labelledby={`${suitability.analysisRevisionId}-suitability`}>
-      <h3
-        id={`${suitability.analysisRevisionId}-suitability`}
-        className="text-[14px] font-black text-textPrimary"
-      >
-        Suitability translation
-      </h3>
-      <p className="mt-1 text-[12px] text-textSecondary">
-        Evidence-grounded recommendations to confirm in person.
-      </p>
-      <div className="mt-2 rounded-xl border border-surfaceGlass/10 bg-bgPrimary p-3">
-        <div className="text-[11px] font-bold uppercase tracking-wide text-textMuted">
-          What your client loved
-        </div>
-        <ul className="mt-2 grid gap-1.5 text-[12px] text-textPrimary">
-          {suitability.whatYouLoved.map((item) => (
-            <li key={item.id}>“{item.value}”</li>
-          ))}
-        </ul>
-      </div>
-      <ul className="mt-2 grid gap-2">
-        {suitability.tailoring.map((item, index) => (
-          <li
-            key={`${item.clientExplanation}:${index}`}
-            className="rounded-xl border border-surfaceGlass/10 bg-bgPrimary p-3"
-          >
-            <div className="flex items-center justify-between gap-2">
-              <h4 className="text-[12px] font-black uppercase tracking-[0.12em] text-textMuted">
-                Tailoring direction
-              </h4>
-              <span className="rounded-full border border-toneWarn/30 bg-toneWarn/10 px-2 py-0.5 text-[11px] font-bold text-textPrimary">
-                {item.status === 'SUPPORTED' ? 'supported' : 'needs check'}
-              </span>
-              </div>
-            <p className="mt-1 text-[12.5px] font-semibold text-textPrimary">
-              {item.clientExplanation}
-            </p>
-            <p className="mt-1 text-[12px] text-textSecondary">
-              {item.professionalDirection}
-            </p>
-            <p className="mt-2 text-[11px] text-textMuted">
-              Sources: {item.sources.map((source) => source.id).join(', ')}
-            </p>
-          </li>
-        ))}
-      </ul>
-      <ul className="mt-2 grid gap-2">
-        {suitability.proConfirmations.map((item, index) => (
-          <li
-            key={`${item.professionalCheck}:${index}`}
-            className="rounded-xl border border-toneWarn/30 bg-toneWarn/10 p-3"
-          >
-            <p className="text-[12px] font-black text-textPrimary">
-              Pro check
-            </p>
-            <p className="mt-1 text-[12px] text-textSecondary">
-              {item.professionalCheck}
-            </p>
-            <p className="mt-1 text-[11px] text-textMuted">
-              {item.clientExplanation}
-            </p>
-          </li>
-        ))}
-      </ul>
-    </section>
-  )
 }
 
 function ServiceEstimate({
@@ -350,6 +251,7 @@ export default function ProConsultBrief({
 
   return (
     <article className="grid gap-5" data-consult-brief-id={brief.briefRevisionId}>
+      <ProConsultSuitability suitability={brief.suitability} analysisRevisionId={brief.sourceAnalysisRevisionId} />
       {brief.mentor ? <section className="rounded-2xl border border-surfaceGlass/20 bg-bgPrimary p-4" data-testid="consult-mentor">
         <h2 className="text-lg font-bold text-textPrimary">{brief.mentor.title}</h2>
         <p className="mt-1 text-sm text-textSecondary">{brief.mentor.authority}</p>
@@ -470,8 +372,6 @@ export default function ProConsultBrief({
           ) : null)}
         </ul>
       </section>
-
-      <SuitabilitySection suitability={brief.suitability} />
 
       <section aria-labelledby={`${brief.consultId}-style-directions`}>
         <h3

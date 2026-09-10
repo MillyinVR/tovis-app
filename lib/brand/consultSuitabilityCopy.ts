@@ -1,0 +1,16 @@
+export const consultSuitabilityCopy = {
+  whatYouLoved: 'What you loved',
+  tailoring: 'How we’d tailor it',
+  confirmations: 'What your pro confirms',
+  note: 'Ideas to discuss with your pro, based on the details you shared.',
+  needsConfirmation: 'Your pro will check this in person.',
+  professionalTitle: 'Suitability guidance',
+  professionalNote: 'Suggested directions for professional review, not a confirmed service plan.',
+  professionalTailoring: 'Professional direction',
+  professionalConfirmations: 'Confirm in person',
+  clientReported: 'Client-reported',
+  observed: 'Observed in photos',
+  clientPreference: 'Client preference',
+  confidence: 'confidence',
+  coreLabels: { baseLevel: 'Base level', lightestLevel: 'Lightest level', currentTone: 'Current tone', visibleCondition: 'Visible condition', density: 'Density', texture: 'Texture' },
+}

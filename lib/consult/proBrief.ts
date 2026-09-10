@@ -1,3 +1,4 @@
+import { loadConsultSuitability, proSuitability } from './suitabilityRead'
 import { normalizeStoredInspirationPayload } from './inspirationPack'
 import { consultIntakeItems, findConsultIntakePack, normalizeConsultIntakePayload } from './intake/registry'
 import { requireAuthorizedProLookScope } from './lookBrief'
@@ -226,7 +227,9 @@ async function loadSessionBrief(
     select: { rating: true, createdAt: true },
   })
 
+  const suitability = await loadConsultSuitability(tx, session.id, payload.sourceAnalysisRevisionId)
   const brief: ConsultProBriefDTO = {
+    ...(suitability ? { suitability: proSuitability(suitability) } : {}),
     consultId: session.id,
     bookingId: session.bookingId,
     lookPostId: session.anchorLookPostId,
@@ -246,7 +249,6 @@ async function loadSessionBrief(
     safetyFlags: payload.safetyFlags,
     achievabilityDirection: payload.achievabilityDirection,
     recommendationDirections: payload.recommendationDirections,
-    ...(result.suitability ? { suitability: result.suitability } : {}),
     ...(result.lookPlan ? { lookPlan: result.lookPlan } : {}),
     ...(result.lookBrief ? { lookBrief: result.lookBrief } : {}),
     // Book the Look, B3. Omitted rather than nulled for a booking-anchored

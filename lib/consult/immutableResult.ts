@@ -7,11 +7,7 @@ import { ConsultRevisionKind, type Prisma } from '@prisma/client'
 import { defaultClientConsultInspirationCopy } from '@/lib/brand/defaultClientConsultInspirationCopy'
 import { isRecord } from '@/lib/guards'
 import { loadConsultLookBriefVersion } from './lookBrief'
-import type {
-  ConsultAnalysisConfidenceDTO,
-  ConsultLookBriefVersionDTO,
-  ConsultLookPlanDTO,
-} from '@/lib/dto/consult'
+import type { ConsultLookBriefVersionDTO, ConsultLookPlanDTO } from '@/lib/dto/consult'
 import { hasConsultLookPlanMinimumIntake } from './lookPlanning'
 
 import { normalizeStoredConsultAnalysisPayload } from './analysisRevision'
@@ -27,11 +23,6 @@ import {
   type HairColorProBriefPayload,
 } from './briefContract'
 import { normalizeConsultIntakePayload } from './intake/registry'
-import {
-  CONSULT_SUITABILITY_PROMPT_VERSION,
-  CONSULT_SUITABILITY_SCHEMA_VERSION,
-  type ConsultSuitabilityTranslation,
-} from './suitabilityTranslation'
 import {
   normalizeStoredInspirationPayload,
 } from './inspirationPack'
@@ -93,216 +84,7 @@ export type ImmutableConsultResult = {
   analysisRevision: number
   intakeRevisionId: string
   payload: HairColorProBriefPayload
-  suitability?: ConsultSuitabilityTranslation
   createdAt: Date
-}
-
-type ConsultSuitabilityClientSentiment = 'LIKE' | 'DISLIKE' | 'GOAL' | 'CONTEXT'
-
-const ALLOWED_CLIENT_SENTIMENTS = new Set<ConsultSuitabilityClientSentiment>([
-  'LIKE',
-  'DISLIKE',
-  'GOAL',
-  'CONTEXT',
-])
-
-function isConsultSuitabilitySentiment(
-  value: string,
-): value is ConsultSuitabilityClientSentiment {
-  return ALLOWED_CLIENT_SENTIMENTS.has(value as ConsultSuitabilityClientSentiment)
-}
-
-type ConsultSuitabilitySourceDTO =
-  | {
-      id: string
-      revisionId: string
-      value: string
-      provenance: 'CLIENT_REPORTED'
-      sentiment: ConsultSuitabilityClientSentiment
-    }
-  | {
-      id: string
-      revisionId: string
-      value: string
-      provenance: 'OBSERVED'
-      confidence: ConsultAnalysisConfidenceDTO
-      evidence: Array<'image' | 'inspiration' | 'profile' | 'core' | string>
-    }
-type ConsultSuitabilityClientSource = Extract<
-  ConsultSuitabilitySourceDTO,
-  { provenance: 'CLIENT_REPORTED' }
->
-
-function sanitizeConfidence(
-  value: unknown,
-): { min: number; max: number } | null {
-  if (!isRecord(value)) return null
-  if (typeof value.min !== 'number' || typeof value.max !== 'number') return null
-  if (value.min < 0 || value.max > 1 || value.min > value.max) return null
-  return { min: value.min, max: value.max }
-}
-
-function normalizeStoredSuitabilitySource(
-  value: unknown,
-): ConsultSuitabilitySourceDTO | null {
-  if (!isRecord(value)) return null
-  if (
-    typeof value.id !== 'string' ||
-    typeof value.revisionId !== 'string' ||
-    typeof value.value !== 'string' ||
-    typeof value.provenance !== 'string'
-  ) {
-    return null
-  }
-  if (value.provenance === 'CLIENT_REPORTED') {
-    if (typeof value.sentiment !== 'string' || !isConsultSuitabilitySentiment(value.sentiment)) {
-      return null
-    }
-    const sentiment = value.sentiment as ConsultSuitabilityClientSentiment
-    return {
-      id: value.id,
-      revisionId: value.revisionId,
-      value: value.value,
-      provenance: 'CLIENT_REPORTED',
-      sentiment,
-    }
-  }
-  if (value.provenance !== 'OBSERVED') return null
-  if (
-    !Array.isArray(value.evidence) ||
-    typeof value.revisionId !== 'string' ||
-    typeof value.value !== 'string'
-  ) {
-    return null
-  }
-  const confidence = sanitizeConfidence(value.confidence)
-  if (!confidence) return null
-  return {
-    id: value.id,
-    revisionId: value.revisionId,
-    value: value.value,
-    provenance: 'OBSERVED',
-    confidence,
-    evidence: [...value.evidence],
-  }
-}
-
-function normalizeStoredWhatYouLovedSource(
-  value: unknown,
-): ConsultSuitabilityClientSource | null {
-  if (!isRecord(value)) return null
-  if (
-    typeof value.id !== 'string' ||
-    typeof value.revisionId !== 'string' ||
-    typeof value.value !== 'string' ||
-    typeof value.provenance !== 'string' ||
-    value.provenance !== 'CLIENT_REPORTED' ||
-    typeof value.sentiment !== 'string' ||
-    !isConsultSuitabilitySentiment(value.sentiment)
-  ) {
-    return null
-  }
-  return {
-    id: value.id,
-    revisionId: value.revisionId,
-    value: value.value,
-    provenance: 'CLIENT_REPORTED',
-    sentiment: value.sentiment as ConsultSuitabilityClientSentiment,
-  }
-}
-
-function normalizeStoredSuitabilityTranslation(
-  raw: Prisma.JsonValue,
-  analysisRevisionId: string,
-  clientRevisionId: string,
-): ConsultSuitabilityTranslation | null {
-  if (!isRecord(raw)) return null
-  if (
-    raw.schemaVersion !== CONSULT_SUITABILITY_SCHEMA_VERSION ||
-    raw.promptVersion !== CONSULT_SUITABILITY_PROMPT_VERSION ||
-    raw.analysisRevisionId !== analysisRevisionId ||
-    raw.clientRevisionId !== clientRevisionId ||
-    raw.requiresProfessionalReview !== true ||
-    (raw.clientSource !== 'INTAKE' && raw.clientSource !== 'INSPIRATION')
-  ) {
-    return null
-  }
-
-  if (!Array.isArray(raw.whatYouLoved) || !Array.isArray(raw.tailoring) || !Array.isArray(raw.proConfirmations)) {
-    return null
-  }
-  const whatYouLoved: ConsultSuitabilityClientSource[] = []
-  for (const source of raw.whatYouLoved) {
-    const parsed = normalizeStoredWhatYouLovedSource(source)
-    if (!parsed) return null
-    whatYouLoved.push(parsed)
-  }
-
-  const tailoring = raw.tailoring
-  const proConfirmations = raw.proConfirmations
-  if (
-    tailoring.length < 1 || tailoring.length > 3 ||
-    proConfirmations.length < 1 || proConfirmations.length > 4
-  ) return null
-
-  const mappedTailoring: ConsultSuitabilityTranslation['tailoring'] = []
-  for (const direction of tailoring) {
-    if (
-      !isRecord(direction) ||
-      typeof direction.clientExplanation !== 'string' ||
-      typeof direction.professionalDirection !== 'string' ||
-      (direction.status !== 'SUPPORTED' && direction.status !== 'NEEDS_PRO_CONFIRMATION') ||
-      direction.provenance !== 'DERIVED_GUIDANCE' ||
-      !Array.isArray(direction.sources)
-    ) {
-      return null
-    }
-    const sources = direction.sources.map((source) => normalizeStoredSuitabilitySource(source))
-    if (!sources.every((source): source is ConsultSuitabilitySourceDTO => source !== null)) return null
-    const status = direction.status === 'SUPPORTED'
-      ? 'SUPPORTED' as const
-      : 'NEEDS_PRO_CONFIRMATION' as const
-    mappedTailoring.push({
-      clientExplanation: direction.clientExplanation,
-      professionalDirection: direction.professionalDirection,
-      status,
-      provenance: 'DERIVED_GUIDANCE' as const,
-      sources: sources as ConsultSuitabilityTranslation['tailoring'][number]['sources'],
-    })
-  }
-
-  const mappedProConfirmations: ConsultSuitabilityTranslation['proConfirmations'] = []
-  for (const confirmation of proConfirmations) {
-    if (
-      !isRecord(confirmation) ||
-      typeof confirmation.clientExplanation !== 'string' ||
-      typeof confirmation.professionalCheck !== 'string' ||
-      confirmation.provenance !== 'NEEDS_PRO_CONFIRMATION' ||
-      !Array.isArray(confirmation.sources)
-    ) {
-      return null
-    }
-    const sources = confirmation.sources.map((source) => normalizeStoredSuitabilitySource(source))
-    if (!sources.every((source): source is ConsultSuitabilitySourceDTO => source !== null)) return null
-    mappedProConfirmations.push({
-      clientExplanation: confirmation.clientExplanation,
-      professionalCheck: confirmation.professionalCheck,
-      provenance: 'NEEDS_PRO_CONFIRMATION' as const,
-      sources: sources as ConsultSuitabilityTranslation['proConfirmations'][number]['sources'],
-    })
-  }
-
-  return {
-    schemaVersion: CONSULT_SUITABILITY_SCHEMA_VERSION,
-    promptVersion: CONSULT_SUITABILITY_PROMPT_VERSION,
-    requiresProfessionalReview: true,
-    analysisRevisionId,
-    clientRevisionId,
-    clientSource: raw.clientSource,
-    whatYouLoved: whatYouLoved,
-    tailoring: mappedTailoring,
-    proConfirmations: mappedProConfirmations,
-  }
 }
 
 /**
@@ -472,25 +254,6 @@ export async function loadLatestImmutableConsultResult(
     throw new ImmutableConsultResultError()
   }
 
-  const suitabilityTranslation = await tx.consultSuitabilityTranslation.findFirst({
-    where: { consultSessionId, analysisRevisionId: analysis.id },
-    select: {
-      payload: true,
-      clientRevisionId: true,
-      analysisRevisionId: true,
-      schemaVersion: true,
-      promptVersion: true,
-    },
-  })
-
-  const suitability = suitabilityTranslation
-    ? normalizeStoredSuitabilityTranslation(
-        suitabilityTranslation.payload,
-        suitabilityTranslation.analysisRevisionId,
-        suitabilityTranslation.clientRevisionId,
-      )
-    : undefined
-
   const lookBrief = lookPlan ? await loadConsultLookBriefVersion(tx, consultSessionId) : undefined
   if (lookPlan && (!lookBrief || lookBrief.sourceAnalysisRevisionId !== analysis.id)) throw new ImmutableConsultResultError()
   lookPlan = effectiveConsultLookPlan(normalizeStoredConsultAnalysisPayload(analysis.payload, analysis.schemaVersion), lookBrief)
@@ -502,7 +265,6 @@ export async function loadLatestImmutableConsultResult(
     analysisRevision: analysis.revision,
     intakeRevisionId: intake.id,
     payload,
-    ...(suitability ? { suitability } : {}),
     ...(lookPlan ? { lookPlan } : {}),
     createdAt: brief.createdAt,
   }
