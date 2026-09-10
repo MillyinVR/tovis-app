@@ -1169,7 +1169,14 @@ export type BrandClientConsultStartingPointCopy = {
  * belong to the pack it serves (lib/consult/inspiration/packs/). A contract-v2
  * CARD pack's labels ARE here, in `cards` — see the type above for why.
  */
+export type BrandConsultFocusCopy = {
+  title: string; instruction: string; center: string; confirm: string; cancel: string
+  preview: string; photo: string; left: string; right: string; top: string; bottom: string
+  loadError: string; closer: string
+}
+
 export type BrandClientConsultInspirationCopy = {
+  focus?: BrandConsultFocusCopy
   clientResponse?: { label: string; placeholder: string; summary?: string }
   /** What a reference picture is for, shown before she is asked for one. */
   introduction: string

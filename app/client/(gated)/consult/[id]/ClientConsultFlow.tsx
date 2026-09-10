@@ -1,5 +1,7 @@
 'use client'
 
+import ConsultInspirationFocus from '@/app/_components/consult/ConsultInspirationFocus'
+import type { CropRect } from '@/lib/media/cropRect'
 import { visibleConsultThreadMessages } from '@/lib/consult/visibleThread'
 import { CONSULT_INSPIRATION_CLIENT_TEXT_LIMIT } from '@/lib/consult/inspiration/clientText'
 import { defaultClientConsultInspirationCopy } from '@/lib/brand/defaultClientConsultInspirationCopy'
@@ -497,6 +499,7 @@ export default function ClientConsultFlow({
   const uploadInspiration = (
     message: ConsultThreadInspirationMessageDTO,
     file: File,
+    crop: CropRect,
   ) =>
     run(async () => {
       // P2e — the inspiration upload was the one entry path that shipped a
@@ -505,7 +508,7 @@ export default function ClientConsultFlow({
       // moment the file crossed 5 MB. The capture path next door has always
       // prepared its photo; this now uses the same helper, so both web entry
       // paths hand the server a 1568px, metadata-free JPEG.
-      const prepared = await prepareImageForUpload(file, CONSULT_CAPTURE_MAX_BYTES)
+      const prepared = await prepareImageForUpload(file, CONSULT_CAPTURE_MAX_BYTES, crop)
       const bytes = await prepared.arrayBuffer()
       const issued = await api<{
         upload: { inspirationId: string; signedUrl: string | null }
@@ -966,6 +969,7 @@ function ConsultThreadMessage({
   onUploadInspiration: (
     message: ConsultThreadInspirationMessageDTO,
     file: File,
+    crop: CropRect,
   ) => void
   copy: BrandClientConsultThreadCopy
   /** The ONE signed read of the reference, shared by every card. */
@@ -1034,6 +1038,7 @@ function ConsultThreadMessage({
         />
       ) : (
         <InspirationMessage
+          key={message.sourceDecisionRequired ? 'choose-source' : (message.source?.inspirationId ?? 'no-source')}
           message={message}
           busy={busy}
           copy={copy}
@@ -1270,6 +1275,7 @@ function InspirationMessage({
   onUpload: (
     message: ConsultThreadInspirationMessageDTO,
     file: File,
+    crop: CropRect,
   ) => void
   onAnswer: (
     message: ConsultThreadInspirationMessageDTO,
@@ -1278,6 +1284,10 @@ function InspirationMessage({
     text?: string,
   ) => void
 }) {
+  const [pending, setPending] = useState<{ file: File; url: string } | null>(null)
+  const { brand } = useBrand()
+  const focusCopy = brand.clientConsultInspiration.focus ?? defaultClientConsultInspirationCopy.focus!
+  useEffect(() => () => { if (pending) URL.revokeObjectURL(pending.url) }, [pending])
   const done = message.state === 'DONE'
   // Bound once rather than re-narrowed at each use: the retry handler needs the
   // id, and a non-null assertion inside a callback is exactly where a later
@@ -1291,7 +1301,11 @@ function InspirationMessage({
       ) : null}
       {done ? null : (
         <ThreadCard>
-          {message.sourceDecisionRequired ? (
+          {message.sourceDecisionRequired && pending ? (
+            <ConsultInspirationFocus key={pending.url} src={pending.url} copy={focusCopy}
+              busy={busy} onCancel={() => setPending(null)}
+              onConfirm={(crop) => onUpload(message, pending.file, crop)} />
+          ) : message.sourceDecisionRequired ? (
             <div className="grid gap-3">
               <label className={`inline-block cursor-pointer ${BUTTON_PRIMARY}`}>
                 Add a photo
@@ -1302,7 +1316,7 @@ function InspirationMessage({
                   disabled={busy}
                   onChange={(event) => {
                     const file = event.target.files?.[0]
-                    if (file) onUpload(message, file)
+                    if (file) setPending({ file, url: URL.createObjectURL(file) })
                     event.target.value = ''
                   }}
                 />
