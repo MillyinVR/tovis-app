@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+HERMES="$SCRIPT_DIR/delegate-hermes"
+CLAUDE="$SCRIPT_DIR/delegate-claude"
+
+route="auto"
+task_text=""
+declare -a delegate_args=()
+
+# Route higher-friction work to Claude; keep Hermes as the default.
+CLAUDE_SIGNALS='\b(architecture|security|privacy|payment|billing|migration|conflict|trade.?off|risk|release|app.?store|app store|go.?no.?go|go-no-go|parity|compliance|schema|model|provider|orchestrator|orchestrat|final.?review|go.?no.?go|decision|sign.?off|auth|permission|contract|incident|adversarial|counterexample)\b'
+
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    --route)
+      route="$2"
+      shift 2
+      ;;
+    --route=*)
+      route="${1#*=}"
+      shift
+      ;;
+    --task)
+      task_text="$2"
+      shift 2
+      ;;
+    --task=*)
+      task_text="${1#*=}"
+      shift
+      ;;
+    *)
+      delegate_args+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [[ -z "$task_text" ]] && [[ -t 0 ]]; then
+  echo "Task text is required when stdin is unavailable. Use --task or pipe text into this command." >&2
+  exit 1
+fi
+
+if [[ -z "$task_text" ]]; then
+  task_text="$(cat)"
+fi
+
+case "$route" in
+  auto|"")
+    if printf '%s' "$task_text" | tr '[:upper:]' '[:lower:]' | grep -Eq "$CLAUDE_SIGNALS"; then
+      route="claude"
+    else
+      route="hermes"
+    fi
+    ;;
+  hermes|claude)
+    ;;
+  *)
+    echo "Invalid --route value: $route (expected auto|hermes|claude)" >&2
+    exit 1
+    ;;
+esac
+
+if [[ "$route" == "hermes" ]]; then
+  target="$HERMES"
+else
+  target="$CLAUDE"
+fi
+
+echo "[chief-of-staff] route=$route" >&2
+
+exec "$target" "${delegate_args[@]}" --task "$task_text"
