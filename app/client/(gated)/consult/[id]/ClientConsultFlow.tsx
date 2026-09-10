@@ -2307,7 +2307,7 @@ function InspirationCardMessage({
   if (answered && !editing) {
     const selectedLabels = card.question.options.filter(option => card.selectedValues.includes(option.value)).map(option => option.label).join(', ')
     return <div className="grid gap-2">
-      <ThreadBubble author="APP">{card.question.label}</ThreadBubble>
+      <ThreadBubble author="APP">{card.name ? <p>{card.name}</p> : null}<p>{card.question.label}</p></ThreadBubble>
       <ThreadBubble author="CLIENT">
         {selectedLabels ? <p>{selectedLabels}</p> : null}
         {card.selectedText ? <p className="whitespace-pre-wrap">{card.selectedText}</p> : null}
