@@ -171,7 +171,7 @@ function unsureClause(
 }
 
 /** "a, b, and c" — the Oxford comma, because two of these clauses read as one without it. */
-function joinClauses(clauses: readonly string[], conjunction: string): string {
+export function joinClauses(clauses: readonly string[], conjunction: string): string {
   const [first, second] = clauses
   if (first === undefined) return ''
   if (second === undefined) return first

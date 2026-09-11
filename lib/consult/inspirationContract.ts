@@ -51,6 +51,7 @@ import {
   deriveConsultInspirationCatalogDetails,
   evaluateConsultInspirationProgress as evaluateConsultInspirationProgressV2,
   findConsultInspirationPack,
+  consultInspirationAnswerMap,
   resolveConsultInspirationPack,
   resolveConsultSessionInspirationPack,
   toConsultInspirationJsonPayloadV2,
@@ -773,13 +774,7 @@ async function sessionInspirationPack(
 }
 
 /** Her stored answers as the v2 engine reads them: question key -> values. */
-function answerMap(
-  answers: readonly ConsultInspirationAnswerDTO[],
-): Record<string, readonly string[]> {
-  const map: Record<string, readonly string[]> = {}
-  for (const answer of answers) map[answer.questionKey] = answer.selectedValues
-  return map
-}
+const answerMap = consultInspirationAnswerMap
 
 type InspirationStateContext = {
   /** Null when this consult is on contract v1. */

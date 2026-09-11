@@ -1663,6 +1663,16 @@ describe('a look-anchored consult reaches analysis results', () => {
       expect(brief.aiObservations.lightestLevel.value).toMatch(
         /^(LEVEL_(10|[1-9])|UNKNOWN)$/,
       )
+      // C2-6a — the top line is composed from exactly what this flow wrote:
+      // the spark ("the color"), the keep card ("my length"), the match intent
+      // ("adapt") and the intake's change scale. No goal direction was asked
+      // (a noticeable change resolves the goal), so no "mainly" clause; and
+      // none of the visual cards was answered, so no region is named. The
+      // same on the mocked and the live path: the sentence reads the client's
+      // taps, never the model.
+      expect(brief.topLine).toBe(
+        'Client wants the color (adapted to the client) because the goal is a change people will notice. Must preserve the length.',
+      )
     }
 
     if (live.on) {

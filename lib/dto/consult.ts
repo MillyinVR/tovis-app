@@ -1903,6 +1903,17 @@ export type ConsultProBriefDTO = {
    * only and shipped iOS fixtures stay valid.
    */
   proFollowUps?: ConsultProFollowUpDTO[]
+  /**
+   * C2-6a — the one-line synthesis at the top of the Brief (gap G6):
+   * "Client wants X because Y. Must preserve Z and avoid W." Composed
+   * deterministically from the client's own card taps and intake answers
+   * (lib/consult/briefTopLine.ts); no model call, and every word comes from
+   * lib/brand/consultProBriefTopLineCopy.ts. Null when nothing the client said
+   * supports a single clause. OPTIONAL on the wire for the same reason every
+   * field added since P5a is: the schema grows by addition only and shipped
+   * iOS fixtures stay valid; a build that predates it renders nothing.
+   */
+  topLine?: string | null
   createdAt: string
 }
 
