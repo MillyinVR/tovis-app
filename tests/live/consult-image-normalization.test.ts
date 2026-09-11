@@ -278,6 +278,6 @@ describe('an oversized image through every consult entry path', () => {
     })
 
     const profile = sanitizeConsultProfileResponse(raw)
-    expect(Object.keys(profile)).toHaveLength(11)
+    expect(Object.keys(profile)).toHaveLength(12)
   })
 })
