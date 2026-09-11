@@ -382,3 +382,87 @@ describe('localized inspiration crops', () => {
     expect(result.tone.region).toEqual({ x: 0.1, y: 0.2, w: 0.5, h: 0.6 })
   })
 })
+
+describe('the containment rule clamps a slightly loose crop', () => {
+  // The real v4 answer that took "Build my plan" down on Deploy E (2026-09-11):
+  // the hair box spans x 0.28–0.72 and the lightest-level crop x 0.50–0.75.
+  // Every other crop is inside. Replayed from the prod call, 5 refusals of 5.
+  const LIVE = {
+    hairRegion: '0.28,0.06,0.44,0.94',
+    ...output({
+      baseLevel: known('LEVEL_6', '0.42,0.06,0.15,0.1'),
+      lightestLevel: known('LEVEL_9', '0.5,0.4,0.25,0.3'),
+      tone: known('WARM', '0.4,0.3,0.3,0.3'),
+      technique: known('BALAYAGE', '0.3,0.2,0.4,0.5'),
+      placement: known('ALL_OVER', '0.3,0.2,0.4,0.5'),
+      rootBlend: known('SHADOW_ROOT', '0.42,0.06,0.15,0.08'),
+      finish: known('HIGH_SHINE', '0.4,0.4,0.3,0.3'),
+      dimension: known('MEDIUM', '0.3,0.2,0.4,0.5'),
+    }),
+    credibilityFlags: ['SINGLE_ANGLE'],
+  }
+
+  it('accepts the prod answer and clamps the one crop that overruns the hair box', () => {
+    const read = sanitizeConsultInspirationRead(LIVE)
+    expect(read.analysis.lightestLevel.value).toBe('LEVEL_9')
+    expect(read.analysis.lightestLevel.region).toEqual({ x: 0.5, y: 0.4, w: 0.22, h: 0.3 })
+    expect(read.regionRepairs).toEqual([
+      {
+        field: 'lightestLevel',
+        received: { x: 0.5, y: 0.4, w: 0.25, h: 0.3 },
+        stored: { x: 0.5, y: 0.4, w: 0.22, h: 0.3 },
+        hairRegion: { x: 0.28, y: 0.06, w: 0.44, h: 0.94 },
+      },
+    ])
+    expect(read.analysis.tone.region).toEqual({ x: 0.4, y: 0.3, w: 0.3, h: 0.3 })
+    expect(read.credibilityFlags).toEqual(['SINGLE_ANGLE'])
+  })
+
+  it('records no repair on a clean read', () => {
+    expect(sanitizeConsultInspirationRead({ hairRegion: '0,0,1,1', ...output() }).regionRepairs).toEqual([])
+  })
+
+  it('clamps a crop that overruns on two sides at once', () => {
+    const repairs: Parameters<typeof sanitizeLocalizedInspirationAnalysis>[1] = []
+    const analysis = sanitizeLocalizedInspirationAnalysis(
+      { hairRegion: '0.1,0.1,0.8,0.8', ...output({ tone: known('WARM', '0.05,0.05,0.4,0.4') }) },
+      repairs,
+    )
+    expect(analysis.tone.region).toEqual({ x: 0.1, y: 0.1, w: 0.35, h: 0.35 })
+    expect(repairs?.map((repair) => repair.field)).toEqual(['tone'])
+  })
+
+  it('still refuses a crop that is mostly outside the hair, and names the check', () => {
+    // x 0.60–0.90 against hair x 0.28–0.72: 0.12 of 0.30 survives, under half.
+    expect(() =>
+      sanitizeLocalizedInspirationAnalysis({
+        hairRegion: '0.28,0.06,0.44,0.94',
+        ...output({ tone: known('WARM', '0.6,0.3,0.3,0.3') }),
+      }),
+    ).toThrowError(expect.objectContaining({ kind: 'bad_output', stage: 'region_containment' }))
+  })
+
+  it('names the check on an ordinary refusal too', () => {
+    expect(() =>
+      sanitizeConsultInspirationAnalysis(
+        output({ tone: { ...known('WARM'), confidence: { min: 0.6, max: 0.6 } } }),
+      ),
+    ).toThrowError(expect.objectContaining({ kind: 'bad_output', stage: 'confidence' }))
+  })
+
+  it('the provider says a clamped crop out loud, geometry only', async () => {
+    mocks.create.mockResolvedValue(message(LIVE))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const result = await runConsultInspirationVision({ image: IMAGE })
+      expect(result.analysis.lightestLevel.region).toEqual({ x: 0.5, y: 0.4, w: 0.22, h: 0.3 })
+      expect(result.credibilityFlags).toEqual(['SINGLE_ANGLE'])
+      expect(warn).toHaveBeenCalledTimes(1)
+      const [, payload] = warn.mock.calls[0] as [string, { field: string }]
+      expect(payload.field).toBe('lightestLevel')
+      expect(JSON.stringify(warn.mock.calls[0])).not.toContain('LEVEL_9')
+    } finally {
+      warn.mockRestore()
+    }
+  })
+})

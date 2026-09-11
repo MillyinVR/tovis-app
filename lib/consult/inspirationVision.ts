@@ -215,6 +215,14 @@ export type ConsultInspirationAnalysisResult = {
 export class ConsultInspirationVisionError extends Error {
   constructor(
     readonly kind: 'unavailable' | 'refused' | 'bad_output' | 'unreadable',
+    /**
+     * Which check refused, as a content-free name (`region_containment`,
+     * `confidence`, …) — for the log line, never for the client. Until
+     * 2026-09-11 a `bad_output` said only that SOMETHING was refused, and the
+     * one that took "Build my plan" down in prod needed a paid reproduction
+     * to name. Null for kinds that are not a check.
+     */
+    readonly stage: string | null = null,
   ) {
     super('Inspiration analysis is unavailable.')
     this.name = 'ConsultInspirationVisionError'
@@ -417,11 +425,11 @@ function absorbRounding(side: number, available: number): number | null {
 function region(raw: unknown): ConsultInspirationRegion | null {
   if (raw === null || raw === undefined) return null
   if (typeof raw !== 'string' || !new RegExp(CONSULT_INSPIRATION_REGION_PATTERN).test(raw)) {
-    throw new ConsultInspirationVisionError('bad_output')
+    throw new ConsultInspirationVisionError('bad_output', 'region')
   }
   const parts = raw.split(',').map(Number)
   if (parts.length !== 4 || parts.some((value) => !Number.isFinite(value))) {
-    throw new ConsultInspirationVisionError('bad_output')
+    throw new ConsultInspirationVisionError('bad_output', 'region')
   }
   const [rawX, rawY, rawW, rawH] = parts as [number, number, number, number]
   const x = round4(rawX)
@@ -434,14 +442,14 @@ function region(raw: unknown): ConsultInspirationRegion | null {
   const w = absorbRounding(round4(rawW), round4(1 - x))
   const h = absorbRounding(round4(rawH), round4(1 - y))
   if (w === null || h === null || w < MIN_REGION_SIDE || h < MIN_REGION_SIDE) {
-    throw new ConsultInspirationVisionError('bad_output')
+    throw new ConsultInspirationVisionError('bad_output', 'region')
   }
   return { x, y, w, h }
 }
 
 function confidence(raw: unknown): { min: number; max: number } {
   if (!isRecord(raw) || Object.keys(raw).sort().join(',') !== 'max,min') {
-    throw new ConsultInspirationVisionError('bad_output')
+    throw new ConsultInspirationVisionError('bad_output', 'confidence')
   }
   const { min, max } = raw
   if (
@@ -453,14 +461,14 @@ function confidence(raw: unknown): { min: number; max: number } {
     max > 1 ||
     min >= max
   ) {
-    throw new ConsultInspirationVisionError('bad_output')
+    throw new ConsultInspirationVisionError('bad_output', 'confidence')
   }
   return { min: round4(min), max: round4(max) }
 }
 
 function evidence(raw: unknown): ConsultInspirationEvidence[] {
   if (!Array.isArray(raw) || raw.length > CONSULT_INSPIRATION_EVIDENCE_KEYS.length) {
-    throw new ConsultInspirationVisionError('bad_output')
+    throw new ConsultInspirationVisionError('bad_output', 'evidence')
   }
   const cited: ConsultInspirationEvidence[] = []
   for (const item of raw) {
@@ -468,7 +476,7 @@ function evidence(raw: unknown): ConsultInspirationEvidence[] {
       (candidate) => candidate === item,
     )
     if (!key || cited.includes(key)) {
-      throw new ConsultInspirationVisionError('bad_output')
+      throw new ConsultInspirationVisionError('bad_output', 'evidence')
     }
     cited.push(key)
   }
@@ -483,10 +491,10 @@ function observation<const T extends readonly string[]>(
     !isRecord(raw) ||
     Object.keys(raw).sort().join(',') !== 'confidence,evidence,region,value'
   ) {
-    throw new ConsultInspirationVisionError('bad_output')
+    throw new ConsultInspirationVisionError('bad_output', 'observation_shape')
   }
   const value = values.find((candidate) => candidate === raw.value)
-  if (!value) throw new ConsultInspirationVisionError('bad_output')
+  if (!value) throw new ConsultInspirationVisionError('bad_output', 'observation_value')
   const range = confidence(raw.confidence)
   const cited = evidence(raw.evidence)
   const box = region(raw.region)
@@ -495,10 +503,10 @@ function observation<const T extends readonly string[]>(
   // unsupported claim. Both fail the whole result rather than shipping.
   if (value === 'UNKNOWN') {
     if (cited.length > 0 || range.max > 0.35 || box) {
-      throw new ConsultInspirationVisionError('bad_output')
+      throw new ConsultInspirationVisionError('bad_output', 'unknown_contradiction')
     }
   } else if (cited.length === 0 || !box) {
-    throw new ConsultInspirationVisionError('bad_output')
+    throw new ConsultInspirationVisionError('bad_output', 'unsupported_claim')
   }
   return { value, confidence: range, evidence: cited, region: box }
 }
@@ -514,8 +522,12 @@ function observation<const T extends readonly string[]>(
  * The stored attribute schema stays unchanged; promptVersion marks this check.
  * Containment validates geometry, not the semantic accuracy of model localization.
  */
-export function sanitizeLocalizedInspirationAnalysis(raw: unknown): ConsultInspirationAnalysis {
-  if (!isRecord(raw) || !Object.hasOwn(raw, 'hairRegion')) throw new ConsultInspirationVisionError('bad_output')
+export function sanitizeLocalizedInspirationAnalysis(
+  raw: unknown,
+  /** Filled with every crop that was clamped; the provider logs them. */
+  repairs: ConsultInspirationRegionRepair[] = [],
+): ConsultInspirationAnalysis {
+  if (!isRecord(raw) || !Object.hasOwn(raw, 'hairRegion')) throw new ConsultInspirationVisionError('bad_output', 'envelope')
   // `credibilityFlags` is the envelope's, not an attribute; it is read by
   // `sanitizeConsultInspirationCredibilityFlags` and must not reach the
   // exact-keys check on the attribute set.
@@ -528,12 +540,63 @@ export function sanitizeLocalizedInspirationAnalysis(raw: unknown): ConsultInspi
   const analysis = sanitizeConsultInspirationAnalysis(attributes)
   for (const field of CONSULT_INSPIRATION_ANALYSIS_FIELDS) {
     const box = analysis[field].region
-    if (box && (box.x < hair.x - ROUNDING_TOLERANCE || box.y < hair.y - ROUNDING_TOLERANCE ||
-      box.x + box.w > hair.x + hair.w + ROUNDING_TOLERANCE || box.y + box.h > hair.y + hair.h + ROUNDING_TOLERANCE)) {
-      throw new ConsultInspirationVisionError('bad_output')
+    if (!box) continue
+    const contained = clampIntoHair(box, hair)
+    if (!contained) throw new ConsultInspirationVisionError('bad_output', 'region_containment')
+    if (contained !== box) {
+      repairs.push({ field, received: box, stored: contained, hairRegion: hair })
+      analysis[field].region = contained
     }
   }
   return analysis
+}
+
+/** One attribute crop the containment rule clamped rather than refused. */
+export type ConsultInspirationRegionRepair = {
+  field: ConsultInspirationAnalysisField
+  received: ConsultInspirationRegion
+  stored: ConsultInspirationRegion
+  hairRegion: ConsultInspirationRegion
+}
+
+/**
+ * The containment rule, with the give a model's localization actually needs.
+ *
+ * 🔴 Until 2026-09-11 any attribute crop that reached past the model's OWN
+ * hair box by more than a rounding step (0.0002) threw the whole paid reading
+ * away. On Deploy E every "Build my plan" with a reference died on exactly
+ * that: the v4 read of a real Look photo answered all eight attributes, and
+ * the lightest-level box ran 0.03 past the right edge of the hair box it had
+ * drawn itself — proven by a local replay of the prod call, 5 refusals out of
+ * 5. A box that is mostly inside the hair is a slightly loose box, not a wrong
+ * one; the crop it points at is the one the model meant.
+ *
+ * So: the box is CLAMPED into the hair box when what survives is at least half
+ * of each side (and still a usable crop), and refused when it is not — a crop
+ * mostly outside the hair is pointing at a garment or a background, and that
+ * is the case the rule exists for. A box that only overruns by rounding is
+ * returned as-is (identity), so a clean read records no repair.
+ */
+function clampIntoHair(
+  box: ConsultInspirationRegion,
+  hair: ConsultInspirationRegion,
+): ConsultInspirationRegion | null {
+  const left = Math.max(box.x, hair.x)
+  const top = Math.max(box.y, hair.y)
+  const right = Math.min(box.x + box.w, hair.x + hair.w)
+  const bottom = Math.min(box.y + box.h, hair.y + hair.h)
+  const w = round4(right - left)
+  const h = round4(bottom - top)
+  const moved =
+    Math.abs(left - box.x) > ROUNDING_TOLERANCE ||
+    Math.abs(top - box.y) > ROUNDING_TOLERANCE ||
+    Math.abs(w - box.w) > ROUNDING_TOLERANCE ||
+    Math.abs(h - box.h) > ROUNDING_TOLERANCE
+  if (!moved) return box
+  if (w < box.w / 2 || h < box.h / 2 || w < MIN_REGION_SIDE || h < MIN_REGION_SIDE) {
+    return null
+  }
+  return { x: round4(left), y: round4(top), w, h }
 }
 
 /**
@@ -553,7 +616,7 @@ export function sanitizeConsultInspirationCredibilityFlags(
   raw: unknown,
 ): ConsultInspirationCredibilityFlag[] {
   if (raw === undefined || raw === null) return []
-  if (!Array.isArray(raw)) throw new ConsultInspirationVisionError('bad_output')
+  if (!Array.isArray(raw)) throw new ConsultInspirationVisionError('bad_output', 'credibility_flags')
   return CONSULT_INSPIRATION_CREDIBILITY_FLAGS.filter((flag) => raw.includes(flag))
 }
 
@@ -566,13 +629,16 @@ export function sanitizeConsultInspirationCredibilityFlags(
 export function sanitizeConsultInspirationRead(raw: unknown): {
   analysis: ConsultInspirationAnalysis
   credibilityFlags: ConsultInspirationCredibilityFlag[]
+  /** Crops the containment rule clamped — empty on a clean read. */
+  regionRepairs: ConsultInspirationRegionRepair[]
 } {
-  const analysis = sanitizeLocalizedInspirationAnalysis(raw)
+  const regionRepairs: ConsultInspirationRegionRepair[] = []
+  const analysis = sanitizeLocalizedInspirationAnalysis(raw, regionRepairs)
   // `sanitizeLocalizedInspirationAnalysis` has just proved `raw` is a record.
   const credibilityFlags = sanitizeConsultInspirationCredibilityFlags(
     isRecord(raw) ? raw.credibilityFlags : undefined,
   )
-  return { analysis, credibilityFlags }
+  return { analysis, credibilityFlags, regionRepairs }
 }
 
 export function sanitizeConsultInspirationAnalysis(
@@ -583,7 +649,7 @@ export function sanitizeConsultInspirationAnalysis(
     Object.keys(raw).sort().join(',') !==
       [...CONSULT_INSPIRATION_ANALYSIS_FIELDS].sort().join(',')
   ) {
-    throw new ConsultInspirationVisionError('bad_output')
+    throw new ConsultInspirationVisionError('bad_output', 'attribute_keys')
   }
   const analysis = Object.fromEntries(
     CONSULT_INSPIRATION_ANALYSIS_FIELDS.map((field) => [
@@ -601,7 +667,7 @@ export function sanitizeConsultInspirationAnalysis(
       analysis.lightestLevel.value,
     )
   ) {
-    throw new ConsultInspirationVisionError('bad_output')
+    throw new ConsultInspirationVisionError('bad_output', 'level_order')
   }
   // Part 0 rule 4, and Stage 1's failure state: a result whose every attribute
   // is UNKNOWN is not a low-confidence answer, it is an unreadable photograph.
@@ -723,20 +789,26 @@ export const runConsultInspirationVision: ConsultInspirationVisionProvider =
     // Named here so it cannot arrive at the parser as unexplained garbage —
     // the same trap the analysis engine's direction call actually fell into.
     if (message.stop_reason === 'max_tokens') {
-      throw new ConsultInspirationVisionError('bad_output')
+      throw new ConsultInspirationVisionError('bad_output', 'max_tokens')
     }
     const text = message.content
       .filter((block): block is Anthropic.TextBlock => block.type === 'text')
       .map((block) => block.text)
       .join('')
-    if (!text) throw new ConsultInspirationVisionError('bad_output')
+    if (!text) throw new ConsultInspirationVisionError('bad_output', 'empty_text')
 
+    let read: ReturnType<typeof sanitizeConsultInspirationRead>
     try {
-      return { ...sanitizeConsultInspirationRead(JSON.parse(text)), model }
+      read = sanitizeConsultInspirationRead(JSON.parse(text))
     } catch (error) {
       if (error instanceof ConsultInspirationVisionError) throw error
-      throw new ConsultInspirationVisionError('bad_output')
+      throw new ConsultInspirationVisionError('bad_output', 'json_parse')
     }
+    // Geometry only — which crop moved and by how much, never what it showed.
+    for (const repair of read.regionRepairs) {
+      console.warn('consult inspiration crop clamped into the hair region', repair)
+    }
+    return { analysis: read.analysis, credibilityFlags: read.credibilityFlags, model }
       },
     )
   }

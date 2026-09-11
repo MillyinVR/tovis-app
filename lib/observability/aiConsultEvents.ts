@@ -80,6 +80,12 @@ export type AiConsultInspirationAnalysisEvent = {
   knownAttributeCount: number | null
   model: string | null
   durationMs: number
+  /**
+   * On BAD_OUTPUT, the content-free name of the check that refused
+   * (`ConsultInspirationVisionError.stage`); null otherwise. Added 2026-09-11
+   * after a prod refusal needed a paid reproduction to be named.
+   */
+  stage?: string | null
 }
 
 export function logAiConsultInspirationAnalysis(
@@ -99,6 +105,7 @@ export function logAiConsultInspirationAnalysis(
       knownAttributeCount: input.knownAttributeCount,
       model: input.model,
       durationMs: input.durationMs,
+      stage: input.stage ?? null,
     }),
   )
 }
