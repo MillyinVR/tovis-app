@@ -10,6 +10,7 @@ import {
 
 import {
   buildConsultPrepReminderContent,
+  consultPrepReminderHref,
   parseConsultPrepReminderPayload,
   planConsultPrepReminders,
 } from './consultPrepReminders'
@@ -334,5 +335,16 @@ describe('the pro’s badge', () => {
     expect(deriveConsultPrepBadge(prep, new Date('2027-01-01T00:00:00Z')).kind).toBe(
       'INCOMPLETE',
     )
+  })
+})
+
+describe('where a tap lands', () => {
+  it('is the singular consult route, encoded, with nothing after the id', () => {
+    // The web route is `app/client/(gated)/consult/[id]`; the iOS deep-link
+    // mapper accepts `/client/consult/<id>` and ONLY when the path has exactly
+    // three parts. A plural or a trailing segment lands on a 404 / Home.
+    expect(consultPrepReminderHref('consult_1')).toBe('/client/consult/consult_1')
+    expect(consultPrepReminderHref('a b/c')).toBe('/client/consult/a%20b%2Fc')
+    expect(consultPrepReminderHref('consult_1').split('/').filter(Boolean)).toHaveLength(3)
   })
 })
