@@ -7,11 +7,21 @@ import {
   type ConsultBriefTopLineArgs,
   type ConsultBriefTopLineInspiration,
 } from './briefTopLine'
+import { consultProBriefTopLineCopy } from '@/lib/brand/consultProBriefTopLineCopy'
+
+import { KEEP_AS_IS_KEY, SPARK_FOCUS_KEY } from './inspiration/cardQuestions'
 import {
   HAIR_COLOR_INSPIRATION_CARD_PACK,
   HAIR_COLOR_INSPIRATION_CARD_PACK_V2,
   HAIR_COLOR_INSPIRATION_CARD_PACK_V4,
 } from './inspiration/packs/hairColor'
+import {
+  CONSULT_INSPIRATION_PACK_ARCHIVE,
+  CONSULT_INSPIRATION_PACKS,
+} from './inspiration/registry'
+import { CONSULT_INSPIRATION_NEUTRAL_VALUES } from './inspiration/types'
+import { CONSULT_INTAKE_PACK_ARCHIVE, CONSULT_INTAKE_PACKS } from './intake/registry'
+import { GOAL_DIRECTION_UNRESOLVED_VALUE } from './intake/sharedOptions'
 
 // The same light-blonde reading the card tests use: level 6 base melting to a
 // level 9, cool, babylights through the mids and ends, dimension unread.
@@ -297,5 +307,50 @@ describe('composeConsultBriefTopLine', () => {
     })
     expect(sentence).toBe('Client wants the color. Must preserve the current color.')
     expectNoInternalCode(sentence)
+  })
+
+  // A value with no words is DROPPED from the sentence, silently. That is the
+  // right failure for an unknown value at runtime and the wrong one for a
+  // value a pack actually offers: C2-6c adds questions and reworded packs, and
+  // a new option without an entry here would vanish from every Brief with no
+  // test going red. So every registered pack — current and archived — must be
+  // fully worded.
+  describe('the copy table covers every value a registered pack can answer with', () => {
+    const packs = [...CONSULT_INTAKE_PACKS, ...CONSULT_INTAKE_PACK_ARCHIVE]
+    const tables = {
+      change_scale: consultProBriefTopLineCopy.changeScale,
+      goal_direction: consultProBriefTopLineCopy.goalDirection,
+    } as const
+
+    for (const [key, table] of Object.entries(tables)) {
+      it(`words every ${key} option`, () => {
+        for (const pack of packs) {
+          const question = pack.questions.find((entry) => entry.key === key)
+          if (!question) continue
+          for (const option of question.options) {
+            if (option.value === GOAL_DIRECTION_UNRESOLVED_VALUE) continue
+            expect(table[option.value], `${pack.id}@${pack.version} ${key}:${option.value}`).toBeTruthy()
+          }
+        }
+      })
+    }
+
+    it('words every spark and keep value on every inspiration card pack', () => {
+      for (const pack of [...CONSULT_INSPIRATION_PACKS, ...CONSULT_INSPIRATION_PACK_ARCHIVE]) {
+        for (const question of pack.questions) {
+          if (question.key !== SPARK_FOCUS_KEY && question.key !== KEEP_AS_IS_KEY) continue
+          for (const option of question.options) {
+            if (CONSULT_INSPIRATION_NEUTRAL_VALUES.has(option.value)) continue
+            const phrase =
+              question.key === SPARK_FOCUS_KEY
+                ? option.value === 'the-whole-thing'
+                  ? consultProBriefTopLineCopy.overallLook
+                  : consultProBriefTopLineCopy.sparkFocus[option.value]
+                : consultProBriefTopLineCopy.keep[`${KEEP_AS_IS_KEY}:${option.value}`]
+            expect(phrase, `${pack.id}@${pack.version} ${question.key}:${option.value}`).toBeTruthy()
+          }
+        }
+      }
+    })
   })
 })
