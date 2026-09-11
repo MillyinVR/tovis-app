@@ -44,7 +44,7 @@ import {
 import { isAllowedConsultProviderModel } from './providerModel'
 import { toProviderOutputSchema } from './providerSchema'
 
-export const CONSULT_INSPIRATION_ANALYSIS_SCHEMA_VERSION = 3
+export const CONSULT_INSPIRATION_ANALYSIS_SCHEMA_VERSION = 4
 // v1 (2026-09-04, P4): first read of the inspiration reference. Seven
 // hair-colour attributes, each an observation plus a normalized region box.
 // v2 (2026-09-04, P4a): the level is NAMED, and there are two of them.
@@ -64,7 +64,36 @@ export const CONSULT_INSPIRATION_ANALYSIS_SCHEMA_VERSION = 3
 //
 // Prompt v3 locates the hair/head before reading attributes. Older cached
 // readings must be refreshed because they did not validate crop localization.
-export const CONSULT_INSPIRATION_ANALYSIS_PROMPT_VERSION = 'inspiration-hair-color-v3'
+// v4 (2026-09-11, C2-6b): the reading gains `credibilityFlags` — what the
+// reader noticed about the PHOTOGRAPH (a filter, an AI-looking image, added
+// hair, studio light, styling that hides the cut, one angle). Prompt v4 asks
+// for them and says, in as many words, that a flag is a note and not a
+// refusal: the eight attributes are still read. A v3 row is still READ by
+// `normalizeStoredConsultInspirationAnalysis` with flags `[]` — a bare bump
+// would have made every stored reading NULL for the pro, the cards and the
+// top line in the migrate-before-deploy window. The request hash includes
+// both versions, so the next read of a v3-read photograph pays once for v4.
+export const CONSULT_INSPIRATION_ANALYSIS_PROMPT_VERSION = 'inspiration-hair-color-v4'
+
+/**
+ * The versions a STORED artefact may carry and still be read back, newest
+ * first. The current pair is what the write side produces; the previous pair
+ * is what production has already stored and what the still-deployed code
+ * writes for the length of a deploy build. The readers that select by
+ * version (lib/consult/inspirationContract.ts) and the normalizer that
+ * validates a row (lib/consult/inspirationAnalysisRead.ts) both take their
+ * list from here, so they cannot disagree about what is readable.
+ */
+export const CONSULT_INSPIRATION_ANALYSIS_READABLE_VERSIONS: ReadonlyArray<{
+  schemaVersion: number
+  promptVersion: string
+}> = [
+  {
+    schemaVersion: CONSULT_INSPIRATION_ANALYSIS_SCHEMA_VERSION,
+    promptVersion: CONSULT_INSPIRATION_ANALYSIS_PROMPT_VERSION,
+  },
+  { schemaVersion: 3, promptVersion: 'inspiration-hair-color-v3' },
+]
 
 const DEFAULT_MODEL = 'claude-sonnet-5'
 /**
@@ -114,10 +143,13 @@ export {
   CONSULT_INSPIRATION_DIMENSIONS,
   CONSULT_INSPIRATION_ANALYSIS_FIELDS,
   CONSULT_INSPIRATION_FIELD_VALUES,
+  CONSULT_INSPIRATION_CREDIBILITY_FLAGS,
   type ConsultInspirationAnalysisField,
+  type ConsultInspirationCredibilityFlag,
 } from './inspirationAttributes'
 import {
   CONSULT_INSPIRATION_ANALYSIS_FIELDS,
+  CONSULT_INSPIRATION_CREDIBILITY_FLAGS,
   CONSULT_INSPIRATION_DIMENSIONS,
   CONSULT_INSPIRATION_FIELD_VALUES,
   CONSULT_INSPIRATION_FINISHES,
@@ -126,6 +158,7 @@ import {
   CONSULT_INSPIRATION_TECHNIQUES,
   CONSULT_INSPIRATION_TONES,
   type ConsultInspirationAnalysisField,
+  type ConsultInspirationCredibilityFlag,
 } from './inspirationAttributes'
 
 /**
@@ -174,6 +207,8 @@ export type ConsultInspirationAnalysis = {
 
 export type ConsultInspirationAnalysisResult = {
   analysis: ConsultInspirationAnalysis
+  /** C2-6b — empty when the reader noticed nothing about the photograph. */
+  credibilityFlags: ConsultInspirationCredibilityFlag[]
   model: string
 }
 
@@ -287,16 +322,32 @@ function observationSchema(values: readonly string[]) {
   }
 }
 
+/**
+ * C2-6b — the credibility flags, as the grammar can hold them: an array of an
+ * enum, `required`, and nothing more. `uniqueItems` and `maxItems` are
+ * stripped at the boundary (lib/consult/providerSchema.ts), so a duplicate or
+ * an unknown value is the SANITIZER's problem, not the grammar's — see
+ * `sanitizeConsultInspirationCredibilityFlags`. Costs 3 units, once.
+ */
+const CREDIBILITY_FLAGS_SCHEMA = {
+  type: 'array',
+  uniqueItems: true,
+  maxItems: CONSULT_INSPIRATION_CREDIBILITY_FLAGS.length,
+  description:
+    'Anything about the PHOTOGRAPH itself (not the hair) that a colourist should know before trusting it. Empty when nothing applies. Each value at most once.',
+  items: { type: 'string', enum: [...CONSULT_INSPIRATION_CREDIBILITY_FLAGS] },
+}
+
 export const CONSULT_INSPIRATION_ANALYSIS_OUTPUT_SCHEMA: Record<string, unknown> = {
   type: 'object',
   additionalProperties: false,
-  required: ['hairRegion', ...CONSULT_INSPIRATION_ANALYSIS_FIELDS],
+  required: ['hairRegion', ...CONSULT_INSPIRATION_ANALYSIS_FIELDS, 'credibilityFlags'],
   properties: { hairRegion: REGION_REF, ...Object.fromEntries(
     CONSULT_INSPIRATION_ANALYSIS_FIELDS.map((field) => [
       field,
       observationSchema(CONSULT_INSPIRATION_FIELD_VALUES[field]),
     ]),
-  ) },
+  ), credibilityFlags: CREDIBILITY_FLAGS_SCHEMA },
   $defs: {
     confidence: CONFIDENCE_SCHEMA,
     evidence: EVIDENCE_SCHEMA,
@@ -314,7 +365,7 @@ export const CONSULT_INSPIRATION_ANALYSIS_SYSTEM_PROMPT = [
   'Answer only with the structured fields you are given. There is no free-text field and you must not attempt to add one.',
   'Every field is an observation with four parts: value, a confidence range, an evidence list, and a region.',
   'Every confidence range is TWO DECIMALS BETWEEN 0 AND 1 — for example {"min": 0.4, "max": 0.65}. Not a percentage, not a score out of 10. The minimum must be strictly less than the maximum.',
-  'Use UNKNOWN whenever the photograph does not actually show you the answer — a back-of-head shot cannot tell you the root blend, a black-and-white or heavily filtered image cannot tell you the tone. UNKNOWN must carry an empty evidence list, a confidence range whose max is at most 0.35, and a null region. Guessing is worse than UNKNOWN.',
+  'Use UNKNOWN whenever the photograph does not actually show you the answer — a back-of-head shot cannot tell you the root blend, a black-and-white or heavily filtered image cannot tell you the tone. UNKNOWN must carry an empty evidence list, a confidence range whose max is at most 0.35, and a null region. Guessing is worse than UNKNOWN. A credibility flag on its own is never a reason for UNKNOWN: if the hair still shows you the answer, read it, and widen the confidence range instead.',
   'A value that is NOT UNKNOWN must cite the evidence label "inspiration", carry a confidence range rather than a certainty, and carry a region.',
   'The region is a normalized bounding box on this image where the attribute is most visible, written as the string "x,y,w,h": x and y are the top-left corner, w and h the width and height, each a decimal between 0 and 1 with at most four places, comma-separated with no spaces, and with x + w and y + h no greater than 1. For example "0.28,0.05,0.44,0.2". Point it at the part of the hair you actually read the attribute from — the root area for root blend and for baseLevel, a mid-length section for dimension, the ends for finish, and the lightest visible pieces for lightestLevel.',
   'Field meanings:',
@@ -328,10 +379,16 @@ export const CONSULT_INSPIRATION_ANALYSIS_SYSTEM_PROMPT = [
   'finish — how the surface reflects: HIGH_SHINE, SATIN or MATTE.',
   'dimension — how much contrast there is between the lightest and darkest pieces: FLAT, SUBTLE, MEDIUM or HIGH_CONTRAST.',
   'Photographs lie about colour: studio light, filters and screens shift tone and level. Widen your confidence ranges accordingly and never report certainty.',
+  'credibilityFlags — anything about the PHOTOGRAPH itself, not the hair, that a colourist should know before trusting it. Include every value that applies and nothing else; an empty list means nothing applies. LIKELY_EDITED — a filter, colour grading, smoothing, sharpening or retouching has visibly changed how the hair looks. LIKELY_AI_GENERATED — the image looks generated or heavily synthetic rather than a photograph of real hair (impossible strand geometry, painted texture, a rendered look). EXTENSIONS_LIKELY — the length, fullness or evenness of the ends suggests added hair. PRO_LIGHTING — studio or professional lighting, a wind machine or a set is flattering the colour and shine in a way daylight will not. FINISH_HIDES_CUT — heat styling, a blowout or a set is doing so much work that the cut and the natural fall cannot be read. SINGLE_ANGLE — one view only, so how the colour and shape sit from other angles is not shown.',
+  'A flag is a note, not a refusal. A flagged photograph is still read into all eight fields; the flag tells the salon to trust some details less, and your confidence ranges should say the same. Do not raise a flag you cannot see evidence for.',
 ].join(' ')
 
-const USER_INSTRUCTION =
-  'This is the client’s inspiration reference. Read its hair colour into the eight fields. Use UNKNOWN wherever this photograph does not show you the answer.'
+/**
+ * Exported so the live contract test sends THE instruction production sends
+ * rather than a copy typed beside it — the same rule as the max-tokens cap.
+ */
+export const CONSULT_INSPIRATION_USER_INSTRUCTION =
+  'This is the client’s inspiration reference. Read its hair colour into the eight fields, and note anything about the photograph itself in credibilityFlags. Use UNKNOWN wherever this photograph does not show you the answer.'
 
 // ── Sanitization ────────────────────────────────────────────────────────────
 // The provider's JSON is a proposal. Everything below is the server deciding
@@ -459,7 +516,13 @@ function observation<const T extends readonly string[]>(
  */
 export function sanitizeLocalizedInspirationAnalysis(raw: unknown): ConsultInspirationAnalysis {
   if (!isRecord(raw) || !Object.hasOwn(raw, 'hairRegion')) throw new ConsultInspirationVisionError('bad_output')
-  const { hairRegion, ...attributes } = raw
+  // `credibilityFlags` is the envelope's, not an attribute; it is read by
+  // `sanitizeConsultInspirationCredibilityFlags` and must not reach the
+  // exact-keys check on the attribute set.
+  const { hairRegion, ...envelope } = raw
+  const attributes = Object.fromEntries(
+    Object.entries(envelope).filter(([key]) => key !== 'credibilityFlags'),
+  )
   const hair = region(hairRegion)
   if (!hair) throw new ConsultInspirationVisionError('unreadable')
   const analysis = sanitizeConsultInspirationAnalysis(attributes)
@@ -471,6 +534,45 @@ export function sanitizeLocalizedInspirationAnalysis(raw: unknown): ConsultInspi
     }
   }
   return analysis
+}
+
+/**
+ * C2-6b — the credibility flags off the wire: the vocabulary, each at most
+ * once, in the vocabulary's order.
+ *
+ * 🔴 Deliberately LENIENT about the values, unlike every other sanitizer in
+ * this file, because a flag is advisory. Refusing a whole paid reading over a
+ * flag word the vocabulary does not know would be Part 0 rule 11's trap #4
+ * (a complete analysis discarded over an enum the policy then refused) for a
+ * field that changes a sentence, not a decision. So: an unknown value is
+ * DROPPED and never stored, a duplicate is deduped, an absent field is `[]`.
+ * A non-array is still `bad_output` — the grammar guarantees an array, so
+ * anything else is a broken contract, not a vocabulary drift.
+ */
+export function sanitizeConsultInspirationCredibilityFlags(
+  raw: unknown,
+): ConsultInspirationCredibilityFlag[] {
+  if (raw === undefined || raw === null) return []
+  if (!Array.isArray(raw)) throw new ConsultInspirationVisionError('bad_output')
+  return CONSULT_INSPIRATION_CREDIBILITY_FLAGS.filter((flag) => raw.includes(flag))
+}
+
+/**
+ * The whole v4 wire object → the two halves the artefact stores: the
+ * localized attribute reading and the credibility flags. This is what the
+ * provider call parses; the two halves are exported separately because the
+ * live contract test and the integration fakes exercise each on its own.
+ */
+export function sanitizeConsultInspirationRead(raw: unknown): {
+  analysis: ConsultInspirationAnalysis
+  credibilityFlags: ConsultInspirationCredibilityFlag[]
+} {
+  const analysis = sanitizeLocalizedInspirationAnalysis(raw)
+  // `sanitizeLocalizedInspirationAnalysis` has just proved `raw` is a record.
+  const credibilityFlags = sanitizeConsultInspirationCredibilityFlags(
+    isRecord(raw) ? raw.credibilityFlags : undefined,
+  )
+  return { analysis, credibilityFlags }
 }
 
 export function sanitizeConsultInspirationAnalysis(
@@ -583,7 +685,7 @@ export const runConsultInspirationVision: ConsultInspirationVisionProvider =
                     data: input.image.base64,
                   },
                 },
-                { type: 'text', text: USER_INSTRUCTION },
+                { type: 'text', text: CONSULT_INSPIRATION_USER_INSTRUCTION },
               ],
             },
           ],
@@ -630,7 +732,7 @@ export const runConsultInspirationVision: ConsultInspirationVisionProvider =
     if (!text) throw new ConsultInspirationVisionError('bad_output')
 
     try {
-      return { analysis: sanitizeLocalizedInspirationAnalysis(JSON.parse(text)), model }
+      return { ...sanitizeConsultInspirationRead(JSON.parse(text)), model }
     } catch (error) {
       if (error instanceof ConsultInspirationVisionError) throw error
       throw new ConsultInspirationVisionError('bad_output')

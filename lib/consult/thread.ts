@@ -560,6 +560,18 @@ export async function loadConsultThread(args: {
       schemaVersion: inspiration.schemaVersion,
     })
 
+    // C2-6b — one sentence about the PHOTOGRAPH, when the reading flagged it
+    // (a filter, an AI-looking image, added hair, studio light, styling that
+    // hides the cut, one angle). It sits between the picture and the cards so
+    // she reads it before she is asked what she loves about it, and it is an
+    // ordinary DONE text bubble: nothing to answer, nothing for resume to land
+    // on, and a client build that predates this slice renders it as-is. The
+    // words are the inspiration copy's, composed on the server
+    // (lib/consult/inspirationCredibility.ts); no code reaches her.
+    if (inspiration.credibilityNote) {
+      out.push(text('inspiration:credibility', inspiration.credibilityNote))
+    }
+
     // One message per coarse card, in pack order. The card the server is
     // waiting on is the OPEN one; the ones after it render as requests she can
     // still jump to, exactly as the photo pack does.

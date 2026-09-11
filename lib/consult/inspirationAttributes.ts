@@ -83,3 +83,26 @@ export const CONSULT_INSPIRATION_FIELD_VALUES: Readonly<
   dimension: CONSULT_INSPIRATION_DIMENSIONS,
 }
 
+/**
+ * C2-6b (gap G2) — what about the PHOTOGRAPH, as opposed to the hair in it,
+ * a colourist would want to know before trusting the reading. The three
+ * consult guides name these as the single most-cited cause of a failed
+ * consult: filters, colour grading, extensions, wind machines, AI images.
+ *
+ * A flag is a NOTE, never a refusal: a flagged reference is still read into
+ * the eight attributes, and it is the client's and the pro's sentences that
+ * change, not whether there is a reading. Enum on the wire, sentences on read
+ * (lib/consult/inspirationCredibility.ts); the words live in the copy tables,
+ * so nothing here ever reaches a screen as a code.
+ */
+export const CONSULT_INSPIRATION_CREDIBILITY_FLAGS = [
+  'LIKELY_EDITED',
+  'LIKELY_AI_GENERATED',
+  'EXTENSIONS_LIKELY',
+  'PRO_LIGHTING',
+  'FINISH_HIDES_CUT',
+  'SINGLE_ANGLE',
+] as const
+export type ConsultInspirationCredibilityFlag =
+  (typeof CONSULT_INSPIRATION_CREDIBILITY_FLAGS)[number]
+

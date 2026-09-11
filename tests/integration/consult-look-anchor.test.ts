@@ -14,6 +14,7 @@ import { lockConsultSessionRow } from '@/lib/consult/inspirationContract'
 // pass on NULLs. Only a real Postgres proves the new definitions do what the
 // migration claims.
 
+import { createHash } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
 
 import {
@@ -306,6 +307,7 @@ vi.mock('@/lib/consult/inspirationVision', async (importOriginal) => {
       }
       return {
         model: 'fake-inspiration-model',
+        credibilityFlags: [...captured.inspirationCredibilityFlags],
         analysis: {
           baseLevel: known('LEVEL_6'),
           lightestLevel: known('LEVEL_9'),
@@ -353,6 +355,8 @@ const captured = vi.hoisted(() => ({
   } | null>,
   /** Set to make the next read fail the way an unreadable photo fails. */
   inspirationFailure: null as null | 'unreadable' | 'unavailable',
+  /** C2-6b — what the fake reader notices about the photograph. */
+  inspirationCredibilityFlags: [] as string[],
 }))
 
 vi.mock('@/lib/consult/analysisEngine', async (importOriginal) => {
@@ -526,6 +530,13 @@ import {
   CONSULT_INSPIRATION_ANALYSIS_PROMPT_VERSION,
   CONSULT_INSPIRATION_ANALYSIS_SCHEMA_VERSION,
 } from '@/lib/consult/inspirationVision'
+import { defaultClientConsultInspirationCopy } from '@/lib/brand/defaultClientConsultInspirationCopy'
+import {
+  composeConsultInspirationCredibilityClientNote,
+  composeConsultInspirationCredibilityProLine,
+} from '@/lib/consult/inspirationCredibility'
+import { buildConsultMentor } from '@/lib/consult/mentor'
+import { normalizeStoredConsultInspirationAnalysis } from '@/lib/consult/inspirationAnalysisRead'
 import { loadAuthorizedProConsultBriefs } from '@/lib/consult/proBrief'
 import type { ConsultProBriefDTO } from '@/lib/dto/consult'
 import {
@@ -2429,6 +2440,260 @@ describe('P4 — the inspiration reference is read, stored, and reaches both aud
       model: 'fake-inspiration-model',
     })
     expect(brief?.inspirationAnalysis?.attributes.technique.value).toBe('BALAYAGE')
+  })
+
+  // ── C2-6b — credibility flags ─────────────────────────────────────────────
+
+  it('flags a doubtful reference for BOTH audiences and still keeps the reading', async () => {
+    captured.inspirationCalls = 0
+    captured.inspirationFailure = null
+    captured.inspirationCredibilityFlags = ['PRO_LIGHTING', 'LIKELY_EDITED']
+    try {
+      const lookPostId = await freshHairLook()
+      const created = await startLook(lookPostId)
+      const sessionId = ((await body(created)).consult as { id: string }).id
+      if (!sessionIds.includes(sessionId)) sessionIds.push(sessionId)
+      await consentAndCompleteIntake(sessionId, 'c26b-flagged')
+
+      // The read stage, in MEDIA_READY: the artefact is written with the
+      // flags beside the attributes, through the live v4 guard arm.
+      const read = await readInspiration(
+        jsonRequest(`/api/v1/client/consult/${sessionId}/inspiration/read`, {
+          idempotencyKey: 'c26b-flagged-read',
+        }),
+        context(sessionId),
+      )
+      expect(read.status).toBe(200)
+      const artefact = await db.consultRevision.findFirstOrThrow({
+        where: { consultSessionId: sessionId, kind: ConsultRevisionKind.INSPIRATION_ANALYSIS },
+        orderBy: { revision: 'desc' },
+        select: { schemaVersion: true, promptVersion: true, payload: true },
+      })
+      expect(artefact.schemaVersion).toBe(4)
+      expect(artefact.promptVersion).toBe('inspiration-hair-color-v4')
+      // Stored in vocabulary order, not arrival order — the sanitizer's doing.
+      expect((artefact.payload as { credibilityFlags: string[] }).credibilityFlags).toEqual([
+        'LIKELY_EDITED',
+        'PRO_LIGHTING',
+      ])
+
+      // 1. The CLIENT: the state carries the app's one sentence, composed from
+      //    the copy table — and the cards are still built, because a flag is a
+      //    note and not a refusal.
+      const state = await loadConsultInspirationState({
+        consultSessionId: sessionId,
+        clientId,
+        actorUserId: clientUserId,
+      })
+      expect(state.source?.analysisReady).toBe(true)
+      expect(state.credibilityNote).toBe(
+        composeConsultInspirationCredibilityClientNote(
+          ['LIKELY_EDITED', 'PRO_LIGHTING'],
+          defaultClientConsultInspirationCopy,
+        ),
+      )
+      expect(state.credibilityNote).toContain('it looks edited or filtered')
+      expect(state.credibilityNote).not.toContain('LIKELY_EDITED')
+      expect((state.cards ?? []).length).toBeGreaterThan(0)
+
+      // 2. The PRO: through the analysis to a Brief. The run finds the
+      //    artefact by hash and pays nothing more for the photograph.
+      await answerInspiration(sessionId, 'c26b-flagged')
+      for (const shotKey of [
+        'hair_back',
+        'hair_left',
+        'hair_right',
+        'hair_crown',
+        'face_front',
+        'face_side',
+        'eyes_closeup',
+      ] as const) {
+        await attachAcceptedCapture(sessionId, shotKey, 'c26b-flagged')
+      }
+      const callsBeforeAnalysis = captured.inspirationCalls
+      const analysis = await startAnalysis(
+        jsonRequest(`/api/v1/client/consult/${sessionId}/analysis`, {
+          idempotencyKey: 'c26b-flagged-analysis',
+          schemaVersion: CONSULT_ANALYSIS_SCHEMA_VERSION,
+          promptVersion: CONSULT_ANALYSIS_PROMPT_VERSION,
+        }),
+        context(sessionId),
+      )
+      expect(analysis.status).toBe(200)
+      const drained = await processConsultAnalysisRuns({ take: 1 })
+      expect(drained.outcomes[0]?.result).toBe('COMPLETED')
+      expect(captured.inspirationCalls).toBe(callsBeforeAnalysis)
+
+      const briefs = await loadAuthorizedProConsultBriefs({ professionalId, clientId })
+      const brief = briefs.find((candidate) => candidate.consultId === sessionId)
+      expect(brief?.inspirationAnalysis?.credibilityFlags).toEqual(['LIKELY_EDITED', 'PRO_LIGHTING'])
+      expect(brief?.inspirationAnalysis?.attributes.technique.value).toBe('BALAYAGE')
+      const proLine = composeConsultInspirationCredibilityProLine(['LIKELY_EDITED', 'PRO_LIGHTING'])
+      expect(proLine).toBe('Reference note: looks edited or filtered; lit like a photo shoot.')
+      expect(brief?.inspirationCredibility).toBe(proLine)
+      // The mentor layer's "what the consult saw" leads with the same line.
+      const mentor = buildConsultMentor(brief!)
+      expect(mentor.sections[0]?.items[0]).toEqual({
+        text: proLine,
+        sourceId: brief?.inspirationAnalysis?.revisionId,
+      })
+      // The engine was handed the attributes only — nothing about the engine
+      // or its schema changed in this slice.
+      const [engineInput] = captured.analysisInputs.slice(-1)
+      expect(JSON.stringify(engineInput?.inspiration)).not.toContain('credibilityFlags')
+    } finally {
+      captured.inspirationCredibilityFlags = []
+    }
+  })
+
+  it('still reads the SHIPPED v3 artefact, and the v4 guard arm holds the flags to the vocabulary', async () => {
+    // A consult in MEDIA_READY with a seeded reference and no reading yet —
+    // the state the still-deployed code writes a v3 artefact into during the
+    // deploy build, and the state every consult read before the deploy is in.
+    const lookPostId = await freshHairLook()
+    const created = await startLook(lookPostId)
+    const sessionId = ((await body(created)).consult as { id: string }).id
+    if (!sessionIds.includes(sessionId)) sessionIds.push(sessionId)
+    await consentAndCompleteIntake(sessionId, 'c26b-v3')
+    const source = await db.consultInspiration.findFirstOrThrow({
+      where: { consultSessionId: sessionId, status: ConsultInspirationStatus.ATTACHED },
+      select: { id: true, source: true },
+    })
+    const attributes = (
+      await db.consultRevision.findFirstOrThrow({
+        where: { consultSessionId: { in: sessionIds }, kind: ConsultRevisionKind.INSPIRATION_ANALYSIS },
+        orderBy: { revision: 'desc' },
+        select: { payload: true },
+      })
+    ).payload as { attributes: Prisma.JsonObject }
+
+    const insert = async (args: {
+      key: string
+      schemaVersion: number
+      promptVersion: string
+      payload: Prisma.InputJsonObject
+    }) =>
+      db.$transaction(async (tx) => {
+        const sequenced = await tx.consultSession.update({
+          where: { id: sessionId },
+          data: { revisionSequence: { increment: 1 } },
+          select: { revisionSequence: true },
+        })
+        const row = await tx.consultRevision.create({
+          data: {
+            consultSessionId: sessionId,
+            revision: sequenced.revisionSequence,
+            kind: ConsultRevisionKind.INSPIRATION_ANALYSIS,
+            schemaVersion: args.schemaVersion,
+            promptVersion: args.promptVersion,
+            model: 'fake-inspiration-model',
+            idempotencyKey: args.key,
+            requestHash: createHash('sha256').update(args.key).digest('hex'),
+            payload: args.payload,
+          },
+        })
+        await tx.consultAuditEvent.create({
+          data: {
+            consultSessionId: sessionId,
+            action: ConsultAuditAction.REVISION_CREATED,
+            actorType: ConsultActorType.CLIENT,
+            actorId: clientUserId,
+            revisionId: row.id,
+          },
+        })
+        return row
+      })
+    const v4 = (credibilityFlags: unknown, extra: Record<string, unknown> = {}) =>
+      ({
+        schemaVersion: 4,
+        inspirationId: source.id,
+        source: source.source,
+        attributes: attributes.attributes,
+        ...(credibilityFlags === undefined ? {} : { credibilityFlags }),
+        ...extra,
+      }) as Prisma.InputJsonObject
+
+    // 1. What the still-deployed code writes: schema 3, prompt v3, no flags.
+    //    The live guard accepts it, and BOTH readers still read it.
+    const v3Row = await insert({
+      key: 'c26b-v3-window',
+      schemaVersion: 3,
+      promptVersion: 'inspiration-hair-color-v3',
+      payload: {
+        schemaVersion: 3,
+        inspirationId: source.id,
+        source: source.source,
+        attributes: attributes.attributes,
+      } as Prisma.InputJsonObject,
+    })
+    expect(v3Row.schemaVersion).toBe(3)
+    const state = await loadConsultInspirationState({
+      consultSessionId: sessionId,
+      clientId,
+      actorUserId: clientUserId,
+    })
+    // The contract's version-pinned query found it: the cards have a reading
+    // to crop, and there is nothing to say about the photograph.
+    expect(state.source?.analysisReady).toBe(true)
+    expect(state.credibilityNote).toBeNull()
+    expect((state.cards ?? []).length).toBeGreaterThan(0)
+    const normalized = normalizeStoredConsultInspirationAnalysis({
+      ...(await db.consultRevision.findUniqueOrThrow({
+        where: { id: v3Row.id },
+        select: { id: true, payload: true, schemaVersion: true, promptVersion: true, model: true, createdAt: true },
+      })),
+    })
+    expect(normalized?.credibilityFlags).toEqual([])
+    expect(normalized?.attributes.baseLevel.value).toBe('LEVEL_6')
+
+    // 2. The v4 arm: positive control first, so the refusals below mean
+    //    something — a valid flagged v4 payload inserts.
+    const accepted = await insert({
+      key: 'c26b-v4-control',
+      schemaVersion: 4,
+      promptVersion: 'inspiration-hair-color-v4',
+      payload: v4(['SINGLE_ANGLE', 'EXTENSIONS_LIKELY']),
+    })
+    expect(accepted.schemaVersion).toBe(4)
+    // And once a v4 row is newest, the readers take it, flags and all.
+    expect(
+      (
+        await loadConsultInspirationState({ consultSessionId: sessionId, clientId, actorUserId: clientUserId })
+      ).credibilityNote,
+    ).toContain('some of that length or fullness may be added hair')
+
+    // 3. What the sanitizer would never write, the guard refuses: a code no
+    //    copy table has words for, a duplicate, a missing field, a wrong type,
+    //    and a v4 row under the v3 prompt.
+    const refused = [
+      { key: 'c26b-v4-unknown', payload: v4(['LIKELY_EDITED', 'WIND_MACHINE']) },
+      { key: 'c26b-v4-duplicate', payload: v4(['LIKELY_EDITED', 'LIKELY_EDITED']) },
+      { key: 'c26b-v4-missing', payload: v4(undefined) },
+      { key: 'c26b-v4-not-array', payload: v4('LIKELY_EDITED') },
+      { key: 'c26b-v4-extra-key', payload: v4([], { inspirationRevisionId: 'x' }) },
+    ]
+    for (const attempt of refused) {
+      await expect(
+        insert({ ...attempt, schemaVersion: 4, promptVersion: 'inspiration-hair-color-v4' }),
+      ).rejects.toThrow(/invalid versioned inspiration analysis payload/)
+    }
+    await expect(
+      insert({
+        key: 'c26b-v4-wrong-prompt',
+        schemaVersion: 4,
+        promptVersion: 'inspiration-hair-color-v3',
+        payload: v4([]),
+      }),
+    ).rejects.toThrow(/invalid versioned inspiration analysis payload/)
+    // A v3 row that smuggles the new key is refused by ITS arm, unchanged.
+    await expect(
+      insert({
+        key: 'c26b-v3-with-flags',
+        schemaVersion: 3,
+        promptVersion: 'inspiration-hair-color-v3',
+        payload: { ...v4([]), schemaVersion: 3 } as Prisma.InputJsonObject,
+      }),
+    ).rejects.toThrow(/invalid versioned inspiration analysis payload/)
   })
 
   it('the standalone entry point refuses an unknown id, and cannot write outside ANALYZING', async () => {

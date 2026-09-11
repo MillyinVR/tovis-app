@@ -48,6 +48,7 @@ import {
   loadLatestImmutableConsultResult,
 } from './immutableResult'
 import { normalizeStoredConsultInspirationAnalysis } from './inspirationAnalysisRead'
+import { composeConsultInspirationCredibilityProLine } from './inspirationCredibility'
 import { diffConsultPlans } from './planDiff'
 import { loadConsultServiceEstimatesByConsultId } from './serviceEstimate'
 
@@ -312,6 +313,12 @@ async function loadSessionBrief(
     inspirationAnalysis,
     // C2-6a — always present on the server's own Brief; optional on the wire.
     topLine: await loadBriefTopLine(tx, session.id, inspiration, inspirationAnalysis, clientIntake),
+    // C2-6b — the reference note, composed at READ time like the top line so
+    // the byte-compared Brief payload never carries it. Null without a
+    // reading or without a flag (a v3 reading has none).
+    inspirationCredibility: inspirationAnalysis
+      ? composeConsultInspirationCredibilityProLine(inspirationAnalysis.credibilityFlags ?? [])
+      : null,
     ...(await loadBriefPlanDiff(session.id, planDiffCopy)),
     feedback: feedback
       ? { rating: feedback.rating, createdAt: feedback.createdAt.toISOString() }

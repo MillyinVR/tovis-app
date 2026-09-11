@@ -48,7 +48,10 @@ import {
   CONSULT_INSPIRATION_ANALYSIS_SYSTEM_PROMPT,
   CONSULT_INSPIRATION_MAX_TOKENS,
   ConsultInspirationVisionError,
-  sanitizeLocalizedInspirationAnalysis,
+  CONSULT_INSPIRATION_CREDIBILITY_FLAGS,
+  CONSULT_INSPIRATION_USER_INSTRUCTION,
+  countKnownConsultInspirationAttributes,
+  sanitizeConsultInspirationRead,
 } from '@/lib/consult/inspirationVision'
 import {
   buildConsultFollowUpOutputSchema,
@@ -374,10 +377,7 @@ describe('the consult schemas compile and answer against the live model', () => 
           type: 'image',
           source: { type: 'base64', media_type: image.mediaType, data: image.base64 },
         },
-        {
-          type: 'text',
-          text: 'This is the client’s inspiration reference. Read its hair colour into the eight fields. Use UNKNOWN wherever this photograph does not show you the answer.',
-        },
+        { type: 'text', text: CONSULT_INSPIRATION_USER_INSTRUCTION },
       ],
       schema: CONSULT_INSPIRATION_ANALYSIS_OUTPUT_SCHEMA,
       maxTokens: CONSULT_INSPIRATION_MAX_TOKENS,
@@ -387,13 +387,51 @@ describe('the consult schemas compile and answer against the live model', () => 
     // the sanitizer working, not failing — but it is the ONLY failure this
     // test tolerates, and it still proves the schema compiled and answered.
     try {
-      const analysis = sanitizeLocalizedInspirationAnalysis(raw)
+      // C2-6b: the v4 read — attributes AND the flag list the grammar holds as
+      // an enum array. Whatever the model flagged here is a live-model fact;
+      // what this asserts is that the field came back, parsed, and sits inside
+      // the vocabulary.
+      const { analysis, credibilityFlags } = sanitizeConsultInspirationRead(raw)
       expect(Object.keys(analysis)).toHaveLength(8)
       expect(analysis.baseLevel.value).toMatch(/^(LEVEL_(10|[1-9])|UNKNOWN)$/)
+      expect(Array.isArray((raw as { credibilityFlags?: unknown }).credibilityFlags)).toBe(true)
+      for (const flag of credibilityFlags) {
+        expect(CONSULT_INSPIRATION_CREDIBILITY_FLAGS).toContain(flag)
+      }
     } catch (error) {
       expect(error).toBeInstanceOf(ConsultInspirationVisionError)
       expect((error as ConsultInspirationVisionError).kind).toBe('unreadable')
     }
+  })
+
+  it('an obviously edited reference comes back FLAGGED, and still read — flag, never reject', async () => {
+    // ⚠️ PLACEHOLDER fixture (C2-6b, 2026-09-11): `synthetic-i-hair_back` put
+    // through an obvious edit — saturation ×2.6, a hue shift, crushed
+    // contrast, over-sharpening and a magenta vignette — because the eval set
+    // holds no real edited or AI-looking reference yet. Tori shoots real eval
+    // fixtures; replace this with one and keep the assertions.
+    const image = fixture('placeholder-edited-hair_back')
+    const raw = await send({
+      system: CONSULT_INSPIRATION_ANALYSIS_SYSTEM_PROMPT,
+      content: [
+        {
+          type: 'image',
+          source: { type: 'base64', media_type: image.mediaType, data: image.base64 },
+        },
+        { type: 'text', text: CONSULT_INSPIRATION_USER_INSTRUCTION },
+      ],
+      schema: CONSULT_INSPIRATION_ANALYSIS_OUTPUT_SCHEMA,
+      maxTokens: CONSULT_INSPIRATION_MAX_TOKENS,
+    })
+    // Required success: the sanitizer ACCEPTS it (a flag never forces
+    // `unreadable` on its own), at least one flag is raised, and the hair was
+    // still read into the eight fields.
+    const { analysis, credibilityFlags } = sanitizeConsultInspirationRead(raw)
+    expect(credibilityFlags.length).toBeGreaterThan(0)
+    for (const flag of credibilityFlags) {
+      expect(CONSULT_INSPIRATION_CREDIBILITY_FLAGS).toContain(flag)
+    }
+    expect(countKnownConsultInspirationAttributes(analysis)).toBeGreaterThan(0)
   })
 
   // ── P5g — the adaptive follow-up call ─────────────────────────────────────

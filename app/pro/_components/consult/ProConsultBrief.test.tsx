@@ -317,6 +317,82 @@ describe('ProConsultBrief', () => {
     expect(html).not.toContain('Estimated total')
   })
 })
+// C2-6b — the reference note: one line about the photograph, beside what the
+// client picked out of it, and the same line leading the mentor layer.
+describe('the inspiration credibility line', () => {
+  const observed = { value: 'COOL' as const, confidence, evidence: ['inspiration' as const], region: { x: 0.1, y: 0.1, w: 0.5, h: 0.5 } }
+  const flagged: ConsultProBriefDTO = {
+    ...brief,
+    inspiration: {
+      ...brief.inspiration,
+      source: 'EXTERNAL_UPLOAD',
+      inspirationId: 'insp_1',
+      exactClientDetails: [{ questionKey: 'spark_focus', value: 'the-color', sentiment: 'LIKE', clientWords: 'the color' }],
+    },
+    inspirationAnalysis: {
+      revisionId: 'reading_1',
+      inspirationId: 'insp_1',
+      source: 'EXTERNAL_UPLOAD',
+      schemaVersion: 4,
+      promptVersion: 'inspiration-hair-color-v4',
+      model: 'fake',
+      attributes: {
+        baseLevel: { ...observed, value: 'LEVEL_6' },
+        lightestLevel: { ...observed, value: 'LEVEL_9' },
+        tone: observed,
+        technique: { ...observed, value: 'BALAYAGE' },
+        placement: { ...observed, value: 'MIDS_TO_ENDS' },
+        rootBlend: { ...observed, value: 'SHADOW_ROOT' },
+        finish: { ...observed, value: 'HIGH_SHINE' },
+        dimension: { ...observed, value: 'MEDIUM' },
+      },
+      credibilityFlags: ['LIKELY_EDITED', 'PRO_LIGHTING'],
+      createdAt: '2026-09-11T00:00:00.000Z',
+    },
+    inspirationCredibility: 'Reference note: looks edited or filtered; lit like a photo shoot.',
+  }
+
+  it('renders the served line whole, beside what matters in the inspiration', () => {
+    const html = renderToStaticMarkup(<ProConsultBrief brief={flagged} timeZone="UTC" />)
+    const at = html.indexOf('data-testid="consult-brief-inspiration-credibility"')
+    expect(at).toBeGreaterThanOrEqual(0)
+    expect(html).toContain('Reference note: looks edited or filtered; lit like a photo shoot.')
+    // After the client's likes, before her words.
+    expect(at).toBeGreaterThan(html.indexOf('What matters in the inspiration'))
+    expect(at).toBeLessThan(html.indexOf('Client&#x27;s words'))
+    // Never the code.
+    expect(html).not.toContain('LIKELY_EDITED')
+  })
+
+  it('renders nothing when the server composed none', () => {
+    for (const inspirationCredibility of [null, undefined]) {
+      const html = renderToStaticMarkup(
+        <ProConsultBrief brief={{ ...flagged, inspirationCredibility }} timeZone="UTC" />,
+      )
+      expect(html).not.toContain('consult-brief-inspiration-credibility')
+      expect(html).not.toContain('Reference note')
+    }
+  })
+
+  it('leads the mentor layer’s "what the consult saw" with the same line', () => {
+    const mentor = buildConsultMentor({ ...flagged, lookPlan: plan })
+    expect(mentor.sections[0]?.items[0]).toEqual({
+      text: 'Reference note: looks edited or filtered; lit like a photo shoot.',
+      sourceId: 'reading_1',
+    })
+    // A reading with no flags leads with the first attribute instead.
+    const unflagged = buildConsultMentor({
+      ...flagged,
+      lookPlan: plan,
+      inspirationAnalysis: { ...flagged.inspirationAnalysis!, credibilityFlags: [] },
+    })
+    expect(unflagged.sections[0]?.items[0]?.text).not.toContain('Reference note')
+    expect(unflagged.sections[0]?.items[0]?.text).toContain('base level')
+    const html = renderToStaticMarkup(<ProConsultBrief brief={{ ...flagged, mentor }} timeZone="UTC" />)
+    expect(html.split('Reference note: looks edited or filtered; lit like a photo shoot.').length - 1).toBe(2)
+  })
+})
+
 it('renders the five evidence-bound mentor sections without generating formulation', () => {
   const source = { ...brief, lookPlan: plan }
   const mentor = buildConsultMentor(source)

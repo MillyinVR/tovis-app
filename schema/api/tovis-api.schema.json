@@ -10009,6 +10009,13 @@
         "createdAt": {
           "type": "string"
         },
+        "credibilityFlags": {
+          "description": "C2-6b — empty when the reader saw nothing to note. OPTIONAL on the wire so the published schema grows by addition only; the server always sends it, and a v3 artefact (read before flags existed) is served with `[]`.",
+          "items": {
+            "$ref": "#/definitions/ConsultInspirationCredibilityFlagDTO"
+          },
+          "type": "array"
+        },
         "inspirationId": {
           "description": "The attached ConsultInspiration row whose image was read.",
           "type": "string"
@@ -10585,6 +10592,18 @@
       ],
       "type": "object"
     },
+    "ConsultInspirationCredibilityFlagDTO": {
+      "description": "C2-6b — what the reader noticed about the PHOTOGRAPH rather than the hair: a filter or edit, an AI-looking image, added hair, studio lighting, styling that hides the cut, a single angle. Mirrors `CONSULT_INSPIRATION_CREDIBILITY_FLAGS` (lib/consult/inspirationAttributes.ts).\n\n🔴 A flag is a note, not a refusal. The reading still answers the eight attributes; what a flag changes is the sentence beside them — the client's in the thread, the pro's on the Brief — and both are composed on the server from the copy tables. A code never reaches a screen.",
+      "enum": [
+        "LIKELY_EDITED",
+        "LIKELY_AI_GENERATED",
+        "EXTENSIONS_LIKELY",
+        "PRO_LIGHTING",
+        "FINISH_HIDES_CUT",
+        "SINGLE_ANGLE"
+      ],
+      "type": "string"
+    },
     "ConsultInspirationDeleteResponseDTO": {
       "properties": {
         "deleted": {
@@ -10928,6 +10947,13 @@
         },
         "consultId": {
           "type": "string"
+        },
+        "credibilityNote": {
+          "description": "C2-6b — the app's one sentence about the reference photograph when the reading flagged it (a filter, an AI-looking image, added hair, studio light, styling that hides the cut, one angle): still useful for the feeling and direction; some details may not be how real hair reflects, moves or grows. Composed on the server from the tenant's inspiration copy, keyed by flag, so no code reaches the client. Null when there is no reading or nothing was flagged. OPTIONAL on the wire, like every field added since P5a; the thread carries it as an ordinary TEXT message.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "introduction": {
           "type": "string"
@@ -12329,6 +12355,13 @@
             {
               "type": "null"
             }
+          ]
+        },
+        "inspirationCredibility": {
+          "description": "C2-6b — one line about the REFERENCE photograph itself, when the reading flagged it: \"Reference note: looks edited or filtered; lit like a photo shoot.\" Composed on the server from `inspirationAnalysis.credibilityFlags` through lib/brand/consultProInspirationCredibilityCopy.ts, exactly as `topLine` is, so iOS renders a string rather than carrying a second word table. Null when there is no reading or no flag. OPTIONAL on the wire for the same reason every field added since P5a is; a build that predates it renders nothing.",
+          "type": [
+            "string",
+            "null"
           ]
         },
         "intakeRevisionId": {

@@ -28,8 +28,10 @@ import {
   ConsultInspirationVisionError,
   countKnownConsultInspirationAttributes,
   runConsultInspirationVision,
+  sanitizeConsultInspirationCredibilityFlags,
   toConsultInspirationAnalysisJson,
   type ConsultInspirationAnalysis,
+  type ConsultInspirationCredibilityFlag,
   type ConsultInspirationVisionProvider,
 } from './inspirationVision'
 import { appendLockedConsultInspirationAnalysisRevision } from './writeBoundary'
@@ -95,6 +97,8 @@ export type ConsultInspirationAnalysisArtefact = {
   source: ConsultInspirationAnalysisDTO['source']
   model: string
   analysis: ConsultInspirationAnalysis
+  /** C2-6b — `[]` on a v3 artefact, which was read before flags existed. */
+  credibilityFlags: ConsultInspirationCredibilityFlag[]
 }
 
 /**
@@ -134,12 +138,19 @@ function toArtefactPayload(args: {
   inspirationId: string
   source: ConsultInspirationAnalysisDTO['source']
   analysis: ConsultInspirationAnalysis
+  credibilityFlags: ConsultInspirationCredibilityFlag[]
 }): Prisma.InputJsonObject {
   return {
     schemaVersion: CONSULT_INSPIRATION_ANALYSIS_SCHEMA_VERSION,
     inspirationId: args.inspirationId,
     source: args.source,
     attributes: toConsultInspirationAnalysisJson(args.analysis),
+    // C2-6b — beside the attributes, never inside them: the attribute set is
+    // what the analysis engine and the SQL attribute validator both read.
+    // Normalized again HERE, not only in the provider: a provider is a seam
+    // (the integration fakes stand in for it), and what reaches the table
+    // must be the vocabulary, deduped, in vocabulary order whoever answered.
+    credibilityFlags: sanitizeConsultInspirationCredibilityFlags(args.credibilityFlags),
   }
 }
 
@@ -233,6 +244,7 @@ async function findStoredConsultInspirationArtefact(
     source: stored.source,
     model: stored.model,
     analysis,
+    credibilityFlags: stored.credibilityFlags ?? [],
   }
 }
 
@@ -248,6 +260,7 @@ export type ConsultInspirationReadResult = {
   source: ConsultInspirationAnalysisDTO['source']
   model: string
   analysis: ConsultInspirationAnalysis
+  credibilityFlags: ConsultInspirationCredibilityFlag[]
 }
 
 /**
@@ -314,7 +327,12 @@ export async function performConsultInspirationRead(args: {
     durationMs: Date.now() - startedAt,
   })
 
-  return { source, model: result.model, analysis: result.analysis }
+  return {
+    source,
+    model: result.model,
+    analysis: result.analysis,
+    credibilityFlags: result.credibilityFlags,
+  }
 }
 
 /**
@@ -350,6 +368,7 @@ export async function persistLockedConsultInspirationAnalysis(
       inspirationId: args.plan.target.inspirationId,
       source: args.read.source,
       analysis: args.read.analysis,
+      credibilityFlags: args.read.credibilityFlags,
     }),
     model: args.read.model,
     idempotencyKey: inspirationAnalysisIdempotencyKey(args.analysisIdempotencyKey),
@@ -363,6 +382,7 @@ export async function persistLockedConsultInspirationAnalysis(
     source: args.read.source,
     model: args.read.model,
     analysis: args.read.analysis,
+    credibilityFlags: args.read.credibilityFlags,
   }
 }
 

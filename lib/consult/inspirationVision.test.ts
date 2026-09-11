@@ -11,12 +11,17 @@ import {
   CONSULT_INSPIRATION_ANALYSIS_FIELDS,
   CONSULT_INSPIRATION_ANALYSIS_OUTPUT_SCHEMA,
   CONSULT_INSPIRATION_ANALYSIS_PROMPT_VERSION,
+  CONSULT_INSPIRATION_ANALYSIS_READABLE_VERSIONS,
   CONSULT_INSPIRATION_ANALYSIS_SCHEMA_VERSION,
+  CONSULT_INSPIRATION_ANALYSIS_SYSTEM_PROMPT,
+  CONSULT_INSPIRATION_CREDIBILITY_FLAGS,
   ConsultInspirationVisionError,
   countKnownConsultInspirationAttributes,
   resetConsultInspirationVisionClientForTests,
   runConsultInspirationVision,
   sanitizeConsultInspirationAnalysis,
+  sanitizeConsultInspirationCredibilityFlags,
+  sanitizeConsultInspirationRead,
   sanitizeLocalizedInspirationAnalysis,
 } from './inspirationVision'
 import { findUnsupportedProviderSchemaKeywords } from './providerSchema'
@@ -91,10 +96,16 @@ describe('inspiration vision schema', () => {
     // other raises 23514 on insert, after the paid call has been billed — so
     // this assertion is the reminder, and the integration test that actually
     // writes an artefact through the live guard is the proof.
-    expect(CONSULT_INSPIRATION_ANALYSIS_SCHEMA_VERSION).toBe(3)
+    expect(CONSULT_INSPIRATION_ANALYSIS_SCHEMA_VERSION).toBe(4)
     expect(CONSULT_INSPIRATION_ANALYSIS_PROMPT_VERSION).toBe(
-      'inspiration-hair-color-v3',
+      'inspiration-hair-color-v4',
     )
+    // C2-6b: the previous pair stays READABLE, so a v3 row is not blanked in
+    // the migrate-before-deploy window. Newest first.
+    expect(CONSULT_INSPIRATION_ANALYSIS_READABLE_VERSIONS).toEqual([
+      { schemaVersion: 4, promptVersion: 'inspiration-hair-color-v4' },
+      { schemaVersion: 3, promptVersion: 'inspiration-hair-color-v3' },
+    ])
     expect([...CONSULT_INSPIRATION_ANALYSIS_FIELDS]).toEqual([
       'baseLevel',
       'lightestLevel',
@@ -218,7 +229,92 @@ describe('sanitizeConsultInspirationAnalysis', () => {
   })
 })
 
+// C2-6b — the credibility flags: a NOTE about the photograph, never a refusal.
+describe('sanitizeConsultInspirationCredibilityFlags', () => {
+  it('the schema asks for the flags as an enum array the grammar can hold, and requires the field', () => {
+    const properties = CONSULT_INSPIRATION_ANALYSIS_OUTPUT_SCHEMA.properties as Record<string, unknown>
+    expect(properties.credibilityFlags).toMatchObject({
+      type: 'array',
+      items: { type: 'string', enum: [...CONSULT_INSPIRATION_CREDIBILITY_FLAGS] },
+    })
+    expect(CONSULT_INSPIRATION_ANALYSIS_OUTPUT_SCHEMA.required).toContain('credibilityFlags')
+    expect(CONSULT_INSPIRATION_CREDIBILITY_FLAGS).toEqual([
+      'LIKELY_EDITED',
+      'LIKELY_AI_GENERATED',
+      'EXTENSIONS_LIKELY',
+      'PRO_LIGHTING',
+      'FINISH_HIDES_CUT',
+      'SINGLE_ANGLE',
+    ])
+    // The prompt defines every value it asks for, and says a flag is a note.
+    for (const flag of CONSULT_INSPIRATION_CREDIBILITY_FLAGS) {
+      expect(CONSULT_INSPIRATION_ANALYSIS_SYSTEM_PROMPT).toContain(`${flag} —`)
+    }
+    expect(CONSULT_INSPIRATION_ANALYSIS_SYSTEM_PROMPT).toContain('A flag is a note, not a refusal.')
+    expect(CONSULT_INSPIRATION_ANALYSIS_SYSTEM_PROMPT).toContain(
+      'A credibility flag on its own is never a reason for UNKNOWN',
+    )
+  })
+
+  it('drops an unknown value, so it is never stored', () => {
+    expect(
+      sanitizeConsultInspirationCredibilityFlags(['LIKELY_EDITED', 'WIND_MACHINE', 'SINGLE_ANGLE']),
+    ).toEqual(['LIKELY_EDITED', 'SINGLE_ANGLE'])
+    // A wrong type inside the array is an unknown value too, not a crash.
+    expect(sanitizeConsultInspirationCredibilityFlags([42, null, 'PRO_LIGHTING'])).toEqual([
+      'PRO_LIGHTING',
+    ])
+  })
+
+  it('dedupes a repeated value and returns the vocabulary order whatever order arrived', () => {
+    expect(
+      sanitizeConsultInspirationCredibilityFlags([
+        'SINGLE_ANGLE',
+        'LIKELY_EDITED',
+        'SINGLE_ANGLE',
+        'LIKELY_EDITED',
+      ]),
+    ).toEqual(['LIKELY_EDITED', 'SINGLE_ANGLE'])
+  })
+
+  it('reads an absent or null field as no flags, and refuses a non-array', () => {
+    expect(sanitizeConsultInspirationCredibilityFlags(undefined)).toEqual([])
+    expect(sanitizeConsultInspirationCredibilityFlags(null)).toEqual([])
+    expect(sanitizeConsultInspirationCredibilityFlags([])).toEqual([])
+    expect(() => sanitizeConsultInspirationCredibilityFlags('LIKELY_EDITED')).toThrowError(
+      ConsultInspirationVisionError,
+    )
+  })
+
+  it('a flagged read still answers the eight attributes — flag, never reject', () => {
+    const read = sanitizeConsultInspirationRead({
+      hairRegion: '0,0,1,1',
+      credibilityFlags: ['LIKELY_AI_GENERATED', 'PRO_LIGHTING'],
+      ...output(),
+    })
+    expect(read.credibilityFlags).toEqual(['LIKELY_AI_GENERATED', 'PRO_LIGHTING'])
+    expect(countKnownConsultInspirationAttributes(read.analysis)).toBe(8)
+    // The attribute sanitizer does not see the envelope field as a ninth attribute.
+    expect(Object.keys(read.analysis).sort()).toEqual([...CONSULT_INSPIRATION_ANALYSIS_FIELDS].sort())
+    // And a v3-shaped answer with no field at all still reads, with no flags.
+    expect(sanitizeConsultInspirationRead({ hairRegion: '0,0,1,1', ...output() }).credibilityFlags).toEqual([])
+  })
+})
+
 describe('runConsultInspirationVision', () => {
+  it('returns the sanitized flags beside the reading', async () => {
+    mocks.create.mockResolvedValue(
+      message({
+        hairRegion: '0,0,1,1',
+        credibilityFlags: ['SINGLE_ANGLE', 'NOT_A_FLAG', 'SINGLE_ANGLE'],
+        ...output(),
+      }),
+    )
+    const result = await runConsultInspirationVision({ image: IMAGE })
+    expect(result.credibilityFlags).toEqual(['SINGLE_ANGLE'])
+    expect(result.analysis.tone.value).toBe('COOL')
+  })
+
   it('fails closed before sending the photo when the model override is not allowlisted', async () => {
     process.env.AI_CONSULT_INSPIRATION_MODEL = 'claude-sonnet-5-typo'
     await expect(

@@ -406,4 +406,25 @@ export const defaultClientConsultInspirationCopy: BrandClientConsultInspirationC
       understandingFallback:
         'You’ve shared a picture to explore. We’ll help {pro} work out the details.',
     },
+
+    // C2-6b — said once, after the picture, only when the reading flagged
+    // something about the PHOTOGRAPH. The voice is the app's and it is on her
+    // side: the picture is still a good reference for the feeling and the
+    // direction, and nothing here says she chose badly. Each clause names what
+    // was noticed in plain words — never the flag's code, which is why every
+    // flag needs an entry here (inspirationCredibility.test.ts checks).
+    credibility: {
+      lead: 'One thing about this picture: {clauses}.',
+      flags: {
+        LIKELY_EDITED: 'it looks edited or filtered',
+        LIKELY_AI_GENERATED: 'it may not be a photo of real hair',
+        EXTENSIONS_LIKELY: 'some of that length or fullness may be added hair',
+        PRO_LIGHTING: 'it was lit like a photo shoot',
+        FINISH_HIDES_CUT: 'the styling is doing a lot of the work',
+        SINGLE_ANGLE: 'it only shows one angle',
+      },
+      conjunction: 'and',
+      close:
+        'It’s still a great reference for the feeling and the direction — just know that some details may not be how real hair reflects, moves or grows.',
+    },
   }
