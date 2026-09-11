@@ -11,6 +11,7 @@ import { formatCents, formatMoneyFromUnknown, moneyToCentsInt } from '@/lib/mone
 import { formatInTimeZone } from '@/lib/time'
 
 import ConsultBriefFeedbackButtons from './ConsultBriefFeedbackButtons'
+import ProConsultAskFollowUp from './ProConsultAskFollowUp'
 
 function labelCode(value: string): string {
   return value
@@ -479,6 +480,15 @@ export default function ProConsultBrief({
           consultId={brief.consultId}
           estimate={brief.serviceEstimate}
         />
+      ) : null}
+
+      {brief.proFollowUps ? (
+        <div className="border-t border-surfaceGlass/10 pt-4">
+          <ProConsultAskFollowUp
+            consultId={brief.consultId}
+            initialQuestions={brief.proFollowUps}
+          />
+        </div>
       ) : null}
 
       {feedbackEnabled || brief.feedback ? (

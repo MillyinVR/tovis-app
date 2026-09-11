@@ -519,6 +519,15 @@ const consultSessionExportSelect = {
     },
     orderBy: { createdAt: 'asc' },
   },
+  // C2-4 — what the client was asked by her pro, and what she tapped. The
+  // pro's `proIntent` draft is deliberately not selected (see exportBoundary).
+  proFollowUpQuestions: {
+    select: {
+      id: true, questionKey: true, priority: true, clientText: true, options: true,
+      planVersion: true, selectedValue: true, answeredAt: true, createdAt: true,
+    },
+    orderBy: { createdAt: 'asc' },
+  },
   agreementAcceptances: {
     select: {
       id: true,
@@ -570,6 +579,7 @@ const consultSessionExportSelect = {
       agreementAcceptanceId: true,
       revisionId: true,
       inspirationId: true,
+      proFollowUpQuestionId: true,
       createdAt: true,
     },
     orderBy: { createdAt: 'asc' },

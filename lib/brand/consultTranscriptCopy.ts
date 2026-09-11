@@ -9,4 +9,6 @@ export const consultTranscriptCopy = {
   reference: 'Reference photo selected', photo: 'Consultation photo', followUp: 'Follow-up questions', plan: 'Look plan version',
   status: 'Current status', source: 'Reference source', summary: 'Summary', nextStep: 'Next step', change: 'Change',
   unanswered: 'No saved answer', intakeAnswer: 'Saved in client-answer revisions',
+  proFollowUp: 'Your question', proFollowUpPriority: 'Priority',
+  proFollowUpNeeded: 'Needed before the appointment', proFollowUpHelpful: 'Helpful for prep',
 }

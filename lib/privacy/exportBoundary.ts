@@ -321,6 +321,11 @@ export const EXPORT_BOUNDARY: Readonly<Record<string, ExportDisposition>> = {
     reason:
       'Pro-authored, content-free quality annotation used for audit and evaluation; it is not client-facing consult content and is not disclosed in either party\'s user export.',
   },
+  ConsultProFollowUpQuestion: {
+    status: 'OMITTED',
+    reason:
+      "Exported transitively inside consultSessions: the question as the client saw it, its options, priority, her answer and the timestamps. The professional's separate `proIntent` draft is not exported — in this slice it is byte-identical to the client-facing text, and when translation lands it is the pro's working note, not the client's data.",
+  },
   ConsultServiceEstimate: {
     status: 'OMITTED',
     reason:

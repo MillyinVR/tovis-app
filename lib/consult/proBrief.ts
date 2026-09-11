@@ -2,6 +2,7 @@ import { loadConsultSuitability, proSuitability } from './suitabilityRead'
 import { normalizeStoredInspirationPayload } from './inspirationPack'
 import { consultIntakeItems, findConsultIntakePack, normalizeConsultIntakePayload } from './intake/registry'
 import { requireAuthorizedProLookScope } from './lookBrief'
+import { loadConsultProFollowUps } from './proFollowUp'
 import 'server-only'
 import { readOptionalEnv } from '@/lib/env'
 import { buildConsultMentor } from './mentor'
@@ -263,6 +264,8 @@ async function loadSessionBrief(
     feedback: feedback
       ? { rating: feedback.rating, createdAt: feedback.createdAt.toISOString() }
       : null,
+    // C2-4 — always present on the server's own Brief; optional on the wire.
+    proFollowUps: await loadConsultProFollowUps(tx, session.id),
     createdAt: result.createdAt.toISOString(),
   }
   if (readOptionalEnv('AI_CONSULT_MENTOR_ENABLED') === 'true') {

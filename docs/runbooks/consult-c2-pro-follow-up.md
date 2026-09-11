@@ -1,0 +1,29 @@
+# C2-4 — the professional asks a follow-up question (slice 1)
+
+This slice lets a professional ask the client one question from the Brief, with two to six one-tap answers and a priority, and shows the client's answer back on the Brief and in the consultation history. It reuses the client's existing follow-up card and answer route; historical ANALYSIS/BRIEF JSON, every existing HTTP shape and the iOS wire contract are unchanged (the additions are optional fields and one new pro-only route).
+
+## Runtime
+
+**Ask.** `POST /api/v1/pro/consults/{id}/follow-up` with `{ priority, text, options }` — `priority` is `NEED_BEFORE_APPOINTMENT` or `HELPFUL_FOR_PREP`, `text` 1–300 characters, `options` 2–6 distinct labels of 1–120 characters. Authorization is the shared Brief scope (`requireAuthorizedProLookScope`: session lock, ownership, exposure gate, anchor, live agreements, open window). The session must be `COMPLETED` (a Brief exists). Caps: at most 3 unanswered questions at once and 12 per consult. The row, its `PRO_FOLLOW_UP_ASKED` audit event and the client's doorbell notification are written in one transaction; the route kicks the notification drain after commit. Rate limit: `pro:bookings:write`. `GET` on the same route lists what she has asked.
+
+**Client.** The question is rendered in the thread as an ordinary `FOLLOW_UP` message (`id: pro-follow-up:<key>`, `round: 0`, `fallback: false`) with the optional `attribution` field ("From {pro}"). Every open one is `OPEN` at once. She answers through the ordinary `POST /api/v1/client/consult/{id}/follow-up`; the server files a `pro_` key here (`lib/consult/proFollowUp.ts`) instead of on a model round. Same scope as the model-round branch (`requireAuthorizedProposalScope` + open window). Write-once: a replay is a no-op, a different value on an answered question is `NOT_OPEN` (409), a value outside the options is `INVALID_ANSWER` (400). Answering never buys a model round. The `PRO_FOLLOW_UP_ANSWERED` audit event and the pro's in-app/push notification are written in the same transaction.
+
+**iOS.** Build 78 and earlier render the card and answer it with no change; they do not show the attribution eyebrow (optional field, ignored on decode). Record that as the one named parity gap for this slice.
+
+**Notifications.** One key, `CONSULT_PRO_FOLLOW_UP`, both recipients: client IN_APP + EMAIL + PUSH, pro IN_APP + PUSH. Transactional, no quiet-hours bypass, no SMS. Copy in `lib/brand/defaultClientConsultProFollowUpCopy.ts` (client) — the notification never carries the question. Dedupe keys: `consult-pro-follow-up:<questionId>` (client), `consult-pro-follow-up-answer:<questionId>` (pro).
+
+**Not in this slice, on purpose.** No plan version or rerun on answer (the analysis input hash does not include a pro question, so a rerun would rebuild the same plan; "the answer updates the living Brief" is the next slice and needs its own decision about what the answer feeds). No supportive-voice translation of the pro's words (`proIntent` and `clientText` are identical; the column split exists so translation can land without a migration). No structured "quick ask" from the follow-up vocabulary. No free-text or photo answers. No reminder for an unanswered `NEED_BEFORE_APPOINTMENT` question (the immediate doorbell only). No Book-CTA gating on an open pro question.
+
+## Storage and rollout
+
+Apply `20261028000000_consult_pro_follow_up_enum` (labels only: the priority enum, two `ConsultAuditAction` values, one `NotificationEventKey`) and `20261028000001_consult_pro_follow_up` (the table, its guard, the audit pointer column and the re-issued `ConsultAuditEvent_shape` whitelist) before the server code. Both are additive; old code never reads the new table, so a code rollback leaves them installed.
+
+`ConsultProFollowUpQuestion`: unique `(consultSessionId, questionKey)`; CHECKs pin the key grammar (`pro_<n>`), text lengths, 2–6 options, the answer pair (value and time together or neither) and the secret-key ban. The BEFORE trigger requires a `COMPLETED` session owned by the asking professional, an unanswered row on insert, well-formed distinct options, and on update allows exactly one change — the answer, once, to one of the row's own options. Deferred constraint triggers require the `PRO_FOLLOW_UP_ASKED` audit row with every insert and the `PRO_FOLLOW_UP_ANSWERED` row with every answer. RLS on, no policies (server-only). Cascades with the session; `professionalId` is `Restrict` (the professional profile is anonymized, never deleted).
+
+Privacy: `DELETE` through the client-owned consult, backed by a `deleteRules` entry; exported transitively inside `consultSessions` as the client saw it (`proIntent` is not exported).
+
+## Verification
+
+Unit (`lib/consult/proFollowUp.test.ts`): the body parser's accept/refuse matrix, option minting, stored-option narrowing, projection. Integration (`tests/integration/consult-pro-follow-up.test.ts`, real Postgres): ask → row + audit + client notification → thread card with attribution → answer through `answerConsultFollowUpQuestion` with a `pro_` key → row + audit + pro notification → Brief and transcript show the answer; refusals (replay, changed answer, unknown key, bad option, two values, open cap, wrong pro, closed window); the database backstop by raw writes (no audit, answered on insert, malformed options, immutable text, second answer, off-menu answer, bad key, audit row without its pointer). Plus the privacy completeness suites, the notification compliance and render suites, typecheck, lint, static guards, the regenerated API schema and the iOS fixture contract.
+
+Not verified by this slice: a real device tap on the notification; the pro UI in a browser beyond a build; stylist quality of anything. Those belong to the coordinated web/iOS parity checkpoint (`docs/consult/consult-parity-evidence.md`).

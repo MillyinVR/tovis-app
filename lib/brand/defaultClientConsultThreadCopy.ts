@@ -93,6 +93,16 @@ export const defaultClientConsultThreadCopy: BrandClientConsultThreadCopy = {
   followUpDone:
     'That’s everything I need. {pro} has the rest — see you at your appointment.',
 
+  // C2-4 — a question the PRO wrote. The card carries her name as its author;
+  // these bubbles say why it is here. Supportive, never a summons: nothing is
+  // cancelled if she does not answer, and the wording must not imply it.
+  proFollowUpIntro:
+    '{pro} has a quick question for you — she’s getting ready for your appointment and wants to learn a little more.',
+  proFollowUpIntroNeeded:
+    '{pro} has a quick question for you before your appointment — it helps her plan your visit properly. One tap is all it takes.',
+  proFollowUpAttribution: 'From {pro}',
+  proFollowUpDone: 'Perfect, {pro} has it. Your consultation is up to date.',
+
   chartCopyLabel:
     'Save these photos in my appointment record with {pro}, so we can come back to them — and so I can rework your plan if you change anything before your appointment. Untick this and they’re deleted as soon as your plan is built.',
 
