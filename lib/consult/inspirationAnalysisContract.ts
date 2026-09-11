@@ -310,6 +310,7 @@ export async function performConsultInspirationRead(args: {
       knownAttributeCount: null,
       model: null,
       durationMs: Date.now() - startedAt,
+      stage: error instanceof ConsultInspirationVisionError ? error.stage : null,
     })
     if (error instanceof ConsultInspirationVisionError) throw surfacedFailure(error.kind)
     // A storage/read refusal is already a typed ConsultWriteError with its own
