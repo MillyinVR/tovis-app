@@ -9,6 +9,7 @@ import type {
   ConsultInspirationSourceDTO,
 } from '@/lib/dto/consult'
 import { readOptionalEnv, requireEnv } from '@/lib/env'
+import { safeError } from '@/lib/security/logging'
 import { isRecord } from '@/lib/guards'
 
 import {
@@ -26,6 +27,7 @@ import {
   type ConsultProviderMeterSink,
 } from './providerMeter'
 import { isAllowedConsultProviderModel } from './providerModel'
+import { CONSULT_EARLY_PHOTO_SHOT_KEY } from './capture/earlyPhoto'
 import {
   CONSULT_INSPIRATION_ANALYSIS_FIELDS,
   type ConsultInspirationAnalysis,
@@ -105,16 +107,24 @@ export const CONSULT_ANALYSIS_DEFAULT_MODEL = 'claude-sonnet-5'
  * room for a run half again as slow as the slowest observed.
  *
  * 🔴 The sum is the analysis route's budget. With C2-1 enabled: 50
- * (inspiration) + 45 (profile) + 30 (face/color companion) + 150 (direction)
- * = 275s, inside `maxDuration = 300` with 25s for database/finalize work.
+ * (inspiration) + 90 (profile) + 30 (face/color companion) + 110 (direction)
+ * = 280s, inside `maxDuration = 300` with 20s for database/finalize work.
  * Raising any ceiling means re-checking that arithmetic; the engine test pins it.
  */
-export const CONSULT_ANALYSIS_PROFILE_TIMEOUT_MS = 45_000
+export const CONSULT_ANALYSIS_PROFILE_TIMEOUT_MS = 90_000
 // C2-1 companion measured ~11.5s live. Keep its ceiling separate from the
 // larger profile call so the optional fourth provider call still leaves worker
 // headroom under Vercel Pro's 300s function ceiling.
 export const CONSULT_FACE_COLOR_TIMEOUT_MS = 30_000
-export const CONSULT_ANALYSIS_DIRECTION_TIMEOUT_MS = 150_000
+// 2026-09-11: profile 45 → 90 and direction 150 → 110. Measured live that day,
+// same request, same schema, nine runs: the profile+styles call answered in
+// 21s, in under 35s, and on five runs did not answer within 45s or 70s at all —
+// provider-side variance this repo cannot control, most likely a cold
+// structured-output grammar compile. The direction call has never been
+// measured above ~65s. Sum stays 50 + 90 + 30 + 110 = 280 ≤ 300. The slow-call
+// warning in `requestConsultAnalysisJson` and the metered `latencyMs` in prod
+// are how the next number gets chosen from data rather than from here.
+export const CONSULT_ANALYSIS_DIRECTION_TIMEOUT_MS = 110_000
 
 /**
  * `max_tokens` per call, and both are load-bearing: a structured-output answer
@@ -1290,6 +1300,22 @@ export const CONSULT_ANALYSIS_DIRECTION_SYSTEM_PROMPT = [
   'Every free-text field states a HARD CHARACTER LIMIT in its description. Those limits are enforced after you answer: a field one character over is not trimmed, it discards the entire analysis. Write to comfortably inside the limit — a shorter, plainer sentence is always the safer answer than a full one.',
 ].join(' ')
 
+/**
+ * A confidence range, repaired where the grammar could not hold the rule.
+ *
+ * The schema can bound neither number (the API refuses `minimum`/`maximum`)
+ * nor say "min < max", so both travel in the description — and the model
+ * still, sometimes, answers with a point value (`min === max`) or the pair the
+ * wrong way round. Until 2026-09-11 either one threw the WHOLE paid analysis
+ * away (the nightly live contract had been red on exactly this since 09-08).
+ * Both are lossless to repair: a swapped pair is the same pair, and a point is
+ * widened by a hair so it is still the range the database's own check
+ * (`consult_analysis_confidence_valid`: min < max) will accept. What is still
+ * refused: a missing key, a non-number, or a value outside [0, 1] — those are
+ * not a range at all.
+ */
+export const CONSULT_CONFIDENCE_POINT_WIDENING = 0.05
+
 function confidence(value: unknown): ConfidenceRange {
   if (!isRecord(value) || !exactKeys(value, ['min', 'max'])) {
     throw new ConsultAnalysisProviderError('bad_output')
@@ -1301,11 +1327,26 @@ function confidence(value: unknown): ConfidenceRange {
     !Number.isFinite(value.max) ||
     value.min < 0 ||
     value.max > 1 ||
-    value.min >= value.max
+    value.max < 0 ||
+    value.min > 1
   ) {
     throw new ConsultAnalysisProviderError('bad_output')
   }
-  return { min: value.min, max: value.max }
+  let min = Math.min(value.min, value.max)
+  let max = Math.max(value.min, value.max)
+  if (min === max) {
+    // Two decimals, the precision the prompt asks the model for — never a
+    // float tail like 0.7500000000000001 in a stored range.
+    if (max + CONSULT_CONFIDENCE_POINT_WIDENING <= 1) max = Math.round((max + CONSULT_CONFIDENCE_POINT_WIDENING) * 100) / 100
+    else min = Math.round((min - CONSULT_CONFIDENCE_POINT_WIDENING) * 100) / 100
+  }
+  if (min !== value.min || max !== value.max) {
+    console.warn('consult analysis confidence repaired', {
+      received: { min: value.min, max: value.max },
+      stored: { min, max },
+    })
+  }
+  return { min, max }
 }
 
 function evidence(
@@ -2014,10 +2055,17 @@ function consultAnalysisImageContent(
   )
   const content: Anthropic.ContentBlockParam[] = []
   const missingShotKeys: ConsultCaptureShotKeyDTO[] = []
-  for (const shotKey of input.capturePack.shotKeys) {
+  // The early photo leads, when present: it is the lowest evidence tier and
+  // the prompt already tells the model what it may and may not be read for.
+  // It is not a pack view, so its absence is not a "missing view".
+  const orderedShotKeys: ConsultCaptureShotKeyDTO[] = [
+    CONSULT_EARLY_PHOTO_SHOT_KEY,
+    ...input.capturePack.shotKeys,
+  ]
+  for (const shotKey of orderedShotKeys) {
     const capture = capturesByShot.get(shotKey)
     if (!capture) {
-      missingShotKeys.push(shotKey)
+      if (shotKey !== CONSULT_EARLY_PHOTO_SHOT_KEY) missingShotKeys.push(shotKey)
       continue
     }
     content.push({
@@ -2081,6 +2129,7 @@ async function requestConsultAnalysisJsonUnmetered(
   reportUsage: (usage: unknown) => void,
 ): Promise<unknown> {
   let message: Anthropic.Message
+  const requestedAt = Date.now()
   try {
     message = await getClient().messages.create(
       {
@@ -2103,12 +2152,48 @@ async function requestConsultAnalysisJsonUnmetered(
       },
       { timeout: args.timeoutMs },
     )
-  } catch {
+  } catch (error: unknown) {
+    // The error is swallowed into `unavailable` on purpose — the client gets
+    // one code — but not silently: an API rejection (400 grammar, 413 image,
+    // 401 key, 529 overload) is invisible from the run row alone, and on
+    // 2026-09-11 that silence cost a day. Content-free: status, type and the
+    // SDK's own message; never the request.
+    const status = error && typeof error === 'object' && 'status' in error ? (error as { status: unknown }).status : null
+    console.error('consult analysis provider request failed', {
+      model: args.model,
+      // The SDK's class name is the diagnosis: APIConnectionTimeoutError,
+      // BadRequestError, AuthenticationError, RateLimitError, OverloadedError.
+      errorName: error instanceof Error ? error.name : typeof error,
+      status,
+      timeoutMs: args.timeoutMs,
+      error: safeError(error),
+    })
     throw new ConsultAnalysisProviderError('unavailable')
   }
   // Billed the moment it answered — before the refusal check and the parser.
   reportUsage(message.usage)
+  // Content-free facts about the answer, for every refusal below: the stop
+  // reason and the token counts say WHY a paid answer was discarded, and the
+  // run row alone never can.
+  const latencyMs = Date.now() - requestedAt
+  const answered = {
+    model: args.model,
+    stopReason: message.stop_reason,
+    maxTokens: args.maxTokens,
+    outputTokens: message.usage?.output_tokens ?? null,
+    inputTokens: message.usage?.input_tokens ?? null,
+    latencyMs,
+    timeoutMs: args.timeoutMs,
+  }
+  // A call that used more than 80% of its ceiling is the early warning for
+  // the timeout that discards the next one. Measured 2026-09-11 on an
+  // early-selfie-only consult: the profile+styles call took 75–80s on the two
+  // runs that answered, and did not answer within 45s or 70s on five others.
+  if (latencyMs > args.timeoutMs * 0.8) {
+    console.warn('consult analysis provider call was slow', answered)
+  }
   if (message.stop_reason === 'refusal') {
+    console.error('consult analysis provider refused', answered)
     throw new ConsultAnalysisProviderError('refused')
   }
   // A capped answer is truncated JSON, and truncated JSON is not a provider
@@ -2117,16 +2202,21 @@ async function requestConsultAnalysisJsonUnmetered(
   // fault. Measured: the first live run of v5 truncated the direction call on
   // exactly this boundary.
   if (message.stop_reason === 'max_tokens') {
+    console.error('consult analysis answer truncated at max_tokens', answered)
     throw new ConsultAnalysisProviderError('bad_output')
   }
   const text = message.content
     .filter((block): block is Anthropic.TextBlock => block.type === 'text')
     .map((block) => block.text)
     .join('')
-  if (!text) throw new ConsultAnalysisProviderError('bad_output')
+  if (!text) {
+    console.error('consult analysis answer had no text block', answered)
+    throw new ConsultAnalysisProviderError('bad_output')
+  }
   try {
     return JSON.parse(text) as unknown
   } catch {
+    console.error('consult analysis answer was not JSON', { ...answered, textLength: text.length })
     throw new ConsultAnalysisProviderError('bad_output')
   }
 }
@@ -2219,18 +2309,64 @@ async function optionalFaceColorCompanion(input: ConsultAnalysisInput): Promise<
  * whole job is to reason FROM that answer. C2-2 will decide how the companion
  * joins that reasoning without mutating historical stored analyses.
  */
+/**
+ * Run a sanitizer and, if it throws the answer away, say WHERE — the stage and
+ * the sanitizer frames — before the error collapses into the client's one code.
+ * Content-free: no payload, no prose; the stack names a function, not a value.
+ * A paid answer discarded in silence is how 2026-09-11 was lost.
+ */
+function rejectedAt<T>(stage: 'profile' | 'profile+styles' | 'direction', sanitize: () => T): T {
+  try {
+    return sanitize()
+  } catch (error: unknown) {
+    if (error instanceof ConsultAnalysisProviderError) {
+      console.error('consult analysis rejected the model answer', {
+        stage,
+        kind: error.kind,
+        at: (error.stack ?? '').split('\n').slice(1, 5).map((line) => line.trim()),
+      })
+    }
+    throw error
+  }
+}
+
 export const runConsultAnalysis: ConsultAnalysisProvider = async (input) => {
   const capturesByShot = new Map(
     input.captures.map((capture) => [capture.shotKey, capture] as const),
   )
   const packKeys = input.capturePack.shotKeys
+  // 🔴 The early photo is admissible on its own. It is NOT a pack member — the
+  // pack is the daylight set, the early photo is the one any-light selfie a
+  // consult is guaranteed to have (P7a-1, Tori 2026-09-05) — and the run
+  // loader (analysisContract.ts) already admits it by name for exactly that
+  // reason. Until 2026-09-11 this guard only knew the pack, so a consult whose
+  // only accepted photo was the early selfie was refused HERE, in about one
+  // second, before any model call: every "Build my plan" in production failed
+  // with ANALYSIS_UNAVAILABLE and nothing was metered. The integration suites
+  // never saw it because they mock this function.
+  const admissibleShotKeys = new Set<string>([...packKeys, CONSULT_EARLY_PHOTO_SHOT_KEY])
+  const inadmissible = input.captures
+    .map((capture) => capture.shotKey)
+    .filter((shotKey) => !admissibleShotKeys.has(shotKey))
   if (
     input.captures.length < 1 ||
     input.captures.length > CONSULT_MAX_ANALYSIS_CAPTURES ||
     packKeys.length < 1 ||
     capturesByShot.size !== input.captures.length ||
-    input.captures.some((capture) => !packKeys.includes(capture.shotKey))
+    inadmissible.length > 0
   ) {
+    // Content-free, and said out loud: a refusal before the call has no
+    // provider error to point at, and the run's failure code alone
+    // ("ANALYSIS_UNAVAILABLE") cannot distinguish this from a model outage.
+    console.error('consult analysis refused before the model call', {
+      reason: 'capture_set',
+      capturePackId: input.capturePack.id,
+      packShotKeys: [...packKeys],
+      suppliedShotKeys: input.captures.map((capture) => capture.shotKey),
+      inadmissibleShotKeys: inadmissible,
+      captureCount: input.captures.length,
+      maxCaptures: CONSULT_MAX_ANALYSIS_CAPTURES,
+    })
     throw new ConsultAnalysisProviderError('bad_output')
   }
   const model = analysisModel()
@@ -2262,8 +2398,10 @@ export const runConsultAnalysis: ConsultAnalysisProvider = async (input) => {
       kind: ConsultProviderCallKind.ANALYSIS_PROFILE,
       meter: input.meter,
     })
-  const profileWithStyles = lookPlanning ? sanitizeConsultProfileAndStylesResponse(featureRead) : undefined
-  const profile = profileWithStyles?.profile ?? sanitizeConsultProfileResponse(featureRead)
+  const profileWithStyles = lookPlanning
+    ? rejectedAt('profile+styles', () => sanitizeConsultProfileAndStylesResponse(featureRead))
+    : undefined
+  const profile = profileWithStyles?.profile ?? rejectedAt('profile', () => sanitizeConsultProfileResponse(featureRead))
   const faceColorProfile = readOptionalEnv('AI_CONSULT_FACE_COLOR_ENABLED') === 'true'
     ? await optionalFaceColorCompanion(input)
     : undefined
@@ -2271,8 +2409,7 @@ export const runConsultAnalysis: ConsultAnalysisProvider = async (input) => {
     ? { menu: input.service.menuOfferings ?? [], ...profileWithStyles } : undefined
 
   // ── Final call: the direction, grounded in the durable profile ───────────
-  const direction = sanitizeConsultDirectionResponse(
-    await requestConsultAnalysisJson({
+  const directionRead = await requestConsultAnalysisJson({
       model,
       system: CONSULT_ANALYSIS_DIRECTION_SYSTEM_PROMPT + (lookPlanContext ? ` ${CONSULT_LOOK_PLAN_INSTRUCTIONS}` : ''),
       content: [
@@ -2292,9 +2429,11 @@ export const runConsultAnalysis: ConsultAnalysisProvider = async (input) => {
       timeoutMs: CONSULT_ANALYSIS_DIRECTION_TIMEOUT_MS,
       kind: ConsultProviderCallKind.ANALYSIS_DIRECTION,
       meter: input.meter,
-    }),
+    })
+  const direction = rejectedAt('direction', () => sanitizeConsultDirectionResponse(
+    directionRead,
     { menuServiceNames: input.service.menuServiceNames, lookPlanContext },
-  )
+  ))
 
   return { analysis: { profile, ...direction }, model, ...(faceColorProfile ? { faceColorProfile } : {}) }
 }
@@ -2304,6 +2443,39 @@ export const runConsultAnalysis: ConsultAnalysisProvider = async (input) => {
  * evidence label for a view that was never supplied is a fabricated
  * observation, so it fails the whole result rather than shipping.
  */
+/**
+ * The two hair LEVELS may only be read from hair views — and when no hair view
+ * was supplied, the grammar still has to offer every hair label, because an
+ * empty enum is not a valid schema (see `hairEvidenceLabelsFor`). The prompt
+ * says "then UNKNOWN"; the model, given an early selfie alone, sometimes cites
+ * `hair_back` anyway. Until 2026-09-11 that one citation discarded the whole
+ * paid analysis at the server's gate. The honest reading of such a citation is
+ * that the level was NOT observed: the observation becomes UNKNOWN with no
+ * evidence and a low range — exactly what the prompt asked for — and the
+ * repair is said out loud. Every other field's enum already excludes unsupplied
+ * labels, so `assertEvidenceSupplied` below still refuses those.
+ */
+export function repairUnsuppliedHairLevelEvidence(
+  analysis: ConsultAnalysisProviderOutput,
+  suppliedShotKeys: ReadonlySet<string>,
+): string[] {
+  const repaired: string[] = []
+  for (const field of ['baseLevel', 'lightestLevel'] as const) {
+    const observation = analysis.core[field]
+    if (observation.evidence.some((key) => key !== 'intake' && !suppliedShotKeys.has(key))) {
+      analysis.core[field] = { value: 'UNKNOWN', confidence: { min: 0, max: 0.3 }, evidence: [] }
+      repaired.push(field)
+    }
+  }
+  if (repaired.length > 0) {
+    console.warn('consult analysis hair level cited an unsupplied view; read as UNKNOWN', {
+      fields: repaired,
+      suppliedShotKeys: [...suppliedShotKeys],
+    })
+  }
+  return repaired
+}
+
 function assertEvidenceSupplied(
   analysis: ConsultAnalysisProviderOutput,
   suppliedShotKeys: ReadonlySet<string>,
@@ -2376,6 +2548,7 @@ export function validateConsultAnalysisProviderResult(
     : sanitizeFaceColorProfile(result.faceColorProfile)
   if (args.suppliedShotKeys) {
     const supplied = new Set<string>(args.suppliedShotKeys)
+    repairUnsuppliedHairLevelEvidence(analysis, supplied)
     assertEvidenceSupplied(analysis, supplied)
     if (faceColorProfile) {
       assertFaceColorEvidenceSupplied(faceColorProfile, supplied)

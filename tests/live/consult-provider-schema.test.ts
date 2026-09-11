@@ -42,6 +42,8 @@ import {
   sanitizeConsultProfileResponse,
   sanitizeConsultProfileAndStylesResponse,
   CONSULT_STYLE_GUIDANCE,
+  runConsultAnalysis,
+  validateConsultAnalysisProviderResult,
 } from '@/lib/consult/analysisEngine'
 import {
   CONSULT_INSPIRATION_ANALYSIS_OUTPUT_SCHEMA,
@@ -693,4 +695,46 @@ describe('the consult schemas compile and answer against the live model', () => 
           .join('\n'),
     )
   })
+  it('the early selfie alone is an admissible analysis input, through the real engine (prod, 2026-09-11)', async () => {
+    // What production does on "Build my plan" when the client has taken only the
+    // any-light early selfie: the same engine, the same pack keys, one image,
+    // look planning on. Until 2026-09-11 this refused in ~1s before the call.
+    // The required-success contract: it must come back and validate as the
+    // server would — with `early_photo` the only supplied evidence.
+    const menu: ConsultProMenuOffering[] = [
+      ['Full balayage', 'Hand-painted lightening for a blended, dimensional result.'],
+      ['Toner gloss', 'Refreshes tone and shine between colour services.'],
+    ].map(([name, description], index) => ({
+      id: `offering-${index}`, serviceId: `service-${index}`,
+      offersInSalon: true, offersMobile: false,
+      salonPriceStartingAt: new Prisma.Decimal(200), salonDurationMinutes: 120,
+      mobilePriceStartingAt: null, mobileDurationMinutes: null,
+      service: { name: name!, description: description!, categoryId: `category-${index}`, defaultDurationMinutes: 120 },
+    }))
+    const menuServiceNames = menu.map(item => item.service.name)
+    const result = await runConsultAnalysis({
+      service: { family: 'HAIR', categoryName: 'Color', serviceName: 'Full balayage', menuServiceNames, lookPlanning: true, menuOfferings: menu },
+      intake: { desired_color: 'lighter' }, intakeItems: [{ questionKey: 'desired_color', question: 'Your dream color?', answerCode: 'lighter', answer: 'Lighter, warmer' }],
+      capturePack: { id: 'hair-color-daylight', shotKeys: SHOT_KEYS },
+      captures: [{ shotKey: 'early_photo', image: fixture('synthetic-i-face_front'), qualityWarningCode: null }],
+      inspiration: { source: 'NONE', analysis: null, answers: [], wants: [], avoids: [], unsure: [], keep: [] },
+      safetyCodes: SAFETY_CODES,
+    })
+    // What the model cited, before the server's own check — so a refusal here
+    // names the field, not just the code.
+    console.log('early-only citations', JSON.stringify({
+      core: Object.fromEntries(Object.entries(result.analysis.core).map(([key, value]) => [key, { value: value.value, evidence: value.evidence, confidence: value.confidence }])),
+      profile: Object.fromEntries(Object.entries(result.analysis.profile).map(([key, value]) => [key, { value: value.value, evidence: value.evidence }])),
+      styles: result.analysis.styleDirections.map(direction => ({ domain: direction.domain, evidence: direction.evidence, confidence: direction.confidence })),
+      lookPlan: result.analysis.lookPlan ? { tier: result.analysis.lookPlan.tier, blocker: result.analysis.lookPlan.blocker } : null,
+    }))
+    // The run loader's own gate, with the same arguments it passes.
+    const validated = validateConsultAnalysisProviderResult(result, { menuServiceNames, lookPlanMenu: menu, suppliedShotKeys: ['early_photo'] })
+    expect(validated).toEqual(result)
+    // Hair levels cannot be read from a selfie: the prompt says UNKNOWN, and
+    // the server would refuse a hair-view citation that was never supplied.
+    expect(result.analysis.core.baseLevel.evidence).toEqual([])
+    expect(result.analysis.lookPlan ?? null).not.toBeNull()
+  })
+
 })

@@ -29,6 +29,7 @@ import {
   CONSULT_ANALYSIS_SCHEMA_VERSION,
   CONSULT_STYLE_DOMAINS,
   ConsultAnalysisProviderError,
+  repairUnsuppliedHairLevelEvidence,
   resetConsultAnalysisClientForTests,
   CONSULT_ANALYSIS_CONSULTATION_OPTION,
   buildConsultDirectionOutputSchema,
@@ -899,8 +900,11 @@ describe('hair-color consult analysis provider', () => {
   })
 
   it('rejects malformed ranges, unsupported evidence, extra fields, and provider provenance drift', () => {
+    // 2026-09-11: a REVERSED range is repaired (same pair, right way round), so
+    // the malformed case is one that is not a range at all — a bound outside
+    // [0, 1]. The repair has its own tests below.
     const badRange = validOutput()
-    badRange.core.currentTone.confidence = { min: 0.9, max: 0.2 }
+    badRange.core.currentTone.confidence = { min: 0.9, max: 1.2 }
     expect(() =>
       validate(badRange),
     ).toThrowError(ConsultAnalysisProviderError)
@@ -1185,3 +1189,151 @@ function obs<const T extends string>(value: T) {
     region: { x: 0.1, y: 0.1, w: 0.5, h: 0.5 },
   }
 }
+
+describe('the early selfie as the only photo (prod, 2026-09-11)', () => {
+  // Every "Build my plan" in production failed in ~1s with ANALYSIS_UNAVAILABLE
+  // and nothing metered: the consult's only accepted capture was `early_photo`,
+  // the run loader admits it by name, and this engine's first guard only knew
+  // the daylight pack. The integration suites mock this function, so only a
+  // unit test here can hold the line.
+  const earlyOnly = [{
+    qualityWarningCode: null,
+    shotKey: 'early_photo' as const,
+    image: { base64: 'ZWFybHk=', mediaType: 'image/jpeg' as const },
+  }]
+
+  beforeEach(() => {
+    mocks.create.mockReset()
+    resetConsultAnalysisClientForTests()
+  })
+
+  it('is admitted, sent first with its own evidence label, and every pack view is reported missing', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      mockBothCalls()
+      await expect(runConsultAnalysis({
+        service, capturePack, intake: {}, intakeItems: [], captures: earlyOnly,
+        inspiration: noInspiration, safetyCodes: [...SAFETY_CODES],
+      })).resolves.toBeTruthy()
+      const [params] = mocks.create.mock.calls[0] ?? []
+      const content = params.messages[0].content as Array<{ type: string; text?: string }>
+      expect(content.filter((item) => item.type === 'image')).toHaveLength(1)
+      expect(content[0]?.text).toBe('Evidence label: early_photo')
+      expect(content[1]?.type).toBe('image')
+      expect(JSON.stringify(content)).toContain(
+        'Missing views (not supplied): hair_back, hair_left, hair_right, hair_crown, face_front, face_side, eyes_closeup.',
+      )
+      expect(errors).not.toHaveBeenCalled()
+    } finally {
+      errors.mockRestore()
+    }
+  })
+
+  it('still refuses a capture that is neither a pack view nor the early photo, and says why', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      mockBothCalls()
+      await expect(runConsultAnalysis({
+        service, capturePack, intake: {}, intakeItems: [],
+        captures: [{ ...earlyOnly[0]!, shotKey: 'area_wide' }],
+        inspiration: noInspiration, safetyCodes: [...SAFETY_CODES],
+      })).rejects.toThrowError(ConsultAnalysisProviderError)
+      expect(mocks.create).not.toHaveBeenCalled()
+      expect(errors).toHaveBeenCalledWith(
+        'consult analysis refused before the model call',
+        expect.objectContaining({ reason: 'capture_set', inadmissibleShotKeys: ['area_wide'] }),
+      )
+    } finally {
+      errors.mockRestore()
+    }
+  })
+
+  it('logs a provider rejection content-free instead of swallowing it', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      mocks.create.mockRejectedValueOnce(Object.assign(new Error('invalid_request_error: grammar too large'), { status: 400 }))
+      await expect(runConsultAnalysis({
+        service, capturePack, intake: {}, intakeItems: [], captures: earlyOnly,
+        inspiration: noInspiration, safetyCodes: [...SAFETY_CODES],
+      })).rejects.toThrowError(ConsultAnalysisProviderError)
+      expect(errors).toHaveBeenCalledWith(
+        'consult analysis provider request failed',
+        expect.objectContaining({ status: 400 }),
+      )
+    } finally {
+      errors.mockRestore()
+    }
+  })
+})
+
+describe('what the grammar cannot hold is repaired, not discarded (2026-09-11)', () => {
+  // The nightly live contract had been red since 09-08 on a confidence range
+  // the model returned as a point; the early-selfie run died on a hair level
+  // citing a view that was never supplied. Both threw away a paid analysis.
+  const supplied = ['early_photo'] as const
+
+  function withConfidence(min: number, max: number) {
+    const output = validOutput()
+    output.profile.skinUndertone = { ...output.profile.skinUndertone, confidence: { min, max } }
+    return output
+  }
+
+  it('widens a point value into the smallest range the database accepts', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const result = validate(withConfidence(0.7, 0.7), [...SUPPLIED])
+      expect(result.analysis.profile.skinUndertone.confidence).toEqual({ min: 0.7, max: 0.75 })
+      const atOne = validate(withConfidence(1, 1), [...SUPPLIED])
+      expect(atOne.analysis.profile.skinUndertone.confidence).toEqual({ min: 0.95, max: 1 })
+      expect(warn).toHaveBeenCalledWith('consult analysis confidence repaired', expect.objectContaining({ received: { min: 0.7, max: 0.7 } }))
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('swaps a reversed pair and still refuses anything outside [0, 1]', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const result = validate(withConfidence(0.8, 0.4), [...SUPPLIED])
+      expect(result.analysis.profile.skinUndertone.confidence).toEqual({ min: 0.4, max: 0.8 })
+      expect(() => validate(withConfidence(-0.1, 0.4), [...SUPPLIED])).toThrowError(ConsultAnalysisProviderError)
+      expect(() => validate(withConfidence(0.4, 1.2), [...SUPPLIED])).toThrowError(ConsultAnalysisProviderError)
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('reads a hair level that cites an unsupplied view as UNKNOWN, and keeps refusing every other unsupplied citation', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const output = validOutput()
+      // Everything else cites only what was supplied.
+      for (const field of Object.keys(output.profile) as Array<keyof typeof output.profile>) {
+        output.profile[field] = { ...output.profile[field], value: 'UNKNOWN', evidence: [], confidence: { min: 0, max: 0.3 } }
+      }
+      for (const field of Object.keys(output.core) as Array<keyof typeof output.core>) {
+        output.core[field] = { ...output.core[field], value: 'UNKNOWN', evidence: [], confidence: { min: 0, max: 0.3 } }
+      }
+      output.styleDirections = output.styleDirections.map((direction) => ({ ...direction, evidence: ['intake'] }))
+      output.core.baseLevel = { value: 'LEVEL_6', confidence: { min: 0.4, max: 0.7 }, evidence: ['hair_back'] }
+      const result = validate(output, [...supplied])
+      expect(result.analysis.core.baseLevel).toEqual({ value: 'UNKNOWN', confidence: { min: 0, max: 0.3 }, evidence: [] })
+      expect(warn).toHaveBeenCalledWith(
+        'consult analysis hair level cited an unsupplied view; read as UNKNOWN',
+        expect.objectContaining({ fields: ['baseLevel'] }),
+      )
+      // A profile field citing an unsupplied view is a grammar the model was
+      // never offered — that stays a refusal.
+      const bad = validOutput()
+      bad.profile.skinUndertone = { ...bad.profile.skinUndertone, evidence: ['face_front'] }
+      expect(() => validate(bad, [...supplied])).toThrowError(ConsultAnalysisProviderError)
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('is exported for the run loader and returns what it changed', () => {
+    const output = validate(validOutput(), [...SUPPLIED]).analysis
+    expect(repairUnsuppliedHairLevelEvidence(output, new Set(SUPPLIED))).toEqual([])
+  })
+})
