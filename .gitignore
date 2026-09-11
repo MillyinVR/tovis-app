@@ -49,6 +49,8 @@ next-env.d.ts
 
 # Claude Code local config
 .claude/
+# Codex local config (hooks.json + a write probe) — tool state, never code
+.codex/
 .vercel
 .env*.local
 
