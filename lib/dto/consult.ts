@@ -549,6 +549,17 @@ export type ConsultInspirationStateDTO = {
    * grows by addition only, so shipped fixtures and shipped clients stay valid.
    */
   cards?: ConsultInspirationCardDTO[]
+  /**
+   * C2-6b — the app's one sentence about the reference photograph when the
+   * reading flagged it (a filter, an AI-looking image, added hair, studio
+   * light, styling that hides the cut, one angle): still useful for the
+   * feeling and direction; some details may not be how real hair reflects,
+   * moves or grows. Composed on the server from the tenant's inspiration copy,
+   * keyed by flag, so no code reaches the client. Null when there is no
+   * reading or nothing was flagged. OPTIONAL on the wire, like every field
+   * added since P5a; the thread carries it as an ordinary TEXT message.
+   */
+  credibilityNote?: string | null
   latestReview: ConsultInspirationReviewDTO | null
 }
 
@@ -1367,6 +1378,25 @@ export type ConsultInspirationAnalysisFieldDTO =
   keyof ConsultInspirationAnalysisAttributesDTO
 
 /**
+ * C2-6b — what the reader noticed about the PHOTOGRAPH rather than the hair:
+ * a filter or edit, an AI-looking image, added hair, studio lighting, styling
+ * that hides the cut, a single angle. Mirrors
+ * `CONSULT_INSPIRATION_CREDIBILITY_FLAGS` (lib/consult/inspirationAttributes.ts).
+ *
+ * 🔴 A flag is a note, not a refusal. The reading still answers the eight
+ * attributes; what a flag changes is the sentence beside them — the client's
+ * in the thread, the pro's on the Brief — and both are composed on the server
+ * from the copy tables. A code never reaches a screen.
+ */
+export type ConsultInspirationCredibilityFlagDTO =
+  | 'LIKELY_EDITED'
+  | 'LIKELY_AI_GENERATED'
+  | 'EXTENSIONS_LIKELY'
+  | 'PRO_LIGHTING'
+  | 'FINISH_HIDES_CUT'
+  | 'SINGLE_ANGLE'
+
+/**
  * The stored artefact, identified by the inspiration ROW it read: a SWAPPED
  * reference makes this one stale, and the pro brief declines to show a stale
  * one rather than showing the wrong picture's colour.
@@ -1384,6 +1414,12 @@ export type ConsultInspirationAnalysisDTO = {
   promptVersion: string
   model: string
   attributes: ConsultInspirationAnalysisAttributesDTO
+  /**
+   * C2-6b — empty when the reader saw nothing to note. OPTIONAL on the wire
+   * so the published schema grows by addition only; the server always sends
+   * it, and a v3 artefact (read before flags existed) is served with `[]`.
+   */
+  credibilityFlags?: ConsultInspirationCredibilityFlagDTO[]
   createdAt: string
 }
 
@@ -1914,6 +1950,17 @@ export type ConsultProBriefDTO = {
    * iOS fixtures stay valid; a build that predates it renders nothing.
    */
   topLine?: string | null
+  /**
+   * C2-6b — one line about the REFERENCE photograph itself, when the reading
+   * flagged it: "Reference note: looks edited or filtered; lit like a photo
+   * shoot." Composed on the server from `inspirationAnalysis.credibilityFlags`
+   * through lib/brand/consultProInspirationCredibilityCopy.ts, exactly as
+   * `topLine` is, so iOS renders a string rather than carrying a second word
+   * table. Null when there is no reading or no flag. OPTIONAL on the wire for
+   * the same reason every field added since P5a is; a build that predates it
+   * renders nothing.
+   */
+  inspirationCredibility?: string | null
   createdAt: string
 }
 

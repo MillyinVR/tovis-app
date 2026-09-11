@@ -1236,6 +1236,28 @@ export type BrandClientConsultInspirationCopy = {
   catalogGuidanceNote: string
   /** P5d — the cards' own words, keyed by attribute and value. */
   cards: BrandClientConsultInspirationCardCopy
+  /**
+   * C2-6b — the one sentence the thread says about a reference photograph the
+   * reading flagged (gap G2). Composed on the server by
+   * lib/consult/inspirationCredibility.ts as `lead` + the flagged clauses
+   * joined with `conjunction` + `close`; a flag with no clause here is left
+   * out, never echoed as a code. The Blueprint's line: still useful for the
+   * feeling and direction; some details may not be how real hair reflects,
+   * moves or grows.
+   */
+  credibility: BrandClientConsultInspirationCredibilityCopy
+}
+
+/** See `BrandClientConsultInspirationCopy.credibility`. */
+export type BrandClientConsultInspirationCredibilityCopy = {
+  /** Opens the sentence; `{clauses}` is the joined list. */
+  lead: string
+  /** `${credibilityFlag}` → its clause, in the app's voice. */
+  flags: Readonly<Record<string, string>>
+  /** The conjunction before the last clause. */
+  conjunction: string
+  /** The closing sentence. */
+  close: string
 }
 
 /**

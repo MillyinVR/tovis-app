@@ -295,6 +295,19 @@ export default function ProConsultBrief({
           <span className="font-semibold">{detail.sentiment === 'LIKE' ? 'Likes' : detail.sentiment === 'DISLIKE' ? 'Avoids' : detail.sentiment === 'GOAL' ? 'Wants' : 'Context'}: </span>{detail.clientWords}
         </p>)}
       </section>}
+      {/* C2-6b — one line about the reference PHOTOGRAPH when the reading
+          flagged it (edited, AI-looking, extensions, studio light, finish
+          hides the cut, one angle). Server-composed, rendered whole, beside
+          what the client picked out of the same picture. Nothing when there
+          is no flag — never a placeholder. */}
+      {brief.inspirationCredibility ? (
+        <p
+          data-testid="consult-brief-inspiration-credibility"
+          className="rounded-xl border border-surfaceGlass/20 bg-bgPrimary px-3 py-2 text-sm font-semibold text-textPrimary"
+        >
+          {brief.inspirationCredibility}
+        </p>
+      ) : null}
       {brief.lookBrief && <ConsultLookBriefPhotos consultId={brief.consultId} />}
 
       <section aria-labelledby={`${brief.consultId}-client-words`}>

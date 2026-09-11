@@ -88,6 +88,8 @@ import { defaultClientConsultInspirationCopy } from '@/lib/brand/defaultClientCo
 import { defaultClientConsultPlanDiffCopy } from '@/lib/brand/defaultClientConsultPlanDiffCopy'
 import { defaultClientConsultThreadCopy } from '@/lib/brand/defaultClientConsultThreadCopy'
 import { readConsultInspiration } from '@/lib/consult/inspirationAnalysisContract'
+import { composeConsultInspirationCredibilityClientNote } from '@/lib/consult/inspirationCredibility'
+import * as fakes from './_support/consultLookFakes'
 import { answerConsultInspirationQuestion, loadConsultInspirationState, requireCompletedConsultInspiration } from '@/lib/consult/inspirationContract'
 import {
   HAIR_COLOR_INTAKE_PACK_VERSION,
@@ -993,6 +995,38 @@ describe('consult thread projection', () => {
     expect(edited.progress.canComplete).toBe(false)
     const projected = await thread(sessionId)
     expect(ofKind(projected.messages, 'INSPIRATION').some((message) => message.card?.questionKey.startsWith('color_'))).toBe(false)
+  })
+
+  // C2-6b — one sentence about the PHOTOGRAPH, between the picture and the cards.
+  it('says one thing about a flagged reference, after the picture and before the cards', async () => {
+    fakes.fakeInspirationCredibility.flags = ['SINGLE_ANGLE', 'LIKELY_EDITED']
+    const sessionId = await startConsult()
+    await acceptBothAgreements(sessionId)
+    await readConsultInspiration({ consultSessionId: sessionId, clientId: fx.clientId, actor: { type: ConsultActorType.CLIENT, id: fx.clientUserId }, idempotencyKey: 'flagged-reference' })
+
+    const t = await thread(sessionId)
+    const ids = t.messages.map((message) => message.id)
+    const note = t.messages.find((message) => message.id === 'inspiration:credibility')
+    expect(note).toMatchObject({ kind: 'TEXT', author: 'APP', state: 'DONE' })
+    expect(note?.kind === 'TEXT' ? note.text : null).toBe(
+      composeConsultInspirationCredibilityClientNote(['LIKELY_EDITED', 'SINGLE_ANGLE'], defaultClientConsultInspirationCopy),
+    )
+    expect(note?.kind === 'TEXT' ? note.text : '').toContain('it looks edited or filtered and it only shows one angle')
+    // Right after the picture, right before the first card — and it never
+    // becomes the open step: resume still lands on the card.
+    expect(ids.indexOf('inspiration:credibility')).toBe(ids.indexOf('inspiration') + 1)
+    expect(ids[ids.indexOf('inspiration:credibility') + 1]).toMatch(/^inspiration:/)
+    expect(t.nextOpenMessageId).toMatch(/^inspiration:/)
+    expect(t.nextOpenMessageId).not.toBe('inspiration:credibility')
+    // The cards are still there: a flag is a note, not a refusal.
+    expect(ofKind(t.messages, 'INSPIRATION').some((message) => message.card)).toBe(true)
+
+    // And a photograph the reader had nothing to say about gets no sentence.
+    fakes.fakeInspirationCredibility.flags = []
+    const plainId = await startConsult()
+    await acceptBothAgreements(plainId)
+    await readConsultInspiration({ consultSessionId: plainId, clientId: fx.clientId, actor: { type: ConsultActorType.CLIENT, id: fx.clientUserId }, idempotencyKey: 'plain-reference' })
+    expect((await thread(plainId)).messages.some((message) => message.id === 'inspiration:credibility')).toBe(false)
   })
 
   it('answers the inspiration step as a card, not as a wizard step', async () => {

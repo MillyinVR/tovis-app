@@ -66,3 +66,27 @@ it('can replace an answered reference and cancel without changing its saved sour
   expect(writes).toEqual([])
   expect(LocalURL.revokeObjectURL).toHaveBeenCalledWith('blob:replacement')
 })
+
+// C2-6b — the reference note is an ordinary text bubble between the picture
+// and the cards; the client reads it with no new component.
+it('shows the app’s one sentence about a flagged reference, between the picture and the cards', async () => {
+  vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })))
+  const base = threadFixture({ inspiration: cardInspiration })
+  const at = base.messages.findIndex(message => message.id === 'inspiration')
+  const sentence = 'One thing about this picture: it looks edited or filtered. It’s still a great reference for the feeling and the direction — just know that some details may not be how real hair reflects, moves or grows.'
+  const thread: ConsultThreadDTO = { ...base, messages: [
+    ...base.messages.slice(0, at + 1),
+    { kind: 'TEXT', id: 'inspiration:credibility', author: 'APP', state: 'DONE', text: sentence },
+    ...base.messages.slice(at + 1),
+  ] }
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.endsWith('/thread')) return new Response(JSON.stringify({ ok: true, thread }), { headers: { 'content-type': 'application/json' } })
+    return new Response('{}', { status: 404 })
+  }))
+  render(<BrandProvider><ClientConsultFlow consultId={thread.consultId} copy={defaultClientConsultThreadCopy} /></BrandProvider>)
+  const note = await screen.findByText(sentence)
+  expect(note).toBeInTheDocument()
+  // The cards are still asked — a flag is a note, not a refusal.
+  expect(screen.getByText('Now a few of you, in daylight if you can.')).toBeInTheDocument()
+})

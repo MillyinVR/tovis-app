@@ -21,6 +21,7 @@ import { defaultClientConsultInspirationCopy } from '@/lib/brand/defaultClientCo
 import type { BrandClientConsultInspirationCopy } from '@/lib/brand/types'
 import type {
   ConsultInspirationAnswerDTO,
+  ConsultInspirationAnalysisDTO,
   ConsultInspirationCardDTO,
   ConsultInspirationCatalogGuidanceDTO,
   ConsultInspirationExactDetailDTO,
@@ -62,7 +63,6 @@ import {
   composeConsultInspirationUnderstanding,
   deriveConsultInspirationPreferences,
   findConsultInspirationCardQuestion,
-  type ConsultInspirationCardReading,
   type ConsultInspirationClientPreferences,
 } from './inspiration/cards'
 import type {
@@ -93,11 +93,9 @@ import {
   type ConsultInspirationStorage,
 } from './inspirationStorage'
 import { CONSULT_CAPTURE_MEDIA_TYPES, type ConsultCaptureMediaType } from './captureVision'
-import {
-  CONSULT_INSPIRATION_ANALYSIS_PROMPT_VERSION,
-  CONSULT_INSPIRATION_ANALYSIS_SCHEMA_VERSION,
-} from './inspirationVision'
+import { CONSULT_INSPIRATION_ANALYSIS_READABLE_VERSIONS } from './inspirationVision'
 import { normalizeStoredConsultInspirationAnalysis } from './inspirationAnalysisRead'
+import { composeConsultInspirationCredibilityClientNote } from './inspirationCredibility'
 import { CONSULT_MAX_CAPTURE_SHOTS } from './capture/registry'
 import {
   CONSULT_SERVICE_PROFILE_CATEGORY_SELECT,
@@ -406,7 +404,8 @@ export async function requireCompletedConsultInspiration(
   // a want is an attribute and a value rather than a word.
   const reading =
     pack && review.inspirationId
-      ? await inspirationAnalysisReading(tx, args.consultSessionId, review.inspirationId)
+      ? (await inspirationAnalysisReading(tx, args.consultSessionId, review.inspirationId))
+          ?.attributes ?? null
       : null
   if (pack?.adaptiveVisualDialogue && review.source !== 'NONE' &&
     !evaluateConsultInspirationProgressV2(pack, answerMap(review.answers), defaultClientConsultInspirationCopy, null, reading).canComplete) {
@@ -718,13 +717,19 @@ async function inspirationAnalysisReading(
   tx: Prisma.TransactionClient,
   consultSessionId: string,
   inspirationId: string,
-): Promise<ConsultInspirationCardReading | null> {
+): Promise<ConsultInspirationAnalysisDTO | null> {
   const stored = await tx.consultRevision.findFirst({
     where: {
       consultSessionId,
       kind: ConsultRevisionKind.INSPIRATION_ANALYSIS,
-      schemaVersion: CONSULT_INSPIRATION_ANALYSIS_SCHEMA_VERSION,
-      promptVersion: CONSULT_INSPIRATION_ANALYSIS_PROMPT_VERSION,
+      // 🔴 C2-6b: every READABLE version pair, not only the current one. The
+      // normalizer below checks the same list, so the query cannot return a
+      // row the normalizer then refuses. Newest first, so once a photograph
+      // has been re-read under v4 that reading wins over its v3 one.
+      OR: CONSULT_INSPIRATION_ANALYSIS_READABLE_VERSIONS.map((readable) => ({
+        schemaVersion: readable.schemaVersion,
+        promptVersion: readable.promptVersion,
+      })),
       payload: { path: ['inspirationId'], equals: inspirationId },
     },
     select: {
@@ -738,7 +743,7 @@ async function inspirationAnalysisReading(
     orderBy: [{ revision: 'desc' }, { id: 'desc' }],
   })
   if (!stored) return null
-  return normalizeStoredConsultInspirationAnalysis(stored)?.attributes ?? null
+  return normalizeStoredConsultInspirationAnalysis(stored)
 }
 
 /**
@@ -830,8 +835,15 @@ async function buildState(
   // 🔴 The reading, not just "is there one". Every card below is a crop of it,
   // and a card is built ONLY where it settled something — which is what makes
   // a light-blonde reference incapable of producing a copper question.
-  const reading = source
+  const stored = source
     ? await inspirationAnalysisReading(tx, session.id, source.id)
+    : null
+  const reading = stored?.attributes ?? null
+  // C2-6b — the app's one sentence about the photograph, when the reading
+  // flagged it. Composed here, where the tenant's copy is in hand, so the
+  // thread carries a finished sentence and no code.
+  const credibilityNote = stored
+    ? composeConsultInspirationCredibilityClientNote(stored.credibilityFlags ?? [], copy)
     : null
   const sourceState = source
     ? {
@@ -942,7 +954,8 @@ async function buildState(
             requiredSpecificDetailCount,
           },
     // A consult that skipped the reference has nothing to crop, so it has no
-    // cards — the same reason it has no questions.
+    // cards — the same reason it has no questions. Nor a note about it.
+    credibilityNote: activeReview?.source === 'NONE' ? null : credibilityNote,
     cards: activeReview?.source === 'NONE' ? [] : [
       ...cards.coarse.filter((card) => !pack?.adaptiveVisualDialogue ||
         ((card.selectedValues.length > 0 || answers.some(answer => answer.questionKey === card.questionKey && answer.text)) && (card.questionKey !== 'understanding_check' || progress.canComplete)) ||
@@ -1636,7 +1649,7 @@ export async function answerConsultInspirationQuestion(args: {
     const previousReview = previous?.inspirationId === source.id ? previous : null
     const previousAnswers = previousReview?.answers ?? []
     const reading = ctx.pack?.adaptiveVisualDialogue
-      ? await inspirationAnalysisReading(tx, session.id, source.id)
+      ? (await inspirationAnalysisReading(tx, session.id, source.id))?.attributes ?? null
       : null
 
     let write: InspirationWrite

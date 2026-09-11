@@ -79,6 +79,7 @@ export function resetConsultLookFakes(): void {
   state.lookServices = []
   state.safetyFlags = []
   state.achievability = 'REQUIRES_PRO_ASSESSMENT'
+  fakeInspirationCredibility.flags = []
 }
 
 /** P7a-3 — make the NEXT analysis run reach a different conclusion. */
@@ -337,9 +338,17 @@ export async function fakeFetchConsultInspirationImage(): Promise<{
   return { base64: 'aW5zcGlyYXRpb24=', mediaType: 'image/jpeg' }
 }
 
+/**
+ * C2-6b — the flags the fake reading carries. Tests that want a flagged
+ * reference set this before the read; the default is an unflagged photograph,
+ * which is what most suites were written against.
+ */
+export const fakeInspirationCredibility: { flags: string[] } = { flags: [] }
+
 export async function fakeRunConsultInspirationVision(): Promise<{
   model: string
   analysis: Record<string, unknown>
+  credibilityFlags: string[]
 }> {
   const known = (value: string) => ({
     value,
@@ -349,6 +358,7 @@ export async function fakeRunConsultInspirationVision(): Promise<{
   })
   return {
     model: 'fake-inspiration-model',
+    credibilityFlags: [...fakeInspirationCredibility.flags],
     analysis: {
       baseLevel: known('LEVEL_5'),
       lightestLevel: known('LEVEL_8'),
