@@ -718,6 +718,16 @@ export const DELETE_RULES: readonly DeleteRule[] = [
         : null,
   }),
   deleteRule({
+    model: 'ConsultProFollowUpQuestion',
+    notes:
+      "Deleted with the client-owned consult; the professional's anonymized profile keeps no copy. Cascades with ConsultSession too — this rule exists so the disposition is backed by deletion code, not by a foreign key.",
+    delegate: (db) => db.consultProFollowUpQuestion,
+    where: (s) =>
+      s.clientProfileId
+        ? { consultSession: { clientId: s.clientProfileId } }
+        : null,
+  }),
+  deleteRule({
     model: 'ConsultServiceEstimate',
     notes:
       "Deleted with the client-owned consult; its lines cascade. A professional account deletion anonymizes her profile instead, so the estimate stays with the client's consult.",

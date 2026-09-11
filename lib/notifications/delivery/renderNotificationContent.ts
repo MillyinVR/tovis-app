@@ -426,6 +426,7 @@ const templateCtaLabels: Record<NotificationTemplateKey, string> = {
   look_brief_review: 'Review the look',
   ai_consult_analysis_ready: 'See my consult',
   consult_prep_reminder: 'Answer the questions',
+  consult_pro_follow_up: 'Open the consultation',
   ai_consult_analysis_failed: 'Try again',
   saved_look_price_alternative: 'Explore looks',
   viral_request_approved: 'View request',
@@ -556,6 +557,9 @@ const templateRenderers: Record<NotificationTemplateKey, TemplateRendererSet> = 
   ),
   consult_prep_reminder: buildStandardTemplateRenderer(
     templateCtaLabels.consult_prep_reminder,
+  ),
+  consult_pro_follow_up: buildStandardTemplateRenderer(
+    templateCtaLabels.consult_pro_follow_up,
   ),
   ai_consult_analysis_failed: buildStandardTemplateRenderer(
     templateCtaLabels.ai_consult_analysis_failed,

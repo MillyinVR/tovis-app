@@ -2680,6 +2680,16 @@ function FollowUpMessage({
   const answered = message.selectedValues.length > 0
   return (
     <ThreadCard dimmed={answered}>
+      {message.attribution ? (
+        // C2-4 — a question the PRO wrote carries her name, so it never reads
+        // as the app's voice. Served, like every other sentence in the thread.
+        <p
+          className="mb-1 text-[11px] font-bold uppercase tracking-wide text-textMuted"
+          data-testid="consult-follow-up-attribution"
+        >
+          {message.attribution}
+        </p>
+      ) : null}
       <p
         className="text-sm font-bold leading-6 text-textPrimary"
         data-testid="consult-follow-up-question"

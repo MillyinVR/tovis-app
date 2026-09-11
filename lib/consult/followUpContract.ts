@@ -1,4 +1,9 @@
 import { recordLockedConsultRerunRequest } from './analysisRerun'
+import {
+  answerConsultProFollowUp,
+  ConsultProFollowUpAnswerError,
+  isConsultProFollowUpKey,
+} from './proFollowUp'
 import { requireAuthorizedProposalScope } from './proposalEntry'
 import { consultRequiresLookChoice } from './lookPlanning'
 import 'server-only'
@@ -750,6 +755,15 @@ export type AnswerConsultFollowUpResult = {
   nextRoundCreated: boolean
 }
 
+/** What the route echoes when a consult has no model rounds to report on. */
+const EMPTY_FOLLOW_UP_STATE: ConsultFollowUpState = {
+  rounds: [],
+  openQuestionKey: null,
+  fallbackActive: false,
+  planVersion: 0,
+  moreRoundsAvailable: false,
+}
+
 export class ConsultFollowUpAnswerError extends Error {
   constructor(readonly code: 'NOT_OPEN' | 'INVALID_ANSWER') {
     super('Invalid follow-up answer.')
@@ -782,6 +796,38 @@ export async function answerConsultFollowUpQuestion(
   deps: ConsultFollowUpDeps = {},
 ): Promise<AnswerConsultFollowUpResult> {
   const now = deps.now ?? new Date()
+
+  // C2-4 — a question the PROFESSIONAL wrote. Same route, same card, same
+  // single-select rule; a different home. The `pro_` prefix is server-minted
+  // and the DB CHECK pins it, so a model round can never carry one and a
+  // client cannot make one up that files anywhere. Answering it never buys a
+  // model round: it is not a round.
+  if (isConsultProFollowUpKey(args.questionKey)) {
+    const values = [...new Set(args.selectedValues)]
+    const [value] = values
+    if (values.length !== 1 || !value) throw new ConsultFollowUpAnswerError('INVALID_ANSWER')
+    try {
+      await answerConsultProFollowUp({
+        consultSessionId: args.consultSessionId,
+        clientId: args.clientId,
+        actorUserId: args.actor.id,
+        questionKey: args.questionKey,
+        selectedValue: value,
+        now,
+      })
+    } catch (error) {
+      if (error instanceof ConsultProFollowUpAnswerError) {
+        throw new ConsultFollowUpAnswerError(error.code)
+      }
+      throw error
+    }
+    const after = await readConsultFollowUpSituation(args.consultSessionId)
+    return {
+      state: after ? projectConsultFollowUpState(after) : EMPTY_FOLLOW_UP_STATE,
+      nextRoundCreated: false,
+    }
+  }
+
   const situation = await readConsultFollowUpSituation(args.consultSessionId)
   if (!situation) throw new ConsultFollowUpAnswerError('NOT_OPEN')
 

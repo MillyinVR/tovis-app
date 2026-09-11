@@ -109,6 +109,8 @@ const EVENT_LABELS: Record<NotificationEventKey, string> = {
     'Problems finishing your consult',
   [NotificationEventKey.CONSULT_PREP_REMINDER]:
     'Questions your pro needs before your appointment',
+  [NotificationEventKey.CONSULT_PRO_FOLLOW_UP]:
+    'Follow-up questions between you and your pro',
   [NotificationEventKey.SAVED_LOOK_PRICE_ALTERNATIVE]: 'Similar looks in your range',
   [NotificationEventKey.VIRAL_REQUEST_APPROVED]: 'Feature request approved',
   [NotificationEventKey.PAYMENT_COLLECTED]: 'Payment receipt',
@@ -187,6 +189,7 @@ const CATEGORY_DEFS: readonly CategoryDef[] = [
       NotificationEventKey.CONSULTATION_REJECTED,
       NotificationEventKey.AI_CONSULT_INVITATION,
       NotificationEventKey.LOOK_BRIEF_REVIEW,
+      NotificationEventKey.CONSULT_PRO_FOLLOW_UP,
       NotificationEventKey.AI_CONSULT_ANALYSIS_READY,
       NotificationEventKey.AI_CONSULT_ANALYSIS_FAILED,
       NotificationEventKey.AFTERCARE_READY,

@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => {
     $queryRaw: vi.fn(), consultRevision: { findMany: vi.fn() },
     consultInspiration: { findMany: vi.fn() }, consultCapture: { findMany: vi.fn() },
     consultFollowUpRound: { findMany: vi.fn() }, consultLookBriefVersion: { findMany: vi.fn() },
+    consultProFollowUpQuestion: { findMany: vi.fn() },
   }
   return { db, authorize: vi.fn(), transaction: (operation: (tx: typeof db) => Promise<unknown>) => operation(db) }
 })
@@ -18,7 +19,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.authorize.mockResolvedValue({ id: 'consult-1' })
   mocks.db.$queryRaw.mockResolvedValue([])
-  for (const model of [mocks.db.consultRevision, mocks.db.consultInspiration, mocks.db.consultCapture, mocks.db.consultFollowUpRound, mocks.db.consultLookBriefVersion]) model.findMany.mockResolvedValue([])
+  for (const model of [mocks.db.consultRevision, mocks.db.consultInspiration, mocks.db.consultCapture, mocks.db.consultFollowUpRound, mocks.db.consultLookBriefVersion, mocks.db.consultProFollowUpQuestion]) model.findMany.mockResolvedValue([])
 })
 
 it('requires the shared pro and consent guard before any event or payload query', async () => {
@@ -38,6 +39,24 @@ it('only exposes stored question text and selected option labels, never evidence
   const result = await loadProConsultTranscript(args)
   expect(result.events[0]?.items).toEqual([{ label: 'Have you used color?', value: 'Not sure' }])
   expect(JSON.stringify(result)).not.toContain('PRIVATE_')
+})
+
+it('projects a pro-authored question as what the client saw plus the tapped label, and never the pro draft', async () => {
+  // C2-4. The select in proTranscript.ts does not read `proIntent`; this pins
+  // that a row carrying one anyway (a future translation slice) stays out.
+  mocks.db.$queryRaw.mockResolvedValue([{ id: 'pq1', source: 'PRO_FOLLOW_UP', createdAt }])
+  mocks.db.consultProFollowUpQuestion.findMany.mockResolvedValue([{ id: 'pq1', priority: 'NEED_BEFORE_APPOINTMENT',
+    clientText: 'Have you had keratin in the last year?', proIntent: 'PRIVATE_DRAFT',
+    options: [{ value: 'option-1', label: 'Yes' }, { value: 'option-2', label: 'No' }], selectedValue: 'option-2', answeredAt: createdAt }])
+  const result = await loadProConsultTranscript(args)
+  expect(result.events[0]?.id).toBe('PRO_FOLLOW_UP:pq1')
+  expect(result.events[0]?.items).toEqual([
+    { label: 'Have you had keratin in the last year?', value: 'No' },
+    { label: 'Priority', value: 'Needed before the appointment' },
+  ])
+  expect(JSON.stringify(result)).not.toContain('PRIVATE_')
+  expect(mocks.db.consultProFollowUpQuestion.findMany).toHaveBeenCalledWith(expect.objectContaining({
+    select: expect.not.objectContaining({ proIntent: true }) }))
 })
 
 it('keeps unreadable revision markers instead of spreading stored payloads', async () => {

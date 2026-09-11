@@ -87,6 +87,7 @@ import {
 import { loadAuthorizedClientConsultResults } from './clientResults'
 import { canDeleteUnbookedConsult, resolveThreadBooking, type ConsultThreadBooking } from './bookingLink'
 import { loadConsultFollowUpState } from './followUpContract'
+import { loadConsultProFollowUps } from './proFollowUp'
 import { loadConsultInspirationState } from './inspirationContract'
 import { loadConsultIntakeState } from './intakeContract'
 import { loadConsultPrepState } from './prepDeadline'
@@ -1032,6 +1033,41 @@ export async function loadConsultThread(args: {
           text('follow-up-done', fillConsultThreadCopy(copy.followUpDone, { pro })),
         )
       }
+    }
+  }
+
+  // ── A question the professional wrote herself (C2-4) ─────────────────────
+  //
+  // Rendered as the SAME card as a model follow-up, with her name as its
+  // eyebrow, and answered through the same route — see lib/consult/proFollowUp.ts
+  // for why. Every open one is OPEN at once: they are independent, and
+  // `nextOpenMessageId` still lands her on the first, which is where the
+  // notification says it will. Sits outside the booking block on purpose: a
+  // pro can ask from any Brief she is authorised to read, booked or not.
+  const proQuestions = await optionalStage(() => loadConsultProFollowUps(prisma, session.id))
+  if (proQuestions && proQuestions.length > 0) {
+    const needed = proQuestions.some(
+      question => question.selectedValue === null && question.priority === 'NEED_BEFORE_APPOINTMENT',
+    )
+    out.push(text('pro-follow-up-intro',
+      fillConsultThreadCopy(needed ? copy.proFollowUpIntroNeeded : copy.proFollowUpIntro, { pro })))
+    for (const question of proQuestions) {
+      out.push({
+        kind: 'FOLLOW_UP',
+        id: `pro-follow-up:${question.questionKey}`,
+        author: 'APP',
+        state: question.selectedValue !== null ? 'DONE' : 'OPEN',
+        text: question.text,
+        attribution: fillConsultThreadCopy(copy.proFollowUpAttribution, { pro }),
+        questionKey: question.questionKey,
+        options: question.options.map(option => ({ ...option })),
+        selectedValues: question.selectedValue ? [question.selectedValue] : [],
+        fallback: false,
+        round: 0,
+      })
+    }
+    if (proQuestions.every(question => question.selectedValue !== null)) {
+      out.push(text('pro-follow-up-done', fillConsultThreadCopy(copy.proFollowUpDone, { pro })))
     }
   }
 

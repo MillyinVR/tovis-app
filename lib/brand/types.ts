@@ -774,6 +774,21 @@ export type BrandClientConsultPrepCopy = {
   due: BrandClientConsultPrepMessage
 }
 
+/**
+ * C2-4 — the notifications around a professional's own follow-up question.
+ *
+ * Doorbells, like the prep reminders: none of them carries the question. The
+ * client side is filled with `{pro}`; the pro side names nobody.
+ */
+export type BrandClientConsultProFollowUpCopy = {
+  /** To the CLIENT: her pro has a quick question. `{pro}`. */
+  asked: BrandClientConsultPrepMessage
+  /** To the CLIENT when the pro marked it NEED_BEFORE_APPOINTMENT. `{pro}`. */
+  askedNeeded: BrandClientConsultPrepMessage
+  /** To the PRO: the client answered. */
+  answered: BrandClientConsultPrepMessage
+}
+
 export type BrandClientConsultThreadCopy = {
   chartHistoryConfirmation: string
   chartReviewQuestion: string
@@ -884,6 +899,26 @@ export type BrandClientConsultThreadCopy = {
   followUpFallback: string
   /** Said when there is nothing left worth asking — the honest end of prep. */
   followUpDone: string
+
+  /**
+   * C2-4 — the bubble above a question the PROFESSIONAL wrote herself. `{pro}`.
+   * Said once, above the first one, like `followUpIntro`.
+   */
+  proFollowUpIntro: string
+  /**
+   * C2-4 — the same bubble when at least one open question is
+   * NEED_BEFORE_APPOINTMENT: it says the answer matters before the visit,
+   * without alarm and without a threat. `{pro}`.
+   */
+  proFollowUpIntroNeeded: string
+  /**
+   * C2-4 — the eyebrow on the card itself ("From {pro}"). The one place the
+   * thread names the pro as the AUTHOR: every other bubble is the app's voice,
+   * and a question she typed must not be dressed as one of them.
+   */
+  proFollowUpAttribution: string
+  /** C2-4 — once every question the pro asked has an answer. `{pro}`. */
+  proFollowUpDone: string
 
   /**
    * The keep-my-photos choice, above the Book button.
@@ -1358,6 +1393,7 @@ export type BrandConfig = {
   clientConsultThread: BrandClientConsultThreadCopy
   /** P7a-4 — the escalating prep-deadline reminders. */
   clientConsultPrep: BrandClientConsultPrepCopy
+  clientConsultProFollowUp: BrandClientConsultProFollowUpCopy
   clientConsultPlanDiff: BrandClientConsultPlanDiffCopy
   clientConsultInspiration: BrandClientConsultInspirationCopy
   home: BrandHomeCopy

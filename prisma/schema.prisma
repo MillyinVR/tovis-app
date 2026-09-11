@@ -731,6 +731,12 @@ enum NotificationEventKey {
   /// because a client's preference is about prep, not about which of four
   /// nudges she wants. Stops the moment prep completes or the booking dies.
   CONSULT_PREP_REMINDER
+  /// C2-4: ONE key, both directions. To the CLIENT: "your pro has a quick
+  /// question" — a doorbell into the thread, never the question itself. To
+  /// the PRO: "she answered". Transactional on the same reasoning as
+  /// CONSULT_PREP_REMINDER (her own appointment, a person she chose), and it
+  /// does not bypass quiet hours for the same reason.
+  CONSULT_PRO_FOLLOW_UP
   BOOKING_STARTED
   BOOKING_RESCHEDULED
   BOOKING_CANCELLED_BY_CLIENT
@@ -2155,6 +2161,7 @@ model ProfessionalProfile {
   calendarBlocks          CalendarBlock[]
   consultSessions         ConsultSession[]
   consultBriefFeedback    ConsultBriefFeedback[]
+  consultProFollowUpQuestions ConsultProFollowUpQuestion[]
   consultServiceEstimates ConsultServiceEstimate[]
 
   calendarFeedSubscription CalendarFeedSubscription?
@@ -7620,11 +7627,28 @@ enum ConsultAuditAction {
   // in lib/consult/clientResults.ts makes retries deterministic.
   CLIENT_RESULTS_SERVED
   ME_CARD_TEASER_TAPPED
+  /// C2-4. A professional asked the client one follow-up question from the
+  /// Brief, and the client answered it. Content-free like every other action
+  /// here: the question and the answer live on ConsultProFollowUpQuestion, and
+  /// the audit row only says who did what, when. At most one of each per
+  /// question (`@@unique([proFollowUpQuestionId, action])`).
+  PRO_FOLLOW_UP_ASKED
+  PRO_FOLLOW_UP_ANSWERED
 }
 
 enum ConsultBriefFeedbackRating {
   ACCURATE_USEFUL
   OFF
+}
+
+/// C2-4. How urgent a professional's own follow-up question is — the two
+/// priorities the September 9 product decision names, and nothing between
+/// them. `NEED_BEFORE_APPOINTMENT`: the answer can affect safety, feasibility,
+/// reserved time, product direction or whether the current plan still holds.
+/// `HELPFUL_FOR_PREP`: useful, never alarming, never blocking.
+enum ConsultProFollowUpPriority {
+  NEED_BEFORE_APPOINTMENT
+  HELPFUL_FOR_PREP
 }
 
 enum ConsultCaptureStatus {
@@ -7807,6 +7831,7 @@ model ConsultSession {
   suitabilityTranslations ConsultSuitabilityTranslation[]
   faceColorProfiles    ConsultFaceColorProfile[]
   followUpRounds       ConsultFollowUpRound[]
+  proFollowUpQuestions ConsultProFollowUpQuestion[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -8078,6 +8103,71 @@ model ConsultBriefFeedback {
   @@index([professionalId, createdAt])
 }
 
+/// C2-4 — one follow-up question a PROFESSIONAL asked the client from the
+/// Brief, and her one-tap answer.
+///
+/// 🔴 Stored apart from ConsultFollowUpRound on purpose. That table holds the
+/// rounds a MODEL wrote (or the pack's own safety fallback), capped per plan
+/// version, shaped and word-filtered by its guard for a model's output. A
+/// question a professional typed has a different author, a different cap, a
+/// different life — it must never spend the model's round budget, and its
+/// provenance must be legible without reading a status column. Both kinds are
+/// rendered to the client through the SAME thread card and answered through
+/// the SAME route (`POST /client/consult/{id}/follow-up`), keyed by
+/// `questionKey`: the `pro_` prefix is how the server files the answer here
+/// rather than in a round. That is what lets an iOS build that predates this
+/// table answer a professional's question with no app change.
+///
+/// `proIntent` is what the professional actually typed and is kept verbatim;
+/// `clientText` is what the client reads. In this slice they are identical —
+/// the supportive-voice translation the product decision allows is a later
+/// slice, and when it lands the original intent must still be here.
+///
+/// Write-once: the question's fields are immutable after insert, and the
+/// answer may be set exactly once (`consult_pro_follow_up_question_guard`).
+/// Every insert needs its PRO_FOLLOW_UP_ASKED audit row and every answer its
+/// PRO_FOLLOW_UP_ANSWERED row in the same transaction.
+model ConsultProFollowUpQuestion {
+  id String @id @default(cuid())
+
+  consultSessionId String
+  consultSession   ConsultSession @relation(fields: [consultSessionId], references: [id], onDelete: Cascade)
+
+  professionalId String
+  professional   ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Restrict)
+
+  /// Server-minted, `pro_<n>`, unique per session; the key the client's answer
+  /// echoes back. The prefix is the routing signal — see the model comment.
+  questionKey String
+
+  priority ConsultProFollowUpPriority
+
+  /// The professional's own words, verbatim. Never shown to the client as-is
+  /// once translation exists; always kept for audit and professional context.
+  proIntent  String
+  /// What the client reads. Identical to `proIntent` in this slice.
+  clientText String
+
+  /// `[{value, label}]`, 2–6 one-tap options. Values are server-minted
+  /// (`option-1`…), labels are the professional's.
+  options Json
+
+  /// The plan version current when the question was asked (0 when none) —
+  /// provenance for the Brief, not a cap.
+  planVersion Int
+
+  selectedValue String?
+  answeredAt    DateTime?
+
+  auditEvents ConsultAuditEvent[]
+
+  createdAt DateTime @default(now())
+
+  @@unique([consultSessionId, questionKey])
+  @@index([consultSessionId, createdAt])
+  @@index([professionalId, createdAt])
+}
+
 /// Immutable, published wording for one prerequisite. Consent and the 18+
 /// statement are independently versioned; an acceptance always points to the
 /// exact words shown. Publishing changed words means inserting version n+1.
@@ -8159,10 +8249,14 @@ model ConsultAuditEvent {
   briefFeedbackId String?               @unique
   briefFeedback   ConsultBriefFeedback? @relation(fields: [briefFeedbackId], references: [id], onDelete: Cascade)
 
+  proFollowUpQuestionId String?
+  proFollowUpQuestion   ConsultProFollowUpQuestion? @relation(fields: [proFollowUpQuestionId], references: [id], onDelete: Cascade)
+
   createdAt DateTime @default(now())
 
   @@unique([captureId, action])
   @@unique([inspirationId, action])
+  @@unique([proFollowUpQuestionId, action])
   // CLIENT_RESULTS_SERVED and ME_CARD_TEASER_TAPPED additionally have a
   // partial unique (consultSessionId, action) index in the C7 migration.
   @@index([consultSessionId, createdAt])
@@ -8170,6 +8264,7 @@ model ConsultAuditEvent {
   @@index([revisionId])
   @@index([captureId])
   @@index([inspirationId])
+  @@index([proFollowUpQuestionId])
 }
 
 /// P4b: one background execution of the analysis pipeline.

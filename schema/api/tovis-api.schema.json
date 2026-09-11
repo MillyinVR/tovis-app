@@ -411,6 +411,7 @@
         "AI_CONSULT_ANALYSIS_READY",
         "AI_CONSULT_ANALYSIS_FAILED",
         "CONSULT_PREP_REMINDER",
+        "CONSULT_PRO_FOLLOW_UP",
         "BOOKING_STARTED",
         "BOOKING_RESCHEDULED",
         "BOOKING_CANCELLED_BY_CLIENT",
@@ -12358,6 +12359,13 @@
           "description": "P7a-3 — which plan version this brief is, and what changed to get here.\n\nOPTIONAL on the wire for the same reason `serviceEstimate` is: the published schema grows by addition only and shipped iOS fixtures stay valid. `planVersion` is 1 for a consult that has never been reworked, and `planChanges` is then empty — there is nothing before it to differ from.\n\n🔴 The diff is against the PREVIOUS version, not against the pro's own adjustments. Carrying those forward is P10's job and is a different question; this one answers \"what did your client change since you last looked?\".",
           "type": "number"
         },
+        "proFollowUps": {
+          "description": "C2-4 — the questions this professional asked the client from this Brief, oldest first, with answers where they exist. OPTIONAL on the wire for the same reason every field added since P5a is: the schema grows by addition only and shipped iOS fixtures stay valid.",
+          "items": {
+            "$ref": "#/definitions/ConsultProFollowUpDTO"
+          },
+          "type": "array"
+        },
         "professionalId": {
           "type": "string"
         },
@@ -12548,6 +12556,116 @@
         "brief"
       ],
       "type": "object"
+    },
+    "ConsultProFollowUpAskRequestDTO": {
+      "properties": {
+        "options": {
+          "description": "2–6 one-tap option labels, 1–120 characters each; the server mints the values.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "priority": {
+          "$ref": "#/definitions/ConsultProFollowUpPriorityDTO"
+        },
+        "text": {
+          "description": "1–300 characters, the professional's own words.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "priority",
+        "text",
+        "options"
+      ],
+      "type": "object"
+    },
+    "ConsultProFollowUpDTO": {
+      "description": "C2-4 — one follow-up question a PROFESSIONAL asked the client from the Brief, as the pro reads it back: the text the client sees, the priority the pro chose, and the client's one-tap answer once it exists.\n\nThe client never receives this shape. Her side is the ordinary `ConsultThreadFollowUpMessageDTO` card (with `attribution` set), answered through the ordinary follow-up route — which is what lets an iOS build that predates this feature answer a professional's question with no app change.",
+      "properties": {
+        "answeredAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "askedAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "options": {
+          "items": {
+            "$ref": "#/definitions/ConsultInspirationQuestionOptionDTO"
+          },
+          "type": "array"
+        },
+        "planVersion": {
+          "description": "The plan version current when it was asked; 0 when none existed.",
+          "type": "number"
+        },
+        "priority": {
+          "$ref": "#/definitions/ConsultProFollowUpPriorityDTO"
+        },
+        "questionKey": {
+          "description": "Server-minted, `pro_<n>`; the key the client's answer echoes back.",
+          "type": "string"
+        },
+        "selectedLabel": {
+          "description": "The chosen option's label, for display; null while open.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "selectedValue": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "text": {
+          "description": "What the client reads.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "questionKey",
+        "priority",
+        "text",
+        "options",
+        "selectedValue",
+        "selectedLabel",
+        "planVersion",
+        "askedAt",
+        "answeredAt"
+      ],
+      "type": "object"
+    },
+    "ConsultProFollowUpListResponseDTO": {
+      "properties": {
+        "questions": {
+          "items": {
+            "$ref": "#/definitions/ConsultProFollowUpDTO"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "questions"
+      ],
+      "type": "object"
+    },
+    "ConsultProFollowUpPriorityDTO": {
+      "description": "C2-4 — how urgent a professional's own follow-up question is. The two priorities the September 9 product decision names, and nothing between.",
+      "enum": [
+        "NEED_BEFORE_APPOINTMENT",
+        "HELPFUL_FOR_PREP"
+      ],
+      "type": "string"
     },
     "ConsultProSuitabilityDTO": {
       "properties": {
@@ -13626,6 +13744,10 @@
     "ConsultThreadFollowUpMessageDTO": {
       "description": "P5g — one adaptive follow-up question, as a card in the thread.\n\n🔴 `text` on this message is the only prose in the consult a MODEL wrote and a client reads. It is generated per client from the reference reading, her own photo reading, the regions she tapped and every answer so far, and it must name something specific it saw — a question that would be the same for everybody is the question P5g exists to delete.\n\n🔴 `options` are enums from a vocabulary that already exists (lib/consult/followUpVocabulary.ts), re-worded by the model but never invented: a value outside the key's real options throws the whole round away on the server, so a client can echo any of these back and know it will file.\n\n`fallback` is true when the model call failed and these are the intake pack's OWN remaining safety questions instead. It is on the wire because the client says so out loud (\"couldn't think of the next question — here are the essentials\"): Part 0 rule 4 forbids a silent fallback, and a fallback the client cannot see is a silent one.",
       "properties": {
+        "attribution": {
+          "description": "C2-4 — set when the PROFESSIONAL wrote this question herself, so the card never reads as the app's voice (\"From Susie\"). OPTIONAL on the wire: a build that predates it renders the same card with no eyebrow and answers it through the same route. `round` is 0 on such a card and `fallback` is false; the `questionKey` carries the `pro_` prefix the server files by.",
+          "type": "string"
+        },
         "author": {
           "const": "APP",
           "type": "string"

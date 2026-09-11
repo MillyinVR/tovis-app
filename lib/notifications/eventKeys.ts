@@ -33,6 +33,7 @@ export type NotificationTemplateKey =
   | 'ai_consult_analysis_ready'
   | 'ai_consult_analysis_failed'
   | 'consult_prep_reminder'
+  | 'consult_pro_follow_up'
   | 'saved_look_price_alternative'
   | 'viral_request_approved'
   | 'payment_collected'
@@ -219,6 +220,7 @@ export const NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.AI_CONSULT_ANALYSIS_READY,
   NotificationEventKey.AI_CONSULT_ANALYSIS_FAILED,
   NotificationEventKey.CONSULT_PREP_REMINDER,
+  NotificationEventKey.CONSULT_PRO_FOLLOW_UP,
   NotificationEventKey.SAVED_LOOK_PRICE_ALTERNATIVE,
   NotificationEventKey.VIRAL_REQUEST_APPROVED,
   NotificationEventKey.PAYMENT_COLLECTED,
@@ -726,6 +728,28 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       // the notification is a doorbell, not the ask itself — the same rule the
       // consult's other client-facing events keep.
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
+    },
+  },
+
+  [NotificationEventKey.CONSULT_PRO_FOLLOW_UP]: {
+    // C2-4. ONE key, both directions, like LOOK_BRIEF_REVIEW: to the client
+    // "your pro has a quick question", to the pro "she answered". TRANSACTIONAL
+    // on CONSULT_PREP_REMINDER's reasoning — her own appointment, a person she
+    // chose, a question about her own service — and, like it, it does NOT
+    // bypass quiet hours: a professional's question can wait until morning,
+    // and the pro's copy already says she is "getting ready", not waiting.
+    key: NotificationEventKey.CONSULT_PRO_FOLLOW_UP,
+    defaultPriority: NotificationPriority.NORMAL,
+    transactional: true,
+    allowQuietHoursBypass: false,
+    templateKey: 'consult_pro_follow_up',
+    supportedRecipients: [NotificationRecipientKind.CLIENT, NotificationRecipientKind.PRO],
+    defaultChannelsByRecipient: {
+      // No SMS, for the reason every consult client event gives: the question
+      // lives behind a login and may be health-adjacent. The notification is
+      // the doorbell, not the ask.
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
+      [NotificationRecipientKind.PRO]: PRO_IN_APP_PUSH_CHANNELS,
     },
   },
 
@@ -1324,6 +1348,7 @@ export const PRO_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.BOOKING_CANCELLED_BY_CLIENT,
   NotificationEventKey.BOOKING_CANCELLED_BY_PRO,
   NotificationEventKey.BOOKING_CANCELLED_BY_ADMIN,
+  NotificationEventKey.CONSULT_PRO_FOLLOW_UP,
   NotificationEventKey.CONSULTATION_APPROVED,
   NotificationEventKey.CONSULTATION_REJECTED,
   NotificationEventKey.REVIEW_RECEIVED,
@@ -1371,6 +1396,7 @@ export const CLIENT_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.AI_CONSULT_ANALYSIS_READY,
   NotificationEventKey.AI_CONSULT_ANALYSIS_FAILED,
   NotificationEventKey.CONSULT_PREP_REMINDER,
+  NotificationEventKey.CONSULT_PRO_FOLLOW_UP,
   NotificationEventKey.SAVED_LOOK_PRICE_ALTERNATIVE,
   NotificationEventKey.PAYMENT_COLLECTED,
   NotificationEventKey.PAYMENT_ACTION_REQUIRED,

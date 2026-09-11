@@ -1394,6 +1394,53 @@ export type ConsultBriefFeedbackDTO = {
   createdAt: string
 }
 
+/**
+ * C2-4 — how urgent a professional's own follow-up question is. The two
+ * priorities the September 9 product decision names, and nothing between.
+ */
+export type ConsultProFollowUpPriorityDTO =
+  | 'NEED_BEFORE_APPOINTMENT'
+  | 'HELPFUL_FOR_PREP'
+
+/**
+ * C2-4 — one follow-up question a PROFESSIONAL asked the client from the
+ * Brief, as the pro reads it back: the text the client sees, the priority the
+ * pro chose, and the client's one-tap answer once it exists.
+ *
+ * The client never receives this shape. Her side is the ordinary
+ * `ConsultThreadFollowUpMessageDTO` card (with `attribution` set), answered
+ * through the ordinary follow-up route — which is what lets an iOS build that
+ * predates this feature answer a professional's question with no app change.
+ */
+export type ConsultProFollowUpDTO = {
+  id: string
+  /** Server-minted, `pro_<n>`; the key the client's answer echoes back. */
+  questionKey: string
+  priority: ConsultProFollowUpPriorityDTO
+  /** What the client reads. */
+  text: string
+  options: ConsultInspirationQuestionOptionDTO[]
+  selectedValue: string | null
+  /** The chosen option's label, for display; null while open. */
+  selectedLabel: string | null
+  /** The plan version current when it was asked; 0 when none existed. */
+  planVersion: number
+  askedAt: string
+  answeredAt: string | null
+}
+
+export type ConsultProFollowUpAskRequestDTO = {
+  priority: ConsultProFollowUpPriorityDTO
+  /** 1–300 characters, the professional's own words. */
+  text: string
+  /** 2–6 one-tap option labels, 1–120 characters each; the server mints the values. */
+  options: string[]
+}
+
+export type ConsultProFollowUpListResponseDTO = {
+  questions: ConsultProFollowUpDTO[]
+}
+
 // Book the Look, B3 — the pro-facing line-item service estimate for a
 // look-anchored consult (docs/product/BOOK-THE-LOOK-DIRECTION.md, decision 6).
 //
@@ -1849,6 +1896,13 @@ export type ConsultProBriefDTO = {
   planVersion?: number
   planChanges?: ConsultPlanDiffEntryDTO[]
   feedback: ConsultBriefFeedbackDTO | null
+  /**
+   * C2-4 — the questions this professional asked the client from this Brief,
+   * oldest first, with answers where they exist. OPTIONAL on the wire for the
+   * same reason every field added since P5a is: the schema grows by addition
+   * only and shipped iOS fixtures stay valid.
+   */
+  proFollowUps?: ConsultProFollowUpDTO[]
   createdAt: string
 }
 
@@ -2367,6 +2421,14 @@ export type ConsultThreadFollowUpMessageDTO = {
   fallback: boolean
   /** Which round of at most three this is, for the client's own ordering. */
   round: number
+  /**
+   * C2-4 — set when the PROFESSIONAL wrote this question herself, so the card
+   * never reads as the app's voice ("From Susie"). OPTIONAL on the wire: a
+   * build that predates it renders the same card with no eyebrow and answers
+   * it through the same route. `round` is 0 on such a card and `fallback` is
+   * false; the `questionKey` carries the `pro_` prefix the server files by.
+   */
+  attribution?: string
 }
 
 export type ConsultThreadMessageDTO =
