@@ -153,8 +153,19 @@ function prepReminderDedupeKey(
   return `consult-prep:${consultSessionId}:${stage}`
 }
 
-function prepReminderHref(consultSessionId: string): string {
-  return `/client/consults/${consultSessionId}`
+/**
+ * Where a tap lands: the client's consult thread. The route is SINGULAR
+ * (`app/client/(gated)/consult/[id]`) and the iOS push deep-link mapper accepts
+ * exactly `/client/consult/<id>` — three path parts, nothing after the id
+ * (`tovis-ios` `ContentView.swift`, `case "consult" where parts.count == 3`).
+ * An earlier version of this helper wrote `/client/consults/…`, which is a
+ * route that does not exist: every prep reminder 404'd on the web and fell
+ * through to Home on the phone. The sibling consult notifications
+ * (`analysisNotifications.ts`, `consultLookBrief.ts`, `lookBriefReminders.ts`)
+ * all build this exact shape; keep them in step.
+ */
+export function consultPrepReminderHref(consultSessionId: string): string {
+  return `/client/consult/${encodeURIComponent(consultSessionId)}`
 }
 
 /**
@@ -330,7 +341,7 @@ export async function syncConsultPrepReminders(args: {
       clientId: session.clientId,
       eventKey: NotificationEventKey.CONSULT_PREP_REMINDER,
       runAt: item.runAt,
-      href: prepReminderHref(session.id),
+      href: consultPrepReminderHref(session.id),
       data: item.payload,
       dedupeKey: item.dedupeKey,
       bookingId: item.payload.bookingId,
@@ -444,7 +455,7 @@ export async function notifyConsultPrepStarted(args: {
       eventKey: NotificationEventKey.CONSULT_PREP_REMINDER,
       title: content.title,
       body: content.body,
-      href: prepReminderHref(session.id),
+      href: consultPrepReminderHref(session.id),
       data: content.data,
       dedupeKey: prepReminderDedupeKey(session.id, 'BOOKED'),
       bookingId: booking.id,
@@ -614,7 +625,7 @@ export async function validateDueConsultPrepReminder(args: {
     clientId: row.clientId,
     bookingId: booking.id,
     dedupeKey: row.dedupeKey ?? prepReminderDedupeKey(session.id, payload.stage),
-    href: prepReminderHref(session.id),
+    href: consultPrepReminderHref(session.id),
     notification: buildConsultPrepReminderContent({
       payload: currentPayload,
       professionalName: formatProfessionalPublicDisplayName(
