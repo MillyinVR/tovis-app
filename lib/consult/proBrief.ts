@@ -1,6 +1,8 @@
 import { loadConsultSuitability, proSuitability } from './suitabilityRead'
 import { normalizeStoredInspirationPayload } from './inspirationPack'
 import { consultIntakeItems, findConsultIntakePack, normalizeConsultIntakePayload } from './intake/registry'
+import { composeConsultBriefTopLine } from './briefTopLine'
+import { consultInspirationAnswerMap, findConsultInspirationPack } from './inspiration/registry'
 import { requireAuthorizedProLookScope } from './lookBrief'
 import { loadConsultProFollowUps } from './proFollowUp'
 import 'server-only'
@@ -22,7 +24,9 @@ import { defaultClientConsultPlanDiffCopy } from '@/lib/brand/defaultClientConsu
 import type { BrandClientConsultPlanDiffCopy } from '@/lib/brand/types'
 import { assertProCanViewClient } from '@/lib/clientVisibility'
 import type {
+  ConsultBriefClientIntakeItemDTO,
   ConsultBriefFeedbackRatingDTO,
+  ConsultBriefInspirationDTO,
   ConsultFaceColorProfileDTO,
   ConsultInspirationAnalysisDTO,
   ConsultPlanDiffEntryDTO,
@@ -127,6 +131,51 @@ async function loadBriefInspirationAnalysis(
   return analysis?.inspirationId === inspirationId ? analysis : null
 }
 
+/**
+ * C2-6a — the top-line sentence for this Brief.
+ *
+ * A read-time SIBLING like the inspiration analysis above, for the same
+ * reason: the Brief payload is byte-compared on every read, so the sentence
+ * cannot live in it. Composed from the inspiration REVISION this Brief names
+ * (its taps), the reading already loaded and pinned to this Brief's picture,
+ * and the intake answers the Brief shows — nothing that is not already on
+ * this screen in longer form.
+ */
+async function loadBriefTopLine(
+  tx: Prisma.TransactionClient,
+  consultSessionId: string,
+  inspiration: ConsultBriefInspirationDTO,
+  analysis: ConsultInspirationAnalysisDTO | null,
+  clientIntake: readonly ConsultBriefClientIntakeItemDTO[],
+): Promise<string | null> {
+  const revision = inspiration.revisionId
+    ? await tx.consultRevision.findFirst({
+        where: {
+          id: inspiration.revisionId,
+          consultSessionId,
+          kind: ConsultRevisionKind.INSPIRATION,
+        },
+        select: { payload: true },
+      })
+    : null
+  const review = revision ? normalizeStoredInspirationPayload(revision.payload) : null
+  return composeConsultBriefTopLine({
+    inspiration: review
+      ? {
+          source: review.source,
+          pack:
+            review.packId !== null && review.packVersion !== null
+              ? findConsultInspirationPack(review.packId, review.packVersion)
+              : null,
+          reading: analysis?.attributes ?? null,
+          answers: consultInspirationAnswerMap(review.answers),
+          exactClientDetails: review.exactClientDetails,
+        }
+      : null,
+    clientIntake,
+  })
+}
+
 async function loadBriefFaceColorProfile(
   tx: Prisma.TransactionClient,
   consultSessionId: string,
@@ -229,6 +278,11 @@ async function loadSessionBrief(
   })
 
   const suitability = await loadConsultSuitability(tx, session.id, payload.sourceAnalysisRevisionId)
+  const inspirationAnalysis = await loadBriefInspirationAnalysis(
+    tx,
+    session.id,
+    inspiration.inspirationId,
+  )
   const brief: ConsultProBriefDTO = {
     ...(suitability ? { suitability: proSuitability(suitability) } : {}),
     consultId: session.id,
@@ -255,11 +309,9 @@ async function loadSessionBrief(
     // Book the Look, B3. Omitted rather than nulled for a booking-anchored
     // consult, which has no estimate to carry.
     ...(session.anchorLookPostId ? { serviceEstimate } : {}),
-    inspirationAnalysis: await loadBriefInspirationAnalysis(
-      tx,
-      session.id,
-      inspiration.inspirationId,
-    ),
+    inspirationAnalysis,
+    // C2-6a — always present on the server's own Brief; optional on the wire.
+    topLine: await loadBriefTopLine(tx, session.id, inspiration, inspirationAnalysis, clientIntake),
     ...(await loadBriefPlanDiff(session.id, planDiffCopy)),
     feedback: feedback
       ? { rating: feedback.rating, createdAt: feedback.createdAt.toISOString() }

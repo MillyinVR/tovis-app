@@ -340,6 +340,19 @@ export function applyConsultInspirationReopen(
   return next
 }
 
+/**
+ * Her stored answers as the v2 engine reads them: question key -> values.
+ * The one mapper from the v1-shaped `answers` list every reader gets
+ * (`ConsultInspirationReview.answers`) to the map the card engine takes.
+ */
+export function consultInspirationAnswerMap(
+  answers: readonly ConsultInspirationAnswerDTO[],
+): Record<string, readonly string[]> {
+  const map: Record<string, readonly string[]> = {}
+  for (const answer of answers) map[answer.questionKey] = answer.selectedValues
+  return map
+}
+
 /** Her selections as the professional reads them, in pack order. */
 export function buildConsultInspirationExactDetails(
   pack: ConsultInspirationPackDefinition,

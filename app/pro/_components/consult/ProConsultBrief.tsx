@@ -253,6 +253,18 @@ export default function ProConsultBrief({
 
   return (
     <article className="grid gap-5" data-consult-brief-id={brief.briefRevisionId}>
+      {/* C2-6a — the first line of the Brief: what she wants, why, and what
+          must not change, in one sentence pair composed from her own taps and
+          answers (lib/consult/briefTopLine.ts). Nothing when the server has
+          nothing to say — never a placeholder. */}
+      {brief.topLine ? (
+        <p
+          data-testid="consult-brief-top-line"
+          className="rounded-2xl border border-surfaceGlass/20 bg-bgPrimary px-4 py-3 text-[15px] font-bold leading-snug text-textPrimary"
+        >
+          {brief.topLine}
+        </p>
+      ) : null}
       <ProConsultSuitability suitability={brief.suitability} analysisRevisionId={brief.sourceAnalysisRevisionId} />
       {brief.mentor ? <section className="rounded-2xl border border-surfaceGlass/20 bg-bgPrimary p-4" data-testid="consult-mentor">
         <h2 className="text-lg font-bold text-textPrimary">{brief.mentor.title}</h2>

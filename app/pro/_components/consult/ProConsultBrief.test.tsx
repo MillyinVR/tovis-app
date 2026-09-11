@@ -225,6 +225,38 @@ describe('ProConsultBrief', () => {
     expect(html).not.toContain('undefined')
   })
 
+  // C2-6a — the top line is the FIRST thing on the Brief, and only when the
+  // server composed one: a Brief with nothing to say shows no placeholder.
+  it('renders the top line first, above the version banner and the client\u2019s words', () => {
+    const html = renderToStaticMarkup(
+      <ProConsultBrief
+        brief={{
+          ...brief,
+          planVersion: 2,
+          planChanges: [],
+          topLine:
+            'Client wants the color because the goal is a change people will notice, mainly going lighter. Must preserve the length.',
+        }}
+        timeZone="UTC"
+      />,
+    )
+    const topLineIndex = html.indexOf('data-testid="consult-brief-top-line"')
+    expect(topLineIndex).toBeGreaterThanOrEqual(0)
+    expect(html).toContain('Client wants the color because the goal is a change people will notice, mainly going lighter. Must preserve the length.')
+    expect(topLineIndex).toBeLessThan(html.indexOf('Updated plan'))
+    expect(topLineIndex).toBeLessThan(html.indexOf('Client&#x27;s words'))
+  })
+
+  it('renders no top line when the server composed none', () => {
+    for (const topLine of [null, undefined]) {
+      const html = renderToStaticMarkup(
+        <ProConsultBrief brief={{ ...brief, topLine }} timeZone="UTC" />,
+      )
+      expect(html).not.toContain('consult-brief-top-line')
+      expect(html).not.toContain('Client wants')
+    }
+  })
+
   it('renders no service-estimate section for a booking-anchored brief', () => {
     const html = renderToStaticMarkup(
       <ProConsultBrief brief={brief} timeZone="UTC" />,
