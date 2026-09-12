@@ -37,6 +37,7 @@ import {
   buildConsultDirectionOutputSchema,
   buildConsultFaceColorOutputSchema,
   buildConsultProfileOutputSchema,
+  CONSULT_STYLE_GUIDANCE,
   consultAnalysisSafetyCodeOptions,
   consultAnalysisContextBlocks,
   consultInspirationBlock,
@@ -404,11 +405,14 @@ describe('hair-color consult analysis provider', () => {
     expect(lookPlanRecommendations({ ...plan, paths: [] })[0]?.serviceIntent).toBe('CONSULTATION')
   })
 
-  it('style-direction texts demand one non-whitespace character, at the boundary', () => {
+  it('style-direction texts carry minLength but NEVER a pattern (a pattern hangs the grammar compiler)', () => {
+    // 2026-09-12: `pattern: '\\S'` on these fields made the API time out
+    // compiling the profile+styles grammar (2.1s → 40s+ on a 5-token probe).
     const schema = toProviderOutputSchema(buildConsultProfileOutputSchema({ suppliedShotKeys: ['early_photo'], includeStyleDirections: true }))
     const text = JSON.stringify(schema)
-    expect(text).toContain('"pattern":"\\\\S"')
+    expect(text).not.toContain('"pattern"')
     expect(text).toContain('"minLength":1')
+    expect(CONSULT_STYLE_GUIDANCE.join(' ')).toContain('Never a blank')
   })
 
   it('a refusal names the check that made it', () => {

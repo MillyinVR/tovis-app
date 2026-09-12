@@ -111,11 +111,22 @@ export const CONSULT_ANALYSIS_DEFAULT_MODEL = 'claude-sonnet-5'
  * = 280s, inside `maxDuration = 300` with 20s for database/finalize work.
  * Raising any ceiling means re-checking that arithmetic; the engine test pins it.
  */
-export const CONSULT_ANALYSIS_PROFILE_TIMEOUT_MS = 90_000
+/**
+ * 🔴 Re-measured 2026-09-12 on a REAL selfie-only consult in prod and in local
+ * replays of the same request (profile + seven style directions, 1,200–2,800
+ * output tokens, no thinking): 42, 44, 45, 50, 53, 54, 55, 56, 62 and 85s —
+ * and twice OVER 90s, which was the ceiling, so one real run in five timed
+ * out with nothing to show and the run loop retried it at full price. 140s
+ * is ~1.6x the slowest completed call. The budget is rebalanced, not
+ * enlarged: inspiration 50 + profile 140 + face/colour 20 (measured 5–6s)
+ * + direction 90 (measured 33–35s) = 300 = the worker's maxDuration; the
+ * pinned test below the direction constant holds the arithmetic.
+ */
+export const CONSULT_ANALYSIS_PROFILE_TIMEOUT_MS = 140_000
 // C2-1 companion measured ~11.5s live. Keep its ceiling separate from the
 // larger profile call so the optional fourth provider call still leaves worker
 // headroom under Vercel Pro's 300s function ceiling.
-export const CONSULT_FACE_COLOR_TIMEOUT_MS = 30_000
+export const CONSULT_FACE_COLOR_TIMEOUT_MS = 20_000
 // 2026-09-11: profile 45 → 90 and direction 150 → 110. Measured live that day,
 // same request, same schema, nine runs: the profile+styles call answered in
 // 21s, in under 35s, and on five runs did not answer within 45s or 70s at all —
@@ -124,7 +135,7 @@ export const CONSULT_FACE_COLOR_TIMEOUT_MS = 30_000
 // measured above ~65s. Sum stays 50 + 90 + 30 + 110 = 280 ≤ 300. The slow-call
 // warning in `requestConsultAnalysisJson` and the metered `latencyMs` in prod
 // are how the next number gets chosen from data rather than from here.
-export const CONSULT_ANALYSIS_DIRECTION_TIMEOUT_MS = 110_000
+export const CONSULT_ANALYSIS_DIRECTION_TIMEOUT_MS = 90_000
 
 /**
  * `max_tokens` per call, and both are load-bearing: a structured-output answer
@@ -882,11 +893,15 @@ function boundedText(maxLength: number, what: string) {
     // presence does not force substance. `cleanText` refuses an empty string,
     // correctly: an empty direction is not a direction.
     minLength: 1,
-    // …and 2026-09-12: given the early selfie alone it satisfied `minLength: 1`
-    // with a single SPACE, which `cleanText` trims to nothing — `text_empty`
-    // took the whole profile+styles answer down in prod. `pattern` survives
-    // the boundary; one non-whitespace character is the honest minimum.
-    pattern: '\\S',
+    // 🔴 NO `pattern` here. 2026-09-12: a `pattern: '\\S'` (one non-whitespace
+    // character, added because the live model once met `minLength: 1` with a
+    // single space) made the API's grammar compiler HANG on this schema —
+    // proven by probe: the same schema answered a 5-token request in 2.1s
+    // without it and timed out at 40s with it, and the deployed profile call
+    // hit its 90s ceiling on the first real run. `pattern` is "accepted" by
+    // the validator, but on 21 free-text fields it is not affordable. The
+    // blank-text case is handled by the prompt (CONSULT_STYLE_GUIDANCE) and
+    // remains `text_empty` at the sanitizer, retried by the run loop.
     maxLength,
     description: `${what} HARD LIMIT: at most ${maxLength} characters, counted as characters and not words. Going over is not truncated, it is rejected — say less rather than more. NEVER return an empty string: if you have nothing to say here, say THAT, in a sentence.`,
   }
@@ -1279,6 +1294,7 @@ export const CONSULT_STYLE_GUIDANCE = [
   'Hair texture, density, and the two levels bound which cuts and colors will actually behave well; honor them in CUT_AND_SHAPE and HAIR_COLOR_HARMONY.',
   'Every style direction’s whyItFlatters must name the specific observed feature or features it builds on. Style directions are directions to discuss with the professional, never promises and never treatment prescriptions.',
   'You owe a direction for all seven domains, including the ones this pack cannot show you. When the supplied views do not support a domain — brows, lashes and makeup are the usual ones when only hair was sent — the honest direction is to SAY SO: name what could not be assessed, say it is one to look at together in person, cite "intake", and use a low confidence range. That is a real, useful answer. What is never acceptable is an empty string, a placeholder, or a direction invented from views you were not given: an empty field discards the entire analysis.',
+  'Every styleDirections text field — title, direction and whyItFlatters — must be a real sentence about this client. Never a blank, a single space, a dash or a placeholder: with little to see, write the provisional direction the observed features and the intake do support, and let the confidence range say how little that is.',
 ] as const
 
 export const CONSULT_ANALYSIS_DIRECTION_SYSTEM_PROMPT = [
