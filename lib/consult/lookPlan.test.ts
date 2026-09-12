@@ -250,6 +250,23 @@ describe('look-plan boundaries', () => {
     }
   })
 
+  it('resolves a menu name that differs only in case or whitespace to the menu row, and names a real miss', () => {
+    const raw = plan()
+    const path = raw.paths[0]!
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const result = sanitizeConsultLookPlan({ ...raw, paths: [{ ...path, visits: [{ services: ['dimensional COLOR ', 'Layered cut'] }] }] }, context())
+      expect(result.paths[0]?.visits[0]?.services).toEqual(['Dimensional color', 'Layered cut'])
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(() => sanitizeConsultLookPlan({ ...raw, paths: [{ ...path, visits: [{ services: ['Balayage'] }] }] }, context()))
+        .toThrowError(expect.objectContaining({ check: 'visit_services_enum' }))
+      expect(JSON.stringify(error.mock.calls[0])).toContain('Balayage')
+    } finally {
+      warn.mockRestore(); error.mockRestore()
+    }
+  })
+
   it('names the check that refused', () => {
     const raw = plan()
     const path = raw.paths[0]!

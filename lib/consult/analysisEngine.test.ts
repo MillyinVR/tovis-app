@@ -420,9 +420,21 @@ describe('hair-color consult analysis provider', () => {
     expect(() => sanitizeConsultProfileResponse({ profile: { ...profile, jawline: {
       ...profile.jawline, confidence: { min: 0.9, max: 0.4 },
     } } })).not.toThrow() // a swapped pair is repaired, not refused
-    expect(() => sanitizeConsultProfileResponse({ profile: { ...profile, jawline: {
-      value: 'UNKNOWN', confidence: { min: 0.1, max: 0.3 }, evidence: ['face_front'],
-    } } })).toThrowError(expect.objectContaining({ check: 'unknown_contradiction' }))
+    // 2026-09-12: an UNKNOWN that cites evidence is read as unobserved, not refused.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      expect(sanitizeConsultProfileResponse({ profile: { ...profile, jawline: {
+        value: 'UNKNOWN', confidence: { min: 0.2, max: 0.6 }, evidence: ['face_front'],
+      } } }).jawline).toEqual({ value: 'UNKNOWN', confidence: { min: 0.2, max: 0.35 }, evidence: [] })
+      // …and a value that cites nothing is an unsupported claim → UNKNOWN.
+      expect(sanitizeConsultProfileResponse({ profile: { ...profile, jawline: {
+        value: 'SOFTLY_ROUNDED', confidence: { min: 0.5, max: 0.8 }, evidence: [],
+      } } }).jawline).toEqual({ value: 'UNKNOWN', confidence: { min: 0, max: 0.3 }, evidence: [] })
+      expect(warn).toHaveBeenCalledTimes(2)
+      expect(JSON.stringify(warn.mock.calls)).not.toContain('SOFTLY_ROUNDED')
+    } finally {
+      warn.mockRestore()
+    }
     expect(() => sanitizeConsultProfileResponse({ profile: { ...profile, jawline: {
       ...profile.jawline, confidence: { min: 0.1, max: 1.4 },
     } } })).toThrowError(expect.objectContaining({ check: 'confidence_range' }))
@@ -978,15 +990,20 @@ describe('hair-color consult analysis provider', () => {
       validate(badRange),
     ).toThrowError(ConsultAnalysisProviderError)
 
+    // 2026-09-12: a value that cites nothing is an unsupported claim and is
+    // read as UNKNOWN (with a warning), no longer a refusal of the whole answer.
     const unsupported = validOutput()
     unsupported.core.density = {
       value: 'HIGH',
       confidence: { min: 0.3, max: 0.6 },
       evidence: [],
     }
-    expect(() =>
-      validate(unsupported),
-    ).toThrowError(ConsultAnalysisProviderError)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      expect(validate(unsupported).analysis.core.density).toEqual({ value: 'UNKNOWN', confidence: { min: 0, max: 0.3 }, evidence: [] })
+    } finally {
+      warn.mockRestore()
+    }
 
     const withExtra = { ...validOutput(), hiddenReasoning: 'secret' }
     expect(() =>

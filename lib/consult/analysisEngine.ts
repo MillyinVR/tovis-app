@@ -1406,13 +1406,33 @@ function observed<const T extends readonly string[]>(
     allowIntake: false,
     hairOnly: options.hairOnly,
   })
-  if (
-    (value === unknown && (cited.length > 0 || range.max > 0.35)) ||
-    (value !== unknown && cited.length === 0)
-  ) {
-    throw new ConsultAnalysisProviderError('bad_output', value === unknown ? 'unknown_contradiction' : 'unsupported_claim')
+  // Two contradictions the grammar cannot forbid, read as what they honestly
+  // mean instead of discarding the paid answer (prod, 2026-09-12: the first
+  // completed "Build my plan" lost attempt 1 of 3 to `unknown_contradiction`):
+  //   * UNKNOWN that still cites evidence or claims confidence — the model
+  //     did not observe it; the citation and the range are dropped.
+  //   * a value with NO evidence — an unsupported claim; it is UNKNOWN, the
+  //     same reading `repairUnsuppliedHairLevelEvidence` gives a fabricated
+  //     citation.
+  // Both are said out loud, geometry-free: field values never reach the log.
+  if (value === unknown && (cited.length > 0 || range.max > 0.35)) {
+    console.warn('consult analysis UNKNOWN cited evidence or claimed confidence; read as unobserved', {
+      evidenceCount: cited.length, confidence: range,
+    })
+    return { value, confidence: unobservedRange(range), evidence: [] }
+  }
+  if (value !== unknown && cited.length === 0) {
+    console.warn('consult analysis observation cited nothing; read as UNKNOWN')
+    return { value: unknown, confidence: { min: 0, max: 0.3 }, evidence: [] }
   }
   return { value, confidence: range, evidence: cited }
+}
+
+/** An UNKNOWN's range, capped at the ceiling the rule states (max ≤ 0.35). */
+function unobservedRange(range: ConfidenceRange): ConfidenceRange {
+  const max = Math.min(range.max, 0.35)
+  const min = Math.min(range.min, max - CONSULT_CONFIDENCE_POINT_WIDENING)
+  return { min: Math.max(0, Math.round(min * 100) / 100), max: Math.round(max * 100) / 100 }
 }
 
 function sanitizeProfile(raw: unknown): ConsultAnalysisFeatureProfile {
