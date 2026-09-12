@@ -882,11 +882,15 @@ function boundedText(maxLength: number, what: string) {
     // presence does not force substance. `cleanText` refuses an empty string,
     // correctly: an empty direction is not a direction.
     minLength: 1,
-    // …and 2026-09-12: given the early selfie alone it satisfied `minLength: 1`
-    // with a single SPACE, which `cleanText` trims to nothing — `text_empty`
-    // took the whole profile+styles answer down in prod. `pattern` survives
-    // the boundary; one non-whitespace character is the honest minimum.
-    pattern: '\\S',
+    // 🔴 NO `pattern` here. 2026-09-12: a `pattern: '\\S'` (one non-whitespace
+    // character, added because the live model once met `minLength: 1` with a
+    // single space) made the API's grammar compiler HANG on this schema —
+    // proven by probe: the same schema answered a 5-token request in 2.1s
+    // without it and timed out at 40s with it, and the deployed profile call
+    // hit its 90s ceiling on the first real run. `pattern` is "accepted" by
+    // the validator, but on 21 free-text fields it is not affordable. The
+    // blank-text case is handled by the prompt (CONSULT_STYLE_GUIDANCE) and
+    // remains `text_empty` at the sanitizer, retried by the run loop.
     maxLength,
     description: `${what} HARD LIMIT: at most ${maxLength} characters, counted as characters and not words. Going over is not truncated, it is rejected — say less rather than more. NEVER return an empty string: if you have nothing to say here, say THAT, in a sentence.`,
   }
@@ -1279,6 +1283,7 @@ export const CONSULT_STYLE_GUIDANCE = [
   'Hair texture, density, and the two levels bound which cuts and colors will actually behave well; honor them in CUT_AND_SHAPE and HAIR_COLOR_HARMONY.',
   'Every style direction’s whyItFlatters must name the specific observed feature or features it builds on. Style directions are directions to discuss with the professional, never promises and never treatment prescriptions.',
   'You owe a direction for all seven domains, including the ones this pack cannot show you. When the supplied views do not support a domain — brows, lashes and makeup are the usual ones when only hair was sent — the honest direction is to SAY SO: name what could not be assessed, say it is one to look at together in person, cite "intake", and use a low confidence range. That is a real, useful answer. What is never acceptable is an empty string, a placeholder, or a direction invented from views you were not given: an empty field discards the entire analysis.',
+  'Every styleDirections text field — title, direction and whyItFlatters — must be a real sentence about this client. Never a blank, a single space, a dash or a placeholder: with little to see, write the provisional direction the observed features and the intake do support, and let the confidence range say how little that is.',
 ] as const
 
 export const CONSULT_ANALYSIS_DIRECTION_SYSTEM_PROMPT = [
