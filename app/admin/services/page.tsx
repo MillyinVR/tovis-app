@@ -37,6 +37,8 @@ type ServiceDTO = {
   addOnGroup: string | null
   categoryId: string | null
   categoryName: string | null
+  /** Other categories the service is listed under (ServiceCategoryLink). */
+  additionalCategoryIds: string[]
 }
 
 function CardShell({
@@ -176,7 +178,14 @@ export default async function AdminServicesPage(props: { searchParams?: SearchPa
         }
       : {}),
     ...(activeOnly ? { isActive: true } : {}),
-    ...(categoryIdsToInclude ? { categoryId: { in: categoryIdsToInclude } } : {}),
+    ...(categoryIdsToInclude
+      ? {
+          OR: [
+            { categoryId: { in: categoryIdsToInclude } },
+            { additionalCategoryLinks: { some: { categoryId: { in: categoryIdsToInclude } } } },
+          ],
+        }
+      : {}),
   }
 
   // ✅ Correct pagination:
@@ -206,6 +215,7 @@ export default async function AdminServicesPage(props: { searchParams?: SearchPa
       isAddOnEligible: true,
       addOnGroup: true,
       category: { select: { id: true, name: true } },
+      additionalCategoryLinks: { select: { categoryId: true } },
     },
   })
 
@@ -228,6 +238,7 @@ export default async function AdminServicesPage(props: { searchParams?: SearchPa
     defaultImageUrl: s.defaultImageUrl ?? null,
     isAddOnEligible: Boolean(s.isAddOnEligible),
     addOnGroup: s.addOnGroup ?? null,
+    additionalCategoryIds: s.additionalCategoryLinks.map((link) => String(link.categoryId)),
   }))
 
   return (

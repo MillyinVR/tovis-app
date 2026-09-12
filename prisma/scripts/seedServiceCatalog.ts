@@ -94,7 +94,7 @@ function printPlan(plan: ServiceCatalogSeedPlan): void {
   console.log(
     `categories: +${s.categories.create} ~${s.categories.update} =${s.categories.skip} | ` +
       `services: +${s.services.create} ~${s.services.update} =${s.services.skip} | ` +
-      `permissions: +${s.permissions} | held back: ${s.heldBack} | refused: ${s.refusals}`,
+      `permissions: +${s.permissions} | also-in links: +${s.links} | held back: ${s.heldBack} | refused: ${s.refusals}`,
   )
 }
 
@@ -131,7 +131,7 @@ async function main(): Promise<number> {
           const result = await applyServiceCatalogSeed(tx, planned, { activate: options.activate })
           console.log(
             `[${SCRIPT_NAME}] wrote: categories +${result.categoriesCreated} ~${result.categoriesUpdated}, ` +
-              `services +${result.servicesCreated} ~${result.servicesUpdated}, permissions +${result.permissionsCreated}`,
+              `services +${result.servicesCreated} ~${result.servicesUpdated}, permissions +${result.permissionsCreated}, links +${result.linksCreated}`,
           )
         }
         return planned

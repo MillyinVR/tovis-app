@@ -5,8 +5,8 @@ import { HAIR_COLOR_INTAKE_PACK_ID } from './intake/packs/hairColor'
 import { HAIR_GENERAL_INTAKE_PACK_ID } from './intake/packs/hairGeneral'
 import {
   HAIR_CUTS_CATEGORY_SLUG,
+  HAIR_HAIRCUT_CATEGORY_SLUG,
   HAIR_TREATMENT_CATEGORY_SLUG,
-  LEGACY_DEV_HAIRCUT_CATEGORY_SLUG,
 } from '@/lib/services/catalog/slugs'
 
 export const CONSULT_SAFETY_ROUTING_POLICY_VERSION =
@@ -37,14 +37,14 @@ export const STRAND_TEST_ADD_ON_PROMPT =
  * A Strand Test can surface only the neutral, non-chemical choices Tori
  * approved. The offering still has to be explicitly configured by the pro.
  *
- * Slugs come from the catalog (lib/services/catalog/slugs.ts). Production's cut
- * category is `cuts`; until 2026-09-12 this rule only knew the dev seed's
- * `haircut`, so no prod haircut ever qualified — the legacy slug stays accepted
- * for local databases.
+ * Slugs come from the catalog (lib/services/catalog/slugs.ts): Barbering
+ * (`cuts`, production's original cut category) and Cuts (`haircut`). Until
+ * 2026-09-12 this rule only knew `haircut`, which production never had, so no
+ * prod haircut ever qualified.
  */
 const STRAND_TEST_ADD_ON_CUT_SLUGS: ReadonlySet<string> = new Set([
   HAIR_CUTS_CATEGORY_SLUG,
-  LEGACY_DEV_HAIRCUT_CATEGORY_SLUG,
+  HAIR_HAIRCUT_CATEGORY_SLUG,
 ])
 
 export function isStrandTestOptionalAddOn(args: {

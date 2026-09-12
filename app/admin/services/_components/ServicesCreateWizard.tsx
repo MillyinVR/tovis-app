@@ -125,6 +125,7 @@ export default function ServicesCreateWizard(props: { categories: CategoryDTO[] 
 
   const [catSearch, setCatSearch] = useState('')
   const [categoryId, setCategoryId] = useState('')
+  const [additionalCategoryIds, setAdditionalCategoryIds] = useState<string[]>([])
 
   const [name, setName] = useState('')
   const [minPrice, setMinPrice] = useState('')
@@ -175,6 +176,8 @@ export default function ServicesCreateWizard(props: { categories: CategoryDTO[] 
   async function createService(): Promise<{ id: string } | null> {
     const form = new FormData()
     form.set('categoryId', categoryId)
+    const alsoIn = additionalCategoryIds.filter((id) => id !== categoryId)
+    if (alsoIn.length) form.set('additionalCategoryIds', alsoIn.join(','))
     form.set('name', name.trim())
     if (minPrice.trim()) form.set('minPrice', minPrice.trim())
     if (defaultDurationMinutes.trim()) form.set('defaultDurationMinutes', defaultDurationMinutes.trim())
@@ -434,6 +437,35 @@ export default function ServicesCreateWizard(props: { categories: CategoryDTO[] 
               />
               Allow mobile by default
             </label>
+
+            <fieldset className="grid gap-1">
+              <FieldLabel>Also list under (optional)</FieldLabel>
+              <div className="text-[11px] text-textSecondary">
+                The same service shown in more categories of the library — one row, the Step 1 category stays its home.
+              </div>
+              <div className="grid gap-1 sm:grid-cols-2">
+                {orderedOptions
+                  .filter((c) => c.id !== categoryId)
+                  .map((c) => {
+                    const checked = additionalCategoryIds.includes(c.id)
+                    return (
+                      <label key={c.id} className="flex items-center gap-2 rounded-xl border border-surfaceGlass/10 bg-bgPrimary/20 px-3 py-2 text-xs text-textPrimary">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={busy}
+                          onChange={(e) =>
+                            setAdditionalCategoryIds((current) =>
+                              e.target.checked ? [...current, c.id] : current.filter((id) => id !== c.id),
+                            )
+                          }
+                        />
+                        <span>{fmtCatLabel(c, byId)}</span>
+                      </label>
+                    )
+                  })}
+              </div>
+            </fieldset>
 
             <div className="grid gap-2 rounded-2xl border border-surfaceGlass/10 bg-bgPrimary/20 p-3">
               <div className="flex items-center justify-between gap-3">

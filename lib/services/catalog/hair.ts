@@ -15,6 +15,11 @@
 //     priced exactly as they are there. Do not rename or re-price them here:
 //     the name is the unique key (a respelling creates a near-duplicate the
 //     seed refuses) and the floor is enforced against every live offering.
+//     The ONE deliberate move is "Cut" → Cuts (Tori, 2026-09-12; the seed
+//     applies a category move only with --force, so it is a visible step).
+//   * `categorySlug` is the PRIMARY category; `alsoIn` lists the other
+//     categories the row is shown under — a Cut is Cuts AND Barbering without
+//     being two rows. A link is browsing only; the consult reads the primary.
 //   * `floorUsd` is a platform MINIMUM (see types.ts). It is deliberately set
 //     at the low end of what a licensed professional charges, not at a typical
 //     price — a floor that is too high refuses a real pro's real price.
@@ -33,6 +38,7 @@ import {
   HAIR_COLOR_CATEGORY_SLUG,
   HAIR_CUTS_CATEGORY_SLUG,
   HAIR_EXTENSIONS_CATEGORY_SLUG,
+  HAIR_HAIRCUT_CATEGORY_SLUG,
   HAIR_STYLING_CATEGORY_SLUG,
   HAIR_TREATMENT_CATEGORY_SLUG,
 } from './slugs'
@@ -53,9 +59,16 @@ export const ADD_ON_GROUP_COLOR = 'Color'
 
 export const HAIR_CATALOG_CATEGORIES: readonly CatalogCategory[] = [
   {
-    slug: HAIR_CUTS_CATEGORY_SLUG, // prod (named "Barbering" there; this is the one deliberate rename)
-    name: 'Cuts & Barbering',
-    description: 'Haircuts, trims, fades, beard work and shaves.',
+    slug: HAIR_HAIRCUT_CATEGORY_SLUG,
+    name: 'Cuts',
+    description: 'Haircuts and trims for every length and texture.',
+    parentSlug: null,
+    consultFamily: ConsultServiceFamily.HAIR,
+  },
+  {
+    slug: HAIR_CUTS_CATEGORY_SLUG, // prod — keeps its name
+    name: 'Barbering',
+    description: 'Fades, tapers, razor work, beard care and shaves.',
     parentSlug: null,
     consultFamily: ConsultServiceFamily.HAIR,
   },
@@ -96,7 +109,11 @@ export const HAIR_CATALOG_CATEGORIES: readonly CatalogCategory[] = [
   },
 ]
 
-type RowInput = Omit<CatalogService, 'categorySlug' | 'professions' | 'isAddOnEligible' | 'addOnGroup' | 'description'> & {
+type RowInput = Omit<
+  CatalogService,
+  'categorySlug' | 'alsoInCategorySlugs' | 'professions' | 'isAddOnEligible' | 'addOnGroup' | 'description'
+> & {
+  alsoIn?: readonly string[]
   isAddOnEligible?: boolean
   addOnGroup?: string | null
   description?: string | null
@@ -110,6 +127,7 @@ function rows(
   return inputs.map((input) => ({
     name: input.name,
     categorySlug,
+    alsoInCategorySlugs: input.alsoIn ?? [],
     defaultDurationMinutes: input.defaultDurationMinutes,
     floorUsd: input.floorUsd,
     allowMobile: input.allowMobile,
@@ -153,21 +171,31 @@ export const HAIR_SAFETY_TEST_SERVICES: readonly CatalogService[] = rows(
 )
 
 export const HAIR_CATALOG_SERVICES: readonly CatalogService[] = [
-  // ── Cuts & Barbering ─────────────────────────────────────────────────────
-  ...rows(HAIR_CUTS_CATEGORY_SLUG, CUT_LICENCES, [
-    { name: 'Cut', defaultDurationMinutes: 40, floorUsd: '35.00', allowMobile: true }, // prod
-    { name: 'Mens Cut', defaultDurationMinutes: 30, floorUsd: '35.00', allowMobile: true, isAddOnEligible: true }, // prod
-    { name: 'Cut & Beard Trim', defaultDurationMinutes: 50, floorUsd: '45.00', allowMobile: false }, // prod
-    { name: 'Beard Trim', defaultDurationMinutes: 20, floorUsd: '20.00', allowMobile: true }, // prod
-    { name: 'Military Cut', defaultDurationMinutes: 30, floorUsd: '25.00', allowMobile: true }, // prod
-    { name: 'Student Cut', defaultDurationMinutes: 30, floorUsd: '25.00', allowMobile: true }, // prod
+  // ── Cuts (salon) ─────────────────────────────────────────────────────────
+  ...rows(HAIR_HAIRCUT_CATEGORY_SLUG, CUT_LICENCES, [
+    { name: 'Cut', defaultDurationMinutes: 40, floorUsd: '35.00', allowMobile: true, alsoIn: [HAIR_CUTS_CATEGORY_SLUG] }, // prod — moved here from Barbering (--force)
     { name: 'Womens Cut & Style', defaultDurationMinutes: 60, floorUsd: '45.00', allowMobile: true, description: 'A tailored haircut finished with a blow-dry and style.' },
     { name: 'Transformation Cut', defaultDurationMinutes: 75, floorUsd: '55.00', allowMobile: true, description: 'A big change in length or shape — long to short, a new silhouette — with extra time to get it right.' },
     { name: 'Curly Cut', defaultDurationMinutes: 75, floorUsd: '55.00', allowMobile: true, description: 'Cut dry, curl by curl, to shape your natural texture.' },
-    { name: 'Kids Cut', defaultDurationMinutes: 30, floorUsd: '20.00', allowMobile: true, description: 'A haircut for children 12 and under.' },
-    { name: 'Buzz Cut', defaultDurationMinutes: 15, floorUsd: '15.00', allowMobile: true, description: 'One clipper length all over.' },
-    { name: 'Line Up', defaultDurationMinutes: 15, floorUsd: '10.00', allowMobile: true, isAddOnEligible: true, addOnGroup: ADD_ON_GROUP_FINISH, description: 'A clean edge-up of the hairline and neckline.' },
+    { name: 'Dry Cut', defaultDurationMinutes: 30, floorUsd: '30.00', allowMobile: true, description: 'A cut on dry hair, no wash or blow-dry, to see exactly how it falls.' },
+    { name: 'Kids Cut', defaultDurationMinutes: 30, floorUsd: '20.00', allowMobile: true, alsoIn: [HAIR_CUTS_CATEGORY_SLUG], description: 'A haircut for children 12 and under.' },
     { name: 'Bang Trim', defaultDurationMinutes: 15, floorUsd: '10.00', allowMobile: true, isAddOnEligible: true, addOnGroup: ADD_ON_GROUP_FINISH, description: 'A trim of the fringe only.' },
+  ]),
+
+  // ── Barbering ────────────────────────────────────────────────────────────
+  ...rows(HAIR_CUTS_CATEGORY_SLUG, CUT_LICENCES, [
+    { name: 'Mens Cut', defaultDurationMinutes: 30, floorUsd: '35.00', allowMobile: true, isAddOnEligible: true, alsoIn: [HAIR_HAIRCUT_CATEGORY_SLUG] }, // prod
+    { name: 'Cut & Beard Trim', defaultDurationMinutes: 50, floorUsd: '45.00', allowMobile: false }, // prod
+    { name: 'Beard Trim', defaultDurationMinutes: 20, floorUsd: '20.00', allowMobile: true }, // prod
+    { name: 'Military Cut', defaultDurationMinutes: 30, floorUsd: '25.00', allowMobile: true }, // prod
+    { name: 'Student Cut', defaultDurationMinutes: 30, floorUsd: '25.00', allowMobile: true, alsoIn: [HAIR_HAIRCUT_CATEGORY_SLUG] }, // prod
+    { name: 'Skin Fade', defaultDurationMinutes: 40, floorUsd: '30.00', allowMobile: true, description: 'Clipper fade taken down to the skin, blended up into the length on top.' },
+    { name: 'Taper', defaultDurationMinutes: 30, floorUsd: '25.00', allowMobile: true, description: 'A gradual fade at the neckline and sideburns only.' },
+    { name: 'Straight Razor Fade', defaultDurationMinutes: 45, floorUsd: '35.00', allowMobile: false, description: 'A fade finished with a straight razor for the sharpest possible blend and edges.' },
+    { name: 'Buzz Cut', defaultDurationMinutes: 15, floorUsd: '15.00', allowMobile: true, alsoIn: [HAIR_HAIRCUT_CATEGORY_SLUG], description: 'One clipper length all over.' },
+    { name: 'Head Shave', defaultDurationMinutes: 20, floorUsd: '20.00', allowMobile: false, description: 'A razor shave of the whole head with hot towels.' },
+    { name: 'Line Up', defaultDurationMinutes: 15, floorUsd: '10.00', allowMobile: true, isAddOnEligible: true, addOnGroup: ADD_ON_GROUP_FINISH, description: 'A clean edge-up of the hairline and neckline.' },
+    { name: 'Beard Sculpt', defaultDurationMinutes: 30, floorUsd: '25.00', allowMobile: true, description: 'Shaping, lining and detailing the beard with clippers and razor.' },
     { name: 'Hot Towel Shave', defaultDurationMinutes: 30, floorUsd: '25.00', allowMobile: false, description: 'A traditional straight-razor shave with hot towels.' },
   ]),
 

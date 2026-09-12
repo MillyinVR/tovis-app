@@ -17,6 +17,8 @@
 //   * create a service whose name NORMALISES equal to an existing row spelled
 //     differently ("Root Touch-Up" next to "Root touch up") — refused outright,
 //     because the consult matches names case-insensitively and would see two;
+//   * remove an "also in" link an admin added by hand — links are ADD-ONLY
+//     here (extras are listed, never dropped);
 //   * activate or deactivate anything that exists; delete anything, ever.
 
 import {
@@ -60,10 +62,20 @@ export type PermissionAction = {
   missing: ProfessionType[]
 }
 
+/** "Also in" links the catalog names that the row does not have yet. */
+export type LinkAction = {
+  serviceName: string
+  /** Category slugs to link (each resolves to an id at apply time). */
+  add: string[]
+  /** Links the row has that the catalog does not name — reported, never removed. */
+  extra: string[]
+}
+
 export type ServiceCatalogSeedPlan = {
   categories: CategoryAction[]
   services: ServiceAction[]
   permissions: PermissionAction[]
+  links: LinkAction[]
   /** A non-empty list means NOTHING may be applied. */
   refusals: CatalogProblem[]
 }
@@ -96,6 +108,7 @@ const SERVICE_SELECT = {
   isAddOnEligible: true,
   addOnGroup: true,
   permissions: { select: { professionType: true, stateCode: true, mode: true } },
+  additionalCategoryLinks: { select: { categoryId: true } },
 } satisfies Prisma.ServiceSelect
 
 type ExistingCategory = Prisma.ServiceCategoryGetPayload<{ select: typeof CATEGORY_SELECT }>
@@ -179,6 +192,20 @@ function planService(
   return { kind: 'update', service, id: existing.id, changes, guarded }
 }
 
+function planLinks(
+  service: CatalogService,
+  existing: ExistingService | undefined,
+  slugById: ReadonlyMap<string, string>,
+): LinkAction | null {
+  const have = new Set(
+    (existing?.additionalCategoryLinks ?? []).map((link) => slugById.get(link.categoryId) ?? link.categoryId),
+  )
+  const wanted = new Set(service.alsoInCategorySlugs)
+  const add = [...wanted].filter((slug) => !have.has(slug))
+  const extra = [...have].filter((slug) => !wanted.has(slug))
+  return add.length || extra.length ? { serviceName: service.name, add, extra } : null
+}
+
 function planPermissions(service: CatalogService, existing: ExistingService | undefined): PermissionAction | null {
   const granted = new Set(
     (existing?.permissions ?? [])
@@ -214,6 +241,7 @@ export async function planServiceCatalogSeed(
 
   const services: ServiceAction[] = []
   const permissions: PermissionAction[] = []
+  const links: LinkAction[] = []
   for (const service of catalog.services) {
     const exact = servicesByName.get(service.name)
     const nearby = servicesByNormalized.get(normalizeServiceName(service.name))
@@ -227,9 +255,11 @@ export async function planServiceCatalogSeed(
     services.push(planService(service, exact, slugById, options))
     const permission = planPermissions(service, exact)
     if (permission) permissions.push(permission)
+    const link = planLinks(service, exact, slugById)
+    if (link) links.push(link)
   }
 
-  return { categories, services, permissions, refusals }
+  return { categories, services, permissions, links, refusals }
 }
 
 export type SeedApplyOptions = {
@@ -243,6 +273,7 @@ export type ServiceCatalogSeedResult = {
   servicesCreated: number
   servicesUpdated: number
   permissionsCreated: number
+  linksCreated: number
 }
 
 /**
@@ -263,6 +294,7 @@ export async function applyServiceCatalogSeed(
     servicesCreated: 0,
     servicesUpdated: 0,
     permissionsCreated: 0,
+    linksCreated: 0,
   }
 
   // Categories in catalog order — validation guarantees parents come first,
@@ -362,6 +394,22 @@ export async function applyServiceCatalogSeed(
     result.permissionsCreated += permission.missing.length
   }
 
+  for (const link of plan.links) {
+    if (!link.add.length) continue
+    const serviceId = serviceIdByName.get(link.serviceName)
+    if (serviceId === undefined) continue // its service was refused
+    const categoryIds = link.add.map((slug) => {
+      const id = categoryIdBySlug.get(slug)
+      if (id === undefined) throw new Error(`"also in" category "${slug}" of "${link.serviceName}" was not resolved`)
+      return id
+    })
+    await tx.serviceCategoryLink.createMany({
+      data: categoryIds.map((categoryId) => ({ serviceId, categoryId })),
+      skipDuplicates: true,
+    })
+    result.linksCreated += categoryIds.length
+  }
+
   return result
 }
 
@@ -384,6 +432,10 @@ export function formatServiceCatalogSeedPlan(plan: ServiceCatalogSeedPlan): stri
   }
   for (const permission of plan.permissions) {
     lines.push(`  + permission "${permission.serviceName}": ALLOW ${permission.missing.join(', ')}`)
+  }
+  for (const link of plan.links) {
+    if (link.add.length) lines.push(`  + also in "${link.serviceName}": ${link.add.join(', ')}`)
+    if (link.extra.length) lines.push(`    ℹ️ "${link.serviceName}" is also linked to ${link.extra.join(', ')} (not in the catalog; left alone)`)
   }
   for (const refusal of plan.refusals) {
     lines.push(`  ✖ REFUSED ${refusal.row}: ${refusal.problem}`)
@@ -415,6 +467,7 @@ export function summarizeServiceCatalogSeedPlan(plan: ServiceCatalogSeedPlan) {
       skip: count(plan.services, 'skip'),
     },
     permissions: plan.permissions.reduce((sum, p) => sum + p.missing.length, 0),
+    links: plan.links.reduce((sum, l) => sum + l.add.length, 0),
     heldBack:
       plan.categories.reduce((sum, a) => sum + a.guarded.length, 0) +
       plan.services.reduce((sum, a) => sum + a.guarded.length, 0),

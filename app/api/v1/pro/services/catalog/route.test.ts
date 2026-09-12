@@ -58,21 +58,23 @@ describe('GET /api/v1/pro/services/catalog', () => {
 
   it('returns the category tree + the pro own offerings', async () => {
     mocks.requirePro.mockResolvedValue({ ok: true, professionalId: 'pro_1' })
+    const balayage = {
+      id: 'svc_balayage',
+      name: 'Balayage',
+      minPrice: '180',
+      defaultDurationMinutes: 180,
+      defaultImageUrl: 'https://x/b.jpg',
+      isAddOnEligible: false,
+      addOnGroup: null,
+    }
+    // Rows as lib/services/categoryTree.ts selects them: primary `services`
+    // plus `linkedServices` (ServiceCategoryLink) on every node.
     mocks.prisma.serviceCategory.findMany.mockResolvedValue([
       {
         id: 'cat_hair',
         name: 'Hair',
-        services: [
-          {
-            id: 'svc_balayage',
-            name: 'Balayage',
-            minPrice: '180',
-            defaultDurationMinutes: 180,
-            defaultImageUrl: 'https://x/b.jpg',
-            isAddOnEligible: false,
-            addOnGroup: null,
-          },
-        ],
+        services: [balayage],
+        linkedServices: [],
         children: [
           {
             id: 'cat_color',
@@ -88,8 +90,17 @@ describe('GET /api/v1/pro/services/catalog', () => {
                 addOnGroup: 'COLOR',
               },
             ],
+            linkedServices: [],
           },
         ],
+      },
+      {
+        // Balayage is ALSO listed here through a link — same row, no duplicate.
+        id: 'cat_blonding',
+        name: 'Blonding',
+        services: [],
+        linkedServices: [{ service: balayage }],
+        children: [],
       },
     ])
     mocks.prisma.professionalServiceOffering.findMany.mockResolvedValue([
@@ -99,10 +110,11 @@ describe('GET /api/v1/pro/services/catalog', () => {
     const res = await GET()
     const body = await res.json()
     expect(res.status).toBe(200)
-    expect(body.categories).toHaveLength(1)
+    expect(body.categories).toHaveLength(2)
     expect(body.categories[0].services[0].minPrice).toBe('180')
     expect(body.categories[0].children[0].services[0].defaultDurationMinutes).toBe(60)
     expect(body.categories[0].children[0].services[0].isAddOnEligible).toBe(true)
+    expect(body.categories[1].services.map((s: { id: string }) => s.id)).toEqual(['svc_balayage'])
     expect(body.offerings).toEqual([{ id: 'off_1', serviceId: 'svc_balayage' }])
   })
 

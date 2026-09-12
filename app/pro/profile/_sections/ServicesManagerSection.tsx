@@ -11,6 +11,7 @@ import { isClientTechnicalRecordEnabled } from '@/lib/clients/technicalRecord'
 import { CONSENT_KIND_LABELS } from '@/lib/consentForms/kindLabels'
 import { loadConsentFormOptions } from '@/lib/consentForms/loader'
 import { loadProLocationCapability } from '@/lib/offerings/locationCapability'
+import { loadServiceCategoryTree } from '@/lib/services/categoryTree'
 
 import OfferingManager from '@/app/pro/services/OfferingManager'
 import ServicesManagerSectionClient from './ServicesManagerSectionClient'
@@ -46,48 +47,9 @@ export default async function ServicesManagerSection({
 
   const profId = user.professionalProfile.id
 
-  const categories = await prisma.serviceCategory.findMany({
-    where: { isActive: true, parentId: null },
-    orderBy: { name: 'asc' },
-    select: {
-      id: true,
-      name: true,
-      services: {
-        where: { isActive: true },
-        orderBy: { name: 'asc' },
-        select: {
-          id: true,
-          name: true,
-          minPrice: true,
-          defaultDurationMinutes: true,
-          defaultImageUrl: true,
-          isAddOnEligible: true,
-          addOnGroup: true,
-        },
-      },
-      children: {
-        where: { isActive: true },
-        orderBy: { name: 'asc' },
-        select: {
-          id: true,
-          name: true,
-          services: {
-            where: { isActive: true },
-            orderBy: { name: 'asc' },
-            select: {
-              id: true,
-              name: true,
-              minPrice: true,
-              defaultDurationMinutes: true,
-              defaultImageUrl: true,
-              isAddOnEligible: true,
-              addOnGroup: true,
-            },
-          },
-        },
-      },
-    },
-  })
+  // One loader with the iOS catalog route — a service linked into a second
+  // category shows there too (lib/services/categoryTree.ts).
+  const categories = await loadServiceCategoryTree(prisma)
 
   // W6: which modes this pro can actually host, so the "add a service" form
   // pre-selects what is true of them rather than pre-checking Salon for

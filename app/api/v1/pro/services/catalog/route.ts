@@ -1,11 +1,11 @@
 // app/api/v1/pro/services/catalog/route.ts
 //
 // Read API for the "Add a service" library picker. The web ServicesManagerSection
-// server-renders this category tree directly from Prisma; native has no other way
-// to reach it, so this exposes the SAME shape (categories → children → services,
-// each with minPrice / default duration / image / add-on flags) plus the pro's
-// already-added offerings (so the picker can mark/disable them). PRO-only.
-import { Prisma } from '@prisma/client'
+// renders the same tree; both read it through lib/services/categoryTree.ts so a
+// service linked into a second category shows there on both platforms. Shape:
+// categories → children → services (minPrice / default duration / image /
+// add-on flags) plus the pro's already-added offerings (so the picker can
+// mark/disable them). PRO-only.
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import {
@@ -13,28 +13,11 @@ import {
   loadProLocationCapability,
 } from '@/lib/offerings/locationCapability'
 import { moneyToString } from '@/lib/money'
+import { loadServiceCategoryTree, type CategoryTreeService } from '@/lib/services/categoryTree'
 
 export const dynamic = 'force-dynamic'
 
-const serviceSelect = {
-  id: true,
-  name: true,
-  minPrice: true,
-  defaultDurationMinutes: true,
-  defaultImageUrl: true,
-  isAddOnEligible: true,
-  addOnGroup: true,
-} as const
-
-function mapService(s: {
-  id: string
-  name: string
-  minPrice: Prisma.Decimal
-  defaultDurationMinutes: number | null
-  defaultImageUrl: string | null
-  isAddOnEligible: boolean
-  addOnGroup: string | null
-}) {
+function mapService(s: CategoryTreeService) {
   return {
     id: String(s.id),
     name: s.name,
@@ -58,32 +41,7 @@ export async function GET() {
     // claiming in-salon. Derived here with the same helper the POST route
     // applies, so the seed the form shows is the one the server would pick.
     const [categories, offerings, capability] = await Promise.all([
-      prisma.serviceCategory.findMany({
-        where: { isActive: true, parentId: null },
-        orderBy: { name: 'asc' },
-        select: {
-          id: true,
-          name: true,
-          services: {
-            where: { isActive: true },
-            orderBy: { name: 'asc' },
-            select: serviceSelect,
-          },
-          children: {
-            where: { isActive: true },
-            orderBy: { name: 'asc' },
-            select: {
-              id: true,
-              name: true,
-              services: {
-                where: { isActive: true },
-                orderBy: { name: 'asc' },
-                select: serviceSelect,
-              },
-            },
-          },
-        },
-      }),
+      loadServiceCategoryTree(prisma),
       prisma.professionalServiceOffering.findMany({
         where: { professionalId: auth.professionalId, isActive: true },
         select: { id: true, serviceId: true },

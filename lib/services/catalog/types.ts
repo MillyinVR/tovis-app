@@ -21,7 +21,13 @@ export type CatalogCategory = {
 export type CatalogService = {
   /** `Service.name` — `@unique`, the identity the seed upserts by, and the exact string the consult recommends from. */
   name: string
+  /** The PRIMARY category (`Service.categoryId`) — what the consult and every non-picker reader use. */
   categorySlug: string
+  /**
+   * Other categories the service is listed under in the library picker
+   * (`ServiceCategoryLink`), without a second row. Never the primary.
+   */
+  alsoInCategorySlugs: readonly string[]
   defaultDurationMinutes: number
   /**
    * `Service.minPrice` as a two-decimal string. ⚠️ This is a HARD FLOOR, not a
