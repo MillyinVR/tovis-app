@@ -511,7 +511,12 @@ export const regionPickerInspiration: ConsultInspirationStateDTO = {
     nextPrepQuestionKey: 'love_regions',
   },
   cards: [
-    ...(cardInspiration.cards ?? []).filter((card) => card.tier === 'COARSE'),
+    // The spark is ANSWERED: the two region moves come after it, and the chat
+    // shows one step at a time, so the picker is the open step only once the
+    // coarse card is history.
+    ...(cardInspiration.cards ?? [])
+      .filter((card) => card.tier === 'COARSE')
+      .map((card) => ({ ...card, selectedValues: ['the-color'] })),
     {
       questionKey: 'love_regions',
       tier: 'PREP',
@@ -560,8 +565,14 @@ export const regionPickerInspiration: ConsultInspirationStateDTO = {
   ],
 }
 
-/** P5g — the follow-up messages, generated and fallback. */
-export function threadFollowUpMessages(): ConsultThreadMessageDTO[] {
+/**
+ * P5g — the follow-up messages, generated and fallback.
+ *
+ * `openRound` 2 is the thread AFTER round 1 was answered: the generated question
+ * is history and the fallback round is the open step. The chat shows one step
+ * at a time, so a spec about the fallback has to be standing on it.
+ */
+export function threadFollowUpMessages(openRound: 1 | 2 = 1): ConsultThreadMessageDTO[] {
   return [
     {
       kind: 'TEXT',
@@ -574,7 +585,7 @@ export function threadFollowUpMessages(): ConsultThreadMessageDTO[] {
       kind: 'FOLLOW_UP',
       id: 'follow-up:1:prior_lightening',
       author: 'APP',
-      state: 'OPEN',
+      state: openRound === 2 ? 'DONE' : 'OPEN',
       text: 'You’re at a light brown now and you loved the ash — that’s usually two visits. When was your hair last lightened?',
       questionKey: 'prior_lightening',
       options: [
@@ -582,7 +593,7 @@ export function threadFollowUpMessages(): ConsultThreadMessageDTO[] {
         { value: 'within-3-months', label: 'In the last few months' },
         { value: 'not-sure', label: 'I don’t remember' },
       ],
-      selectedValues: [],
+      selectedValues: openRound === 2 ? ['never'] : [],
       fallback: false,
       round: 1,
     },
@@ -597,7 +608,7 @@ export function threadFollowUpMessages(): ConsultThreadMessageDTO[] {
       kind: 'FOLLOW_UP',
       id: 'follow-up:2:henna_plant_dye_history',
       author: 'APP',
-      state: 'BLOCKED',
+      state: openRound === 2 ? 'OPEN' : 'BLOCKED',
       text: 'When did you last use henna or another plant-based hair dye?',
       questionKey: 'henna_plant_dye_history',
       options: [
@@ -609,6 +620,29 @@ export function threadFollowUpMessages(): ConsultThreadMessageDTO[] {
       round: 2,
     },
   ]
+}
+
+function cardAnswered(card: NonNullable<ConsultInspirationStateDTO['cards']>[number]): boolean {
+  return card.selectedValues.length > 0 || Boolean(card.selectedText)
+}
+
+/**
+ * The same consult with every card ANSWERED (each takes its first option), so
+ * the thread's open step is whatever comes AFTER the inspiration — the early
+ * photo, the guided pack, the plan. The chat shows one step at a time, so a
+ * spec about a later step has to start from a thread that has reached it.
+ */
+export function withCardsAnswered(
+  inspiration: ConsultInspirationStateDTO,
+): ConsultInspirationStateDTO {
+  return {
+    ...inspiration,
+    cards: (inspiration.cards ?? []).map((card) =>
+      cardAnswered(card)
+        ? card
+        : { ...card, selectedValues: [card.question.options[0]?.value ?? 'not-sure'] },
+    ),
+  }
 }
 
 export function withAnalysisReady(
@@ -720,8 +754,11 @@ export function threadFixture(args: {
   /** P7a-1: the early photo's slot, or null for "not taken yet". */
   earlyPhoto?: ConsultCaptureStateDTO['earlyPhoto']
   status?: ConsultThreadDTO['status']
-  /** P5g — append the adaptive follow-up messages after the plan. */
-  followUps?: boolean
+  /**
+   * P5g — append the adaptive follow-up messages after the plan. Pass
+   * `{ openRound: 2 }` for the thread after round 1 was answered.
+   */
+  followUps?: boolean | { openRound: 1 | 2 }
   /**
    * P7a-3: a finished, VERSIONED plan.
    *
@@ -740,12 +777,14 @@ export function threadFixture(args: {
 }): ConsultThreadDTO {
   const photos = threadPhotoMessages(captureState, args.slotOverrides)
   const cards = args.inspiration.cards ?? []
-  // P5d — one message per card, exactly as lib/consult/thread.ts projects them.
+  // P5d — one message per card, exactly as lib/consult/thread.ts projects them:
+  // the FIRST unanswered card is the open one, the rest wait behind it.
+  const firstUnansweredCard = cards.findIndex((card) => !cardAnswered(card))
   const cardMessages: ConsultThreadMessageDTO[] = cards.map((card, index) => ({
     kind: 'INSPIRATION',
     id: `inspiration:${card.questionKey}`,
     author: 'APP',
-    state: card.selectedValues.length > 0 ? 'DONE' : index === 0 ? 'OPEN' : 'BLOCKED',
+    state: cardAnswered(card) ? 'DONE' : index === firstUnansweredCard ? 'OPEN' : 'BLOCKED',
     // 🔴 A card says its piece on the card, so no bubble above it.
     text: null,
     sourceDecisionRequired: false,
@@ -800,8 +839,24 @@ export function threadFixture(args: {
     // Appended only when the caller asks for a plan, so every existing spec
     // keeps the thread it had: those describe a consult that has not run yet.
     ...(args.plan ? planMessages(args.plan) : []),
-    ...(args.followUps ? threadFollowUpMessages() : []),
+    ...(args.followUps
+      ? threadFollowUpMessages(
+          typeof args.followUps === 'object' ? args.followUps.openRound : 1,
+        )
+      : []),
   ]
+
+  // 🔴 Once a plan exists, NOTHING earlier in the thread is still open — the
+  // server's own rule (lib/consult/thread.ts, `hasPlan`). A finished consult
+  // resumes on its plan (or on a follow-up after it), never on a card or a
+  // photo she skipped. Without this the fixture's open card would sit in front
+  // of the plan and the chat would never reach it.
+  const planIndex = messages.findIndex((message) => message.kind === 'PLAN')
+  if (planIndex >= 0) {
+    for (const message of messages.slice(0, planIndex)) {
+      if (message.state === 'OPEN') message.state = 'BLOCKED'
+    }
+  }
 
   return {
     consultId: CONSULT_FIXTURE_ID,

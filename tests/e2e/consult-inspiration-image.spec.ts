@@ -34,12 +34,14 @@
 import { expect, test, type Page, type Route } from '@playwright/test'
 
 import {
+  cardInspiration,
   CONSULT_FIXTURE_ID,
   generalServiceInspiration,
   lookSourceInspiration,
   threadFixture,
   uploadSourceInspiration,
   withAnalysisReady,
+  withCardsAnswered,
 } from './fixtures/consultInspiration'
 
 const BASE = `/api/v1/client/consult/${CONSULT_FIXTURE_ID}`
@@ -63,6 +65,8 @@ async function stubConsult(
     media: (route: Route) => Promise<void>
     bookEnabled?: boolean
     slotOverrides?: Record<string, 'EMPTY' | 'ACCEPTED' | 'REJECTED'>
+    /** P7a-1: the early photo's slot. Accepted, and the chat moves on to the pack. */
+    earlyPhoto?: Parameters<typeof threadFixture>[0]['earlyPhoto']
     /** P5b: how POST /inspiration/read answers. */
     read?: (route: Route) => Promise<void>
   },
@@ -100,6 +104,7 @@ async function stubConsult(
           inspiration: current.inspiration,
           bookEnabled: options.bookEnabled,
           slotOverrides: options.slotOverrides,
+          earlyPhoto: options.earlyPhoto,
         }),
       },
     }),
@@ -127,6 +132,19 @@ function signedRead(expiresInSeconds: number) {
 
 const photo = (page: Page) =>
   page.getByRole('img', { name: 'Your inspiration photo' })
+
+const ACCEPTED_SELFIE: Parameters<typeof threadFixture>[0]['earlyPhoto'] = {
+  shotKey: 'early_photo',
+  state: 'ACCEPTED',
+  captureId: 'capture_early_1',
+  qualityReasonCode: 'PASS',
+  qualityWarningCode: null,
+  retakeTip: null,
+  rawExpiresAt: '2026-09-07T18:00:00.000Z',
+  purgedAt: null,
+  attemptCount: 1,
+  previousReasonCode: null,
+}
 const errorState = (page: Page) => page.getByTestId('consult-inspiration-image-error')
 
 test.describe('consult inspiration image', () => {
@@ -228,7 +246,7 @@ test.describe('consult inspiration image', () => {
 // were green in every unit test while being wrong on screen.
 
 test.describe('consult thread', () => {
-  test('renders the flow as a thread, with history left on screen', async ({
+  test('renders the flow as a chat: the opening line, ONE open step, and nothing after it', async ({
     page,
   }) => {
     await stubConsult(page, {
@@ -238,8 +256,10 @@ test.describe('consult thread', () => {
 
     await page.goto(`/client/consult/${CONSULT_FIXTURE_ID}`)
 
-    // The opening bubble, an inspiration card and every photo request are all
-    // on ONE screen. The wizard this replaces showed exactly one of them.
+    // The opening bubble and the inspiration step — the one the server says
+    // is next — are on screen. The photo requests are NOT: one thing at a time
+    // (Tori, 2026-09-11), so a step she has not reached is not on the page,
+    // dimmed or otherwise.
     await expect(
       page.getByText('Love this one.', { exact: false }),
     ).toBeVisible()
@@ -248,8 +268,8 @@ test.describe('consult thread', () => {
         name: 'Which color or colors in this picture are your favorite?',
       }),
     ).toBeVisible()
-    await expect(page.getByRole('heading', { name: 'Face front' })).toBeVisible()
-    await expect(page.getByRole('heading', { name: 'Eyes & brows' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Face front' })).toHaveCount(0)
+    await expect(page.locator('[data-thread-message="photo:early_photo"]')).toHaveCount(0)
   })
 
   test('has NO free-text input anywhere in the thread', async ({ page }) => {
@@ -300,20 +320,26 @@ test.describe('consult thread', () => {
     await expect(page.locator('input[type="text"]')).toHaveCount(0)
   })
 
-  test('shows each photo request with its served badge', async ({ page }) => {
+  test('shows a sent photo as sent, the refused one as the open step, and the next not yet', async ({ page }) => {
+    // The chat has reached the guided pack: the cards are answered, the early
+    // photo is in, the first guided shot was accepted and the second refused.
     await stubConsult(page, {
-      inspiration: lookSourceInspiration,
+      inspiration: withCardsAnswered(cardInspiration),
       media: (route) => route.fulfill({ json: signedRead(600) }),
-      slotOverrides: { face_front: 'EMPTY', eyes_closeup: 'REJECTED' },
+      earlyPhoto: ACCEPTED_SELFIE,
+      slotOverrides: { hair_left: 'REJECTED', hair_right: 'EMPTY' },
     })
 
     await page.goto(`/client/consult/${CONSULT_FIXTURE_ID}`)
 
-    // Accepted, outstanding and refused are three visibly different things —
-    // the failure this guards is a sent photo reading as one never taken.
+    // Accepted and refused are visibly different things — the failure this
+    // guards is a sent photo reading as one never taken. The accepted shot is
+    // history (her line says it passed); the refused one is the open step,
+    // with its retake; the shot after it is not on the page yet.
     await expect(page.getByText('Passed').first()).toBeVisible()
-    await expect(page.getByText('Needed').first()).toBeVisible()
     await expect(page.getByText('Retake').first()).toBeVisible()
+    await expect(page.getByText('Needed')).toHaveCount(0)
+    await expect(page.getByRole('heading', { name: 'Right side' })).toHaveCount(0)
   })
 
   test('Book the look is disabled until a selfie is in, and says why', async ({

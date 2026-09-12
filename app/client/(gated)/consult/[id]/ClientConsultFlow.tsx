@@ -2,6 +2,7 @@
 
 import ConsultInspirationFocus from '@/app/_components/consult/ConsultInspirationFocus'
 import type { CropRect } from '@/lib/media/cropRect'
+import { visibleConsultThreadMessages } from '@/lib/consult/visibleThread'
 import { CONSULT_INSPIRATION_CLIENT_TEXT_LIMIT } from '@/lib/consult/inspiration/clientText'
 import ClientConsultSuitability from '@/app/_components/consult/ClientConsultSuitability'
 import { useBrand } from '@/lib/brand/BrandProvider'
@@ -16,8 +17,14 @@ import { useBrand } from '@/lib/brand/BrandProvider'
 //     "reopening resumes at the next open step" is the server's answer, not
 //     four progress blockers re-interpreted here. The per-stage endpoints are
 //     unchanged and remain the only way to ANSWER anything.
-//   * Earlier steps stay on screen as history. A wizard that replaces the
-//     question you just answered gives you nothing to scroll back to.
+//   * It reads as a CHAT (Tori, 2026-09-11). ONE step is on screen at a time —
+//     the message the server says is next — and nothing after it. An answered
+//     step collapses into its question-and-answer bubbles and scrolls up into
+//     history, which stays there to read back; the next step arrives beneath.
+//     (This reverses #1149's "later steps on screen, dimmed" — that read as a
+//     form with the fields greyed out.) Which messages are visible is decided
+//     in lib/consult/visibleThread.ts; the compact history forms are in the
+//     per-kind renderers below.
 //   * Inspiration cards accept pack choices and optional client-authored words.
 //   * The sticky Book the look CTA unlocks on the SELFIE, not on the analysis.
 //     Booking runs the ORDINARY look-booking path — the analysis takes ~100s,
@@ -71,10 +78,12 @@ import {
 import {
   THREAD_BUTTON_PRIMARY,
   THREAD_BUTTON_SECONDARY,
+  THREAD_MESSAGE_ENTER,
   ThreadBubble,
   ThreadCard,
   ThreadMessageSlot,
   ThreadShell,
+  ThreadTyping,
 } from './_thread/ThreadShell'
 
 const ConsultInputState = createContext({ editing: false, inputsOpen: true })
@@ -131,6 +140,8 @@ const BUTTON_SECONDARY = THREAD_BUTTON_SECONDARY
 /** The small square controls on the zoomable inspiration image. */
 const CHIP_INACTIVE =
   'rounded-lg border border-surfaceGlass/20 px-3 py-1.5 text-xs font-bold text-textPrimary disabled:opacity-50'
+/** A small action under a settled message — "replace this photo" — never a button. */
+const SUBTLE_LINK = 'text-xs font-bold text-textSecondary underline underline-offset-2'
 
 /**
  * Values the server refuses to combine with anything else ("None", "Not sure",
@@ -829,10 +840,23 @@ export default function ClientConsultFlow({
     )
   }
 
+  // The chat: history, then the one open step, and nothing after it. The
+  // prep controls (chart copy, carry on with a partial pack) are about the
+  // guided photos, so they appear once the conversation has reached them.
+  const visibleMessages = visibleConsultThreadMessages(thread)
+  const photosReached = visibleMessages.some(
+    (message) =>
+      message.kind === 'PHOTO_REQUEST' &&
+      message.shot.key !== CONSULT_EARLY_PHOTO_SHOT_KEY,
+  )
+  const latestMessageId = visibleMessages[visibleMessages.length - 1]?.id ?? null
+
   return (
     <ConsultInputState.Provider value={{ editing: editing && Boolean(thread.controls?.canEditAnswers), inputsOpen: thread.controls?.inputsOpen !== false }}>
     <ThreadShell
       openMessageId={thread.nextOpenMessageId}
+      latestMessageId={latestMessageId}
+      typing={busy}
       footer={
         <BookTheLookCta
           thread={thread}
@@ -842,7 +866,6 @@ export default function ClientConsultFlow({
         />
       }
     >
-      <ErrorNote message={error} />
       <div className="flex flex-wrap gap-2" aria-label={copy.management.edit}>
         {thread.controls?.canEditAnswers && thread.messages.some(m => m.kind === 'QUESTION' && m.answer !== null || m.kind === 'INSPIRATION' && ((m.card?.selectedValues.length ?? 0) > 0 || Boolean(m.card?.selectedText))) ? <button type="button" className={BUTTON_SECONDARY} disabled={busy} onClick={() => setEditing(!editing)}>{editing ? copy.management.done : copy.management.edit}</button> : null}
         {thread.controls?.canDelete ? <button type="button" className={BUTTON_SECONDARY} disabled={busy} onClick={() => setManagementAction('delete')}>{copy.homeSessions.delete}</button> : null}
@@ -878,7 +901,7 @@ export default function ClientConsultFlow({
           </div>
         </div>
       ) : null}
-      {thread.messages.map((message) => (
+      {visibleMessages.map((message) => (
         <ThreadMessageSlot key={message.id} id={message.id}>
           <ConsultThreadMessage
             message={message}
@@ -906,14 +929,20 @@ export default function ClientConsultFlow({
           />
         </ThreadMessageSlot>
       ))}
-      <CapturePrepControls
-        thread={thread}
-        busy={busy}
-        copy={copy}
-        pro={thread.professionalDisplayName}
-        onChartCopy={setChartCopy}
-        onProceed={proceedWithAccepted}
-      />
+      {photosReached ? (
+        <CapturePrepControls
+          thread={thread}
+          busy={busy}
+          copy={copy}
+          pro={thread.professionalDisplayName}
+          onChartCopy={setChartCopy}
+          onProceed={proceedWithAccepted}
+        />
+      ) : null}
+      {/* Where she is looking: an error lands under the step it belongs to,
+          not at the top of a page she has scrolled past. */}
+      <ErrorNote message={error} />
+      {busy ? <ThreadTyping /> : null}
     </ThreadShell>
     </ConsultInputState.Provider>
   )
@@ -1146,6 +1175,21 @@ function ConsentMessage({
   busy: boolean
   onAccept: (kind: string, agreementVersionId: string) => void
 }) {
+  // Settled: the ask and her agreement, as two lines of the chat. The full
+  // legal text stays readable from the agreements she accepted; the thread is
+  // not the place to re-read it every time she scrolls past.
+  if (message.state === 'DONE') {
+    return (
+      <div className="grid gap-2">
+        <ThreadBubble author="APP">{message.text}</ThreadBubble>
+        <ThreadBubble author="CLIENT">
+          {message.requirements.map((requirement) => (
+            <p key={requirement.kind}>Agreed · {requirement.requiredVersion.title}</p>
+          ))}
+        </ThreadBubble>
+      </div>
+    )
+  }
   return (
     <div className="grid gap-3">
       <ThreadBubble author="APP">{message.text}</ThreadBubble>
@@ -1179,9 +1223,11 @@ function ConsentMessage({
 /**
  * One intake question, one message.
  *
- * An ANSWERED question keeps its card — dimmed — and gains the client's own
- * answer as a bubble on her side. That echo is the point: a thread you can
- * scroll back through is the difference between a conversation and a form.
+ * An ANSWERED question collapses into two lines of the chat: the question as
+ * the app's bubble, her answer as hers. That echo is the point: a thread you
+ * can scroll back through is the difference between a conversation and a form.
+ * The card, with its options and help text, is only the OPEN step (or an
+ * answered one being edited).
  */
 function QuestionMessage({
   message,
@@ -1203,9 +1249,18 @@ function QuestionMessage({
       : (question.options.find((option) => option.value === answer)?.label ??
         answer)
 
+  if (answeredLabel !== null && !editing) {
+    return (
+      <div className="grid gap-2">
+        <ThreadBubble author="APP">{question.label}</ThreadBubble>
+        <ThreadBubble author="CLIENT">{answeredLabel}</ThreadBubble>
+      </div>
+    )
+  }
+
   return (
     <div className="grid gap-2">
-      <ThreadCard dimmed={answer !== null && !editing}>
+      <ThreadCard>
         <h3 className="text-base font-black text-textPrimary">
           {question.label}
         </h3>
@@ -1245,10 +1300,12 @@ function QuestionMessage({
  * of what you like?"). The card is what is being fixed in place here, not the
  * wording inside it.
  */
-function InspirationFileChoice({ label, busy, onChoose }: {
+function InspirationFileChoice({ label, busy, subtle, onChoose }: {
   label: string; busy: boolean; onChoose: (file: File) => void
+  /** A text link under a settled bubble rather than a button in an open card. */
+  subtle?: boolean
 }) {
-  return <label className={`inline-block cursor-pointer ${BUTTON_SECONDARY}`}>
+  return <label className={`inline-block cursor-pointer ${subtle ? SUBTLE_LINK : BUTTON_SECONDARY}`}>
     {label}
     <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" disabled={busy}
       onChange={(event) => {
@@ -1303,6 +1360,41 @@ function InspirationMessage({
   // edit turns a narrowed value back into `undefined` without the compiler
   // noticing.
   const source = message.source
+  const chooseReplacement = (file: File) =>
+    setPending({ file, url: URL.createObjectURL(file) })
+
+  // Settled: the app's line, then her reference as a photo on her side of the
+  // chat (or the choice to go without one), with the one way to change it.
+  if (done && !pending) {
+    return (
+      <div className="grid gap-2">
+        {message.text ? (
+          <ThreadBubble author="APP">{message.text}</ThreadBubble>
+        ) : null}
+        {source ? (
+          <>
+            {source.imageAvailable && image.url ? (
+              <div className="flex justify-end">
+                <RemoteImage
+                  src={image.url}
+                  alt="Your inspiration photo"
+                  intrinsic
+                  className={`${THREAD_MESSAGE_ENTER} max-h-48 max-w-[70%] rounded-2xl rounded-br-md border border-surfaceGlass/10 object-cover`}
+                />
+              </div>
+            ) : null}
+            <div className="flex justify-end">
+              <InspirationFileChoice label={focusCopy.replace} busy={busy} subtle
+                onChoose={chooseReplacement} />
+            </div>
+          </>
+        ) : (
+          <ThreadBubble author="CLIENT">Carry on without one</ThreadBubble>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="grid gap-2">
       {message.text ? (
@@ -1317,7 +1409,7 @@ function InspirationMessage({
       ) : source ? (
         <div className="justify-self-start">
           <InspirationFileChoice label={focusCopy.replace} busy={busy}
-            onChoose={(file) => setPending({ file, url: URL.createObjectURL(file) })} />
+            onChoose={chooseReplacement} />
         </div>
       ) : null}
       {done || pending ? null : (
@@ -1325,7 +1417,7 @@ function InspirationMessage({
           {message.sourceDecisionRequired ? (
             <div className="grid gap-3">
               <InspirationFileChoice label={focusCopy.addPhoto} busy={busy}
-                onChoose={(file) => setPending({ file, url: URL.createObjectURL(file) })} />
+                onChoose={chooseReplacement} />
               <button
                 type="button"
                 className={`${BUTTON_SECONDARY} justify-self-start`}
@@ -1436,8 +1528,60 @@ function PhotoRequestMessage({
   // server that predates the field means yes, which is what shipped before.
   const shootable = message.shootable !== false
 
+  // Settled: the ask, then the photo (this session's own copy, when there is
+  // one) and its verdict on her side of the chat. A warm-light aside and the
+  // way to replace it stay, small, under her line — a retake in daylight is
+  // the one thing history still has to let her do.
+  if (accepted) {
+    return (
+      <div className="grid gap-2">
+        <ThreadBubble author="APP">{shot.title}</ThreadBubble>
+        {preview ? (
+          <div className="flex justify-end">
+            <RemoteImage
+              src={preview}
+              alt={`Your ${shot.title} photo`}
+              intrinsic
+              className={`${THREAD_MESSAGE_ENTER} h-28 w-28 rounded-2xl rounded-br-md border border-surfaceGlass/10 object-cover`}
+            />
+          </div>
+        ) : null}
+        <ThreadBubble author="CLIENT">{badge.label}</ThreadBubble>
+        {error ? (
+          <p className="ml-auto max-w-[80%] rounded-lg border border-toneDanger/30 bg-toneDanger/10 px-2 py-1.5 text-xs leading-5 text-textPrimary">
+            {error}
+          </p>
+        ) : null}
+        {slot.qualityWarningCode ? (
+          <p className="text-right text-xs leading-5 text-textMuted">
+            {QUALITY_REASON_COPY[slot.qualityWarningCode]} We can still use it —
+            daylight just reads truer, if you get the chance to retake it.
+          </p>
+        ) : null}
+        {shootable ? (
+          <div className="flex justify-end">
+            <label className={`cursor-pointer ${SUBTLE_LINK}`}>
+              Replace this photo
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                disabled={busy}
+                onChange={(event) => {
+                  const file = event.target.files?.[0]
+                  if (file) onUpload(message, file)
+                  event.target.value = ''
+                }}
+              />
+            </label>
+          </div>
+        ) : null}
+      </div>
+    )
+  }
+
   return (
-    <ThreadCard dimmed={accepted}>
+    <ThreadCard>
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
@@ -2678,8 +2822,36 @@ function FollowUpMessage({
   ) => void
 }) {
   const answered = message.selectedValues.length > 0
+  if (answered) {
+    return (
+      <div className="grid gap-2">
+        <ThreadBubble author="APP">
+          {message.attribution ? (
+            <p
+              className="mb-1 text-[11px] font-bold uppercase tracking-wide text-textMuted"
+              data-testid="consult-follow-up-attribution"
+            >
+              {message.attribution}
+            </p>
+          ) : null}
+          <p
+            data-testid="consult-follow-up-question"
+            data-fallback={message.fallback ? 'true' : 'false'}
+          >
+            {message.text}
+          </p>
+        </ThreadBubble>
+        <ThreadBubble author="CLIENT">
+          {message.options
+            .filter((option) => message.selectedValues.includes(option.value))
+            .map((option) => option.label)
+            .join(', ')}
+        </ThreadBubble>
+      </div>
+    )
+  }
   return (
-    <ThreadCard dimmed={answered}>
+    <ThreadCard>
       {message.attribution ? (
         // C2-4 — a question the PRO wrote carries her name, so it never reads
         // as the app's voice. Served, like every other sentence in the thread.
@@ -2697,29 +2869,20 @@ function FollowUpMessage({
       >
         {message.text}
       </p>
-      {answered ? (
-        <p className="mt-2 text-xs leading-5 text-textSecondary">
-          {message.options
-            .filter((option) => message.selectedValues.includes(option.value))
-            .map((option) => option.label)
-            .join(', ')}
-        </p>
-      ) : (
-        <div className="mt-4 grid gap-2">
-          {message.options.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              disabled={busy}
-              data-testid={`consult-follow-up-option-${option.value}`}
-              className={`${BUTTON_SECONDARY} text-left`}
-              onClick={() => onAnswer(message, [option.value])}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-      )}
+      <div className="mt-4 grid gap-2">
+        {message.options.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            disabled={busy}
+            data-testid={`consult-follow-up-option-${option.value}`}
+            className={`${BUTTON_SECONDARY} text-left`}
+            onClick={() => onAnswer(message, [option.value])}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
     </ThreadCard>
   )
 }
