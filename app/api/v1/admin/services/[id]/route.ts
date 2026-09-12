@@ -12,6 +12,12 @@ import { writeAdminAuditLog } from '@/lib/admin/auditLog'
 import { hasAdminPermission } from '@/lib/adminPermissions'
 import { parseMoney } from '@/lib/moneyDecimal'
 import { prisma } from '@/lib/prisma'
+import {
+  ADDITIONAL_CATEGORY_IDS_FIELD,
+  PrimaryCategoryLinkError,
+  parseAdditionalCategoryIds,
+  replaceServiceCategoryLinks,
+} from '@/lib/services/categoryLinks'
 
 export const dynamic = 'force-dynamic'
 
@@ -229,6 +235,7 @@ async function patchFromForm(args: PatchArgs): Promise<Response> {
     'isAddOnEligible',
     'addOnGroup',
     'defaultImageUrl',
+    ADDITIONAL_CATEGORY_IDS_FIELD,
   ])
 
   if (isActivePresent && isActiveParsed !== null && !hasAnyNonToggleField) {
@@ -340,7 +347,11 @@ async function patchFromForm(args: PatchArgs): Promise<Response> {
     }
   }
 
-  if (Object.keys(update).length === 0) {
+  // ABSENT means untouched: a form that does not carry the field cannot wipe
+  // the links by saving. Present (even empty) is the new complete set.
+  const additionalCategoryIds = parseAdditionalCategoryIds(form)
+
+  if (Object.keys(update).length === 0 && additionalCategoryIds === null) {
     return jsonFail(400, 'No valid fields to update')
   }
 
@@ -351,13 +362,45 @@ async function patchFromForm(args: PatchArgs): Promise<Response> {
     })
   }
 
-  await prisma.service.update({
-    where: { id: service.id },
-    data: update,
+  const categoryId = nextCategoryId ?? service.categoryId
+
+  if (additionalCategoryIds !== null) {
+    if (additionalCategoryIds.includes(categoryId)) {
+      return jsonFail(400, new PrimaryCategoryLinkError().message)
+    }
+    for (const linkedCategoryId of additionalCategoryIds) {
+      await assertAdminCategoryScopeOrThrow({ adminUserId, categoryId: linkedCategoryId })
+    }
+  }
+
+  const linkChange = await prisma.$transaction(async (tx) => {
+    if (Object.keys(update).length) {
+      await tx.service.update({
+        where: { id: service.id },
+        data: update,
+      })
+    }
+    if (additionalCategoryIds === null) {
+      // The form did not speak about links, so they stay — except one that now
+      // points at the NEW primary, which is no longer a link by definition.
+      if (nextCategoryId && nextCategoryId !== service.categoryId) {
+        await tx.serviceCategoryLink.deleteMany({
+          where: { serviceId: service.id, categoryId: nextCategoryId },
+        })
+      }
+      return null
+    }
+    return replaceServiceCategoryLinks(tx, {
+      serviceId: service.id,
+      primaryCategoryId: categoryId,
+      categoryIds: additionalCategoryIds,
+    })
   })
 
-  const changedKeys = Object.keys(update)
-  const categoryId = nextCategoryId ?? service.categoryId
+  const changedKeys = [
+    ...Object.keys(update),
+    ...(linkChange && (linkChange.added || linkChange.removed) ? [ADDITIONAL_CATEGORY_IDS_FIELD] : []),
+  ]
 
   await writeAdminAuditLog({
     adminUserId,

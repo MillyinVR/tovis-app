@@ -2949,6 +2949,24 @@ model ServiceCategory {
   lookTrendStat           LookCategoryTrendStat?
   consultSessions         ConsultSession[]
   categoryBookingPolicies ProCategoryBookingPolicy[]
+  /// Services filed under this category as an ADDITIONAL home (see Service.additionalCategoryLinks).
+  linkedServices          ServiceCategoryLink[]
+}
+
+/// A service sitting in a second (or third) category without being duplicated.
+/// A pure join: Tori's 2026-09-12 call — "a straight razor fade is Barbering,
+/// a Cut is Cuts and Barbering". The pair is the key; `Service.categoryId` is
+/// still the one primary category every non-picker reader uses.
+model ServiceCategoryLink {
+  serviceId  String
+  categoryId String
+  createdAt  DateTime @default(now())
+
+  service  Service         @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  category ServiceCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([serviceId, categoryId])
+  @@index([categoryId])
 }
 
 // Per-service-category engagement-rate aggregate — the data source for the
@@ -3163,6 +3181,12 @@ model Service {
 
   lookPosts          LookPost[]
   primaryMediaAssets MediaAsset[] @relation("MediaPrimaryService")
+
+  // The service's OTHER categories. `categoryId` stays the PRIMARY category —
+  // the one the consult, the commitment tier and the category booking policy
+  // read — and a link only adds the service to another category's list in the
+  // library picker. Never a link to the primary itself (write paths refuse it).
+  additionalCategoryLinks ServiceCategoryLink[]
 }
 
 model OfferingAddOn {

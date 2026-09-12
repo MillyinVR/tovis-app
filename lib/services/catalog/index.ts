@@ -79,6 +79,17 @@ export function validateServiceCatalog(catalog: ServiceCatalog): CatalogProblem[
     if (!seenSlugs.has(service.categorySlug)) {
       problems.push({ row: name, problem: `unknown category "${service.categorySlug}"` })
     }
+    for (const also of service.alsoInCategorySlugs) {
+      if (!seenSlugs.has(also)) {
+        problems.push({ row: name, problem: `unknown "also in" category "${also}"` })
+      }
+      if (also === service.categorySlug) {
+        problems.push({ row: name, problem: `"also in" names its own primary category "${also}"` })
+      }
+    }
+    if (new Set(service.alsoInCategorySlugs).size !== service.alsoInCategorySlugs.length) {
+      problems.push({ row: name, problem: 'lists an "also in" category twice' })
+    }
     if (
       !Number.isInteger(service.defaultDurationMinutes) ||
       service.defaultDurationMinutes < CATALOG_MIN_DURATION_MINUTES

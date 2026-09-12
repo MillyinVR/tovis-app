@@ -41,17 +41,17 @@ function syntheticCatalog(tag: string): ServiceCatalog {
     ],
     services: [
       {
-        name: `${tag} Balayage`, categorySlug: `${tag}-color`, defaultDurationMinutes: 180, floorUsd: '150.00',
+        name: `${tag} Balayage`, categorySlug: `${tag}-color`, alsoInCategorySlugs: [], defaultDurationMinutes: 180, floorUsd: '150.00',
         allowMobile: true, isAddOnEligible: false, addOnGroup: null, description: 'Hand-painted.',
         professions: [ProfessionType.COSMETOLOGIST, ProfessionType.HAIRSTYLIST],
       },
       {
-        name: `${tag} Root Smudge`, categorySlug: `${tag}-touch-up`, defaultDurationMinutes: 30, floorUsd: '30.00',
+        name: `${tag} Root Smudge`, categorySlug: `${tag}-touch-up`, alsoInCategorySlugs: [], defaultDurationMinutes: 30, floorUsd: '30.00',
         allowMobile: true, isAddOnEligible: true, addOnGroup: 'Color', description: null,
         professions: [ProfessionType.COSMETOLOGIST],
       },
       {
-        name: `${tag} Cut`, categorySlug: `${tag}-cuts`, defaultDurationMinutes: 45, floorUsd: '35.00',
+        name: `${tag} Cut`, categorySlug: `${tag}-cuts`, alsoInCategorySlugs: [`${tag}-color`], defaultDurationMinutes: 45, floorUsd: '35.00',
         allowMobile: false, isAddOnEligible: false, addOnGroup: null, description: 'A cut.',
         professions: [ProfessionType.COSMETOLOGIST, ProfessionType.BARBER],
       },
@@ -85,6 +85,7 @@ async function readBack(tx: Prisma.TransactionClient, tag: string) {
       name: true, minPrice: true, defaultDurationMinutes: true, allowMobile: true, isAddOnEligible: true,
       addOnGroup: true, description: true, isActive: true, category: { select: { slug: true } },
       permissions: { select: { professionType: true, stateCode: true, mode: true } },
+      additionalCategoryLinks: { select: { category: { select: { slug: true } } } },
     },
   })
   return { categories, services }
@@ -102,12 +103,13 @@ describe('the service catalog seed', () => {
         categories: { create: 3, update: 0, skip: 0 },
         services: { create: 3, update: 0, skip: 0 },
         permissions: 5,
+        links: 1,
         heldBack: 0,
         refusals: 0,
       })
 
       const result = await applyServiceCatalogSeed(tx, plan, { activate: true })
-      expect(result).toEqual({ categoriesCreated: 3, categoriesUpdated: 0, servicesCreated: 3, servicesUpdated: 0, permissionsCreated: 5 })
+      expect(result).toEqual({ categoriesCreated: 3, categoriesUpdated: 0, servicesCreated: 3, servicesUpdated: 0, permissionsCreated: 5, linksCreated: 1 })
 
       const { categories, services } = await readBack(tx, tag)
       expect(categories.map((c) => [c.slug, c.isActive, c.parent?.slug ?? null])).toEqual([
@@ -123,6 +125,8 @@ describe('the service catalog seed', () => {
       })
       const cut = services.find((s) => s.name === `${tag} Cut`)
       expect(cut?.permissions.map((p) => p.professionType).sort()).toEqual([ProfessionType.BARBER, ProfessionType.COSMETOLOGIST])
+      expect(cut?.category.slug).toBe(`${tag}-cuts`)
+      expect(cut?.additionalCategoryLinks.map((l) => l.category.slug)).toEqual([`${tag}-color`])
 
       // Second run: everything is a skip, nothing to write.
       const again = await planServiceCatalogSeed(tx, catalog, OPEN)
@@ -130,11 +134,12 @@ describe('the service catalog seed', () => {
         categories: { create: 0, update: 0, skip: 3 },
         services: { create: 0, update: 0, skip: 3 },
         permissions: 0,
+        links: 0,
         heldBack: 0,
         refusals: 0,
       })
       const second = await applyServiceCatalogSeed(tx, again, { activate: true })
-      expect(second).toEqual({ categoriesCreated: 0, categoriesUpdated: 0, servicesCreated: 0, servicesUpdated: 0, permissionsCreated: 0 })
+      expect(second).toEqual({ categoriesCreated: 0, categoriesUpdated: 0, servicesCreated: 0, servicesUpdated: 0, permissionsCreated: 0, linksCreated: 0 })
     })
   })
 
@@ -263,6 +268,28 @@ describe('the service catalog seed', () => {
       expect(plan.refusals.map((r) => r.problem)).toContain('floor must be a non-negative amount with exactly two decimals')
       await expect(applyServiceCatalogSeed(tx, plan, { activate: true })).rejects.toBeInstanceOf(ServiceCatalogRefusedError)
       expect((await readBack(tx, tag)).categories).toEqual([])
+    })
+  })
+
+  it('adds missing "also in" links and leaves an admin-added link alone', async () => {
+    await rolledBack(async (tx, tag) => {
+      const catalog = syntheticCatalog(tag)
+      const cuts = await tx.serviceCategory.create({ data: { slug: `${tag}-cuts`, name: 'Cuts', description: 'Cuts.', consultFamily: ConsultServiceFamily.HAIR } })
+      const extra = await tx.serviceCategory.create({ data: { slug: `${tag}-extra`, name: 'Extra', description: 'Admin-made.', consultFamily: ConsultServiceFamily.HAIR } })
+      const cut = await tx.service.create({ data: { name: `${tag} Cut`, categoryId: cuts.id, defaultDurationMinutes: 45, minPrice: new Prisma.Decimal('35.00'), description: 'A cut.' } })
+      await tx.serviceCategoryLink.create({ data: { serviceId: cut.id, categoryId: extra.id } })
+
+      const plan = await planServiceCatalogSeed(tx, catalog, OPEN)
+      expect(plan.links).toEqual([{ serviceName: `${tag} Cut`, add: [`${tag}-color`], extra: [`${tag}-extra`] }])
+      const result = await applyServiceCatalogSeed(tx, plan, { activate: true })
+      expect(result.linksCreated).toBe(1)
+      const links = await tx.serviceCategoryLink.findMany({ where: { serviceId: cut.id }, select: { category: { select: { slug: true } } } })
+      expect(links.map((l) => l.category.slug).sort()).toEqual([`${tag}-color`, `${tag}-extra`])
+
+      // Re-plan: the extra is still reported, nothing more to add, apply is a no-op.
+      const again = await planServiceCatalogSeed(tx, catalog, OPEN)
+      expect(again.links).toEqual([{ serviceName: `${tag} Cut`, add: [], extra: [`${tag}-extra`] }])
+      expect((await applyServiceCatalogSeed(tx, again, { activate: true })).linksCreated).toBe(0)
     })
   })
 

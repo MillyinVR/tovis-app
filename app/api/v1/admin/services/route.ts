@@ -11,6 +11,11 @@ import { writeAdminAuditLog } from '@/lib/admin/auditLog'
 import { hasAdminPermission } from '@/lib/adminPermissions'
 import { parseMoney } from '@/lib/moneyDecimal'
 import { prisma } from '@/lib/prisma'
+import {
+  PrimaryCategoryLinkError,
+  parseAdditionalCategoryIds,
+  replaceServiceCategoryLinks,
+} from '@/lib/services/categoryLinks'
 
 export const dynamic = 'force-dynamic'
 
@@ -119,17 +124,24 @@ export async function POST(req: NextRequest) {
       return jsonFail(400, 'Invalid defaultDurationMinutes')
     }
 
-    const okCategory = await hasAdminPermission({
-      adminUserId: user.id,
-      allowedRoles: [
-        AdminPermissionRole.SUPER_ADMIN,
-        AdminPermissionRole.SUPPORT,
-      ],
-      scope: { categoryId },
-    })
-
-    if (!okCategory) {
-      return jsonFail(403, 'Forbidden')
+    // The primary category and every ADDITIONAL one the service is listed
+    // under must each be inside the admin's scope.
+    const additionalCategoryIds = parseAdditionalCategoryIds(form) ?? []
+    if (additionalCategoryIds.includes(categoryId)) {
+      return jsonFail(400, new PrimaryCategoryLinkError().message)
+    }
+    for (const scopedCategoryId of [categoryId, ...additionalCategoryIds]) {
+      const okCategory = await hasAdminPermission({
+        adminUserId: user.id,
+        allowedRoles: [
+          AdminPermissionRole.SUPER_ADMIN,
+          AdminPermissionRole.SUPPORT,
+        ],
+        scope: { categoryId: scopedCategoryId },
+      })
+      if (!okCategory) {
+        return jsonFail(403, 'Forbidden')
+      }
     }
 
     let minPrice: Prisma.Decimal
@@ -140,24 +152,34 @@ export async function POST(req: NextRequest) {
       return jsonFail(400, 'Invalid minPrice. Use e.g. 45 or 45.00')
     }
 
-    const created = await prisma.service.create({
-      data: {
-        name,
-        categoryId,
-        description: description || null,
-        defaultDurationMinutes,
-        minPrice,
-        defaultImageUrl,
-        allowMobile,
-        isActive: true,
-        isAddOnEligible,
-        addOnGroup,
-      },
-      select: {
-        id: true,
-        name: true,
-        categoryId: true,
-      },
+    const created = await prisma.$transaction(async (tx) => {
+      const row = await tx.service.create({
+        data: {
+          name,
+          categoryId,
+          description: description || null,
+          defaultDurationMinutes,
+          minPrice,
+          defaultImageUrl,
+          allowMobile,
+          isActive: true,
+          isAddOnEligible,
+          addOnGroup,
+        },
+        select: {
+          id: true,
+          name: true,
+          categoryId: true,
+        },
+      })
+      if (additionalCategoryIds.length) {
+        await replaceServiceCategoryLinks(tx, {
+          serviceId: row.id,
+          primaryCategoryId: row.categoryId,
+          categoryIds: additionalCategoryIds,
+        })
+      }
+      return row
     })
 
     await writeAdminAuditLog({
@@ -165,10 +187,13 @@ export async function POST(req: NextRequest) {
       serviceId: created.id,
       categoryId: created.categoryId,
       action: 'SERVICE_CREATED',
-      note: 'Service created',
+      note: additionalCategoryIds.length
+        ? `Service created; also listed under ${additionalCategoryIds.length} more categor${additionalCategoryIds.length === 1 ? 'y' : 'ies'}`
+        : 'Service created',
       metadata: {
         serviceId: created.id,
         categoryId: created.categoryId,
+        additionalCategoryIds,
         serviceName: created.name,
       },
     }).catch(() => null)

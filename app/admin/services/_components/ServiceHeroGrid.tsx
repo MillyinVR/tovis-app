@@ -49,6 +49,7 @@ type ServiceDTO = {
   addOnGroup: string | null
   categoryId: string | null
   categoryName: string | null
+  additionalCategoryIds: string[]
 }
 
 type ToastState = {
@@ -411,6 +412,7 @@ function buildServiceBaseline(service: ServiceDTO) {
     name: service.name.trim(),
     description: service.description ?? '',
     categoryId: service.categoryId ?? '',
+    additionalCategoryIds: [...service.additionalCategoryIds].sort().join(','),
     defaultDurationMinutes: service.defaultDurationMinutes
       ? String(service.defaultDurationMinutes)
       : '',
@@ -898,6 +900,9 @@ const ServiceEditForm = forwardRef<
   const [name, setName] = useState(service.name)
   const [description, setDescription] = useState(service.description ?? '')
   const [categoryId, setCategoryId] = useState(service.categoryId ?? '')
+  const [additionalCategoryIds, setAdditionalCategoryIds] = useState<string[]>(
+    service.additionalCategoryIds,
+  )
   const [defaultDurationMinutes, setDefaultDurationMinutes] = useState(
     service.defaultDurationMinutes ? String(service.defaultDurationMinutes) : '',
   )
@@ -922,6 +927,7 @@ const ServiceEditForm = forwardRef<
       name.trim() !== baseline.name ||
       description !== baseline.description ||
       categoryId !== baseline.categoryId ||
+      [...additionalCategoryIds].sort().join(',') !== baseline.additionalCategoryIds ||
       defaultDurationMinutes !== baseline.defaultDurationMinutes ||
       minPrice !== baseline.minPrice ||
       Boolean(allowMobile) !== Boolean(baseline.allowMobile) ||
@@ -934,6 +940,7 @@ const ServiceEditForm = forwardRef<
     name,
     description,
     categoryId,
+    additionalCategoryIds,
     defaultDurationMinutes,
     minPrice,
     allowMobile,
@@ -1069,6 +1076,8 @@ const ServiceEditForm = forwardRef<
       name: cleanName,
       description: description.trim() || '',
       categoryId: categoryId || '',
+      // The primary can never also be a link; drop it if the primary just changed onto it.
+      additionalCategoryIds: additionalCategoryIds.filter((id) => id !== categoryId).join(','),
       defaultDurationMinutes: defaultDurationMinutes || '',
       minPrice: minPrice || '',
       allowMobile: allowMobile ? 'true' : 'false',
@@ -1082,6 +1091,7 @@ const ServiceEditForm = forwardRef<
     defaultImageUrl,
     description,
     categoryId,
+    additionalCategoryIds,
     defaultDurationMinutes,
     minPrice,
     allowMobile,
@@ -1210,6 +1220,45 @@ const ServiceEditForm = forwardRef<
             ))}
           </select>
         </label>
+
+        <fieldset className="grid gap-1">
+          <legend className="text-xs font-extrabold text-textSecondary">
+            Also list under
+          </legend>
+          <div className="text-[11px] text-textSecondary">
+            The same service, shown in more categories of the library. It stays one row; the category above remains its home.
+          </div>
+          <div className="grid gap-1 sm:grid-cols-2">
+            {categories
+              .filter((category) => category.id !== categoryId)
+              .map((category) => {
+                const checked = additionalCategoryIds.includes(category.id)
+                return (
+                  <label
+                    key={category.id}
+                    className="flex items-center gap-2 rounded-xl border border-surfaceGlass/10 bg-bgPrimary/20 px-3 py-2 text-xs text-textPrimary"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      disabled={busy}
+                      onChange={(event) =>
+                        setAdditionalCategoryIds((current) =>
+                          event.target.checked
+                            ? [...current, category.id]
+                            : current.filter((id) => id !== category.id),
+                        )
+                      }
+                    />
+                    <span>
+                      {category.parentId ? '↳ ' : ''}
+                      {category.name}
+                    </span>
+                  </label>
+                )
+              })}
+          </div>
+        </fieldset>
 
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="grid gap-1">

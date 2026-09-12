@@ -17,15 +17,15 @@ import {
   type ServiceCatalog,
 } from './index'
 import { HAIR_CATALOG_CATEGORIES, HAIR_SAFETY_TEST_SERVICES } from './hair'
-import { HAIR_CUTS_CATEGORY_SLUG, HAIR_TREATMENT_CATEGORY_SLUG } from './slugs'
+import { HAIR_CUTS_CATEGORY_SLUG, HAIR_HAIRCUT_CATEGORY_SLUG, HAIR_TREATMENT_CATEGORY_SLUG } from './slugs'
 
 /**
  * Production's twelve rows as they stood on 2026-09-12 (SQL against
- * rqhhvuaoksuvbvlypztn). The catalog must carry them VERBATIM: the seed never
- * renames (name is the unique key — a respelling is a second row) and holds a
- * floor change back (a floor is enforced against every live offering). If one
- * of these needs to change, that is a decision, made by editing this list and
- * the catalog together — not a drive-by.
+ * rqhhvuaoksuvbvlypztn). The catalog must carry their NAMES, DURATIONS and
+ * FLOORS verbatim: the seed never renames (name is the unique key — a
+ * respelling is a second row) and holds a floor change back (a floor is
+ * enforced against every live offering). Each row's category is the one it
+ * lives in today; the ONE deliberate move is listed separately below.
  */
 const PROD_ROWS_2026_09_12: ReadonlyArray<[name: string, categorySlug: string, minutes: number, floor: string]> = [
   ['Beard Trim', 'cuts', 20, '20.00'],
@@ -41,6 +41,13 @@ const PROD_ROWS_2026_09_12: ReadonlyArray<[name: string, categorySlug: string, m
   ['iTip install', 'hair-extensions', 120, '300.00'],
   ['iTip Maintenance', 'hair-extensions', 60, '200.00'],
 ]
+
+/**
+ * Tori's 2026-09-12 call: the generic "Cut" is a salon cut first. The seed
+ * applies a category move only with --force, so this is a visible step in the
+ * prod run, not a side effect. It stays listed under Barbering through a link.
+ */
+const DELIBERATE_CATEGORY_MOVES: ReadonlyMap<string, string> = new Map([['Cut', HAIR_HAIRCUT_CATEGORY_SLUG]])
 
 const PROD_CATEGORY_SLUGS_2026_09_12 = ['cuts', 'hair-color', 'hair-extensions']
 
@@ -58,7 +65,11 @@ describe('the hair service catalog', () => {
   it("carries production's existing rows verbatim", () => {
     for (const [name, categorySlug, minutes, floor] of PROD_ROWS_2026_09_12) {
       const row = byName(name)
-      expect(row.categorySlug, name).toBe(categorySlug)
+      expect(row.categorySlug, name).toBe(DELIBERATE_CATEGORY_MOVES.get(name) ?? categorySlug)
+      if (DELIBERATE_CATEGORY_MOVES.has(name)) {
+        // Still browsable where prod has it today.
+        expect(row.alsoInCategorySlugs, name).toContain(categorySlug)
+      }
       expect(row.defaultDurationMinutes, name).toBe(minutes)
       expect(row.floorUsd, name).toBe(floor)
     }
@@ -71,6 +82,23 @@ describe('the hair service catalog', () => {
     expect(new Set(HAIR_CATALOG_CATEGORIES.map((c) => c.consultFamily))).toEqual(
       new Set([ConsultServiceFamily.HAIR]),
     )
+  })
+
+  it('splits Barbering from Cuts and lets a cut live in both without a second row', () => {
+    expect(HAIR_CATALOG_CATEGORIES.find((c) => c.slug === HAIR_CUTS_CATEGORY_SLUG)?.name).toBe('Barbering')
+    expect(HAIR_CATALOG_CATEGORIES.find((c) => c.slug === HAIR_HAIRCUT_CATEGORY_SLUG)?.name).toBe('Cuts')
+    expect(byName('Straight Razor Fade').categorySlug).toBe(HAIR_CUTS_CATEGORY_SLUG)
+    expect(byName('Womens Cut & Style').categorySlug).toBe(HAIR_HAIRCUT_CATEGORY_SLUG)
+    expect(byName('Mens Cut')).toMatchObject({ categorySlug: HAIR_CUTS_CATEGORY_SLUG, alsoInCategorySlugs: [HAIR_HAIRCUT_CATEGORY_SLUG] })
+    expect(byName('Cut')).toMatchObject({ categorySlug: HAIR_HAIRCUT_CATEGORY_SLUG, alsoInCategorySlugs: [HAIR_CUTS_CATEGORY_SLUG] })
+    // A link never points at the row's own primary, and every link is a known category.
+    const slugs = new Set(HAIR_CATALOG_CATEGORIES.map((c) => c.slug))
+    for (const row of SERVICE_CATALOG.services) {
+      for (const also of row.alsoInCategorySlugs) {
+        expect(also, row.name).not.toBe(row.categorySlug)
+        expect(slugs.has(also), `${row.name} → ${also}`).toBe(true)
+      }
+    }
   })
 
   it('covers cuts, colour, extensions, treatments, styling and braids', () => {
@@ -114,8 +142,11 @@ describe('the hair service catalog', () => {
     expect(deep.categorySlug).toBe(HAIR_TREATMENT_CATEGORY_SLUG)
     expect(isStrandTestOptionalAddOn({ categorySlug: deep.categorySlug, serviceName: deep.name })).toBe(true)
     const cut = byName('Womens Cut & Style')
-    expect(cut.categorySlug).toBe(HAIR_CUTS_CATEGORY_SLUG)
+    expect(cut.categorySlug).toBe(HAIR_HAIRCUT_CATEGORY_SLUG)
     expect(isStrandTestOptionalAddOn({ categorySlug: cut.categorySlug, serviceName: cut.name })).toBe(true)
+    const fade = byName('Straight Razor Fade')
+    expect(fade.categorySlug).toBe(HAIR_CUTS_CATEGORY_SLUG)
+    expect(isStrandTestOptionalAddOn({ categorySlug: fade.categorySlug, serviceName: fade.name })).toBe(true)
     const keratin = byName('Keratin Smoothing Treatment')
     expect(isStrandTestOptionalAddOn({ categorySlug: keratin.categorySlug, serviceName: keratin.name })).toBe(false)
   })
@@ -140,7 +171,9 @@ describe('the hair service catalog', () => {
     for (const row of SERVICE_CATALOG.services) {
       expect(row.professions, row.name).toContain(ProfessionType.COSMETOLOGIST)
       expect(row.professions, row.name).toContain(ProfessionType.HAIRSTYLIST)
-      expect(row.professions.includes(ProfessionType.BARBER), row.name).toBe(row.categorySlug === HAIR_CUTS_CATEGORY_SLUG)
+      expect(row.professions.includes(ProfessionType.BARBER), row.name).toBe(
+        row.categorySlug === HAIR_CUTS_CATEGORY_SLUG || row.categorySlug === HAIR_HAIRCUT_CATEGORY_SLUG,
+      )
       expect(row.professions.includes(ProfessionType.HAIR_BRAIDER), row.name).toBe(row.categorySlug === 'braiding')
     }
   })
@@ -150,13 +183,14 @@ describe('validateServiceCatalog', () => {
   const parent: CatalogCategory = { slug: 'parent', name: 'Parent', description: 'p', parentSlug: null, consultFamily: ConsultServiceFamily.HAIR }
   const child: CatalogCategory = { slug: 'child', name: 'Child', description: 'c', parentSlug: 'parent', consultFamily: ConsultServiceFamily.HAIR }
   const row: CatalogService = {
-    name: 'Row One', categorySlug: 'child', defaultDurationMinutes: 30, floorUsd: '10.00', allowMobile: true,
-    isAddOnEligible: false, addOnGroup: null, description: null, professions: [ProfessionType.COSMETOLOGIST],
+    name: 'Row One', categorySlug: 'child', alsoInCategorySlugs: [], defaultDurationMinutes: 30, floorUsd: '10.00',
+    allowMobile: true, isAddOnEligible: false, addOnGroup: null, description: null, professions: [ProfessionType.COSMETOLOGIST],
   }
   const base: ServiceCatalog = { categories: [parent, child], services: [row] }
 
-  it('accepts a well-formed catalog', () => {
+  it('accepts a well-formed catalog, including a link to another category', () => {
     expect(validateServiceCatalog(base)).toEqual([])
+    expect(validateServiceCatalog({ ...base, services: [{ ...row, alsoInCategorySlugs: ['parent'] }] })).toEqual([])
   })
 
   it.each<[string, ServiceCatalog, string]>([
@@ -175,6 +209,9 @@ describe('validateServiceCatalog', () => {
     ['an empty description', { ...base, services: [{ ...row, description: ' ' }] }, 'use null'],
     ['a row granting no licence', { ...base, services: [{ ...row, professions: [] }] }, 'grants no licence'],
     ['a padded name', { ...base, services: [{ ...row, name: ' Row One' }] }, 'surrounding whitespace'],
+    ['an unknown "also in" category', { ...base, services: [{ ...row, alsoInCategorySlugs: ['nope'] }] }, 'unknown "also in" category'],
+    ['an "also in" equal to the primary', { ...base, services: [{ ...row, alsoInCategorySlugs: ['child'] }] }, 'names its own primary'],
+    ['a repeated "also in"', { ...base, services: [{ ...row, alsoInCategorySlugs: ['parent', 'parent'] }] }, 'lists an "also in" category twice'],
   ])('refuses %s', (_label, catalog, problem) => {
     const problems = validateServiceCatalog(catalog)
     expect(problems.map((p) => p.problem).join('\n')).toContain(problem)
