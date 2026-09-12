@@ -9,7 +9,7 @@ import ClientConsultFlow from './ClientConsultFlow'
 
 afterEach(() => vi.unstubAllGlobals())
 
-it('saves a typed correction and retains it as chat history, with later steps still on screen', async () => {
+it('saves a typed correction and retains it as chat history, and only then shows the next step', async () => {
   vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })))
   const original = cardInspiration.cards!.find(card => card.questionKey === 'attr_tone')!
   const card = { ...original, selectedValues: [], selectedText: null, question: { ...original.question, allowText: true } }
@@ -30,13 +30,17 @@ it('saves a typed correction and retains it as chat history, with later steps st
   }))
   render(<BrandProvider><ClientConsultFlow consultId={thread.consultId} copy={defaultClientConsultThreadCopy} /></BrandProvider>)
   const input = await screen.findByRole('textbox', { name: 'Say it in your own words' })
-  // Later steps stay on the page, locked — the thread is not a wizard (P5a).
-  expect(screen.getByText('Now a few of you, in daylight if you can.')).toBeInTheDocument()
+  // ONE thing at a time (Tori, 2026-09-11): the step after this card is not on
+  // the page until this one is answered.
+  expect(screen.queryByText('Now a few of you, in daylight if you can.')).not.toBeInTheDocument()
   fireEvent.change(input, { target: { value: 'The hair is warmer; that is her clothing.' } })
   fireEvent.click(screen.getByRole('button', { name: /^Next$/ }))
   await waitFor(() => expect(saved).toMatchObject({ selectedValues: [], text: 'The hair is warmer; that is her clothing.' }))
   await screen.findByText('The hair is warmer; that is her clothing.')
   expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+  // The answered card is history now — the question and her words as two
+  // bubbles — and the next step has arrived beneath it.
+  expect(screen.getByText('Is this part of what you like?')).toBeInTheDocument()
   expect(screen.getByText('Now a few of you, in daylight if you can.')).toBeInTheDocument()
 })
 
@@ -88,5 +92,5 @@ it('shows the app’s one sentence about a flagged reference, between the pictur
   const note = await screen.findByText(sentence)
   expect(note).toBeInTheDocument()
   // The cards are still asked — a flag is a note, not a refusal.
-  expect(screen.getByText('Now a few of you, in daylight if you can.')).toBeInTheDocument()
+  expect(screen.getByText('What made you stop scrolling?')).toBeInTheDocument()
 })

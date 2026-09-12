@@ -22,6 +22,7 @@ import {
   CONSULT_FIXTURE_ID,
   regionPickerInspiration,
   threadFixture,
+  withCardsAnswered,
 } from './fixtures/consultInspiration'
 
 const BASE = `/api/v1/client/consult/${CONSULT_FIXTURE_ID}`
@@ -32,7 +33,15 @@ const IMAGE_BYTES = Buffer.from(
   'base64',
 )
 
-async function stubConsult(page: Page) {
+/**
+ * The chat shows one step at a time, so each describe starts from the thread
+ * that has REACHED its step: the region picker as the open card, or — with the
+ * cards answered and the plan built — the follow-up round.
+ */
+async function stubConsult(
+  page: Page,
+  fixture: Parameters<typeof threadFixture>[0] = { inspiration: regionPickerInspiration },
+) {
   const followUpPosts: unknown[] = []
   await page.route(`**${BASE}/inspiration/media`, async (route: Route) =>
     route.fulfill({
@@ -57,18 +66,16 @@ async function stubConsult(page: Page) {
     route.fulfill({ json: { ok: true, inspiration: regionPickerInspiration, replayed: false } }),
   )
   await page.route(`**${BASE}/thread`, async (route: Route) =>
-    route.fulfill({
-      json: {
-        ok: true,
-        thread: threadFixture({
-          inspiration: regionPickerInspiration,
-          plan: { version: 1 },
-          followUps: true,
-        }),
-      },
-    }),
+    route.fulfill({ json: { ok: true, thread: threadFixture(fixture) } }),
   )
   return { followUpPosts }
+}
+
+/** The thread after the plan: every card answered, the follow-ups begun. */
+const AFTER_THE_PLAN: Parameters<typeof threadFixture>[0] = {
+  inspiration: withCardsAnswered(regionPickerInspiration),
+  plan: { version: 1 },
+  followUps: true,
 }
 
 test.describe('P5g — tap what you love', () => {
@@ -189,7 +196,7 @@ test.describe('P5g — the adaptive follow-ups', () => {
   test('renders as question cards after the plan, one open at a time', async ({
     page,
   }) => {
-    await stubConsult(page)
+    await stubConsult(page, AFTER_THE_PLAN)
     await page.goto(`/client/consult/${CONSULT_FIXTURE_ID}`)
 
     const questions = page.getByTestId('consult-follow-up-question')
@@ -205,10 +212,14 @@ test.describe('P5g — the adaptive follow-ups', () => {
     }).first().boundingBox()) ?? (await page.getByTestId('consult-follow-up-question').first().boundingBox())!
     const firstQuestionBox = (await questions.first().boundingBox())!
     expect(firstQuestionBox.y).toBeGreaterThan(planBox.y)
+    // One open at a time means ONE on screen: the second round is not on the
+    // page until the first is answered.
+    await expect(questions).toHaveCount(1)
   })
 
   test('🔴 the fallback says so, out loud', async ({ page }) => {
-    await stubConsult(page)
+    // Round 1 answered, so the fallback round is the open step.
+    await stubConsult(page, { ...AFTER_THE_PLAN, followUps: { openRound: 2 } })
     await page.goto(`/client/consult/${CONSULT_FIXTURE_ID}`)
 
     // Part 0 rule 4 forbids a silent fallback, and one she cannot see is a
@@ -226,7 +237,7 @@ test.describe('P5g — the adaptive follow-ups', () => {
   })
 
   test('answering posts the key and the enum, and nothing else', async ({ page }) => {
-    const { followUpPosts } = await stubConsult(page)
+    const { followUpPosts } = await stubConsult(page, AFTER_THE_PLAN)
     await page.goto(`/client/consult/${CONSULT_FIXTURE_ID}`)
 
     await page.getByTestId('consult-follow-up-option-within-3-months').click()
@@ -246,7 +257,7 @@ test.describe('P5g — the adaptive follow-ups', () => {
   })
 
   test('there is no way to type a follow-up answer', async ({ page }) => {
-    await stubConsult(page)
+    await stubConsult(page, AFTER_THE_PLAN)
     await page.goto(`/client/consult/${CONSULT_FIXTURE_ID}`)
     const card = page
       .getByTestId('consult-follow-up-question')

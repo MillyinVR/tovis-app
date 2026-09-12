@@ -42,7 +42,19 @@ const IMAGE_BYTES = Buffer.from(
   'base64',
 )
 
-async function stubCardConsult(page: Page) {
+/**
+ * The chat shows one step at a time. `cardInspiration` opens on the spark card;
+ * `PREP_CARD_OPEN` is the same consult one answer later, standing on the prep
+ * card with its crop and its plain word.
+ */
+const PREP_CARD_OPEN = {
+  ...cardInspiration,
+  cards: (cardInspiration.cards ?? []).map((card, index) =>
+    index === 0 ? { ...card, selectedValues: ['the-color'] } : card,
+  ),
+}
+
+async function stubCardConsult(page: Page, inspiration = cardInspiration) {
   await page.route(`**${BASE}/inspiration/media`, async (route: Route) =>
     route.fulfill({
       json: {
@@ -62,7 +74,7 @@ async function stubCardConsult(page: Page) {
   })
   await page.route(`**${BASE}/thread`, async (route: Route) =>
     route.fulfill({
-      json: { ok: true, thread: threadFixture({ inspiration: cardInspiration }) },
+      json: { ok: true, thread: threadFixture({ inspiration }) },
     }),
   )
   return { mediaReads: () => mediaReads }
@@ -70,7 +82,7 @@ async function stubCardConsult(page: Page) {
 
 test.describe('consult inspiration cards', () => {
   test('shows the crop, then the plain word, then the question', async ({ page }) => {
-    await stubCardConsult(page)
+    await stubCardConsult(page, PREP_CARD_OPEN)
     await page.goto(`/client/consult/${CONSULT_FIXTURE_ID}`)
 
     const name = page.getByTestId('consult-inspiration-card-name')
@@ -163,17 +175,17 @@ test.describe('consult inspiration cards', () => {
   })
 
   test('fetches the reference ONCE for every card on the thread', async ({ page }) => {
-    const { mediaReads } = await stubCardConsult(page)
+    const { mediaReads } = await stubCardConsult(page, PREP_CARD_OPEN)
     await page.goto(`/client/consult/${CONSULT_FIXTURE_ID}`)
     await expect(
       page.getByTestId('consult-inspiration-card-name'),
     ).toBeVisible()
     await page.waitForTimeout(1_500)
-    // The thread renders the step's own panel plus two cards, one of which has
-    // four option crops — seven images of one photograph. They all point at the
-    // SAME signed URL, so the browser fetches the bytes once and paints them
-    // seven times. A per-card signed read would be the P1 refetch bug arrived
-    // at from the other direction.
+    // The chat paints the reference as her own photo in the history, then
+    // again as the prep card's crop — two images of one photograph, and every
+    // later card will be another. They all point at the SAME signed URL, so
+    // the browser fetches the bytes once. A per-card signed read would be the
+    // P1 refetch bug arrived at from the other direction.
     expect(mediaReads()).toBeLessThanOrEqual(2)
   })
 

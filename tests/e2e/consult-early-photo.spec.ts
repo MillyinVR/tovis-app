@@ -28,6 +28,7 @@ import {
   cardInspiration,
   CONSULT_FIXTURE_ID,
   threadFixture,
+  withCardsAnswered,
 } from './fixtures/consultInspiration'
 
 const BASE = `/api/v1/client/consult/${CONSULT_FIXTURE_ID}`
@@ -45,6 +46,11 @@ async function stubThread(
     earlyPhoto: EarlyPhoto
     bookEnabled: boolean
     status?: 'EARLY_PHOTO_READY' | 'MEDIA_READY'
+    /**
+     * The chat shows one step at a time, so a spec about the early photo AS
+     * the open step starts from a thread whose cards are answered.
+     */
+    cardsAnswered?: boolean
   },
 ): Promise<void> {
   await page.route(`**${BASE}/inspiration/media`, async (route: Route) =>
@@ -64,7 +70,7 @@ async function stubThread(
       json: {
         ok: true,
         thread: threadFixture({
-          inspiration: cardInspiration,
+          inspiration: args.cardsAnswered ? withCardsAnswered(cardInspiration) : cardInspiration,
           earlyPhoto: args.earlyPhoto,
           bookEnabled: args.bookEnabled,
           status: args.status ?? 'MEDIA_READY',
@@ -91,13 +97,14 @@ const accepted = (warningCode: string | null): EarlyPhoto => ({
 })
 
 test.describe('P7a-1 the early photo', () => {
-  test('renders after the coarse cards and BEFORE the intake and the guided pack', async ({
+  test('renders after the coarse cards, as the open step, with the guided pack not yet on screen', async ({
     page,
   }) => {
     await stubThread(page, {
       earlyPhoto: null,
       bookEnabled: false,
       status: 'EARLY_PHOTO_READY',
+      cardsAnswered: true,
     })
     await page.goto(`/client/consult/${CONSULT_FIXTURE_ID}`)
 
@@ -131,7 +138,10 @@ test.describe('P7a-1 the early photo', () => {
     expect(early, 'the early photo message is on the page').toBeGreaterThan(-1)
     expect(lastCard, 'the coarse cards are on the page').toBeGreaterThan(-1)
     expect(early).toBeGreaterThan(lastCard)
-    if (firstGuided > -1) expect(early).toBeLessThan(firstGuided)
+    // One thing at a time: the guided pack comes AFTER this photo, so it is
+    // not on the page until this photo is in.
+    expect(firstGuided, 'the guided pack is not on screen yet').toBe(-1)
+    expect(ids[ids.length - 1], 'the early photo is the newest message').toBe('photo:early_photo')
   })
 
   test('a warm-lit camera-roll selfie is ACCEPTED with a warning and unlocks a PRESSABLE Book', async ({
@@ -181,6 +191,7 @@ test.describe('P7a-1 the early photo', () => {
       },
       bookEnabled: false,
       status: 'EARLY_PHOTO_READY',
+      cardsAnswered: true,
     })
     await page.goto(`/client/consult/${CONSULT_FIXTURE_ID}`)
 

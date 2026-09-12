@@ -179,8 +179,9 @@ async function tapsToThePhotoStep(
     // ("Never", "No"), so a label search finds one question's buttons and
     // attributes them to five.
     //
-    // An answered question keeps its card and its heading — that is the thread —
-    // but loses its options, so exactly one intake message is ever tappable.
+    // An answered question collapses into its question-and-answer bubbles —
+    // that is the chat — and loses its options, so exactly one intake message
+    // is ever tappable.
     const tappable = Array.from(
       document.querySelectorAll('[data-thread-message^="intake:"]'),
     ).filter((node) => node.querySelectorAll('button').length > 0)
@@ -235,10 +236,20 @@ describe('the web consult intake, one question at a time', () => {
       family: 'HAIR',
     })
     await tapsToThePhotoStep(pack)
-    // The wizard replaced each question with the next one. A thread keeps them:
-    // the client's own answers are still there to scroll back to.
-    const answered = screen.getAllByRole('heading', { level: 3 })
+    // The wizard replaced each question with the next one. A chat keeps them:
+    // every question is still on the page as history, each with the client's
+    // own answer beside it to scroll back to.
+    const answered = document.querySelectorAll('[data-thread-message^="intake:"]')
     expect(answered.length).toBe(pack.questions.length)
+    // The labels are the SERVED ones (the client-language rewording), which is
+    // what she tapped and what her bubble echoes.
+    for (const question of toConsultIntakeQuestionPackDTO(pack).questions) {
+      const slot = document.querySelector(
+        `[data-thread-message="intake:${question.key}"]`,
+      )
+      expect(slot?.textContent).toContain(question.label)
+      expect(slot?.textContent).toContain(question.options[0]!.label)
+    }
   })
 
   // The product principle, measured: sixteen taps to reach the camera was a
