@@ -23,3 +23,8 @@ ALTER TABLE "ServiceCategoryLink"
 ALTER TABLE "ServiceCategoryLink"
   ADD CONSTRAINT "ServiceCategoryLink_categoryId_fkey"
   FOREIGN KEY ("categoryId") REFERENCES "ServiceCategory"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- Server-only like every other table here: RLS on, no policies (the deny-all
+-- posture tests/integration/database-hardening.test.ts enforces on every
+-- public table — a table created after 20260901000000 does not inherit it).
+ALTER TABLE "ServiceCategoryLink" ENABLE ROW LEVEL SECURITY;
