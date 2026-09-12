@@ -48,7 +48,7 @@ export function cleanText(value: unknown, max: number): string {
 export function enumValue<const T extends readonly string[]>(
   value: unknown,
   values: T,
-  onInvalid: () => never = () => { throw new ConsultAnalysisProviderError('bad_output') },
+  onInvalid: () => never = () => { throw new ConsultAnalysisProviderError('bad_output', 'enum') },
 ): T[number] {
   const matched = values.find((candidate) => candidate === value)
   if (!matched) return onInvalid()

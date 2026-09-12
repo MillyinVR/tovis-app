@@ -1,5 +1,5 @@
 import { ConsultServiceFamily, Prisma } from '@prisma/client'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import type { ConsultAnalysisPayloadDTO, ConsultCaptureShotKeyDTO } from '@/lib/dto/consult'
 import { ConsultAnalysisProviderError } from './analysisValidation'
@@ -218,6 +218,47 @@ describe('look-plan boundaries', () => {
     for (const featureEvidence of [['profile.eyeColor'], ['identity'], ['profile.skinUndertone', 'profile.skinUndertone']]) {
       expect(() => sanitizeConsultLookPlan({ ...raw, paths: [{ ...path, featureEvidence }] }, context())).toThrow(ConsultAnalysisProviderError)
     }
+  })
+
+  it('reads paths drawn against an empty menu as "no matching offering" instead of refusing', () => {
+    // `maxItems: 0` is stripped at the boundary, so the model can still draw a
+    // path whose services can only be null. Nothing can host it; it is not a
+    // wrong answer worth a whole refusal after both paid calls.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const raw = { ...plan(), paths: [{ ...plan().paths[0]!, visits: [{ services: [null] }] }] }
+      const result = sanitizeConsultLookPlan(raw, { ...context(), menu: [] })
+      expect(result.paths).toEqual([])
+      expect(result.blocker).toBe('NO_MATCHING_OFFERING')
+      expect(warn).toHaveBeenCalledTimes(1)
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('reads a null citation against an empty evidence vocabulary as no citation', () => {
+    const unknownAll = observations()
+    for (const key of Object.keys(unknownAll.profile) as (keyof typeof unknownAll.profile)[]) unknownAll.profile[key] = observed('UNKNOWN')
+    for (const key of Object.keys(unknownAll.core) as (keyof typeof unknownAll.core)[]) unknownAll.core[key] = observed('UNKNOWN', 'hair_back')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const raw = { ...plan(), paths: [{ ...plan().paths[0]!, featureEvidence: [null] }] }
+      const result = sanitizeConsultLookPlan(raw, { ...context(), observations: unknownAll })
+      expect(result.paths[0]?.featureEvidence).toEqual([])
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('names the check that refused', () => {
+    const raw = plan()
+    const path = raw.paths[0]!
+    expect(() => sanitizeConsultLookPlan({ ...raw, paths: [{ ...path, featureEvidence: ['profile.eyeColor'] }] }, context()))
+      .toThrowError(expect.objectContaining({ check: 'path_evidence_enum' }))
+    expect(() => sanitizeConsultLookPlan({ ...raw, paths: [{ ...path, visits: [{ services: ['Not on the menu'] }] }] }, context()))
+      .toThrowError(expect.objectContaining({ check: 'visit_services_enum' }))
+    expect(() => sanitizeConsultLookPlan({ ...raw, blocker: 'NONE', paths: [] }, context()))
+      .toThrowError(expect.objectContaining({ check: 'plan_ready_without_paths' }))
   })
 
   it('builds the closed menu schema through the existing provider boundary', () => {

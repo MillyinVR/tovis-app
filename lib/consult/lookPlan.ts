@@ -105,7 +105,7 @@ export function consultLookPlanMenuContext(menu: Menu): string {
 }
 
 export function buildConsultLookPlanOutputSchema(args: Omit<PlanContext, 'observations'> & { observations: SchemaObservations }): Record<string, unknown> {
-  if (args.family !== ConsultServiceFamily.HAIR) badOutput()
+  if (args.family !== ConsultServiceFamily.HAIR) badOutput('plan_family')
   const names = consultLookPlanMenu(args.menu).map(offering => offering.service.name)
   const fields = consultLookPlanEvidence(args.observations)
   // No empty enums: a null-typed item plus maxItems: 0 documents the empty
@@ -150,52 +150,73 @@ export function buildConsultLookPlanOutputSchema(args: Omit<PlanContext, 'observ
   }
 }
 
-function badOutput(): never { throw new ConsultAnalysisProviderError('bad_output') }
+/** Every refusal here names its check — `rejectedAt` logs it beside the stage. */
+function badOutput(check: string): never { throw new ConsultAnalysisProviderError('bad_output', check) }
 
 function planText(raw: unknown, max: number): string {
   const text = cleanText(raw, max)
   // Money comes from menu columns later, including when the model tries to
   // put an amount in prose instead of adding a forbidden price property.
-  if (/\p{Sc}|\b(?:USD|EUR|GBP|dollars?|euros?)\b/iu.test(text)) badOutput()
+  if (/\p{Sc}|\b(?:USD|EUR|GBP|dollars?|euros?)\b/iu.test(text)) badOutput('plan_currency')
   return text
 }
 
-function uniqueStrings(raw: unknown, allowed: readonly string[], max: number, min = 0): string[] {
-  if (!Array.isArray(raw) || raw.length < min || raw.length > max) badOutput()
-  const values = raw.map(value => enumValue(value, allowed))
-  if (new Set(values).size !== values.length) badOutput()
+function uniqueStrings(raw: unknown, allowed: readonly string[], max: number, label: string, min = 0): string[] {
+  if (!Array.isArray(raw)) badOutput(`${label}_shape`)
+  // 🔴 An EMPTY vocabulary cannot be expressed to the grammar: `allowedItems`
+  // sends `{ type: 'null' }` items and `maxItems: 0`, and the API strips
+  // `maxItems` (lib/consult/providerSchema.ts). So the model can — and does —
+  // answer `[null]` where the schema meant "nothing". That is the grammar's
+  // limit, not a wrong answer: read it as the empty list it stands for.
+  if (!allowed.length) {
+    if (raw.length) console.warn('consult look plan listed items against an empty vocabulary; read as none', { label, count: raw.length })
+    return []
+  }
+  if (raw.length < min || raw.length > max) badOutput(`${label}_count`)
+  const values = raw.map(value => enumValue(value, allowed, () => badOutput(`${label}_enum`)))
+  if (new Set(values).size !== values.length) badOutput(`${label}_duplicate`)
   return values
 }
 
 export function sanitizeConsultLookPlan(raw: unknown, args: PlanContext): ConsultLookPlanProviderOutput {
-  if (args.family !== ConsultServiceFamily.HAIR) badOutput()
+  if (args.family !== ConsultServiceFamily.HAIR) badOutput('plan_family')
   return sanitizePlanFields(raw, consultLookPlanMenu(args.menu).map(offering => offering.service.name),
     consultLookPlanEvidence(args.observations))
 }
 
 function sanitizePlanFields(raw: unknown, names: readonly string[], fields: readonly ConsultLookPlanEvidenceField[]): ConsultLookPlanProviderOutput {
-  if (!isRecord(raw) || !exactKeys(raw, ['tier', 'blocker', 'summary', 'nextStep', 'paths'])) badOutput()
-  const tier = enumValue(raw.tier, CONSULT_LOOK_PLAN_TIERS)
-  const blocker = enumValue(raw.blocker, CONSULT_LOOK_PLAN_BLOCKERS)
-  if (!Array.isArray(raw.paths) || raw.paths.length > CONSULT_LOOK_PLAN_MAX_PATHS) badOutput()
-  const paths = raw.paths.map((path): ConsultLookPlanProviderPath => {
-    if (!isRecord(path) || !exactKeys(path, ['title', 'whyThisWorksForYou', 'featureEvidence', 'visits'])) badOutput()
-    if (!Array.isArray(path.visits) || path.visits.length < 1 || path.visits.length > CONSULT_LOOK_PLAN_MAX_VISITS) badOutput()
-    const cited = uniqueStrings(path.featureEvidence, fields, fields.length)
+  if (!isRecord(raw) || !exactKeys(raw, ['tier', 'blocker', 'summary', 'nextStep', 'paths'])) badOutput('plan_keys')
+  const tier = enumValue(raw.tier, CONSULT_LOOK_PLAN_TIERS, () => badOutput('plan_tier'))
+  let blocker = enumValue(raw.blocker, CONSULT_LOOK_PLAN_BLOCKERS, () => badOutput('plan_blocker'))
+  if (!Array.isArray(raw.paths) || raw.paths.length > CONSULT_LOOK_PLAN_MAX_PATHS) badOutput('plan_paths_count')
+  // No eligible offering, no path: the schema says so with `maxItems: 0`,
+  // which the API strips, so the model may still draw paths whose services
+  // can only be `null`. Nothing on the menu can host them — read the plan as
+  // the "no matching offering" it is, rather than refusing the paid answer.
+  let rawPaths = raw.paths
+  if (!names.length && rawPaths.length) {
+    console.warn('consult look plan drew paths against an empty menu; read as no matching offering', { count: rawPaths.length, blocker })
+    rawPaths = []
+    blocker = 'NO_MATCHING_OFFERING'
+  }
+  const paths = rawPaths.map((path): ConsultLookPlanProviderPath => {
+    if (!isRecord(path) || !exactKeys(path, ['title', 'whyThisWorksForYou', 'featureEvidence', 'visits'])) badOutput('path_keys')
+    if (!Array.isArray(path.visits) || path.visits.length < 1 || path.visits.length > CONSULT_LOOK_PLAN_MAX_VISITS) badOutput('path_visits_count')
+    const cited = uniqueStrings(path.featureEvidence, fields, fields.length, 'path_evidence')
     return {
       title: planText(path.title, 100),
       whyThisWorksForYou: planText(path.whyThisWorksForYou, 320),
-      featureEvidence: cited.map(field => enumValue(field, fields)),
+      featureEvidence: cited.map(field => enumValue(field, fields, () => badOutput('path_evidence_enum'))),
       visits: path.visits.map(visit => {
-        if (!isRecord(visit) || !exactKeys(visit, ['services'])) badOutput()
-        return { services: uniqueStrings(visit.services, names, CONSULT_LOOK_PLAN_MAX_STEPS_PER_VISIT, 1) }
+        if (!isRecord(visit) || !exactKeys(visit, ['services'])) badOutput('visit_keys')
+        return { services: uniqueStrings(visit.services, names, CONSULT_LOOK_PLAN_MAX_STEPS_PER_VISIT, 'visit_services', 1) }
       }),
     }
   })
   // Zero paths cannot claim readiness; unavailable menus cannot carry paths.
-  if ((blocker === 'NONE' && !paths.length) || (!names.length && paths.length)) badOutput()
-  if (blocker === 'NO_MATCHING_OFFERING' && paths.length) badOutput()
-  if (new Set(paths.map(path => path.title.toLowerCase())).size !== paths.length) badOutput()
+  if (blocker === 'NONE' && !paths.length) badOutput('plan_ready_without_paths')
+  if (blocker === 'NO_MATCHING_OFFERING' && paths.length) badOutput('plan_paths_with_no_offering')
+  if (new Set(paths.map(path => path.title.toLowerCase())).size !== paths.length) badOutput('plan_title_duplicate')
   return {
     tier, blocker,
     summary: planText(raw.summary, 400),
@@ -248,7 +269,7 @@ export function resolveConsultLookPlan(raw: unknown, args: PlanContext & {
       visits: path.visits.map(visit => ({
         steps: visit.services.map(name => {
           const offering = byName.get(name)
-          if (!offering) badOutput()
+          if (!offering) badOutput('plan_offering_missing')
           return {
             offeringId: offering.id, serviceId: offering.serviceId,
             serviceCategoryId: offering.service.categoryId, serviceName: offering.service.name,
@@ -265,26 +286,26 @@ export function resolveConsultLookPlan(raw: unknown, args: PlanContext & {
  */
 export function normalizeStoredConsultLookPlan(raw: unknown, observations: Observations): ConsultLookPlan {
   if (!isRecord(raw) || !exactKeys(raw, ['schemaVersion', 'tier', 'status', 'provisional', 'summary', 'nextStep', 'paths']) ||
-    raw.schemaVersion !== CONSULT_LOOK_PLAN_SCHEMA_VERSION) badOutput()
+    raw.schemaVersion !== CONSULT_LOOK_PLAN_SCHEMA_VERSION) badOutput('stored_plan_version')
   const status = enumValue(raw.status, ['READY_TO_CHOOSE', 'NEEDS_INPUT', 'PRO_REVIEW', 'NO_OFFERING'] as const)
-  if (raw.provisional !== (status !== 'READY_TO_CHOOSE') || !Array.isArray(raw.paths) || raw.paths.length > CONSULT_LOOK_PLAN_MAX_PATHS) badOutput()
-  if ((status === 'PRO_REVIEW' || status === 'NO_OFFERING') && raw.paths.length) badOutput()
+  if (raw.provisional !== (status !== 'READY_TO_CHOOSE') || !Array.isArray(raw.paths) || raw.paths.length > CONSULT_LOOK_PLAN_MAX_PATHS) badOutput('stored_plan_shape')
+  if ((status === 'PRO_REVIEW' || status === 'NO_OFFERING') && raw.paths.length) badOutput('stored_plan_paths_with_status')
   const byName = new Map<string, ConsultLookPlanPath['visits'][number]['steps'][number]>()
   const byOffering = new Map<string, string>()
   const byService = new Map<string, string>()
   const paths = raw.paths.map(path => {
     if (!isRecord(path) || !exactKeys(path, ['title', 'whyThisWorksForYou', 'featureEvidence', 'sessionCount', 'visits']) ||
       !Array.isArray(path.visits) || path.sessionCount !== path.visits.length ||
-      path.visits.length < 1 || path.visits.length > CONSULT_LOOK_PLAN_MAX_VISITS) badOutput()
+      path.visits.length < 1 || path.visits.length > CONSULT_LOOK_PLAN_MAX_VISITS) badOutput('stored_path_shape')
     return {
       title: path.title, whyThisWorksForYou: path.whyThisWorksForYou, featureEvidence: path.featureEvidence,
       visits: path.visits.map(visit => {
         if (!isRecord(visit) || !exactKeys(visit, ['steps']) || !Array.isArray(visit.steps) ||
-          visit.steps.length < 1 || visit.steps.length > CONSULT_LOOK_PLAN_MAX_STEPS_PER_VISIT) badOutput()
+          visit.steps.length < 1 || visit.steps.length > CONSULT_LOOK_PLAN_MAX_STEPS_PER_VISIT) badOutput('stored_visit_steps_count')
         return { services: visit.steps.map(step => {
-          if (!isRecord(step) || !exactKeys(step, ['serviceId', 'offeringId', 'serviceCategoryId', 'serviceName'])) badOutput()
+          if (!isRecord(step) || !exactKeys(step, ['serviceId', 'offeringId', 'serviceCategoryId', 'serviceName'])) badOutput('stored_plan_keys')
           const identifier = (value: unknown): string => {
-            if (typeof value !== 'string' || !value.trim() || value !== value.trim() || value.length > 256) badOutput()
+            if (typeof value !== 'string' || !value.trim() || value !== value.trim() || value.length > 256) badOutput('stored_step_text')
             return value
           }
           const parsed = {
@@ -293,9 +314,9 @@ export function normalizeStoredConsultLookPlan(raw: unknown, observations: Obser
           }
           const previous = byName.get(parsed.serviceName)
           if (previous && (previous.serviceId !== parsed.serviceId || previous.offeringId !== parsed.offeringId ||
-            previous.serviceCategoryId !== parsed.serviceCategoryId)) badOutput()
+            previous.serviceCategoryId !== parsed.serviceCategoryId)) badOutput('stored_step_service_mismatch')
           if ((byOffering.has(parsed.offeringId) && byOffering.get(parsed.offeringId) !== parsed.serviceName) ||
-            (byService.has(parsed.serviceId) && byService.get(parsed.serviceId) !== parsed.serviceName)) badOutput()
+            (byService.has(parsed.serviceId) && byService.get(parsed.serviceId) !== parsed.serviceName)) badOutput('stored_step_name_mismatch')
           byName.set(parsed.serviceName, parsed)
           byOffering.set(parsed.offeringId, parsed.serviceName)
           byService.set(parsed.serviceId, parsed.serviceName)
@@ -317,7 +338,7 @@ export function normalizeStoredConsultLookPlan(raw: unknown, observations: Obser
       sessionCount: path.visits.length,
       visits: path.visits.map(visit => ({ steps: visit.services.map(name => {
         const step = byName.get(name)
-        if (!step) badOutput()
+        if (!step) badOutput('stored_step_missing')
         return step
       }) })),
     })),

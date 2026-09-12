@@ -404,6 +404,13 @@ describe('hair-color consult analysis provider', () => {
     expect(lookPlanRecommendations({ ...plan, paths: [] })[0]?.serviceIntent).toBe('CONSULTATION')
   })
 
+  it('style-direction texts demand one non-whitespace character, at the boundary', () => {
+    const schema = toProviderOutputSchema(buildConsultProfileOutputSchema({ suppliedShotKeys: ['early_photo'], includeStyleDirections: true }))
+    const text = JSON.stringify(schema)
+    expect(text).toContain('"pattern":"\\\\S"')
+    expect(text).toContain('"minLength":1')
+  })
+
   it('a refusal names the check that made it', () => {
     const profile = validProfile()
     expect(() => sanitizeConsultProfileResponse({ profile: { ...profile, jawline: {
