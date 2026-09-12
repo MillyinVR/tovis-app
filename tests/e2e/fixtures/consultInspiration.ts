@@ -696,6 +696,24 @@ function threadEarlyPhotoMessage(
   }
 }
 
+/** The plan card before any run: what `lib/consult/thread.ts` serves at ANALYSIS_PENDING. */
+function startablePlanMessage(): ConsultThreadMessageDTO {
+  return {
+    kind: 'PLAN',
+    id: 'plan',
+    author: 'APP',
+    state: 'OPEN',
+    text: 'I’ve got everything I need. Want me to work out the plan? It takes a minute or two.',
+    run: null,
+    results: null,
+    awaitingStart: true,
+    schemaVersion: 4,
+    promptVersion: 'service-analysis-v5',
+    planVersion: 0,
+    updatePending: false,
+  }
+}
+
 /** P7a-3 — the plan card and one PLAN_UPDATE bubble per version after the first. */
 function planMessages(plan: {
   version: number
@@ -774,6 +792,13 @@ export function threadFixture(args: {
       changes: ConsultPlanDiffEntryDTO[]
     }>
   }
+  /**
+   * The daylight break (2026-09-12): the plan card as the server serves it at
+   * ANALYSIS_PENDING with no run yet — startable, OPEN, version zero. The
+   * thread that has one is the thread where "build my look now" is possible
+   * before the daylight photos are in. Ignored when `plan` is given.
+   */
+  planStartable?: boolean
 }): ConsultThreadDTO {
   const photos = threadPhotoMessages(captureState, args.slotOverrides)
   const cards = args.inspiration.cards ?? []
@@ -831,7 +856,7 @@ export function threadFixture(args: {
       id: 'capture-intro',
       author: 'APP',
       state: 'DONE',
-      text: 'Now a few of you, in daylight if you can.',
+      text: 'Now a few photos of you, and these need daylight — it shows your truest colour, where indoor light warms or flattens it.',
     },
     ...photos,
     // P7a-3 — the finished plan, and the version bubbles after it.
@@ -839,6 +864,7 @@ export function threadFixture(args: {
     // Appended only when the caller asks for a plan, so every existing spec
     // keeps the thread it had: those describe a consult that has not run yet.
     ...(args.plan ? planMessages(args.plan) : []),
+    ...(!args.plan && args.planStartable ? [startablePlanMessage()] : []),
     ...(args.followUps
       ? threadFollowUpMessages(
           typeof args.followUps === 'object' ? args.followUps.openRound : 1,
@@ -851,7 +877,9 @@ export function threadFixture(args: {
   // resumes on its plan (or on a follow-up after it), never on a card or a
   // photo she skipped. Without this the fixture's open card would sit in front
   // of the plan and the chat would never reach it.
-  const planIndex = messages.findIndex((message) => message.kind === 'PLAN')
+  // A STARTABLE plan card (`planStartable`) is not a plan: the server keeps
+  // the photos open behind it while she chooses.
+  const planIndex = args.plan ? messages.findIndex((message) => message.kind === 'PLAN') : -1
   if (planIndex >= 0) {
     for (const message of messages.slice(0, planIndex)) {
       if (message.state === 'OPEN') message.state = 'BLOCKED'

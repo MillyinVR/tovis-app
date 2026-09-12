@@ -835,8 +835,32 @@ export type BrandClientConsultThreadCopy = {
   /** When the client has answered enough to move on. */
   inspirationDone: string
 
-  /** Before the photo requests. */
+  /** Before the photo requests. Says that these need daylight. */
   captureIntro: string
+  /**
+   * The daylight break (Tori, 2026-09-12). Said once, at the first daylight
+   * photo, when her look can already be built from what she has given: she
+   * can have it built now, or add the photos first — and either way she can
+   * come back to them any time before her appointment.
+   */
+  captureChoice: string
+  /** The button that builds her look from what is in. */
+  captureChoiceBuildNow: string
+  /** The button that goes on to the daylight photos first. */
+  captureChoiceAddPhotos: string
+  /**
+   * Under the open daylight photo once she chose to add them first: the way
+   * out stays a tap away, and it says that the photos she skips just come back
+   * as unknown.
+   */
+  captureChoiceLater: string
+  /**
+   * After she built her look without finishing the photos: the app's reply,
+   * and the standing invitation. The photos that are still wanted follow it.
+   */
+  captureChoiceBuilt: string
+  /** The link on a daylight photo she has not sent yet, once her look exists. */
+  captureAddLater: string
   /**
    * Shown in place of the guided pack while the guided stage is not open yet
    * (P3b) — before booking and intake, the photos simply are not asked for.
