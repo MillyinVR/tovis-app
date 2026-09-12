@@ -111,11 +111,22 @@ export const CONSULT_ANALYSIS_DEFAULT_MODEL = 'claude-sonnet-5'
  * = 280s, inside `maxDuration = 300` with 20s for database/finalize work.
  * Raising any ceiling means re-checking that arithmetic; the engine test pins it.
  */
-export const CONSULT_ANALYSIS_PROFILE_TIMEOUT_MS = 90_000
+/**
+ * 🔴 Re-measured 2026-09-12 on a REAL selfie-only consult in prod and in local
+ * replays of the same request (profile + seven style directions, 1,200–2,800
+ * output tokens, no thinking): 42, 44, 45, 50, 53, 54, 55, 56, 62 and 85s —
+ * and twice OVER 90s, which was the ceiling, so one real run in five timed
+ * out with nothing to show and the run loop retried it at full price. 140s
+ * is ~1.6x the slowest completed call. The budget is rebalanced, not
+ * enlarged: inspiration 50 + profile 140 + face/colour 20 (measured 5–6s)
+ * + direction 90 (measured 33–35s) = 300 = the worker's maxDuration; the
+ * pinned test below the direction constant holds the arithmetic.
+ */
+export const CONSULT_ANALYSIS_PROFILE_TIMEOUT_MS = 140_000
 // C2-1 companion measured ~11.5s live. Keep its ceiling separate from the
 // larger profile call so the optional fourth provider call still leaves worker
 // headroom under Vercel Pro's 300s function ceiling.
-export const CONSULT_FACE_COLOR_TIMEOUT_MS = 30_000
+export const CONSULT_FACE_COLOR_TIMEOUT_MS = 20_000
 // 2026-09-11: profile 45 → 90 and direction 150 → 110. Measured live that day,
 // same request, same schema, nine runs: the profile+styles call answered in
 // 21s, in under 35s, and on five runs did not answer within 45s or 70s at all —
@@ -124,7 +135,7 @@ export const CONSULT_FACE_COLOR_TIMEOUT_MS = 30_000
 // measured above ~65s. Sum stays 50 + 90 + 30 + 110 = 280 ≤ 300. The slow-call
 // warning in `requestConsultAnalysisJson` and the metered `latencyMs` in prod
 // are how the next number gets chosen from data rather than from here.
-export const CONSULT_ANALYSIS_DIRECTION_TIMEOUT_MS = 110_000
+export const CONSULT_ANALYSIS_DIRECTION_TIMEOUT_MS = 90_000
 
 /**
  * `max_tokens` per call, and both are load-bearing: a structured-output answer

@@ -9,9 +9,10 @@
 //
 // 🔴 Two numbers here are load-bearing and are not the usual copy-paste:
 //
-//   maxDuration = 300 — one run makes three sequential paid calls with a
-//   combined 245-second ceiling (50s inspiration + 45s profile + 150s
-//   direction). The looks/social drain this route is modelled on runs at 60,
+//   maxDuration = 300 — one run makes up to four sequential paid calls with
+//   a combined 300-second ceiling (50s inspiration + 140s profile + 20s
+//   face/colour + 90s direction; re-measured 2026-09-12, pinned by a test in
+//   lib/consult/analysisEngine.test.ts). The looks/social drain this route is modelled on runs at 60,
 //   which would kill every analysis run it started.
 //
 //   take = 1 — for the same reason. A batch of analysis runs in one invocation
