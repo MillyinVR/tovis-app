@@ -173,7 +173,27 @@ function uniqueStrings(raw: unknown, allowed: readonly string[], max: number, la
     return []
   }
   if (raw.length < min || raw.length > max) badOutput(`${label}_count`)
-  const values = raw.map(value => enumValue(value, allowed, () => badOutput(`${label}_enum`)))
+  const values = raw.map(value => {
+    const exact = allowed.find(candidate => candidate === value)
+    if (exact) return exact
+    // The enum is in the grammar, and still a name arrives that is not
+    // byte-identical to a menu row (prod, 2026-09-12: `visit_services_enum`
+    // refused attempt 2 of the first completed "Build my plan", and both
+    // attempts of the 02:05Z run). A menu name differing only in case or
+    // whitespace is the same service — resolve it the way the run loader
+    // resolves a recommendation (analysisContract: exact, case-insensitive),
+    // and store the CANONICAL row name. Anything further off is refused, and
+    // the refusal says what arrived: menu names are the pro's public catalog,
+    // never client content.
+    const folded = typeof value === 'string' ? value.trim().toLowerCase() : null
+    const near = folded ? allowed.find(candidate => candidate.trim().toLowerCase() === folded) : undefined
+    if (near) {
+      console.warn('consult look plan named a menu item loosely; read as the menu row', { label, received: value, stored: near })
+      return near
+    }
+    console.error('consult look plan named something outside its vocabulary', { label, received: value, allowed })
+    return badOutput(`${label}_enum`)
+  })
   if (new Set(values).size !== values.length) badOutput(`${label}_duplicate`)
   return values
 }
