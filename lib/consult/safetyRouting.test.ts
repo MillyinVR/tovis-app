@@ -123,6 +123,13 @@ describe('deterministic hair-color safety routing', () => {
         serviceName: 'Deep Conditioning Treatment',
       }),
     ).toBe(true)
+    // Production's cut category is `cuts` (the dev seed's is `haircut`).
+    expect(
+      isStrandTestOptionalAddOn({
+        categorySlug: 'cuts',
+        serviceName: 'Womens Cut & Style',
+      }),
+    ).toBe(true)
     expect(
       isStrandTestOptionalAddOn({
         categorySlug: 'hair-treatment',
