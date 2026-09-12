@@ -1318,7 +1318,7 @@ export const CONSULT_CONFIDENCE_POINT_WIDENING = 0.05
 
 function confidence(value: unknown): ConfidenceRange {
   if (!isRecord(value) || !exactKeys(value, ['min', 'max'])) {
-    throw new ConsultAnalysisProviderError('bad_output')
+    throw new ConsultAnalysisProviderError('bad_output', 'confidence_shape')
   }
   if (
     typeof value.min !== 'number' ||
@@ -1330,7 +1330,7 @@ function confidence(value: unknown): ConfidenceRange {
     value.max < 0 ||
     value.min > 1
   ) {
-    throw new ConsultAnalysisProviderError('bad_output')
+    throw new ConsultAnalysisProviderError('bad_output', 'confidence_range')
   }
   let min = Math.min(value.min, value.max)
   let max = Math.max(value.min, value.max)
@@ -1354,7 +1354,7 @@ function evidence(
   options: { allowIntake: boolean; hairOnly?: boolean },
 ): EvidenceKey[] {
   if (!Array.isArray(value) || value.length > CONSULT_ANALYSIS_EVIDENCE_KEYS.length) {
-    throw new ConsultAnalysisProviderError('bad_output')
+    throw new ConsultAnalysisProviderError('bad_output', 'evidence')
   }
   const allowed: readonly EvidenceKey[] = options.hairOnly
     ? CONSULT_ANALYSIS_HAIR_EVIDENCE_KEYS
@@ -1364,7 +1364,7 @@ function evidence(
   const result: EvidenceKey[] = []
   for (const item of value) {
     const key = allowed.find((candidate) => candidate === item)
-    if (!key || result.includes(key)) throw new ConsultAnalysisProviderError('bad_output')
+    if (!key || result.includes(key)) throw new ConsultAnalysisProviderError('bad_output', 'evidence')
     result.push(key)
   }
   return result
@@ -1377,7 +1377,7 @@ function observed<const T extends readonly string[]>(
   options: { hairOnly?: boolean } = {},
 ): { value: T[number]; confidence: ConfidenceRange; evidence: EvidenceKey[] } {
   if (!isRecord(raw) || !exactKeys(raw, ['value', 'confidence', 'evidence'])) {
-    throw new ConsultAnalysisProviderError('bad_output')
+    throw new ConsultAnalysisProviderError('bad_output', 'observation_shape')
   }
   const value = enumValue(raw.value, values)
   const range = confidence(raw.confidence)
@@ -1389,14 +1389,14 @@ function observed<const T extends readonly string[]>(
     (value === unknown && (cited.length > 0 || range.max > 0.35)) ||
     (value !== unknown && cited.length === 0)
   ) {
-    throw new ConsultAnalysisProviderError('bad_output')
+    throw new ConsultAnalysisProviderError('bad_output', value === unknown ? 'unknown_contradiction' : 'unsupported_claim')
   }
   return { value, confidence: range, evidence: cited }
 }
 
 function sanitizeProfile(raw: unknown): ConsultAnalysisFeatureProfile {
   if (!isRecord(raw) || !exactKeys(raw, CONSULT_PROFILE_FIELDS)) {
-    throw new ConsultAnalysisProviderError('bad_output')
+    throw new ConsultAnalysisProviderError('bad_output', 'profile_keys')
   }
   const profile = Object.fromEntries(
     CONSULT_PROFILE_FIELDS.map((field) => [
@@ -1405,11 +1405,27 @@ function sanitizeProfile(raw: unknown): ConsultAnalysisFeatureProfile {
     ]),
   )
   const eyeColor = observed(raw.eyeColor, CONSULT_PROFILE_EYE_COLORS, 'UNKNOWN')
-  if (eyeColor.evidence.some((key) => !['face_front', 'face_side', 'eyes_closeup'].includes(key))) {
-    throw new ConsultAnalysisProviderError('bad_output')
+  if (eyeColor.evidence.some((key) => !CONSULT_EYE_COLOR_VIEWS.includes(key))) {
+    // The prompt says eye colour is read only from a clear face_front,
+    // face_side or eyes_closeup — and the grammar still has to offer whatever
+    // views WERE supplied, because an empty enum is not a valid schema. Given
+    // the any-light early selfie alone, the model reads the iris anyway and
+    // cites `early_photo`. Until 2026-09-12 that one citation discarded the
+    // whole paid analysis (every "Build my plan" on a selfie-only consult in
+    // prod, 3 of 3, reproduced locally). The honest reading is the one the
+    // prompt asked for: eye colour was NOT observed under reliable light, so
+    // it is UNKNOWN, with no evidence and a low range — the same repair as
+    // `repairUnsuppliedHairLevelEvidence`, said out loud the same way.
+    console.warn('consult analysis eye color cited a view it may not be read from; read as UNKNOWN', {
+      evidence: eyeColor.evidence,
+    })
+    profile.eyeColor = { value: 'UNKNOWN', confidence: { min: 0, max: 0.3 }, evidence: [] }
   }
   return profile as ConsultAnalysisFeatureProfile
 }
+
+/** The only views eye colour may be read from (the prompt says so too). */
+const CONSULT_EYE_COLOR_VIEWS: readonly string[] = ['face_front', 'face_side', 'eyes_closeup']
 
 export function unknownFaceColorProfile(): ConsultFaceColorProfile {
   const unknown = <T extends string>(value: T): ProfileObservation<T> => ({
@@ -1488,10 +1504,10 @@ function sanitizeStyleDirections(raw: unknown): ConsultStyleDirection[] {
     keys: readonly string[],
   ): ConsultStyleDirection => {
     if (!isRecord(item) || !exactKeys(item, keys) || item.discussWithProfessional !== true) {
-      throw new ConsultAnalysisProviderError('bad_output')
+      throw new ConsultAnalysisProviderError('bad_output', 'style_shape')
     }
     const cited = evidence(item.evidence, { allowIntake: true })
-    if (cited.length === 0) throw new ConsultAnalysisProviderError('bad_output')
+    if (cited.length === 0) throw new ConsultAnalysisProviderError('bad_output', 'style_evidence')
     return {
       domain,
       title: cleanText(item.title, 120),
@@ -1507,7 +1523,7 @@ function sanitizeStyleDirections(raw: unknown): ConsultStyleDirection[] {
     // Provider shape: exactly the seven domain keys, enforced by the grammar's
     // `required` — which, unlike `minItems`, survives the boundary.
     if (!exactKeys(raw, CONSULT_STYLE_DOMAINS)) {
-      throw new ConsultAnalysisProviderError('bad_output')
+      throw new ConsultAnalysisProviderError('bad_output', 'style_domains')
     }
     for (const domain of CONSULT_STYLE_DOMAINS) {
       byDomain.set(
@@ -1705,8 +1721,8 @@ function sanitizeRecommendations(
     menuServiceNames: readonly string[]
   },
 ): ConsultAnalysisProviderOutput['recommendations'] {
-  if (!Array.isArray(raw) || raw.length < 1 || raw.length > 3) {
-    throw new ConsultAnalysisProviderError('bad_output')
+  if (!Array.isArray(raw) || raw.length < 1 || raw.length > CONSULT_MAX_RECOMMENDATIONS) {
+    throw new ConsultAnalysisProviderError('bad_output', 'recommendations_count')
   }
   const recommendations = raw.map((item) => sanitizeRecommendation(item, args))
   // One recommendation per service (or per test / consultation).
@@ -1718,7 +1734,7 @@ function sanitizeRecommendations(
       ),
     ).size !== recommendations.length
   ) {
-    throw new ConsultAnalysisProviderError('bad_output')
+    throw new ConsultAnalysisProviderError('bad_output', 'recommendation_duplicate')
   }
   return recommendations
 }
@@ -1740,7 +1756,7 @@ export function sanitizeConsultProfileAndStylesResponse(raw: unknown): {
   profile: ConsultAnalysisFeatureProfile
   styleDirections: ConsultStyleDirection[]
 } {
-  if (!isRecord(raw) || !exactKeys(raw, ['profile', 'styleDirections'])) throw new ConsultAnalysisProviderError('bad_output')
+  if (!isRecord(raw) || !exactKeys(raw, ['profile', 'styleDirections'])) throw new ConsultAnalysisProviderError('bad_output', 'response_keys')
   return { profile: sanitizeProfile(raw.profile), styleDirections: sanitizeStyleDirections(raw.styleDirections) }
 }
 
@@ -1750,13 +1766,33 @@ export function lookPlanRecommendations(plan: ConsultLookPlanProviderOutput): Co
     title: 'Plan your version of this look', rationale: plan.nextStep,
     achievability: 'Your pro will confirm the next step with you.', discussWithProfessional: true,
   }]
-  return plan.paths.map(path => ({
-    serviceIntent: 'SERVICE', serviceName: path.visits[0]?.services[0] ?? null,
-    title: path.title, rationale: path.whyThisWorksForYou,
-    achievability: 'Your pro will confirm this look and the appointment plan with you.',
-    discussWithProfessional: true,
-  }))
+  // One recommendation per FIRST SERVICE, not per path. Two paths to the same
+  // look often open with the same service ("start with a fresh shape" and
+  // "shape, then lighten" both begin with the haircut), and the stored
+  // recommendation list is keyed by service — `sanitizeRecommendations`
+  // refuses a duplicate. Until 2026-09-12 that refusal fired in the run
+  // loader's gate AFTER both paid calls, so a plan with two such paths killed
+  // the whole analysis (reproduced locally on a real selfie: two paths, one
+  // service, bad_output at the duplicate check). The paths themselves are
+  // stored whole on the look plan; this list only has to name each service
+  // once, with the first path that leads with it.
+  const byService = new Map<string, ConsultAnalysisProviderOutput['recommendations'][number]>()
+  for (const path of plan.paths) {
+    const serviceName = path.visits[0]?.services[0] ?? null
+    const key = serviceName ?? ''
+    if (byService.has(key)) continue
+    byService.set(key, {
+      serviceIntent: 'SERVICE', serviceName,
+      title: path.title, rationale: path.whyThisWorksForYou,
+      achievability: 'Your pro will confirm this look and the appointment plan with you.',
+      discussWithProfessional: true,
+    })
+  }
+  return [...byService.values()].slice(0, CONSULT_MAX_RECOMMENDATIONS)
 }
+
+/** `sanitizeRecommendations` accepts 1–3; the plan may name more paths. */
+const CONSULT_MAX_RECOMMENDATIONS = 3
 
 /** What call 2 returned, on its own — everything but the profile. */
 export function sanitizeConsultDirectionResponse(
@@ -2323,6 +2359,7 @@ function rejectedAt<T>(stage: 'profile' | 'profile+styles' | 'direction', saniti
       console.error('consult analysis rejected the model answer', {
         stage,
         kind: error.kind,
+        check: error.check,
         at: (error.stack ?? '').split('\n').slice(1, 5).map((line) => line.trim()),
       })
     }

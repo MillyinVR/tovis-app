@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { ConsultLookPlanProviderOutput } from '@/lib/consult/lookPlan'
 
 const mocks = vi.hoisted(() => ({
   create: vi.fn(),
@@ -29,6 +30,7 @@ import {
   CONSULT_ANALYSIS_SCHEMA_VERSION,
   CONSULT_STYLE_DOMAINS,
   ConsultAnalysisProviderError,
+  lookPlanRecommendations,
   repairUnsuppliedHairLevelEvidence,
   resetConsultAnalysisClientForTests,
   CONSULT_ANALYSIS_CONSULTATION_OPTION,
@@ -348,15 +350,71 @@ afterEach(() => {
 })
 
 describe('hair-color consult analysis provider', () => {
-  it('requires visible eye color in new responses and refuses non-eye evidence', () => {
+  it('requires visible eye color in new responses, and reads non-eye evidence as UNKNOWN', () => {
     const profile = validProfile()
     expect(sanitizeConsultProfileResponse({ profile }).eyeColor.value).toBe('BROWN')
     const { eyeColor: _eyeColor, ...missing } = profile
     void _eyeColor
-    expect(() => sanitizeConsultProfileResponse({ profile: missing })).toThrow(ConsultAnalysisProviderError)
-    expect(() => sanitizeConsultProfileResponse({ profile: { ...profile, eyeColor: {
-      value: 'BROWN', confidence: { min: 0.4, max: 0.7 }, evidence: ['hair_back'],
-    } } })).toThrow(ConsultAnalysisProviderError)
+    expect(() => sanitizeConsultProfileResponse({ profile: missing })).toThrowError(
+      expect.objectContaining({ kind: 'bad_output', check: 'profile_keys' }),
+    )
+    // Prod, 2026-09-12: the early selfie was the only photo, the model read the
+    // iris from it anyway and cited `early_photo`; until then that one citation
+    // discarded the whole paid analysis. It is a repair, not a refusal — the
+    // prompt's own answer for eye colour without a reliable face view.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      for (const view of ['early_photo', 'hair_back']) {
+        const repaired = sanitizeConsultProfileResponse({ profile: { ...profile, eyeColor: {
+          value: 'BROWN', confidence: { min: 0.4, max: 0.7 }, evidence: [view],
+        } } })
+        expect(repaired.eyeColor).toEqual({ value: 'UNKNOWN', confidence: { min: 0, max: 0.3 }, evidence: [] })
+        expect(repaired.jawline).toEqual(profile.jawline)
+      }
+      expect(warn).toHaveBeenCalledTimes(2)
+      expect(JSON.stringify(warn.mock.calls)).not.toContain('BROWN')
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('two look-plan paths that open with the same service become ONE recommendation', () => {
+    // Prod-shaped (2026-09-12, replayed on a real selfie): a plan with two
+    // paths that both start with the haircut. The stored recommendation list is
+    // keyed by service, so before this the run loader's gate refused the whole
+    // analysis after both paid calls.
+    const path = (title: string, ...services: string[]): ConsultLookPlanProviderOutput['paths'][number] => ({
+      title, whyThisWorksForYou: `${title} suits her.`, featureEvidence: [], visits: [{ services }],
+    })
+    const plan: ConsultLookPlanProviderOutput = {
+      tier: 'TOWARD', blocker: 'MORE_INFORMATION', summary: 'Two ways in.', nextStep: 'Talk it through.',
+      paths: [
+        path('Start with a fresh shape', 'Haircut'),
+        path('Shape, then lighten', 'Haircut', 'Full balayage'),
+        path('Lighten first', 'Full balayage'),
+      ],
+    }
+    const recommendations = lookPlanRecommendations(plan)
+    expect(recommendations.map(r => `${r.serviceName}:${r.title}`)).toEqual([
+      'Haircut:Start with a fresh shape',
+      'Full balayage:Lighten first',
+    ])
+    // and the stored-shape gate accepts what the engine now emits
+    expect(new Set(recommendations.map(r => `${r.serviceIntent}:${r.serviceName}`)).size).toBe(recommendations.length)
+    expect(lookPlanRecommendations({ ...plan, paths: [] })[0]?.serviceIntent).toBe('CONSULTATION')
+  })
+
+  it('a refusal names the check that made it', () => {
+    const profile = validProfile()
+    expect(() => sanitizeConsultProfileResponse({ profile: { ...profile, jawline: {
+      ...profile.jawline, confidence: { min: 0.9, max: 0.4 },
+    } } })).not.toThrow() // a swapped pair is repaired, not refused
+    expect(() => sanitizeConsultProfileResponse({ profile: { ...profile, jawline: {
+      value: 'UNKNOWN', confidence: { min: 0.1, max: 0.3 }, evidence: ['face_front'],
+    } } })).toThrowError(expect.objectContaining({ check: 'unknown_contradiction' }))
+    expect(() => sanitizeConsultProfileResponse({ profile: { ...profile, jawline: {
+      ...profile.jawline, confidence: { min: 0.1, max: 1.4 },
+    } } })).toThrowError(expect.objectContaining({ check: 'confidence_range' }))
   })
 
   it('C2-1 sanitizes the companion face/color profile and merges it without replacing settled fields', () => {
