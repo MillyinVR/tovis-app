@@ -882,6 +882,11 @@ function boundedText(maxLength: number, what: string) {
     // presence does not force substance. `cleanText` refuses an empty string,
     // correctly: an empty direction is not a direction.
     minLength: 1,
+    // …and 2026-09-12: given the early selfie alone it satisfied `minLength: 1`
+    // with a single SPACE, which `cleanText` trims to nothing — `text_empty`
+    // took the whole profile+styles answer down in prod. `pattern` survives
+    // the boundary; one non-whitespace character is the honest minimum.
+    pattern: '\\S',
     maxLength,
     description: `${what} HARD LIMIT: at most ${maxLength} characters, counted as characters and not words. Going over is not truncated, it is rejected — say less rather than more. NEVER return an empty string: if you have nothing to say here, say THAT, in a sentence.`,
   }
@@ -1379,7 +1384,7 @@ function observed<const T extends readonly string[]>(
   if (!isRecord(raw) || !exactKeys(raw, ['value', 'confidence', 'evidence'])) {
     throw new ConsultAnalysisProviderError('bad_output', 'observation_shape')
   }
-  const value = enumValue(raw.value, values)
+  const value = enumValue(raw.value, values, () => { throw new ConsultAnalysisProviderError('bad_output', 'observation_value') })
   const range = confidence(raw.confidence)
   const cited = evidence(raw.evidence, {
     allowIntake: false,
@@ -1639,7 +1644,7 @@ function sanitizeRecommendation(
  */
 function sanitizeCore(raw: unknown): ConsultAnalysisCore {
   if (!isRecord(raw) || !exactKeys(raw, CONSULT_ANALYSIS_CORE_FIELDS)) {
-    throw new ConsultAnalysisProviderError('bad_output')
+    throw new ConsultAnalysisProviderError('bad_output', 'core_keys')
   }
   const baseLevel = observed(raw.baseLevel, CONSULT_HAIR_LEVELS, 'UNKNOWN', {
     hairOnly: true,
@@ -1650,7 +1655,7 @@ function sanitizeCore(raw: unknown): ConsultAnalysisCore {
   // A base darker than the lightest is the one combination the scale forbids.
   // Either being UNKNOWN is simply unobserved, and passes.
   if (!consultHairLevelPairIsOrdered(baseLevel.value, lightestLevel.value)) {
-    throw new ConsultAnalysisProviderError('bad_output')
+    throw new ConsultAnalysisProviderError('bad_output', 'level_order')
   }
   return {
     baseLevel,
@@ -1675,7 +1680,7 @@ function sanitizeServiceLens(raw: unknown): ConsultAnalysisProviderOutput['servi
     ]) ||
     raw.discussWithProfessional !== true
   ) {
-    throw new ConsultAnalysisProviderError('bad_output')
+    throw new ConsultAnalysisProviderError('bad_output', 'service_lens_shape')
   }
   return {
     goal: cleanText(raw.goal, 240),
@@ -1691,7 +1696,7 @@ function sanitizeServiceLens(raw: unknown): ConsultAnalysisProviderOutput['servi
 
 function sanitizeSafetyFlags(raw: unknown): ConsultAnalysisProviderOutput['safetyFlags'] {
   if (!Array.isArray(raw) || raw.length > CONSULT_ANALYSIS_SAFETY_CODES.length) {
-    throw new ConsultAnalysisProviderError('bad_output')
+    throw new ConsultAnalysisProviderError('bad_output', 'safety_count')
   }
   const flags = raw.map((item) => {
     if (
@@ -1699,16 +1704,16 @@ function sanitizeSafetyFlags(raw: unknown): ConsultAnalysisProviderOutput['safet
       !exactKeys(item, ['code', 'summary', 'discussWithProfessional']) ||
       item.discussWithProfessional !== true
     ) {
-      throw new ConsultAnalysisProviderError('bad_output')
+      throw new ConsultAnalysisProviderError('bad_output', 'safety_shape')
     }
     return {
-      code: enumValue(item.code, CONSULT_ANALYSIS_SAFETY_CODES),
+      code: enumValue(item.code, CONSULT_ANALYSIS_SAFETY_CODES, () => { throw new ConsultAnalysisProviderError('bad_output', 'safety_code') }),
       summary: cleanText(item.summary, 240),
       discussWithProfessional: true as const,
     }
   })
   if (new Set(flags.map((flag) => flag.code)).size !== flags.length) {
-    throw new ConsultAnalysisProviderError('bad_output')
+    throw new ConsultAnalysisProviderError('bad_output', 'safety_duplicate')
   }
   return flags
 }
@@ -1809,7 +1814,7 @@ export function sanitizeConsultDirectionResponse(
       args.lookPlanContext ? 'lookPlan' : 'recommendations',
     ])
   ) {
-    throw new ConsultAnalysisProviderError('bad_output')
+    throw new ConsultAnalysisProviderError('bad_output', 'response_keys')
   }
   const core = sanitizeCore(raw.core)
   const lookPlan = args.lookPlanContext ? sanitizeConsultLookPlan(raw.lookPlan, {
