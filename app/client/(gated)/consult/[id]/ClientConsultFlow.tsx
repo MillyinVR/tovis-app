@@ -143,6 +143,31 @@ const CHIP_INACTIVE =
 /** A small action under a settled message — "replace this photo" — never a button. */
 const SUBTLE_LINK = 'text-xs font-bold text-textSecondary underline underline-offset-2'
 
+const isPlanMessage = (
+  entry: ConsultThreadMessageDTO,
+): entry is ConsultThreadPlanMessageDTO => entry.kind === 'PLAN'
+
+/** A photo request from the guided (daylight) pack — never the early photo. */
+const isGuidedPhotoRequest = (
+  entry: ConsultThreadMessageDTO,
+): entry is ConsultThreadPhotoRequestMessageDTO =>
+  entry.kind === 'PHOTO_REQUEST' && entry.shot.key !== CONSULT_EARLY_PHOTO_SHOT_KEY
+
+/**
+ * How a guided photo request is drawn (the daylight break, Tori 2026-09-12).
+ *
+ * `choice: 'OPEN'` — the request is the open step and her look could already
+ * be built, so the CHOICE renders in its place: build now, or add the photos
+ * first. `choice: 'BUILT'` — she built without this one; her answer and the
+ * standing invitation render above it. `compact` — her look exists and this
+ * photo was never sent: one line with the way to add it, not a full camera
+ * card between her and her plan.
+ */
+type GuidedPhotoPresentation = {
+  choice: 'OPEN' | 'BUILT' | null
+  compact: boolean
+}
+
 /**
  * Values the server refuses to combine with anything else ("None", "Not sure",
  * "Nothing else"). Picking one clears the rest instead of letting the mix
@@ -305,6 +330,12 @@ export default function ClientConsultFlow({
   const [managementAction, setManagementAction] = useState<'delete' | 'revoke' | null>(null)
   const [analyzing, setAnalyzing] = useState(false)
   const analysisKey = useRef<string>(newKey())
+  // The daylight break: which way she went at the first daylight photo.
+  // UNDECIDED shows the choice; PHOTOS shows the photo request with the
+  // build-now exit under it. Transient on purpose — the durable half of the
+  // decision is the plan run itself, and a client who comes back before
+  // sending a photo is asked the same honest question again.
+  const [captureChoice, setCaptureChoice] = useState<'UNDECIDED' | 'PHOTOS'>('UNDECIDED')
   // P5b — the inspiration read stage: its own busy flag, its own error, and
   // the id of the reference it last asked about.
   const [inspirationFullscreen, setInspirationFullscreen] = useState(false)
@@ -752,14 +783,6 @@ export default function ClientConsultFlow({
       }
     })
 
-  const proceedWithAccepted = () =>
-    run(async () => {
-      await api(`${base}/capture/proceed`, {
-        method: 'POST',
-        body: JSON.stringify({}),
-      })
-    })
-
   const setChartCopy = (optIn: boolean) =>
     run(async () => {
       await api(`${base}/capture/chart-copy`, {
@@ -791,6 +814,44 @@ export default function ClientConsultFlow({
       }
     })
 
+  // The daylight break's "Build my look now". One tap from wherever the
+  // capture is: a consult still in MEDIA_READY goes through the partial-pack
+  // door first (`capture/proceed` — the server insists on at least one
+  // accepted guided photo and a finished reference step), and the plan card
+  // the re-read then serves is started exactly as its own button starts it.
+  // A consult already at ANALYSIS_PENDING skips straight to the start.
+  const buildLookNow = () =>
+    run(async () => {
+      let plan = thread?.messages.find(isPlanMessage) ?? null
+      if (!plan?.awaitingStart) {
+        await api(`${base}/capture/proceed`, {
+          method: 'POST',
+          body: JSON.stringify({}),
+        })
+        plan = (await refresh()).messages.find(isPlanMessage) ?? null
+      }
+      if (
+        !plan?.awaitingStart ||
+        plan.schemaVersion === null ||
+        plan.promptVersion === null
+      ) {
+        return
+      }
+      setAnalyzing(true)
+      try {
+        await api(`${base}/analysis`, {
+          method: 'POST',
+          body: JSON.stringify({
+            idempotencyKey: analysisKey.current,
+            schemaVersion: plan.schemaVersion,
+            promptVersion: plan.promptVersion,
+          }),
+        })
+      } finally {
+        setAnalyzing(false)
+      }
+    })
+
   // ── The poll ──────────────────────────────────────────────────────────────
   // Every 5s while a run is live and this screen is mounted. Stops on its own
   // when the run settles. Unlike the wizard this replaces, a completed run does
@@ -799,9 +860,7 @@ export default function ClientConsultFlow({
   // `document.hidden` is checked per tick rather than by subscribing to the
   // visibility event: a backgrounded tab should not keep asking, and the tick
   // that runs when it comes back is the catch-up.
-  const planMessage = thread?.messages.find(
-    (entry): entry is ConsultThreadPlanMessageDTO => entry.kind === 'PLAN',
-  )
+  const planMessage = thread?.messages.find(isPlanMessage)
   const analysisRun = planMessage?.run ?? null
   const runIsLive = analysisRun ? isConsultAnalysisRunLive(analysisRun) : false
   useEffect(() => {
@@ -850,6 +909,57 @@ export default function ClientConsultFlow({
       message.shot.key !== CONSULT_EARLY_PHOTO_SHOT_KEY,
   )
   const latestMessageId = visibleMessages[visibleMessages.length - 1]?.id ?? null
+
+  // ── The daylight break ────────────────────────────────────────────────────
+  // Has she asked for her plan? The server's own rule (lib/consult/thread.ts,
+  // `planCommitted`): a run exists, or a plan does. From then on the daylight
+  // photos are still wanted, still shootable, and no longer in her way.
+  const planCommitted =
+    Boolean(planMessage?.run) ||
+    (planMessage?.planVersion ?? 0) > 0 ||
+    Boolean(planMessage?.results)
+  // The EARLY photo is excluded from the count, as the server excludes it in
+  // `advanceLockedConsultToAnalysisIfReady`: the partial-pack door is about
+  // the GUIDED pack, and a photograph that is not one of its slots does not
+  // open it.
+  const guidedPhotos = thread.messages.filter(isGuidedPhotoRequest)
+  const acceptedGuided = guidedPhotos.filter(
+    (entry) => entry.slot.state === 'ACCEPTED',
+  ).length
+  // Could her look be built right now, from what is in? Either the server
+  // already serves a startable plan card (a hair consult reaches
+  // ANALYSIS_PENDING off the early photo alone), or the partial-pack door is
+  // open (MEDIA_READY with at least one accepted guided photo).
+  const buildable =
+    thread.controls?.inputsOpen !== false &&
+    !planCommitted &&
+    ((planMessage?.awaitingStart === true && !planMessage.run) ||
+      (thread.status === 'MEDIA_READY' && acceptedGuided >= 1))
+  // The choice stands only on a photo she has not tried yet. A refused shot is
+  // a retake card with its guidance, and a client who has sent one has already
+  // answered "photos first" — she gets the photo, with the exit underneath.
+  const openGuidedPhoto = guidedPhotos.find((entry) => entry.state === 'OPEN')
+  const choosing =
+    buildable &&
+    captureChoice === 'UNDECIDED' &&
+    openGuidedPhoto?.slot.state === 'EMPTY'
+  const firstUnsentGuidedId =
+    guidedPhotos.find((entry) => entry.slot.state === 'EMPTY')?.id ?? null
+  const guidedPhotoPresentation = (
+    message: ConsultThreadMessageDTO,
+  ): GuidedPhotoPresentation | undefined => {
+    if (!isGuidedPhotoRequest(message)) return undefined
+    if (!planCommitted) {
+      return {
+        choice: choosing && message.id === openGuidedPhoto?.id ? 'OPEN' : null,
+        compact: false,
+      }
+    }
+    return {
+      choice: message.id === firstUnsentGuidedId ? 'BUILT' : null,
+      compact: message.slot.state === 'EMPTY',
+    }
+  }
 
   return (
     <ConsultInputState.Provider value={{ editing: editing && Boolean(thread.controls?.canEditAnswers), inputsOpen: thread.controls?.inputsOpen !== false }}>
@@ -926,6 +1036,9 @@ export default function ClientConsultFlow({
             onChooseLook={chooseLook}
             onStartAnalysis={startAnalysis}
             onRefresh={() => void refresh()}
+            guidedPhoto={guidedPhotoPresentation(message)}
+            onBuildLookNow={buildLookNow}
+            onAddPhotosFirst={() => setCaptureChoice('PHOTOS')}
           />
         </ThreadMessageSlot>
       ))}
@@ -936,7 +1049,8 @@ export default function ClientConsultFlow({
           copy={copy}
           pro={thread.professionalDisplayName}
           onChartCopy={setChartCopy}
-          onProceed={proceedWithAccepted}
+          canBuild={buildable && !choosing && Boolean(openGuidedPhoto)}
+          onBuild={buildLookNow}
         />
       ) : null}
       {/* Where she is looking: an error lands under the step it belongs to,
@@ -978,10 +1092,17 @@ function ConsultThreadMessage({
   onStartAnalysis,
   onChooseLook,
   onRefresh,
+  guidedPhoto,
+  onBuildLookNow,
+  onAddPhotosFirst,
 }: {
   message: ConsultThreadMessageDTO
   busy: boolean
   analyzing: boolean
+  /** The daylight break, for a guided photo request; undefined otherwise. */
+  guidedPhoto: GuidedPhotoPresentation | undefined
+  onBuildLookNow: () => void
+  onAddPhotosFirst: () => void
   slotPreviews: Record<string, string>
   slotErrors: Record<string, string>
   onAcceptAgreement: (kind: string, agreementVersionId: string) => void
@@ -1081,10 +1202,14 @@ function ConsultThreadMessage({
         <PhotoRequestMessage
           message={message}
           busy={busy}
+          copy={copy}
           preview={slotPreviews[message.shot.key]}
           error={slotErrors[message.shot.key]}
           onUpload={onUploadShot}
           onUseChartPhoto={onUseChartPhoto}
+          guidedPhoto={guidedPhoto}
+          onBuildLookNow={onBuildLookNow}
+          onAddPhotosFirst={onAddPhotosFirst}
         />
       )
 
@@ -1500,20 +1625,28 @@ function InspirationMessage({
 function PhotoRequestMessage({
   message,
   busy,
+  copy,
   preview,
   error,
   onUpload,
   onUseChartPhoto,
+  guidedPhoto,
+  onBuildLookNow,
+  onAddPhotosFirst,
 }: {
   onUseChartPhoto: (mediaAssetId: string) => void
   message: ConsultThreadPhotoRequestMessageDTO
   busy: boolean
+  copy: BrandClientConsultThreadCopy
   preview: string | undefined
   error: string | undefined
   onUpload: (
     message: ConsultThreadPhotoRequestMessageDTO,
     file: File,
   ) => void
+  guidedPhoto: GuidedPhotoPresentation | undefined
+  onBuildLookNow: () => void
+  onAddPhotosFirst: () => void
 }) {
   const { shot, slot } = message
   const accepted = slot.state === 'ACCEPTED'
@@ -1527,6 +1660,79 @@ function PhotoRequestMessage({
   // that matters here: would the server take this upload? Undefined from a
   // server that predates the field means yes, which is what shipped before.
   const shootable = message.shootable !== false
+
+  const errorLine = error ? (
+    <p className="mt-2 rounded-lg border border-toneDanger/30 bg-toneDanger/10 px-2 py-1.5 text-xs leading-5 text-textPrimary">
+      {error}
+    </p>
+  ) : null
+
+  // The daylight break (Tori, 2026-09-12): a clean stop before the first
+  // daylight photo when her look can already be built. Both buttons are hers;
+  // the sentence says the photos are wanted either way, and can wait.
+  if (guidedPhoto?.choice === 'OPEN') {
+    return (
+      <div className="grid gap-2" data-testid="consult-daylight-choice">
+        <ThreadBubble author="APP">{copy.captureChoice}</ThreadBubble>
+        <ThreadCard>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className={BUTTON_PRIMARY}
+              disabled={busy}
+              onClick={onBuildLookNow}
+            >
+              {copy.captureChoiceBuildNow}
+            </button>
+            <button
+              type="button"
+              className={BUTTON_SECONDARY}
+              disabled={busy}
+              onClick={onAddPhotosFirst}
+            >
+              {copy.captureChoiceAddPhotos}
+            </button>
+          </div>
+        </ThreadCard>
+      </div>
+    )
+  }
+
+  // Her look exists and this photo was never sent: one line, with the way to
+  // add it, rather than a camera card standing between her and her plan. The
+  // first of these carries her answer and the standing invitation.
+  if (guidedPhoto?.compact) {
+    return (
+      <div className="grid gap-2" data-testid="consult-daylight-later">
+        {guidedPhoto.choice === 'BUILT' ? (
+          <>
+            <ThreadBubble author="CLIENT">{copy.captureChoiceBuildNow}</ThreadBubble>
+            <ThreadBubble author="APP">{copy.captureChoiceBuilt}</ThreadBubble>
+          </>
+        ) : null}
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-surfaceGlass/10 px-3 py-2">
+          <span className="text-xs font-bold text-textSecondary">{shot.title}</span>
+          {shootable ? (
+            <label className={`cursor-pointer ${SUBTLE_LINK}`}>
+              {copy.captureAddLater}
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                disabled={busy}
+                onChange={(event) => {
+                  const file = event.target.files?.[0]
+                  if (file) onUpload(message, file)
+                  event.target.value = ''
+                }}
+              />
+            </label>
+          ) : null}
+        </div>
+        {errorLine}
+      </div>
+    )
+  }
 
   // Settled: the ask, then the photo (this session's own copy, when there is
   // one) and its verdict on her side of the chat. A warm-light aside and the
@@ -1645,11 +1851,7 @@ function PhotoRequestMessage({
         </div>
       ) : null}
 
-      {error ? (
-        <p className="mt-2 rounded-lg border border-toneDanger/30 bg-toneDanger/10 px-2 py-1.5 text-xs leading-5 text-textPrimary">
-          {error}
-        </p>
-      ) : null}
+      {errorLine}
 
       {shootable ? (
         <label
@@ -1827,8 +2029,9 @@ function PlanSummary({
 
 /**
  * The two capture-step controls that are NOT steps: the chart-copy preference
- * she can flip at any point in the window, and the offer to run the analysis on
- * the photos that were accepted.
+ * she can flip at any point in the window, and — once she chose to add the
+ * daylight photos first — the way out that stays a tap away: build the look
+ * from what is in, and add the rest later.
  *
  * They sit under the thread rather than inside a message because neither is a
  * question with an answer — turning either into a bubble would put a message in
@@ -1840,35 +2043,23 @@ function CapturePrepControls({
   copy,
   pro,
   onChartCopy,
-  onProceed,
+  canBuild,
+  onBuild,
 }: {
   thread: ConsultThreadDTO
   busy: boolean
   copy: BrandClientConsultThreadCopy
   pro: string
   onChartCopy: (optIn: boolean) => void
-  onProceed: () => void
+  /**
+   * Decided by the flow: her look can be built now, a daylight photo is still
+   * outstanding, and the choice itself is not on screen (it would be the same
+   * button twice).
+   */
+  canBuild: boolean
+  onBuild: () => void
 }) {
-  // 🔴 The EARLY photo is excluded, and it is the same correction the server
-  // makes in `advanceLockedConsultToAnalysisIfReady` (P7a-1): this card is
-  // about the GUIDED pack — "you have some of your photos in, run it anyway" —
-  // so counting a photograph that is not one of its slots would report a
-  // seven-shot pack as 8-of-8 complete after seven guided shots, and would
-  // offer "proceed with a partial pack" to a client who has taken no guided
-  // photo at all. The server still permits an analysis on the early photo
-  // alone; this is the card that describes the pack.
-  const photos = thread.messages.filter(
-    (entry): entry is ConsultThreadPhotoRequestMessageDTO =>
-      entry.kind === 'PHOTO_REQUEST' &&
-      entry.shot.key !== CONSULT_EARLY_PHOTO_SHOT_KEY,
-  )
   if (!thread.chartCopy) return null
-
-  const accepted = photos.filter(
-    (entry) => entry.slot.state === 'ACCEPTED',
-  ).length
-  const canProceed =
-    thread.controls?.inputsOpen !== false && thread.status === 'MEDIA_READY' && accepted >= 1 && accepted < photos.length
 
   return (
     <div className="grid gap-3">
@@ -1893,20 +2084,18 @@ function CapturePrepControls({
           </span>
         </label>
       </ThreadCard>
-      {canProceed ? (
+      {canBuild ? (
         <ThreadCard>
           <p className="text-sm leading-6 text-textSecondary">
-            You can keep going with the photos that came through. The views you
-            skip can’t be analyzed, so those parts of your plan will honestly
-            say unknown.
+            {copy.captureChoiceLater}
           </p>
           <button
             type="button"
             className={`mt-3 ${BUTTON_SECONDARY}`}
             disabled={busy}
-            onClick={onProceed}
+            onClick={onBuild}
           >
-            Carry on with {accepted} of {photos.length} photos
+            {copy.captureChoiceBuildNow}
           </button>
         </ThreadCard>
       ) : null}

@@ -97,8 +97,14 @@ import {
 } from '@/lib/consult/intakePack'
 import { CONSULT_EARLY_PHOTO_SHOT_KEY } from '@/lib/consult/capture/earlyPhoto'
 import {
+  CONSULT_ANALYSIS_PROMPT_VERSION,
+  CONSULT_ANALYSIS_SCHEMA_VERSION,
+} from '@/lib/consult/analysisEngine'
+import { POST as startAnalysis } from '@/app/api/v1/client/consult/[id]/analysis/route'
+import {
   earlyPhotoWritable,
   guidedCaptureWritable,
+  proceedConsultCaptureToAnalysis,
 } from '@/lib/consult/captureContract'
 import {
   findConsultCaptureShot,
@@ -121,6 +127,7 @@ import {
   attachAcceptedCapture,
   body,
   completeAnswers,
+  context,
   createLook,
   fx,
   jsonRequest,
@@ -931,6 +938,120 @@ describe('consult thread projection', () => {
     // The plan is the LAST thing in the thread on an unbooked consult — the
     // reveal, after the work.
     expect(t.messages[t.messages.length - 1]?.kind).toBe('PLAN')
+  })
+
+  // The daylight break (Tori, 2026-09-12). The chat shows one thing at a time
+  // (#1163), and it walks the thread to `nextOpenMessageId`. A consult that
+  // could already build its plan kept its next daylight photo OPEN, so the
+  // chat stopped there and the plan card — and the "working it out" bubble
+  // after she started it — sat below the cut. She was asked for daylight
+  // photos "to finish up" with no way past them.
+  it('🔴 keeps the next daylight photo open while she is choosing, and steps the photos aside once she has asked for her plan', async () => {
+    const sessionId = await startConsult()
+    await acceptBothAgreements(sessionId)
+    await takeEarlyPhoto(sessionId)
+    await appendConsultIntakeRevision({
+      consultSessionId: sessionId,
+      actor: { type: ConsultActorType.CLIENT, id: fx.clientUserId },
+      loadInput: async () => ({
+        idempotencyKey: 'daylight-break-intake',
+        packVersion: HAIR_COLOR_INTAKE_PACK_VERSION,
+        schemaVersion: HAIR_COLOR_INTAKE_SCHEMA_VERSION,
+        complete: true,
+        answers: completeAnswers,
+      }),
+    })
+    // The rest of the intake as she walks it: every question the thread asks,
+    // answered, until it asks none — the photos come after that.
+    const answers: Record<string, string> = { ...completeAnswers }
+    for (let step = 0; step < 20; step += 1) {
+      const open = ofKind((await thread(sessionId)).messages, 'QUESTION').find(
+        (question) => question.state === 'OPEN' && question.id.startsWith('intake:'),
+      )
+      if (!open) break
+      // A definite answer: a complete intake refuses "not sure" on the goal.
+      const option = open.question.options.find((o) => o.value !== 'not-sure')
+      if (!option) throw new Error(`No option to answer ${open.question.key} with`)
+      answers[open.question.key] = option.value
+      await appendConsultIntakeRevision({
+        consultSessionId: sessionId,
+        actor: { type: ConsultActorType.CLIENT, id: fx.clientUserId },
+        loadInput: async () => ({
+          idempotencyKey: `daylight-break-intake-${step}`,
+          packVersion: HAIR_COLOR_INTAKE_PACK_VERSION,
+          schemaVersion: HAIR_COLOR_INTAKE_SCHEMA_VERSION,
+          complete: true,
+          answers,
+        }),
+      })
+    }
+    for (const [questionKey, selectedValues] of INSPIRATION_ANSWERS) {
+      await answerConsultInspirationQuestion({
+        consultSessionId: sessionId,
+        clientId: fx.clientId,
+        actor: { type: ConsultActorType.CLIENT, id: fx.clientUserId },
+        input: {
+          idempotencyKey: `daylight-break-${questionKey}`,
+          schemaVersion: INSPIRATION_SCHEMA_VERSION,
+          questionKey,
+          selectedValues,
+        },
+      })
+    }
+    // One daylight photo in, and she takes the partial-pack door: the plan can
+    // be built from what is in.
+    await attachAcceptedCapture(db, sessionId, 'hair_back', 'daylight-break')
+    await proceedConsultCaptureToAnalysis({
+      consultSessionId: sessionId,
+      clientId: fx.clientId,
+      actor: { type: ConsultActorType.CLIENT, id: fx.clientUserId },
+    })
+
+    const choosing = await thread(sessionId)
+    expect(choosing.status).toBe('ANALYSIS_PENDING')
+    const startable = ofKind(choosing.messages, 'PLAN')
+    expect(startable).toHaveLength(1)
+    expect(startable[0]?.awaitingStart).toBe(true)
+    expect(startable[0]?.run).toBeNull()
+    // Still choosing — build now, or add the photos first — so the next
+    // daylight photo stays the open step: the second answer has to be a tap
+    // away, and the startable plan card sits behind it for the first.
+    const guided = (messages: ConsultThreadMessageDTO[]) =>
+      ofKind(messages, 'PHOTO_REQUEST').filter(
+        (photo) => photo.shot.key !== CONSULT_EARLY_PHOTO_SHOT_KEY,
+      )
+    expect(choosing.nextOpenMessageId).toBe('photo:hair_left')
+    expect(guided(choosing.messages).filter((p) => p.state === 'OPEN')).toHaveLength(1)
+
+    // She asks for her plan. The start claims the run; nothing drains it here
+    // (`kickConsultAnalysisRun` no-ops under VITEST), so this is the thread
+    // WHILE the plan is being worked out.
+    const started = await startAnalysis(
+      jsonRequest(`/api/v1/client/consult/${sessionId}/analysis`, {
+        idempotencyKey: 'daylight-break-analysis',
+        schemaVersion: CONSULT_ANALYSIS_SCHEMA_VERSION,
+        promptVersion: CONSULT_ANALYSIS_PROMPT_VERSION,
+      }),
+      context(sessionId),
+    )
+    expect(started.status, await started.clone().text()).toBe(200)
+
+    const building = await thread(sessionId)
+    expect(building.status).toBe('ANALYZING')
+    // Every daylight photo is still there, still wanted and still shootable —
+    // she can come back to them any time — and NONE is the step the thread
+    // waits on. The plan card is what she reaches.
+    const stillWanted = guided(building.messages)
+    expect(stillWanted).toHaveLength(7)
+    expect(stillWanted.filter((p) => p.state === 'OPEN')).toHaveLength(0)
+    expect(stillWanted.filter((p) => p.state === 'BLOCKED')).toHaveLength(6)
+    expect(stillWanted.every((p) => p.shootable === true)).toBe(true)
+    expect(building.nextOpenMessageId).toBeNull()
+    const card = ofKind(building.messages, 'PLAN')[0]
+    expect(card?.run).not.toBeNull()
+    expect(card?.awaitingStart).toBe(false)
+    expect(card?.text).toBe(copy.planRunning)
+    expect(building.messages[building.messages.length - 1]?.kind).toBe('PLAN')
   })
 
   it('withdraws completion if a late photo reading reveals unanswered visual questions', async () => {

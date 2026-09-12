@@ -711,6 +711,29 @@ export async function loadConsultThread(args: {
   //
   // Prep. Uses the capture state already loaded above the intake.
   //
+  // The analysis stage is read HERE, above the pack, because the pack needs
+  // its answer: once she has asked for her plan, the photos stop being the
+  // open step (see `planCommitted`). Null before ANALYSIS_PENDING.
+  const analysis = await optionalStage(() => loadConsultAnalysisState(stageArgs))
+  /**
+   * Has she committed to a plan? (Tori, 2026-09-12 — the daylight break.)
+   *
+   * A run exists, or a plan does. From then on the guided photos are still
+   * wanted and still shootable — every request renders, every one is
+   * tappable — but none of them is the step the thread is waiting on. Before
+   * this, a hair consult that reached ANALYSIS_PENDING off the early photo
+   * alone kept its FIRST daylight request OPEN, so `nextOpenMessageId` named
+   * the photo and the chat (one thing at a time, #1163) stopped there: the
+   * plan card, and the "working it out" bubble after she started it, were
+   * below the cut and never reached. She was asked for daylight photos to
+   * "finish up" with no way past them.
+   *
+   * Only a RUN commits, not ANALYSIS_PENDING alone: at that status she is
+   * still choosing — build now, or add the photos first — and the request has
+   * to stay open for the second answer to be a tap away.
+   */
+  const planCommitted = hasPlan || Boolean(analysis?.run)
+  //
   // 🔴 GATED ON THE WRITE BOUNDARY'S OWN ANSWER (P3b). `capture` loads at
   // EARLY_PHOTO_READY — it has to, because the early photo lives in the same
   // stage — and this block used to run whenever it loaded. So all seven guided
@@ -763,8 +786,9 @@ export async function loadConsultThread(args: {
       const settled = slot.state === 'ACCEPTED' || slot.state === 'PURGED'
       // Only the FIRST outstanding photo is the open step. The rest are still
       // requests — they render, and she can jump to any of them, but resume
-      // lands on one place. Once a plan exists, none of them is that place.
-      const open = !settled && firstOpenShot && !hasPlan
+      // lands on one place. Once she has asked for her plan, none of them is
+      // that place (`planCommitted`, above).
+      const open = !settled && firstOpenShot && !planCommitted
       if (open) firstOpenShot = false
       out.push({
         kind: 'PHOTO_REQUEST',
@@ -789,7 +813,7 @@ export async function loadConsultThread(args: {
   }
 
   // ── Plan ─────────────────────────────────────────────────────────────────
-  const analysis = await optionalStage(() => loadConsultAnalysisState(stageArgs))
+  // `analysis` was read above the pack; see `planCommitted`.
   const results =
     session.status === ConsultSessionStatus.COMPLETED
       ? await optionalStage(() =>

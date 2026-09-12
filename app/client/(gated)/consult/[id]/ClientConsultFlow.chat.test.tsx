@@ -32,7 +32,7 @@ it('saves a typed correction and retains it as chat history, and only then shows
   const input = await screen.findByRole('textbox', { name: 'Say it in your own words' })
   // ONE thing at a time (Tori, 2026-09-11): the step after this card is not on
   // the page until this one is answered.
-  expect(screen.queryByText('Now a few of you, in daylight if you can.')).not.toBeInTheDocument()
+  expect(screen.queryByText('Now a few photos of you, and these need daylight — it shows your truest colour, where indoor light warms or flattens it.')).not.toBeInTheDocument()
   fireEvent.change(input, { target: { value: 'The hair is warmer; that is her clothing.' } })
   fireEvent.click(screen.getByRole('button', { name: /^Next$/ }))
   await waitFor(() => expect(saved).toMatchObject({ selectedValues: [], text: 'The hair is warmer; that is her clothing.' }))
@@ -41,7 +41,7 @@ it('saves a typed correction and retains it as chat history, and only then shows
   // The answered card is history now — the question and her words as two
   // bubbles — and the next step has arrived beneath it.
   expect(screen.getByText('Is this part of what you like?')).toBeInTheDocument()
-  expect(screen.getByText('Now a few of you, in daylight if you can.')).toBeInTheDocument()
+  expect(screen.getByText('Now a few photos of you, and these need daylight — it shows your truest colour, where indoor light warms or flattens it.')).toBeInTheDocument()
 })
 
 it('can replace an answered reference and cancel without changing its saved source', async () => {

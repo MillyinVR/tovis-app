@@ -55,8 +55,23 @@ export const defaultClientConsultThreadCopy: BrandClientConsultThreadCopy = {
     'Now tell me what you like about it — tap what catches your eye.',
   inspirationDone: 'Got it. {pro} will see exactly what you picked out.',
 
+  // Daylight, and WHY (Tori, 2026-09-12): it shows her truest colour. Indoor
+  // light warms or flattens it, and a plan read off a warm frame is a plan for
+  // hair she does not have.
   captureIntro:
-    'Now a few of you, in daylight if you can. Each one gets checked straight away, and I’ll tell you why if one won’t work.',
+    'Now a few photos of you, and these need daylight — it shows your truest colour, where indoor light warms or flattens it. Each one gets checked straight away, and I’ll tell you why if one won’t work.',
+  // The daylight break (Tori, 2026-09-12). A clean stop at the first daylight
+  // photo: build now, or add the photos first. Both answers are hers, and both
+  // say the same thing — the photos are wanted, and they can wait.
+  captureChoice:
+    'I can build your look now from what you’ve given me, or you can add the daylight photos first. Either way I’d love them — daylight shows your truest colour, and that makes the plan a lot sharper. You can add or change them any time before your appointment.',
+  captureChoiceBuildNow: 'Build my look now',
+  captureChoiceAddPhotos: 'Add daylight photos first',
+  captureChoiceLater:
+    'You can build your look whenever you like and add the rest later. Anything a missing photo would have shown just comes back as unknown — no guessing.',
+  captureChoiceBuilt:
+    'No problem. Add your daylight photos whenever you like, any time before your appointment, and I’ll look at your plan again with them.',
+  captureAddLater: 'Add this photo',
   // Says what happens next rather than what is missing — she has not failed a
   // step here, she simply has not reached one. No jargon, no "locked".
   captureLockedBeforeBooking:
