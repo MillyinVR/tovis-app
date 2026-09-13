@@ -121,13 +121,29 @@ async function requireAuthorizedClientResultScope(
  * Counts ACCEPTED rows only. A rejected frame is not an input to the plan, so
  * counting it would make the sentence describe photographs the reading never
  * saw — which is the opposite of what rule 8 is for.
+ *
+ * 🔴 One frame per VIEW, newest first. A slot can hold more than one accepted
+ * row over a consult's life — a photo purged after the plan was built and then
+ * re-sent, and now a photo the client REPLACED — and counting both would tell
+ * her the reading saw eight frames when it saw seven, and call her colour warm
+ * on the strength of a photograph that has been superseded. `captures` arrives
+ * newest-first, so the first row per shot is the one still standing.
  */
-function photoLightFor(
-  captures: readonly { status: ConsultCaptureStatus; qualityWarningCode: string | null }[],
+export function photoLightFor(
+  captures: readonly {
+    status: ConsultCaptureStatus
+    qualityWarningCode: string | null
+    shotKey: string
+  }[],
 ): ConsultResultsPhotoLightDTO {
-  const accepted = captures.filter(
-    (capture) => capture.status === ConsultCaptureStatus.ACCEPTED,
-  )
+  const accepted = [
+    ...new Map(
+      captures
+        .filter((capture) => capture.status === ConsultCaptureStatus.ACCEPTED)
+        .map((capture) => [capture.shotKey, capture] as const)
+        .reverse(),
+    ).values(),
+  ]
   const warm = accepted.filter((capture) =>
     isConsultColorFindingCode(capture.qualityWarningCode ?? ''),
   )
@@ -254,6 +270,9 @@ export async function loadAuthorizedClientConsultResults(
           },
         },
         select: { status: true, qualityWarningCode: true, shotKey: true },
+        // Newest first, so `photoLightFor` keeps the frame that is still the
+        // slot's — the same order and tiebreak the capture state itself uses.
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       })
       const attributedBookingCount = await tx.booking.count({
         where: { sourceConsultSessionId: scope.id },

@@ -3,12 +3,24 @@
 import { useCallback, useRef, useState } from 'react'
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import type { BrandConsultFocusCopy } from '@/lib/brand/types'
-import type { CropRect } from '@/lib/media/cropRect'
+import { FULL_FRAME_CROP, type CropRect } from '@/lib/media/cropRect'
 import { clampCropRect, resizeCropRect, type CropHandle } from '@/lib/media/cropDrag'
 
-/** Local selection only. Confirmation hands a rectangle to the upload owner. */
-export default function ConsultInspirationFocus({ src, copy, busy, onConfirm, onCancel }: {
+/**
+ * Local selection only. Confirmation hands a rectangle to the upload owner.
+ *
+ * Used for the inspiration reference (choose whose look this is about) and for
+ * the client's own selfie (zoom in on your face, and leave anyone else in the
+ * frame out of it). The two differ in their words and in one button:
+ * `fullFrameLabel`, when given, offers the WHOLE photo as a one-tap answer.
+ * A selfie needs that — the picture is already of her, and a crop is the
+ * exception rather than the point — while an inspiration reference is asked
+ * for precisely because a region of it has to be singled out.
+ */
+export default function ConsultPhotoFocus({ src, copy, busy, fullFrameLabel, onConfirm, onCancel }: {
   src: string; copy: BrandConsultFocusCopy; busy: boolean
+  /** Offers the whole frame as its own answer. Omitted = a crop is required. */
+  fullFrameLabel?: string
   onConfirm: (crop: CropRect) => void; onCancel: () => void
 }) {
   const frame = useRef<HTMLDivElement>(null)
@@ -25,7 +37,7 @@ export default function ConsultInspirationFocus({ src, copy, busy, onConfirm, on
       ? { dx: next - value, dy: 0 } : { dx: 0, dy: next - value }))
   }
   const button = 'rounded-lg border border-surfaceGlass/20 px-3 py-2 text-sm font-semibold text-textPrimary disabled:opacity-50'
-  return <fieldset disabled={busy} className="grid min-w-0 gap-3" data-testid="consult-inspiration-focus">
+  return <fieldset disabled={busy} className="grid min-w-0 gap-3" data-testid="consult-photo-focus">
     <legend className="text-sm font-semibold text-textPrimary">{copy.title}</legend>
     <p className="text-xs leading-5 text-textSecondary">{copy.instruction}</p>
     <div ref={frame} className="relative overflow-hidden rounded-lg">
@@ -42,6 +54,13 @@ export default function ConsultInspirationFocus({ src, copy, busy, onConfirm, on
         style={{ left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `${rect.w * 100}%`, height: `${rect.h * 100}%`, boxShadow: '0 0 0 9999px rgb(var(--scrim) / 0.5)' }} /> : null}
     </div>
     {failed ? <p role="alert" className="text-sm text-textPrimary">{copy.loadError}</p> : null}
+    {/* 🔴 NOT gated on `natural`, unlike every control below it. Sending the
+        whole frame needs no dimensions — only a rectangle does — and this is
+        the answer that must always be available: a photo whose natural size
+        never arrives (see `onLoad` and already-cached images) would otherwise
+        leave her with no way to send a picture she has already chosen. */}
+    {fullFrameLabel && !failed ? <button type="button" className={button} disabled={busy}
+      data-testid="consult-focus-full-frame" onClick={() => onConfirm(FULL_FRAME_CROP)}>{fullFrameLabel}</button> : null}
     {!rect && !failed ? <button type="button" className={button} disabled={!natural || busy} onClick={() => place(0.5, 0.5)}>{copy.center}</button> : null}
     {rect && natural && !failed ? <>
       {([['w', copy.left, rect.x], ['e', copy.right, rect.x + rect.w], ['n', copy.top, rect.y], ['s', copy.bottom, rect.y + rect.h]] as const).map(([handle, label, value]) =>

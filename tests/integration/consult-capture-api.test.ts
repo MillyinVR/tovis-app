@@ -44,6 +44,7 @@ const fake = vi.hoisted(() => ({
         | 'COLOR_CAST'
         | 'VIEW_MISMATCH'
         | 'HAIR_NOT_VISIBLE'
+        | 'SUBJECT_NOT_VISIBLE'
         | 'BLURRY'
         | 'TOO_DARK'
         | 'TOO_BRIGHT'
@@ -613,7 +614,7 @@ function authenticate(consult: ReadyConsult) {
 async function takeEarlyPhoto(
   consult: ReadyConsult,
   label: string,
-) {
+): Promise<string> {
   // `authenticate` is called by each TEST, after createReadyConsult returns —
   // so this helper, which runs inside it, authenticates as the same client
   // itself. Same value the test is about to set.
@@ -657,6 +658,7 @@ async function takeEarlyPhoto(
     captureContext(sessionId, captureId),
   )
   expect(judged.status).toBe(200)
+  return captureId
 }
 
 async function issue(
@@ -1035,23 +1037,32 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
       }),
     ).toBe(2)
 
+    // A SECOND photo for the same slot is a replacement, not a duplicate: the
+    // unjudged one it supersedes is purge-marked in the same commit, so the
+    // slot still holds exactly one live capture — the newest.
     const secondIssue = await issue(consult, 'hair_back', 'different-live-issue')
     const secondUploadId = ((await body(secondIssue)).upload as {
       uploadSessionId: string
     }).uploadSessionId
     await putIssuedObject(secondUploadId)
-    const duplicateLive = await attach(
+    const replacement = await attach(
       consult,
       secondUploadId,
       'hair_back',
       'different-live-attach',
     )
-    expect(duplicateLive.status).toBe(409)
-    expect(
-      await db.consultCapture.count({
-        where: { consultSessionId: consult.sessionId, shotKey: 'hair_back' },
-      }),
-    ).toBe(1)
+    expect(replacement.status).toBe(200)
+    const backRows = await db.consultCapture.findMany({
+      where: { consultSessionId: consult.sessionId, shotKey: 'hair_back' },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true, uploadSessionId: true, purgeRequestedAt: true, purgedAt: true },
+    })
+    expect(backRows).toHaveLength(2)
+    expect(backRows[0]?.uploadSessionId).toBe(upload.id)
+    expect(backRows[0]?.purgeRequestedAt).not.toBeNull()
+    expect(backRows[0]?.purgedAt).not.toBeNull()
+    expect(backRows[1]?.uploadSessionId).toBe(secondUploadId)
+    expect(backRows[1]?.purgeRequestedAt).toBeNull()
   })
 
   it('uses stable non-leaking upload failures for missing and foreign sessions', async () => {
@@ -1307,6 +1318,97 @@ describe('consult C3 capture API against PostgreSQL and fake private storage', (
       captureId: replacementId,
       attemptCount: 2,
       previousReasonCode: 'BLURRY',
+    })
+  })
+
+  // 🔴 "Replace this photo" — the control both clients have always shown on an
+  // accepted photo, which the attach path refused outright until now (Tori,
+  // 2026-09-13: "theres an option for replace but it doesnt actually allow the
+  // client to replace it"). The selfie is the one every consult has.
+  it('replaces an accepted selfie, and keeps the old one when the replacement is refused', async () => {
+    const consult = await createReadyConsult('early-replace')
+    authenticate(consult)
+    const original = await db.consultCapture.findFirstOrThrow({
+      where: {
+        consultSessionId: consult.sessionId,
+        shotKey: CONSULT_EARLY_PHOTO_SHOT_KEY,
+      },
+    })
+    expect(original.status).toBe(ConsultCaptureStatus.ACCEPTED)
+
+    // A refused replacement must never cost her the photo she already had —
+    // that one is still what the analysis reads.
+    fake.qualityByShot.set(CONSULT_EARLY_PHOTO_SHOT_KEY, {
+      accepted: false,
+      reasonCode: 'SUBJECT_NOT_VISIBLE',
+      retakeTip: 'Make sure you are in the frame.',
+      model: 'fake-quality-model',
+    })
+    const refusedId = await takeEarlyPhoto(consult, 'early-replace-refused')
+    expect(refusedId).not.toBe(original.id)
+    expect(
+      await db.consultCapture.findUniqueOrThrow({ where: { id: refusedId } }),
+    ).toMatchObject({
+      status: ConsultCaptureStatus.REJECTED,
+      storagePath: null,
+    })
+    const kept = await db.consultCapture.findUniqueOrThrow({
+      where: { id: original.id },
+    })
+    expect(kept).toMatchObject({
+      status: ConsultCaptureStatus.ACCEPTED,
+      purgeRequestedAt: null,
+      purgedAt: null,
+      storagePath: expect.any(String),
+    })
+
+    // The replacement that PASSES takes the slot, and the photo it replaced is
+    // purge-marked and its raw object destroyed in the same breath. More than
+    // one live accepted capture for a shot is a pack the analysis refuses
+    // outright, so this is not merely tidiness.
+    fake.qualityByShot.set(CONSULT_EARLY_PHOTO_SHOT_KEY, {
+      accepted: true,
+      reasonCode: 'PASS',
+      retakeTip: null,
+      model: 'fake-quality-model',
+    })
+    const replacementId = await takeEarlyPhoto(consult, 'early-replace-passed')
+    expect(
+      await db.consultCapture.findUniqueOrThrow({ where: { id: original.id } }),
+    ).toMatchObject({
+      purgeRequestedAt: expect.any(Date),
+      purgedAt: expect.any(Date),
+      storagePath: null,
+    })
+    expect(
+      await db.consultAuditEvent.count({
+        where: {
+          captureId: original.id,
+          action: ConsultAuditAction.CAPTURE_DELETED,
+        },
+      }),
+    ).toBe(1)
+    expect(
+      await db.consultCapture.count({
+        where: {
+          consultSessionId: consult.sessionId,
+          shotKey: CONSULT_EARLY_PHOTO_SHOT_KEY,
+          status: ConsultCaptureStatus.ACCEPTED,
+          purgedAt: null,
+          purgeRequestedAt: null,
+        },
+      }),
+    ).toBe(1)
+
+    const state = await getCapture(
+      new Request(
+        `http://test/api/v1/client/consult/${consult.sessionId}/capture`,
+      ),
+      context(consult.sessionId),
+    )
+    expect(state.status).toBe(200)
+    expect((await body(state)).capture).toMatchObject({
+      earlyPhoto: { state: 'ACCEPTED', captureId: replacementId },
     })
   })
 

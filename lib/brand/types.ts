@@ -900,6 +900,21 @@ export type BrandClientConsultThreadCopy = {
   /** The link on a daylight photo she has not sent yet, once her look exists. */
   captureAddLater: string
   /**
+   * The selfie's focus step (Tori, 2026-09-13): before the one photo of HER
+   * goes up, she can send it as it is or zoom in on her face.
+   *
+   * The same card the inspiration step uses, with its own words, because the
+   * questions are not the same one: an inspiration photo is cropped to single
+   * out a region of someone else's look, and a selfie is cropped when the
+   * frame holds more than one person or she is small in it. Hence `fullFrame`
+   * — a selfie needs "use it as it is" to be one tap, where a reference does
+   * not have that answer at all.
+   */
+  captureFocus: BrandConsultFocusCopy & {
+    /** Sends the whole frame, uncropped. */
+    fullFrame: string
+  }
+  /**
    * Shown in place of the guided pack while the guided stage is not open yet
    * (P3b) — before booking and intake, the photos simply are not asked for.
    */
