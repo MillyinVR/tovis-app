@@ -58,6 +58,17 @@ export const CONSULT_PRO_MENU_SELECT = {
       description: true,
       categoryId: true,
       defaultDurationMinutes: true,
+      // What the work actually DOES — admin-owned, and what the look plan
+      // reasons from. Without these the model was choosing a client's services
+      // from bare NAMES (every live row's `description` was empty on
+      // 2026-09-13), with no way to know a toner cannot lighten.
+      consultSummary: true,
+      maxLiftLevels: true,
+      depositsTone: true,
+      isChemical: true,
+      changesShape: true,
+      addsLength: true,
+      limitations: true,
     },
   },
 } satisfies Prisma.ProfessionalServiceOfferingSelect

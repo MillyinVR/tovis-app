@@ -12,6 +12,7 @@ import { writeAdminAuditLog } from '@/lib/admin/auditLog'
 import { hasAdminPermission } from '@/lib/adminPermissions'
 import { parseMoney } from '@/lib/moneyDecimal'
 import { prisma } from '@/lib/prisma'
+import { CONSULT_FACT_FIELDS, consultFactsConflict } from '@/lib/services/consultFacts'
 import {
   ADDITIONAL_CATEGORY_IDS_FIELD,
   PrimaryCategoryLinkError,
@@ -24,6 +25,9 @@ export const dynamic = 'force-dynamic'
 type ServiceForPatch = {
   id: string
   categoryId: string
+  /** Current diagnostic facts, so a PARTIAL edit is checked against what is stored. */
+  maxLiftLevels: number | null
+  isChemical: boolean
 }
 
 type HttpStatusError = Error & {
@@ -89,6 +93,10 @@ async function getServiceOr404(
     select: {
       id: true,
       categoryId: true,
+      // Read back so a partial edit of the diagnostic facts can be checked
+      // against what is already stored, not just against what was posted.
+      maxLiftLevels: true,
+      isChemical: true,
     },
   })
 }
@@ -235,6 +243,8 @@ async function patchFromForm(args: PatchArgs): Promise<Response> {
     'isAddOnEligible',
     'addOnGroup',
     'defaultImageUrl',
+    // The consult's diagnostic facts — what the work can and cannot achieve.
+    ...CONSULT_FACT_FIELDS,
     ADDITIONAL_CATEGORY_IDS_FIELD,
   ])
 
@@ -323,6 +333,64 @@ async function patchFromForm(args: PatchArgs): Promise<Response> {
     const addOnGroup = (pickString(form.get('addOnGroup')) ?? '').trim()
     update.addOnGroup = addOnGroup || null
   }
+
+  // ── The consult's diagnostic facts ────────────────────────────────────────
+  //
+  // What the work can and cannot ACHIEVE — the columns the look plan reasons
+  // from. Admin-owned by design (Tori, 2026-09-13): the app hardcodes none of
+  // this, `pnpm seed:service-facts` only ever fills a blank, and whatever is
+  // saved here is what the consult uses from the next analysis onward.
+  //
+  // 🔴 A blank field is stored as NULL, not as 0 or false, wherever the column
+  // allows it: "this service cannot lighten" and "nobody has told us yet" are
+  // different facts and only one of them is safe to plan against.
+  if (form.has('consultSummary')) {
+    const consultSummary = (pickString(form.get('consultSummary')) ?? '').trim()
+    update.consultSummary = consultSummary || null
+  }
+
+  if (form.has('limitations')) {
+    const limitations = (pickString(form.get('limitations')) ?? '').trim()
+    update.limitations = limitations || null
+  }
+
+  if (form.has('maxLiftLevels')) {
+    const raw = (pickString(form.get('maxLiftLevels')) ?? '').trim()
+    if (!raw) {
+      update.maxLiftLevels = null
+    } else {
+      const maxLiftLevels = pickInt(form.get('maxLiftLevels'))
+      // The DB CHECK enforces this too; refusing here is what turns a typo
+      // into a readable message instead of a 500.
+      if (maxLiftLevels === null || !Number.isInteger(maxLiftLevels) || maxLiftLevels < 0 || maxLiftLevels > 10) {
+        return jsonFail(400, 'Invalid maxLiftLevels. Use 0–10, or leave it blank if unknown.')
+      }
+      update.maxLiftLevels = maxLiftLevels
+    }
+  }
+
+  for (const field of ['depositsTone', 'isChemical', 'changesShape', 'addsLength'] as const) {
+    if (form.has(field)) {
+      update[field] =
+        pickBool(form.get(field)) ?? parseBoolish(pickString(form.get(field))) ?? false
+    }
+  }
+
+  // 🔴 A service that LIGHTENS is chemical work, always. The database says so
+  // as well; checking here means an admin gets told why rather than a 500, and
+  // the safer-looking half of the pair cannot be saved on its own by accident.
+  // `update` is a Prisma input, so a field can legitimately be an operation
+  // object rather than a value. Only a plain number is a lift level; anything
+  // else means this request did not set one, so fall back to what is stored.
+  const liftUpdate = update.maxLiftLevels
+  const conflict = consultFactsConflict({
+    maxLiftLevels:
+      typeof liftUpdate === 'number' ? liftUpdate
+      : liftUpdate === null ? null
+      : service.maxLiftLevels,
+    isChemical: typeof update.isChemical === 'boolean' ? update.isChemical : service.isChemical,
+  })
+  if (conflict) return jsonFail(400, conflict)
 
   if (form.has('isActive')) {
     const isActive =

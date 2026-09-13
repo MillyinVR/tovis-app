@@ -128,6 +128,8 @@
     "backfill:contact-hash-v2:dev": "DATABASE_URL=postgresql://postgres:postgres@localhost:5434/tovis_dev DIRECT_URL=postgresql://postgres:postgres@localhost:5434/tovis_dev dotenv -e .env.local -- pnpm backfill:contact-hash-v2 -- --write",
     "seed:booking-overrides": "tsx prisma/seeds/bookingOverridePermissions.ts",
     "seed:service-catalog": "NODE_OPTIONS=\"--import tsx --require ./prisma/scripts/_serverOnlyCjsHook.cjs\" node prisma/scripts/seedServiceCatalog.ts",
+    "seed:service-facts": "NODE_OPTIONS=\"--import tsx --require ./prisma/scripts/_serverOnlyCjsHook.cjs\" node prisma/scripts/seedServiceConsultFacts.ts",
+    "seed:service-facts:test": "node scripts/with-test-db.mjs pnpm seed:service-facts -- --write",
     "seed:service-catalog:test": "node scripts/with-test-db.mjs pnpm seed:service-catalog -- --write --activate",
     "seed:service-catalog:dev": "DATABASE_URL=postgresql://postgres:postgres@localhost:5434/tovis_dev DIRECT_URL=postgresql://postgres:postgres@localhost:5434/tovis_dev pnpm seed:service-catalog -- --write --activate",
     "lookup:booking-override-ids": "tsx prisma/seeds/lookupBookingOverrideIds.ts",

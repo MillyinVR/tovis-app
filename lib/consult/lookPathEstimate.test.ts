@@ -3,16 +3,17 @@ import { describe, expect, it } from 'vitest'
 import type { ConsultLookPlanDTO } from '@/lib/dto/consult'
 import type { ConsultProMenuOffering } from './proMenu'
 import { estimateConsultLookPaths, normalizeConsultLookPathEstimates } from './lookPathEstimate'
+import { UNSPECIFIED_SERVICE_FACTS } from './testServiceFacts'
 
 const menu: ConsultProMenuOffering[] = [
   { id: 'color', serviceId: 'color', offersInSalon: true, offersMobile: true,
     salonPriceStartingAt: new Prisma.Decimal('120.50'), mobilePriceStartingAt: new Prisma.Decimal('150'),
     salonDurationMinutes: 62, mobileDurationMinutes: 80,
-    service: { name: 'Color', categoryId: 'hair', description: null, defaultDurationMinutes: 20 } },
+    service: { name: 'Color', categoryId: 'hair', description: null, defaultDurationMinutes: 20, ...UNSPECIFIED_SERVICE_FACTS } },
   { id: 'cut', serviceId: 'cut', offersInSalon: true, offersMobile: false,
     salonPriceStartingAt: new Prisma.Decimal('0'), mobilePriceStartingAt: null,
     salonDurationMinutes: 20, mobileDurationMinutes: null,
-    service: { name: 'Cut', categoryId: 'hair', description: null, defaultDurationMinutes: 20 } },
+    service: { name: 'Cut', categoryId: 'hair', description: null, defaultDurationMinutes: 20, ...UNSPECIFIED_SERVICE_FACTS } },
 ]
 const step = (id: string) => ({ offeringId: id, serviceId: id, serviceCategoryId: 'hair', serviceName: id })
 const path = (visits: string[][]) => ({ title: 'Warm dimension', whyThisWorksForYou: 'Your chosen warmth.',
