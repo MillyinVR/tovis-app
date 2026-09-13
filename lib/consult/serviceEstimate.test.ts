@@ -14,6 +14,7 @@ import {
   deriveConsultServiceEstimate,
   type ConsultServiceEstimateAnalysisInput,
 } from './serviceEstimate'
+import { UNSPECIFIED_SERVICE_FACTS } from './testServiceFacts'
 
 const CATEGORY_ID = 'cat_hair_color'
 
@@ -34,6 +35,7 @@ function offering(
       description: null,
       categoryId: CATEGORY_ID,
       defaultDurationMinutes: 60,
+      ...UNSPECIFIED_SERVICE_FACTS,
       ...overrides.service,
     },
   }

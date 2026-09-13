@@ -15,6 +15,7 @@ import {
   type ConsultLookPlanProviderOutput,
 } from './lookPlan'
 import { toProviderOutputSchema } from './providerSchema'
+import { UNSPECIFIED_SERVICE_FACTS } from './testServiceFacts'
 
 function observed<const T extends string>(value: T, shot: ConsultCaptureShotKeyDTO = 'face_front') {
   return { value, confidence: { min: 0.6, max: 0.85 }, evidence: [shot] }
@@ -43,7 +44,7 @@ function offering(name: string, category = 'color'): ConsultProMenuOffering {
     offersInSalon: true, offersMobile: false,
     salonPriceStartingAt: new Prisma.Decimal(200), salonDurationMinutes: 120,
     mobilePriceStartingAt: null, mobileDurationMinutes: null,
-    service: { name, categoryId: category, description: `${name} offering description.`, defaultDurationMinutes: 90 },
+    service: { name, categoryId: category, description: `${name} offering description.`, defaultDurationMinutes: 90, ...UNSPECIFIED_SERVICE_FACTS },
   }
 }
 
@@ -164,17 +165,50 @@ describe('look-plan boundaries', () => {
     expect(() => buildConsultLookPlanOutputSchema(input)).toThrow(ConsultAnalysisProviderError)
   })
 
-  it('sends only names and bounded descriptions to the provider', () => {
+  it('sends names, bounded descriptions and the diagnostic facts — and never money', () => {
     const menu = context().menu
     menu[0]!.service.description = 'x'.repeat(1000)
     const text = consultLookPlanMenuContext(menu)
     const data: unknown = JSON.parse(text)
+    // An unfilled fact is absent, never sent as a default: "cannot lighten"
+    // and "we were never told" must not look the same to the model.
     expect(data).toEqual(menu.map((item, index) => ({
       name: item.service.name, description: index === 0 ? 'x'.repeat(600) : item.service.description,
+      does: null, cannot: null,
     })))
+    // 🔴 The money boundary, which the facts must never widen. The model picks
+    // SERVICES and the server prices them — that is why a price in this
+    // product is never hallucinated.
     expect(text).not.toContain('offering-')
     expect(text).not.toContain('200')
     expect(text).not.toContain('120')
+  })
+
+  it('sends each diagnostic fact the admin has actually set', () => {
+    const menu = context().menu
+    Object.assign(menu[0]!.service, {
+      consultSummary: 'Adds length with individual bonded strands.',
+      maxLiftLevels: 0,
+      addsLength: true,
+      limitations: 'Does not change the colour of her own hair.',
+    })
+    Object.assign(menu[1]!.service, {
+      consultSummary: 'Lightens woven pieces throughout.',
+      maxLiftLevels: 4, depositsTone: true, isChemical: true,
+    })
+    const data = JSON.parse(consultLookPlanMenuContext(menu)) as Array<Record<string, unknown>>
+
+    expect(data[0]).toMatchObject({
+      does: 'Adds length with individual bonded strands.',
+      liftsLevels: 0, addsLength: true,
+      cannot: 'Does not change the colour of her own hair.',
+    })
+    // 🔴 The fact the whole feature turns on: a deposit-only service reports
+    // liftsLevels 0 rather than omitting it, so the model can rule it out for
+    // a lighter goal instead of assuming it might work.
+    expect(data[0]).not.toHaveProperty('chemical')
+    expect(data[1]).toMatchObject({ liftsLevels: 4, changesTone: true, chemical: true })
+    expect(data[1]).not.toHaveProperty('addsLength')
   })
 
   it('excludes ambiguous names and offerings with no hostable mode', () => {

@@ -17,6 +17,7 @@ import {
   type ConsultBookingProposalEstimateInput,
 } from './bookingProposal'
 import type { ConsultProMenuOffering } from './proMenu'
+import { UNSPECIFIED_SERVICE_FACTS } from './testServiceFacts'
 
 const CATEGORY_ID = 'cat_hair_color'
 
@@ -37,6 +38,7 @@ function offering(
       description: null,
       categoryId: CATEGORY_ID,
       defaultDurationMinutes: 60,
+      ...UNSPECIFIED_SERVICE_FACTS,
       ...overrides.service,
     },
   }
@@ -429,6 +431,8 @@ describe('nothing is invented', () => {
         description: null,
         categoryId: CATEGORY_ID,
         defaultDurationMinutes: 60,
+        ...UNSPECIFIED_SERVICE_FACTS,
+      ...UNSPECIFIED_SERVICE_FACTS,
       },
     })
 

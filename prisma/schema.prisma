@@ -1691,12 +1691,12 @@ model User {
   usedSignupInvite     SignupInvite?              @relation("SignupInviteUsedBy")
   sentMessages         Message[]                  @relation("UserSentMessages")
   threadParticipants   MessageThreadParticipant[] @relation("UserThreadParticipants")
-  founderMembership  FounderMember?
-  founderMessages    FounderMessage[]           @relation("FounderMessageSender")
-  founderAnswers     FounderMessage[]           @relation("FounderMessageAnsweredBy")
-  founderModerations FounderMessage[]           @relation("FounderMessageHiddenBy")
-  founderReports     FounderMessageReport[]     @relation("FounderMessageReporter")
-  founderRoomReads   FounderRoomRead[]
+  founderMembership    FounderMember?
+  founderMessages      FounderMessage[]           @relation("FounderMessageSender")
+  founderAnswers       FounderMessage[]           @relation("FounderMessageAnsweredBy")
+  founderModerations   FounderMessage[]           @relation("FounderMessageHiddenBy")
+  founderReports       FounderMessageReport[]     @relation("FounderMessageReporter")
+  founderRoomReads     FounderRoomRead[]
 
   notificationActor                  Notification[]              @relation("NotificationActor")
   adminNotifications                 AdminNotification[]         @relation("AdminNotifications")
@@ -2065,10 +2065,10 @@ model ClientAddress {
 }
 
 model ProfessionalProfile {
-  consultMentorEnabled Boolean @default(false)
-  consultProductLines String[] @default([])
-  id     String @id @default(cuid())
-  userId String @unique
+  consultMentorEnabled Boolean  @default(false)
+  consultProductLines  String[] @default([])
+  id                   String   @id @default(cuid())
+  userId               String   @unique
 
   // Permanent Founding 100 recognition. The number is intentionally kept off
   // member-facing DTOs/UI: professionals see only "Founding Member", while
@@ -2152,17 +2152,17 @@ model ProfessionalProfile {
   scheduleConfigVersion Int @default(0)
 
   // Relationships
-  user                    User                          @relation(fields: [userId], references: [id])
-  founderMembership       FounderMember?                @relation("FounderProfessionalMembership")
-  sponsoredFounderClients FounderMember[]               @relation("FounderClientSponsor")
-  locations               ProfessionalLocation[]
-  offerings               ProfessionalServiceOffering[]
-  bookings                Booking[]
-  calendarBlocks          CalendarBlock[]
-  consultSessions         ConsultSession[]
-  consultBriefFeedback    ConsultBriefFeedback[]
+  user                        User                          @relation(fields: [userId], references: [id])
+  founderMembership           FounderMember?                @relation("FounderProfessionalMembership")
+  sponsoredFounderClients     FounderMember[]               @relation("FounderClientSponsor")
+  locations                   ProfessionalLocation[]
+  offerings                   ProfessionalServiceOffering[]
+  bookings                    Booking[]
+  calendarBlocks              CalendarBlock[]
+  consultSessions             ConsultSession[]
+  consultBriefFeedback        ConsultBriefFeedback[]
   consultProFollowUpQuestions ConsultProFollowUpQuestion[]
-  consultServiceEstimates ConsultServiceEstimate[]
+  consultServiceEstimates     ConsultServiceEstimate[]
 
   calendarFeedSubscription CalendarFeedSubscription?
 
@@ -3158,6 +3158,52 @@ model Service {
   isAddOnEligible        Boolean @default(false)
   addOnGroup             String? // optional: "Finish", "Treatment", etc.
 
+  // ── What this service actually DOES (the consult's diagnostic facts) ──────
+  //
+  // 🔴 These are for the ENGINE, not the client. `description` above is the
+  // client-facing blurb ("hand-painted, lived-in lightness"); these say what
+  // the work can and cannot achieve, so the consult can diagnose the services
+  // a look needs rather than pattern-match on a service NAME.
+  //
+  // The reason they exist: on 2026-09-13 every live Service row had an EMPTY
+  // description, so `consultLookPlanMenuContext` was sending the model a list
+  // of bare names. It had no way to know a toner cannot lighten, or that a
+  // highlight is a chemical service — and it showed, in placeholder style
+  // directions and in service names invented off the menu.
+  //
+  // Admin-owned and admin-editable (Tori, 2026-09-13: the app hardcodes none
+  // of this). Every field is optional/defaulted so an unfilled service simply
+  // contributes no claim — the consult says less rather than guessing.
+
+  /**
+   * One sentence on what the work achieves, in diagnostic terms. Engine-facing.
+   */
+  consultSummary String?
+  /**
+   * Levels of LIGHTENING it can achieve. 0/null = it cannot lighten at all.
+   */
+  maxLiftLevels  Int?
+  /**
+   * Can it change or refresh TONE (a gloss, a toner, a deposit-only colour)?
+   */
+  depositsTone   Boolean @default(false)
+  /**
+   * Chemical work — the consult must treat history and patch/strand tests as relevant.
+   */
+  isChemical     Boolean @default(false)
+  /**
+   * Does it change the cut, shape or silhouette?
+   */
+  changesShape   Boolean @default(false)
+  /**
+   * Does it ADD length or density (extensions), rather than alter what is there?
+   */
+  addsLength     Boolean @default(false)
+  /**
+   * What this service CANNOT achieve — the negative facts a plan must respect.
+   */
+  limitations    String?
+
   intentEvents                 ClientIntentEvent[]
   lastMinuteOpeningServices    LastMinuteOpeningService[]
   lastMinuteTierFreeAddOnPlans LastMinuteTierPlan[]       @relation("LastMinuteTierPlanFreeAddOnService")
@@ -3730,9 +3776,9 @@ model ClientNotificationSettings {
 
 model Booking {
   consultLookVisitOutcome ConsultLookVisitOutcome?
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                      String                   @id @default(cuid())
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
 
   clientId       String
   professionalId String
@@ -5358,21 +5404,21 @@ model Reminder {
 
 model MediaAsset {
   consultChartPhotoUses ConsultChartPhotoUse[]
-  id               String    @id @default(cuid())
-  professionalId   String
+  id                    String                 @id @default(cuid())
+  professionalId        String
   // Tenant of the owning pro (derived from professional.homeTenantId).
   // Expand phase: nullable + backfilled; a follow-up contract migration makes
   // it NOT NULL. See finish-plan T2.2.
-  proTenantId      String?
-  bookingId        String?
-  reviewId         String?
+  proTenantId           String?
+  bookingId             String?
+  reviewId              String?
   // Opt-in before/after pairing: on the *displayed* asset (the "after" a pro
   // features to portfolio, or the after-photo of a review), points at the
   // chosen "before" counterpart so surfaces can render the comparison slider
   // (BeforeAfterReveal / BeforeAfterCompareView). Null = show as a single tile.
   // Self-relation, nullable; onDelete SetNull so deleting a before never
   // cascades to the after that references it.
-  beforeAssetId    String?
+  beforeAssetId         String?
   // Every media asset is anchored to a primary bookable service so it can always
   // route to "book this" (the product goal: media → easy booking). Required by
   // DB constraint + by the MediaAssetWriteInput type (single create choke point,
@@ -5380,13 +5426,13 @@ model MediaAsset {
   // (session/review photos) or the first selected service (portfolio uploads).
   // Extra/secondary services still live in the MediaServiceTag M2M below.
   // (License/verification docs are NOT MediaAssets — they use VerificationDocument.)
-  primaryServiceId String
-  uploadedByUserId String?
-  uploadedByRole   Role?
-  url              String?
-  thumbUrl         String?
-  mediaType        MediaType
-  caption          String?
+  primaryServiceId      String
+  uploadedByUserId      String?
+  uploadedByRole        Role?
+  url                   String?
+  thumbUrl              String?
+  mediaType             MediaType
+  caption               String?
   // Normalized focal point of the subject (a face, per C6) in the original,
   // EXIF-corrected upright image — both in [0,1] from the TOP-LEFT origin. Lets
   // cover-cropped surfaces (the full-screen Looks feed above all) center their
@@ -5394,8 +5440,8 @@ model MediaAsset {
   // instead of the blind geometric center. Null = center = pre-C6 behavior, so
   // legacy rows and every surface render byte-identically until a focal is set.
   // Written at the media-confirm choke point (lib/media/recordMediaAsset.ts).
-  focalX           Float?
-  focalY           Float?
+  focalX                Float?
+  focalY                Float?
   // Non-destructive publish CROP: the rect of the stored image a surface should
   // display, normalized [0,1] from the TOP-LEFT origin — the same convention as
   // focalX/focalY, in the same space (the original, EXIF-corrected upright
@@ -5414,10 +5460,10 @@ model MediaAsset {
   // published frame had removed. Enforced at the write by
   // PUT /api/v1/pro/media/[id]/crop, not merely in the UI.
   // See docs/design/media-crop-rect.md.
-  cropX            Float?
-  cropY            Float?
-  cropW            Float?
-  cropH            Float?
+  cropX                 Float?
+  cropY                 Float?
+  cropW                 Float?
+  cropH                 Float?
 
   // The UNDO WINDOW on a re-frame (capture chain item 4, Tori's decision
   // 2026-09-01). The consent bound above is a one-way ratchet, which made a
@@ -7789,8 +7835,8 @@ enum ConsultProviderCallOutcome {
 /// legal acceptance, and audit event.
 model ConsultSession {
   chartPhotoUses ConsultChartPhotoUse[]
-  chartReviews ConsultChartReview[]
-  id String @id @default(cuid())
+  chartReviews   ConsultChartReview[]
+  id             String                 @id @default(cuid())
 
   clientId String
   client   ClientProfile @relation(fields: [clientId], references: [id], onDelete: Cascade)
@@ -7839,23 +7885,23 @@ model ConsultSession {
   chartCopyDecidedAt   DateTime?
   chartCopyCompletedAt DateTime?
 
-  revisions            ConsultRevision[]
-  agreementAcceptances ConsultAgreementAcceptance[]
-  auditEvents          ConsultAuditEvent[]
-  briefFeedback        ConsultBriefFeedback?
-  captures             ConsultCapture[]
-  inspirations         ConsultInspiration[]
-  uploadSessions       UploadSession[]
-  serviceEstimates     ConsultServiceEstimate[]
-  bookingProposals     ConsultBookingProposal[]
-  analysisRuns         ConsultAnalysisRun[]
-  lookVisitOutcomes    ConsultLookVisitOutcome[]
-  lookBriefVersions    ConsultLookBriefVersion[]
-  providerCalls        ConsultProviderCall[]
+  revisions               ConsultRevision[]
+  agreementAcceptances    ConsultAgreementAcceptance[]
+  auditEvents             ConsultAuditEvent[]
+  briefFeedback           ConsultBriefFeedback?
+  captures                ConsultCapture[]
+  inspirations            ConsultInspiration[]
+  uploadSessions          UploadSession[]
+  serviceEstimates        ConsultServiceEstimate[]
+  bookingProposals        ConsultBookingProposal[]
+  analysisRuns            ConsultAnalysisRun[]
+  lookVisitOutcomes       ConsultLookVisitOutcome[]
+  lookBriefVersions       ConsultLookBriefVersion[]
+  providerCalls           ConsultProviderCall[]
   suitabilityTranslations ConsultSuitabilityTranslation[]
-  faceColorProfiles    ConsultFaceColorProfile[]
-  followUpRounds       ConsultFollowUpRound[]
-  proFollowUpQuestions ConsultProFollowUpQuestion[]
+  faceColorProfiles       ConsultFaceColorProfile[]
+  followUpRounds          ConsultFollowUpRound[]
+  proFollowUpQuestions    ConsultProFollowUpQuestion[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -7926,7 +7972,7 @@ model ConsultInspiration {
 /// content-free; image bytes never enter PostgreSQL.
 model ConsultCapture {
   chartPhotoUse ConsultChartPhotoUse?
-  id String @id @default(cuid())
+  id            String                @id @default(cuid())
 
   consultSessionId String
   consultSession   ConsultSession @relation(fields: [consultSessionId], references: [id], onDelete: Cascade)
@@ -7982,8 +8028,8 @@ model ConsultCapture {
 /// UPDATEs and rejects inserts unless both legal prerequisites are active.
 model ConsultRevision {
   chartPhotoSources ConsultAnalysisChartPhoto[]
-  chartReview ConsultChartReview?
-  id String @id @default(cuid())
+  chartReview       ConsultChartReview?
+  id                String                      @id @default(cuid())
 
   consultSessionId String
   consultSession   ConsultSession @relation(fields: [consultSessionId], references: [id], onDelete: Cascade)
@@ -8003,13 +8049,13 @@ model ConsultRevision {
 
   createdAt DateTime @default(now())
 
-  auditEvents      ConsultAuditEvent[]
-  briefFeedback    ConsultBriefFeedback?
-  serviceEstimates ConsultServiceEstimate[] @relation("ConsultServiceEstimateAnalysis")
-  lookBriefVersions ConsultLookBriefVersion[]
-  suitabilityTranslation ConsultSuitabilityTranslation? @relation("ConsultSuitabilityAnalysis")
+  auditEvents              ConsultAuditEvent[]
+  briefFeedback            ConsultBriefFeedback?
+  serviceEstimates         ConsultServiceEstimate[]        @relation("ConsultServiceEstimateAnalysis")
+  lookBriefVersions        ConsultLookBriefVersion[]
+  suitabilityTranslation   ConsultSuitabilityTranslation?  @relation("ConsultSuitabilityAnalysis")
   suitabilityClientSources ConsultSuitabilityTranslation[] @relation("ConsultSuitabilityClient")
-  faceColorProfile  ConsultFaceColorProfile? @relation("ConsultFaceColorProfileAnalysis")
+  faceColorProfile         ConsultFaceColorProfile?        @relation("ConsultFaceColorProfileAnalysis")
 
   @@unique([consultSessionId, revision])
   @@unique([consultSessionId, idempotencyKey])
@@ -8018,18 +8064,18 @@ model ConsultRevision {
 
 /// C2-2 optional derived guidance; immutable, same-session source revisions.
 model ConsultSuitabilityTranslation {
-  id String @id @default(cuid())
-  consultSessionId String
-  consultSession ConsultSession @relation(fields: [consultSessionId], references: [id], onDelete: Cascade)
-  analysisRevisionId String @unique
-  analysisRevision ConsultRevision @relation("ConsultSuitabilityAnalysis", fields: [analysisRevisionId], references: [id], onDelete: Cascade)
-  clientRevisionId String
-  clientRevision ConsultRevision @relation("ConsultSuitabilityClient", fields: [clientRevisionId], references: [id], onDelete: Cascade)
-  schemaVersion Int
-  promptVersion String
-  model String
-  payload Json
-  createdAt DateTime @default(now())
+  id                 String          @id @default(cuid())
+  consultSessionId   String
+  consultSession     ConsultSession  @relation(fields: [consultSessionId], references: [id], onDelete: Cascade)
+  analysisRevisionId String          @unique
+  analysisRevision   ConsultRevision @relation("ConsultSuitabilityAnalysis", fields: [analysisRevisionId], references: [id], onDelete: Cascade)
+  clientRevisionId   String
+  clientRevision     ConsultRevision @relation("ConsultSuitabilityClient", fields: [clientRevisionId], references: [id], onDelete: Cascade)
+  schemaVersion      Int
+  promptVersion      String
+  model              String
+  payload            Json
+  createdAt          DateTime        @default(now())
 
   @@index([consultSessionId, createdAt])
   @@index([clientRevisionId])
@@ -8042,14 +8088,14 @@ model ConsultFaceColorProfile {
   consultSessionId String
   consultSession   ConsultSession @relation(fields: [consultSessionId], references: [id], onDelete: Cascade)
 
-  analysisRevisionId String @unique
+  analysisRevisionId String          @unique
   analysisRevision   ConsultRevision @relation("ConsultFaceColorProfileAnalysis", fields: [analysisRevisionId], references: [id], onDelete: Cascade)
 
   schemaVersion Int
   promptVersion String
-  model String
-  payload Json
-  createdAt DateTime @default(now())
+  model         String
+  payload       Json
+  createdAt     DateTime @default(now())
 
   @@index([consultSessionId, createdAt])
 }
@@ -8481,8 +8527,8 @@ model ConsultServiceEstimate {
   sourceAnalysisRevision   ConsultRevision @relation("ConsultServiceEstimateAnalysis", fields: [sourceAnalysisRevisionId], references: [id], onDelete: Cascade)
 
   /// New look estimates belong to one immutable shared Brief version.
-  sourceLookBriefVersionId String? @unique
-  sourceLookBriefVersion ConsultLookBriefVersion? @relation(fields: [sourceLookBriefVersionId], references: [id], onDelete: Cascade)
+  sourceLookBriefVersionId String?                  @unique
+  sourceLookBriefVersion   ConsultLookBriefVersion? @relation(fields: [sourceLookBriefVersionId], references: [id], onDelete: Cascade)
 
   status      ConsultServiceEstimateStatus
   refusalCode ConsultServiceEstimateRefusalCode?
@@ -8725,41 +8771,40 @@ model ProCategoryBookingPolicy {
   @@index([serviceCategoryId])
 }
 
-
 /// Version-specific decisions layered on immutable consultation evidence.
 /// A choice or adjustment creates a new row; only the two acknowledgments can
 /// be added to that exact version. Old confirmations never acknowledge a new one.
 model ConsultLookBriefVersion {
-  visitOutcomes ConsultLookVisitOutcome[]
+  visitOutcomes               ConsultLookVisitOutcome[]
   /// Professional plan stays separate from the AI analysis and requires explicit review.
-  professionalPlan Json?
-  professionalPlanReason String? @db.VarChar(400)
+  professionalPlan            Json?
+  professionalPlanReason      String?                   @db.VarChar(400)
   invalidatedProfessionalPlan Json?
 
-  additionalClientAnswers Json @default("[]")
-  awaitingAnalysis Boolean @default(false)
-  id String @id @default(cuid())
-  consultSessionId String
-  consultSession ConsultSession @relation(fields: [consultSessionId], references: [id], onDelete: Cascade)
-  version Int
-  sourceAnalysisRevisionId String
-  sourceAnalysisRevision ConsultRevision @relation(fields: [sourceAnalysisRevisionId], references: [id], onDelete: Cascade)
-  selectedPathIndex Int?
-  selectedLocationType ServiceLocationType?
+  additionalClientAnswers    Json                    @default("[]")
+  awaitingAnalysis           Boolean                 @default(false)
+  id                         String                  @id @default(cuid())
+  consultSessionId           String
+  consultSession             ConsultSession          @relation(fields: [consultSessionId], references: [id], onDelete: Cascade)
+  version                    Int
+  sourceAnalysisRevisionId   String
+  sourceAnalysisRevision     ConsultRevision         @relation(fields: [sourceAnalysisRevisionId], references: [id], onDelete: Cascade)
+  selectedPathIndex          Int?
+  selectedLocationType       ServiceLocationType?
   /// Server-owned price and time snapshots for each separate alternative/mode.
-  pathEstimates Json @default("[]")
+  pathEstimates              Json                    @default("[]")
   /// Per-field professional decisions, validated against the referenced path.
-  adjustments Json @default("{}")
+  adjustments                Json                    @default("{}")
   /// Prior decisions that require a new professional review after refinement.
-  invalidatedAdjustments Json @default("[]")
-  changeSummary Json @default("[]")
-  createdByActorType ConsultActorType
-  createdByActorId String?
-  clientAcknowledgedAt DateTime?
+  invalidatedAdjustments     Json                    @default("[]")
+  changeSummary              Json                    @default("[]")
+  createdByActorType         ConsultActorType
+  createdByActorId           String?
+  clientAcknowledgedAt       DateTime?
   professionalAcknowledgedAt DateTime?
-  idempotencyKey String @db.VarChar(128)
-  estimate ConsultServiceEstimate?
-  createdAt DateTime @default(now())
+  idempotencyKey             String                  @db.VarChar(128)
+  estimate                   ConsultServiceEstimate?
+  createdAt                  DateTime                @default(now())
 
   @@unique([consultSessionId, version])
   @@unique([consultSessionId, idempotencyKey])
@@ -8768,48 +8813,51 @@ model ConsultLookBriefVersion {
 
 /// Immutable completed-visit feedback. Observed time excludes payment and aftercare closeout.
 model ConsultLookVisitOutcome {
-  id String @id @default(cuid())
-  bookingId String @unique
-  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  consultSessionId String
-  consultSession ConsultSession @relation(fields: [consultSessionId], references: [id], onDelete: Cascade)
-  lookBriefVersionId String
-  lookBriefVersion ConsultLookBriefVersion @relation(fields: [lookBriefVersionId], references: [id], onDelete: Cascade)
+  id                     String                  @id @default(cuid())
+  bookingId              String                  @unique
+  booking                Booking                 @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  consultSessionId       String
+  consultSession         ConsultSession          @relation(fields: [consultSessionId], references: [id], onDelete: Cascade)
+  lookBriefVersionId     String
+  lookBriefVersion       ConsultLookBriefVersion @relation(fields: [lookBriefVersionId], references: [id], onDelete: Cascade)
   observedServiceMinutes Int?
-  finalServiceSubtotal Decimal? @db.Decimal(10, 2)
-  completedAt DateTime
-  createdAt DateTime @default(now())
+  finalServiceSubtotal   Decimal?                @db.Decimal(10, 2)
+  completedAt            DateTime
+  createdAt              DateTime                @default(now())
+
   @@index([consultSessionId, completedAt])
 }
 
 /// Explicit client confirmations of source-dated chart facts. Intake answers
 /// remain in the canonical immutable revision; this row records their origin.
 model ConsultChartReview {
-  id String @id @default(cuid())
+  id               String          @id @default(cuid())
   consultSessionId String
-  consultSession ConsultSession @relation(fields: [consultSessionId], references: [id], onDelete: Cascade)
-  intakeRevisionId String @unique
-  intakeRevision ConsultRevision @relation(fields: [intakeRevisionId], references: [id], onDelete: Cascade)
-  fingerprint String @db.Char(64)
-  decision String @db.VarChar(16)
-  facts Json
-  createdAt DateTime @default(now())
+  consultSession   ConsultSession  @relation(fields: [consultSessionId], references: [id], onDelete: Cascade)
+  intakeRevisionId String          @unique
+  intakeRevision   ConsultRevision @relation(fields: [intakeRevisionId], references: [id], onDelete: Cascade)
+  fingerprint      String          @db.Char(64)
+  decision         String          @db.VarChar(16)
+  facts            Json
+  createdAt        DateTime        @default(now())
+
   @@index([consultSessionId, createdAt])
 }
 
 /// A client explicitly reused this dated chart image as a new starting photo.
 model ConsultChartPhotoUse {
-  analyses ConsultAnalysisChartPhoto[]
-  id String @id @default(cuid())
+  analyses         ConsultAnalysisChartPhoto[]
+  id               String                      @id @default(cuid())
   consultSessionId String
-  consultSession ConsultSession @relation(fields: [consultSessionId], references: [id], onDelete: Cascade)
-  captureId String @unique
-  capture ConsultCapture @relation(fields: [captureId], references: [id], onDelete: Cascade)
-  mediaAssetId String?
-  mediaAsset MediaAsset? @relation(fields: [mediaAssetId], references: [id], onDelete: SetNull)
+  consultSession   ConsultSession              @relation(fields: [consultSessionId], references: [id], onDelete: Cascade)
+  captureId        String                      @unique
+  capture          ConsultCapture              @relation(fields: [captureId], references: [id], onDelete: Cascade)
+  mediaAssetId     String?
+  mediaAsset       MediaAsset?                 @relation(fields: [mediaAssetId], references: [id], onDelete: SetNull)
   sourceRecordedAt DateTime
-  idempotencyKey String @db.VarChar(128)
-  createdAt DateTime @default(now())
+  idempotencyKey   String                      @db.VarChar(128)
+  createdAt        DateTime                    @default(now())
+
   @@unique([consultSessionId, idempotencyKey])
 }
 
@@ -8817,7 +8865,8 @@ model ConsultChartPhotoUse {
 model ConsultAnalysisChartPhoto {
   revisionId String
   photoUseId String
-  revision ConsultRevision @relation(fields: [revisionId], references: [id], onDelete: Cascade)
-  photoUse ConsultChartPhotoUse @relation(fields: [photoUseId], references: [id], onDelete: Cascade)
+  revision   ConsultRevision      @relation(fields: [revisionId], references: [id], onDelete: Cascade)
+  photoUse   ConsultChartPhotoUse @relation(fields: [photoUseId], references: [id], onDelete: Cascade)
+
   @@id([revisionId, photoUseId])
 }

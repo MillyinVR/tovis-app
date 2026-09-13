@@ -81,6 +81,7 @@ import type {
 import { toProviderOutputSchema } from '@/lib/consult/providerSchema'
 import { runConsultSuitability } from '@/lib/consult/suitabilityRuntime'
 import { syntheticSuitabilityInput } from '@/tests/fixtures/consultSuitability'
+import { UNSPECIFIED_SERVICE_FACTS } from '@/lib/consult/testServiceFacts'
 import {
   buildConsultSuitabilityContext, sanitizeConsultSuitabilityResponse,
 } from '@/lib/consult/suitabilityTranslation'
@@ -289,7 +290,7 @@ describe('the consult schemas compile and answer against the live model', () => 
       offersInSalon: true, offersMobile: false,
       salonPriceStartingAt: new Prisma.Decimal(200), salonDurationMinutes: 120,
       mobilePriceStartingAt: null, mobileDurationMinutes: null,
-      service: { name: name!, description: description!, categoryId: `category-${index}`, defaultDurationMinutes: 120 },
+      service: { name: name!, description: description!, categoryId: `category-${index}`, defaultDurationMinutes: 120, ...UNSPECIFIED_SERVICE_FACTS },
     }))
     const lookPlanContext = { menu, ...profileWithStyles }
     const raw = await send({
@@ -747,7 +748,7 @@ describe('the consult schemas compile and answer against the live model', () => 
       offersInSalon: true, offersMobile: false,
       salonPriceStartingAt: new Prisma.Decimal(200), salonDurationMinutes: 120,
       mobilePriceStartingAt: null, mobileDurationMinutes: null,
-      service: { name: name!, description: description!, categoryId: `category-${index}`, defaultDurationMinutes: 120 },
+      service: { name: name!, description: description!, categoryId: `category-${index}`, defaultDurationMinutes: 120, ...UNSPECIFIED_SERVICE_FACTS },
     }))
     const menuServiceNames = menu.map(item => item.service.name)
     const result = await runConsultAnalysis({

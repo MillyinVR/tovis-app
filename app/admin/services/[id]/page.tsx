@@ -18,6 +18,11 @@ import { prisma } from '@/lib/prisma'
 import { moneyToString } from '@/lib/money'
 import { resolveChargeCurrency } from '@/lib/payments/resolveChargeCurrency'
 import { DISPLAY_LOCALE } from '@/lib/locale'
+import {
+  CONSULT_FACT_LABELS,
+  CONSULT_MAX_LIFT_LEVELS_MAX,
+  CONSULT_MAX_LIFT_LEVELS_MIN,
+} from '@/lib/services/consultFacts'
 
 export const dynamic = 'force-dynamic'
 
@@ -120,6 +125,13 @@ export default async function AdminServiceDetailPage({ params }: Props) {
       categoryId: true,
       isAddOnEligible: true,
       addOnGroup: true,
+      consultSummary: true,
+      maxLiftLevels: true,
+      depositsTone: true,
+      isChemical: true,
+      changesShape: true,
+      addsLength: true,
+      limitations: true,
       permissions: {
         select: {
           id: true,
@@ -308,6 +320,57 @@ export default async function AdminServiceDetailPage({ params }: Props) {
                 <FieldLabel>Description (optional)</FieldLabel>
                 <Textarea name="description" defaultValue={service.description ?? ''} rows={3} />
               </label>
+
+              {/* 🔴 What the CONSULTATION reasons from. Not client-facing: the
+                  description above is what a client reads, these are what let
+                  the consult work out which services a look actually needs.
+                  Every live service had a blank description on 2026-09-13, so
+                  the engine was choosing from bare names. */}
+              <div className="grid gap-3 rounded-2xl border border-surfaceGlass/10 bg-bgPrimary/20 p-3">
+                <div className="text-xs font-extrabold text-textSecondary">
+                  What this service does (used by the consultation)
+                </div>
+                <div className="text-[11px] text-textSecondary">
+                  These tell the consultation what the work can and cannot achieve, so it can
+                  work out which services a client&rsquo;s look needs — even when they differ
+                  from the services named on the inspiration photo. Leave a field blank if you
+                  do not know; the consultation will simply say less rather than guess.
+                </div>
+
+                <label className="grid gap-2">
+                  <FieldLabel>{CONSULT_FACT_LABELS.consultSummary.label}</FieldLabel>
+                  <Textarea name="consultSummary" defaultValue={service.consultSummary ?? ''} rows={2} />
+                  <span className="text-[11px] text-textSecondary">{CONSULT_FACT_LABELS.consultSummary.help}</span>
+                </label>
+
+                <label className="grid gap-2">
+                  <FieldLabel>{CONSULT_FACT_LABELS.maxLiftLevels.label}</FieldLabel>
+                  <TextInput
+                    name="maxLiftLevels"
+                    type="number"
+                    min={CONSULT_MAX_LIFT_LEVELS_MIN}
+                    max={CONSULT_MAX_LIFT_LEVELS_MAX}
+                    step={1}
+                    defaultValue={service.maxLiftLevels ?? ''}
+                    placeholder="0"
+                  />
+                  <span className="text-[11px] text-textSecondary">{CONSULT_FACT_LABELS.maxLiftLevels.help}</span>
+                </label>
+
+                <ToggleRow name="depositsTone" checked={service.depositsTone} label={CONSULT_FACT_LABELS.depositsTone.label} />
+                <ToggleRow name="isChemical" checked={service.isChemical} label={CONSULT_FACT_LABELS.isChemical.label} />
+                <ToggleRow name="changesShape" checked={service.changesShape} label={CONSULT_FACT_LABELS.changesShape.label} />
+                <ToggleRow name="addsLength" checked={service.addsLength} label={CONSULT_FACT_LABELS.addsLength.label} />
+                <div className="text-[11px] text-textSecondary">
+                  {CONSULT_FACT_LABELS.isChemical.help}
+                </div>
+
+                <label className="grid gap-2">
+                  <FieldLabel>{CONSULT_FACT_LABELS.limitations.label}</FieldLabel>
+                  <Textarea name="limitations" defaultValue={service.limitations ?? ''} rows={2} />
+                  <span className="text-[11px] text-textSecondary">{CONSULT_FACT_LABELS.limitations.help}</span>
+                </label>
+              </div>
 
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-wrap gap-4">
