@@ -270,4 +270,70 @@ describe('ClientConsultResults', () => {
     )
     expect(container.textContent).not.toMatch(/join waitlist|notify me|payment|checkout/i)
   })
+
+  it('says the UNKNOWNs out loud, naming what daylight would settle', () => {
+    render(
+      <ClientConsultResults
+        results={{
+          ...results(),
+          daylightGap: {
+            missingShotKeys: ['hair_back', 'face_front'],
+            unlocks: ['HAIR_LEVELS', 'SKIN_TONE_AND_SEASON'],
+            provisionalCount: 2,
+          },
+        }}
+        copy={copy}
+      />,
+    )
+    expect(screen.getByText(copy.daylightGapTitle)).toBeInTheDocument()
+    // What her selfie already bought, by the real count.
+    expect(
+      screen.getByText(copy.daylightGapProvisional.replace('{count}', '2')),
+    ).toBeInTheDocument()
+    // The list is composed from the unlock codes the server actually sent.
+    expect(
+      screen.getByText(
+        copy.daylightGapBody.replace(
+          '{list}',
+          [copy.daylightGapUnlocks.HAIR_LEVELS, copy.daylightGapUnlocks.SKIN_TONE_AND_SEASON].join(', '),
+        ),
+      ),
+    ).toBeInTheDocument()
+    // No placeholder ever reaches her.
+    expect(document.body.textContent).not.toContain('{list}')
+    expect(document.body.textContent).not.toContain('{count}')
+  })
+
+  it('says nothing when no photograph would change the reading', () => {
+    render(
+      <ClientConsultResults
+        results={{
+          ...results(),
+          daylightGap: { missingShotKeys: [], unlocks: [], provisionalCount: 0 },
+        }}
+        copy={copy}
+      />,
+    )
+    expect(screen.queryByText(copy.daylightGapTitle)).toBeNull()
+  })
+
+  it('omits the "what your selfie bought" line when it bought nothing', () => {
+    render(
+      <ClientConsultResults
+        results={{
+          ...results(),
+          daylightGap: {
+            missingShotKeys: ['hair_back'],
+            unlocks: ['HAIR_LEVELS'],
+            provisionalCount: 0,
+          },
+        }}
+        copy={copy}
+      />,
+    )
+    expect(screen.getByText(copy.daylightGapTitle)).toBeInTheDocument()
+    expect(
+      screen.queryByText(copy.daylightGapProvisional.replace('{count}', '0')),
+    ).toBeNull()
+  })
 })

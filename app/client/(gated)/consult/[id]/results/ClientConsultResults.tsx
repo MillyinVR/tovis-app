@@ -143,6 +143,35 @@ export default function ClientConsultResults({
               .replace('{total}', String(results.photoLight.acceptedFrameCount))}
           </p>
         ) : null}
+        {/*
+          The UNKNOWNs, said out loud (Tori, 2026-09-13). Shown only when the
+          server found something a photograph would actually settle — a client
+          who sent everything and still has an UNKNOWN sees nothing here,
+          because no picture she can take would change it.
+        */}
+        {results.daylightGap?.unlocks.length ? (
+          <div className="mt-2 rounded-lg border border-toneInfo/30 bg-toneInfo/10 px-2 py-1.5">
+            <p className="text-xs font-semibold text-textPrimary">
+              {copy.daylightGapTitle}
+            </p>
+            {results.daylightGap.provisionalCount > 0 ? (
+              <p className="mt-1 text-xs leading-5 text-textSecondary">
+                {copy.daylightGapProvisional.replace(
+                  '{count}',
+                  String(results.daylightGap.provisionalCount),
+                )}
+              </p>
+            ) : null}
+            <p className="mt-1 text-xs leading-5 text-textPrimary">
+              {copy.daylightGapBody.replace(
+                '{list}',
+                results.daylightGap.unlocks
+                  .map((unlock) => copy.daylightGapUnlocks[unlock])
+                  .join(', '),
+              )}
+            </p>
+          </div>
+        ) : null}
         <ul className="mt-3 grid gap-2 sm:grid-cols-2">
           <Observation
             label={copy.baseLevelLabel}

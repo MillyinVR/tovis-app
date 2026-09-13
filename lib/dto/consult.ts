@@ -1998,6 +1998,34 @@ export type ConsultResultsPhotoLightDTO = {
   mostFramesWarm: boolean
 }
 
+/**
+ * What the daylight photographs would still add — the UNKNOWNs said out loud,
+ * with the thing she can do about them (Tori, 2026-09-13).
+ *
+ * Composed by `consultDaylightGap` (lib/consult/daylightGap.ts) from the
+ * reading that actually came back, never from an assumption: a group appears
+ * only when one of its observations really is UNKNOWN AND the views that would
+ * settle it really are missing.
+ */
+export type ConsultDaylightUnlockDTO =
+  | 'HAIR_LEVELS'
+  | 'HAIR_TONE_AND_CONDITION'
+  | 'SKIN_TONE_AND_SEASON'
+  | 'EYE_AND_BROW_DETAIL'
+
+export type ConsultResultsDaylightGapDTO = {
+  /** Pack views that never landed and would settle something. May be empty. */
+  missingShotKeys: ConsultCaptureShotKeyDTO[]
+  /** What those views would settle. Empty = nothing left for a photo to fix. */
+  unlocks: ConsultDaylightUnlockDTO[]
+  /**
+   * Observations that WERE read but are held below the plan-carrying floor —
+   * what the early selfie actually bought her. Counted so the copy can say
+   * "here is what I could see" before "here is what daylight would add".
+   */
+  provisionalCount: number
+}
+
 export type ConsultClientResultsDTO = {
   suitability?: ConsultClientSuitabilityDTO
 
@@ -2054,6 +2082,13 @@ export type ConsultClientResultsDTO = {
    * (tools/check-ios-fixture-contract.mjs).
    */
   photoLight?: ConsultResultsPhotoLightDTO
+  /**
+   * What daylight photographs would still add to this reading. OPTIONAL on the
+   * wire for the same reason `photoLight` is: the published schema grows by
+   * addition only, so a native build that predates it keeps decoding
+   * (tools/check-ios-fixture-contract.mjs).
+   */
+  daylightGap?: ConsultResultsDaylightGapDTO
   meCardTeaser: {
     locked: true
     tapped: boolean

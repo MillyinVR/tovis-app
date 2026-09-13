@@ -1,5 +1,8 @@
-import type { EditorialCampaign } from './editorialCampaign'
 // lib/brand/types.ts
+
+import type { ConsultDaylightUnlockDTO } from '@/lib/dto/consult'
+
+import type { EditorialCampaign } from './editorialCampaign'
 
 export type BrandId = string // 'tovis' | 'salon-xyz' | 'school-abc' | ...
 
@@ -595,6 +598,24 @@ export type BrandClientConsultResultsCopy = {
    * against the photographs she remembers taking.
    */
   warmLightCaveat: string
+  /**
+   * The UNKNOWNs, said out loud, with the thing she can do about them (Tori,
+   * 2026-09-13). "We aren't having her add that for funsies": a consult built
+   * on the early selfie alone shows real answers for what a selfie CAN see and
+   * UNKNOWN for the rest, and without this the second half reads as the app
+   * failing rather than as photographs she has not sent yet.
+   *
+   * Shown ONLY when `daylightGap.unlocks` is non-empty, which the server sets
+   * only where an observation really is UNKNOWN and the view that would settle
+   * it really is missing — so this sentence can never promise something a
+   * photograph will not deliver.
+   */
+  daylightGapTitle: string
+  /** `{count}` is how many readings the photos she HAS sent did support. */
+  daylightGapProvisional: string
+  daylightGapBody: string
+  /** One clause per unlock code, joined into `daylightGapBody`'s list. */
+  daylightGapUnlocks: Record<ConsultDaylightUnlockDTO, string>
   /**
    * Schema v4 reports the two named ends of the head, so the screen names
    * them too. v3's single "Current level range" tile rendered a min/max pair

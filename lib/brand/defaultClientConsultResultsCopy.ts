@@ -17,6 +17,21 @@ export const defaultClientConsultResultsCopy: BrandClientConsultResultsCopy = {
     'These observations are a starting point for your professional to verify in person.',
   warmLightCaveat:
     '{warm} of your {total} photos were taken in warm indoor light, so the colour readings below are less certain than the rest. Your professional will check them in daylight.',
+  // The UNKNOWNs, said out loud (Tori, 2026-09-13). Her photo bought her
+  // something — say that first — and then say plainly what is still missing
+  // and which picture would settle it. No jargon, nothing that reads as a
+  // failure, and a standing invitation rather than a demand.
+  daylightGapTitle: 'What daylight photos would add',
+  daylightGapProvisional:
+    'Your first photo gave me {count} of these readings already — they’re a starting point, not a final answer.',
+  daylightGapBody:
+    'A few daylight photos would settle the rest: {list}. You can add them any time before your appointment, and I’ll look at your plan again with them.',
+  daylightGapUnlocks: {
+    HAIR_LEVELS: 'how light or dark your hair actually is',
+    HAIR_TONE_AND_CONDITION: 'your hair’s shade, texture and condition',
+    SKIN_TONE_AND_SEASON: 'your skin tone and the colours that suit it',
+    EYE_AND_BROW_DETAIL: 'your eye and brow shape',
+  },
   baseLevelLabel: 'Color near your scalp',
   lightestLevelLabel: 'Lightest color in your hair',
   toneLabel: 'Color shade',

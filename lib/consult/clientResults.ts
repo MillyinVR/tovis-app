@@ -10,7 +10,9 @@ import {
 } from '@prisma/client'
 
 import type {
+  ConsultCaptureShotKeyDTO,
   ConsultClientResultsDTO,
+  ConsultResultsDaylightGapDTO,
   ConsultResultsPhotoLightDTO,
 } from '@/lib/dto/consult'
 import { logAiConsultServe } from '@/lib/observability/aiConsultEvents'
@@ -18,6 +20,8 @@ import { prisma } from '@/lib/prisma'
 
 import { isAiConsultC7ExposureEnabledForPro } from './access'
 import { isConsultColorFindingCode } from './capture/types'
+import { resolveConsultCapturePack } from './capture/registry'
+import { consultDaylightGap } from './daylightGap'
 import { requireCurrentConsultAgreementAcceptances } from './agreementContract'
 import { evaluateConsultAnchorScope } from './anchor'
 import { CONSULT_OPEN_WINDOW_SELECT } from './openWindow'
@@ -50,6 +54,11 @@ const CLIENT_RESULT_SCOPE_SELECT = {
   status: true,
   client: { select: { userId: true } },
   ...CONSULT_OPEN_WINDOW_SELECT,
+  // `slug` already comes from the anchor select; `consultFamily` is added so
+  // `consultDaylightGap` can resolve the pack and therefore only ever offer a
+  // view this session could actually ask her for. AFTER the spread, because a
+  // key before it is silently overwritten by it.
+  serviceCategory: { select: { slug: true, consultFamily: true } },
 } satisfies Prisma.ConsultSessionSelect
 
 type ClientResultScope = Prisma.ConsultSessionGetPayload<{
@@ -134,6 +143,7 @@ function clientResultsDto(args: {
   result: Awaited<ReturnType<typeof loadLatestImmutableConsultResult>>
   teaserTapped: boolean
   photoLight: ConsultResultsPhotoLightDTO
+  daylightGap: ConsultResultsDaylightGapDTO
   suitability?: ConsultClientResultsDTO['suitability']
 }): ConsultClientResultsDTO {
   const directions = args.result.payload.recommendationDirections
@@ -159,6 +169,7 @@ function clientResultsDto(args: {
     ...(args.result.lookPlan ? { lookPlan: args.result.lookPlan } : {}),
     ...(args.result.lookBrief ? { lookBrief: args.result.lookBrief } : {}),
     photoLight: args.photoLight,
+    daylightGap: args.daylightGap,
     meCardTeaser: { locked: true, tapped: args.teaserTapped },
     createdAt: args.result.createdAt.toISOString(),
   }
@@ -242,7 +253,7 @@ export async function loadAuthorizedClientConsultResults(
             in: [ConsultCaptureStatus.ACCEPTED, ConsultCaptureStatus.REJECTED],
           },
         },
-        select: { status: true, qualityWarningCode: true },
+        select: { status: true, qualityWarningCode: true, shotKey: true },
       })
       const attributedBookingCount = await tx.booking.count({
         where: { sourceConsultSessionId: scope.id },
@@ -254,6 +265,17 @@ export async function loadAuthorizedClientConsultResults(
           result,
           teaserTapped: actions.has(ConsultAuditAction.ME_CARD_TEASER_TAPPED),
           photoLight: photoLightFor(captures),
+          daylightGap: consultDaylightGap({
+            profile: result.payload.profile,
+            aiObservations: result.payload.aiObservations,
+            acceptedShotKeys: captures
+              .filter((capture) => capture.status === ConsultCaptureStatus.ACCEPTED)
+              .map((capture) => capture.shotKey as ConsultCaptureShotKeyDTO),
+            packShotKeys: resolveConsultCapturePack({
+              categorySlug: scope.serviceCategory.slug,
+              family: scope.serviceCategory.consultFamily,
+            }).shots.map((shot) => shot.key),
+          }),
           ...(suitability ? { suitability: clientSuitability(suitability) } : {}),
         }),
         firstServe,
