@@ -7,7 +7,7 @@ function fixture() {
   const thread = threadFixture({ inspiration: cardInspiration, status: 'MEDIA_READY' })
   const question: ConsultThreadQuestionMessageDTO = { kind: 'QUESTION', id: 'intake:box_dye_history', author: 'APP', state: 'DONE',
     answer: 'never', packVersion: 4, schemaVersion: 2,
-    question: { key: 'box_dye_history', label: 'Have you used box dye?', helpText: null, kind: 'SINGLE_SELECT', requirement: 'REQUIRED',
+    question: { key: 'box_dye_history', label: 'Have you used box dye?', helpText: null, kind: 'SINGLE_SELECT', requirement: 'REQUIRED', allowText: true,
       options: [{ value: 'never', label: 'Never' }, { value: 'yes', label: 'Yes, I have' }] } }
   thread.messages = [question]
   thread.nextOpenMessageId = null

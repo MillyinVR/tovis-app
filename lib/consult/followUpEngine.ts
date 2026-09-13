@@ -110,6 +110,13 @@ export type ConsultFollowUpQuestion = {
    */
   evidence: string
   options: { value: string; label: string }[]
+  /**
+   * Whether she may answer this card in her OWN WORDS — beside the option she
+   * picks, or instead of picking one. Comes from the question's own pack
+   * entry, never from the model: the model re-words a question, it does not
+   * decide what a client is allowed to say.
+   */
+  allowText: boolean
 }
 
 export type ConsultFollowUpResult = {
@@ -355,6 +362,9 @@ export function sanitizeConsultFollowUpQuestions(
       // the question was earned, and a code is exactly what makes it gradeable.
       evidence: sanitizeText(item.evidence, CONSULT_FOLLOW_UP_MAX_TEXT_LENGTH, false),
       options: sanitizeOptions(item.options, entry),
+      // From the VOCABULARY, not from `item`: whatever the model returned
+      // about this is not its call.
+      allowText: entry.allowText,
     })
   }
   return questions

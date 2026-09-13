@@ -21,7 +21,10 @@ import type {
   ConsultBriefClientIntakeItemDTO,
   ConsultIntakeAnswerMapDTO,
   ConsultIntakeQuestionPackDTO,
+  ConsultIntakeTextAnswerMapDTO,
 } from '@/lib/dto/consult'
+
+import { validateConsultClientText } from '../clientText'
 
 import {
   GENERAL_SERVICE_INTAKE_PACK,
@@ -37,11 +40,12 @@ import {
   HAIR_GENERAL_INTAKE_PACK_V1,
   HAIR_GENERAL_INTAKE_PACK_V2,
 } from './packs/hairGeneral'
-import type {
-  ConsultIntakePackDefinition,
-  ConsultIntakePayload,
-  ConsultIntakeProgress,
-  ConsultIntakeValidationResult,
+import {
+  CONSULT_INTAKE_CLIENT_WORDS_VALUE,
+  type ConsultIntakePackDefinition,
+  type ConsultIntakePayload,
+  type ConsultIntakeProgress,
+  type ConsultIntakeValidationResult,
 } from './types'
 
 export const CONSULT_INTAKE_PACKS: readonly ConsultIntakePackDefinition[] = [
@@ -158,34 +162,70 @@ export function evaluateConsultIntakeProgress(
   return { canComplete: true, nextQuestionKey: null, blocker: null }
 }
 
-/** Strict write validation: unknown keys and invalid option values fail. */
+const INVALID: ConsultIntakeValidationResult = {
+  ok: false,
+  code: 'INVALID_ANSWERS',
+  message: 'Invalid answers.',
+}
+
+/**
+ * Strict write validation: unknown keys and invalid option values fail.
+ *
+ * `rawTextAnswers` is the sidecar of words she typed. A key may appear there
+ * ALONGSIDE a real option code (a note on a choice) or carry
+ * `CONSULT_INTAKE_CLIENT_WORDS_VALUE` as its code (the escape hatch — "none of
+ * these, let me explain"). Both need the question to say `allowText`, and a
+ * sentinel with no words is refused: it would store an answer that means
+ * nothing to the client, the pro, or the safety policy.
+ */
 export function validateConsultIntakeAnswers(
   pack: ConsultIntakePackDefinition,
   raw: unknown,
   complete: boolean,
+  rawTextAnswers?: unknown,
 ): ConsultIntakeValidationResult {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    return { ok: false, code: 'INVALID_ANSWERS', message: 'Invalid answers.' }
-  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return INVALID
 
   const byKey = questionsByKey(pack)
   const record: Record<string, unknown> = { ...raw }
+
+  const textAnswers: ConsultIntakeTextAnswerMapDTO = {}
+  if (rawTextAnswers !== undefined && rawTextAnswers !== null) {
+    if (typeof rawTextAnswers !== 'object' || Array.isArray(rawTextAnswers)) {
+      return INVALID
+    }
+    for (const [key, value] of Object.entries(
+      rawTextAnswers as Record<string, unknown>,
+    )) {
+      const definition = byKey.get(key)
+      const note = validateConsultClientText(value)
+      // Words keyed to a question she has not answered are orphans no reader
+      // would ever show, and words on a question that does not take them are a
+      // client ignoring the contract.
+      if (!definition || !definition.allowText || !note.ok || !note.text) {
+        return INVALID
+      }
+      if (!(key in record)) return INVALID
+      textAnswers[key] = note.text
+    }
+  }
+
   const answers: ConsultIntakeAnswerMapDTO = {}
   for (const [key, value] of Object.entries(record)) {
     const definition = byKey.get(key)
-    if (!definition || typeof value !== 'string') {
-      return { ok: false, code: 'INVALID_ANSWERS', message: 'Invalid answers.' }
-    }
+    if (!definition || typeof value !== 'string') return INVALID
     const trimmed = value.trim()
-    if (!definition.options.some((option) => option.value === trimmed)) {
-      return { ok: false, code: 'INVALID_ANSWERS', message: 'Invalid answers.' }
+    const typed =
+      trimmed === CONSULT_INTAKE_CLIENT_WORDS_VALUE &&
+      definition.allowText &&
+      Boolean(textAnswers[key])
+    if (!typed && !definition.options.some((option) => option.value === trimmed)) {
+      return INVALID
     }
     answers[key] = trimmed
   }
 
-  if (Object.keys(answers).length === 0) {
-    return { ok: false, code: 'INVALID_ANSWERS', message: 'Invalid answers.' }
-  }
+  if (Object.keys(answers).length === 0) return INVALID
 
   if (complete) {
     const progress = evaluateConsultIntakeProgress(pack, answers)
@@ -201,7 +241,7 @@ export function validateConsultIntakeAnswers(
     }
   }
 
-  return { ok: true, answers }
+  return { ok: true, answers, textAnswers }
 }
 
 const PAYLOAD_KEYS = new Set([
@@ -211,6 +251,15 @@ const PAYLOAD_KEYS = new Set([
   'complete',
   'answers',
 ])
+
+/**
+ * OPTIONAL payload keys — present on a row only when they have content.
+ *
+ * `textAnswers` is absent from every intake written before free text existed,
+ * and stays absent on one where she typed nothing, so those rows read and
+ * re-hash exactly as they always did.
+ */
+const OPTIONAL_PAYLOAD_KEYS = new Set(['textAnswers'])
 
 /**
  * Read normalization for a stored INTAKE payload, together with the pack
@@ -226,7 +275,13 @@ export function resolveConsultIntakePayload(
 ): { pack: ConsultIntakePackDefinition; payload: ConsultIntakePayload } | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
   const record: Record<string, unknown> = { ...raw }
-  if (Object.keys(record).some((key) => !PAYLOAD_KEYS.has(key))) return null
+  if (
+    Object.keys(record).some(
+      (key) => !PAYLOAD_KEYS.has(key) && !OPTIONAL_PAYLOAD_KEYS.has(key),
+    )
+  ) {
+    return null
+  }
   if (typeof record.packId !== 'string') return null
   if (typeof record.packVersion !== 'number') return null
   const pack = findConsultIntakePack(record.packId, record.packVersion)
@@ -241,8 +296,21 @@ export function resolveConsultIntakePayload(
     pack,
     record.answers,
     record.complete,
+    record.textAnswers,
   )
   if (!validated.ok) return null
+  // A STORED note must already be in its normalized form. The write path is the
+  // only thing that puts one here and it normalizes first, so a row whose text
+  // needed trimming was not written by this contract.
+  if (
+    record.textAnswers !== undefined &&
+    Object.entries(validated.textAnswers).some(
+      ([key, text]) => (record.textAnswers as Record<string, unknown>)[key] !== text,
+    )
+  ) {
+    return null
+  }
+  const textAnswers = { ...validated.textAnswers }
   return {
     pack,
     payload: {
@@ -251,6 +319,7 @@ export function resolveConsultIntakePayload(
       schemaVersion: pack.schemaVersion,
       complete: record.complete,
       answers: validated.answers,
+      ...(Object.keys(textAnswers).length ? { textAnswers } : {}),
     },
   }
 }
@@ -351,11 +420,27 @@ export function resolveConsultSessionIntakeState(
 export function consultIntakeItems(
   pack: ConsultIntakePackDefinition,
   answers: Readonly<Record<string, string>>,
+  textAnswers?: Readonly<Record<string, string>>,
 ): ConsultBriefClientIntakeItemDTO[] {
   const items: ConsultBriefClientIntakeItemDTO[] = []
   for (const question of pack.questions) {
     const answerCode = answers[question.key]
     if (!answerCode) continue
+    const clientWords = textAnswers?.[question.key]
+    // 🔴 The escape hatch has no option to look up — her sentence IS the
+    // answer. Falling through to the `!option` skip below would drop the one
+    // thing she chose to say in her own words.
+    if (answerCode === CONSULT_INTAKE_CLIENT_WORDS_VALUE) {
+      if (!clientWords) continue
+      items.push({
+        questionKey: question.key,
+        question: question.label,
+        answerCode,
+        answer: clientWords,
+        clientWords,
+      })
+      continue
+    }
     const option = question.options.find((candidate) => candidate.value === answerCode)
     if (!option) continue
     items.push({
@@ -363,6 +448,7 @@ export function consultIntakeItems(
       question: question.label,
       answerCode,
       answer: option.label,
+      ...(clientWords ? { clientWords } : {}),
     })
   }
   return items

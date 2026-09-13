@@ -256,7 +256,7 @@ async function loadSessionBrief(
     const latest = await tx.consultRevision.findFirst({ where: { consultSessionId: session.id, kind: 'INTAKE' }, orderBy: { revision: 'desc' } })
     const intake = latest ? normalizeConsultIntakePayload(latest.payload) : null
     const pack = intake ? findConsultIntakePack(intake.packId, intake.packVersion) : null
-    if (intake && pack) clientIntake = consultIntakeItems(pack, intake.answers)
+    if (intake && pack) clientIntake = consultIntakeItems(pack, intake.answers, intake.textAnswers)
     const latestReference = await tx.consultRevision.findFirst({ where: { consultSessionId: session.id, kind: 'INSPIRATION' }, orderBy: { revision: 'desc' } })
     const reference = latestReference ? normalizeStoredInspirationPayload(latestReference.payload) : null
     if (reference && latestReference) {

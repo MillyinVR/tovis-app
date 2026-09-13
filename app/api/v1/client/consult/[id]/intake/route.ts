@@ -54,6 +54,9 @@ async function readSubmitInput(req: Request) {
     schemaVersion,
     complete: body.complete,
     answers: body.answers,
+    // Optional and unvalidated here on purpose: the write boundary validates
+    // it against the pinned pack inside the lock, the same as `answers`.
+    ...('textAnswers' in body ? { textAnswers: body.textAnswers } : {}),
   }
 }
 

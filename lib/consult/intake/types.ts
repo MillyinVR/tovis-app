@@ -10,7 +10,19 @@ import type {
   ConsultIntakeAnswerMapDTO,
   ConsultIntakeQuestionDTO,
   ConsultIntakeQuestionPackDTO,
+  ConsultIntakeTextAnswerMapDTO,
 } from '@/lib/dto/consult'
+
+/**
+ * The answer CODE that means "she answered this one in her own words".
+ *
+ * Deliberately NOT a member of any question's `options`, so a shipped client
+ * that predates free text can never render it as a tappable choice and send it
+ * with no words attached. `validateConsultIntakeAnswers` admits it only on an
+ * `allowText` question that carries a matching `textAnswers` entry, and
+ * `consult_intake_payload_guard` enforces the same pairing in the database.
+ */
+export const CONSULT_INTAKE_CLIENT_WORDS_VALUE = 'client-words'
 
 /**
  * A pack's CONDITIONAL question. Every pack asks "what would you most like to
@@ -37,7 +49,12 @@ export type ConsultIntakeValidationErrorCode =
   | 'GOAL_DIRECTION_UNRESOLVED'
 
 export type ConsultIntakeValidationResult =
-  | { ok: true; answers: ConsultIntakeAnswerMapDTO }
+  | {
+      ok: true
+      answers: ConsultIntakeAnswerMapDTO
+      /** Normalized sidecar — `{}` when she typed nothing. */
+      textAnswers: ConsultIntakeTextAnswerMapDTO
+    }
   | {
       ok: false
       code: ConsultIntakeValidationErrorCode
@@ -61,6 +78,13 @@ export type ConsultIntakePayload = {
   schemaVersion: number
   complete: boolean
   answers: ConsultIntakeAnswerMapDTO
+  /**
+   * Her own words, keyed to an answered question. OMITTED, never `{}`, when
+   * she typed nothing — the stored JSON carries the key only when it has
+   * content, so every intake written before free text existed still reads and
+   * re-hashes byte-identically.
+   */
+  textAnswers?: ConsultIntakeTextAnswerMapDTO
 }
 
 export type ConsultIntakeOptionValues = ReadonlyArray<readonly [string, string]>
@@ -71,12 +95,20 @@ export function intakeOptions(
   return values.map(([value, label]) => ({ value, label }))
 }
 
+/**
+ * 🔴 `allowText` defaults to TRUE (Tori, 2026-09-13: "there were times i
+ * couldnt answer the consult questions with the optios it gave me... the
+ * client should have an option to fill in their own words"). A pack that means
+ * to withhold the escape hatch says so; silence grants it. The inspiration
+ * pack made the same choice for the same reason.
+ */
 export function intakeQuestion(
   key: string,
   label: string,
   requirement: ConsultIntakeQuestionDTO['requirement'],
   values: ConsultIntakeOptionValues,
   helpText: string | null = null,
+  allowText = true,
 ): ConsultIntakeQuestionDTO {
   return {
     key,
@@ -85,6 +117,7 @@ export function intakeQuestion(
     kind: 'SINGLE_SELECT',
     requirement,
     options: intakeOptions(values),
+    allowText,
   }
 }
 

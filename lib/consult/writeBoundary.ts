@@ -958,6 +958,7 @@ export async function finalizeLockedHairColorAnalysis(
     intakePackId: intake.packId,
     intakePackVersion: intake.packVersion,
     intakeAnswers: intake.answers,
+    intakeTextAnswers: intake.textAnswers,
     analysisRevisionId: revision.id,
     analysisRevision: revision.revision,
     analysis: briefAnalysis,
@@ -1102,16 +1103,27 @@ export async function writeLookServiceEstimate(
   })
 }
 
+const byKey = ([left]: readonly [string, string], [right]: readonly [string, string]) =>
+  left < right ? -1 : left > right ? 1 : 0
+
+/**
+ * 🔴 `textAnswers` joins the hash ONLY when she typed something. An intake
+ * with no words hashes to exactly the value it hashed before free text
+ * existed, so an idempotency key already in flight replays rather than
+ * conflicting across the deploy.
+ */
 function intakeRequestHash(args: {
   packId: string
   packVersion: number
   schemaVersion: number
   complete: boolean
   answers: Readonly<Record<string, string>>
+  textAnswers?: Readonly<Record<string, string>>
 }): string {
-  const orderedAnswers = Object.entries(args.answers).sort(([left], [right]) =>
-    left < right ? -1 : left > right ? 1 : 0,
-  )
+  const orderedAnswers = Object.entries(args.answers).sort(byKey)
+  const orderedText = args.textAnswers
+    ? Object.entries(args.textAnswers).sort(byKey)
+    : null
   return createHash('sha256')
     .update(
       JSON.stringify({
@@ -1120,6 +1132,7 @@ function intakeRequestHash(args: {
         schemaVersion: args.schemaVersion,
         complete: args.complete,
         answers: orderedAnswers,
+        ...(orderedText?.length ? { textAnswers: orderedText } : {}),
       }),
     )
     .digest('hex')
@@ -1138,11 +1151,13 @@ export async function appendConsultIntakeRevision(args: {
   consultSessionId: string
   actor: ClientActor
   now?: Date
-  loadInput: (context: { tx: Prisma.TransactionClient; pack: ConsultIntakePackDefinition; clientId: string; professionalId: string; answers: Record<string, string> }) => Promise<{
+  loadInput: (context: { tx: Prisma.TransactionClient; pack: ConsultIntakePackDefinition; clientId: string; professionalId: string; answers: Record<string, string>; textAnswers: Record<string, string> }) => Promise<{
     packVersion: number
     schemaVersion: number
     complete: boolean
     answers: unknown
+    /** Her own words, keyed to an answered question. Omitted when she typed none. */
+    textAnswers?: unknown
     idempotencyKey: string
     chartReview?: { fingerprint: string; decision: 'CONFIRMED' | 'BOX_DYE_ONLY' | 'SINGLE_FACT' | 'CHANGED'; sources: ClientChartFact[] }
   }>
@@ -1198,8 +1213,12 @@ export async function appendConsultIntakeRevision(args: {
     // has proven ownership, eligibility, lifecycle, and both current legal
     // prerequisites. Revocation uses the same row lock, so the two operations
     // have one deterministic order.
+    const priorIntake = normalizeConsultIntakePayload(priorIntakePayloads[0]?.payload)
+    // 🔴 The intake is a REPLACE write: the caller echoes the WHOLE map back,
+    // words included. Handing it the prior sidecar as well is what stops a
+    // one-key submit from wiping every note she has already typed.
     const input = await args.loadInput({ tx, pack, clientId: scope.clientId, professionalId: scope.professionalId,
-      answers: normalizeConsultIntakePayload(priorIntakePayloads[0]?.payload)?.answers ?? {} })
+      answers: priorIntake?.answers ?? {}, textAnswers: { ...priorIntake?.textAnswers } })
     if (input.packVersion !== pack.version) {
       throw new ConsultWriteError(
         'PACK_VERSION_MISMATCH',
@@ -1223,6 +1242,7 @@ export async function appendConsultIntakeRevision(args: {
       pack,
       input.answers,
       input.complete,
+      input.textAnswers,
     )
     if (!validated.ok) {
       const code =
@@ -1232,12 +1252,19 @@ export async function appendConsultIntakeRevision(args: {
           : 'INVALID_ANSWERS'
       throw new ConsultWriteError(code, validated.message)
     }
+    const words = Object.keys(validated.textAnswers).length
+      ? { ...validated.textAnswers }
+      : undefined
     const intakeHash = intakeRequestHash({
       packId: pack.id,
       packVersion: input.packVersion,
       schemaVersion: input.schemaVersion,
       complete: input.complete,
       answers: validated.answers,
+      // Omitted when she typed nothing, so a submit that predates free text
+      // hashes to exactly the value it always did and an in-flight
+      // idempotency key still replays instead of conflicting.
+      ...(words ? { textAnswers: words } : {}),
     })
     const requestHash = input.chartReview ? createHash('sha256').update(JSON.stringify({ intakeHash,
       fingerprint: input.chartReview.fingerprint, decision: input.chartReview.decision })).digest('hex') : intakeHash
@@ -1318,6 +1345,7 @@ export async function appendConsultIntakeRevision(args: {
           schemaVersion: input.schemaVersion,
           complete: input.complete,
           answers: validated.answers,
+          ...(words ? { textAnswers: words } : {}),
         },
         schemaVersion: input.schemaVersion,
         idempotencyKey,

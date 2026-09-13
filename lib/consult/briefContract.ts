@@ -61,13 +61,14 @@ function intakeItems(
   intakePackId: string,
   intakePackVersion: number | undefined,
   answers: Readonly<Record<string, string>>,
+  textAnswers: Readonly<Record<string, string>> | undefined,
 ): ConsultBriefClientIntakeItemDTO[] {
   // The VERSION the answers were written under, so the brief shows the pro the
   // questions the client actually saw. Undefined only for a brief built before
   // any pack had a second version; that is the colour pack's v2.
   const pack = findConsultIntakePack(intakePackId, intakePackVersion)
   if (!pack) throw new Error('Consult brief intake pack is unknown.')
-  return consultIntakeItems(pack, answers)
+  return consultIntakeItems(pack, answers, textAnswers)
 }
 
 /**
@@ -90,6 +91,8 @@ type HairColorProBriefBuildArgs = {
    */
   intakePackVersion?: number
   intakeAnswers: Readonly<Record<string, string>>
+  /** What she TYPED on an intake question, when she typed anything. */
+  intakeTextAnswers?: Readonly<Record<string, string>>
   analysisRevisionId: string
   analysisRevision: number
   analysis: ConsultAnalysisPayloadDTO
@@ -103,6 +106,7 @@ function buildHairColorProBriefCore(
     args.intakePackId ?? HAIR_COLOR_INTAKE_PACK_ID,
     args.intakePackVersion ?? HAIR_COLOR_INTAKE_PACK_V2_VERSION,
     args.intakeAnswers,
+    args.intakeTextAnswers,
   )
   if (clientIntake.length === 0) {
     throw new Error('Consult brief intake is unavailable.')

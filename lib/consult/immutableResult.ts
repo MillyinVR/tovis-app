@@ -162,6 +162,7 @@ export async function loadLatestImmutableConsultResult(
       intakePackId: normalizedIntake.packId,
       intakePackVersion: normalizedIntake.packVersion,
       intakeAnswers: normalizedIntake.answers,
+      intakeTextAnswers: normalizedIntake.textAnswers,
       analysisRevisionId: analysis.id,
       analysisRevision: analysis.revision,
       analysis: normalizeStoredConsultAnalysisPayload(

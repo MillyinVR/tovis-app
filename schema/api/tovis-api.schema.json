@@ -8930,6 +8930,10 @@
         "answerCode": {
           "type": "string"
         },
+        "clientWords": {
+          "description": "What she TYPED on this question, when she typed anything. The pro reads her sentence, not a rendering of the code — and on the escape hatch (`CONSULT_INTAKE_CLIENT_WORDS_VALUE`) this is the only answer there is.",
+          "type": "string"
+        },
         "question": {
           "type": "string"
         },
@@ -11222,6 +11226,10 @@
     },
     "ConsultIntakeQuestionDTO": {
       "properties": {
+        "allowText": {
+          "description": "Whether the client may answer this question in her OWN WORDS — as a note alongside a chosen option, or instead of one (Tori, 2026-09-13: \"there were times i couldnt answer the consult questions with the options it gave me\"). Defaults to true for every intake question (`lib/consult/intake/types.ts`); a pack opts out deliberately.\n\nAdditive on the wire: a shipped client that does not know the field renders the options exactly as before.",
+          "type": "boolean"
+        },
         "helpText": {
           "type": [
             "string",
@@ -11254,7 +11262,8 @@
         "helpText",
         "kind",
         "requirement",
-        "options"
+        "options",
+        "allowText"
       ],
       "type": "object"
     },
@@ -11336,6 +11345,10 @@
         },
         "schemaVersion": {
           "type": "number"
+        },
+        "textAnswers": {
+          "$ref": "#/definitions/ConsultIntakeTextAnswerMapDTO",
+          "description": "Present only when she typed something; absent, never `{}`, when she did not."
         }
       },
       "required": [
@@ -11484,6 +11497,13 @@
         "intake",
         "replayed"
       ],
+      "type": "object"
+    },
+    "ConsultIntakeTextAnswerMapDTO": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Her own words, keyed to a question she has ALSO answered — the sidecar the code-only `ConsultIntakeAnswerMapDTO` cannot carry. Exactly the shape the inspiration contract stores as `textAnswers` (P5c), for the same reason: the answer map is a vocabulary the safety policy and the database guards read by code, and a sentence is not a code.\n\nA key here whose ANSWER is the client-words sentinel (`CONSULT_INTAKE_CLIENT_WORDS_VALUE`, lib/consult/intake/types.ts) is the ESCAPE HATCH (\"none of these — let me explain\"); a key here with a real option code is a NOTE alongside that choice. Both are stored the same way.",
       "type": "object"
     },
     "ConsultLookAdjustment": {
@@ -13845,6 +13865,10 @@
     "ConsultThreadFollowUpMessageDTO": {
       "description": "P5g — one adaptive follow-up question, as a card in the thread.\n\n🔴 `text` on this message is the only prose in the consult a MODEL wrote and a client reads. It is generated per client from the reference reading, her own photo reading, the regions she tapped and every answer so far, and it must name something specific it saw — a question that would be the same for everybody is the question P5g exists to delete.\n\n🔴 `options` are enums from a vocabulary that already exists (lib/consult/followUpVocabulary.ts), re-worded by the model but never invented: a value outside the key's real options throws the whole round away on the server, so a client can echo any of these back and know it will file.\n\n`fallback` is true when the model call failed and these are the intake pack's OWN remaining safety questions instead. It is on the wire because the client says so out loud (\"couldn't think of the next question — here are the essentials\"): Part 0 rule 4 forbids a silent fallback, and a fallback the client cannot see is a silent one.",
       "properties": {
+        "allowText": {
+          "description": "Whether this card takes her OWN WORDS, and what she has already typed on it. Both OPTIONAL on the wire: a build that predates them renders exactly the card it renders today, with no box.\n\n🔴 `allowText` is false on a card whose answer route cannot carry words — a professional's own question, and a chart-fact confirmation. Offering a box that cannot send what she types is the defect #1171 fixed.",
+          "type": "boolean"
+        },
         "attribution": {
           "description": "C2-4 — set when the PROFESSIONAL wrote this question herself, so the card never reads as the app's voice (\"From Susie\"). OPTIONAL on the wire: a build that predates it renders the same card with no eyebrow and answers it through the same route. `round` is 0 on such a card and `fallback` is false; the `questionKey` carries the `pro_` prefix the server files by.",
           "type": "string"
@@ -13854,6 +13878,9 @@
           "type": "string"
         },
         "chartFactSourceId": {
+          "type": "string"
+        },
+        "clientWords": {
           "type": "string"
         },
         "fallback": {
@@ -14240,6 +14267,10 @@
           "type": "string"
         },
         "chartReviewFingerprint": {
+          "type": "string"
+        },
+        "clientWords": {
+          "description": "What she TYPED on this question, when she typed anything — a note beside the option in `answer`, or, when `answer` is the client-words sentinel, the answer itself. Carried so the thread can render her own sentence back to her without a second read, and so re-opening the question puts her words back in the box instead of silently dropping them.",
           "type": "string"
         },
         "id": {

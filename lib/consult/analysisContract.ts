@@ -1056,7 +1056,7 @@ async function loadConsultAnalysisRunContext(
     now: args.now,
   })
   const captures = await currentCaptures(db, session, args.now)
-  const lookHistory = lookPlanningForSession(session) ? await loadConsultLookHistory(db, session.id) : { answers: {}, items: [] }
+  const lookHistory = lookPlanningForSession(session) ? await loadConsultLookHistory(db, session.id) : { answers: {}, textAnswers: {}, items: [] }
   const menu = await loadRecommendationOfferings(db, session)
   const service = await loadServiceContext(db, session, menu.offerings)
   return {
@@ -1638,7 +1638,7 @@ export async function executeConsultAnalysisRun(args: {
         await provider({
           service: context.service,
           intake: context.intake.payload.answers,
-          intakeItems: [...consultIntakeItems(pack, context.intake.payload.answers), ...context.lookHistory.items.filter(item => !context.intake.payload.answers[item.questionKey])],
+          intakeItems: [...consultIntakeItems(pack, context.intake.payload.answers, context.intake.payload.textAnswers), ...context.lookHistory.items.filter(item => !context.intake.payload.answers[item.questionKey])],
           capturePack: {
             id: profile.capturePack.id,
             shotKeys: profile.capturePack.shots.map((shot) => shot.key),
@@ -1663,6 +1663,7 @@ export async function executeConsultAnalysisRun(args: {
             ...deriveConsultSafetyFlagPolicy({
               intakePackId: context.intake.payload.packId,
               intake: context.intake.payload.answers,
+              intakeTextAnswers: context.intake.payload.textAnswers,
               visibleCondition: 'UNKNOWN',
             }).supported,
           ],
@@ -1681,6 +1682,7 @@ export async function executeConsultAnalysisRun(args: {
           deriveConsultSafetyFlagPolicy({
             intakePackId: context.intake.payload.packId,
             intake: context.intake.payload.answers,
+            intakeTextAnswers: context.intake.payload.textAnswers,
             visibleCondition: providerResult.analysis.core.visibleCondition.value,
           }),
         ),
@@ -1790,6 +1792,7 @@ export async function executeConsultAnalysisRun(args: {
 
         const { lookPlan: rawLookPlan, ...analysis } = providerResult.analysis
         const answers = { ...finalContext.lookHistory.answers, ...finalContext.intake.payload.answers }
+        const words = { ...finalContext.lookHistory.textAnswers, ...finalContext.intake.payload.textAnswers }
         const pathNames = new Set(rawLookPlan?.paths.flatMap(path => path.visits.flatMap(visit => visit.services)) ?? [])
         const pathCategoryIds = finalContext.menu.offerings.filter(offering => pathNames.has(offering.service.name)).map(offering => offering.service.categoryId)
         const colorPath = Boolean(rawLookPlan && await tx.serviceCategory.findFirst({ where: { id: { in: pathCategoryIds }, slug: 'hair-color' }, select: { id: true } }))
@@ -1822,8 +1825,13 @@ export async function executeConsultAnalysisRun(args: {
           // "Not sure" is not an answer any routing rule reads — the policy
           // looks for 'yes' — so nothing downstream would carry it. The pro
           // resolves it with her.
-          historyUnknownToClient: consultPrepSafetyQuestions(finalContext.intake.pack).some(question => answers[question.key] === 'not-sure') ||
-            (colorPath && CONSULT_LOOK_COLOR_HISTORY_QUESTIONS.some(question => answers[question.key] === 'not-sure')),
+          // 🔴 A safety question answered in her OWN WORDS is unknown to every
+          // routing rule here — they read codes, and a sentence is not a code
+          // (Tori, 2026-09-13: the model may flag, it may never clear). So
+          // typing on one routes to the pro exactly as "not sure" does,
+          // whether she typed INSTEAD of tapping or as a note beside a tap.
+          historyUnknownToClient: consultPrepSafetyQuestions(finalContext.intake.pack).some(question => answers[question.key] === 'not-sure' || Boolean(words[question.key])) ||
+            (colorPath && CONSULT_LOOK_COLOR_HISTORY_QUESTIONS.some(question => answers[question.key] === 'not-sure' || Boolean(words[question.key]))),
           safetyRouted: routing.blocksChemicalRecommendations,
         }) : undefined
         const payload = { ...analysis, recommendations, ...(lookPlan ? { lookPlan } : {}) }

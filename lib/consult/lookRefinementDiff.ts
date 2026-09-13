@@ -28,7 +28,7 @@ export async function describeLookRefinement(tx: Prisma.TransactionClient, args:
     const items = (raw: Prisma.JsonValue | undefined) => {
       const intake = raw ? normalizeConsultIntakePayload(raw) : null
       const pack = intake ? findConsultIntakePack(intake.packId, intake.packVersion) : null
-      return intake && pack ? consultIntakeItems(pack, intake.answers) : []
+      return intake && pack ? consultIntakeItems(pack, intake.answers, intake.textAnswers) : []
     }
     compare(items(intakeRevisions[1]?.payload), items(latestIntake.payload))
   }

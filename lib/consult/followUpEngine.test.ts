@@ -34,6 +34,7 @@ function entry(
     home,
     packLabel: `The pack's own wording for ${key}`,
     options: values.map((value) => ({ value, label: value })),
+    allowText: true,
     safety,
   }
 }

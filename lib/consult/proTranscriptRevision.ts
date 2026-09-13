@@ -51,7 +51,7 @@ export function projectProTranscriptRevisions(
           if (!intake || !pack || intake.schemaVersion !== row.schemaVersion) {
             return [{ ...identity, kind: row.kind, availability: 'UNAVAILABLE' }]
           }
-          return [{ ...identity, kind: row.kind, availability: 'AVAILABLE', items: consultIntakeItems(pack, intake.answers) }]
+          return [{ ...identity, kind: row.kind, availability: 'AVAILABLE', items: consultIntakeItems(pack, intake.answers, intake.textAnswers) }]
         }
         case 'INSPIRATION': {
           const inspiration = normalizeStoredInspirationPayload(row.payload)

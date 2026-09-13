@@ -1,12 +1,13 @@
-/** Client-authored context, never a model observation or an instruction. */
-export const CONSULT_INSPIRATION_CLIENT_TEXT_LIMIT = 600
+// The inspiration card's own names for the shared client-text rule
+// (lib/consult/clientText.ts). Re-exports rather than a second implementation:
+// intake and the thread follow-ups validate the same way, and the database
+// guards are written against ONE limit, not three.
+import {
+  CONSULT_CLIENT_TEXT_LIMIT,
+  validateConsultClientText,
+} from '../clientText'
 
-export function validateInspirationClientText(raw: unknown):
-  | { ok: true; text: string | null }
-  | { ok: false } {
-  if (raw == null) return { ok: true, text: null }
-  if (typeof raw !== 'string' || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(raw)) return { ok: false }
-  const text = raw.trim()
-  if (text.length > CONSULT_INSPIRATION_CLIENT_TEXT_LIMIT) return { ok: false }
-  return { ok: true, text: text || null }
-}
+/** Client-authored context, never a model observation or an instruction. */
+export const CONSULT_INSPIRATION_CLIENT_TEXT_LIMIT = CONSULT_CLIENT_TEXT_LIMIT
+
+export const validateInspirationClientText = validateConsultClientText

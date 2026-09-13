@@ -63,6 +63,7 @@ const VOCABULARY: ConsultFollowUpVocabulary = {
       home: 'INTAKE',
       packLabel: 'When was your hair last lightened?',
       safety: true,
+      allowText: true,
       options: [{ value: 'never', label: 'Never' }],
     },
   ],

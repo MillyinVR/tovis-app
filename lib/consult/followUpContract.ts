@@ -89,6 +89,8 @@ import {
 } from './serviceProfile'
 import { resolveConsultServiceIdentity } from './serviceIdentity'
 import { appendConsultIntakeRevision } from './writeBoundary'
+import { readStoredConsultClientText, validateConsultClientText } from './clientText'
+import { CONSULT_INTAKE_CLIENT_WORDS_VALUE } from './intake/types'
 import { normalizeStoredConsultInspirationAnalysis } from './inspirationAnalysisRead'
 import {
   ConsultFollowUpError,
@@ -121,6 +123,12 @@ export const CONSULT_MAX_FOLLOW_UP_ROUNDS = 3
 export type ConsultFollowUpRoundQuestion = ConsultFollowUpQuestion & {
   /** Her answer, or null while it is open. Read from the question's own home. */
   selectedValues: string[] | null
+  /**
+   * What she TYPED on this card, or null. Read from the question's own home
+   * too: an INTAKE-home note lives in the intake revision's sidecar, a
+   * FOLLOW_UP-home one in this round's `clientTextAnswers`. Never stored twice.
+   */
+  clientWords: string | null
 }
 
 export type ConsultFollowUpRoundView = {
@@ -179,10 +187,22 @@ export function readStoredQuestions(payload: Prisma.JsonValue): ConsultFollowUpQ
       }
     }
     if (parsed.length === 0) continue
-    questions.push({ key, text, home, evidence, options: parsed })
+    // 🔴 Absent on every round stored before free text existed, and those cards
+    // must keep rendering exactly as they did: no flag means no box.
+    questions.push({ key, text, home, evidence, options: parsed, allowText: raw.allowText === true })
   }
   return questions
 }
+
+/**
+ * The round's CLIENT-AUTHORED text, narrowed.
+ *
+ * Its own COLUMN, because `answers` carries a CHECK that refuses the words
+ * face / eye / skin / undertone / identity / ethnic / race / health — a ban on
+ * what the MODEL may write that would have refused an ordinary sentence about
+ * herself. See the 20261103000000 migration.
+ */
+export const readStoredClientText = readStoredConsultClientText
 
 export function readStoredAnswers(
   payload: Prisma.JsonValue,
@@ -220,6 +240,21 @@ function answeredValues(
   return answer ? [...answer] : null
 }
 
+/** Her words for one question, asked of the SAME home its answer came from. */
+function answeredWords(
+  question: ConsultFollowUpQuestion,
+  homes: {
+    intakeTextAnswers: Readonly<Record<string, string>>
+    roundClientText: Readonly<Record<string, string>>
+  },
+): string | null {
+  return (
+    (question.home === 'INTAKE'
+      ? homes.intakeTextAnswers[question.key]
+      : homes.roundClientText[question.key]) ?? null
+  )
+}
+
 // ── The situation, read once ────────────────────────────────────────────────
 
 type FollowUpSituation = {
@@ -229,6 +264,8 @@ type FollowUpSituation = {
   /** The pack this consult is PINNED to, not the pack that shipped today. */
   intakePack: ConsultIntakePackDefinition
   intakeAnswers: Record<string, string>
+  /** Her own words on an INTAKE-home question, keyed to an answered one. */
+  intakeTextAnswers: Record<string, string>
   serviceName: string | null
   professionalDisplayName: string
   rounds: ConsultFollowUpRoundView[]
@@ -385,6 +422,9 @@ export async function generateConsultFollowUpRound(
         questions: questions.map((question) => ({
           ...question,
           selectedValues: null,
+          // A round just created is by construction unanswered, so there is
+          // nothing typed on it either.
+          clientWords: null,
         })),
       },
     }
@@ -418,6 +458,7 @@ function fallbackQuestion(
     text: entry.packLabel,
     evidence: 'Asked because it is still unanswered and it affects what is safe to do.',
     options: entry.options.map((option) => ({ ...option })),
+    allowText: entry.allowText,
   }
 }
 
@@ -469,6 +510,7 @@ async function readConsultFollowUpSituation(
         status: true,
         questions: true,
         answers: true,
+        clientTextAnswers: true,
         createdAt: true,
       },
     }),
@@ -503,6 +545,9 @@ async function readConsultFollowUpSituation(
       if (typeof value === 'string') intakeAnswers[key] = value
     }
   }
+  const intakeTextAnswers: Record<string, string> = isRecord(intakePayload)
+    ? readStoredClientText(intakePayload.textAnswers as Prisma.JsonValue)
+    : {}
 
   // 🔴 The pack this consult was SERVED, pinned by its own stored revisions —
   // not the pack that shipped today. A client mid-consult when a new pack
@@ -576,6 +621,7 @@ async function readConsultFollowUpSituation(
       createdAt: row.createdAt,
       storedQuestions: readStoredQuestions(row.questions),
       storedAnswers: readStoredAnswers(row.answers),
+      storedClientText: readStoredClientText(row.clientTextAnswers),
     }))
 
   // Follow-up-home answers accumulate ACROSS rounds: a question answered in
@@ -595,6 +641,7 @@ async function readConsultFollowUpSituation(
     planVersion,
     intakePack,
     intakeAnswers,
+    intakeTextAnswers,
     inspiration,
     core,
     preferences,
@@ -612,6 +659,10 @@ async function readConsultFollowUpSituation(
         selectedValues: answeredValues(question, {
           intakeAnswers,
           roundAnswers: row.storedAnswers,
+        }),
+        clientWords: answeredWords(question, {
+          intakeTextAnswers,
+          roundClientText: row.storedClientText,
         }),
       })),
     })),
@@ -791,6 +842,12 @@ export async function answerConsultFollowUpQuestion(
     actor: { type: typeof ConsultActorType.CLIENT; id: string }
     questionKey: string
     selectedValues: string[]
+    /**
+     * Her own words on this card, when she typed any. Beside the option she
+     * picked, or — with `selectedValues` of `[client-words]` — instead of
+     * picking one.
+     */
+    text?: string
     idempotencyKey: string
   },
   deps: ConsultFollowUpDeps = {},
@@ -853,11 +910,28 @@ export async function answerConsultFollowUpQuestion(
   // plan version, a replayed tap, and a client that made the key up.
   if (!round || !question) throw new ConsultFollowUpAnswerError('NOT_OPEN')
 
+  // Her words, under the one rule this app has for client text. A note on a
+  // question that does not take one, or a sentence that fails the rule, is
+  // refused BEFORE anything is written — she must never lose a tap because the
+  // box beside it was invalid.
+  const note = validateConsultClientText(args.text)
+  if (!note.ok || (note.text && !question.allowText)) {
+    throw new ConsultFollowUpAnswerError('INVALID_ANSWER')
+  }
+
   const allowed = new Set(question.options.map((option) => option.value))
   const values = [...new Set(args.selectedValues)]
+  // 🔴 The escape hatch is admitted only WITH words. The sentinel on its own
+  // is not an answer: it is a code that means "see the sentence" pointing at
+  // no sentence.
+  const typed =
+    values.length === 1 &&
+    values[0] === CONSULT_INTAKE_CLIENT_WORDS_VALUE &&
+    question.allowText &&
+    Boolean(note.text)
   if (
     values.length !== 1 ||
-    !values.every((value) => allowed.has(value))
+    !(typed || values.every((value) => allowed.has(value)))
   ) {
     // Every follow-up question is single-select: each key in both vocabularies
     // maps to exactly one stored string. Accepting two would mean inventing a
@@ -871,11 +945,19 @@ export async function answerConsultFollowUpQuestion(
       consultSessionId: args.consultSessionId,
       actor: args.actor,
       now,
-      loadInput: async () => {
+      loadInput: async ({ textAnswers }) => {
         const answers = { ...situation.intakeAnswers, [question.key]: value }
+        // 🔴 A REPLACE write: the notes already stored are echoed back, or
+        // answering one follow-up erases every word she has typed so far. An
+        // EMPTY box clears this question's note, which is the only way to take
+        // one back.
+        const words = { ...textAnswers }
+        if (note.text) words[question.key] = note.text
+        else delete words[question.key]
         return {
           packVersion: situation.intakePack.version,
           schemaVersion: situation.intakePack.schemaVersion,
+          textAnswers: words,
           // The server's own judgement, echoed: every REQUIRED question now
           // has an answer. The write boundary re-validates it and refuses a
           // claim made early.
@@ -897,12 +979,21 @@ export async function answerConsultFollowUpQuestion(
         throw new ConsultFollowUpAnswerError('NOT_OPEN')
       }
       const existing = readStoredAnswers(currentRound.answers)
+      const existingText = readStoredClientText(currentRound.clientTextAnswers)
       if (existing[question.key]) {
-        if (existing[question.key]?.length !== 1 || existing[question.key]?.[0] !== value) throw new ConsultFollowUpAnswerError('NOT_OPEN')
+        if (existing[question.key]?.length !== 1 || existing[question.key]?.[0] !== value ||
+          (existingText[question.key] ?? null) !== (note.text ?? null)) throw new ConsultFollowUpAnswerError('NOT_OPEN')
         return
       }
+      // 🔴 Her words go in their OWN column. `answers` carries a CHECK that
+      // refuses face / eye / skin / undertone / identity / ethnic / race /
+      // health anywhere in it — a ban on what the MODEL writes that would
+      // otherwise refuse "I had a reaction on my skin" after she typed it.
+      const clientTextAnswers = { ...existingText }
+      if (note.text) clientTextAnswers[question.key] = note.text
+      else delete clientTextAnswers[question.key]
       await tx.consultFollowUpRound.update({ where: { id: round.id }, data: {
-        answers: { ...existing, [question.key]: [value] }, answeredAt: now,
+        answers: { ...existing, [question.key]: [value] }, clientTextAnswers, answeredAt: now,
       } })
       if (await consultRequiresLookChoice(tx, args.consultSessionId)) {
         await recordLockedConsultRerunRequest(tx, { consultSessionId: args.consultSessionId, actor: args.actor })

@@ -37,6 +37,7 @@ const replace = vi.fn()
 const push = vi.fn()
 vi.mock('next/navigation', () => ({ useRouter: () => ({ replace, push }) }))
 
+import { BrandProvider } from '@/lib/brand/BrandProvider'
 import ClientConsultFlow from './ClientConsultFlow'
 
 const CONSULT_ID = 'consult_1'
@@ -166,7 +167,15 @@ async function tapsToThePhotoStep(
     }),
   )
 
-  render(<ClientConsultFlow consultId={CONSULT_ID} copy={COPY} />)
+  // The intake card reads its own-words wording from the brand, exactly as the
+  // inspiration card already did — so the walk renders inside a provider, and
+  // the provider needs the theme query jsdom does not ship.
+  vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })))
+  render(
+    <BrandProvider>
+      <ClientConsultFlow consultId={CONSULT_ID} copy={COPY} />
+    </BrandProvider>,
+  )
   // The thread is ONE read, and it is asynchronous — without waiting for it the
   // loop below finds nothing tappable and reports a triumphant zero taps.
   await screen.findByText('Love this one.')

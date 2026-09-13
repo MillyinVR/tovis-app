@@ -193,7 +193,7 @@ describe('hair-color intake pack', () => {
   it('allows validated partial saves but requires every required answer to complete', () => {
     expect(
       validateHairColorIntakeAnswers({ change_scale: 'noticeable' }, false),
-    ).toEqual({ ok: true, answers: { change_scale: 'noticeable' } })
+    ).toEqual({ ok: true, answers: { change_scale: 'noticeable' }, textAnswers: {} })
     expect(validateHairColorIntakeAnswers({}, false)).toMatchObject({
       ok: false,
       code: 'INVALID_ANSWERS',

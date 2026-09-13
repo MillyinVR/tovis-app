@@ -173,6 +173,17 @@ export type ConsultIntakeQuestionDTO = {
   kind: 'SINGLE_SELECT'
   requirement: ConsultIntakeQuestionRequirementDTO
   options: ConsultIntakeQuestionOptionDTO[]
+  /**
+   * Whether the client may answer this question in her OWN WORDS — as a note
+   * alongside a chosen option, or instead of one (Tori, 2026-09-13: "there
+   * were times i couldnt answer the consult questions with the options it
+   * gave me"). Defaults to true for every intake question
+   * (`lib/consult/intake/types.ts`); a pack opts out deliberately.
+   *
+   * Additive on the wire: a shipped client that does not know the field
+   * renders the options exactly as before.
+   */
+  allowText: boolean
 }
 
 // `id` and `categorySlug` name WHICH pack was served (lib/consult/intake/
@@ -188,6 +199,22 @@ export type ConsultIntakeQuestionPackDTO = {
 }
 
 export type ConsultIntakeAnswerMapDTO = {
+  [questionKey: string]: string
+}
+
+/**
+ * Her own words, keyed to a question she has ALSO answered — the sidecar the
+ * code-only `ConsultIntakeAnswerMapDTO` cannot carry. Exactly the shape the
+ * inspiration contract stores as `textAnswers` (P5c), for the same reason: the
+ * answer map is a vocabulary the safety policy and the database guards read by
+ * code, and a sentence is not a code.
+ *
+ * A key here whose ANSWER is the client-words sentinel
+ * (`CONSULT_INTAKE_CLIENT_WORDS_VALUE`, lib/consult/intake/types.ts) is the
+ * ESCAPE HATCH ("none of these — let me explain"); a key here with a real
+ * option code is a NOTE alongside that choice. Both are stored the same way.
+ */
+export type ConsultIntakeTextAnswerMapDTO = {
   [questionKey: string]: string
 }
 
@@ -227,6 +254,8 @@ export type ConsultIntakeRevisionDTO = {
   schemaVersion: number
   complete: boolean
   answers: ConsultIntakeAnswerMapDTO
+  /** Present only when she typed something; absent, never `{}`, when she did not. */
+  textAnswers?: ConsultIntakeTextAnswerMapDTO
   createdAt: string
 }
 
@@ -1312,6 +1341,12 @@ export type ConsultBriefClientIntakeItemDTO = {
   question: string
   answerCode: string
   answer: string
+  /**
+   * What she TYPED on this question, when she typed anything. The pro reads
+   * her sentence, not a rendering of the code — and on the escape hatch
+   * (`CONSULT_INTAKE_CLIENT_WORDS_VALUE`) this is the only answer there is.
+   */
+  clientWords?: string
 }
 
 export type ConsultBriefAiObservationsDTO = {
@@ -2338,6 +2373,14 @@ export type ConsultThreadQuestionMessageDTO = {
   question: ConsultIntakeQuestionDTO
   answer: string | null
   /**
+   * What she TYPED on this question, when she typed anything — a note beside
+   * the option in `answer`, or, when `answer` is the client-words sentinel,
+   * the answer itself. Carried so the thread can render her own sentence back
+   * to her without a second read, and so re-opening the question puts her
+   * words back in the box instead of silently dropping them.
+   */
+  clientWords?: string
+  /**
    * The pack this question belongs to. Carried because answering it POSTs a
    * whole intake revision pinned to these versions — a thread that rendered the
    * question but made the client go and fetch the version to answer it would
@@ -2572,6 +2615,17 @@ export type ConsultThreadFollowUpMessageDTO = {
   fallback: boolean
   /** Which round of at most three this is, for the client's own ordering. */
   round: number
+  /**
+   * Whether this card takes her OWN WORDS, and what she has already typed on
+   * it. Both OPTIONAL on the wire: a build that predates them renders exactly
+   * the card it renders today, with no box.
+   *
+   * 🔴 `allowText` is false on a card whose answer route cannot carry words —
+   * a professional's own question, and a chart-fact confirmation. Offering a
+   * box that cannot send what she types is the defect #1171 fixed.
+   */
+  allowText?: boolean
+  clientWords?: string
   /**
    * C2-4 — set when the PROFESSIONAL wrote this question herself, so the card
    * never reads as the app's voice ("From Susie"). OPTIONAL on the wire: a

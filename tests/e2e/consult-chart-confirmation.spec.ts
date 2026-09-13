@@ -8,7 +8,7 @@ test('dated chart review persists the explicit choice and resumes the thread', a
   const fingerprint = 'a'.repeat(64)
   thread.messages = [{ kind: 'QUESTION', id: 'chart-review', author: 'APP', state: 'OPEN',
     chartReviewFingerprint: fingerprint, answer: null, packVersion: 4, schemaVersion: 2,
-    question: { key: 'chart_review', kind: 'SINGLE_SELECT', requirement: 'REQUIRED',
+    question: { key: 'chart_review', kind: 'SINGLE_SELECT', requirement: 'REQUIRED', allowText: false,
       label: 'Anything done outside the app since your last visit on August 1, 2026?',
       helpText: 'Please check these chart details before confirming: Box dye? Never (July 30, 2026).',
       options: [{ value: 'CONFIRMED', label: copy.chartReviewConfirm }, { value: 'BOX_DYE_ONLY', label: copy.chartReviewBoxDyeOnly },

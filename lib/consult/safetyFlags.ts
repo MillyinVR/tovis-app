@@ -61,6 +61,66 @@ type VisibleCondition = 'NO_VISIBLE_CONCERN' | 'POSSIBLE_COMPROMISE' | 'UNKNOWN'
 const RECENT_TREATMENT_VALUES = new Set(['within-6-months'])
 const RECENT_LIGHTENING_VALUES = new Set(['within-3-months', '3-6-months'])
 
+/**
+ * FREE TEXT ON A SAFETY QUESTION — "the model can flag, never clear"
+ * (Tori, 2026-09-13).
+ *
+ * Two halves, and they are deliberately asymmetric:
+ *
+ *   NEVER CLEAR — a safety question she answered in her own words reads as
+ *     'not-sure' to every rule below (`reading`). `determineConsultSafetyRouting`
+ *     and this policy both look for CODES, and a sentence is not a code: without
+ *     this, "I had a reaction to something once, I'm not sure what" produces the
+ *     same flags as never being asked. A note ALONGSIDE a tapped option counts
+ *     too — she does not write "actually, my scalp burned" next to "no" for it
+ *     to be filed as a clean no.
+ *
+ *   MAY FLAG — and only then, the model is additionally ALLOWED (never
+ *     required) to raise that question's own positive code if her sentence
+ *     really reports one. These are exactly the codes the question's positive
+ *     ANSWERS raise, so the model can reach no conclusion the option list could
+ *     not; it is reading her words, not inventing a concern.
+ *
+ * 🔴 `consult_analysis_payload_guard` mirrors both halves. Widening `supported`
+ * here without patching the guard's `supported_codes` is a 23514 on the app's
+ * own write.
+ */
+const CLIENT_WORDS_MAY_RAISE: Readonly<
+  Record<string, readonly ConsultAnalysisSafetyCode[]>
+> = {
+  prior_reaction: ['PRIOR_REACTION'],
+  box_dye_history: ['RECENT_BOX_DYE'],
+  prior_lightening: ['RECENT_LIGHTENING'],
+  chemical_history: ['RECENT_CHEMICAL_SERVICE'],
+  recent_treatment_timing: ['RECENT_CHEMICAL_SERVICE'],
+  known_allergies: ['KNOWN_ALLERGY'],
+  skin_sensitivity: ['SENSITIVITY_REPORTED'],
+}
+
+/**
+ * The intake as the rules below must read it: every question she typed on
+ * reads 'not-sure', whatever code sits beside the words.
+ *
+ * A key with no unknown code of its own (skin_sensitivity) simply raises
+ * nothing, exactly as tapping "not sure" on it would — free text is never a
+ * NEW rule, only the existing one applied to an answer no rule could read.
+ */
+function reading(
+  intake: Readonly<Record<string, string>>,
+  text: Readonly<Record<string, string>>,
+): Readonly<Record<string, string>> {
+  const keys = Object.keys(text).filter((key) => key in CLIENT_WORDS_MAY_RAISE)
+  if (keys.length === 0) return intake
+  return { ...intake, ...Object.fromEntries(keys.map((key) => [key, 'not-sure'])) }
+}
+
+/** Codes her WORDS may turn out to mean — allowed to the model, never required. */
+function mayRaise(
+  text: Readonly<Record<string, string>>,
+): ConsultAnalysisSafetyCode[] {
+  return Object.keys(text).flatMap((key) => [...(CLIENT_WORDS_MAY_RAISE[key] ?? [])])
+}
+
 function policy(
   supported: Iterable<ConsultAnalysisSafetyCode>,
   required: Iterable<ConsultAnalysisSafetyCode>,
@@ -79,9 +139,11 @@ function policy(
  * branch in the database mirrors exactly these.
  */
 function hairColorPolicy(
-  intake: Readonly<Record<string, string>>,
+  intakeAnswers: Readonly<Record<string, string>>,
   visibleCondition: VisibleCondition,
+  text: Readonly<Record<string, string>>,
 ): ConsultSafetyFlagPolicy {
+  const intake = reading(intakeAnswers, text)
   const required = new Set<ConsultAnalysisSafetyCode>(['ALLERGY_HISTORY_UNKNOWN'])
   if (intake.prior_reaction === 'yes') required.add('PRIOR_REACTION')
   if (intake.prior_reaction === 'not-sure') required.add('REACTION_HISTORY_UNKNOWN')
@@ -92,16 +154,22 @@ function hairColorPolicy(
   }
   if (intake.prior_lightening === 'not-sure') required.add('CHEMICAL_HISTORY_UNKNOWN')
   if (visibleCondition === 'POSSIBLE_COMPROMISE') required.add('VISIBLE_COMPROMISE')
-  // On the colour pack every supported flag is also required — the intake
-  // either demands it or cannot support it.
-  return policy(required, required, { constraints: true, maintenance: !intake.maintenance_tolerance })
+  // On the colour pack every required flag is supported and, but for the codes
+  // her own words may turn out to mean, every supported flag is required — the
+  // intake either demands it or cannot back it.
+  return policy([...required, ...mayRaise(text)], required, {
+    constraints: true,
+    maintenance: !intake.maintenance_tolerance,
+  })
 }
 
 /** Extensions, cuts, any hair service that is not colour. */
 function hairGeneralPolicy(
-  intake: Readonly<Record<string, string>>,
+  intakeAnswers: Readonly<Record<string, string>>,
   visibleCondition: VisibleCondition,
+  text: Readonly<Record<string, string>>,
 ): ConsultSafetyFlagPolicy {
+  const intake = reading(intakeAnswers, text)
   const required = new Set<ConsultAnalysisSafetyCode>(['ALLERGY_HISTORY_UNKNOWN'])
   if (intake.prior_reaction === 'yes') required.add('PRIOR_REACTION')
   if (intake.prior_reaction === 'not-sure') required.add('REACTION_HISTORY_UNKNOWN')
@@ -114,7 +182,7 @@ function hairGeneralPolicy(
   }
   if (intake.prior_lightening === 'not-sure') required.add('CHEMICAL_HISTORY_UNKNOWN')
   if (visibleCondition === 'POSSIBLE_COMPROMISE') required.add('VISIBLE_COMPROMISE')
-  return policy(required, required, {
+  return policy([...required, ...mayRaise(text)], required, {
     constraints: true,
     maintenance: !intake.maintenance_tolerance,
   })
@@ -122,9 +190,11 @@ function hairGeneralPolicy(
 
 /** Every non-hair family. */
 function generalServicePolicy(
-  intake: Readonly<Record<string, string>>,
+  intakeAnswers: Readonly<Record<string, string>>,
   visibleCondition: VisibleCondition,
+  text: Readonly<Record<string, string>>,
 ): ConsultSafetyFlagPolicy {
+  const intake = reading(intakeAnswers, text)
   const required = new Set<ConsultAnalysisSafetyCode>()
   if (intake.prior_reaction === 'yes') required.add('PRIOR_REACTION')
   if (intake.prior_reaction === 'not-sure') required.add('REACTION_HISTORY_UNKNOWN')
@@ -142,7 +212,7 @@ function generalServicePolicy(
     required.add('SENSITIVITY_REPORTED')
   }
   if (visibleCondition === 'POSSIBLE_COMPROMISE') required.add('VISIBLE_COMPROMISE')
-  return policy(required, required, {
+  return policy([...required, ...mayRaise(text)], required, {
     constraints: !intake.known_allergies || intake.known_allergies === 'not-sure',
     maintenance: !intake.maintenance_tolerance,
   })
@@ -151,15 +221,18 @@ function generalServicePolicy(
 export function deriveConsultSafetyFlagPolicy(args: {
   intakePackId: string
   intake: Readonly<Record<string, string>>
+  /** What she TYPED on an intake question. See CLIENT_WORDS_MAY_RAISE. */
+  intakeTextAnswers?: Readonly<Record<string, string>>
   visibleCondition: VisibleCondition
 }): ConsultSafetyFlagPolicy {
+  const text = args.intakeTextAnswers ?? {}
   switch (args.intakePackId) {
     case HAIR_COLOR_INTAKE_PACK_ID:
-      return hairColorPolicy(args.intake, args.visibleCondition)
+      return hairColorPolicy(args.intake, args.visibleCondition, text)
     case HAIR_GENERAL_INTAKE_PACK_ID:
-      return hairGeneralPolicy(args.intake, args.visibleCondition)
+      return hairGeneralPolicy(args.intake, args.visibleCondition, text)
     case GENERAL_SERVICE_INTAKE_PACK_ID:
-      return generalServicePolicy(args.intake, args.visibleCondition)
+      return generalServicePolicy(args.intake, args.visibleCondition, text)
     default:
       // An unregistered pack supports NOTHING: a provider flag on it is
       // unverifiable, and an analysis that carries one is refused rather than
