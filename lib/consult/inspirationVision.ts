@@ -413,36 +413,68 @@ const MIN_REGION_SIDE = 0.01
 const ROUNDING_TOLERANCE = 0.0002
 
 /**
- * `side`, clamped to `available` when it exceeds it only by rounding; null
- * when it exceeds it by more than that (the caller refuses the whole result).
+ * `side`, fitted to the room the frame actually leaves it (`available` =
+ * 1 − the box's own origin). Null when it cannot honestly be fitted.
+ *
+ * Three outcomes, and the middle one is the whole point:
+ *  - it fits — kept as it is;
+ *  - it runs off the edge of the IMAGE — trimmed back to the edge. The
+ *    overflow is off-canvas, so it holds no pixels the reading could have come
+ *    from, and trimming it leaves the box pointing at exactly the part of the
+ *    photograph the model meant;
+ *  - the overflow eats more than half the side — the box was never aimed at
+ *    what it claims, and the caller refuses it.
+ *
+ * 🔴 Until 2026-09-13 anything past `ROUNDING_TOLERANCE` was refused, and that
+ * refusal discarded the ENTIRE paid read. Measured on Tori's own reference
+ * (prod session cmtymyxha…: three `bad_output`s at `stage: "region"` on 09-13,
+ * then 3/3 on a local replay of the same image): the model draws `hairRegion`
+ * with y + h = 1.07–1.09 — hair that runs to the bottom of the frame — every
+ * single time. A box the image cannot hold is not a wrong box, and this is the
+ * same lossless repair `clampIntoHair` already makes one step later against
+ * the hair box.
  */
-function absorbRounding(side: number, available: number): number | null {
+function fitIntoFrame(side: number, available: number): number | null {
   if (side <= available) return side
-  return side - available <= ROUNDING_TOLERANCE ? available : null
+  // A box that already touched the edge can come back a ten-thousandth over
+  // once each side is rounded. That is a rounding artefact, absorbed silently.
+  if (side - available <= ROUNDING_TOLERANCE) return available
+  if (available < side / 2 || available < MIN_REGION_SIDE) return null
+  return available
 }
 
 /** "x,y,w,h" → the stored object. Null and absent both mean "no region". */
 function region(raw: unknown): ConsultInspirationRegion | null {
   if (raw === null || raw === undefined) return null
   if (typeof raw !== 'string' || !new RegExp(CONSULT_INSPIRATION_REGION_PATTERN).test(raw)) {
-    throw new ConsultInspirationVisionError('bad_output', 'region')
+    throw new ConsultInspirationVisionError('bad_output', 'region_format')
   }
   const parts = raw.split(',').map(Number)
   if (parts.length !== 4 || parts.some((value) => !Number.isFinite(value))) {
-    throw new ConsultInspirationVisionError('bad_output', 'region')
+    throw new ConsultInspirationVisionError('bad_output', 'region_format')
   }
   const [rawX, rawY, rawW, rawH] = parts as [number, number, number, number]
   const x = round4(rawX)
   const y = round4(rawY)
-  // A box that already touched the edge can come back a ten-thousandth over
-  // once each side is rounded. That is a rounding artefact and is absorbed.
-  // A box that overflows by MORE than that is a wrong box, and silently
-  // shrinking it would store a region that points somewhere the model did not
-  // mean — so it is refused, like any other unusable output.
-  const w = absorbRounding(round4(rawW), round4(1 - x))
-  const h = absorbRounding(round4(rawH), round4(1 - y))
-  if (w === null || h === null || w < MIN_REGION_SIDE || h < MIN_REGION_SIDE) {
-    throw new ConsultInspirationVisionError('bad_output', 'region')
+  const requestedW = round4(rawW)
+  const requestedH = round4(rawH)
+  const w = fitIntoFrame(requestedW, round4(1 - x))
+  const h = fitIntoFrame(requestedH, round4(1 - y))
+  // The three ways a box can be unusable are named separately, so the next
+  // refusal in prod says which rule it broke instead of only that a region was
+  // bad — which is what made this one cost a paid reproduction to find.
+  if (w === null || h === null) {
+    throw new ConsultInspirationVisionError('bad_output', 'region_bounds')
+  }
+  if (w < MIN_REGION_SIDE || h < MIN_REGION_SIDE) {
+    throw new ConsultInspirationVisionError('bad_output', 'region_too_small')
+  }
+  // Geometry only — how far off the frame the box ran, never what it showed.
+  if (w !== requestedW || h !== requestedH) {
+    console.warn('consult inspiration crop trimmed to the frame', {
+      received: { x, y, w: requestedW, h: requestedH },
+      stored: { x, y, w, h },
+    })
   }
   return { x, y, w, h }
 }

@@ -165,6 +165,33 @@ describe('sanitizeConsultInspirationAnalysis', () => {
     ).toThrowError(ConsultInspirationVisionError)
   })
 
+  it('trims a box that runs off the frame back to the edge, and names each refusal', () => {
+    // The prod shape (2026-09-13): hair running to the bottom of the frame,
+    // drawn as y 0.22 + h 0.85 = 1.07. Everything below y = 1 is off-canvas,
+    // so trimming h to 0.78 keeps the box on exactly the pixels it read.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      expect(
+        sanitizeConsultInspirationAnalysis(output({ finish: known('SATIN', '0.24,0.22,0.6,0.85') }))
+          .finish.region,
+      ).toEqual({ x: 0.24, y: 0.22, w: 0.6, h: 0.78 })
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(JSON.stringify(warn.mock.calls[0])).toContain('trimmed to the frame')
+    } finally {
+      warn.mockRestore()
+    }
+    // Losing more than half the side means the box was never aimed there.
+    expect(() =>
+      sanitizeConsultInspirationAnalysis(output({ finish: known('SATIN', '0.9,0.2,0.5,0.1') })),
+    ).toThrowError(expect.objectContaining({ kind: 'bad_output', stage: 'region_bounds' }))
+    expect(() =>
+      sanitizeConsultInspirationAnalysis(output({ finish: known('SATIN', '0.1,0.2,0.003,0.1') })),
+    ).toThrowError(expect.objectContaining({ kind: 'bad_output', stage: 'region_too_small' }))
+    expect(() =>
+      sanitizeConsultInspirationAnalysis(output({ finish: known('SATIN', '0.1,0.2,0.5') })),
+    ).toThrowError(expect.objectContaining({ kind: 'bad_output', stage: 'region_format' }))
+  })
+
   it('refuses an UNKNOWN that cites evidence, claims confidence, or points at a region', () => {
     for (const contradiction of [
       { ...UNKNOWN, evidence: ['inspiration'] },

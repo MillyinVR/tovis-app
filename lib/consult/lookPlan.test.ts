@@ -195,7 +195,9 @@ describe('look-plan boundaries', () => {
   it.each([
     ['unknown offering', { services: ['Invented color'] }],
     ['client-invented service ID', { services: ['Dimensional color'], serviceId: 'trusted-looking-id' }],
-    ['same service twice in one visit', { services: ['Dimensional color', 'Dimensional color'] }],
+    // A service named twice is no longer here: it is collapsed to one step
+    // (see "reads a service named twice in one visit as one step"), because
+    // refusing it discarded a whole paid analysis in prod on 2026-09-13.
     ['empty appointment', { services: [] }],
     ['duration from the model', { services: ['Dimensional color'], durationMinutes: 10 }],
   ])('rejects a visit with %s', (_label, visit) => {
@@ -212,10 +214,12 @@ describe('look-plan boundaries', () => {
     expect(resolveConsultLookPlan(raw, context()).paths[0]?.sessionCount).toBe(8)
   })
 
-  it('refuses unsupported or duplicated citations', () => {
+  it('refuses unsupported citations', () => {
+    // A REPEATED citation is not unsupported — it leans on the field once, and
+    // collapses. Only a field the profile cannot back is refused.
     const raw = plan()
     const path = raw.paths[0]!
-    for (const featureEvidence of [['profile.eyeColor'], ['identity'], ['profile.skinUndertone', 'profile.skinUndertone']]) {
+    for (const featureEvidence of [['profile.eyeColor'], ['identity']]) {
       expect(() => sanitizeConsultLookPlan({ ...raw, paths: [{ ...path, featureEvidence }] }, context())).toThrow(ConsultAnalysisProviderError)
     }
   })
@@ -265,6 +269,38 @@ describe('look-plan boundaries', () => {
     } finally {
       warn.mockRestore(); error.mockRestore()
     }
+  })
+
+  it('reads a service named twice in one visit as one step, and still refuses a real overrun', () => {
+    // Prod, 2026-09-13 00:08Z: a visit listed "iTip Install" twice, both
+    // resolved to the one menu row, and the duplicate check discarded four
+    // model calls that had all answered.
+    const raw = plan()
+    const path = raw.paths[0]!
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const result = sanitizeConsultLookPlan(
+        { ...raw, paths: [{ ...path, visits: [{ services: ['Dimensional color', 'dimensional COLOR'] }] }] },
+        context(),
+      )
+      expect(result.paths[0]?.visits[0]?.services).toEqual(['Dimensional color'])
+      expect(JSON.stringify(warn.mock.calls)).toContain('listed the same item twice')
+    } finally {
+      warn.mockRestore()
+    }
+    // A repeated citation collapses the same way.
+    const evidence = sanitizeConsultLookPlan(
+      { ...raw, paths: [{ ...path, featureEvidence: ['profile.skinUndertone', 'profile.skinUndertone'] }] },
+      context(),
+    )
+    expect(evidence.paths[0]?.featureEvidence).toEqual(['profile.skinUndertone'])
+    // Twice the allowance is a wrong answer, not a repeat, and is still refused.
+    expect(() =>
+      sanitizeConsultLookPlan(
+        { ...raw, paths: [{ ...path, visits: [{ services: Array(40).fill('Dimensional color') }] }] },
+        context(),
+      ),
+    ).toThrowError(expect.objectContaining({ check: 'visit_services_count' }))
   })
 
   it('names the check that refused', () => {
