@@ -88,9 +88,20 @@ export const CONSULT_ANALYSIS_SCHEMA_VERSION = 6
 // accepts only the explicit old (4/v5) and new (5/v6) pairs, allowing the
 // previous deployment to finish requests while the new deployment builds.
 // Historical revisions retain their original profile shape when read.
-export const CONSULT_ANALYSIS_PROMPT_VERSION = 'service-analysis-v8'
+//
+// v9 (2026-09-13) relaxes two forced-UNKNOWNs so the early selfie buys her
+// something: eye colour and skinDepth may be read from an `early_photo` and
+// are then held PROVISIONAL (`CONSULT_PROVISIONAL_CONFIDENCE_MAX`). The
+// accompanying migration 20261031000000 teaches the payload guard the v9
+// prompt AND the eyeColor evidence label, scoped to v9 so the v7/v8 arms are
+// unchanged — the guard refuses `early_photo` there to this day.
+export const CONSULT_ANALYSIS_PROMPT_VERSION = 'service-analysis-v9'
 export const CONSULT_FACE_COLOR_SCHEMA_VERSION = 1
-export const CONSULT_FACE_COLOR_PROMPT_VERSION = 'face-color-companion-v1'
+// v2 (2026-09-13): skinDepth may be read provisionally from the early selfie;
+// surfaceOvertone still may not. Pinned by the
+// `ConsultFaceColorProfile_prompt_version` CHECK, which 20261031000000 widens
+// to accept v1 (the deploy window) and v2.
+export const CONSULT_FACE_COLOR_PROMPT_VERSION = 'face-color-companion-v2'
 export const CONSULT_ANALYSIS_DEFAULT_MODEL = 'claude-sonnet-5'
 /**
  * Per-call ceilings, because the two calls are nothing like each other.
@@ -1259,7 +1270,7 @@ export const CONSULT_ANALYSIS_PROFILE_SYSTEM_PROMPT = [
   'Skin undertone and color season read from phone photos are approximate even in daylight: widen those confidence ranges, and never report either with high confidence from a single view.',
   'Contrast is the backbone of the profile: judge it between skin, hair and eyes together, not from one of them.',
   'Face proportion, jawline and forehead proportion describe the balance of the face as a whole; feature balance describes whether the features read soft, blended or structured.',
-  'Eye color describes only the visible iris, never identity or natural color behind possible contacts. Read it only from a clear face_front, face_side or eyes_closeup photograph. If the iris is too small, obscured, filtered, color-shifted or inconsistent, use UNKNOWN. Never infer it from hair, skin, intake, or the inspiration.',
+  'Eye color describes only the visible iris, never identity or natural color behind possible contacts. Read it from a clear face_front, face_side or eyes_closeup photograph. Where none of those was supplied, you MAY read it from a clear early_photo instead and cite that: which colour family an iris belongs to survives ordinary indoor light. Say how sure you are in the confidence range — a selfie-backed reading is a provisional one, not a confident one. If the iris is too small, obscured, filtered, color-shifted or inconsistent, use UNKNOWN. Never infer it from hair, skin, intake, or the inspiration.',
   'Eye shape, eye spacing, brow density and brow shape read from the eyes_closeup view where one is supplied, and from face_front otherwise; if neither is supplied they are UNKNOWN.',
   'A capture may be labelled with a color warning. That view passed the quality gate but its light is not trustworthy for color: widen the confidence range on any observation that leans on it — undertone, season and contrast especially — and prefer a view without a warning when one is supplied.',
   'Do not describe the client’s inspiration reference, her goal, or any service. You are not being asked what to do about her hair.',
@@ -1270,10 +1281,11 @@ export const CONSULT_FACE_COLOR_SYSTEM_PROMPT = [
   'You are the companion to an existing feature profile. Do not repeat undertone, contrast, season, general face proportion, jawline, eye shape, eye spacing, brow density, or brow shape. Produce only the nine companion observations in the schema.',
   ...SHARED_CONDUCT,
   'skinDepth describes visible cosmetic depth only, never race or ethnicity. surfaceOvertone describes only visible surface cast/redness and is NOT undertone.',
-  'skinDepth and surfaceOvertone require a trustworthy face_front or face_side image. Never cite early_photo for either field because that selfie is explicitly allowed in any light.',
+  'surfaceOvertone requires a trustworthy face_front or face_side image. Never cite early_photo for it: a surface cast is exactly what a warm room invents, and that selfie is explicitly allowed in any light.',
+  'skinDepth prefers a trustworthy face_front or face_side image, but where neither was supplied you MAY read it from a clear early_photo and cite that — which broad depth band a face falls in survives ordinary indoor light. Keep the confidence range low to say it is provisional.',
   'faceWidthBalance compares the visible forehead, cheekbone and jaw widths. chinContour is neutral geometry. Neither is an attractiveness score.',
   'eyeTilt, lidVisibility, browBoneRelationship, browArchPosition and browTailDirection prefer eyes_closeup, then face_front. Use UNKNOWN when framing or angle cannot support the distinction.',
-  'An early_photo may support provisional non-color geometry only. If it is the only face view, color fields must be UNKNOWN.',
+  'An early_photo supports provisional geometry, and provisional skinDepth. If it is the only face view, surfaceOvertone must be UNKNOWN.',
   'A capture with a color warning is not trustworthy for skinDepth or surfaceOvertone; prefer UNKNOWN over a color guess.',
 ].join(' ')
 
@@ -1370,6 +1382,42 @@ function confidence(value: unknown): ConfidenceRange {
   return { min, max }
 }
 
+/**
+ * The ceiling on a PROVISIONAL reading — one the early selfie can support as
+ * an idea, but not as a fact.
+ *
+ * 🔴 Why a ceiling and not a flag: `isSupportedConsultObservation`
+ * (lib/consult/analysisValidation.ts) already draws this line at
+ * `confidence.min >= 0.5`. Holding a provisional reading below that means it
+ * reaches the client and the pro as a real value they can see and talk about,
+ * and CANNOT quietly become load-bearing evidence under a look plan. The
+ * honesty is enforced by the number, not by a second field nobody reads.
+ *
+ * It sits above the UNKNOWN band too (`max <= 0.35`), so a provisional reading
+ * is never mistakable for a non-reading.
+ */
+export const CONSULT_PROVISIONAL_CONFIDENCE_MAX = 0.45
+
+/** Two decimals, the precision the prompt asks for — never a float tail. */
+function round2(value: number): number {
+  return Math.round(value * 100) / 100
+}
+
+/**
+ * The same observation, held to the provisional ceiling.
+ *
+ * The model's own relative confidence is preserved where it already sits below
+ * the ceiling; only an over-confident range is brought down. `confidence()`
+ * guarantees `min < max` on the way in, and this keeps that true.
+ */
+export function provisionalObservation<T extends string>(
+  observation: ProfileObservation<T>,
+): ProfileObservation<T> {
+  const max = round2(Math.min(observation.confidence.max, CONSULT_PROVISIONAL_CONFIDENCE_MAX))
+  const min = round2(Math.max(0, Math.min(observation.confidence.min, max - 0.05)))
+  return { ...observation, confidence: { min, max } }
+}
+
 function evidence(
   value: unknown,
   options: { allowIntake: boolean; hairOnly?: boolean },
@@ -1453,20 +1501,45 @@ function sanitizeProfile(raw: unknown): ConsultAnalysisFeatureProfile {
     // the any-light early selfie alone, the model reads the iris anyway and
     // cites `early_photo`. Until 2026-09-12 that one citation discarded the
     // whole paid analysis (every "Build my plan" on a selfie-only consult in
-    // prod, 3 of 3, reproduced locally). The honest reading is the one the
-    // prompt asked for: eye colour was NOT observed under reliable light, so
-    // it is UNKNOWN, with no evidence and a low range — the same repair as
-    // `repairUnsuppliedHairLevelEvidence`, said out loud the same way.
-    console.warn('consult analysis eye color cited a view it may not be read from; read as UNKNOWN', {
-      evidence: eyeColor.evidence,
-    })
-    profile.eyeColor = { value: 'UNKNOWN', confidence: { min: 0, max: 0.3 }, evidence: [] }
+    // prod, 3 of 3, reproduced locally); #1157 then read it as UNKNOWN.
+    //
+    // 🔴 2026-09-13 (Tori): UNKNOWN is the wrong answer here. We ask for that
+    // selfie, so it has to buy her something. An iris IS visible in a selfie,
+    // and which colour family it belongs to survives ordinary indoor light far
+    // better than undertone or season do — the reason this rule exists. So a
+    // selfie-backed reading is kept PROVISIONALLY: real enough to show her,
+    // never confident enough to carry a plan (see
+    // `CONSULT_PROVISIONAL_CONFIDENCE_MAX`).
+    //
+    // A citation that is neither an allowed view NOR the selfie is a view the
+    // model did not have, and that is still a non-observation.
+    const provisional = eyeColor.evidence.length > 0 && eyeColor.evidence.every(
+      (key) => CONSULT_EYE_COLOR_VIEWS.includes(key) || CONSULT_EYE_COLOR_PROVISIONAL_VIEWS.includes(key),
+    )
+    if (provisional) {
+      console.warn('consult analysis eye color read from the early selfie; kept provisionally', {
+        evidence: eyeColor.evidence,
+      })
+      profile.eyeColor = provisionalObservation(eyeColor)
+    } else {
+      console.warn('consult analysis eye color cited a view it may not be read from; read as UNKNOWN', {
+        evidence: eyeColor.evidence,
+      })
+      profile.eyeColor = { value: 'UNKNOWN', confidence: { min: 0, max: 0.3 }, evidence: [] }
+    }
   }
   return profile as ConsultAnalysisFeatureProfile
 }
 
-/** The only views eye colour may be read from (the prompt says so too). */
+/** The only views eye colour may be read from outright (the prompt says so too). */
 const CONSULT_EYE_COLOR_VIEWS: readonly string[] = ['face_front', 'face_side', 'eyes_closeup']
+
+/**
+ * …and the view that may support only a PROVISIONAL eye colour: the early
+ * selfie, which is deliberately allowed in any light, so it can suggest the
+ * colour family but never settle it.
+ */
+const CONSULT_EYE_COLOR_PROVISIONAL_VIEWS: readonly string[] = ['early_photo']
 
 export function unknownFaceColorProfile(): ConsultFaceColorProfile {
   const unknown = <T extends string>(value: T): ProfileObservation<T> => ({
@@ -2352,10 +2425,31 @@ export async function runConsultFaceColorCompanion(
   const trustedColorShots = new Set<string>(faceCaptures.filter(capture =>
     capture.shotKey !== 'early_photo' && !capture.qualityWarningCode,
   ).map(capture => capture.shotKey))
+  // 🔴 2026-09-13 (Tori): the early selfie has to buy her something.
+  //
+  // The two colour fields are not equally fragile. `surfaceOvertone` IS a
+  // colour cast, and a warm room invents one — from a view allowed in any
+  // light it stays UNKNOWN. `skinDepth` is a broad band, and which band a face
+  // falls in survives ordinary indoor light, so a clean selfie may support it
+  // PROVISIONALLY (never at plan-carrying confidence). A selfie the capture
+  // gate already flagged for colour supports neither.
+  const provisionalColorShots = new Set<string>(faceCaptures.filter(capture =>
+    capture.shotKey === 'early_photo' && !capture.qualityWarningCode,
+  ).map(capture => capture.shotKey))
   for (const field of ['skinDepth', 'surfaceOvertone'] as const) {
-    if (profile[field].evidence.some(key => !trustedColorShots.has(key))) {
-      profile[field] = { value: 'UNKNOWN', confidence: { min: 0, max: 0.35 }, evidence: [] }
+    const cited = profile[field].evidence
+    if (!cited.some(key => !trustedColorShots.has(key))) continue
+    const provisional = field === 'skinDepth' && cited.length > 0 && cited.every(
+      key => trustedColorShots.has(key) || provisionalColorShots.has(key),
+    )
+    if (provisional) {
+      console.warn('consult analysis skin depth read from the early selfie; kept provisionally', {
+        evidence: cited,
+      })
+      profile[field] = provisionalObservation(profile[field])
+      continue
     }
+    profile[field] = { value: 'UNKNOWN', confidence: { min: 0, max: 0.35 }, evidence: [] }
   }
   return profile
 }

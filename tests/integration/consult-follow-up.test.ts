@@ -314,6 +314,13 @@ describe('a round is bought once', () => {
     await expect(attempt(5, 'service-analysis-v6', profile)).rejects.toBe(rollback)
     await expect(attempt(6, 'service-analysis-v7', profile)).rejects.toBe(rollback)
     await expect(attempt(6, 'service-analysis-v8', profile)).rejects.toBe(rollback)
+    await expect(attempt(6, 'service-analysis-v9', profile)).rejects.toBe(rollback)
+    // v9 is the arm that admits a PROVISIONAL eye colour off the early selfie;
+    // every earlier arm still refuses that label (20261031000000).
+    await expect(attempt(6, 'service-analysis-v9', {
+      ...profile,
+      eyeColor: { value: 'BROWN', confidence: { min: 0.3, max: 0.45 }, evidence: ['early_photo'] },
+    })).rejects.toBe(rollback)
     const invalidCases: Array<[number, string | null, Prisma.JsonObject]> = [
       [6, null, profile],
       [6, 'service-analysis-v6', profile],
@@ -323,6 +330,11 @@ describe('a round is bought once', () => {
       [5, 'service-analysis-v6', oldProfile],
       [4, 'service-analysis-v5', profile],
       [5, 'service-analysis-v6', { ...profile, eyeColor: { value: 'BROWN', confidence: { min: 0.4, max: 0.7 }, evidence: ['hair_back'] } }],
+      // The v9 relaxation is scoped to v9: an earlier arm still refuses the
+      // early selfie as eye-colour evidence.
+      [6, 'service-analysis-v8', { ...profile, eyeColor: { value: 'BROWN', confidence: { min: 0.3, max: 0.45 }, evidence: ['early_photo'] } }],
+      // ...and a hair view is refused even on v9.
+      [6, 'service-analysis-v9', { ...profile, eyeColor: { value: 'BROWN', confidence: { min: 0.3, max: 0.45 }, evidence: ['hair_back'] } }],
     ]
     for (const [schema, prompt, nextProfile] of invalidCases) {
       await expect(attempt(schema, prompt, nextProfile)).rejects.toThrow(/23514|invalid|violates/i)

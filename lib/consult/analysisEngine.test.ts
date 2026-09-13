@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { isSupportedConsultObservation } from '@/lib/consult/analysisValidation'
 import type { ConsultLookPlanProviderOutput } from '@/lib/consult/lookPlan'
 
 const mocks = vi.hoisted(() => ({
@@ -18,6 +19,7 @@ vi.mock('@anthropic-ai/sdk', () => ({
 
 import {
   CONSULT_ANALYSIS_DEFAULT_MODEL,
+  CONSULT_PROVISIONAL_CONFIDENCE_MAX,
   CONSULT_ANALYSIS_DIRECTION_OUTPUT_SCHEMA,
   CONSULT_ANALYSIS_DIRECTION_SYSTEM_PROMPT,
   CONSULT_ANALYSIS_EFFORT,
@@ -361,22 +363,46 @@ describe('hair-color consult analysis provider', () => {
     )
     // Prod, 2026-09-12: the early selfie was the only photo, the model read the
     // iris from it anyway and cited `early_photo`; until then that one citation
-    // discarded the whole paid analysis. It is a repair, not a refusal — the
-    // prompt's own answer for eye colour without a reliable face view.
+    // discarded the whole paid analysis. #1157 made it a repair to UNKNOWN.
+    //
+    // 2026-09-13 (Tori): UNKNOWN throws away the one thing that selfie could
+    // tell her. A selfie-backed iris is KEPT, held below the plan-carrying
+    // floor. A hair view is still a view the model cannot read an iris from.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
-      for (const view of ['early_photo', 'hair_back']) {
-        const repaired = sanitizeConsultProfileResponse({ profile: { ...profile, eyeColor: {
-          value: 'BROWN', confidence: { min: 0.4, max: 0.7 }, evidence: [view],
-        } } })
-        expect(repaired.eyeColor).toEqual({ value: 'UNKNOWN', confidence: { min: 0, max: 0.3 }, evidence: [] })
-        expect(repaired.jawline).toEqual(profile.jawline)
-      }
+      const provisional = sanitizeConsultProfileResponse({ profile: { ...profile, eyeColor: {
+        value: 'BROWN', confidence: { min: 0.4, max: 0.7 }, evidence: ['early_photo'],
+      } } })
+      expect(provisional.eyeColor.value).toBe('BROWN')
+      expect(provisional.eyeColor.evidence).toEqual(['early_photo'])
+      // Below `isSupportedConsultObservation`'s 0.5 floor, so it can be shown
+      // but can never carry a look plan; above the UNKNOWN band's 0.35 ceiling,
+      // so it is not mistakable for a non-reading.
+      expect(provisional.eyeColor.confidence.min).toBeLessThan(0.5)
+      expect(provisional.eyeColor.confidence.max).toBe(CONSULT_PROVISIONAL_CONFIDENCE_MAX)
+      expect(isSupportedConsultObservation(provisional.eyeColor)).toBe(false)
+      expect(provisional.jawline).toEqual(profile.jawline)
+
+      const repaired = sanitizeConsultProfileResponse({ profile: { ...profile, eyeColor: {
+        value: 'BROWN', confidence: { min: 0.4, max: 0.7 }, evidence: ['hair_back'],
+      } } })
+      expect(repaired.eyeColor).toEqual({ value: 'UNKNOWN', confidence: { min: 0, max: 0.3 }, evidence: [] })
+
       expect(warn).toHaveBeenCalledTimes(2)
       expect(JSON.stringify(warn.mock.calls)).not.toContain('BROWN')
     } finally {
       warn.mockRestore()
     }
+  })
+
+  it('keeps a confident face-view eye colour exactly as the model gave it', () => {
+    // The relaxation is scoped: a real face view is still allowed to be sure.
+    const profile = validProfile()
+    const confident = sanitizeConsultProfileResponse({ profile: { ...profile, eyeColor: {
+      value: 'GREEN', confidence: { min: 0.7, max: 0.9 }, evidence: ['face_front'],
+    } } })
+    expect(confident.eyeColor.confidence).toEqual({ min: 0.7, max: 0.9 })
+    expect(isSupportedConsultObservation(confident.eyeColor)).toBe(true)
   })
 
   it('two look-plan paths that open with the same service become ONE recommendation', () => {
@@ -613,7 +639,7 @@ describe('hair-color consult analysis provider', () => {
       safetyCodes: [...SAFETY_CODES],
     })
     expect(CONSULT_ANALYSIS_SCHEMA_VERSION).toBe(6)
-    expect(CONSULT_ANALYSIS_PROMPT_VERSION).toBe('service-analysis-v8')
+    expect(CONSULT_ANALYSIS_PROMPT_VERSION).toBe('service-analysis-v9')
     expect(result.model).toBe(CONSULT_ANALYSIS_DEFAULT_MODEL)
 
     // v5 is TWO calls, in order, and the second is the one that can name a
