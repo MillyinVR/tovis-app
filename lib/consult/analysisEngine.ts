@@ -1282,11 +1282,11 @@ export const CONSULT_FACE_COLOR_SYSTEM_PROMPT = [
   ...SHARED_CONDUCT,
   'skinDepth describes visible cosmetic depth only, never race or ethnicity. surfaceOvertone describes only visible surface cast/redness and is NOT undertone.',
   'surfaceOvertone requires a trustworthy face_front or face_side image. Never cite early_photo for it: a surface cast is exactly what a warm room invents, and that selfie is explicitly allowed in any light.',
-  'skinDepth prefers a trustworthy face_front or face_side image, but where neither was supplied you MAY read it from a clear early_photo and cite that — which broad depth band a face falls in survives ordinary indoor light. Keep the confidence range low to say it is provisional.',
+  'skinDepth prefers a trustworthy face_front or face_side image, but where neither was supplied you MAY read it from an early_photo and cite that, even one carrying a colour warning — which broad depth band a face falls in survives ordinary indoor light. Keep the confidence range low to say it is provisional.',
   'faceWidthBalance compares the visible forehead, cheekbone and jaw widths. chinContour is neutral geometry. Neither is an attractiveness score.',
   'eyeTilt, lidVisibility, browBoneRelationship, browArchPosition and browTailDirection prefer eyes_closeup, then face_front. Use UNKNOWN when framing or angle cannot support the distinction.',
   'An early_photo supports provisional geometry, and provisional skinDepth. If it is the only face view, surfaceOvertone must be UNKNOWN.',
-  'A capture with a color warning is not trustworthy for skinDepth or surfaceOvertone; prefer UNKNOWN over a color guess.',
+  'A capture with a color warning is not trustworthy for surfaceOvertone; prefer UNKNOWN over a color guess. For skinDepth a colour warning is a reason to widen the confidence range, not to refuse: a warm room shifts a cast far more than it moves a face between broad depth bands.',
 ].join(' ')
 
 /**
@@ -1575,12 +1575,29 @@ function sanitizeFaceColorProfile(raw: unknown): ConsultFaceColorProfile {
       throw new ConsultAnalysisProviderError('bad_output')
     }
   }
+  // 🔴 The two colour fields do NOT share a view list any more.
+  //
+  // `skinDepth` may lean on the early selfie; `runConsultFaceColorCompanion`
+  // then holds such a reading provisional. `surfaceOvertone` may not, ever —
+  // it IS a colour cast, and the selfie is allowed in any light.
+  //
+  // This refusal has to move in step with the prompt. Telling the model it may
+  // cite `early_photo` for skinDepth while this still threw would refuse the
+  // whole companion answer, and `optionalFaceColorCompanion` would swallow it
+  // into an all-UNKNOWN profile — losing the seven GEOMETRY fields that work
+  // today. A relaxation that lands one layer out of step is a regression.
   for (const field of ['skinDepth', 'surfaceOvertone'] as const) {
-    if (profile[field].evidence.some(key => key !== 'face_front' && key !== 'face_side')) {
-      throw new ConsultAnalysisProviderError('bad_output')
+    if (profile[field].evidence.some(key => !CONSULT_FACE_COLOR_VIEWS[field].includes(key))) {
+      throw new ConsultAnalysisProviderError('bad_output', `${field}_evidence`)
     }
   }
   return profile
+}
+
+/** Which views may back each colour field, before the provisional pass. */
+const CONSULT_FACE_COLOR_VIEWS: Record<'skinDepth' | 'surfaceOvertone', readonly string[]> = {
+  skinDepth: ['face_front', 'face_side', 'early_photo'],
+  surfaceOvertone: ['face_front', 'face_side'],
 }
 
 export function sanitizeConsultFaceColorResponse(raw: unknown): ConsultFaceColorProfile {
@@ -2429,12 +2446,22 @@ export async function runConsultFaceColorCompanion(
   //
   // The two colour fields are not equally fragile. `surfaceOvertone` IS a
   // colour cast, and a warm room invents one — from a view allowed in any
-  // light it stays UNKNOWN. `skinDepth` is a broad band, and which band a face
-  // falls in survives ordinary indoor light, so a clean selfie may support it
-  // PROVISIONALLY (never at plan-carrying confidence). A selfie the capture
-  // gate already flagged for colour supports neither.
+  // light it stays UNKNOWN, always. `skinDepth` is a broad band, and which
+  // band a face falls in survives ordinary indoor light, so the selfie may
+  // support it PROVISIONALLY — never at plan-carrying confidence.
+  //
+  // 🔴 A COLOUR WARNING DOES NOT EXCLUDE THE SELFIE HERE, and the first draft
+  // of this rule (which did exclude it) would have been dead code. Since
+  // 2026-09-07 warm light WARNS on every shot rather than refusing it
+  // (`CONSULT_COLOR_FINDING_WARNING_CODES`), and in prod every accepted
+  // `early_photo` — 3 of 3, including the one on Tori's own run — carries
+  // `WARM_INDOOR_LIGHT`. A rule that only fires on a selfie with no colour
+  // warning is a rule that never fires. The warning is what the provisional
+  // ceiling is FOR: a warm room does not move a face between broad depth
+  // bands the way it invents a surface cast, and the confidence range says
+  // out loud how little this is worth.
   const provisionalColorShots = new Set<string>(faceCaptures.filter(capture =>
-    capture.shotKey === 'early_photo' && !capture.qualityWarningCode,
+    capture.shotKey === 'early_photo',
   ).map(capture => capture.shotKey))
   for (const field of ['skinDepth', 'surfaceOvertone'] as const) {
     const cited = profile[field].evidence

@@ -489,14 +489,46 @@ describe('hair-color consult analysis provider', () => {
     expect(Object.keys(merged)).toHaveLength(21)
   })
 
-  it('C2-1 never treats the any-light early selfie as color evidence', () => {
+  it('C2-1 never treats the any-light early selfie as OVERTONE evidence, but does allow a provisional depth', () => {
     const unknown = { value: 'UNKNOWN', confidence: { min: 0, max: 0.35 }, evidence: [] }
-    const profile = Object.fromEntries([
+    const base = () => Object.fromEntries([
       'skinDepth', 'surfaceOvertone', 'faceWidthBalance', 'chinContour', 'eyeTilt',
       'lidVisibility', 'browBoneRelationship', 'browArchPosition', 'browTailDirection',
     ].map((field) => [field, { ...unknown }])) as Record<string, unknown>
-    profile.skinDepth = { value: 'MEDIUM', confidence: { min: 0.4, max: 0.6 }, evidence: ['early_photo'] }
-    expect(() => sanitizeConsultFaceColorResponse({ profile })).toThrow(ConsultAnalysisProviderError)
+
+    // The cast field: the selfie is allowed in any light, so it can never say.
+    const overtone = base()
+    overtone.surfaceOvertone = { value: 'BALANCED', confidence: { min: 0.4, max: 0.6 }, evidence: ['early_photo'] }
+    expect(() => sanitizeConsultFaceColorResponse({ profile: overtone }))
+      .toThrowError(expect.objectContaining({ check: 'surfaceOvertone_evidence' }))
+
+    // The broad band: admitted here, and held provisional by the companion.
+    const depth = base()
+    depth.skinDepth = { value: 'MEDIUM', confidence: { min: 0.4, max: 0.6 }, evidence: ['early_photo'] }
+    expect(sanitizeConsultFaceColorResponse({ profile: depth }).skinDepth.value).toBe('MEDIUM')
+  })
+
+  it('C2-1 keeps a selfie-backed skin depth PROVISIONAL — including a warm-lit one', async () => {
+    // 🔴 Every accepted `early_photo` in prod (3 of 3, Tori's own included)
+    // carries WARM_INDOOR_LIGHT, because warm light warns rather than refuses.
+    // A rule that only fired on an unwarned selfie would never fire at all.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      mocks.create.mockResolvedValueOnce(message({ profile: { ...unknownFaceColorProfile(),
+        skinDepth: { value: 'MEDIUM', confidence: { min: 0.5, max: 0.8 }, evidence: ['early_photo'] },
+        chinContour: { value: 'TAPERED', confidence: { min: 0.4, max: 0.7 }, evidence: ['early_photo'] },
+      } }))
+      const result = await runConsultFaceColorCompanion({ service, capturePack, intake: {}, intakeItems,
+        captures: [{ shotKey: 'early_photo', image: { base64: 'aGVsbG8=', mediaType: 'image/jpeg' }, qualityWarningCode: 'WARM_INDOOR_LIGHT' }],
+        inspiration: noInspiration, safetyCodes: [...SAFETY_CODES] })
+      expect(result.skinDepth.value).toBe('MEDIUM')
+      expect(result.skinDepth.confidence.max).toBe(CONSULT_PROVISIONAL_CONFIDENCE_MAX)
+      expect(isSupportedConsultObservation(result.skinDepth)).toBe(false)
+      // Geometry off the same selfie is untouched by the colour rules.
+      expect(result.chinContour.confidence).toEqual({ min: 0.4, max: 0.7 })
+    } finally {
+      warn.mockRestore()
+    }
   })
 
   it.each(['skinDepth', 'surfaceOvertone'])('C2-1 rejects eyes_closeup as %s color evidence', (field) => {
