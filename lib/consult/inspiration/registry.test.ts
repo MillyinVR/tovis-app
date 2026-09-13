@@ -18,6 +18,7 @@ import {
   findConsultInspirationPack,
   resolveConsultInspirationPack,
   resolveConsultInspirationPayloadV2,
+  toConsultInspirationQuestionDTO,
   resolveConsultSessionInspirationPack,
   toConsultInspirationJsonPayloadV2,
   toConsultInspirationReviewV2,
@@ -391,6 +392,33 @@ describe('client-authored inspiration words', () => {
     expect(review.answers.find(answer => answer.questionKey === 'favorite_colors')?.text).toBe('I mean the face-framing hair, not the sweatpants.')
     expect(review.exactClientDetails).toContainEqual({ questionKey: 'favorite_colors', value: 'client-words', clientWords: 'I mean the face-framing hair, not the sweatpants.', sentiment: 'CONTEXT' })
   })
+  // 🔴 The regression guard for what Tori reported on 2026-09-13 ("we lost the
+  // option for the client to add in there own words"). The box is offered by
+  // the PACK now rather than hardcoded on the wire, so a future pack question
+  // that quietly sets `allowText: false` is caught here instead of silently
+  // taking her words away again.
+  it('offers her own words on every question of every pack, except the confirmation', () => {
+    const withoutText = new Set<string>()
+    let asked = 0
+    for (const pack of CONSULT_INSPIRATION_PACKS) {
+      for (const question of pack.questions) {
+        asked += 1
+        if (!toConsultInspirationQuestionDTO(pack, question, copy).allowText) {
+          withoutText.add(question.key)
+        }
+      }
+    }
+
+    expect(asked).toBeGreaterThan(5)
+    // `understanding_check` is a confirmation: the validator deliberately will
+    // NOT let text waive its selection, so a box there is a control that
+    // cannot answer its own question. Every other question takes her words.
+    expect([...withoutText]).toEqual(
+      expect.arrayContaining([]),
+    )
+    for (const key of withoutText) expect(key).toBe('understanding_check')
+  })
+
   it('refuses orphan, blank and oversized words and empty answers without words', () => {
     const pack = HAIR_COLOR_INSPIRATION_PACK
     for (const textAnswers of [{ unknown: 'hello' }, { favorite_colors: '' }, { favorite_colors: 'x'.repeat(601) }]) {

@@ -145,6 +145,12 @@ export function understandingCheckCard(): ConsultInspirationPackQuestion {
     detailSentiment: 'CONTEXT',
     // Confirming a summary is not a detail she pointed at in the picture.
     countsAsDetail: false,
+    // 🔴 The one card that takes no free text. It is a confirmation, and
+    // `validateConsultInspirationAnswer` will not let prose waive it — so a
+    // box here would be a control that cannot answer its own question. She
+    // says what she wants changed by picking "change something", which reopens
+    // the cards that DO take her words.
+    allowText: false,
     composedPrompt: true,
     reopens: {
       'change-something': [SPARK_FOCUS_KEY, KEEP_AS_IS_KEY, UNDERSTANDING_CHECK_KEY],
