@@ -184,6 +184,15 @@ export async function loadProposalDerivationInputs(
 ): Promise<{
   estimate: ConsultProposalEstimateRow | null
   analysisRecommendations: ConsultBookingProposalAnalysisInput
+  /**
+   * 🔴 Read from the PLAN, not from the recommendation intents.
+   * `analysisRoutedToSafetyPrerequisites` answers false for every Book the
+   * Look consult — `resolveRecommendations` collapses a safety-routed
+   * look-planning analysis to one CONSULTATION and returns early, so the
+   * PATCH_TEST / STRAND_TEST intents it looks for are never stored. The plan
+   * carries the fact itself; see `ConsultLookPlanDTO.safetyRouted`.
+   */
+  lookPlanSafetyRouted: boolean
 }> {
   // P7a-3: the LATEST estimate, not "the" estimate. A consult now holds one per
   // analysis version, because a rerun reprices — so the proposal must be built
@@ -194,6 +203,7 @@ export async function loadProposalDerivationInputs(
     select: { id: true, payload: true, schemaVersion: true },
   })
   let sourceLookBriefVersionId: string | undefined
+  let lookPlanSafetyRouted = false
   if (latestAnalysis) {
     const plan = normalizeStoredConsultAnalysisPayload(latestAnalysis.payload, latestAnalysis.schemaVersion).lookPlan
     if (plan) {
@@ -202,11 +212,12 @@ export async function loadProposalDerivationInputs(
         select: { id: true, sourceAnalysisRevisionId: true, selectedPathIndex: true, awaitingAnalysis: true, professionalPlan: true, invalidatedProfessionalPlan: true },
       })
       const currentPlan = effectiveConsultLookPlan(normalizeStoredConsultAnalysisPayload(latestAnalysis.payload, latestAnalysis.schemaVersion), version)
-      if (!currentPlan || currentPlan.provisional || currentPlan.status !== 'READY_TO_CHOOSE' || !version ||
+      if (!currentPlan || !currentPlan.choosable || !version ||
         version.awaitingAnalysis || version.sourceAnalysisRevisionId !== latestAnalysis.id || version.selectedPathIndex === null) {
-        return { estimate: null, analysisRecommendations: [] }
+        return { estimate: null, analysisRecommendations: [], lookPlanSafetyRouted: false }
       }
       sourceLookBriefVersionId = version.id
+      lookPlanSafetyRouted = currentPlan.safetyRouted
     }
   }
   const estimate = await tx.consultServiceEstimate.findFirst({
@@ -216,7 +227,7 @@ export async function loadProposalDerivationInputs(
     select: PROPOSAL_ESTIMATE_SELECT,
   })
 
-  if (!estimate) return { estimate: null, analysisRecommendations: [] }
+  if (!estimate) return { estimate: null, analysisRecommendations: [], lookPlanSafetyRouted }
 
   let analysisRecommendations: ConsultBookingProposalAnalysisInput
   try {
@@ -231,7 +242,11 @@ export async function loadProposalDerivationInputs(
     throw new ConsultProposalEntryError('UNAVAILABLE')
   }
 
-  return { estimate, analysisRecommendations: estimate.sourceLookBriefVersion?.professionalPlan ? [] : analysisRecommendations }
+  // A pro-authored plan drops the AI's recommendations, but NOT the safety
+  // fact: the pro redrawing the look does not clear a patch test the intake
+  // called for (`professionalLookPlan` inherits it onto their plan).
+  return { estimate, lookPlanSafetyRouted,
+    analysisRecommendations: estimate.sourceLookBriefVersion?.professionalPlan ? [] : analysisRecommendations }
 }
 
 export function toProposalEstimateInput(
@@ -304,6 +319,9 @@ export function toConsultBookingProposalDTO(args: {
       args.draft.startingAtPrice,
     ),
     estimateNote: COPY.consultProposal.estimateNote,
+    // The disclosure that replaced the refusal. Non-null exactly when the
+    // pinned analysis routed to a patch or strand test.
+    safetyNote: args.draft.safetyRouted ? COPY.consultProposal.safetyTestFirst : null,
     proDecidesNote: COPY.consultProposal.proDecides,
     autoAccepts: args.autoAcceptBookings,
     // Routed through the SAME fork the commit runs (decision 4) rather than
@@ -362,7 +380,7 @@ export async function loadAuthorizedConsultBookingProposal(args: {
   return prisma.$transaction(async (tx) => {
     const scope = await requireAuthorizedProposalScope(tx, args)
 
-    const { estimate, analysisRecommendations } =
+    const { estimate, analysisRecommendations, lookPlanSafetyRouted } =
       await loadProposalDerivationInputs(tx, scope.id)
 
     if (estimate?.sourceLookBriefVersion && estimate.sourceLookBriefVersion.selectedLocationType !== args.locationType) {
@@ -374,6 +392,7 @@ export async function loadAuthorizedConsultBookingProposal(args: {
       locationType: args.locationType,
       estimate: toProposalEstimateInput(estimate),
       analysisRecommendations,
+      lookPlanSafetyRouted,
       enhancementSelection: args.enhancementSelection,
     })
 

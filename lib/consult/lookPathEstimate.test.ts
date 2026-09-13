@@ -17,7 +17,7 @@ const menu: ConsultProMenuOffering[] = [
 const step = (id: string) => ({ offeringId: id, serviceId: id, serviceCategoryId: 'hair', serviceName: id })
 const path = (visits: string[][]) => ({ title: 'Warm dimension', whyThisWorksForYou: 'Your chosen warmth.',
   featureEvidence: [], sessionCount: visits.length, visits: visits.map(ids => ({ steps: ids.map(step) })) })
-const plan: ConsultLookPlanDTO = { schemaVersion: 1, tier: 'EXACT', status: 'READY_TO_CHOOSE', provisional: false,
+const plan: ConsultLookPlanDTO = { schemaVersion: 1, tier: 'EXACT', status: 'READY_TO_CHOOSE', provisional: false, choosable: true, safetyRouted: false,
   summary: 'Warm dimension.', nextStep: 'Confirm your look.', paths: [path([['color', 'cut'], ['color']]), path([['cut']])] }
 const estimate = (offerings = menu, locationType: ServiceLocationType = 'SALON') => estimateConsultLookPaths({ plan, menu: offerings, locationType, stepMinutes: 15 })
 

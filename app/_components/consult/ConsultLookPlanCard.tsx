@@ -47,7 +47,9 @@ export default function ConsultLookPlanCard({ plan: sourcePlan, brief: savedBrie
     <section className="grid gap-3" aria-label="Your look plan">
       <div>
         <h3 className="text-base font-bold text-textPrimary">{tier}</h3>
-        {(plan.provisional || brief?.awaitingAnalysis) && <p className="text-xs font-semibold text-textSecondary">Draft — a few details still need confirming</p>}
+        {(plan.provisional || brief?.awaitingAnalysis) && <p className="text-xs font-semibold text-textSecondary">
+          {plan.choosable && !brief?.awaitingAnalysis ? copy.fromEarlyPhotos : copy.draft}
+        </p>}
         {brief && <p className="text-xs text-textSecondary">Version {brief.version}</p>}
       </div>
       <p className="text-sm leading-6 text-textPrimary">{plan.summary}</p>
@@ -83,7 +85,7 @@ export default function ConsultLookPlanCard({ plan: sourcePlan, brief: savedBrie
                     price={step.price} duration={step.durationMinutes} onSaved={setBrief} />)}
                 </div>)}
                 {!available && <p>Your pro needs to update this option before you can choose it.</p>}
-                {onChoose && !brief.awaitingAnalysis && plan.status === 'READY_TO_CHOOSE' && !plan.provisional && <button type="button"
+                {onChoose && !brief.awaitingAnalysis && plan.choosable && <button type="button"
                   className="mt-2 rounded-full border border-surfaceGlass/20 px-4 py-2 text-sm font-semibold text-textPrimary disabled:opacity-50"
                   disabled={busy || !brief.confirmationOpen || correctionsNeedReview || selected || !available} aria-pressed={selected}
                   onClick={() => onChoose(brief.version, pathIndex, estimate.locationType)}>

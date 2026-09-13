@@ -1819,9 +1819,12 @@ export async function executeConsultAnalysisRun(args: {
           goalConfirmed: finalContext.inspiration.preferences.wants.length > 0 ||
             finalContext.inspiration.exactClientDetails.length > 0,
           maintenanceDecisionResolved: Boolean(answers.maintenance_tolerance),
-          requiresProfessionalReview: routing.blocksChemicalRecommendations ||
-            consultPrepSafetyQuestions(finalContext.intake.pack).some(question => answers[question.key] === 'not-sure') ||
+          // "Not sure" is not an answer any routing rule reads — the policy
+          // looks for 'yes' — so nothing downstream would carry it. The pro
+          // resolves it with her.
+          historyUnknownToClient: consultPrepSafetyQuestions(finalContext.intake.pack).some(question => answers[question.key] === 'not-sure') ||
             (colorPath && CONSULT_LOOK_COLOR_HISTORY_QUESTIONS.some(question => answers[question.key] === 'not-sure')),
+          safetyRouted: routing.blocksChemicalRecommendations,
         }) : undefined
         const payload = { ...analysis, recommendations, ...(lookPlan ? { lookPlan } : {}) }
         const captureIds = finalContext.captures.map((capture) => capture.id)

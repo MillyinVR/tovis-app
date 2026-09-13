@@ -381,7 +381,13 @@ describe('the bootstrap window', () => {
 })
 
 describe('a refusal is a refusal, never a fallback', () => {
-  it('refuses the grid when the analysis routed to safety prerequisites', async () => {
+  // 🔴 This USED to refuse the grid with CONSULT_PROPOSAL_UNAVAILABLE, as a
+  // consequence of the proposal refusal above it. Tori removed that gate
+  // (2026-09-13, asked twice with the consequence stated): a safety-routed
+  // client may see times and ask. The grid was never a safety mechanism of its
+  // own — it only ever echoed the proposal — so what this now guards is that
+  // the refusal is GONE rather than accidentally half-present.
+  it('offers the grid to a safety-routed consult, which now proposes', async () => {
     const safetyConsultId = await driveToProposal(
       'avail-safety',
       SAFETY_ROUTED_ANSWERS,
@@ -390,14 +396,9 @@ describe('a refusal is a refusal, never a fallback', () => {
     const response = await getDay(dayRequest({ consultId: safetyConsultId }))
     const payload = await body(response)
 
-    expect(response.status).toBe(409)
-    expect(payload.ok).toBe(false)
-    expect(payload.code).toBe('CONSULT_PROPOSAL_UNAVAILABLE')
-    // 🔴 The point: no `slots`, no base-sized consolation grid. A safety-routed
-    // consult that answered with times would be advertising a chemical service
-    // its own analysis declined to recommend.
-    expect(payload.slots).toBeUndefined()
-    expect(payload.durationMinutes).toBeUndefined()
+    expect(response.status).toBe(200)
+    expect(payload.ok).toBe(true)
+    expect(Array.isArray(payload.slots)).toBe(true)
   })
 
   it('refuses a service that is not the proposal’s floor', async () => {

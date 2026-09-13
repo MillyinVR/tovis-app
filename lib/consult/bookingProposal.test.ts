@@ -94,6 +94,7 @@ function derive(args: {
   menu: ConsultProMenuOffering[]
   estimate?: ConsultBookingProposalEstimateInput | null
   analysisRecommendations?: ConsultBookingProposalAnalysisInput
+  lookPlanSafetyRouted?: boolean
   locationType?: ServiceLocationType
   stepMinutes?: number
   enhancementSelection?: ConsultBookingProposalEnhancementSelection
@@ -118,6 +119,7 @@ function derive(args: {
     // hold pass — the widest thing the booking could become — and it is the
     // reading every case below this line was written against. The client's own
     // selection is exercised in its own block at the bottom of this file.
+    ...(args.lookPlanSafetyRouted === undefined ? {} : { lookPlanSafetyRouted: args.lookPlanSafetyRouted }),
     enhancementSelection: args.enhancementSelection ?? 'ALL',
   })
 }
@@ -125,12 +127,12 @@ function derive(args: {
 const floor = offering({ serviceId: 'svc_balayage' })
 
 describe('an estimate is not automatically a proposal', () => {
-  // 🔴 The load-bearing case for this whole slice. When the analysis routes to
-  // safety prerequisites, B3's estimate legitimately contains the patch/strand
-  // test lines AND the chemical floor — the honest PRO-facing answer. That floor
-  // is a service the analysis explicitly declined to recommend yet, so it must
-  // never become a price a client can commit to unattended at 3 AM.
-  it('refuses when the analysis routed to safety prerequisites, however well the menu prices', () => {
+  // 🔴 This case USED to refuse outright (`SAFETY_REVIEW_REQUIRED`). Tori's
+  // call, 2026-09-13, asked twice with the consequence stated: the pro's own
+  // booking review is where that judgement belongs, not a silent refusal
+  // upstream of it, so she may now ask. What must NOT be lost is the
+  // disclosure — the proposal has to say a test comes first.
+  it('proposes when the analysis routed to safety prerequisites, and says a test comes first', () => {
     const patch = offering({ serviceId: 'svc_patch' })
 
     const result = derive({
@@ -148,12 +150,13 @@ describe('an estimate is not automatically a proposal', () => {
       ],
     })
 
-    expect(result.status).toBe('REFUSED')
-    expect(result.refusalCode).toBe('SAFETY_REVIEW_REQUIRED')
-    expect(result.lines).toEqual([])
+    expect(result.status).toBe('PROPOSED')
+    expect(result.refusalCode).toBe(null)
+    expect(result.status === 'PROPOSED' && result.safetyRouted).toBe(true)
+    expect(result.status === 'PROPOSED' && result.lines.length).toBeGreaterThan(0)
   })
 
-  it('refuses on a STRAND_TEST as well as a PATCH_TEST', () => {
+  it('marks a STRAND_TEST as well as a PATCH_TEST', () => {
     const result = derive({
       menu: [floor],
       analysisRecommendations: [
@@ -161,7 +164,35 @@ describe('an estimate is not automatically a proposal', () => {
         recommendation('CONSULTATION'),
       ],
     })
-    expect(result.refusalCode).toBe('SAFETY_REVIEW_REQUIRED')
+    expect(result.status === 'PROPOSED' && result.safetyRouted).toBe(true)
+  })
+
+  // The other half of the same rule: an ordinary consult must NOT be marked,
+  // or the disclosure becomes wallpaper and stops meaning anything.
+  it('leaves an unrouted analysis unmarked', () => {
+    const result = derive({
+      menu: [floor],
+      analysisRecommendations: [recommendation('CONSULTATION')],
+    })
+    expect(result.status === 'PROPOSED' && result.safetyRouted).toBe(false)
+  })
+
+  // 🔴 The hole this nearly shipped with. `resolveRecommendations` collapses a
+  // safety-routed LOOK-PLANNING analysis to a single CONSULTATION and returns
+  // early, so the PATCH_TEST / STRAND_TEST intents are never stored and
+  // `analysisRoutedToSafetyPrerequisites` answers false for every Book the
+  // Look consult — safety-routed or not. Reading only the intents would have
+  // shown no warning on exactly the flow the safety gates were removed from.
+  // The plan carries the fact itself; this is the test that says so.
+  it('marks a look-planning consult whose recommendations cannot carry the signal', () => {
+    const result = derive({
+      menu: [floor],
+      // What a safety-routed look-planning analysis ACTUALLY stores.
+      analysisRecommendations: [recommendation('CONSULTATION')],
+      lookPlanSafetyRouted: true,
+    })
+    expect(result.status).toBe('PROPOSED')
+    expect(result.status === 'PROPOSED' && result.safetyRouted).toBe(true)
   })
 
   // 🔴 The case that would have shipped a permanently-dead feature. EVERY

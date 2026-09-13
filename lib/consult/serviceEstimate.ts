@@ -219,7 +219,7 @@ export function deriveConsultServiceEstimate(args: {
     const plan = args.analysis.lookPlan
     const index = args.selectedPathIndex
     const path = index !== undefined && Number.isInteger(index) && index >= 0 ? plan.paths[index] : undefined
-    if (plan.status !== 'READY_TO_CHOOSE' || plan.provisional || !path?.visits[0]?.steps.length) {
+    if (!plan.choosable || !path?.visits[0]?.steps.length) {
       return refused('LOOK_PLAN_SELECTION_REQUIRED', scheduling, args.locationType)
     }
     const offerings = new Map(args.menu.map(offering => [offering.id, offering]))

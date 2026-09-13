@@ -921,6 +921,13 @@ export default function AddOnsClient({
           <div className="mt-2 text-[11px] font-semibold leading-5 text-textSecondary">
             {consultProposal.estimateNote} {consultProposal.proDecidesNote}
           </div>
+          {/* See ClientConsultBooking's copy of this: the safety prerequisite
+              has to be readable at the control that commits her. */}
+          {consultProposal.safetyNote ? (
+            <div className="mt-2 rounded-lg bg-toneWarn/10 px-3 py-2 text-[11px] font-semibold leading-5 text-textPrimary">
+              {consultProposal.safetyNote}
+            </div>
+          ) : null}
         </div>
       ) : null}
 
