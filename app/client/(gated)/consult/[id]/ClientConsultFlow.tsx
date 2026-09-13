@@ -4,6 +4,7 @@ import ConsultInspirationFocus from '@/app/_components/consult/ConsultInspiratio
 import type { CropRect } from '@/lib/media/cropRect'
 import { visibleConsultThreadMessages } from '@/lib/consult/visibleThread'
 import { CONSULT_INSPIRATION_CLIENT_TEXT_LIMIT } from '@/lib/consult/inspiration/clientText'
+import { CONSULT_INTAKE_CLIENT_WORDS_VALUE } from '@/lib/consult/intake/types'
 import ClientConsultSuitability from '@/app/_components/consult/ClientConsultSuitability'
 import { useBrand } from '@/lib/brand/BrandProvider'
 
@@ -463,6 +464,7 @@ export default function ClientConsultFlow({
   const answerIntake = (
     message: ConsultThreadQuestionMessageDTO,
     value: string,
+    text?: string,
   ) =>
     run(async () => {
       if (!thread) return
@@ -481,6 +483,14 @@ export default function ClientConsultFlow({
       const current = await api<ConsultIntakeStateResponseDTO>(`${base}/intake`)
       const answers: Record<string, string> = { ...current.intake.latestRevision?.answers }
       answers[message.question.key] = value
+      // 🔴 A REPLACE write: the whole map goes back, words included. Read out
+      // of what the server holds rather than kept in a second copy here that
+      // could drift — and an empty box CLEARS the note she had on this
+      // question, which is the only way to take one back.
+      const textAnswers: Record<string, string> = { ...current.intake.latestRevision?.textAnswers }
+      const note = text?.trim()
+      if (note) textAnswers[message.question.key] = note
+      else delete textAnswers[message.question.key]
 
       const saved = await api<ConsultIntakeSubmitResponseDTO>(`${base}/intake`, {
         method: 'POST',
@@ -490,6 +500,7 @@ export default function ClientConsultFlow({
           schemaVersion: message.schemaVersion,
           complete: current.intake.latestRevision?.complete ?? false,
           answers,
+          textAnswers,
         }),
       })
       if (
@@ -508,6 +519,7 @@ export default function ClientConsultFlow({
             schemaVersion: message.schemaVersion,
             complete: true,
             answers,
+            textAnswers,
           }),
         })
       }
@@ -680,6 +692,7 @@ export default function ClientConsultFlow({
   const answerFollowUp = (
     message: ConsultThreadFollowUpMessageDTO,
     selectedValues: string[],
+    text?: string,
   ) =>
     run(async () => {
       if (message.chartFactSourceId && selectedValues.length === 1) {
@@ -693,6 +706,9 @@ export default function ClientConsultFlow({
           idempotencyKey: newKey(),
           questionKey: message.questionKey,
           selectedValues,
+          // Sent only on a card that offered the box, so a build answering a
+          // pro's question posts exactly the body it always did.
+          ...(message.allowText ? { text: text?.trim() ?? '' } : {}),
         }),
       })
     })
@@ -1354,6 +1370,16 @@ function ConsentMessage({
  * The card, with its options and help text, is only the OPEN step (or an
  * answered one being edited).
  */
+/**
+ * One intake question.
+ *
+ * When the server marks the question `allowText`, the box sits BESIDE the
+ * options rather than behind a mode switch — so tapping an option files what
+ * she typed as a NOTE on that choice, and the send button files her words as
+ * the answer ITSELF (`CONSULT_INTAKE_CLIENT_WORDS_VALUE`). Tori asked for both
+ * behaviours, 2026-09-13, and one control is how they stay one thing on
+ * screen.
+ */
 function QuestionMessage({
   message,
   busy,
@@ -1364,21 +1390,36 @@ function QuestionMessage({
   onAnswer: (
     message: ConsultThreadQuestionMessageDTO,
     value: string,
+    text?: string,
   ) => void
 }) {
   const { editing } = useContext(ConsultInputState)
+  const { brand } = useBrand()
+  const copy = brand.clientConsultThread.intakeClientWords
   const { question, answer } = message
+  const [text, setText] = useState(message.clientWords ?? '')
+  // Her words are the whole answer on the escape hatch; on an ordinary option
+  // they are a note that rides beneath the label she chose.
   const answeredLabel =
     answer === null
       ? null
-      : (question.options.find((option) => option.value === answer)?.label ??
-        answer)
+      : answer === CONSULT_INTAKE_CLIENT_WORDS_VALUE
+        ? (message.clientWords ?? answer)
+        : (question.options.find((option) => option.value === answer)?.label ??
+          answer)
+  const answeredNote =
+    answer !== null && answer !== CONSULT_INTAKE_CLIENT_WORDS_VALUE
+      ? message.clientWords
+      : undefined
 
   if (answeredLabel !== null && !editing) {
     return (
       <div className="grid gap-2">
         <ThreadBubble author="APP">{question.label}</ThreadBubble>
         <ThreadBubble author="CLIENT">{answeredLabel}</ThreadBubble>
+        {answeredNote ? (
+          <ThreadBubble author="CLIENT">{answeredNote}</ThreadBubble>
+        ) : null}
       </div>
     )
   }
@@ -1402,11 +1443,32 @@ function QuestionMessage({
                 type="button"
                 disabled={busy}
                 className={`${BUTTON_SECONDARY} text-left`}
-                onClick={() => onAnswer(message, option.value)}
+                onClick={() => onAnswer(message, option.value, text)}
               >
                 {option.label}
               </button>
             ))}
+            {question.allowText ? (
+              <div className="mt-1 grid gap-2">
+                <ClientWordsInput
+                  text={text}
+                  onChange={setText}
+                  busy={busy}
+                  label={copy.label}
+                  placeholder={copy.placeholder}
+                />
+                <button
+                  type="button"
+                  disabled={busy || !text.trim()}
+                  className={`${BUTTON_SECONDARY} text-left`}
+                  onClick={() =>
+                    onAnswer(message, CONSULT_INTAKE_CLIENT_WORDS_VALUE, text)
+                  }
+                >
+                  {copy.send}
+                </button>
+              </div>
+            ) : null}
           </div>
         ) : null}
       </ThreadCard>
@@ -3008,8 +3070,12 @@ function FollowUpMessage({
   onAnswer: (
     message: ConsultThreadFollowUpMessageDTO,
     selectedValues: string[],
+    text?: string,
   ) => void
 }) {
+  const { brand } = useBrand()
+  const copy = brand.clientConsultThread.intakeClientWords
+  const [text, setText] = useState(message.clientWords ?? '')
   const answered = message.selectedValues.length > 0
   if (answered) {
     return (
@@ -3031,11 +3097,17 @@ function FollowUpMessage({
           </p>
         </ThreadBubble>
         <ThreadBubble author="CLIENT">
-          {message.options
-            .filter((option) => message.selectedValues.includes(option.value))
-            .map((option) => option.label)
-            .join(', ')}
+          {message.selectedValues.includes(CONSULT_INTAKE_CLIENT_WORDS_VALUE)
+            ? (message.clientWords ?? '')
+            : message.options
+                .filter((option) => message.selectedValues.includes(option.value))
+                .map((option) => option.label)
+                .join(', ')}
         </ThreadBubble>
+        {message.clientWords &&
+        !message.selectedValues.includes(CONSULT_INTAKE_CLIENT_WORDS_VALUE) ? (
+          <ThreadBubble author="CLIENT">{message.clientWords}</ThreadBubble>
+        ) : null}
       </div>
     )
   }
@@ -3066,11 +3138,33 @@ function FollowUpMessage({
             disabled={busy}
             data-testid={`consult-follow-up-option-${option.value}`}
             className={`${BUTTON_SECONDARY} text-left`}
-            onClick={() => onAnswer(message, [option.value])}
+            onClick={() => onAnswer(message, [option.value], text)}
           >
             {option.label}
           </button>
         ))}
+        {message.allowText ? (
+          <div className="mt-1 grid gap-2">
+            <ClientWordsInput
+              text={text}
+              onChange={setText}
+              busy={busy}
+              label={copy.label}
+              placeholder={copy.placeholder}
+            />
+            <button
+              type="button"
+              disabled={busy || !text.trim()}
+              data-testid="consult-follow-up-client-words"
+              className={`${BUTTON_SECONDARY} text-left`}
+              onClick={() =>
+                onAnswer(message, [CONSULT_INTAKE_CLIENT_WORDS_VALUE], text)
+              }
+            >
+              {copy.send}
+            </button>
+          </div>
+        ) : null}
       </div>
     </ThreadCard>
   )
@@ -3169,13 +3263,22 @@ function InspirationQuestionForm({
   )
 }
 
-function ClientWordsInput({ text, onChange, busy }: { text: string; onChange: (text: string) => void; busy: boolean }) {
+/**
+ * The box she types into. Wording is passed in: the inspiration card asks her
+ * to correct what the model noticed, the intake question asks her to answer
+ * where the options ran out. The LIMIT is one rule for both
+ * (lib/consult/clientText.ts), which is what the database guards enforce.
+ */
+function ClientWordsInput({ text, onChange, busy, label, placeholder }: {
+  text: string; onChange: (text: string) => void; busy: boolean
+  label?: string; placeholder?: string
+}) {
   const { brand } = useBrand()
   const copy = brand.clientConsultInspiration.clientResponse
   return <label className="grid gap-2 text-sm text-textSecondary">
-    {copy.label}
+    {label ?? copy.label}
     <textarea value={text} onChange={event => onChange(event.target.value)} disabled={busy}
-      maxLength={CONSULT_INSPIRATION_CLIENT_TEXT_LIMIT} rows={3} placeholder={copy.placeholder}
+      maxLength={CONSULT_INSPIRATION_CLIENT_TEXT_LIMIT} rows={3} placeholder={placeholder ?? copy.placeholder}
       className="w-full rounded-xl border border-surfaceGlass/20 bg-bgPrimary p-3 text-textPrimary" />
   </label>
 }

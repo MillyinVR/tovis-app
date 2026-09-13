@@ -54,6 +54,12 @@ export type ConsultFollowUpVocabularyEntry = {
   /** Every option value the key accepts, and the pack's own label for each. */
   options: readonly { value: string; label: string }[]
   /**
+   * Whether the question takes her OWN WORDS. Carried from the pack question
+   * (`allowText`), so a follow-up card offers exactly what the same question
+   * offers on the intake step — and never a box its answer route cannot send.
+   */
+  allowText: boolean
+  /**
    * True when this key is one the safety policy routes on. These are the
    * questions the FALLBACK asks when the model call fails, and the ones the
    * prompt is told it must ask before anything else.
@@ -101,6 +107,7 @@ function entry(
       value: option.value,
       label: option.label,
     })),
+    allowText: question.allowText,
     safety: CONSULT_FOLLOW_UP_SAFETY_KEYS.has(question.key),
   }
 }

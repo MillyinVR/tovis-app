@@ -82,6 +82,9 @@ export async function POST(request: Request, context: RouteContext) {
       actor: { type: ConsultActorType.CLIENT, id: auth.user.id },
       questionKey,
       selectedValues,
+      // Unvalidated here on purpose: the contract validates it against the
+      // question's own `allowText` once it has proven the card is open.
+      ...(typeof body.text === 'string' ? { text: body.text } : {}),
       idempotencyKey,
     })
     return jsonOk({ followUp: result.state, nextRoundCreated: result.nextRoundCreated })

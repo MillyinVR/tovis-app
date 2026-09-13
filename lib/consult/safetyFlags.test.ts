@@ -198,3 +198,98 @@ describe('consult safety flag policy', () => {
     ).not.toThrow()
   })
 })
+
+// ── Free text on a safety question ──────────────────────────────────────────
+//
+// Tori's decision, 2026-09-13, asked and answered: the model can FLAG, never
+// CLEAR. These cases are the mirror of the `supported_codes` arm the
+// accompanying migration adds to `consult_analysis_payload_guard` — a policy
+// that widened here and not there is a 23514 on the app's own write.
+describe('consult safety flags and the client’s own words', () => {
+  it('reads a typed safety answer as UNKNOWN, whatever code sits beside it', () => {
+    // She tapped "no" and then wrote a sentence next to it. The tap does not
+    // survive the sentence: nothing downstream can read the sentence, so the
+    // professional confirms it with her.
+    const beside = deriveConsultSafetyFlagPolicy({
+      intakePackId: 'hair-color',
+      intake: { prior_reaction: 'no', box_dye_history: 'never', prior_lightening: 'never' },
+      intakeTextAnswers: { prior_reaction: 'no, but my scalp burned once' },
+      visibleCondition: 'NO_VISIBLE_CONCERN',
+    })
+    expect(codes(beside.required)).toEqual([
+      'ALLERGY_HISTORY_UNKNOWN',
+      'REACTION_HISTORY_UNKNOWN',
+    ])
+    // ...and the model MAY additionally say what her words report.
+    expect(codes(beside.supported)).toEqual([
+      'ALLERGY_HISTORY_UNKNOWN',
+      'PRIOR_REACTION',
+      'REACTION_HISTORY_UNKNOWN',
+    ])
+  })
+
+  it('never lets her words CLEAR a question she answered only in words', () => {
+    const hatch = deriveConsultSafetyFlagPolicy({
+      intakePackId: 'hair-color',
+      intake: {
+        prior_reaction: 'client-words',
+        box_dye_history: 'never',
+        prior_lightening: 'never',
+      },
+      intakeTextAnswers: { prior_reaction: 'I have never had any reaction at all' },
+      visibleCondition: 'NO_VISIBLE_CONCERN',
+    })
+    // Reassuring words are still not an answer any routing rule can read.
+    expect(codes(hatch.required)).toContain('REACTION_HISTORY_UNKNOWN')
+  })
+
+  it('admits a flag her words support, and still refuses one nothing backs', () => {
+    const policy = deriveConsultSafetyFlagPolicy({
+      intakePackId: 'hair-color',
+      intake: { prior_reaction: 'no', box_dye_history: 'never', prior_lightening: 'never' },
+      intakeTextAnswers: { prior_reaction: 'my scalp burned last time' },
+      visibleCondition: 'NO_VISIBLE_CONCERN',
+    })
+    const applied = applyConsultSafetyFlagPolicy(
+      analysisWith({
+        flags: [{ code: 'PRIOR_REACTION' }],
+        constraints: 'Allergy history is unknown.',
+        maintenance: 'Upkeep tolerance is unknown.',
+      }),
+      policy,
+    )
+    expect(applied.safetyFlags.map((flag) => flag.code).sort()).toEqual([
+      'ALLERGY_HISTORY_UNKNOWN',
+      'PRIOR_REACTION',
+      'REACTION_HISTORY_UNKNOWN',
+    ])
+    // A code her words could not mean is still a concern invented about a real
+    // person: the whole analysis is refused, exactly as before.
+    expect(() =>
+      applyConsultSafetyFlagPolicy(
+        analysisWith({
+          flags: [{ code: 'RECENT_BOX_DYE' }],
+          constraints: 'Allergy history is unknown.',
+          maintenance: 'Upkeep tolerance is unknown.',
+        }),
+        policy,
+      ),
+    ).toThrow(ConsultAnalysisProviderError)
+  })
+
+  it('leaves a consult with no typed words exactly as it was', () => {
+    const before = deriveConsultSafetyFlagPolicy({
+      intakePackId: 'general-service',
+      intake: { prior_reaction: 'no', known_allergies: 'none-known' },
+      visibleCondition: 'UNKNOWN',
+    })
+    const after = deriveConsultSafetyFlagPolicy({
+      intakePackId: 'general-service',
+      intake: { prior_reaction: 'no', known_allergies: 'none-known' },
+      intakeTextAnswers: {},
+      visibleCondition: 'UNKNOWN',
+    })
+    expect(codes(after.required)).toEqual(codes(before.required))
+    expect(codes(after.supported)).toEqual(codes(before.supported))
+  })
+})

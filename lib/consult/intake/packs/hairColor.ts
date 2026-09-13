@@ -364,7 +364,9 @@ export function validateHairColorC5EvaluationIntakeAnswers(
       message: 'Required answers are missing.',
     }
   }
-  return { ok: true, answers }
+  // The C5 evaluation harness drives fixtures, never a real client, so it has
+  // no words to carry.
+  return { ok: true, answers, textAnswers: {} }
 }
 
 

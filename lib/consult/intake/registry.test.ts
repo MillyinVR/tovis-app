@@ -23,6 +23,7 @@ import {
   toConsultIntakeQuestionPackDTO,
   validateConsultIntakeAnswers,
 } from './registry'
+import { CONSULT_INTAKE_CLIENT_WORDS_VALUE } from './types'
 
 const completeHairGeneral = {
   maintenance_tolerance: 'medium',
@@ -287,7 +288,7 @@ describe('consult intake registry', () => {
         { hair_texture: 'wavy' },
         false,
       ),
-    ).toEqual({ ok: true, answers: { hair_texture: 'wavy' } })
+    ).toEqual({ ok: true, answers: { hair_texture: 'wavy' }, textAnswers: {} })
     expect(
       validateConsultIntakeAnswers(
         GENERAL_SERVICE_INTAKE_PACK,
@@ -438,5 +439,121 @@ describe('consult intake registry', () => {
       'prior_reaction',
       'last_service_timing',
     ])
+  })
+})
+
+// ── Her own words ───────────────────────────────────────────────────────────
+//
+// Tori, 2026-09-13: "there were times i couldnt answer the consult questions
+// with the optios it gave me... the client should have an option to fill in
+// their own words". Two behaviours, one sidecar. These cases mirror the matrix
+// `consult_intake_payload_guard` is probed with, so the application and the
+// database agree about what a typed answer is.
+describe('consult intake client words', () => {
+  const words = (raw: unknown, answers: Record<string, string> = completeHairGeneral) =>
+    validateConsultIntakeAnswers(HAIR_GENERAL_INTAKE_PACK, answers, false, raw)
+
+  it('takes a note ALONGSIDE a chosen option', () => {
+    expect(words({ prior_reaction: 'no, but my scalp stings' })).toMatchObject({
+      ok: true,
+      answers: { prior_reaction: 'no' },
+      textAnswers: { prior_reaction: 'no, but my scalp stings' },
+    })
+  })
+
+  it('takes her words INSTEAD of an option, and only with words attached', () => {
+    const hatch = { ...completeHairGeneral, prior_reaction: CONSULT_INTAKE_CLIENT_WORDS_VALUE }
+    expect(
+      words({ prior_reaction: 'a reaction once, not sure to what' }, hatch),
+    ).toMatchObject({
+      ok: true,
+      answers: { prior_reaction: CONSULT_INTAKE_CLIENT_WORDS_VALUE },
+    })
+    // The sentinel on its own means nothing to the client, the professional or
+    // the safety policy — it is not an answer, it is a dangling reference.
+    expect(words(undefined, hatch)).toMatchObject({ ok: false, code: 'INVALID_ANSWERS' })
+    expect(words({ change_scale: 'anything' }, hatch)).toMatchObject({
+      ok: false,
+      code: 'INVALID_ANSWERS',
+    })
+  })
+
+  it('still counts a typed answer as ANSWERED for completeness', () => {
+    const hatch = { ...completeHairGeneral, prior_reaction: CONSULT_INTAKE_CLIENT_WORDS_VALUE }
+    expect(
+      validateConsultIntakeAnswers(HAIR_GENERAL_INTAKE_PACK, hatch, true, {
+        prior_reaction: 'a reaction once',
+      }),
+    ).toMatchObject({ ok: true })
+    expect(evaluateConsultIntakeProgress(HAIR_GENERAL_INTAKE_PACK, hatch)).toMatchObject({
+      canComplete: true,
+    })
+  })
+
+  it('refuses words that are orphaned, oversized, empty or unprintable', () => {
+    // A question she has not answered has nothing to hang a note on.
+    expect(words({ goal_direction: 'something' })).toMatchObject({ ok: false })
+    expect(words({ prior_reaction: 'x'.repeat(601) })).toMatchObject({ ok: false })
+    expect(words({ prior_reaction: `a${String.fromCharCode(7)}b` })).toMatchObject({ ok: false })
+    expect(words({ prior_reaction: '   ' })).toMatchObject({ ok: false })
+    expect(words([])).toMatchObject({ ok: false })
+    // Trimmed on the way in, so what is stored is what the guard will accept.
+    expect(words({ prior_reaction: '  padded  ' })).toMatchObject({
+      ok: true,
+      textAnswers: { prior_reaction: 'padded' },
+    })
+  })
+
+  it('refuses words on a question that does not take them', () => {
+    const noText = {
+      ...HAIR_GENERAL_INTAKE_PACK,
+      questions: HAIR_GENERAL_INTAKE_PACK.questions.map((question) =>
+        question.key === 'prior_reaction' ? { ...question, allowText: false } : question,
+      ),
+    }
+    expect(
+      validateConsultIntakeAnswers(noText, completeHairGeneral, false, {
+        prior_reaction: 'anything',
+      }),
+    ).toMatchObject({ ok: false })
+  })
+
+  it('round-trips the sidecar through a stored payload, and omits it when empty', () => {
+    const stored = {
+      packId: HAIR_GENERAL_INTAKE_PACK.id,
+      packVersion: HAIR_GENERAL_INTAKE_PACK.version,
+      schemaVersion: HAIR_GENERAL_INTAKE_PACK.schemaVersion,
+      complete: false,
+      answers: completeHairGeneral,
+    }
+    expect(normalizeConsultIntakePayload(stored)).not.toHaveProperty('textAnswers')
+    expect(
+      normalizeConsultIntakePayload({ ...stored, textAnswers: { prior_reaction: 'itchy' } }),
+    ).toMatchObject({ textAnswers: { prior_reaction: 'itchy' } })
+    // A stored note that is not already normalized was not written by this
+    // contract, so the row is skipped rather than quietly repaired.
+    expect(
+      normalizeConsultIntakePayload({ ...stored, textAnswers: { prior_reaction: ' itchy ' } }),
+    ).toBeNull()
+  })
+
+  it('renders a typed answer on the pro brief instead of dropping it', () => {
+    const pack = HAIR_GENERAL_INTAKE_PACK
+    const hatch = { ...completeHairGeneral, prior_reaction: CONSULT_INTAKE_CLIENT_WORDS_VALUE }
+    expect(
+      consultIntakeItems(pack, hatch, { prior_reaction: 'a reaction once' }).find(
+        (item) => item.questionKey === 'prior_reaction',
+      ),
+    ).toMatchObject({
+      answerCode: CONSULT_INTAKE_CLIENT_WORDS_VALUE,
+      answer: 'a reaction once',
+      clientWords: 'a reaction once',
+    })
+    // A note beside a real choice keeps the chosen label AND her sentence.
+    expect(
+      consultIntakeItems(pack, completeHairGeneral, { prior_reaction: 'but it stings' }).find(
+        (item) => item.questionKey === 'prior_reaction',
+      ),
+    ).toMatchObject({ answerCode: 'no', clientWords: 'but it stings' })
   })
 })

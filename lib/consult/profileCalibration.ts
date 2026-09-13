@@ -10,6 +10,7 @@ export const CONSULT_CALIBRATION_QUESTIONS: readonly ConsultFollowUpVocabularyEn
     home: 'FOLLOW_UP',
     packLabel: 'Which jewelry finish do you usually enjoy wearing?',
     safety: false,
+    allowText: true,
     options: [
       { value: 'gold', label: 'Gold' },
       { value: 'silver', label: 'Silver' },
@@ -22,6 +23,7 @@ export const CONSULT_CALIBRATION_QUESTIONS: readonly ConsultFollowUpVocabularyEn
     home: 'FOLLOW_UP',
     packLabel: 'From past experience, do you usually tan, burn, or both? No need to test this.',
     safety: false,
+    allowText: true,
     options: [
       { value: 'tan', label: 'Usually tan' },
       { value: 'burn', label: 'Usually burn' },

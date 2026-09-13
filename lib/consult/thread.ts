@@ -635,6 +635,7 @@ export async function loadConsultThread(args: {
   const chartReviewOpen = Boolean(intake?.chartReview && inputWindow.open)
   if (intake) {
     const answers = intake.latestRevision?.answers ?? {}
+    const clientWords = intake.latestRevision?.textAnswers ?? {}
     // 🔴 `progress.nextQuestionKey` goes NULL the moment every REQUIRED question
     // (and the conditional goal direction) is answered — it never names a
     // SKIPPABLE one. Following it alone therefore stops asking optional
@@ -654,7 +655,10 @@ export async function loadConsultThread(args: {
       out.push({ kind: 'QUESTION', id: 'chart-review', author: 'APP', state: 'OPEN', answer: null,
         packVersion: intake.questionPack.version, schemaVersion: intake.questionPack.schemaVersion,
         chartReviewFingerprint: review.fingerprint,
-        question: { key: 'chart_review', kind: 'SINGLE_SELECT', requirement: 'REQUIRED',
+        // 🔴 No free text: this one answers to /chart-review, which carries a
+        // DECISION and no words. Offering a box that cannot be sent is the
+        // defect #1171 just fixed on the confirmation card.
+        question: { key: 'chart_review', kind: 'SINGLE_SELECT', requirement: 'REQUIRED', allowText: false,
           label: fillConsultThreadCopy(copy.chartReviewQuestion, { date: formatInTimeZone(review.lastVisitAt, DEFAULT_TIME_ZONE,
             { month: 'long', day: 'numeric', year: 'numeric' }) }),
           helpText: [copy.chartReviewSummary, ...review.facts.map(fact => `${fact.label} ${fact.answer} (${formatInTimeZone(fact.recordedAt, DEFAULT_TIME_ZONE,
@@ -690,13 +694,19 @@ export async function loadConsultThread(args: {
               ? 'BLOCKED'
               : 'OPEN',
         ...(chartSource?.sourceId ? { chartFactSourceId: chartSource.sourceId } : {}),
-        question: chartSource?.recordedAt && chartAnswer ? { ...question,
+        // 🔴 A CHART-FACT confirmation answers to /chart-fact, which carries a
+        // value and no words, so it withholds the text box the same question
+        // offers on the ordinary intake path. A box that cannot send what she
+        // types is the defect #1171 fixed on the confirmation card; the fix is
+        // not to offer it, not to drop her words on the floor.
+        question: chartSource?.recordedAt && chartAnswer ? { ...question, allowText: false,
           helpText: fillConsultThreadCopy(copy.chartHistoryConfirmation, {
             date: formatInTimeZone(chartSource.recordedAt, DEFAULT_TIME_ZONE, { month: 'long', day: 'numeric', year: 'numeric' }), answer: chartAnswer.label,
           }),
           options: [chartAnswer, ...question.options.filter(option => option.value !== chartAnswer.value)],
         } : question,
         answer,
+        ...(clientWords[question.key] ? { clientWords: clientWords[question.key] } : {}),
         packVersion: intake.questionPack.version,
         schemaVersion: intake.questionPack.schemaVersion,
       })
@@ -1057,6 +1067,11 @@ export async function loadConsultThread(args: {
             questionKey: question.key,
             options: question.options.map((option) => ({ ...option })),
             selectedValues: question.selectedValues ?? [],
+            // 🔴 A CHART-FACT confirmation answers to /chart-fact, which
+            // carries a value and no words, so the box is withheld there even
+            // when the question itself takes one.
+            allowText: question.allowText && !source?.sourceId,
+            ...(question.clientWords ? { clientWords: question.clientWords } : {}),
             fallback: round.status === 'FALLBACK',
             round: round.round,
           })
@@ -1098,6 +1113,10 @@ export async function loadConsultThread(args: {
         questionKey: question.questionKey,
         options: question.options.map(option => ({ ...option })),
         selectedValues: question.selectedValue ? [question.selectedValue] : [],
+        // 🔴 A professional's own question files through
+        // `answerConsultProFollowUp`, whose row has nowhere to put a sentence.
+        // No box until it does.
+        allowText: false,
         fallback: false,
         round: 0,
       })

@@ -44,7 +44,12 @@ export const defaultClientConsultThreadCopy: BrandClientConsultThreadCopy = {
   consentResume:
     'You stopped this one earlier, so it’s been sitting right where you left it. Agree again and we pick up from there.',
 
-  intakeIntro: 'A few quick things about you. Choose what fits. If you don’t know, use “Not sure” when it’s offered.',
+  intakeIntro: 'A few quick things about you. Choose what fits, or write your own answer. If you don’t know, use “Not sure” when it’s offered.',
+  intakeClientWords: {
+    label: 'Say it in your own words',
+    placeholder: 'Add anything that matters, or answer here if none of these fits…',
+    send: 'None of these — use what I wrote',
+  },
   intakeDone: 'That’s everything I needed from you in words.',
 
   inspirationSourceIntro:

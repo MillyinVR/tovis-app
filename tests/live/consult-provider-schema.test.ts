@@ -458,6 +458,7 @@ describe('the consult schemas compile and answer against the live model', () => 
       home: 'INTAKE',
       packLabel: 'When was your hair last lightened?',
       safety: true,
+      allowText: true,
       options: [
         { value: 'never', label: 'Never' },
         { value: 'within-3-months', label: 'Within 3 months' },
@@ -472,6 +473,7 @@ describe('the consult schemas compile and answer against the live model', () => 
       packLabel:
         'When did you last use henna or another plant-based hair dye?',
       safety: true,
+      allowText: true,
       options: [
         { value: 'never', label: 'Never' },
         { value: 'within-6-months', label: 'Within 6 months' },
@@ -484,6 +486,7 @@ describe('the consult schemas compile and answer against the live model', () => 
       home: 'FOLLOW_UP',
       packLabel: 'When was your last color service?',
       safety: false,
+      allowText: true,
       options: [
         { value: 'never', label: 'Never' },
         { value: 'within-4-weeks', label: 'Within 4 weeks' },
@@ -497,6 +500,7 @@ describe('the consult schemas compile and answer against the live model', () => 
       home: 'FOLLOW_UP',
       packLabel: 'Do you have an event or deadline?',
       safety: false,
+      allowText: true,
       options: [
         { value: 'no-deadline', label: 'No deadline' },
         { value: 'within-2-weeks', label: 'Within 2 weeks' },

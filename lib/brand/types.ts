@@ -841,6 +841,23 @@ export type BrandClientConsultThreadCopy = {
   /** After the last intake question is answered. */
   intakeDone: string
 
+  /**
+   * The intake question's own words (Tori, 2026-09-13: "there were times i
+   * couldnt answer the consult questions with the optios it gave me").
+   *
+   * The box sits BESIDE the options, exactly as it does on an inspiration
+   * card, so both of Tori's behaviours are one control: tap an option and what
+   * she typed rides along as a note; tap `send` and her words ARE the answer.
+   * Shown on a question the server marked `allowText`, never on one whose
+   * answer route cannot carry words.
+   */
+  intakeClientWords: {
+    label: string
+    placeholder: string
+    /** Files her words as the answer itself, with no option chosen. */
+    send: string
+  }
+
   /** The inspiration card's own framing, before a reference exists. */
   inspirationSourceIntro: string
   /**

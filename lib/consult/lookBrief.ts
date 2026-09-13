@@ -4,7 +4,7 @@ import { consultLookConfirmationOpen } from './lookConfirmation'
 import { loadConsultLookCompletedVisit } from './lookVisitOutcome'
 import { describeLookEstimateChanges, describeLookExpectationChanges } from './lookBriefDiff'
 import { effectiveConsultLookPlan } from './lookBriefPlan'
-import { loadConsultLookHistory, parseConsultLookHistoryItems } from './lookHistory'
+import { consultLookHistoryStoredItems, loadConsultLookHistory, parseConsultLookHistoryItems } from './lookHistory'
 import { notifyConsultLookBriefVersion } from '@/lib/notifications/consultLookBrief'
 import { isDeepStrictEqual } from 'node:util'
 import { readStoredLookAdjustments, parseConsultLookAdjustments, assertLookAdjustmentTargets, lookAdjustmentKey, type ConsultLookAdjustment } from './lookAdjustments'
@@ -103,7 +103,7 @@ export async function appendLockedConsultLookBriefVersion(tx: Prisma.Transaction
     professionalPlan: professionalPlan ?? Prisma.DbNull,
     professionalPlanReason: professionalPlanReason ?? null,
     invalidatedProfessionalPlan: invalidatedProfessionalPlan ?? Prisma.DbNull,
-    additionalClientAnswers: clientHistory.items,
+    additionalClientAnswers: consultLookHistoryStoredItems(clientHistory.items),
     consultSessionId: args.consultSessionId, sourceAnalysisRevisionId: source.id, version: (previous?.version ?? 0) + 1,
     selectedPathIndex: args.selectedPathIndex ?? null, selectedLocationType: args.selectedLocationType ?? null,
     pathEstimates, adjustments: { entries: adjustments }, invalidatedAdjustments: invalidated, createdByActorType: args.actorType, createdByActorId: args.actorId,
@@ -191,7 +191,7 @@ export async function appendLockedConsultLookRefinement(tx: Prisma.TransactionCl
     professionalPlan: previous.professionalPlan ?? Prisma.DbNull,
     professionalPlanReason: previous.professionalPlanReason,
     invalidatedProfessionalPlan: previous.invalidatedProfessionalPlan ?? Prisma.DbNull,
-    additionalClientAnswers: clientHistory.items,
+    additionalClientAnswers: consultLookHistoryStoredItems(clientHistory.items),
     consultSessionId: args.consultSessionId, sourceAnalysisRevisionId: previous.sourceAnalysisRevisionId,
     version: previous.version + 1, awaitingAnalysis: true,
     selectedPathIndex: previous.selectedPathIndex, selectedLocationType: previous.selectedLocationType,

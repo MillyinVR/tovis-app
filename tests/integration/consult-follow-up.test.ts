@@ -143,6 +143,7 @@ function providerAnswering(key: string, values: string[]): ConsultFollowUpProvid
           home: entry.home,
           text: 'You’re at a light brown now and you loved the ash — would coming back in a few weeks work?',
           evidence: `wants lightestLevel:LEVEL_9; core.baseLevel LEVEL_6`,
+          allowText: entry.allowText,
           options: values.map((value) => ({ value, label: `Option ${value}` })),
         },
       ],
@@ -316,10 +317,13 @@ describe('a round is bought once', () => {
     await expect(attempt(6, 'service-analysis-v8', profile)).rejects.toBe(rollback)
     await expect(attempt(6, 'service-analysis-v9', profile)).rejects.toBe(rollback)
     await expect(attempt(6, 'service-analysis-v10', profile)).rejects.toBe(rollback)
-    // v9 and v10 are the arms that admit a PROVISIONAL eye colour off the early
-    // selfie; every earlier arm still refuses that label (20261031000000,
-    // extended to v10 by 20261101000000).
-    for (const promptVersion of ['service-analysis-v9', 'service-analysis-v10']) {
+    await expect(attempt(6, 'service-analysis-v11', profile)).rejects.toBe(rollback)
+    // v9, v10 and v11 are the arms that admit a PROVISIONAL eye colour off the
+    // early selfie; every earlier arm still refuses that label (20261031000000,
+    // extended to v10 by 20261101000000 and to v11 by 20261103000000). 🔴 A new
+    // prompt version that does NOT carry this exception forward silently stops
+    // the selfie buying her an eye-colour reading at all.
+    for (const promptVersion of ['service-analysis-v9', 'service-analysis-v10', 'service-analysis-v11']) {
       await expect(attempt(6, promptVersion, {
         ...profile,
         eyeColor: { value: 'BROWN', confidence: { min: 0.3, max: 0.45 }, evidence: ['early_photo'] },
@@ -340,6 +344,7 @@ describe('a round is bought once', () => {
       // ...and a hair view is refused even on v9 and v10.
       [6, 'service-analysis-v9', { ...profile, eyeColor: { value: 'BROWN', confidence: { min: 0.3, max: 0.45 }, evidence: ['hair_back'] } }],
       [6, 'service-analysis-v10', { ...profile, eyeColor: { value: 'BROWN', confidence: { min: 0.3, max: 0.45 }, evidence: ['hair_back'] } }],
+      [6, 'service-analysis-v11', { ...profile, eyeColor: { value: 'BROWN', confidence: { min: 0.3, max: 0.45 }, evidence: ['hair_back'] } }],
     ]
     for (const [schema, prompt, nextProfile] of invalidCases) {
       await expect(attempt(schema, prompt, nextProfile)).rejects.toThrow(/23514|invalid|violates/i)
@@ -356,7 +361,7 @@ describe('a round is bought once', () => {
       if (!entry) throw new Error('Calibration question missing')
       return { model: 'claude-sonnet-5', questions: [{
         key: entry.key, home: entry.home, text: entry.packLabel,
-        evidence: 'intake; color reading remains uncertain', options: [...entry.options],
+        evidence: 'intake; color reading remains uncertain', allowText: entry.allowText, options: [...entry.options],
       }] }
     }
     await generateConsultFollowUpRound({ consultSessionId: sessionId, actor: client() }, { provider })
@@ -605,6 +610,7 @@ describe('🔴 a round never re-asks what an earlier round got', () => {
                 home: first!.home,
                 text: 'One more thing, and then you are done.',
                 evidence: 'round two',
+                allowText: first!.allowText,
                 options: first!.options.slice(0, 2).map((option) => ({ ...option })),
               },
             ],
@@ -660,6 +666,7 @@ describe('🔴 a round never re-asks what an earlier round got', () => {
                 home: first!.home,
                 text: 'One more thing.',
                 evidence: 'round two',
+                allowText: first!.allowText,
                 options: first!.options.slice(0, 2).map((option) => ({ ...option })),
               },
             ],
@@ -802,6 +809,7 @@ describe('🔴 the database is the backstop', () => {
       text: 'Is there a date you are working toward?',
       home: 'FOLLOW_UP',
       evidence: 'no deadline recorded',
+      allowText: true,
       options: [{ value: 'no-deadline', label: 'No deadline' }],
     },
   ]

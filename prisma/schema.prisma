@@ -8136,6 +8136,16 @@ model ConsultFollowUpRound {
   /// `{key: [values]}`, follow-up-pack keys only. Empty until she answers.
   answers   Json @default("{}")
 
+  /// `{key: "her sentence"}` — what the CLIENT typed on a follow-up card,
+  /// keyed to a question in `questions`.
+  ///
+  /// 🔴 Its own column on purpose. `answers` carries
+  /// `ConsultFollowUpRound_no_identity_words`, which refuses the words face /
+  /// eye / skin / undertone / identity / ethnic / race / health anywhere in it
+  /// — right for what the MODEL writes, and fatal for "I had a reaction on my
+  /// skin" once the client types here too (Tori, 2026-09-13).
+  clientTextAnswers Json @default("{}")
+
   createdAt DateTime @default(now())
 
   /// 🔴 TELEMETRY, not the completion signal. Whether a round is finished is
