@@ -77,6 +77,29 @@ export const defaultClientConsultThreadCopy: BrandClientConsultThreadCopy = {
   captureChoiceBuilt:
     'No problem. Add your daylight photos whenever you like, any time before your appointment, and I’ll look at your plan again with them.',
   captureAddLater: 'Add this photo',
+  // The selfie's focus step. The first button is the whole photo, deliberately:
+  // she has just chosen a picture of herself, and cropping is the exception.
+  // The second is what makes a group photo usable — and it is the same crop
+  // card the inspiration step uses, so there is one of these, not two.
+  captureFocus: {
+    title: 'Happy with this photo?',
+    instruction:
+      'Send it as it is, or zoom in on yourself first — worth doing if someone else is in the shot, or if you are small in the frame.',
+    fullFrame: 'Use the whole photo',
+    center: 'Zoom in on me',
+    confirm: 'Use this area',
+    cancel: 'Choose another photo',
+    addPhoto: 'Add your photo',
+    replace: 'Replace this photo',
+    preview: 'This is the part we will use',
+    photo: 'Your photo',
+    left: 'Left edge',
+    right: 'Right edge',
+    top: 'Top edge',
+    bottom: 'Bottom edge',
+    loadError: 'That photo could not be opened. Choose another photo.',
+    closer: 'Keep just yourself in the part you choose — leave anyone else out of it.',
+  },
   // Says what happens next rather than what is missing — she has not failed a
   // step here, she simply has not reached one. No jargon, no "locked".
   captureLockedBeforeBooking:

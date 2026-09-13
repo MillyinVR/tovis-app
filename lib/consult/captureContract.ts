@@ -812,6 +812,98 @@ export async function issueConsultCaptureUpload(args: {
   })
 }
 
+/**
+ * Retire the captures a newer photo for the same slot supersedes.
+ *
+ * 🔴 This is what makes "Replace this photo" mean anything. Both clients have
+ * offered that control since P2d and the lifecycle gate was widened in P7a-3
+ * to let her use it right up to the appointment — but the attach path refused
+ * every second photo for a live slot outright ("This capture slot is already
+ * active"), so the client picked a photo, paid the upload, and got a 409 that
+ * read as "the consult changed". The slot still holds ONE live capture; which
+ * one it is is now allowed to change.
+ *
+ * Called at two moments, with two different sets of statuses, because the two
+ * answer different questions:
+ *
+ *   - at ATTACH, for `ATTACHED` only — an unjudged photo she has walked away
+ *     from is worth nothing and must not stand in the way of the next one
+ *     (that is also what un-wedges a slot whose quality call never returned);
+ *   - at ACCEPT, for `ATTACHED` and `ACCEPTED` — the replacement has passed,
+ *     so the photo it replaces goes now. 🔴 It CANNOT go any earlier: if the
+ *     replacement is refused, her accepted photo is the one the analysis still
+ *     reads, and retiring it at attach time would mean a bad retake silently
+ *     cost her the good photo she already had.
+ *
+ * Two accepted, unpurged captures for one shot is not a state the analysis can
+ * read at all — `currentCaptures` refuses the whole pack as "incomplete" the
+ * moment it sees a second one — so the accept-time call runs in the SAME
+ * transaction as the acceptance, never after it.
+ *
+ * Returns the ids whose raw object the caller must purge after the commit;
+ * the durable purge markers written here make the sweep retry if it doesn't.
+ */
+async function retireSupersededCaptures(
+  tx: Prisma.TransactionClient,
+  args: {
+    consultSessionId: string
+    shotKey: string
+    /** The capture being kept — null at attach, where it does not exist yet. */
+    keepCaptureId: string | null
+    statuses: ConsultCaptureStatus[]
+    actor: ClientActor
+    now: Date
+  },
+): Promise<string[]> {
+  const superseded = await tx.consultCapture.findMany({
+    where: {
+      consultSessionId: args.consultSessionId,
+      shotKey: args.shotKey,
+      ...(args.keepCaptureId ? { id: { not: args.keepCaptureId } } : {}),
+      status: { in: args.statuses },
+      purgedAt: null,
+      purgeRequestedAt: null,
+    },
+    select: { id: true },
+  })
+  if (superseded.length === 0) return []
+  const ids = superseded.map((row) => row.id)
+  await tx.consultCapture.updateMany({
+    where: { id: { in: ids } },
+    data: { purgeEligibleAt: args.now, purgeRequestedAt: args.now },
+  })
+  // The same action the client's own delete writes, and the same one the
+  // inspiration path reuses for a replaced reference: a replacement IS a
+  // client-initiated removal of the photo it replaces.
+  await tx.consultAuditEvent.createMany({
+    data: ids.map((captureId) => ({
+      consultSessionId: args.consultSessionId,
+      action: ConsultAuditAction.CAPTURE_DELETED,
+      actorType: args.actor.type,
+      actorId: args.actor.id,
+      captureId,
+    })),
+  })
+  return ids
+}
+
+/** Best-effort raw purge for captures already purge-MARKED in a commit. */
+async function purgeRetiredCaptureObjects(
+  ids: readonly string[],
+  now: Date,
+  storage: ConsultCaptureStorage,
+): Promise<void> {
+  for (const id of ids) {
+    try {
+      await purgeConsultCaptureRawObject(id, now, storage)
+    } catch {
+      // The durable purgeEligibleAt marker makes the cleanup job retry. A
+      // storage failure must not turn a photo the client successfully
+      // replaced into a failed upload.
+    }
+  }
+}
+
 export async function attachConsultCaptureUpload(args: {
   consultSessionId: string
   clientId: string
@@ -828,7 +920,7 @@ export async function attachConsultCaptureUpload(args: {
 }): Promise<{ captureId: string; replayed: boolean }> {
   const now = args.now ?? new Date()
   const storage = args.storage ?? consultCaptureStorage
-  return prisma.$transaction(
+  const result = await prisma.$transaction(
     async (tx) => {
       await lockSession(tx, args.consultSessionId, 'UPDATE')
       const session = await requireScope(tx, {
@@ -860,7 +952,7 @@ export async function attachConsultCaptureUpload(args: {
         if (existing.attachRequestHash !== requestHash) {
           throw new ConsultWriteError('IDEMPOTENCY_CONFLICT', 'Idempotency conflict.')
         }
-        return { captureId: existing.id, replayed: true }
+        return { captureId: existing.id, replayed: true, superseded: [] }
       }
       assertCaptureWriteState(session, input.shotKey, 'attach', now)
 
@@ -893,21 +985,17 @@ export async function attachConsultCaptureUpload(args: {
       ) {
         throw new ConsultWriteError('CAPTURE_UPLOAD_EXPIRED', 'Capture upload expired.')
       }
-      const liveCapture = await tx.consultCapture.findFirst({
-        where: {
-          consultSessionId: session.id,
-          shotKey: input.shotKey,
-          status: {
-            in: [ConsultCaptureStatus.ATTACHED, ConsultCaptureStatus.ACCEPTED],
-          },
-          purgedAt: null,
-          rawExpiresAt: { gt: now },
-        },
-        select: { id: true },
+      // An UNJUDGED photo for this slot is superseded here and now; an
+      // ACCEPTED one is left alone until the replacement passes its own check
+      // (retireSupersededCaptures).
+      const supersededAtAttach = await retireSupersededCaptures(tx, {
+        consultSessionId: session.id,
+        shotKey: input.shotKey,
+        keepCaptureId: null,
+        statuses: [ConsultCaptureStatus.ATTACHED],
+        actor: args.actor,
+        now,
       })
-      if (liveCapture) {
-        throw new ConsultWriteError('INVALID_STATE', 'This capture slot is already active.')
-      }
 
       let object
       try {
@@ -969,10 +1057,23 @@ export async function attachConsultCaptureUpload(args: {
           captureId: capture.id,
         },
       })
-      return { captureId: capture.id, replayed: false }
+      return {
+        captureId: capture.id,
+        replayed: false,
+        superseded: supersededAtAttach,
+      }
     },
     { maxWait: 10_000, timeout: 60_000 },
   )
+  // After the commit, like every other raw purge here: the object store is not
+  // part of the transaction, and the purge markers above are what make this
+  // recoverable if it fails.
+  await purgeRetiredCaptureObjects(
+    result.superseded,
+    new Date(Math.max(now.getTime(), Date.now())),
+    storage,
+  )
+  return { captureId: result.captureId, replayed: result.replayed }
 }
 
 function qualityDto(capture: {
@@ -1068,10 +1169,10 @@ export async function checkConsultCaptureQuality(args: {
         if (capture.qualityRequestHash !== requestHash) {
           throw new ConsultWriteError('IDEMPOTENCY_CONFLICT', 'Idempotency conflict.')
         }
-        return { quality: qualityDto(capture), replayed: true, rejectedId: null }
+        return { quality: qualityDto(capture), replayed: true, purgeIds: [] }
       }
       if (capture.qualityCheckedAt) {
-        return { quality: qualityDto(capture), replayed: true, rejectedId: null }
+        return { quality: qualityDto(capture), replayed: true, purgeIds: [] }
       }
       assertCaptureWriteState(session, capture.shotKey, 'quality', now)
       if (
@@ -1185,6 +1286,29 @@ export async function checkConsultCaptureQuality(args: {
           'Capture quality output is invalid.',
         )
       }
+      // The replacement passed, so the photo it replaces goes now — in this
+      // same commit, because two accepted captures for one shot is a pack the
+      // analysis refuses outright (see retireSupersededCaptures).
+      //
+      // 🔴 BEFORE the row below is marked ACCEPTED, not after. The slot's
+      // "one live accepted photo" rule is a partial unique index
+      // (`ConsultCapture_one_accepted_slot`), and Postgres checks it per
+      // statement: accepting the replacement while the photo it replaces is
+      // still live fails the whole transaction, which is exactly what the
+      // integration suite caught here.
+      const superseded = quality.accepted
+        ? await retireSupersededCaptures(tx, {
+            consultSessionId: session.id,
+            shotKey: capture.shotKey,
+            keepCaptureId: capture.id,
+            statuses: [
+              ConsultCaptureStatus.ATTACHED,
+              ConsultCaptureStatus.ACCEPTED,
+            ],
+            actor: args.actor,
+            now: finalizedAt,
+          })
+        : []
       const status = quality.accepted
         ? ConsultCaptureStatus.ACCEPTED
         : ConsultCaptureStatus.REJECTED
@@ -1240,7 +1364,8 @@ export async function checkConsultCaptureQuality(args: {
       return {
         quality: qualityDto(updated),
         replayed: false,
-        rejectedId: quality.accepted ? null : capture.id,
+        // The refused photo itself, or the photo(s) this one replaced.
+        purgeIds: quality.accepted ? superseded : [capture.id, ...superseded],
       }
     },
     { maxWait: 10_000, timeout: 60_000 },
@@ -1250,18 +1375,14 @@ export async function checkConsultCaptureQuality(args: {
   // for it INSIDE the transaction above is a self-deadlock — see
   // lib/consult/providerMeter.ts.
   await flushConsultProviderMeter()
-  if (result.rejectedId) {
-    try {
-      await purgeConsultCaptureRawObject(
-        result.rejectedId,
-        new Date(Math.max(now.getTime(), Date.now())),
-        storage,
-      )
-    } catch {
-      // The durable purgeEligibleAt marker makes the cleanup job retry. Do not
-      // replace the bounded quality result with storage/provider detail.
-    }
-  }
+  // The refused photo, and any photo this one replaced. Never allowed to
+  // replace the bounded quality result with storage/provider detail — the
+  // durable purgeEligibleAt markers make the cleanup job retry.
+  await purgeRetiredCaptureObjects(
+    result.purgeIds,
+    new Date(Math.max(now.getTime(), Date.now())),
+    storage,
+  )
   return { quality: result.quality, replayed: result.replayed }
 }
 

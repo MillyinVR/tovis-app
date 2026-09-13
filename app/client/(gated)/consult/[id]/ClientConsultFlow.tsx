@@ -1,6 +1,6 @@
 'use client'
 
-import ConsultInspirationFocus from '@/app/_components/consult/ConsultInspirationFocus'
+import ConsultPhotoFocus from '@/app/_components/consult/ConsultPhotoFocus'
 import type { CropRect } from '@/lib/media/cropRect'
 import { visibleConsultThreadMessages } from '@/lib/consult/visibleThread'
 import { CONSULT_INSPIRATION_CLIENT_TEXT_LIMIT } from '@/lib/consult/inspiration/clientText'
@@ -725,6 +725,13 @@ export default function ClientConsultFlow({
   const uploadShot = (
     message: ConsultThreadPhotoRequestMessageDTO,
     file: File,
+    /**
+     * The part of the frame she chose to send, from the focus card. Omitted on
+     * a shot that has no focus step — and then the whole frame goes, exactly as
+     * it always has. The crop is baked into the BYTES here, so nothing outside
+     * it ever reaches the server.
+     */
+    crop?: CropRect,
   ) =>
     run(async () => {
       const shot = message.shot
@@ -733,6 +740,7 @@ export default function ClientConsultFlow({
         const prepared = await prepareImageForUpload(
           file,
           CONSULT_CAPTURE_MAX_BYTES,
+          crop,
         )
         const bytes = await prepared.arrayBuffer()
         const issued = await api<{
@@ -1152,6 +1160,7 @@ function ConsultThreadMessage({
   onUploadShot: (
     message: ConsultThreadPhotoRequestMessageDTO,
     file: File,
+    crop?: CropRect,
   ) => void
   onUseChartPhoto: (mediaAssetId: string) => void
   onChooseLook: ChooseConsultLook
@@ -1589,7 +1598,7 @@ function InspirationMessage({
       ) : null}
       {pending ? (
         <ThreadCard>
-          <ConsultInspirationFocus key={pending.url} src={pending.url} copy={focusCopy}
+          <ConsultPhotoFocus key={pending.url} src={pending.url} copy={focusCopy}
             busy={busy} onCancel={() => setPending(null)}
             onConfirm={(crop) => onUpload(message, pending.file, crop)} />
         </ThreadCard>
@@ -1705,14 +1714,37 @@ function PhotoRequestMessage({
   onUpload: (
     message: ConsultThreadPhotoRequestMessageDTO,
     file: File,
+    crop?: CropRect,
   ) => void
   guidedPhoto: GuidedPhotoPresentation | undefined
   onBuildLookNow: () => void
   onAddPhotosFirst: () => void
 }) {
   const { shot, slot } = message
+  // This card's own copy, which the page already resolved and handed down —
+  // not a second read of the brand next to it.
+  const focusCopy = copy.captureFocus
   const accepted = slot.state === 'ACCEPTED'
   const badge = photoBadge(slot.state)
+  /**
+   * The focus step, on the selfie only (Tori, 2026-09-13). It is the one photo
+   * chosen from a camera roll before anything else exists, so it is the one
+   * that arrives with other people in it — and the one she is most likely to
+   * be small in. The seven guided shots are taken to an instruction, and keep
+   * their one-tap upload.
+   */
+  const focusable = shot.key === CONSULT_EARLY_PHOTO_SHOT_KEY
+  const [pending, setPending] = useState<{ file: File; url: string } | null>(null)
+  useEffect(() => () => { if (pending) URL.revokeObjectURL(pending.url) }, [pending])
+  // Every control that hands this message a file goes through here, so "add"
+  // and "replace" cannot end up offering two different steps.
+  const choose = (file: File) => {
+    if (!focusable) {
+      onUpload(message, file)
+      return
+    }
+    setPending({ file, url: URL.createObjectURL(file) })
+  }
   // A second refusal must not look like the first — see captureRetakeGuidance.
   const guidance = consultSlotRetakeGuidance(slot)
   // 🔴 `shootable`, never `state` (P3b). A BLOCKED request is deliberately
@@ -1728,6 +1760,33 @@ function PhotoRequestMessage({
       {error}
     </p>
   ) : null
+
+  // Her photo, before a single byte goes up: send it as it is, or zoom in.
+  // First, because it is the answer to every other branch below — she has
+  // chosen a file and nothing else is being asked of her until she says which
+  // part of it to send.
+  if (pending) {
+    return (
+      <div className="grid gap-2" data-testid="consult-capture-focus">
+        <ThreadBubble author="APP">{shot.title}</ThreadBubble>
+        <ThreadCard>
+          <ConsultPhotoFocus
+            key={pending.url}
+            src={pending.url}
+            copy={focusCopy}
+            busy={busy}
+            fullFrameLabel={focusCopy.fullFrame}
+            onCancel={() => setPending(null)}
+            onConfirm={(crop) => {
+              onUpload(message, pending.file, crop)
+              setPending(null)
+            }}
+          />
+        </ThreadCard>
+        {errorLine}
+      </div>
+    )
+  }
 
   // The daylight break (Tori, 2026-09-12): a clean stop before the first
   // daylight photo when her look can already be built. Both buttons are hers;
@@ -1784,7 +1843,7 @@ function PhotoRequestMessage({
                 disabled={busy}
                 onChange={(event) => {
                   const file = event.target.files?.[0]
-                  if (file) onUpload(message, file)
+                  if (file) choose(file)
                   event.target.value = ''
                 }}
               />
@@ -1802,7 +1861,7 @@ function PhotoRequestMessage({
   // the one thing history still has to let her do.
   if (accepted) {
     return (
-      <div className="grid gap-2">
+      <div className="grid gap-2" data-testid={`consult-photo-${shot.key}`}>
         <ThreadBubble author="APP">{shot.title}</ThreadBubble>
         {preview ? (
           <div className="flex justify-end">
@@ -1837,7 +1896,7 @@ function PhotoRequestMessage({
                 disabled={busy}
                 onChange={(event) => {
                   const file = event.target.files?.[0]
-                  if (file) onUpload(message, file)
+                  if (file) choose(file)
                   event.target.value = ''
                 }}
               />
@@ -1929,7 +1988,7 @@ function PhotoRequestMessage({
             disabled={busy}
             onChange={(event) => {
               const file = event.target.files?.[0]
-              if (file) onUpload(message, file)
+              if (file) choose(file)
               event.target.value = ''
             }}
           />

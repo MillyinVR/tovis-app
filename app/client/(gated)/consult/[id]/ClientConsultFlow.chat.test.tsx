@@ -1,10 +1,36 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { webcrypto } from 'node:crypto'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { BrandProvider } from '@/lib/brand/BrandProvider'
 import { defaultClientConsultThreadCopy } from '@/lib/brand/defaultClientConsultThreadCopy'
-import { cardInspiration, threadFixture } from '@/tests/e2e/fixtures/consultInspiration'
+import { cardInspiration, threadFixture, withCardsAnswered } from '@/tests/e2e/fixtures/consultInspiration'
 import type { ConsultThreadDTO } from '@/lib/dto/consult'
 vi.mock('next/navigation', () => ({ useRouter: () => ({ replace: vi.fn(), push: vi.fn() }) }))
+// jsdom reports a natural size of 0 for every image, and the focus card cannot
+// offer a crop of a photo whose dimensions it does not know. Same stand-in the
+// focus card's own test uses.
+vi.mock('@/app/_components/media/RemoteImage', () => ({ default: function MockRemoteImage(props: {
+  src: string; alt: string; className?: string
+  onNaturalSize?: (width: number, height: number) => void
+  onError?: () => void
+}) {
+  return <img src={props.src} alt={props.alt} className={props.className}
+    onLoad={() => props.onNaturalSize?.(400, 500)} onError={props.onError} />
+} }))
+// jsdom has no canvas, and the real preparer is exercised by its own unit test.
+// What matters here is WHAT it is handed: the crop she confirmed.
+vi.mock('@/lib/media/prepareImageForUpload', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/media/prepareImageForUpload')>()),
+  prepareImageForUpload: vi.fn(async () => {
+    const prepared = new Blob(['prepared'], { type: 'image/jpeg' })
+    // jsdom's Blob has no arrayBuffer(); the uploader hashes the bytes.
+    Object.defineProperty(prepared, 'arrayBuffer', {
+      value: async () => new Uint8Array([1, 2, 3, 4]).buffer,
+    })
+    return prepared
+  }),
+}))
+import { prepareImageForUpload } from '@/lib/media/prepareImageForUpload'
 import ClientConsultFlow from './ClientConsultFlow'
 
 afterEach(() => vi.unstubAllGlobals())
@@ -234,4 +260,77 @@ it('sends follow-up words, and withholds the box on a question the pro wrote', a
   })
   // One card offered the box; the pro's did not, so there is exactly one.
   expect(screen.getAllByRole('textbox', { name: 'Say it in your own words' })).toHaveLength(1)
+})
+
+/**
+ * 🔴 Tori, 2026-09-13: "theres an option for replace but it doesnt actually
+ * allow the client to replace it." The server refused it (see
+ * lib/consult/captureContract.ts); this is the client half — the control has to
+ * reach the upload at all, and it now goes through the focus card on its way,
+ * so a photo with someone else in it can be cropped down to her.
+ */
+it('replaces the selfie through the focus card, sending only the part she chose', async () => {
+  vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })))
+  const NativeURL = URL
+  class LocalURL extends NativeURL {
+    static override createObjectURL = vi.fn(() => 'blob:selfie')
+    static override revokeObjectURL = vi.fn()
+  }
+  vi.stubGlobal('URL', LocalURL)
+  // jsdom ships neither randomUUID nor SubtleCrypto; the upload needs both.
+  vi.stubGlobal('crypto', webcrypto)
+  // Her cards are answered, so the settled selfie is history on the page —
+  // which is exactly where its "Replace this photo" link lives.
+  const thread = threadFixture({
+    inspiration: withCardsAnswered(cardInspiration),
+    earlyPhoto: {
+      shotKey: 'early_photo',
+      state: 'ACCEPTED',
+      captureId: 'capture-1',
+      qualityReasonCode: 'PASS',
+      qualityWarningCode: null,
+      retakeTip: null,
+      rawExpiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      purgedAt: null,
+      attemptCount: 1,
+      previousReasonCode: null,
+    },
+  })
+  const writes: string[] = []
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    const json = (value: unknown) => new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json' } })
+    if (url.endsWith('/thread')) return json({ ok: true, thread })
+    if (init?.method === 'POST' || init?.method === 'PUT') writes.push(url)
+    if (url.endsWith('/capture/uploads')) {
+      return json({ ok: true, upload: { uploadSessionId: 'upload-1', signedUrl: 'https://storage.test/put' } })
+    }
+    if (url === 'https://storage.test/put') return new Response('', { status: 200 })
+    if (url.endsWith('/capture/attach')) return json({ ok: true, captureId: 'capture-2' })
+    return json({ ok: true })
+  }))
+  const { unmount } = render(<BrandProvider><ClientConsultFlow consultId={thread.consultId} copy={defaultClientConsultThreadCopy} /></BrandProvider>)
+
+  // Scoped to the SELFIE: the guided shots in this fixture are accepted too,
+  // and each carries its own replace link.
+  const selfie = await screen.findByTestId('consult-photo-early_photo')
+  const replace = within(selfie).getByLabelText('Replace this photo')
+  fireEvent.change(replace, { target: { files: [new File(['selfie'], 'selfie.jpg', { type: 'image/jpeg' })] } })
+  // Nothing has been sent yet: the photo is hers until she says which part of
+  // it to use.
+  expect(await screen.findByText(defaultClientConsultThreadCopy.captureFocus.title)).toBeInTheDocument()
+  expect(writes).toEqual([])
+
+  fireEvent.load(screen.getByAltText(defaultClientConsultThreadCopy.captureFocus.photo))
+  fireEvent.click(screen.getByRole('button', { name: defaultClientConsultThreadCopy.captureFocus.center }))
+  fireEvent.click(screen.getByRole('button', { name: defaultClientConsultThreadCopy.captureFocus.confirm }))
+
+  await waitFor(() => expect(writes.some(url => url.endsWith('/capture/attach'))).toBe(true))
+  expect(writes.filter(url => url.endsWith('/capture/uploads'))).toHaveLength(1)
+  const [call] = vi.mocked(prepareImageForUpload).mock.calls
+  expect(call?.[2]).toMatchObject({ x: 0.3, y: 0.25, w: 0.4, h: 0.5 })
+  expect(LocalURL.revokeObjectURL).toHaveBeenCalledWith('blob:selfie')
+  // Unmounted HERE, while the object-URL stub is still in place: the page
+  // releases its local previews on the way out, and jsdom's own URL cannot.
+  unmount()
 })
