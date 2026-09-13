@@ -488,7 +488,7 @@ describe('a completed consult still takes input', () => {
     })
     expect(faceColor.consultSessionId).toBe(sessionId)
     expect(faceColor.schemaVersion).toBe(1)
-    expect(faceColor.promptVersion).toBe('face-color-companion-v1')
+    expect(faceColor.promptVersion).toBe('face-color-companion-v2')
     expect(faceColor.model).toBe('fake-analysis-model')
     expect(faceColor.payload).toMatchObject({
       skinDepth: { value: 'MEDIUM' },
@@ -519,11 +519,29 @@ describe('a completed consult still takes input', () => {
       payload: JSON.parse(JSON.stringify(unknownFaceColorProfile())) as Prisma.InputJsonObject }
     await expect(db.consultFaceColorProfile.create({ data: { ...base, analysisRevisionId: intake.id } })).rejects.toThrow()
     for (const skinDepth of [null, { value: null, confidence: { min: 0, max: 0.3 }, evidence: [] },
+      // Still refused on a v1 row: the selfie relaxation is scoped to v2, so
+      // every historical row stays under the rule it was written against.
       { value: 'MEDIUM', confidence: { min: 0.4, max: 0.7 }, evidence: ['early_photo'] },
       { value: 'MEDIUM', confidence: { min: 0.4, max: 0.7 }, evidence: ['hair_back'] },
       { value: 'MEDIUM', confidence: { min: 0.4, max: 0.7 }, evidence: ['eyes_closeup'] }]) {
       await expect(db.consultFaceColorProfile.create({ data: { ...base, payload: { ...base.payload, skinDepth } } })).rejects.toThrow()
     }
+    // ...and ACCEPTED on a v2 row, which is the whole point of the relaxation.
+    // Proven here rather than assumed: `consult_face_color_profile_guard`
+    // admits early_photo for every field, so this reads as settled until
+    // `ConsultFaceColorProfile_color_requires_face_view` refuses the write.
+    const v2 = await db.consultFaceColorProfile.create({ data: { ...base,
+      promptVersion: 'face-color-companion-v2',
+      payload: { ...base.payload,
+        skinDepth: { value: 'MEDIUM', confidence: { min: 0.3, max: 0.45 }, evidence: ['early_photo'] } } } })
+    await db.consultFaceColorProfile.delete({ where: { id: v2.id } })
+    // The cast field is refused from the selfie on BOTH arms.
+    await expect(db.consultFaceColorProfile.create({ data: { ...base,
+      promptVersion: 'face-color-companion-v2',
+      payload: { ...base.payload,
+        surfaceOvertone: { value: 'BALANCED', confidence: { min: 0.3, max: 0.45 }, evidence: ['early_photo'] } } } }))
+      .rejects.toThrow()
+
     const otherSessionId = await completedConsult('c2-other-session')
     await expect(db.consultFaceColorProfile.create({ data: { ...base, consultSessionId: otherSessionId } })).rejects.toThrow()
     const row = await db.consultFaceColorProfile.create({ data: base })

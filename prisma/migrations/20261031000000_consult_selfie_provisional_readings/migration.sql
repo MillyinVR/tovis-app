@@ -127,3 +127,35 @@ ALTER TABLE "ConsultFaceColorProfile"
     "promptVersion" = 'face-color-companion-v1'
     OR "promptVersion" = 'face-color-companion-v2'
   ) IS TRUE);
+
+-- 3) The companion's own colour-evidence pin --------------------------------
+-- 🔴 THE FOURTH PIN, and the one that would have refused the WRITE.
+-- `consult_face_color_profile_guard` admits `early_photo` for every field, so
+-- it looked settled — but this table ALSO carries
+-- `ConsultFaceColorProfile_color_requires_face_view`, which contains both
+-- colour fields to face_front/face_side. A skinDepth citing the selfie would
+-- have been refused here, after the companion call was paid for. Found by the
+-- integration suite, not by reading the guard.
+--
+-- Widened for skinDepth ONLY, and SCOPED TO v2, so every v1 row stays under
+-- exactly the rule it was written against. surfaceOvertone is unchanged in
+-- both arms: it IS a colour cast, and the selfie is allowed in any light.
+-- Existing rows are all v1 with face-view evidence, so the ADD validates
+-- without a rewrite.
+
+ALTER TABLE "ConsultFaceColorProfile"
+  DROP CONSTRAINT IF EXISTS "ConsultFaceColorProfile_color_requires_face_view";
+
+ALTER TABLE "ConsultFaceColorProfile"
+  ADD CONSTRAINT "ConsultFaceColorProfile_color_requires_face_view"
+  CHECK ((
+    (
+      (payload #> '{skinDepth,evidence}') <@ '["face_front", "face_side"]'::jsonb
+      OR (
+        "promptVersion" = 'face-color-companion-v2'
+        AND (payload #> '{skinDepth,evidence}')
+              <@ '["face_front", "face_side", "early_photo"]'::jsonb
+      )
+    )
+    AND (payload #> '{surfaceOvertone,evidence}') <@ '["face_front", "face_side"]'::jsonb
+  ) IS TRUE);
