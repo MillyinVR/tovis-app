@@ -172,8 +172,13 @@ function uniqueStrings(raw: unknown, allowed: readonly string[], max: number, la
     if (raw.length) console.warn('consult look plan listed items against an empty vocabulary; read as none', { label, count: raw.length })
     return []
   }
-  if (raw.length < min || raw.length > max) badOutput(`${label}_count`)
-  const values = raw.map(value => {
+  // A list that repeats itself is not a longer list, so the bounds are checked
+  // AFTER the repeats are collapsed, below. The guard here is only against an
+  // absurd array: the grammar's `maxItems` does not survive the boundary, and
+  // resolving an unbounded list against the menu is work nobody asked for.
+  // More than twice the allowance is a wrong answer, not a repeat.
+  if (raw.length > max * 2) badOutput(`${label}_count`)
+  const resolved = raw.map(value => {
     const exact = allowed.find(candidate => candidate === value)
     if (exact) return exact
     // The enum is in the grammar, and still a name arrives that is not
@@ -194,7 +199,22 @@ function uniqueStrings(raw: unknown, allowed: readonly string[], max: number, la
     console.error('consult look plan named something outside its vocabulary', { label, received: value, allowed })
     return badOutput(`${label}_enum`)
   })
-  if (new Set(values).size !== values.length) badOutput(`${label}_duplicate`)
+  // 🔴 Naming the same thing twice used to discard the whole paid analysis.
+  // Prod, 2026-09-13 00:08Z: one visit listed "iTip Install" twice, both
+  // resolved to the menu row "iTip install", and `visit_services_duplicate`
+  // threw away four model calls that had all answered — the first plan to get
+  // that far. Collapsing a repeat is lossless in both vocabularies this helper
+  // serves: a visit that lists a service twice is one step, and a path that
+  // cites a feature twice leans on it once. The repeat is logged, not obeyed.
+  const values = [...new Set(resolved)]
+  if (values.length !== resolved.length) {
+    console.warn('consult look plan listed the same item twice; read as one', {
+      label,
+      listed: resolved.length,
+      kept: values.length,
+    })
+  }
+  if (values.length < min || values.length > max) badOutput(`${label}_count`)
   return values
 }
 
