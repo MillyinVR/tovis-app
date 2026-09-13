@@ -185,6 +185,14 @@ export type ConsultBookingProposalDraft =
       totalDurationMinutes: number
       /** Sum of the line prices — the client-facing "Starting at" figure. */
       startingAtPrice: Prisma.Decimal
+      /**
+       * Did the pinned analysis route to safety prerequisites? Carried rather
+       * than re-derived, because the recommendations this was read from are
+       * pinned to the estimate's analysis revision and a later intake edit must
+       * not be able to make a served proposal look safer than the one the
+       * client was shown. Drives `safetyNote` on the wire.
+       */
+      safetyRouted: boolean
       /** The floor plus the enhancements she opted into. Nothing else. */
       lines: ConsultBookingProposalLineDraft[]
       /**
@@ -308,6 +316,11 @@ export function deriveConsultBookingProposal(args: {
   estimate: ConsultBookingProposalEstimateInput | null
   /** The stored analysis's own recommendations. See the type's comment. */
   analysisRecommendations: ConsultBookingProposalAnalysisInput
+  /**
+   * The look plan's own safety fact, for the flow where the recommendations
+   * cannot carry it. See `loadProposalDerivationInputs`.
+   */
+  lookPlanSafetyRouted?: boolean
   /** Which enhancements are on this booking (B7). See the type's comment. */
   enhancementSelection: ConsultBookingProposalEnhancementSelection
 }): ConsultBookingProposalDraft {
@@ -318,18 +331,33 @@ export function deriveConsultBookingProposal(args: {
     return refused('ESTIMATE_REFUSED', locationType)
   }
 
-  // 🔴 Rule 1. The estimate for a safety-routed analysis is a real, honest
-  // pro-facing answer — the test lines AND the chemical floor — and it is
-  // precisely NOT a thing to hand a client as a bookable price at 3 AM, because
-  // that floor is a service the analysis explicitly declined to recommend yet.
+  // 🔴 Rule 1 USED TO REFUSE HERE, and no longer does (Tori, 2026-09-13, asked
+  // twice with the consequence stated in full). Its reasoning still reads
+  // correctly — a safety-routed estimate carries a floor the analysis declined
+  // to recommend — but it was the second of two gates that stopped a client
+  // even ASKING, and Tori's position is that the pro's own booking review is
+  // where that judgement belongs, not a silent refusal upstream of it.
   //
-  // The signal is the analysis's own SERVICE INTENT, resolved through
-  // `analysisRoutedToSafetyPrerequisites` — never a line's NAME (a renamed
-  // service would walk straight past that) and never `safetyFlags` (always
-  // non-empty; see the input type's comment).
-  if (analysisRoutedToSafetyPrerequisites(args.analysisRecommendations)) {
-    return refused('SAFETY_REVIEW_REQUIRED', locationType)
-  }
+  // 🔴 What must remain true for that to be safe: she has to be TOLD a test
+  // comes first. `safetyRouted` below drives `safetyNote` on the wire, which
+  // both commit surfaces render (web and iOS).
+  //
+  // It reads TWO sources on purpose, because neither covers both flows:
+  //   * the recommendation intents, pinned to the estimate's analysis revision
+  //     — the ordinary consult; and
+  //   * the look plan's own `safetyRouted` — Book the Look, where
+  //     `resolveRecommendations` collapses a routed analysis to one
+  //     CONSULTATION and returns early, so the PATCH_TEST / STRAND_TEST
+  //     intents are never stored and the first source answers false for every
+  //     such consult. Reading only the intents showed no warning on exactly
+  //     the flow these gates were removed from.
+  //
+  // If that chain is ever broken, this refusal is the thing that was holding
+  // the line — put it back.
+  // Either source is sufficient, and for a Book the Look consult only the
+  // second one ever answers true.
+  const safetyRouted = analysisRoutedToSafetyPrerequisites(args.analysisRecommendations) ||
+    args.lookPlanSafetyRouted === true
 
   if (args.estimate.lines.length === 0) {
     // An ESTIMATED estimate always carries its floor (B3's DB trigger says so).
@@ -457,6 +485,7 @@ export function deriveConsultBookingProposal(args: {
     bufferMinutes: args.bufferMinutes,
     totalDurationMinutes,
     startingAtPrice,
+    safetyRouted,
     lines,
     recommendations,
   }
@@ -477,6 +506,7 @@ export async function buildConsultBookingProposal(
     locationType: ServiceLocationType
     estimate: ConsultBookingProposalEstimateInput | null
     analysisRecommendations: ConsultBookingProposalAnalysisInput
+    lookPlanSafetyRouted?: boolean
     enhancementSelection: ConsultBookingProposalEnhancementSelection
   },
 ): Promise<ConsultBookingProposalDraft> {
@@ -508,6 +538,7 @@ export async function buildConsultBookingProposal(
     menu,
     estimate: args.estimate,
     analysisRecommendations: args.analysisRecommendations,
+    ...(args.lookPlanSafetyRouted === undefined ? {} : { lookPlanSafetyRouted: args.lookPlanSafetyRouted }),
     enhancementSelection: args.enhancementSelection,
   })
 }

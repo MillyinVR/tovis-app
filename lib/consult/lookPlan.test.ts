@@ -53,7 +53,7 @@ function context() {
     menu: [offering('Extensions', 'extensions'), offering('Dimensional color'), offering('Layered cut', 'cut')],
     observations: observations(),
     requiredHistoryComplete: true, startingPointSufficient: true, goalConfirmed: true, maintenanceDecisionResolved: true,
-    requiresProfessionalReview: false,
+    historyUnknownToClient: false, safetyRouted: false,
   }
 }
 
@@ -118,19 +118,41 @@ describe('a look plan follows the desired result', () => {
     expect(result.status).toBe('NO_OFFERING')
   })
 
-  it.each(['requiredHistoryComplete', 'startingPointSufficient', 'goalConfirmed', 'maintenanceDecisionResolved'] as const)(
+  it.each(['requiredHistoryComplete', 'goalConfirmed', 'maintenanceDecisionResolved'] as const)(
     'a model cannot override missing %s', field => {
       const result = resolveConsultLookPlan(plan(), { ...context(), [field]: false })
       expect(result.status).toBe('NEEDS_INPUT')
       expect(result.provisional).toBe(true)
+      expect(result.choosable).toBe(false)
       expect(result.nextStep).not.toBe(plan().nextStep)
     },
   )
 
-  it('existing safety review wins over a claimed exact, ready path and all other gates', () => {
-    const result = resolveConsultLookPlan(plan(), { ...context(), requiresProfessionalReview: true, requiredHistoryComplete: false })
+  // 🔴 Tori, 2026-09-13: "we absolutely can not make the pictures be a blocker".
+  // The reading is still honestly marked thin — she is told so, and told what
+  // daylight would add — but the photograph does not touch her permission.
+  it('a thin starting-point photo marks the plan provisional and still lets her book', () => {
+    const result = resolveConsultLookPlan(plan(), { ...context(), startingPointSufficient: false })
+    expect(result.status).toBe('NEEDS_INPUT')
+    expect(result.provisional).toBe(true)
+    expect(result.choosable).toBe(true)
+    expect(result.paths).toHaveLength(1)
+  })
+
+  it('never turns a thin photo into the next thing she has to do', () => {
+    const result = resolveConsultLookPlan(plan(), { ...context(), startingPointSufficient: false })
+    expect(result.nextStep).not.toMatch(/photo/i)
+  })
+
+  // Safety ROUTING no longer reaches this function at all (Tori, 2026-09-13):
+  // it is carried by the recommendations and surfaces on the booking. What
+  // remains is a history the CLIENT said she does not know, which no routing
+  // rule reads — so the pro resolves it, and she still sees the look.
+  it('an unknown history needs the pro, and keeps the paths it found', () => {
+    const result = resolveConsultLookPlan(plan(), { ...context(), historyUnknownToClient: true })
     expect(result.status).toBe('PRO_REVIEW')
-    expect(result.paths).toEqual([])
+    expect(result.choosable).toBe(false)
+    expect(result.paths).toHaveLength(1)
     expect(result.nextStep).toContain('before we can reserve')
   })
 })
@@ -348,7 +370,12 @@ describe('immutable look-plan snapshots', () => {
     const saved = resolveConsultLookPlan(plan(), context())
     expect(() => normalizeStoredConsultLookPlan({ ...saved, provisional: true }, observations())).toThrow()
     expect(() => normalizeStoredConsultLookPlan({ ...saved, paths: [] }, observations())).toThrow()
-    expect(() => normalizeStoredConsultLookPlan({ ...saved, status: 'PRO_REVIEW', provisional: true }, observations())).toThrow()
+    // PRO_REVIEW carrying paths is VALID now — the pro reviews the look she
+    // can already see. What stays invalid is permission with nothing behind it.
+    expect(normalizeStoredConsultLookPlan({ ...saved, status: 'PRO_REVIEW', provisional: true, choosable: false }, observations()).paths)
+      .toHaveLength(1)
+    expect(() => normalizeStoredConsultLookPlan({ ...saved, status: 'PRO_REVIEW', provisional: true, choosable: true }, observations())).toThrow()
+    expect(() => normalizeStoredConsultLookPlan({ ...saved, paths: [], choosable: true }, observations())).toThrow()
     expect(() => normalizeStoredConsultLookPlan({ ...saved, paths: [{ ...saved.paths[0], sessionCount: 2 }] }, observations())).toThrow()
   })
 

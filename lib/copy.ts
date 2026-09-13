@@ -97,6 +97,20 @@ export const COPY = {
      * lives until the pro finalizes it in the chair (decision 8).
      */
     receiptTitle: 'Your consultation booking',
+    /**
+     * 🔴 Shown exactly when the analysis routed to safety prerequisites — a
+     * reported reaction, or recent/unknown colour chemistry on the hair.
+     *
+     * Until 2026-09-13 this state REFUSED the proposal outright
+     * (`SAFETY_REVIEW_REQUIRED`). Tori's call is that the pro's own booking
+     * review is where that judgement belongs, so the client may now ask. This
+     * sentence is what replaces the refusal on her screen: she is told, before
+     * she commits, that a test comes first. It is not a warning decoration —
+     * removing it puts her in a chemical appointment she was never told had a
+     * prerequisite.
+     */
+    safetyTestFirst:
+      'Your pro needs to do a quick skin or strand test before this appointment.',
   },
 
   /**

@@ -95,7 +95,18 @@ export const CONSULT_ANALYSIS_SCHEMA_VERSION = 6
 // accompanying migration 20261031000000 teaches the payload guard the v9
 // prompt AND the eyeColor evidence label, scoped to v9 so the v7/v8 arms are
 // unchanged — the guard refuses `early_photo` there to this day.
-export const CONSULT_ANALYSIS_PROMPT_VERSION = 'service-analysis-v9'
+//
+// v10 (2026-09-13) gives the PROFILE call the positive selfie clause the face
+// colour COMPANION already had. From one warm-lit selfie in prod the companion
+// read 8 of its 9 observations and the profile read 5 of its 12 — the same
+// photograph, and the companion reported `chinContour` and `faceWidthBalance`
+// where the profile said UNKNOWN for `jawline` and `faceProportion`. The only
+// difference was the sentence. This is prompt-only: geometry has no per-field
+// view rule in `sanitizeProfile` (only `eyeColor` does) and none in the guard
+// (only eyeColor and the two hair levels), and `consult_analysis_evidence_valid`
+// has always accepted `early_photo` — verified against the live database
+// before the change, not inferred from the TypeScript.
+export const CONSULT_ANALYSIS_PROMPT_VERSION = 'service-analysis-v10'
 export const CONSULT_FACE_COLOR_SCHEMA_VERSION = 1
 // v2 (2026-09-13): skinDepth may be read provisionally from the early selfie;
 // surfaceOvertone still may not. Pinned by the
@@ -1271,7 +1282,8 @@ export const CONSULT_ANALYSIS_PROFILE_SYSTEM_PROMPT = [
   'Contrast is the backbone of the profile: judge it between skin, hair and eyes together, not from one of them.',
   'Face proportion, jawline and forehead proportion describe the balance of the face as a whole; feature balance describes whether the features read soft, blended or structured.',
   'Eye color describes only the visible iris, never identity or natural color behind possible contacts. Read it from a clear face_front, face_side or eyes_closeup photograph. Where none of those was supplied, you MAY read it from a clear early_photo instead and cite that: which colour family an iris belongs to survives ordinary indoor light. Say how sure you are in the confidence range — a selfie-backed reading is a provisional one, not a confident one. If the iris is too small, obscured, filtered, color-shifted or inconsistent, use UNKNOWN. Never infer it from hair, skin, intake, or the inspiration.',
-  'Eye shape, eye spacing, brow density and brow shape read from the eyes_closeup view where one is supplied, and from face_front otherwise; if neither is supplied they are UNKNOWN.',
+  'Eye shape, eye spacing, brow density and brow shape read from the eyes_closeup view where one is supplied, and from face_front otherwise. Where neither was supplied you MAY read them from a clear early_photo and cite that, keeping the confidence range low to say the reading is provisional; use UNKNOWN only when the framing or angle genuinely cannot support the distinction.',
+  'An early_photo supports provisional GEOMETRY — face proportion, forehead proportion, jawline, feature balance, eye shape and eye spacing. The shape of a face survives ordinary indoor light: read what the selfie can actually show, cite early_photo, and keep the confidence range low. UNKNOWN is for what you cannot see, not for a photograph you would have preferred to be better. Skin undertone and color season are the exception — those a warm room really does invent, so from an early_photo alone they stay UNKNOWN.',
   'A capture may be labelled with a color warning. That view passed the quality gate but its light is not trustworthy for color: widen the confidence range on any observation that leans on it — undertone, season and contrast especially — and prefer a view without a warning when one is supplied.',
   'Do not describe the client’s inspiration reference, her goal, or any service. You are not being asked what to do about her hair.',
 ].join(' ')

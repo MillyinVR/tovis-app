@@ -1121,7 +1121,54 @@ export type ConsultLookPlanDTO = {
   schemaVersion: 1
   tier: 'EXACT' | 'CLOSE' | 'TOWARD'
   status: 'READY_TO_CHOOSE' | 'NEEDS_INPUT' | 'PRO_REVIEW' | 'NO_OFFERING'
+  /**
+   * Is this reading thin — built on fewer or poorer photographs than the plan
+   * would like? Derived from `status`, and pinned to that derivation by
+   * `consult_look_plan_snapshot_valid`. It drives the "Draft" label, the
+   * daylight caveat, and the provisional-intake allowance in
+   * `writeBoundary`/`immutableResult`. It is NOT permission to book — see
+   * `choosable`.
+   */
   provisional: boolean
+  /**
+   * May the client choose and book this plan?
+   *
+   * 🔴 Deliberately SEPARATE from `provisional` (Tori, 2026-09-13: "we
+   * absolutely can not make the pictures be a blocker"). Photograph quality
+   * makes a reading provisional — that is honest and stays — but it must never
+   * decide whether she may book. The two questions had been one field, so a
+   * warm-lit selfie silently withdrew the booking.
+   *
+   * Answered only by things she can actually act on: has she answered the
+   * intake and safety questions, has she said what she wants, and is there a
+   * path on this pro's menu to choose. Never by a photograph.
+   *
+   * Absent on rows written before 2026-09-13; `normalizeStoredConsultLookPlan`
+   * reads those as `status === 'READY_TO_CHOOSE'`, which is exactly what the
+   * four gates asked of them at the time.
+   */
+  choosable: boolean
+  /**
+   * Did this consult route to safety prerequisites — a reported reaction, or
+   * recent/unknown colour chemistry?
+   *
+   * 🔴 It has to be stored HERE, on the plan, because for a look-planning
+   * session it exists nowhere else. `resolveRecommendations` collapses a
+   * safety-routed look-planning analysis to a single CONSULTATION
+   * recommendation and returns early, so the PATCH_TEST / STRAND_TEST intents
+   * that `analysisRoutedToSafetyPrerequisites` looks for are never written —
+   * that helper answers FALSE for every Book the Look consult, safety-routed
+   * or not. Reading it as the signal here would silently show no warning on
+   * exactly the flow that needs one.
+   *
+   * Decided under the session lock beside every other plan fact and stored
+   * immutably, so a later intake edit cannot make a served plan look safer
+   * than the one she was shown.
+   *
+   * Absent on rows written before 2026-09-13, which read as false — correct,
+   * because such a plan could not be booked at all.
+   */
+  safetyRouted: boolean
   summary: string
   nextStep: string
   paths: Array<{
@@ -1602,6 +1649,17 @@ export type ConsultBookingProposalDTO = {
    * here cannot disagree with the booking that follows.
    */
   commitNote: string
+  /**
+   * Present exactly when the pinned analysis routed to safety prerequisites,
+   * null otherwise. The sentence is `COPY.consultProposal.safetyTestFirst`.
+   *
+   * 🔴 This is the client-facing half of what used to be an outright refusal
+   * (`SAFETY_REVIEW_REQUIRED`, removed 2026-09-13 on Tori's explicit call). The
+   * booking is allowed now, so the disclosure is the only thing telling her a
+   * test comes first. Every surface that renders a proposal must render this
+   * when it is non-null.
+   */
+  safetyNote: string | null
   lines: ConsultBookingProposalLineDTO[]
   /**
    * Book the Look, B7 — the enhancements the analysis recommends on top of the

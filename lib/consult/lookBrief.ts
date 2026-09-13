@@ -64,7 +64,7 @@ export async function appendLockedConsultLookBriefVersion(tx: Prisma.Transaction
   const professionalPlanReason = args.professionalPlanReason ?? (professionalPlan ? previous?.professionalPlanReason : null)
   const plan = effectiveConsultLookPlan(analysis, { professionalPlan, invalidatedProfessionalPlan })
   if (!plan) throw new ConsultWriteError('INVALID_STATE', 'This consultation has no look plan.')
-  if (args.selectedPathIndex !== undefined && (plan.provisional || plan.status !== 'READY_TO_CHOOSE' ||
+  if (args.selectedPathIndex !== undefined && (!plan.choosable ||
     !Number.isInteger(args.selectedPathIndex) || args.selectedPathIndex < 0 || !plan.paths[args.selectedPathIndex] || !args.selectedLocationType)) {
     throw new ConsultWriteError('INVALID_STATE', 'Confirm the remaining details before choosing this look.')
   }

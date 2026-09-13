@@ -81,7 +81,12 @@ export async function authorProfessionalLookPlan(args: {
       if (!offering) throw new ConsultWriteError('INVALID_REQUEST', 'Choose active services from your own menu.')
       return { offeringId: offering.id, serviceId: offering.serviceId, serviceCategoryId: offering.service.categoryId, serviceName: offering.service.name }
     }) }))
-    const plan: ConsultLookPlanDTO = { schemaVersion: 1, tier: input.tier, status: 'READY_TO_CHOOSE', provisional: false,
+    // The pro authored this one by hand, so it is neither thin nor waiting on
+    // anything she has to answer.
+    const plan: ConsultLookPlanDTO = { schemaVersion: 1, tier: input.tier, status: 'READY_TO_CHOOSE', provisional: false, choosable: true,
+      // Inherited, never re-decided: a pro redrawing the plan does not clear a
+      // patch test the intake called for, and the client's booking still says so.
+      safetyRouted: analysis.lookPlan?.safetyRouted ?? false,
       summary: input.summary, nextStep: 'Review your pro’s plan, choose this look, and confirm this version.',
       paths: [{ title: input.title, whyThisWorksForYou: input.whyThisWorksForYou, featureEvidence: [], sessionCount: visits.length, visits }] }
     try { normalizeStoredConsultLookPlan(plan, analysis) }

@@ -1,6 +1,6 @@
 import type { ConsultLookBriefVersionDTO, ConsultLookPlanDTO } from '@/lib/dto/consult'
 export const plan: ConsultLookPlanDTO = {
-  schemaVersion: 1, tier: 'EXACT', status: 'READY_TO_CHOOSE', provisional: false,
+  schemaVersion: 1, tier: 'EXACT', status: 'READY_TO_CHOOSE', provisional: false, choosable: true, safetyRouted: false,
   summary: 'Warm dimension and movement while keeping your length.', nextStep: 'Choose the direction you love.',
   paths: [{ title: 'Buttery blonde with soft layers', whyThisWorksForYou: 'Keeps your natural root and the length you love.',
     featureEvidence: [], sessionCount: 2, visits: [0, 1].map(() => ({ steps: [

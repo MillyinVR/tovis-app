@@ -53,6 +53,14 @@ function StartingAtBlock({ proposal }: { proposal: ConsultBookingProposalDTO }) 
       <p className="mt-2 text-[12px] font-semibold leading-5 text-textSecondary">
         {proposal.estimateNote} {proposal.proDecidesNote}
       </p>
+      {/* The prerequisite, before she commits. This booking is allowed now
+          where it used to be refused outright, so this sentence is the only
+          thing that tells her a test comes first. */}
+      {proposal.safetyNote ? (
+        <p className="mt-2 rounded-lg bg-toneWarn/10 px-3 py-2 text-[12px] font-semibold leading-5 text-textPrimary">
+          {proposal.safetyNote}
+        </p>
+      ) : null}
     </div>
   )
 }

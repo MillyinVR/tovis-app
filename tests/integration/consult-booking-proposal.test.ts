@@ -487,10 +487,16 @@ describe('the proposal a client is shown', () => {
     expect(proposal.reason).toBe('PRO_SCHEDULING_NOT_READY')
   })
 
-  // 🔴 The whole reason B4 does not simply book the estimate. When the analysis
-  // routes to safety prerequisites, the estimate legitimately contains the
-  // chemical floor — a service the analysis explicitly declined to recommend.
-  it('refuses entirely when the analysis routed to safety prerequisites', async () => {
+  // 🔴 This USED to refuse entirely (`SAFETY_REVIEW_REQUIRED`). Tori's call,
+  // 2026-09-13, asked twice with the consequence stated in full: the pro's own
+  // booking review is where that judgement belongs, so she may now ask.
+  //
+  // What this test now guards is the thing that makes that safe — the client
+  // is TOLD a test comes first. End to end, from a reported prior reaction in
+  // the intake all the way to the sentence on the wire. If `safetyNote` ever
+  // comes back null here, the disclosure is gone and she is booking a chemical
+  // appointment with no warning at all.
+  it('proposes when the analysis routed to safety prerequisites, and says a test comes first', async () => {
     // Driven from the INTAKE, which is the real routing input: a reported prior
     // reaction requires a patch test, and the analysis then replaces every
     // colour recommendation with the tests plus a professional review.
@@ -513,16 +519,20 @@ describe('the proposal a client is shown', () => {
     const proposal = (await body(response)).proposal as {
       available: boolean
       reason: string | null
+      proposal: { safetyNote: string | null } | null
     }
-    expect(proposal.available).toBe(false)
-    expect(proposal.reason).toBe('SAFETY_REVIEW_REQUIRED')
+    expect(proposal.available).toBe(true)
+    expect(proposal.reason).toBe(null)
+    // 🔴 The load-bearing assertion. Note this consult is a LOOK-PLANNING one,
+    // where `analysisRoutedToSafetyPrerequisites` cannot answer: the analysis
+    // stores a single CONSULTATION recommendation, not the PATCH_TEST intent.
+    // The note is here only because the PLAN carries the fact.
+    expect(proposal.proposal?.safetyNote).toBeTruthy()
 
-    // And the commit path refuses too — the preview is not the only gate.
+    // And the commit path is open too — she can actually place the hold, where
+    // it used to refuse with CONSULT_PROPOSAL_UNAVAILABLE.
     const start = futureLocal(3, 10)
-    const code = await refusalCode(() =>
-      holdFromConsult({ start, consultId }),
-    )
-    expect(code).toBe('CONSULT_PROPOSAL_UNAVAILABLE')
+    await expect(holdFromConsult({ start, consultId })).resolves.toBeDefined()
   })
 })
 
