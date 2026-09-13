@@ -88,3 +88,7 @@ artifacts/
 # references are comments — so this breaks nothing. Re-track a subpath with
 # `git add -f docs/<path>` if something ever needs to be public again.
 docs/
+
+# A real client's face, pulled from the private bucket for a live replay.
+# NEVER commit this — see tests/live/consult-selfie-replay.test.ts.
+tests/live/.fixtures/
