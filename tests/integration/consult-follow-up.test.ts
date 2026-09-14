@@ -570,6 +570,82 @@ describe('🔴 the fallback, forced', () => {
       await db.consultFollowUpRound.count({ where: { consultSessionId: sessionId } }),
     ).toBe(0)
     expect(ofKind((await thread(sessionId)).messages, 'FOLLOW_UP')).toHaveLength(0)
+
+    // 🔴 …and she is TOLD that, which is the whole of item 6. On 2026-09-13
+    // this exact path ran in production and the thread simply stopped: no
+    // round, no sentence, no way to tell the product working from the product
+    // broken. The conclusion is RECORDED by the code that reached it —
+    // re-deriving it is impossible, because the vocabulary was not empty here
+    // either, only its safety subset was.
+    const concluded = await db.consultSession.findUniqueOrThrow({
+      where: { id: sessionId },
+      select: { followUpConcludedAt: true },
+    })
+    expect(concluded.followUpConcludedAt).toBeInstanceOf(Date)
+    expect(
+      (await thread(sessionId)).messages.some(
+        (m) => m.kind === 'TEXT' && m.text.includes('No questions from me this time'),
+      ),
+    ).toBe(true)
+  })
+
+  it('🔴 stays silent when no round was ATTEMPTED — an absence is not a conclusion', async () => {
+    // The same observable state as the test above — zero rounds — and the
+    // opposite meaning. Nothing has run yet, so nothing may be claimed: saying
+    // "I've got everything I need" over a pipeline that has not started (or
+    // that crashed) is the lie the recorded marker exists to prevent.
+    const sessionId = await completedConsult('p5g-not-attempted')
+
+    const session = await db.consultSession.findUniqueOrThrow({
+      where: { id: sessionId },
+      select: { followUpConcludedAt: true },
+    })
+    expect(session.followUpConcludedAt).toBeNull()
+
+    const messages = (await thread(sessionId)).messages
+    expect(ofKind(messages, 'FOLLOW_UP')).toHaveLength(0)
+    expect(
+      messages.some(
+        (m) => m.kind === 'TEXT' && m.text.includes('No questions from me this time'),
+      ),
+    ).toBe(false)
+  })
+
+  it('withdraws the conclusion when a round IS written afterwards', async () => {
+    // The marker must never outlive its truth. A consult that concluded
+    // "nothing to ask", then had a question become askable again, must not
+    // carry a sentence that contradicts the card underneath it.
+    const sessionId = await completedConsult('p5g-withdrawn')
+    await generateConsultFollowUpRound(
+      { consultSessionId: sessionId, actor: client() },
+      { provider: failingProvider },
+    )
+    expect(
+      (await db.consultSession.findUniqueOrThrow({
+        where: { id: sessionId },
+        select: { followUpConcludedAt: true },
+      })).followUpConcludedAt,
+    ).toBeInstanceOf(Date)
+
+    await unanswerIntakeQuestion(sessionId, 'prior_lightening')
+    const second = await generateConsultFollowUpRound(
+      { consultSessionId: sessionId, actor: client() },
+      { provider: failingProvider },
+    )
+    expect(second.created).toBe(true)
+    expect(
+      (await db.consultSession.findUniqueOrThrow({
+        where: { id: sessionId },
+        select: { followUpConcludedAt: true },
+      })).followUpConcludedAt,
+    ).toBeNull()
+
+    const messages = (await thread(sessionId)).messages
+    expect(
+      messages.some(
+        (m) => m.kind === 'TEXT' && m.text.includes('No questions from me this time'),
+      ),
+    ).toBe(false)
   })
 })
 

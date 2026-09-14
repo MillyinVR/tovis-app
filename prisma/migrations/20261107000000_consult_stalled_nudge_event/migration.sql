@@ -1,0 +1,15 @@
+-- AlterEnum
+-- The §8.1 re-engagement trigger for a consult the client STARTED and never
+-- finished.
+--
+-- Distinct from SAVED_LOOK_CONSULT_NUDGE, which is about a look she saved and
+-- never booked. This one is about work already in progress: on 2026-09-13, six
+-- of the seven consults ever started in production were sitting unfinished, and
+-- nothing in the product would ever touch them again — every consult
+-- notification requires a COMPLETED consult and a live booking.
+--
+-- Additive enum value. Postgres allows ALTER TYPE … ADD VALUE inside a
+-- transaction block (PG 12+) as long as the new value is not USED in the same
+-- transaction — nothing here uses it. Precedent:
+-- 20260903000000_waitlist_offer_expiry_events.
+ALTER TYPE "NotificationEventKey" ADD VALUE IF NOT EXISTS 'CONSULT_STALLED_NUDGE';

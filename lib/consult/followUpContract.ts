@@ -150,6 +150,12 @@ export type ConsultFollowUpState = {
   fallbackActive: boolean
   planVersion: number
   moreRoundsAvailable: boolean
+  /**
+   * True when the system has finished asking and said so — nothing is open and
+   * a conclusion was recorded. The thread turns this into a sentence; an
+   * absence of rounds on its own must never be read as this.
+   */
+  nothingLeftToAsk: boolean
 }
 
 // ── Reading a stored round ──────────────────────────────────────────────────
@@ -273,6 +279,12 @@ type FollowUpSituation = {
   followUpAnswers: Record<string, string[]>
   /** The session, in the shape the input-window rule reads. */
   session: ConsultOpenWindowSession
+  /**
+   * When a round was attempted and honestly concluded there was nothing left
+   * to ask, or null. Recorded rather than derived — see the schema note on
+   * `ConsultSession.followUpConcludedAt` for why a reader cannot work it out.
+   */
+  followUpConcludedAt: Date | null
   /** The reference as the vision model read it, or null when unread. */
   inspiration: ConsultInspirationAnalysisAttributesDTO | null
   /** Her own hair as the analysis read it, or null before the first plan. */
@@ -300,6 +312,41 @@ export type GenerateConsultFollowUpRoundResult =
         | 'NOTHING_LEFT_TO_ASK'
         | 'ALREADY_EXISTS'
     }
+
+/**
+ * Record — or withdraw — "there is nothing left to ask".
+ *
+ * 🔴 Written by the code that REACHED the conclusion, because no reader can
+ * reach it. Zero rounds looks identical whether the round has not been bought
+ * yet, the attempt crashed, or the attempt ran and found nothing; only the
+ * third may be said to the client. Re-deriving the vocabulary does not settle
+ * it either — on 2026-09-13 the vocabulary was not empty, only its safety
+ * subset was.
+ *
+ * Cleared on every round that IS written, so the marker never outlives its
+ * truth.
+ *
+ * Never allowed to fail its caller. This marks a SENTENCE in the thread, the
+ * same class of addition a follow-up round is; losing an answer she just typed
+ * because a cosmetic marker could not be written would be the worse bug.
+ */
+async function recordConsultFollowUpConclusion(
+  consultSessionId: string,
+  concludedAt: Date | null,
+): Promise<void> {
+  try {
+    await prisma.consultSession.updateMany({
+      where: { id: consultSessionId },
+      data: { followUpConcludedAt: concludedAt },
+    })
+  } catch (error) {
+    console.error('consult follow-up conclusion could not be recorded', {
+      consultSessionId,
+      concluded: concludedAt !== null,
+      ...safeError(error),
+    })
+  }
+}
 
 /**
  * Build the next round for a consult, if one is due.
@@ -345,6 +392,13 @@ export async function generateConsultFollowUpRound(
   // reached a plan and never booked, which is exactly the case that would have
   // paid for nothing.
   if (!(await consultHasLiveBooking(args.consultSessionId)) && !(await consultRequiresLookChoice(prisma, args.consultSessionId))) {
+    // 🔴 Not asking because she has not booked is NOT "nothing left to ask",
+    // and a marker left over from an earlier plan version would say the wrong
+    // one. Withdrawn only when one is actually present, so the common case —
+    // this no-op firing on every completed run — still writes nothing.
+    if (situation.followUpConcludedAt !== null) {
+      await recordConsultFollowUpConclusion(args.consultSessionId, null)
+    }
     return { created: false, reason: 'NOT_BOOKED' }
   }
   const state = projectConsultFollowUpState(situation)
@@ -353,6 +407,7 @@ export async function generateConsultFollowUpRound(
 
   const vocabulary = await resolveVocabularyFor(situation)
   if (vocabulary.entries.length === 0) {
+    await recordConsultFollowUpConclusion(args.consultSessionId, now)
     return { created: false, reason: 'NOTHING_LEFT_TO_ASK' }
   }
 
@@ -387,6 +442,7 @@ export async function generateConsultFollowUpRound(
     status = ConsultFollowUpRoundStatus.GENERATED
   } catch (error) {
     if (error instanceof ConsultFollowUpError && error.kind === 'no_vocabulary') {
+      await recordConsultFollowUpConclusion(args.consultSessionId, now)
       return { created: false, reason: 'NOTHING_LEFT_TO_ASK' }
     }
     // 🔴 The fallback. Never the old static list (Part 0 rule 4), never a
@@ -408,6 +464,11 @@ export async function generateConsultFollowUpRound(
       ...safeError(error),
     })
     if (safety.length === 0) {
+      // 🔴 The 2026-09-13 case, and the reason this marker exists. The call
+      // failed, the fallback had nothing safety-critical left, and the thread
+      // went quiet with no way for her to tell the product working from the
+      // product broken.
+      await recordConsultFollowUpConclusion(args.consultSessionId, now)
       return { created: false, reason: 'NOTHING_LEFT_TO_ASK' }
     }
     questions = safety.map(fallbackQuestion)
@@ -429,6 +490,9 @@ export async function generateConsultFollowUpRound(
         createdAt: now,
       },
     })
+    // There is something to ask after all, so any earlier conclusion is
+    // withdrawn rather than left to contradict the round below it.
+    await recordConsultFollowUpConclusion(args.consultSessionId, null)
     return {
       created: true,
       round: {
@@ -489,6 +553,7 @@ const FOLLOW_UP_SESSION_SELECT = {
   id: true,
   clientId: true,
   status: true,
+  followUpConcludedAt: true,
   serviceCategory: { select: CONSULT_SERVICE_PROFILE_CATEGORY_SELECT },
 } satisfies Prisma.ConsultSessionSelect
 
@@ -654,6 +719,7 @@ async function readConsultFollowUpSituation(
 
   return {
     session,
+    followUpConcludedAt: session.followUpConcludedAt,
     needsCalibration,
     needsColorHistory,
     planVersion,
@@ -708,6 +774,9 @@ function projectConsultFollowUpState(
       newest.questions.some((question) => question.selectedValues === null),
     planVersion: situation.planVersion,
     moreRoundsAvailable: situation.rounds.length < CONSULT_MAX_FOLLOW_UP_ROUNDS,
+    // Only with nothing open: a recorded conclusion from an earlier round says
+    // nothing about a question she is looking at right now.
+    nothingLeftToAsk: situation.followUpConcludedAt !== null && openQuestionKey === null,
   }
 }
 
@@ -831,6 +900,9 @@ const EMPTY_FOLLOW_UP_STATE: ConsultFollowUpState = {
   fallbackActive: false,
   planVersion: 0,
   moreRoundsAvailable: false,
+  // A session that could not be read has concluded nothing. Silence is the
+  // only honest answer here, and it is the one the thread already gives.
+  nothingLeftToAsk: false,
 }
 
 export class ConsultFollowUpAnswerError extends Error {

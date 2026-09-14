@@ -41,6 +41,7 @@ export type ReEngagementTrigger =
   | 'EVENT_COUNTDOWN' // §8    — "18 days until prom — here's who still has openings"
   | 'AVAILABILITY_OPENED_ON_SAVE' // §6.8/§5.7.5 — a saved pro just opened up
   | 'REBOOK_CADENCE' // §6.7   — cadence-timed "time for a refresh?"
+  | 'UNFINISHED_CONSULT' // a consult she STARTED and never finished
   | 'HESITATION_CONSULT' // §6.8 — saved a high-commitment look, never booked → consult nudge
   | 'PRICE_ALTERNATIVE' // §6.8 — saved an over-budget look → similar in-band look from another pro
   | 'BOARD_ARCHIVE' // §7.5   — "how did it go? leave a review?"
@@ -53,7 +54,10 @@ export type ReEngagementTrigger =
  *   everything else.
  *
  * The three time-sensitive triggers (a deadline, an opening, an overdue cadence)
- * rank above the clockless ones. Among the clockless band, both §6.8 saved-not
+ * rank above the clockless ones. UNFINISHED_CONSULT leads the clockless band: it
+ * is the only one of them about work the client ALREADY STARTED, so it is the
+ * strongest expressed intent in the group and the one whose absence leaves a
+ * half-finished thing sitting in her app. Among the clockless band, both §6.8 saved-not
  * -booked CONVERSION nudges (funnel: Want→Book) outrank the post-event
  * BOARD_ARCHIVE housekeeping prompt. Between the two §6.8 nudges, the hesitation
  * consult honors the client's OWN saved choice (same pro, "ask questions"), while
@@ -65,10 +69,11 @@ export const RE_ENGAGEMENT_TRIGGER_PRIORITY: Record<ReEngagementTrigger, number>
     EVENT_COUNTDOWN: 0,
     AVAILABILITY_OPENED_ON_SAVE: 1,
     REBOOK_CADENCE: 2,
-    HESITATION_CONSULT: 3,
-    PRICE_ALTERNATIVE: 4,
-    BOARD_ARCHIVE: 5,
-    OTHER: 6,
+    UNFINISHED_CONSULT: 3,
+    HESITATION_CONSULT: 4,
+    PRICE_ALTERNATIVE: 5,
+    BOARD_ARCHIVE: 6,
+    OTHER: 7,
   }
 
 /**
@@ -92,6 +97,10 @@ export const RE_ENGAGEMENT_EVENT_KEY_TRIGGER: Partial<
   // has no hard deadline, so it yields the last pooled slot to a countdown or a
   // saved-pro opening.
   [NotificationEventKey.REBOOK_CADENCE_DUE]: 'REBOOK_CADENCE',
+  // A consult she started and abandoned. Highest of the clockless tiers — she
+  // already did the work of starting, which is a stronger signal than any save,
+  // and it decays (her uploaded photos expire on a ~1h TTL and cannot be reused).
+  [NotificationEventKey.CONSULT_STALLED_NUDGE]: 'UNFINISHED_CONSULT',
   // §6.8 — the hesitation blocker response: a saved high-commitment look the
   // client never booked earns a gentle consult/education nudge. Below the three
   // time-sensitive triggers (no clock at all).

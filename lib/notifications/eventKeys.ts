@@ -28,6 +28,7 @@ export type NotificationTemplateKey =
   | 'event_date_countdown'
   | 'rebook_cadence_due'
   | 'saved_look_consult_nudge'
+  | 'consult_stalled_nudge'
   | 'ai_consult_invitation'
   | 'look_brief_review'
   | 'ai_consult_analysis_ready'
@@ -215,6 +216,7 @@ export const NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.EVENT_DATE_COUNTDOWN,
   NotificationEventKey.REBOOK_CADENCE_DUE,
   NotificationEventKey.SAVED_LOOK_CONSULT_NUDGE,
+  NotificationEventKey.CONSULT_STALLED_NUDGE,
   NotificationEventKey.AI_CONSULT_INVITATION,
   NotificationEventKey.LOOK_BRIEF_REVIEW,
   NotificationEventKey.AI_CONSULT_ANALYSIS_READY,
@@ -634,6 +636,29 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     transactional: false,
     allowQuietHoursBypass: false,
     templateKey: 'saved_look_consult_nudge',
+    supportedRecipients: [NotificationRecipientKind.CLIENT],
+    defaultChannelsByRecipient: {
+      // In-app inbox + email + push (push inert until APNs is live). No SMS —
+      // re-engagement nudges are not an approved transactional SMS use case.
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
+    },
+  },
+
+  [NotificationEventKey.CONSULT_STALLED_NUDGE]: {
+    // The unfinished-consult nudge. Like its re-engagement siblings it is
+    // gentle and promotional-adjacent (NOT transactional — no SMS, no
+    // quiet-hours bypass), and it draws from the same §8.1 pooled budget.
+    //
+    // 🔴 Sent ONLY for a consult whose next move is the CLIENT'S. A consult
+    // waiting on our own analysis queue — or one whose model refused her four
+    // times, which happened to a real client on 2026-09-11 — is never nudged:
+    // that is our bug, and asking her to "finish" it would blame her for it.
+    // The line is drawn once, in lib/consult/stallFunnel.ts.
+    key: NotificationEventKey.CONSULT_STALLED_NUDGE,
+    defaultPriority: NotificationPriority.LOW,
+    transactional: false,
+    allowQuietHoursBypass: false,
+    templateKey: 'consult_stalled_nudge',
     supportedRecipients: [NotificationRecipientKind.CLIENT],
     defaultChannelsByRecipient: {
       // In-app inbox + email + push (push inert until APNs is live). No SMS —
@@ -1391,6 +1416,7 @@ export const CLIENT_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.EVENT_DATE_COUNTDOWN,
   NotificationEventKey.REBOOK_CADENCE_DUE,
   NotificationEventKey.SAVED_LOOK_CONSULT_NUDGE,
+  NotificationEventKey.CONSULT_STALLED_NUDGE,
   NotificationEventKey.AI_CONSULT_INVITATION,
   NotificationEventKey.LOOK_BRIEF_REVIEW,
   NotificationEventKey.AI_CONSULT_ANALYSIS_READY,

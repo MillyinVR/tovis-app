@@ -1079,11 +1079,29 @@ export async function loadConsultThread(args: {
       }
       // Why nothing more is coming, when that is the case. Said at the bottom
       // rather than left as an absence she has to interpret.
-      if (!followUp.openQuestionKey && !followUp.moreRoundsAvailable) {
+      //
+      // Two ways to be finished, and until 2026-09-13 only the first was said:
+      // the round cap is spent, OR the system attempted another round and
+      // concluded there was nothing honest left to ask. A consult that ran out
+      // of questions BELOW the cap simply went quiet.
+      if (
+        !followUp.openQuestionKey &&
+        (!followUp.moreRoundsAvailable || followUp.nothingLeftToAsk)
+      ) {
         out.push(
           text('follow-up-done', fillConsultThreadCopy(copy.followUpDone, { pro })),
         )
       }
+    } else if (followUp?.nothingLeftToAsk) {
+      // 🔴 No round was EVER written, and that was a decision rather than a
+      // failure — the generation ran and found nothing worth asking (on
+      // 2026-09-13, a failed call whose safety fallback had nothing left).
+      // Said out loud, because an empty thread is the same shape as a broken
+      // one. `nothingLeftToAsk` is only ever true when the code that reached
+      // that conclusion recorded it; an absence of rounds never implies it.
+      out.push(
+        text('follow-up-none', fillConsultThreadCopy(copy.followUpNoneNeeded, { pro })),
+      )
     }
   }
 

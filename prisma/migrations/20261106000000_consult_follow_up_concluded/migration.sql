@@ -1,0 +1,20 @@
+-- When a follow-up round was attempted and honestly concluded there was
+-- nothing left to ask.
+--
+-- The thread cannot work this out for itself. "No rounds" is the same
+-- observable state for three different stories: the round has not been bought
+-- yet, the attempt crashed, or the attempt ran and found nothing worth asking.
+-- Only the last may be said to the client, and on 2026-09-13 a real consult hit
+-- exactly that case — the generation call returned BAD_OUTPUT, the safety
+-- fallback found zero remaining safety questions, no round was written, and the
+-- thread simply stopped with no explanation.
+--
+-- Re-deriving it at read time does not work either: on that consult the
+-- vocabulary was NOT empty, only its safety subset was, so a reader recomputing
+-- the vocabulary would have concluded there were questions left and stayed
+-- silent.
+--
+-- Nullable and additive: every existing row keeps its meaning (NULL = "no
+-- conclusion recorded"), no read depends on it being present, and code that
+-- does not select it is unaffected.
+ALTER TABLE "ConsultSession" ADD COLUMN "followUpConcludedAt" TIMESTAMP(3);
