@@ -3,6 +3,7 @@ import { readOptionalEnv } from '@/lib/env'
 import { analysisModel, requestConsultAnalysisJson } from './analysisEngine'
 import { ConsultAnalysisProviderError } from './analysisValidation'
 import type { ConsultProviderMeterSink } from './providerMeter'
+import { withOneConsultRetry } from './providerRetry'
 import {
   buildConsultSuitabilityContext, buildConsultSuitabilityOutputSchema,
   consultSuitabilityProviderContext, sanitizeConsultSuitabilityResponse,
@@ -18,7 +19,11 @@ export type ConsultSuitabilityProvider = (args: {
 }) => Promise<{ raw: unknown; model: string }>
 export type ConsultSuitabilityResult = { translation: ConsultSuitabilityTranslation; model: string }
 
-/** Same approved model, transport, schema conversion, metering and no retries. */
+/**
+ * Same approved model, transport, schema conversion and metering. No retry at
+ * THIS layer — `optionalConsultSuitability` owns that, because only it knows
+ * the deadline a second attempt has to fit inside.
+ */
 export const runConsultSuitability: ConsultSuitabilityProvider = async ({ context, meter }) => {
   const model = analysisModel()
   const raw = await requestConsultAnalysisJson({
@@ -42,13 +47,35 @@ export async function optionalConsultSuitability(args: {
   if (!args.input.clientChoices.some(choice => choice.sentiment === 'LIKE' || choice.sentiment === 'GOAL')) return
   try {
     const context = buildConsultSuitabilityContext(args.input)
-    const { raw, model } = await (args.provider ?? runConsultSuitability)({ context, meter: args.meter })
-    if (!model.trim() || model !== model.trim() || model.length > 128) throw new ConsultAnalysisProviderError('bad_output')
-    return { translation: sanitizeConsultSuitabilityResponse(raw, context), model }
+    const provider = args.provider ?? runConsultSuitability
+    return await withOneConsultRetry({
+      // 🔴 The deadline is re-checked BEFORE the second call, not once at the
+      // top: the first attempt has already spent up to CONSULT_SUITABILITY_
+      // TIMEOUT_MS by now, and this is optional work that must never eat the
+      // route's finalization reserve. Out of room → the first failure stands.
+      canStartRetry: () =>
+        Date.now() - args.startedAt + CONSULT_SUITABILITY_TIMEOUT_MS <
+        CONSULT_SUITABILITY_LATEST_START_MS,
+      onRetry: (error) => {
+        // Content-free, exactly as the failure log below is.
+        console.warn('consult suitability retrying once', {
+          kind: error instanceof ConsultAnalysisProviderError ? error.kind : 'unavailable',
+          check: error instanceof ConsultAnalysisProviderError ? error.check : null,
+        })
+      },
+      attempt: async () => {
+        const { raw, model } = await provider({ context, meter: args.meter })
+        if (!model.trim() || model !== model.trim() || model.length > 128) {
+          throw new ConsultAnalysisProviderError('bad_output', 'model_name')
+        }
+        return { translation: sanitizeConsultSuitabilityResponse(raw, context), model }
+      },
+    })
   } catch (error) {
     // Never log client text, provider output, or arbitrary exception messages.
     console.warn('consult suitability unavailable', {
       kind: error instanceof ConsultAnalysisProviderError ? error.kind : 'unavailable',
+      check: error instanceof ConsultAnalysisProviderError ? error.check : null,
     })
     return undefined
   }

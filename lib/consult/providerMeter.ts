@@ -14,11 +14,14 @@
 // consult whose cost lines are missing says so in the logs rather than simply
 // showing $0.
 //
-// Call sites (all three, and the enum in the schema is the checklist):
-//   CAPTURE_GATE       lib/consult/captureVision.ts
-//   INSPIRATION_READ   lib/consult/inspirationVision.ts
-//   ANALYSIS_PROFILE   lib/consult/analysisEngine.ts (call 1)
-//   ANALYSIS_DIRECTION lib/consult/analysisEngine.ts (call 2)
+// Call sites (the enum in the schema is the checklist):
+//   CAPTURE_GATE          lib/consult/captureVision.ts
+//   INSPIRATION_READ      lib/consult/inspirationVision.ts
+//   ANALYSIS_PROFILE      lib/consult/analysisEngine.ts (call 1)
+//   ANALYSIS_FACE_COLOR   lib/consult/analysisEngine.ts (call 2)
+//   ANALYSIS_DIRECTION    lib/consult/analysisEngine.ts (call 3)
+//   ANALYSIS_SUITABILITY  lib/consult/suitabilityRuntime.ts
+//   FOLLOW_UP_QUESTIONS   lib/consult/followUpEngine.ts
 
 // 🔴 NO `import 'server-only'` here, deliberately — the same rule as
 // lib/prisma.ts, which does not carry it either. `analysisEngine.ts` imports
@@ -64,6 +67,12 @@ export type ConsultProviderCallMeasurement = {
   latencyMs: number
   /** The provider's raw `usage` block. Absent for a call that never answered. */
   usage?: unknown
+  /**
+   * The refusing check's name, straight off the engine's error. Taken as
+   * `unknown` because it arrives from a caught value; `cleanFailureCheck`
+   * below is what makes it a column value.
+   */
+  failureCheck?: unknown
 }
 
 /** What a meter row looks like before it is written — exported for the tests. */
@@ -73,6 +82,28 @@ export type ConsultProviderCallRecord = ConsultProviderUsage & {
   model: string
   latencyMs: number
   costMicroUsd: number | null
+  failureCheck: string | null
+}
+
+/**
+ * The longest check name this column will store. The engines build these from
+ * string literals (`text_empty`, `region_containment`), so the bound is a
+ * backstop against a future caller handing over something unbounded — never a
+ * limit anything legitimate runs into.
+ */
+const MAX_FAILURE_CHECK_LENGTH = 64
+
+/**
+ * A check name is a stable identifier, never prose. A value that is not a
+ * plain, short, single-token string is dropped rather than stored. That keeps
+ * the guarantee the schema comment makes — this column can never carry a
+ * value, a prompt, or client text, whatever a future engine passes.
+ */
+function cleanFailureCheck(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  if (!trimmed || trimmed.length > MAX_FAILURE_CHECK_LENGTH) return null
+  return /^[a-z0-9_+-]+$/i.test(trimmed) ? trimmed : null
 }
 
 /** Pure: measurement in, row out. No I/O, so it is trivially testable. */
@@ -90,6 +121,7 @@ export function buildConsultProviderCallRecord(
       : 0,
     ...usage,
     costMicroUsd: consultProviderCostMicroUsd(measurement.model, usage),
+    failureCheck: cleanFailureCheck(measurement.failureCheck),
   }
 }
 
@@ -174,6 +206,29 @@ export function consultProviderOutcomeForErrorKind(
 }
 
 /**
+ * The refusing check's name, read off whichever engine threw.
+ *
+ * 🔴 TWO spellings, deliberately tolerated rather than unified. The analysis
+ * engine calls it `check` (added 2026-09-12) and the inspiration engine calls
+ * it `stage` (added 2026-09-11) — the same concept under two names, because
+ * the inspiration one is also the `stage` field of the published
+ * `ai_consult_inspiration_analysis` log contract. Renaming the property is
+ * three lines; renaming it *through* that contract is a breaking change to a
+ * log schema for a cosmetic win. So the normalizing happens here, once, and
+ * the divergence is written down instead of being rediscovered.
+ *
+ * `ConsultCaptureVisionError` is the one engine error that still carries no
+ * check — CAPTURE_GATE has never failed in production, so there is nothing to
+ * diagnose yet. It simply yields null here, and can start supplying a name
+ * without touching this function.
+ */
+export function consultProviderCheckForError(error: unknown): string | null {
+  if (!error || typeof error !== 'object') return null
+  const source = error as { check?: unknown; stage?: unknown }
+  return cleanFailureCheck(source.check ?? source.stage)
+}
+
+/**
  * Wrap ONE paid provider call so it is metered whatever happens to it.
  *
  * `run` is handed a `reportUsage` callback and must call it the moment the
@@ -202,13 +257,17 @@ export async function meterConsultProviderCall<T>(
   // insert simply queues behind the lock and lands the moment the transaction
   // commits. `flushConsultProviderMeter` is how a caller waits for it, at a
   // point where waiting is safe.
-  const meter = (outcome: ConsultProviderCallOutcome) => {
+  const meter = (
+    outcome: ConsultProviderCallOutcome,
+    failureCheck: string | null = null,
+  ) => {
     const write = recordConsultProviderCall(sink, {
       kind: args.kind,
       outcome,
       model: args.model,
       latencyMs: Date.now() - startedAt,
       usage,
+      failureCheck,
     })
     pendingWrites.add(write)
     void write.finally(() => pendingWrites.delete(write))
@@ -225,6 +284,7 @@ export async function meterConsultProviderCall<T>(
           ? (error as { kind: unknown }).kind
           : null,
       ),
+      consultProviderCheckForError(error),
     )
     throw error
   }
@@ -251,6 +311,7 @@ export async function readConsultProviderCalls(consultSessionId: string) {
       cacheReadInputTokens: true,
       latencyMs: true,
       costMicroUsd: true,
+      failureCheck: true,
       createdAt: true,
     },
   })

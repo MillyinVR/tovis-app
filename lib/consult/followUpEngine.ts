@@ -127,6 +127,15 @@ export type ConsultFollowUpResult = {
 export class ConsultFollowUpError extends Error {
   constructor(
     readonly kind: 'unavailable' | 'refused' | 'bad_output' | 'no_vocabulary',
+    /**
+     * Which check refused, as a content-free name (`options_not_allowed`,
+     * `text_length`, …) — for the log line and the meter row, never for the
+     * client. The same repair the analysis and inspiration engines already
+     * carry: on 2026-09-13 this call was 0-for-1 in production and the only
+     * thing recorded was that it had failed. Null for kinds that are not a
+     * check.
+     */
+    readonly check: string | null = null,
   ) {
     super('Follow-up questions are unavailable.')
     this.name = 'ConsultFollowUpError'
@@ -278,10 +287,10 @@ function assertSafeProse(value: string, clientFacing: boolean): void {
   // constraint violation at the insert. The database is the backstop; this is
   // the place that fails politely.
   if (CONSULT_INSPIRATION_FORBIDDEN_WORDS.test(value)) {
-    throw new ConsultFollowUpError('refused')
+    throw new ConsultFollowUpError('refused', 'forbidden_words')
   }
   if (clientFacing && CONSULT_FOLLOW_UP_INTERNAL_NAME.test(value)) {
-    throw new ConsultFollowUpError('refused')
+    throw new ConsultFollowUpError('refused', 'internal_name')
   }
 }
 
@@ -290,10 +299,10 @@ function sanitizeText(
   max: number,
   clientFacing: boolean,
 ): string {
-  if (typeof raw !== 'string') throw new ConsultFollowUpError('bad_output')
+  if (typeof raw !== 'string') throw new ConsultFollowUpError('bad_output', 'text_type')
   const text = raw.trim()
   if (text.length === 0 || text.length > max) {
-    throw new ConsultFollowUpError('bad_output')
+    throw new ConsultFollowUpError('bad_output', text.length === 0 ? 'text_empty' : 'text_length')
   }
   assertSafeProse(text, clientFacing)
   return text
@@ -308,22 +317,22 @@ function sanitizeOptions(
     raw.length < 2 ||
     raw.length > CONSULT_FOLLOW_UP_MAX_OPTIONS
   ) {
-    throw new ConsultFollowUpError('bad_output')
+    throw new ConsultFollowUpError('bad_output', 'options_count')
   }
   const allowed = new Set(vocabularyEntry.options.map((option) => option.value))
   const options: { value: string; label: string }[] = []
   for (const item of raw) {
-    if (!isRecord(item)) throw new ConsultFollowUpError('bad_output')
+    if (!isRecord(item)) throw new ConsultFollowUpError('bad_output', 'option_shape')
     const { value } = item
     // 🔴 The constraint the grammar could not hold. A value that is not one of
     // THIS key's real options is a question whose answer could never be filed,
     // so it fails the round rather than being dropped — dropping it would leave
     // her a question with one button.
     if (typeof value !== 'string' || !allowed.has(value)) {
-      throw new ConsultFollowUpError('bad_output')
+      throw new ConsultFollowUpError('bad_output', 'options_not_allowed')
     }
     if (options.some((existing) => existing.value === value)) {
-      throw new ConsultFollowUpError('bad_output')
+      throw new ConsultFollowUpError('bad_output', 'options_duplicate')
     }
     options.push({
       value,
@@ -338,21 +347,21 @@ export function sanitizeConsultFollowUpQuestions(
   vocabulary: ConsultFollowUpVocabulary,
 ): ConsultFollowUpQuestion[] {
   if (!isRecord(raw) || !Array.isArray(raw.questions)) {
-    throw new ConsultFollowUpError('bad_output')
+    throw new ConsultFollowUpError('bad_output', 'envelope')
   }
   const list = raw.questions
   if (list.length === 0 || list.length > CONSULT_FOLLOW_UP_MAX_QUESTIONS) {
-    throw new ConsultFollowUpError('bad_output')
+    throw new ConsultFollowUpError('bad_output', 'questions_count')
   }
   const questions: ConsultFollowUpQuestion[] = []
   for (const item of list) {
     if (!isRecord(item) || typeof item.key !== 'string') {
-      throw new ConsultFollowUpError('bad_output')
+      throw new ConsultFollowUpError('bad_output', 'question_shape')
     }
     const entry = vocabulary.byKey.get(item.key)
-    if (!entry) throw new ConsultFollowUpError('bad_output')
+    if (!entry) throw new ConsultFollowUpError('bad_output', 'key_not_in_vocabulary')
     if (questions.some((existing) => existing.key === entry.key)) {
-      throw new ConsultFollowUpError('bad_output')
+      throw new ConsultFollowUpError('bad_output', 'key_duplicate')
     }
     questions.push({
       key: entry.key,
@@ -378,7 +387,7 @@ function modelName(): string {
   const model = readOptionalEnv('AI_CONSULT_FOLLOW_UP_MODEL') ?? DEFAULT_MODEL
   if (!isAllowedConsultProviderModel(model)) {
     // Fail closed, exactly as every other consult call does.
-    throw new ConsultFollowUpError('unavailable')
+    throw new ConsultFollowUpError('unavailable', 'model_not_allowed')
   }
   return model
 }
@@ -440,23 +449,23 @@ export const runConsultFollowUpQuestions: ConsultFollowUpProvider = async (
           { timeout: CONSULT_FOLLOW_UP_REQUEST_TIMEOUT_MS },
         )
       } catch {
-        throw new ConsultFollowUpError('unavailable')
+        throw new ConsultFollowUpError('unavailable', 'provider_call')
       }
       // Billed the moment it answered — before the refusal check and the parser.
       reportUsage(message.usage)
 
       if (message.stop_reason === 'refusal') {
-        throw new ConsultFollowUpError('refused')
+        throw new ConsultFollowUpError('refused', 'stop_refusal')
       }
       // Truncated JSON is this repo's cap being too low, not a provider fault.
       if (message.stop_reason === 'max_tokens') {
-        throw new ConsultFollowUpError('bad_output')
+        throw new ConsultFollowUpError('bad_output', 'max_tokens')
       }
       const text = message.content
         .filter((block): block is Anthropic.TextBlock => block.type === 'text')
         .map((block) => block.text)
         .join('')
-      if (!text) throw new ConsultFollowUpError('bad_output')
+      if (!text) throw new ConsultFollowUpError('bad_output', 'empty_text')
 
       try {
         return {
@@ -468,7 +477,7 @@ export const runConsultFollowUpQuestions: ConsultFollowUpProvider = async (
         }
       } catch (error) {
         if (error instanceof ConsultFollowUpError) throw error
-        throw new ConsultFollowUpError('bad_output')
+        throw new ConsultFollowUpError('bad_output', 'json_parse')
       }
     },
   )

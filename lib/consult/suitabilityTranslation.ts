@@ -48,7 +48,13 @@ export type ConsultSuitabilityContext = {
   unknownFields: ObservationField[]
 }
 
-function invalid(): never { throw new ConsultAnalysisProviderError('bad_output') }
+/**
+ * Every refusal names its check. Until 2026-09-13 this threw anonymously, so
+ * a live ANALYSIS_SUITABILITY BAD_OUTPUT — and it was 0-for-1 in production —
+ * recorded only that something had been refused, in the logs and in the meter
+ * alike. The name is content-free and never reaches a client.
+ */
+function invalid(check: string): never { throw new ConsultAnalysisProviderError('bad_output', check) }
 
 function isClientPreference(source: ConsultSuitabilitySource): source is ClientSource {
   return source.provenance === 'CLIENT_REPORTED' && source.sentiment !== 'CONTEXT'
@@ -61,25 +67,25 @@ function desiredChoices(sources: readonly ConsultSuitabilitySource[]): ClientSou
 function clientText(value: string): string {
   // Client statements are attributed quotations, not provider-authored claims.
   // Preserve their wording, including numbers, rather than rewriting intent.
-  if (typeof value !== 'string' || !value.trim() || value.length > 400) invalid()
+  if (typeof value !== 'string' || !value.trim() || value.length > 400) invalid('text_shape')
   return value
 }
 
 export function buildConsultSuitabilityContext(input: ConsultSuitabilityInput): ConsultSuitabilityContext {
   if (!input.analysisRevisionId.trim() || !input.clientRevisionId.trim() ||
       (input.faceColor && input.faceColor.analysisRevisionId !== input.analysisRevisionId) ||
-      input.clientChoices.length > 30) invalid()
+      input.clientChoices.length > 30) invalid('context_inputs')
   const sources: ConsultSuitabilitySource[] = input.clientChoices.map((choice, index) => ({
     id: `choice.${index}`, provenance: 'CLIENT_REPORTED', revisionId: input.clientRevisionId,
     value: clientText(choice.clientWords), sentiment: enumValue(choice.sentiment, ['LIKE', 'DISLIKE', 'GOAL', 'CONTEXT']),
   }))
-  if (!desiredChoices(sources).length) invalid()
+  if (!desiredChoices(sources).length) invalid('no_desired_choices')
   const unknownFields: ObservationField[] = []
   const add = (field: ObservationField, observation: ConsultAnalysisObservationDTO<string> | undefined) => {
     if (!observation) { unknownFields.push(field); return }
-    if (!isRecord(observation.confidence) || !Array.isArray(observation.evidence)) invalid()
+    if (!isRecord(observation.confidence) || !Array.isArray(observation.evidence)) invalid('observation_shape')
     const { min, max } = observation.confidence
-    if (!Number.isFinite(min) || !Number.isFinite(max) || min < 0 || max > 1 || min > max) invalid()
+    if (!Number.isFinite(min) || !Number.isFinite(max) || min < 0 || max > 1 || min > max) invalid('confidence_range')
     // Same eligibility floor as existing look-plan evidence. No new confidence
     // calculation: retain the observation's own interval and original citations.
     if (!isSupportedConsultObservation(observation)) {
@@ -119,7 +125,7 @@ export function buildConsultSuitabilityOutputSchema(context: ConsultSuitabilityC
   const ids = context.sources.map(source => source.id)
   const choices = context.sources.filter(isClientPreference)
   const observations = context.sources.filter(source => source.provenance === 'OBSERVED')
-  if (!desiredChoices(context.sources).length) invalid()
+  if (!desiredChoices(context.sources).length) invalid('context_no_desired_choices')
   const text = { type: 'string', minLength: 1, maxLength: 320 }
   const references = { type: 'array', minItems: 1, maxItems: ids.length, uniqueItems: true,
     items: { type: 'string', enum: ids } }
@@ -154,7 +160,7 @@ export function buildConsultSuitabilityOutputSchema(context: ConsultSuitabilityC
 const UNSOURCED_TECHNICAL = /\p{N}|\p{Sc}|%|\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion|dozen|half|quarter|grams?|millimeters?|millimetres?|inches|ounces?|ml|mm|oz|volumes?|percent|developer|peroxide|oxidant|formula|formulation|mix(?:ing)?|processing|ratio|minutes?)\b/iu
 function directionText(value: unknown): string {
   const text = cleanText(value, 320)
-  if (UNSOURCED_TECHNICAL.test(text)) invalid()
+  if (UNSOURCED_TECHNICAL.test(text)) invalid('unsourced_technical')
   return text
 }
 
@@ -172,31 +178,31 @@ export type ConsultSuitabilityTranslation = {
 
 /** Provenance and revision binding are assigned by the server, never the model. */
 export function sanitizeConsultSuitabilityResponse(raw: unknown, context: ConsultSuitabilityContext): ConsultSuitabilityTranslation {
-  if (!isRecord(raw) || !exactKeys(raw, ['tailoring', 'proConfirmations'])) invalid()
+  if (!isRecord(raw) || !exactKeys(raw, ['tailoring', 'proConfirmations'])) invalid('envelope')
   const resolve = (value: unknown, allowEmpty = false): ConsultSuitabilitySource[] => {
-    if (!Array.isArray(value) || (!allowEmpty && !value.length) || value.length > context.sources.length || new Set(value).size !== value.length) invalid()
+    if (!Array.isArray(value) || (!allowEmpty && !value.length) || value.length > context.sources.length || new Set(value).size !== value.length) invalid('source_id_list')
     return value.map(id => {
       const source = context.sources.find(candidate => candidate.id === id)
-      if (!source) invalid()
+      if (!source) invalid('source_unknown')
       return structuredClone(source)
     })
   }
   const desired = desiredChoices(context.sources)
-  if (!desired.length) invalid()
+  if (!desired.length) invalid('no_desired_sources')
   if (!Array.isArray(raw.tailoring) || raw.tailoring.length < 1 || raw.tailoring.length > 3 ||
-      !Array.isArray(raw.proConfirmations) || raw.proConfirmations.length < 1 || raw.proConfirmations.length > 4) invalid()
+      !Array.isArray(raw.proConfirmations) || raw.proConfirmations.length < 1 || raw.proConfirmations.length > 4) invalid('response_list_lengths')
   const tailoring = raw.tailoring.map<ConsultSuitabilityTranslation['tailoring'][number]>(item => {
-    if (!isRecord(item) || !exactKeys(item, ['clientExplanation', 'professionalDirection', 'clientChoiceIds', 'observationIds'])) invalid()
+    if (!isRecord(item) || !exactKeys(item, ['clientExplanation', 'professionalDirection', 'clientChoiceIds', 'observationIds'])) invalid('tailoring_keys')
     const choices = resolve(item.clientChoiceIds)
     const observations = resolve(item.observationIds, true)
-    if (!choices.every(isClientPreference) || !observations.every(source => source.provenance === 'OBSERVED')) invalid()
+    if (!choices.every(isClientPreference) || !observations.every(source => source.provenance === 'OBSERVED')) invalid('source_provenance')
     const sources = [...choices, ...observations]
     return { clientExplanation: directionText(item.clientExplanation), professionalDirection: directionText(item.professionalDirection),
       status: sources.some(source => source.provenance === 'OBSERVED') ? 'SUPPORTED' : 'NEEDS_PRO_CONFIRMATION',
       provenance: 'DERIVED_GUIDANCE' as const, sources }
   })
   const proConfirmations = raw.proConfirmations.map(item => {
-    if (!isRecord(item) || !exactKeys(item, ['clientExplanation', 'professionalCheck', 'sourceIds'])) invalid()
+    if (!isRecord(item) || !exactKeys(item, ['clientExplanation', 'professionalCheck', 'sourceIds'])) invalid('confirmation_keys')
     return { clientExplanation: directionText(item.clientExplanation), professionalCheck: directionText(item.professionalCheck),
       provenance: 'NEEDS_PRO_CONFIRMATION' as const, sources: resolve(item.sourceIds) }
   })

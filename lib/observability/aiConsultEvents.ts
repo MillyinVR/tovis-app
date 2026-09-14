@@ -109,3 +109,45 @@ export function logAiConsultInspirationAnalysis(
     }),
   )
 }
+
+/**
+ * The daily provider-health rollup (lib/consult/providerHealth.ts).
+ *
+ * Counts, costs and content-free check names only — this event carries no
+ * consult id, no client id, and nothing a model wrote. It is the routine line;
+ * anything in it that needs an owner is raised separately by
+ * `captureConsultProviderHealthAlert`.
+ */
+export type AiConsultProviderHealthEvent = {
+  windowHours: number
+  since: string
+  until: string
+  totalCalls: number
+  failedCalls: number
+  badOutputCalls: number
+  costMicroUsd: number
+  byKind: {
+    kind: string
+    totalCalls: number
+    failedCalls: number
+    failureRate: number
+    costMicroUsd: number
+    topFailureChecks: { check: string; count: number }[]
+  }[]
+  alertingKinds: string[]
+}
+
+export function logAiConsultProviderHealth(
+  input: AiConsultProviderHealthEvent,
+): void {
+  console.info(
+    JSON.stringify({
+      ts: new Date().toISOString(),
+      app: APP_NAME,
+      namespace: NAMESPACE,
+      level: input.alertingKinds.length > 0 ? 'warn' : 'info',
+      event: 'ai_consult_provider_health',
+      ...input,
+    }),
+  )
+}

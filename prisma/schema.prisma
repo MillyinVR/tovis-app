@@ -8463,6 +8463,20 @@ model ConsultProviderCall {
   /// price in the repo", never "free".
   costMicroUsd Int?
 
+  /// On a non-OK outcome: the content-free name of the check that refused
+  /// (`text_empty`, `region_containment`, …), copied off the engine's own
+  /// error. NULL when the call succeeded, or when the failure was not a check.
+  ///
+  /// The engines already carry this and already log it — but logs age out. On
+  /// 2026-09-13 four `INSPIRATION_READ` BAD_OUTPUTs from 09-11 were found in
+  /// the meter and could no longer be explained, because the only record of
+  /// WHICH check refused had expired with the log retention. This column is
+  /// that record, kept for as long as the cost row it sits on.
+  ///
+  /// Never a value, a prompt, or client text: the engines construct these from
+  /// string literals, and `buildConsultProviderCallRecord` bounds the length.
+  failureCheck String?
+
   createdAt DateTime @default(now())
 
   @@index([consultSessionId, createdAt])
