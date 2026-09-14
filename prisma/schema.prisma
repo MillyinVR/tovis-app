@@ -881,6 +881,9 @@ enum NotificationEventKey {
   // (emitter lib/notifications/hesitationConsultNudge.ts). Never availability- or
   // deadline-driven; the lowest-priority live re-engagement trigger.
   SAVED_LOOK_CONSULT_NUDGE
+  /// A consult she STARTED and never finished — distinct from the saved-look
+  /// nudge above, which is about a look she never started at all.
+  CONSULT_STALLED_NUDGE
 
   // §6.8 price blocker response, gated by the §8.1 re-engagement budget: a client
   // saved a look priced well ABOVE their LEARNED price band (lib/looks/personalizedFeed.ts
@@ -7884,6 +7887,28 @@ model ConsultSession {
   chartCopyOptIn       Boolean   @default(true)
   chartCopyDecidedAt   DateTime?
   chartCopyCompletedAt DateTime?
+
+  /// P5g item 6 — the instant a follow-up round was ATTEMPTED and honestly
+  /// concluded there was nothing left to ask.
+  ///
+  /// 🔴 It exists because the thread CANNOT derive this. Zero rounds is the
+  /// same observable state for three different stories: the round has not been
+  /// bought yet, the attempt crashed, or the attempt ran and found nothing
+  /// worth asking. Only the third one may be said out loud, and saying "that's
+  /// everything I need" over a crash is precisely the lie this is meant to
+  /// stop. So the conclusion is RECORDED by the code that reached it rather
+  /// than guessed at read time.
+  ///
+  /// Re-derivation cannot substitute for it either: on 2026-09-13 the
+  /// vocabulary was NOT empty — only its safety subset was — so a reader
+  /// recomputing the vocabulary would have found questions and stayed silent.
+  ///
+  /// Cleared whenever a round IS written, so it never outlives its truth. A
+  /// plain nullable column rather than a new ConsultAuditAction: an unknown
+  /// enum value in a stored column is a rollback hazard (old code cannot
+  /// deserialize rows the new code wrote), while a column old code does not
+  /// select is inert.
+  followUpConcludedAt DateTime?
 
   revisions               ConsultRevision[]
   agreementAcceptances    ConsultAgreementAcceptance[]

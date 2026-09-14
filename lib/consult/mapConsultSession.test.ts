@@ -30,6 +30,7 @@ function row(overrides: Partial<ConsultSession> = {}): ConsultSession {
     chartCopyOptIn: true,
     chartCopyDecidedAt: null,
     chartCopyCompletedAt: null,
+    followUpConcludedAt: null,
     anchorLookPostId: null,
     ...overrides,
   }

@@ -978,6 +978,21 @@ export type BrandClientConsultThreadCopy = {
   followUpDone: string
 
   /**
+   * 🔴 P5g item 6 — said when NO follow-up question was ever asked, because the
+   * round was attempted and honestly concluded there was nothing to ask.
+   *
+   * It stands ALONE: there is no `followUpIntro` above it and no question card
+   * below it, so it has to make sense as the only sentence in its part of the
+   * thread. On 2026-09-13 a real consult reached this state and said nothing at
+   * all, leaving the client no way to tell the product working from the product
+   * broken (Tori's call, 2026-09-13: say so).
+   *
+   * Must not promise an appointment — this can be reached by a consult whose
+   * look choice is still open — and must not apologise. `{pro}`.
+   */
+  followUpNoneNeeded: string
+
+  /**
    * C2-4 — the bubble above a question the PROFESSIONAL wrote herself. `{pro}`.
    * Said once, above the first one, like `followUpIntro`.
    */

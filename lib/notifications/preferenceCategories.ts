@@ -47,6 +47,7 @@ export type NotificationCategoryKey =
   | 'EVENT_COUNTDOWNS'
   | 'REBOOK_REMINDERS'
   | 'CONSULT_NUDGES'
+  | 'UNFINISHED_CONSULT'
   | 'PRICE_ALTERNATIVES'
   | 'MESSAGES'
   | 'CHART_ACCESS'
@@ -102,6 +103,7 @@ const EVENT_LABELS: Record<NotificationEventKey, string> = {
   [NotificationEventKey.EVENT_DATE_COUNTDOWN]: 'Event countdown reminders',
   [NotificationEventKey.REBOOK_CADENCE_DUE]: 'Time-for-a-refresh reminders',
   [NotificationEventKey.SAVED_LOOK_CONSULT_NUDGE]: 'Consult reminders for big decisions',
+  [NotificationEventKey.CONSULT_STALLED_NUDGE]: 'Reminders about a consult you started',
   [NotificationEventKey.AI_CONSULT_INVITATION]: 'Pre-appointment consult invitations',
   [NotificationEventKey.LOOK_BRIEF_REVIEW]: 'Look plan updates and review reminders',
   [NotificationEventKey.AI_CONSULT_ANALYSIS_READY]: 'Your consult is ready',
@@ -264,6 +266,17 @@ const CATEGORY_DEFS: readonly CategoryDef[] = [
     description:
       'Gentle, no-pressure reminders to ask questions or book a consult on a big-decision look you saved (like permanent makeup, color, or extensions). Muting this turns off consult reminders only.',
     eventKeys: [NotificationEventKey.SAVED_LOOK_CONSULT_NUDGE],
+  },
+  {
+    key: 'UNFINISHED_CONSULT',
+    label: 'Unfinished consult reminders',
+    // Its own control rather than a second event key under CONSULT_NUDGES: that
+    // category is about a look she saved and never started. This is about work
+    // she DID start, and wanting one without the other is an ordinary thing to
+    // want.
+    description:
+      "One gentle reminder if you started a consult and didn't finish it. Muting this turns off unfinished-consult reminders only.",
+    eventKeys: [NotificationEventKey.CONSULT_STALLED_NUDGE],
   },
   {
     key: 'PRICE_ALTERNATIVES',

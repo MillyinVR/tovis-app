@@ -135,6 +135,11 @@ export const defaultClientConsultThreadCopy: BrandClientConsultThreadCopy = {
     'I couldn’t think of the next question just now — so here are the essentials, the ones {pro} needs either way.',
   followUpDone:
     'That’s everything I need. {pro} has the rest — see you at your appointment.',
+  // 🔴 Stands alone — nothing was asked, so there is no intro above it and no
+  // card below it. Honest about the absence without dressing it up as a
+  // decision she made, and it promises nothing about an appointment.
+  followUpNoneNeeded:
+    'No questions from me this time — I’ve got everything I need, and {pro} has the rest.',
 
   // C2-4 — a question the PRO wrote. The card carries her name as its author;
   // these bubbles say why it is here. Supportive, never a summons: nothing is

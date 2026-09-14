@@ -6,6 +6,7 @@
 //   - §8   event-date countdown        (highest priority)
 //   - §6.8 saved-look availability-opened
 //   - §6.7 rebook-cadence
+//   - unfinished consult               (leads the clockless band)
 //   - §6.8 hesitation consult          (lowest — no clock)
 //
 // They already share ONE weekly budget (RE_ENGAGEMENT_WEEKLY_CAP, counted from the
@@ -65,6 +66,11 @@ import {
   gatherRebookCadenceCandidates,
 } from '@/lib/notifications/rebookCadenceNotifications'
 import {
+  STALLED_CONSULT_TRIGGER,
+  composeStalledConsultCopy,
+  gatherStalledConsultCandidates,
+} from '@/lib/notifications/stalledConsultNudge'
+import {
   SAVED_LOOK_ACTIVATION_TRIGGER,
   composeSavedActivationCopy,
   gatherSavedActivationCandidates,
@@ -120,6 +126,7 @@ function zeroTriggerTally(): Record<ReEngagementTrigger, number> {
     EVENT_COUNTDOWN: 0,
     AVAILABILITY_OPENED_ON_SAVE: 0,
     REBOOK_CADENCE: 0,
+    UNFINISHED_CONSULT: 0,
     HESITATION_CONSULT: 0,
     PRICE_ALTERNATIVE: 0,
     BOARD_ARCHIVE: 0,
@@ -217,6 +224,7 @@ export type ReEngagementDispatchSummary = {
   rebookOpenPros: number
   rebookCompletedVisits: number
   consultAgingSaves: number
+  stalledConsults: number
   priceAltAgingSaves: number
   /** True if any trigger's scan hit its cap (candidates may be incomplete). */
   scanCapped: boolean
@@ -241,6 +249,7 @@ function buildDispatchCandidates(args: {
   saved: Awaited<ReturnType<typeof gatherSavedActivationCandidates>>
   rebook: Awaited<ReturnType<typeof gatherRebookCadenceCandidates>>
   consult: Awaited<ReturnType<typeof gatherConsultNudgeCandidates>>
+  stalled: Awaited<ReturnType<typeof gatherStalledConsultCandidates>>
   priceAlt: Awaited<ReturnType<typeof gatherPriceAlternativeCandidates>>
 }): ReEngagementDispatchCandidate[] {
   const candidates: ReEngagementDispatchCandidate[] = []
@@ -298,6 +307,22 @@ function buildDispatchCandidates(args: {
     })
   }
 
+  for (const c of args.stalled.candidates) {
+    candidates.push({
+      clientId: c.clientId,
+      trigger: STALLED_CONSULT_TRIGGER,
+      eventKey: NotificationEventKey.CONSULT_STALLED_NUDGE,
+      dedupeKey: c.dedupeKey,
+      // Most recently touched first — she is likeliest to remember starting it,
+      // and (when her photos are still live) likeliest to be able to resume.
+      tierRank: -c.idleSince.getTime(),
+      copy: composeStalledConsultCopy({
+        proName: args.stalled.proNames.get(c.professionalId) ?? '',
+        candidate: c,
+      }),
+    })
+  }
+
   for (const c of args.priceAlt.candidates) {
     candidates.push({
       clientId: c.clientId,
@@ -326,11 +351,12 @@ export async function runReEngagementDispatch(
 ): Promise<ReEngagementDispatchSummary> {
   const now = options.now
 
-  const [countdown, saved, rebook, consult, priceAlt] = await Promise.all([
+  const [countdown, saved, rebook, consult, stalled, priceAlt] = await Promise.all([
     gatherEventCountdownCandidates(db, { now }),
     gatherSavedActivationCandidates(db, { now }),
     gatherRebookCadenceCandidates(db, { now }),
     gatherConsultNudgeCandidates(db, { now }),
+    gatherStalledConsultCandidates(db, { now }),
     gatherPriceAlternativeCandidates(db, { now }),
   ])
 
@@ -339,6 +365,7 @@ export async function runReEngagementDispatch(
     saved,
     rebook,
     consult,
+    stalled,
     priceAlt,
   })
   const candidateClientIds = [...new Set(candidates.map((c) => c.clientId))]
@@ -349,6 +376,7 @@ export async function runReEngagementDispatch(
     mutedSaved,
     mutedRebook,
     mutedConsult,
+    mutedStalled,
     mutedPriceAlt,
   ] = await Promise.all([
     loadReEngagementBudgetCounts(db, {
@@ -373,6 +401,10 @@ export async function runReEngagementDispatch(
     }),
     loadMutedClientsForEvent(db, {
       clientIds: candidateClientIds,
+      eventKey: NotificationEventKey.CONSULT_STALLED_NUDGE,
+    }),
+    loadMutedClientsForEvent(db, {
+      clientIds: candidateClientIds,
       eventKey: NotificationEventKey.SAVED_LOOK_PRICE_ALTERNATIVE,
     }),
   ])
@@ -385,6 +417,7 @@ export async function runReEngagementDispatch(
     [NotificationEventKey.SAVED_LOOK_AVAILABILITY_OPENED, mutedSaved],
     [NotificationEventKey.REBOOK_CADENCE_DUE, mutedRebook],
     [NotificationEventKey.SAVED_LOOK_CONSULT_NUDGE, mutedConsult],
+    [NotificationEventKey.CONSULT_STALLED_NUDGE, mutedStalled],
     [NotificationEventKey.SAVED_LOOK_PRICE_ALTERNATIVE, mutedPriceAlt],
   ])
 
@@ -418,12 +451,14 @@ export async function runReEngagementDispatch(
     rebookOpenPros: rebook.openPros,
     rebookCompletedVisits: rebook.completedVisits,
     consultAgingSaves: consult.agingSaves,
+    stalledConsults: stalled.idleSessions,
     priceAltAgingSaves: priceAlt.agingSaves,
     scanCapped:
       countdown.scanCapped ||
       saved.scanCapped ||
       rebook.scanCapped ||
       consult.scanCapped ||
+      stalled.scanCapped ||
       priceAlt.scanCapped,
     candidatesByTrigger,
     mutedOptOut: allocation.mutedOptOut,

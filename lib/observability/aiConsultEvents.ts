@@ -151,3 +151,47 @@ export function logAiConsultProviderHealth(
     }),
   )
 }
+
+/**
+ * The daily consult STALL funnel — how many consults have gone quiet, and at
+ * which step.
+ *
+ * Counts and ages only: no consult id, no client id, nothing she wrote or
+ * photographed. The companion to `ai_consult_provider_health` — that one says
+ * whether the model is answering, this one says whether anyone is getting
+ * through the product. On 2026-09-13 the second question had never been asked,
+ * and the answer was one completed consult out of seven.
+ *
+ * `awaitingClient` / `awaitingSystem` split the total by WHOSE move is next,
+ * because a pile of consults waiting on our own queue is an operational
+ * failure and a pile waiting on her is a product one.
+ */
+export type AiConsultStallFunnelEvent = {
+  minAgeHours: number
+  until: string
+  totalStalled: number
+  awaitingClient: number
+  awaitingSystem: number
+  byStatus: {
+    status: string
+    sessions: number
+    awaitingClient: boolean
+    oldestAgeHours: number
+  }[]
+}
+
+export function logAiConsultStallFunnel(input: AiConsultStallFunnelEvent): void {
+  console.info(
+    JSON.stringify({
+      ts: new Date().toISOString(),
+      app: APP_NAME,
+      namespace: NAMESPACE,
+      // 🔴 A consult stuck on OUR side is the one worth raising the level for.
+      // A client who wandered off is ordinary; a queue that is not draining is
+      // not, and it is the case that hid four failed runs for two days.
+      level: input.awaitingSystem > 0 ? 'warn' : 'info',
+      event: 'ai_consult_stall_funnel',
+      ...input,
+    }),
+  )
+}
