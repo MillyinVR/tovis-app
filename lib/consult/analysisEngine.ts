@@ -19,6 +19,7 @@ import {
 import {
   CONSULT_HAIR_LEVELS,
   consultHairLevelPairIsOrdered,
+  consultHairLevelScalePromptText,
   type ConsultHairLevel,
 } from './hairLevel'
 import type { ConsultCaptureImage } from './captureStorage'
@@ -116,7 +117,11 @@ export const CONSULT_ANALYSIS_SCHEMA_VERSION = 6
 // forward to it, and splits the guard's one code array into REQUIRED and
 // SUPPORTED so a flag her words may turn out to mean is admitted without
 // being demanded.
-export const CONSULT_ANALYSIS_PROMPT_VERSION = 'service-analysis-v11'
+// v12 (2026-09-13): the direction call is told what the ten salon depth levels
+// MEAN (lib/consult/hairLevel.ts). It had never been given the scale at all —
+// not even the one-line version the inspiration read carried — while being
+// asked for baseLevel and lightestLevel on it. Prose only; schema 6 unchanged.
+export const CONSULT_ANALYSIS_PROMPT_VERSION = 'service-analysis-v12'
 export const CONSULT_FACE_COLOR_SCHEMA_VERSION = 1
 // v2 (2026-09-13): skinDepth may be read provisionally from the early selfie;
 // surfaceOvertone still may not. Pinned by the
@@ -1343,7 +1348,8 @@ export const CONSULT_ANALYSIS_DIRECTION_SYSTEM_PROMPT = [
   'Inputs: a consultation context naming the service family, the service category, the specific service the client is considering when one is known, the professional’s menu in that category, and the capture pack this consult uses; the client’s intake as the questions and answers she saw (with their immutable option codes); one or more labeled daylight photos from that pack; a reading of the client’s INSPIRATION reference; and the client’s FEATURE PROFILE, already established from these same photographs by an earlier pass.',
   'The feature profile is given to you as settled fact. Do not re-derive it, do not contradict it, and do not restate it as though it were your own observation. Use it: every style direction and every recommendation must lean on the specific profile fields that support it, and a field the profile marked UNKNOWN is not available to lean on.',
   'You produce: the hair core observations, exactly one style direction per domain (HAIR_COLOR_HARMONY, CUT_AND_SHAPE, BANGS, BROWS, LASHES, MAKEUP, COLOR_PALETTE), a service lens, safety flags, and service recommendations.',
-  'The hair core is two levels and four observations. baseLevel is the depth at the root — the darkest dominant color on the head. lightestLevel is the lightest dominant color, wherever it sits. They are two separate readings, not a range: a solid single-process has the SAME value in both, and reporting them equal is the correct answer, not a failure. Balayage, highlights and a grown-out root are where they differ. How sure you are goes in each observation’s confidence range, never into the gap between the two levels. Both read from the hair views only.',
+  consultHairLevelScalePromptText(),
+  'The hair core is two levels and four observations. baseLevel is the depth at the root — the darkest dominant color on the head. lightestLevel is the lightest dominant color, wherever it sits. Both sit on the depth scale above. They are two separate readings, not a range: a solid single-process has the SAME value in both, and reporting them equal is the correct answer, not a failure. Balayage, highlights and a grown-out root are where they differ. How sure you are goes in each observation’s confidence range, never into the gap between the two levels. Both read from the hair views only.',
   'Everything you write serves the client’s stated desired look. The linked service is reference context, never a required purchase. The service lens describes the client’s goal, history, constraints, maintenance and appointment context as they bear on the desired result; recommendations are services from the professional’s menu (named exactly as the menu names them) or a consultation with the professional; the hair core observations are filled from the hair views when hair is the subject and set to UNKNOWN when it is not.',
   ...SHARED_CONDUCT,
   'You are also given what the client brought as INSPIRATION: a structured reading of her reference photograph (its base and lightest level, tone, technique, placement, root blend, finish and dimension, each with a confidence range) and, in her own words, what she said she liked about it. You are NOT given the reference image; the reading is what you have of it.',

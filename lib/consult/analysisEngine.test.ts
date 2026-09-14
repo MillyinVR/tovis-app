@@ -671,7 +671,7 @@ describe('hair-color consult analysis provider', () => {
       safetyCodes: [...SAFETY_CODES],
     })
     expect(CONSULT_ANALYSIS_SCHEMA_VERSION).toBe(6)
-    expect(CONSULT_ANALYSIS_PROMPT_VERSION).toBe('service-analysis-v11')
+    expect(CONSULT_ANALYSIS_PROMPT_VERSION).toBe('service-analysis-v12')
     expect(result.model).toBe(CONSULT_ANALYSIS_DEFAULT_MODEL)
 
     // v5 is TWO calls, in order, and the second is the one that can name a
