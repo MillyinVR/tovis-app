@@ -87,6 +87,93 @@ export const CONSULT_HAIR_LEVEL_DEPTH: Readonly<
   LEVEL_10: 'lightest blonde',
 }
 
+/** What lifting to a level exposes, and what cancels it. */
+export type ConsultHairUnderlyingPigment = {
+  /** The contributing pigment lifting to this level uncovers. */
+  exposes: string
+  /** Its complement — the tone that neutralizes it. */
+  neutralizedBy: string
+}
+
+/**
+ * The underlying (contributing) pigment at each level, and the complementary
+ * pigment that cancels it.
+ *
+ * 🔴 Why this exists: without it the plan can say "a 4 to an 8" but not what
+ * that COSTS. Lifting does not remove pigment evenly — it uncovers warmth in a
+ * fixed order, and a colourist plans around that order. "4 to 8 goes through
+ * red and orange, cancelled with green then blue" is real formulation and an
+ * honest multi-session answer; "4 to 8" on its own invites a cheerful
+ * single-visit promise the chemistry does not support.
+ *
+ * 🔴 SOURCE: Tori's physical Ashlee Norman Hair swatch ring, read off the card
+ * on 2026-09-14. This is deliberately NOT what the web charts say — they run
+ * about one level warm (they put orange at 6 and orange-yellow at 7, where the
+ * card puts red-orange at 6 and orange at 7). The card is a professional tool
+ * and she is the colourist; the websites are neither. Do not "correct" this
+ * table back towards a chart. The numbering and its pigment order are industry
+ * facts, freely restatable — no swatch imagery is reproduced here.
+ *
+ * ⚠️ LEVEL_1 is null on purpose: the card's scale STARTS at level 2, so we
+ * have no professional source for what black exposes. Null means "not on the
+ * card", and `consultHairUnderlyingPigmentPromptText` says so out loud rather
+ * than letting a model fill the gap.
+ */
+export const CONSULT_HAIR_LEVEL_UNDERLYING_PIGMENT: Readonly<
+  Record<Exclude<ConsultHairLevel, 'UNKNOWN'>, ConsultHairUnderlyingPigment | null>
+> = {
+  LEVEL_1: null,
+  LEVEL_2: { exposes: 'red', neutralizedBy: 'green' },
+  LEVEL_3: { exposes: 'red', neutralizedBy: 'green' },
+  LEVEL_4: { exposes: 'red', neutralizedBy: 'green' },
+  LEVEL_5: { exposes: 'red-orange', neutralizedBy: 'blue-green' },
+  LEVEL_6: { exposes: 'red-orange', neutralizedBy: 'blue-green' },
+  LEVEL_7: { exposes: 'orange', neutralizedBy: 'blue' },
+  LEVEL_8: { exposes: 'yellow-orange', neutralizedBy: 'blue-violet' },
+  LEVEL_9: { exposes: 'yellow', neutralizedBy: 'violet' },
+  LEVEL_10: { exposes: 'pale yellow', neutralizedBy: 'violet' },
+}
+
+/**
+ * The pigment table as prompt text, built from the map above for the same
+ * reason the depth scale is: two readers must not drift on what a level
+ * exposes.
+ *
+ * The "every level it passes THROUGH" sentence is the load-bearing one. A lift
+ * from 4 to 8 does not expose yellow-orange and stop; it travels red, then
+ * red-orange, then orange, and what the hair holds at the end is the sum of
+ * that journey. A model given only the destination row will formulate for the
+ * destination and promise one visit.
+ */
+export function consultHairUnderlyingPigmentPromptText(): string {
+  const rungs = (
+    Object.keys(CONSULT_HAIR_LEVEL_UNDERLYING_PIGMENT) as Exclude<
+      ConsultHairLevel,
+      'UNKNOWN'
+    >[]
+  )
+    .map((level) => {
+      const pigment = CONSULT_HAIR_LEVEL_UNDERLYING_PIGMENT[level]
+      if (!pigment) return null
+      return `${consultHairLevelNumber(level)} exposes ${pigment.exposes} (cancelled by ${pigment.neutralizedBy})`
+    })
+    .filter((rung): rung is string => rung !== null)
+    .join('; ')
+  return (
+    'Lifting hair uncovers warmth in a fixed order — the underlying or ' +
+    `contributing pigment. On this scale: ${rungs}. ` +
+    'Level 1 is not on this list and you have not been told what it exposes; ' +
+    'do not guess one. ' +
+    'A lift passes through every level between where she is and where she is ' +
+    'going, and exposes each of their pigments on the way, so the warmth left ' +
+    'to cancel at the end is the sum of that journey and not just the ' +
+    'destination row. The wider the lift, the more of it there is, and the ' +
+    'more likely the honest answer is more than one visit plus a toner. Never ' +
+    'promise that a wide lift will be clean, cool or single-session because ' +
+    'the destination level sounds light.'
+  )
+}
+
 /**
  * The scale as one block of prompt text, built from the map above so the
  * inspiration read and the capture analysis cannot drift apart on what a level

@@ -121,7 +121,20 @@ export const CONSULT_ANALYSIS_SCHEMA_VERSION = 6
 // MEAN (lib/consult/hairLevel.ts). It had never been given the scale at all —
 // not even the one-line version the inspiration read carried — while being
 // asked for baseLevel and lightestLevel on it. Prose only; schema 6 unchanged.
-export const CONSULT_ANALYSIS_PROMPT_VERSION = 'service-analysis-v12'
+// v13 (2026-09-14): the look-plan instructions carry the UNDERLYING PIGMENT
+// each level exposes and the complement that cancels it
+// (lib/consult/hairLevel.ts). The plan could already size a lift — "her base
+// is a 4, the reference is an 8, that gap needs a service with liftsLevels 4"
+// — but had no way to price its chemistry, so a wide lift read as a menu
+// arithmetic problem rather than a journey through red and orange that takes
+// more than one visit and a toner. Prose only; schema 6 unchanged, and the
+// sentences live in CONSULT_LOOK_PLAN_INSTRUCTIONS, which is appended to this
+// same call's system prompt.
+//
+// 🔴 The values are Tori's PHYSICAL swatch card, which runs about one level
+// cooler than the web charts. See the source note in lib/consult/hairLevel.ts
+// before anyone "fixes" them.
+export const CONSULT_ANALYSIS_PROMPT_VERSION = 'service-analysis-v13'
 export const CONSULT_FACE_COLOR_SCHEMA_VERSION = 1
 // v2 (2026-09-13): skinDepth may be read provisionally from the early selfie;
 // surfaceOvertone still may not. Pinned by the
