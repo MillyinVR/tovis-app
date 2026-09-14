@@ -136,7 +136,35 @@ export const CONSULT_ANALYSIS_SCHEMA_VERSION = 6
 // 🔴 The values are Tori's PHYSICAL swatch card, which runs about one level
 // cooler than the web charts. See the source note in lib/consult/hairLevel.ts
 // before anyone "fixes" them.
-export const CONSULT_ANALYSIS_PROMPT_VERSION = 'service-analysis-v13'
+//
+// v14 (2026-09-14): the two levels stop being read off the OVERHEAD shot.
+// Prose only; schema 6 unchanged, and no stored row changes meaning.
+//
+// The depth bench (docs/consult/depth-bench-2026-09-14) found the crown view
+// carrying almost the whole level error, but it measured the INSPIRATION
+// reader one image at a time — a different reader from this one, which sees
+// every view at once. Re-measured HERE, on this engine, 21 paired fixture-runs
+// against the same corpus:
+//
+//   * the control cited hair_crown for baseLevel in 22 of 22 runs, and cited
+//     it FIRST in 12 of 22. `shotPhrase` in lib/consult/followUpContext.ts
+//     renders `evidence[0]` into the follow-up's context block, which tells
+//     the question-writing model her depth was read from "the photo looking
+//     down at the top of your hair" and licenses it to refer to that photo
+//     that way when it talks to her. So in over half of all consults the
+//     conversation layer was grounded on the one view neither reader can
+//     trust for depth — and the two get it wrong in OPPOSITE directions.
+//     With these sentences: cited 5 of 23, cited first 1 of 23.
+//   * baseLevel error fell against BOTH ground truths — 0.86 -> 0.71 levels
+//     vs Tori's blind grayscale root calls (0.69 -> 0.50 excluding the
+//     disputed fixture iv), and 0.43 -> 0.33 vs the corpus labels. Nothing
+//     regressed: lightestLevel went 0.83 -> 0.75, and run-to-run stability
+//     from 2 of 6 fixtures to 3 of 6.
+//
+// 🔴 These sentences are the MEASURED artefact. Reword them and the numbers
+// above describe a prompt that is no longer shipping — re-measure with
+// scripts/dev/crown-level-experiment.ts rather than editing them in place.
+export const CONSULT_ANALYSIS_PROMPT_VERSION = 'service-analysis-v14'
 export const CONSULT_FACE_COLOR_SCHEMA_VERSION = 1
 // v2 (2026-09-13): skinDepth may be read provisionally from the early selfie;
 // surfaceOvertone still may not. Pinned by the
@@ -1384,6 +1412,13 @@ export const CONSULT_ANALYSIS_DIRECTION_SYSTEM_PROMPT = [
   'Recommendations are bounded directions to discuss with the professional, never promises. Name each recommended service exactly as the menu lists it, or choose the consultation option.',
   'Give one to three useful recommendations. One well-supported recommendation is enough. Never invent a choice to fill a count. If this run requests lookPlan instead, return that plan and do not output recommendations.',
   'Every free-text field states a HARD CHARACTER LIMIT in its description. Those limits are enforced after you answer: a field one character over is not trimmed, it discards the entire analysis. Write to comfortably inside the limit — a shorter, plainer sentence is always the safer answer than a full one.',
+  // 🔴 v14, and it must stay LAST. The experiment that justifies these
+  // sentences (see CONSULT_ANALYSIS_PROMPT_VERSION) appended them after the
+  // whole joined prompt, so this position IS the measured one. Moving them up
+  // the array, or rewording them, makes the recorded numbers describe a prompt
+  // that is no longer shipping — re-measure with
+  // scripts/dev/crown-level-experiment.ts instead.
+  'The hair_crown view looks down at the top of the head. It is lit from above, so its hair reads brighter and more specular than the same head does from the side, and its exposure is not a reliable measure of depth. Read baseLevel and lightestLevel from hair_back, hair_left and hair_right where any of those was supplied, and use hair_crown for what the overhead angle genuinely shows — density and the parting. Cite hair_crown for a level only when it is the only hair view you were given, and keep the confidence range low when you do.',
 ].join(' ')
 
 /**
