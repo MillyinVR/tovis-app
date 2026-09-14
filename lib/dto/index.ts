@@ -70,6 +70,14 @@ export type {
   ProVisibilityHealthDTO,
 } from '@/lib/pro/visibilityHealth'
 
+// ── Pro readiness / onboarding blockers (GET /api/v1/pro/readiness) ──────────
+export type {
+  LiveBookingMode,
+  ProReadinessBlocker,
+  ProReadiness,
+  ProReadinessResponseDTO,
+} from '@/lib/pro/readiness/proReadiness'
+
 // ── Pro Finance & Tax tab (GET /api/v1/pro/finance) — superset of Overview ────
 export type {
   ProFinanceCardTone,

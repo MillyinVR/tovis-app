@@ -50,6 +50,21 @@ export type ProReadiness =
   | { ok: true; liveModes: LiveBookingMode[]; readyLocationIds: string[] }
   | { ok: false; blockers: ProReadinessBlocker[] }
 
+/**
+ * The wire envelope for GET /api/v1/pro/readiness (`jsonOk({ readiness })`).
+ *
+ * Declared so the blocker union reaches `schema/api/tovis-api.schema.json` and
+ * the cross-repo fixture contract can hold the native clients to it. Before
+ * this existed the route had no generated definition at all, so renaming a
+ * blocker (#997 collapsed two verification blockers into `VERIFICATION_BARRED`)
+ * broke iOS silently: its decoder falls back to `.unknown`, which renders a row
+ * with generic copy and NO destination, and the verification screen has exactly
+ * one entry point on device. Nothing went red for twenty days.
+ */
+export type ProReadinessResponseDTO = {
+  readiness: ProReadiness
+}
+
 export type PublishableLocationBlocker =
   | 'LOCATION_MISSING_TIMEZONE'
   | 'LOCATION_MISSING_WORKING_HOURS'
