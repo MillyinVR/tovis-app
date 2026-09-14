@@ -1,0 +1,11 @@
+{
+  "//": "Dev scripts run under tsx, outside Next's module graph, so an import of `server-only` has nothing to resolve to. The vitest configs solve this the same way — see the `resolve.alias` block in vitest.live.config.mts. Kept out of the root tsconfig on purpose: mapping `server-only` to a no-op there would disarm the boundary for the real build.",
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": "../..",
+    "paths": {
+      "@/*": ["./*"],
+      "server-only": ["./test/mocks/server-only.ts"]
+    }
+  }
+}
