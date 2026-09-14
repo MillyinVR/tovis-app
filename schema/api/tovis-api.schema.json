@@ -15102,6 +15102,13 @@
     "LastMinuteTier": {
       "$ref": "#/definitions/%24Enums.LastMinuteTier"
     },
+    "LiveBookingMode": {
+      "enum": [
+        "SALON",
+        "MOBILE"
+      ],
+      "type": "string"
+    },
     "LocationType": {
       "$ref": "#/definitions/ProfessionalLocationType"
     },
@@ -22346,6 +22353,84 @@
         "reviews",
         "isFavoritedByMe",
         "signals"
+      ],
+      "type": "object"
+    },
+    "ProReadiness": {
+      "anyOf": [
+        {
+          "properties": {
+            "liveModes": {
+              "items": {
+                "$ref": "#/definitions/LiveBookingMode"
+              },
+              "type": "array"
+            },
+            "ok": {
+              "const": true,
+              "type": "boolean"
+            },
+            "readyLocationIds": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "ok",
+            "liveModes",
+            "readyLocationIds"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "blockers": {
+              "items": {
+                "$ref": "#/definitions/ProReadinessBlocker"
+              },
+              "type": "array"
+            },
+            "ok": {
+              "const": false,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "ok",
+            "blockers"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ProReadinessBlocker": {
+      "enum": [
+        "NO_ACTIVE_OFFERING",
+        "NO_BOOKABLE_LOCATION",
+        "SALON_MISSING_ADDRESS",
+        "MOBILE_MISSING_BASE_CONFIG",
+        "LOCATION_MISSING_TIMEZONE",
+        "LOCATION_MISSING_WORKING_HOURS",
+        "LOCATION_MISSING_GEO",
+        "OFFERING_MISSING_SALON_PRICE_OR_DURATION",
+        "OFFERING_MISSING_MOBILE_PRICE_OR_DURATION",
+        "STRIPE_NOT_READY",
+        "VERIFICATION_BARRED",
+        "LICENSE_EXPIRED"
+      ],
+      "type": "string"
+    },
+    "ProReadinessResponseDTO": {
+      "description": "The wire envelope for GET /api/v1/pro/readiness (`jsonOk({ readiness })`).\n\nDeclared so the blocker union reaches `schema/api/tovis-api.schema.json` and the cross-repo fixture contract can hold the native clients to it. Before this existed the route had no generated definition at all, so renaming a blocker (#997 collapsed two verification blockers into `VERIFICATION_BARRED`) broke iOS silently: its decoder falls back to `.unknown`, which renders a row with generic copy and NO destination, and the verification screen has exactly one entry point on device. Nothing went red for twenty days.",
+      "properties": {
+        "readiness": {
+          "$ref": "#/definitions/ProReadiness"
+        }
+      },
+      "required": [
+        "readiness"
       ],
       "type": "object"
     },
