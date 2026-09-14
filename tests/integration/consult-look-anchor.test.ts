@@ -305,6 +305,18 @@ vi.mock('@/lib/consult/inspirationVision', async (importOriginal) => {
           captured.inspirationFailure,
         )
       }
+      if (captured.inspirationRawPayload) {
+        // THE policy, not a second copy of it — the same reason
+        // `sanitizeConsultInspirationRead` is exported at all.
+        const read = original.sanitizeConsultInspirationRead(
+          captured.inspirationRawPayload,
+        )
+        return {
+          model: 'fake-inspiration-model',
+          credibilityFlags: read.credibilityFlags,
+          analysis: read.analysis,
+        }
+      }
       return {
         model: 'fake-inspiration-model',
         credibilityFlags: [...captured.inspirationCredibilityFlags],
@@ -357,6 +369,12 @@ const captured = vi.hoisted(() => ({
   inspirationFailure: null as null | 'unreadable' | 'unavailable',
   /** C2-6b — what the fake reader notices about the photograph. */
   inspirationCredibilityFlags: [] as string[],
+  /**
+   * A RAW provider payload to push through the real sanitizer, instead of the
+   * pre-sanitized analysis the fake normally returns. Set it when what is under
+   * test is the POLICY and what the DB will accept from it, not the pipeline.
+   */
+  inspirationRawPayload: null as unknown,
 }))
 
 vi.mock('@/lib/consult/analysisEngine', async (importOriginal) => {
@@ -2546,6 +2564,102 @@ describe('P4 — the inspiration reference is read, stored, and reaches both aud
       expect(JSON.stringify(engineInput?.inspiration)).not.toContain('credibilityFlags')
     } finally {
       captured.inspirationCredibilityFlags = []
+    }
+  })
+
+  it('stores a DEGRADED reading through the live guard — one bad attribute is not a lost read', async () => {
+    // 🔴 The discard bug, end to end. The raw payload below is the shape the
+    // model actually returned on 2026-09-14 when the reference was desaturated:
+    // `tone` carries a real value but cites nothing and points nowhere, because
+    // the model worked out it could not read tone and wrote NEUTRAL where
+    // UNKNOWN belonged. That one word used to throw all eight attributes away.
+    //
+    // What this proves that a unit test cannot: the UNKNOWN the sanitizer
+    // SYNTHESIZES is one Postgres will take. `consult_inspiration_observation_valid`
+    // requires an UNKNOWN to cite nothing, point nowhere and claim
+    // `confidence.max <= 0.35`; a degraded attribute that missed any of those
+    // would be a 500 on the write, not a caught refusal.
+    const crop = { x: 0.15, y: 0.2, w: 0.6, h: 0.5 }
+    const wire = (value: string) => ({
+      value,
+      confidence: { min: 0.4, max: 0.65 },
+      evidence: ['inspiration'],
+      region: `${crop.x},${crop.y},${crop.w},${crop.h}`,
+    })
+    captured.inspirationRawPayload = {
+      hairRegion: '0.1,0.1,0.8,0.8',
+      baseLevel: wire('LEVEL_6'),
+      lightestLevel: wire('LEVEL_9'),
+      // The live repro: a value with no evidence and no region.
+      tone: { value: 'NEUTRAL', confidence: { min: 0.4, max: 0.65 }, evidence: [], region: null },
+      technique: wire('BALAYAGE'),
+      placement: wire('MIDS_TO_ENDS'),
+      rootBlend: wire('SHADOW_ROOT'),
+      finish: wire('HIGH_SHINE'),
+      dimension: wire('MEDIUM'),
+      credibilityFlags: [],
+    }
+    try {
+      const lookPostId = await freshHairLook()
+      const created = await startLook(lookPostId)
+      const sessionId = ((await body(created)).consult as { id: string }).id
+      if (!sessionIds.includes(sessionId)) sessionIds.push(sessionId)
+      await consentAndCompleteIntake(sessionId, 'degraded-read')
+
+      const read = await readInspiration(
+        jsonRequest(`/api/v1/client/consult/${sessionId}/inspiration/read`, {
+          idempotencyKey: 'degraded-read-1',
+        }),
+        context(sessionId),
+      )
+      // The read SUCCEEDS. Before this change it was a bad_output.
+      expect(read.status).toBe(200)
+
+      const artefact = await db.consultRevision.findFirstOrThrow({
+        where: { consultSessionId: sessionId, kind: ConsultRevisionKind.INSPIRATION_ANALYSIS },
+        orderBy: { revision: 'desc' },
+        select: { payload: true },
+      })
+      type StoredObservation = {
+        value: string
+        confidence: { min: number; max: number }
+        evidence: string[]
+        region: unknown
+      }
+      const stored = (
+        artefact.payload as { attributes: Record<string, StoredObservation> }
+      ).attributes
+      const attribute = (field: string): StoredObservation => {
+        const observed = stored[field]
+        if (!observed) throw new Error(`the artefact is missing ${field}`)
+        return observed
+      }
+
+      // The bad attribute, and ONLY it, became an honest UNKNOWN.
+      expect(attribute('tone')).toEqual({
+        value: 'UNKNOWN',
+        confidence: { min: 0, max: 0.05 },
+        evidence: [],
+        region: null,
+      })
+      // The seven the photograph did answer are all still there.
+      expect(attribute('baseLevel').value).toBe('LEVEL_6')
+      expect(attribute('lightestLevel').value).toBe('LEVEL_9')
+      expect(attribute('dimension').value).toBe('MEDIUM')
+      expect(
+        Object.values(stored).filter((observed) => observed.value !== 'UNKNOWN'),
+      ).toHaveLength(7)
+
+      // And the client is told what it could NOT read, rather than the whole
+      // reference silently failing.
+      const state = await loadConsultInspirationState({
+        consultSessionId: sessionId,
+        clientId,
+        actorUserId: clientUserId,
+      })
+      expect(state.source?.analysisReady).toBe(true)
+    } finally {
+      captured.inspirationRawPayload = null
     }
   })
 

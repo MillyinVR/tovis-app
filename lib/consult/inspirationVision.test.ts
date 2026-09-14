@@ -15,8 +15,10 @@ import {
   CONSULT_INSPIRATION_ANALYSIS_SCHEMA_VERSION,
   CONSULT_INSPIRATION_ANALYSIS_SYSTEM_PROMPT,
   CONSULT_INSPIRATION_CREDIBILITY_FLAGS,
+  CONSULT_INSPIRATION_FIELD_VALUES,
   ConsultInspirationVisionError,
   countKnownConsultInspirationAttributes,
+  type ConsultInspirationAttributeDegradation,
   resetConsultInspirationVisionClientForTests,
   runConsultInspirationVision,
   sanitizeConsultInspirationAnalysis,
@@ -35,6 +37,19 @@ function known(value: string, region = '0.1,0.2,0.5,0.6') {
     evidence: ['inspiration'],
     region,
   }
+}
+
+/** `known`, but stating how sure the model was — the level-order tie-break. */
+function knownAt(value: string, min: number, max: number) {
+  return { ...known(value), confidence: { min, max } }
+}
+
+/** The UNKNOWN the sanitizer synthesizes for an attribute it had to refuse. */
+const DEGRADED = {
+  value: 'UNKNOWN',
+  confidence: { min: 0, max: 0.05 },
+  evidence: [],
+  region: null,
 }
 
 const UNKNOWN = {
@@ -136,14 +151,56 @@ describe('sanitizeConsultInspirationAnalysis', () => {
     expect(analysis.tone.value).toBe('COOL')
   })
 
-  it('refuses a base level lighter than the lightest, and accepts them equal', () => {
+  it('splits an impossible level pair instead of losing both, keeping the surer one', () => {
     // A grown-out balayage differs; a solid single-process does not. Only the
-    // impossible ordering fails — see lib/consult/hairLevel.ts.
-    expect(() =>
-      sanitizeConsultInspirationAnalysis(
-        output({ baseLevel: known('LEVEL_9'), lightestLevel: known('LEVEL_5') }),
-      ),
-    ).toThrowError(ConsultInspirationVisionError)
+    // impossible ordering is acted on — see lib/consult/hairLevel.ts.
+    //
+    // The pair is never swapped (that would invent a reading nobody made) and
+    // never both dropped (that loses the most valuable pair in the result).
+    // The LESS confident half becomes UNKNOWN and the surer half survives.
+    const surerBase: ConsultInspirationAttributeDegradation[] = []
+    const keptBase = sanitizeConsultInspirationAnalysis(
+      output({
+        baseLevel: knownAt('LEVEL_9', 0.7, 0.9),
+        lightestLevel: knownAt('LEVEL_5', 0.3, 0.5),
+      }),
+      surerBase,
+    )
+    expect(keptBase.baseLevel.value).toBe('LEVEL_9')
+    expect(keptBase.lightestLevel).toEqual(DEGRADED)
+    expect(surerBase).toEqual([
+      { field: 'lightestLevel', check: 'level_order', offered: 'LEVEL_5' },
+    ])
+
+    const surerLightest: ConsultInspirationAttributeDegradation[] = []
+    const keptLightest = sanitizeConsultInspirationAnalysis(
+      output({
+        baseLevel: knownAt('LEVEL_9', 0.3, 0.5),
+        lightestLevel: knownAt('LEVEL_5', 0.7, 0.9),
+      }),
+      surerLightest,
+    )
+    expect(keptLightest.lightestLevel.value).toBe('LEVEL_5')
+    expect(keptLightest.baseLevel).toEqual(DEGRADED)
+    expect(surerLightest.map((entry) => entry.field)).toEqual(['baseLevel'])
+
+    // Equally sure: `baseLevel` is the one that goes, because the inspiration
+    // reading is the DESTINATION (lookPlan.ts) and its lightest level is what
+    // sets the lift target; its base describes roots the plan reads from her
+    // own capture instead.
+    const tied: ConsultInspirationAttributeDegradation[] = []
+    const onATie = sanitizeConsultInspirationAnalysis(
+      output({ baseLevel: known('LEVEL_9'), lightestLevel: known('LEVEL_5') }),
+      tied,
+    )
+    expect(onATie.lightestLevel.value).toBe('LEVEL_5')
+    expect(onATie.baseLevel).toEqual(DEGRADED)
+    expect(tied.map((entry) => entry.field)).toEqual(['baseLevel'])
+
+    // The other seven attributes are untouched by any of that.
+    expect(onATie.tone.value).toBe('COOL')
+    expect(countKnownConsultInspirationAttributes(onATie)).toBe(7)
+
     expect(
       sanitizeConsultInspirationAnalysis(
         output({ baseLevel: known('LEVEL_6'), lightestLevel: known('LEVEL_6') }),
@@ -157,15 +214,23 @@ describe('sanitizeConsultInspirationAnalysis', () => {
     ).toBe('UNKNOWN')
   })
 
-  it('clamps a box that rounding pushed past the edge, and refuses one that is really out', () => {
+  it('clamps a box that rounding pushed past the edge, and degrades one that is really out', () => {
     expect(
       sanitizeConsultInspirationAnalysis(output({ finish: known('SATIN', '0.9,0.9,0.1,0.1') }))
         .finish.region,
     ).toEqual({ x: 0.9, y: 0.9, w: 0.1, h: 0.1 })
-    // 0.9 + 0.5 is not a rounding artefact; it is a box that does not fit.
-    expect(() =>
-      sanitizeConsultInspirationAnalysis(output({ finish: known('SATIN', '0.9,0.2,0.5,0.1') })),
-    ).toThrowError(ConsultInspirationVisionError)
+    // 0.9 + 0.5 is not a rounding artefact; it is a box that does not fit. The
+    // FINISH is then unreadable — the other seven attributes are not.
+    const degradations: ConsultInspirationAttributeDegradation[] = []
+    const analysis = sanitizeConsultInspirationAnalysis(
+      output({ finish: known('SATIN', '0.9,0.2,0.5,0.1') }),
+      degradations,
+    )
+    expect(analysis.finish).toEqual(DEGRADED)
+    expect(countKnownConsultInspirationAttributes(analysis)).toBe(7)
+    expect(degradations).toEqual([
+      { field: 'finish', check: 'region_bounds', offered: 'SATIN' },
+    ])
   })
 
   it('trims a box that runs off the frame back to the edge, and names each refusal', () => {
@@ -183,41 +248,68 @@ describe('sanitizeConsultInspirationAnalysis', () => {
     } finally {
       warn.mockRestore()
     }
-    // Losing more than half the side means the box was never aimed there.
-    expect(() =>
-      sanitizeConsultInspirationAnalysis(output({ finish: known('SATIN', '0.9,0.2,0.5,0.1') })),
-    ).toThrowError(expect.objectContaining({ kind: 'bad_output', stage: 'region_bounds' }))
-    expect(() =>
-      sanitizeConsultInspirationAnalysis(output({ finish: known('SATIN', '0.1,0.2,0.003,0.1') })),
-    ).toThrowError(expect.objectContaining({ kind: 'bad_output', stage: 'region_too_small' }))
-    expect(() =>
-      sanitizeConsultInspirationAnalysis(output({ finish: known('SATIN', '0.1,0.2,0.5') })),
-    ).toThrowError(expect.objectContaining({ kind: 'bad_output', stage: 'region_format' }))
+    // Losing more than half the side means the box was never aimed there. Each
+    // way a box can be unusable still has its OWN name — the names are just
+    // recorded against the attribute now instead of ending the whole read.
+    for (const [region, check] of [
+      ['0.9,0.2,0.5,0.1', 'region_bounds'],
+      ['0.1,0.2,0.003,0.1', 'region_too_small'],
+      ['0.1,0.2,0.5', 'region_format'],
+    ] as const) {
+      const degradations: ConsultInspirationAttributeDegradation[] = []
+      const analysis = sanitizeConsultInspirationAnalysis(
+        output({ finish: known('SATIN', region) }),
+        degradations,
+      )
+      expect(analysis.finish).toEqual(DEGRADED)
+      expect(degradations).toEqual([{ field: 'finish', check, offered: 'SATIN' }])
+    }
   })
 
-  it('refuses an UNKNOWN that cites evidence, claims confidence, or points at a region', () => {
+  it('degrades an UNKNOWN that cites evidence, claims confidence, or points at a region', () => {
     for (const contradiction of [
       { ...UNKNOWN, evidence: ['inspiration'] },
       { ...UNKNOWN, confidence: { min: 0.4, max: 0.9 } },
       { ...UNKNOWN, region: '0.1,0.1,0.2,0.2' },
     ]) {
-      expect(() =>
-        sanitizeConsultInspirationAnalysis(output({ rootBlend: contradiction })),
-      ).toThrowError(ConsultInspirationVisionError)
+      const degradations: ConsultInspirationAttributeDegradation[] = []
+      const analysis = sanitizeConsultInspirationAnalysis(
+        output({ rootBlend: contradiction }),
+        degradations,
+      )
+      // The contradiction is not stored — the attribute is rewritten to an
+      // UNKNOWN that satisfies every rule the DB guard applies to one.
+      expect(analysis.rootBlend).toEqual(DEGRADED)
+      expect(degradations).toEqual([
+        { field: 'rootBlend', check: 'unknown_contradiction', offered: 'UNKNOWN' },
+      ])
     }
   })
 
-  it('refuses a reading that cites nothing or points nowhere', () => {
-    expect(() =>
-      sanitizeConsultInspirationAnalysis(
-        output({ tone: { ...known('WARM'), evidence: [] } }),
-      ),
-    ).toThrowError(ConsultInspirationVisionError)
-    expect(() =>
-      sanitizeConsultInspirationAnalysis(
-        output({ tone: { ...known('WARM'), region: null } }),
-      ),
-    ).toThrowError(ConsultInspirationVisionError)
+  it('degrades a reading that cites nothing or points nowhere, and keeps the rest', () => {
+    // 🔴 The live repro, from the six-fixture eval on 2026-09-14. Sent a
+    // desaturated copy of fixture `i`, the model answered
+    //   tone  value=NEUTRAL  evidence=[]  region=null
+    // — it had correctly worked out that a desaturated image cannot tell it the
+    // tone, and wrote NEUTRAL where UNKNOWN belonged. That one word used to
+    // discard all eight attributes; seven of them were good.
+    for (const broken of [
+      { ...known('NEUTRAL'), evidence: [] },
+      { ...known('NEUTRAL'), region: null },
+    ]) {
+      const degradations: ConsultInspirationAttributeDegradation[] = []
+      const analysis = sanitizeConsultInspirationAnalysis(
+        output({ tone: broken }),
+        degradations,
+      )
+      expect(analysis.tone).toEqual(DEGRADED)
+      expect(countKnownConsultInspirationAttributes(analysis)).toBe(7)
+      expect(analysis.baseLevel.value).toBe('LEVEL_5')
+      expect(analysis.lightestLevel.value).toBe('LEVEL_8')
+      expect(degradations).toEqual([
+        { field: 'tone', check: 'unsupported_claim', offered: 'NEUTRAL' },
+      ])
+    }
   })
 
   it('treats an all-UNKNOWN read as an unreadable photo, not a low-confidence answer', () => {
@@ -244,18 +336,33 @@ describe('sanitizeConsultInspirationAnalysis', () => {
     expect(analysis.rootBlend.region).toBeNull()
   })
 
-  it('refuses an unknown attribute, a missing one, and a value outside its enum', () => {
+  it('still refuses an unknown attribute and a missing one — the key set is not degradable', () => {
+    // A key set that is not this schema is a broken contract, not a photograph
+    // that was hard to read: the grammar makes all eight `required`, so there
+    // is no reading here to salvage.
     expect(() =>
       sanitizeConsultInspirationAnalysis({ ...output(), porosity: known('HIGH') }),
-    ).toThrowError(ConsultInspirationVisionError)
+    ).toThrowError(expect.objectContaining({ stage: 'attribute_keys' }))
     const missing = { ...output() }
     delete (missing as Partial<typeof missing>).dimension
     expect(() => sanitizeConsultInspirationAnalysis(missing)).toThrowError(
-      ConsultInspirationVisionError,
+      expect.objectContaining({ stage: 'attribute_keys' }),
     )
-    expect(() =>
-      sanitizeConsultInspirationAnalysis(output({ tone: known('MAUVE') })),
-    ).toThrowError(ConsultInspirationVisionError)
+  })
+
+  it('degrades a value outside its enum, and never repeats the word it did not know', () => {
+    const degradations: ConsultInspirationAttributeDegradation[] = []
+    const analysis = sanitizeConsultInspirationAnalysis(
+      output({ tone: known('MAUVE') }),
+      degradations,
+    )
+    expect(analysis.tone).toEqual(DEGRADED)
+    // `offered` is null, not "MAUVE": a value the enum does not know is
+    // unconstrained text, and nothing this file logs carries what a photo said.
+    expect(degradations).toEqual([
+      { field: 'tone', check: 'observation_value', offered: null },
+    ])
+    expect(JSON.stringify(degradations)).not.toContain('MAUVE')
   })
 })
 
@@ -398,10 +505,22 @@ describe('runConsultInspirationVision', () => {
 
 
 describe('localized inspiration crops', () => {
-  it('rejects a garment crop below the identified hair in a mirror shot', () => {
-    expect(() => sanitizeLocalizedInspirationAnalysis({ hairRegion: '0.05,0.05,0.8,0.85',
-      ...output({ tone: known('WARM', '0.2,0.92,0.3,0.07') }),
-    })).toThrowError(ConsultInspirationVisionError)
+  it('drops a garment crop below the identified hair in a mirror shot, and keeps the hair read', () => {
+    const degradations: ConsultInspirationAttributeDegradation[] = []
+    const analysis = sanitizeLocalizedInspirationAnalysis(
+      {
+        hairRegion: '0.05,0.05,0.8,0.85',
+        ...output({ tone: known('WARM', '0.2,0.92,0.3,0.07') }),
+      },
+      [],
+      degradations,
+    )
+    // The garment never becomes a tone; it just is not one any more.
+    expect(analysis.tone).toEqual(DEGRADED)
+    expect(analysis.baseLevel.value).toBe('LEVEL_5')
+    expect(degradations).toEqual([
+      { field: 'tone', check: 'region_containment', offered: 'WARM' },
+    ])
   })
   it('requires a located head of hair and never invents an area', () => {
     expect(() => sanitizeLocalizedInspirationAnalysis({ hairRegion: null, ...output() })).toThrowError(ConsultInspirationVisionError)
@@ -462,22 +581,111 @@ describe('the containment rule clamps a slightly loose crop', () => {
     expect(repairs?.map((repair) => repair.field)).toEqual(['tone'])
   })
 
-  it('still refuses a crop that is mostly outside the hair, and names the check', () => {
+  it('still refuses a crop that is mostly outside the hair — for that attribute', () => {
     // x 0.60–0.90 against hair x 0.28–0.72: 0.12 of 0.30 survives, under half.
-    expect(() =>
-      sanitizeLocalizedInspirationAnalysis({
+    const degradations: ConsultInspirationAttributeDegradation[] = []
+    const analysis = sanitizeLocalizedInspirationAnalysis(
+      {
         hairRegion: '0.28,0.06,0.44,0.94',
         ...output({ tone: known('WARM', '0.6,0.3,0.3,0.3') }),
-      }),
-    ).toThrowError(expect.objectContaining({ kind: 'bad_output', stage: 'region_containment' }))
+      },
+      [],
+      degradations,
+    )
+    expect(analysis.tone).toEqual(DEGRADED)
+    expect(degradations).toEqual([
+      { field: 'tone', check: 'region_containment', offered: 'WARM' },
+    ])
   })
 
   it('names the check on an ordinary refusal too', () => {
+    const degradations: ConsultInspirationAttributeDegradation[] = []
+    const analysis = sanitizeConsultInspirationAnalysis(
+      output({ tone: { ...known('WARM'), confidence: { min: 0.6, max: 0.6 } } }),
+      degradations,
+    )
+    expect(analysis.tone).toEqual(DEGRADED)
+    expect(degradations).toEqual([
+      { field: 'tone', check: 'confidence', offered: 'WARM' },
+    ])
+  })
+
+  it('keeps the all-UNKNOWN floor when DEGRADING is what empties the reading', () => {
+    // 🔴 The floor must be reached by degradation as well as by the model
+    // answering UNKNOWN. Degrading every attribute and calling it a success
+    // would be the empty-attribute success Part 0 rule 4 forbids — and the DB
+    // guard refuses such a payload, so it would be a 500 rather than an
+    // honest "we couldn't read this one".
+    const allBroken = Object.fromEntries(
+      CONSULT_INSPIRATION_ANALYSIS_FIELDS.map((field) => [
+        field,
+        { ...known('UNKNOWN'), evidence: [] },
+      ]),
+    )
+    expect(() => sanitizeConsultInspirationAnalysis(allBroken)).toThrowError(
+      expect.objectContaining({ kind: 'unreadable' }),
+    )
+  })
+
+  it('keeps the floor when CONTAINMENT is what empties the reading', () => {
+    // The containment pass runs after the floor check inside
+    // `sanitizeConsultInspirationAnalysis`, so it can empty a reading that had
+    // just passed. Every crop here is outside the hair box.
+    const everyCropOutside = Object.fromEntries(
+      CONSULT_INSPIRATION_ANALYSIS_FIELDS.map((field) => [
+        field,
+        known(
+          // Any real value for this field; UNKNOWN would degrade for a
+          // different reason and prove a different thing.
+          CONSULT_INSPIRATION_FIELD_VALUES[field].find(
+            (value) => value !== 'UNKNOWN',
+          ) ?? 'UNKNOWN',
+          '0.8,0.8,0.2,0.2',
+        ),
+      ]),
+    )
     expect(() =>
-      sanitizeConsultInspirationAnalysis(
-        output({ tone: { ...known('WARM'), confidence: { min: 0.6, max: 0.6 } } }),
-      ),
-    ).toThrowError(expect.objectContaining({ kind: 'bad_output', stage: 'confidence' }))
+      sanitizeLocalizedInspirationAnalysis({
+        hairRegion: '0.0,0.0,0.3,0.3',
+        ...everyCropOutside,
+      }),
+    ).toThrowError(expect.objectContaining({ kind: 'unreadable' }))
+  })
+
+  it('the provider says a degraded attribute out loud, content-free', async () => {
+    mocks.create.mockResolvedValue(
+      message({
+        hairRegion: '0,0,1,1',
+        ...output({ tone: { ...known('WARM'), evidence: [] } }),
+      }),
+    )
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const result = await runConsultInspirationVision({ image: IMAGE })
+      // The read SUCCEEDS — that is the whole point — with tone unknown.
+      expect(result.analysis.tone.value).toBe('UNKNOWN')
+      expect(result.analysis.baseLevel.value).toBe('LEVEL_5')
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(JSON.stringify(warn.mock.calls[0])).toContain('degraded to UNKNOWN')
+      const [, payload] = warn.mock.calls[0] as [
+        string,
+        ConsultInspirationAttributeDegradation,
+      ]
+      expect(payload).toEqual({
+        field: 'tone',
+        check: 'unsupported_claim',
+        offered: 'WARM',
+      })
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('records no degradation on a clean read', () => {
+    expect(
+      sanitizeConsultInspirationRead({ hairRegion: '0,0,1,1', ...output() })
+        .attributeDegradations,
+    ).toEqual([])
   })
 
   it('the provider says a clamped crop out loud, geometry only', async () => {

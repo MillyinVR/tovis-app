@@ -318,12 +318,26 @@ describe('a round is bought once', () => {
     await expect(attempt(6, 'service-analysis-v9', profile)).rejects.toBe(rollback)
     await expect(attempt(6, 'service-analysis-v10', profile)).rejects.toBe(rollback)
     await expect(attempt(6, 'service-analysis-v11', profile)).rejects.toBe(rollback)
-    // v9, v10 and v11 are the arms that admit a PROVISIONAL eye colour off the
-    // early selfie; every earlier arm still refuses that label (20261031000000,
-    // extended to v10 by 20261101000000 and to v11 by 20261103000000). 🔴 A new
-    // prompt version that does NOT carry this exception forward silently stops
-    // the selfie buying her an eye-colour reading at all.
-    for (const promptVersion of ['service-analysis-v9', 'service-analysis-v10', 'service-analysis-v11']) {
+    await expect(attempt(6, 'service-analysis-v12', profile)).rejects.toBe(rollback)
+    await expect(attempt(6, 'service-analysis-v13', profile)).rejects.toBe(rollback)
+    // v9 onward are the arms that admit a PROVISIONAL eye colour off the early
+    // selfie; every earlier arm still refuses that label (20261031000000,
+    // extended to v10 by 20261101000000, to v11 by 20261103000000, to v12 by
+    // 20261106000000 and to v13 by 20261108000000). 🔴 A new prompt version
+    // that does NOT carry this exception forward silently stops the selfie
+    // buying her an eye-colour reading at all — the pin lives TWICE in the
+    // guard body and it is the second one, here, that is easy to miss.
+    //
+    // ⚠️ v12 was added to this list on 2026-09-14, not when v12 shipped: the
+    // migration carried the exemption forward correctly but nothing asserted
+    // it, so the bump that DID drop it would have gone green.
+    for (const promptVersion of [
+      'service-analysis-v9',
+      'service-analysis-v10',
+      'service-analysis-v11',
+      'service-analysis-v12',
+      'service-analysis-v13',
+    ]) {
       await expect(attempt(6, promptVersion, {
         ...profile,
         eyeColor: { value: 'BROWN', confidence: { min: 0.3, max: 0.45 }, evidence: ['early_photo'] },
@@ -345,6 +359,8 @@ describe('a round is bought once', () => {
       [6, 'service-analysis-v9', { ...profile, eyeColor: { value: 'BROWN', confidence: { min: 0.3, max: 0.45 }, evidence: ['hair_back'] } }],
       [6, 'service-analysis-v10', { ...profile, eyeColor: { value: 'BROWN', confidence: { min: 0.3, max: 0.45 }, evidence: ['hair_back'] } }],
       [6, 'service-analysis-v11', { ...profile, eyeColor: { value: 'BROWN', confidence: { min: 0.3, max: 0.45 }, evidence: ['hair_back'] } }],
+      [6, 'service-analysis-v12', { ...profile, eyeColor: { value: 'BROWN', confidence: { min: 0.3, max: 0.45 }, evidence: ['hair_back'] } }],
+      [6, 'service-analysis-v13', { ...profile, eyeColor: { value: 'BROWN', confidence: { min: 0.3, max: 0.45 }, evidence: ['hair_back'] } }],
     ]
     for (const [schema, prompt, nextProfile] of invalidCases) {
       await expect(attempt(schema, prompt, nextProfile)).rejects.toThrow(/23514|invalid|violates/i)

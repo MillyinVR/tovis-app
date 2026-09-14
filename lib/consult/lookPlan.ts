@@ -4,6 +4,7 @@ import type { ConsultAnalysisPayloadDTO, ConsultLookPlanDTO } from '@/lib/dto/co
 import { isRecord } from '@/lib/guards'
 
 import { cleanText, enumValue, exactKeys, isSupportedConsultObservation, ConsultAnalysisProviderError } from './analysisValidation'
+import { consultHairUnderlyingPigmentPromptText } from './hairLevel'
 import type { ConsultProMenuOffering } from './proMenu'
 
 export const CONSULT_LOOK_PLAN_SCHEMA_VERSION = 1
@@ -86,6 +87,11 @@ export const CONSULT_LOOK_PLAN_INSTRUCTIONS = [
   'Use EXACT when the requested result is achievable with this menu and starting point. Otherwise use CLOSE for achievable alternatives ranked by similarity to what the client wants, excluding what they avoid. Use TOWARD for an honest foundation toward that goal when nothing close is achievable yet.',
   'Each menu entry carries what that service can and cannot achieve: `does` describes the work, `liftsLevels` is how many levels of LIGHTENING it can achieve (0 means it cannot lighten at all), `changesTone` means it can change or refresh tone, `chemical` means colour or texture chemistry, `changesShape` means it cuts or reshapes, `addsLength` means it adds hair, and `cannot` states plainly what it will not do. Diagnose from these facts, never from the service NAME — a name suggests, a fact decides. Where an entry omits a fact you were not told it, so do not assume it.',
   'Reason from where she is to where she wants to be. Her own hair is in the observations — the two levels especially — and the destination is the inspiration reading. Going LIGHTER needs a service whose liftsLevels covers the gap; no amount of a service with liftsLevels 0 will ever get her there, however well its name fits, and a gap wider than any single service can cover is a TOWARD plan across more than one visit, said plainly. Going darker, changing tone, changing shape and adding length are separate questions with their own facts. Never propose a service to do something its `cannot` rules out.',
+  // The lift-gap sentence above can size a lift but not price its CHEMISTRY.
+  // Underlying pigment is what turns "a 4 to an 8" into "through red and
+  // orange, so more than one visit and a toner" — see lib/consult/hairLevel.ts
+  // for the source (Tori's physical swatch card, not a web chart).
+  consultHairUnderlyingPigmentPromptText(),
   'A look usually needs more than one service, and the ones the reference photo names are often not the ones she needs. Work out what the RESULT requires against this menu and this starting point, then choose the services that deliver it — including services the reference never mentioned, and excluding ones it did.',
   'Return one to three distinct alternative paths; do not invent an extra choice to reach three. Each path contains ordered visits, each with the menu services required together at that visit. Alternative paths are mutually exclusive, not additive services.',
   `Use the conservative upper end of a visit-count range, up to ${CONSULT_LOOK_PLAN_MAX_VISITS} visits with at most ${CONSULT_LOOK_PLAN_MAX_STEPS_PER_VISIT} required services per visit. If a responsible path exceeds those limits or cannot yet be sized, use PRO_REVIEW and explain the next step rather than truncating the plan.`,

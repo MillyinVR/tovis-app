@@ -545,7 +545,9 @@ function observation<const T extends readonly string[]>(
   const box = region(raw.region)
   // An UNKNOWN that cites evidence, claims confidence, or points at a region is
   // a contradiction; a reading that cites nothing or points nowhere is an
-  // unsupported claim. Both fail the whole result rather than shipping.
+  // unsupported claim. Neither is storable, so the attribute is refused — but
+  // only the attribute: `observationOrDegraded` catches this and turns it into
+  // an UNKNOWN rather than binning the other seven.
   if (value === 'UNKNOWN') {
     if (cited.length > 0 || range.max > 0.35 || box) {
       throw new ConsultInspirationVisionError('bad_output', 'unknown_contradiction')
@@ -554,6 +556,105 @@ function observation<const T extends readonly string[]>(
     throw new ConsultInspirationVisionError('bad_output', 'unsupported_claim')
   }
   return { value, confidence: range, evidence: cited, region: box }
+}
+
+/**
+ * One attribute the sanitizer could not take at face value, recorded rather
+ * than thrown. See `observationOrDegraded` for why it is not thrown.
+ */
+export type ConsultInspirationAttributeDegradation = {
+  field: ConsultInspirationAnalysisField
+  /** The check that refused, content-free — the names `stage` already carries. */
+  check: string
+  /**
+   * The value the provider offered, but ONLY when it is a member of that
+   * field's own vocabulary. Null otherwise — a value the enum does not know is
+   * unconstrained text, and this file's logs never carry what a photo showed.
+   */
+  offered: string | null
+}
+
+/**
+ * The confidence an UNKNOWN we synthesized ourselves may claim.
+ *
+ * It has to satisfy the same three rules the DB guard applies to every stored
+ * UNKNOWN (`consult_inspiration_observation_valid`: no evidence, no region,
+ * `confidence.max <= 0.35`) and `min < max`. Deliberately at the very bottom of
+ * that band rather than at the 0.35 ceiling: this attribute was not read as
+ * uncertain, it was read as something the server refused, and a downstream
+ * reader should not be able to mistake it for a faint observation.
+ */
+const DEGRADED_CONFIDENCE = { min: 0, max: 0.05 } as const
+
+/**
+ * The honest stand-in for an attribute that could not be taken at face value.
+ *
+ * Typed at the literal `'UNKNOWN'` rather than at the field's vocabulary, so
+ * there is no assertion here: every one of the eight vocabularies carries
+ * UNKNOWN (lib/consult/inspirationAttributes.ts), which makes this assignable
+ * to any of their observation types on its own terms.
+ */
+function degradedObservation(): ConsultInspirationObservation<'UNKNOWN'> {
+  return {
+    value: 'UNKNOWN',
+    confidence: { ...DEGRADED_CONFIDENCE },
+    evidence: [],
+    region: null,
+  }
+}
+
+/**
+ * 🔴 One bad attribute degrades THAT attribute. It does not throw the reading away.
+ *
+ * Until 2026-09-14 every per-attribute check here failed the WHOLE eight-field
+ * result. Measured on the six reference fixtures: sending a desaturated copy of
+ * the photograph broke 4 of 6 reads, and the raw output of the first one was
+ *
+ *     tone   value=NEUTRAL   evidence=[]   region=null
+ *
+ * — the model had correctly worked out that a desaturated image cannot tell it
+ * the tone, cleared the evidence and the region, and then wrote NEUTRAL where
+ * UNKNOWN belonged. `unsupported_claim` fired and all eight attributes were
+ * discarded, including the two levels that pass had just improved. Seven of the
+ * eight fields were good. One word cost the entire paid call.
+ *
+ * This is the same trap `sanitizeConsultInspirationCredibilityFlags` names in
+ * its own comment — Part 0 rule 11's trap #4, a complete analysis discarded
+ * over an enum the policy then refused — and it is answered the same way: the
+ * unusable part is dropped, the usable part is kept, and what was dropped is
+ * recorded instead of vanishing.
+ *
+ * What is NOT relaxed: nothing invalid is ever stored (the attribute becomes a
+ * real UNKNOWN, not the value the provider offered), and the all-UNKNOWN floor
+ * still refuses a reading that degraded to nothing. A silently-degraded reading
+ * would be the invisible failure this whole thread is about, so `degradations`
+ * is filled for the caller to log.
+ *
+ * Only this file's own error is caught. A genuine bug still throws.
+ */
+function observationOrDegraded(
+  raw: unknown,
+  values: readonly string[],
+  field: ConsultInspirationAnalysisField,
+  degradations: ConsultInspirationAttributeDegradation[],
+): ConsultInspirationObservation<string> {
+  try {
+    return observation(raw, values)
+  } catch (error) {
+    if (!(error instanceof ConsultInspirationVisionError)) throw error
+    degradations.push({
+      field,
+      check: error.stage ?? 'observation',
+      offered: offeredValue(raw, values),
+    })
+    return degradedObservation()
+  }
+}
+
+/** The provider's value, but only if our own vocabulary knows the word. */
+function offeredValue(raw: unknown, values: readonly string[]): string | null {
+  if (!isRecord(raw)) return null
+  return values.find((candidate) => candidate === raw.value) ?? null
 }
 
 /**
@@ -571,6 +672,8 @@ export function sanitizeLocalizedInspirationAnalysis(
   raw: unknown,
   /** Filled with every crop that was clamped; the provider logs them. */
   repairs: ConsultInspirationRegionRepair[] = [],
+  /** Filled with every attribute that was degraded; the provider logs them. */
+  degradations: ConsultInspirationAttributeDegradation[] = [],
 ): ConsultInspirationAnalysis {
   if (!isRecord(raw) || !Object.hasOwn(raw, 'hairRegion')) throw new ConsultInspirationVisionError('bad_output', 'envelope')
   // `credibilityFlags` is the envelope's, not an attribute; it is read by
@@ -580,18 +683,45 @@ export function sanitizeLocalizedInspirationAnalysis(
   const attributes = Object.fromEntries(
     Object.entries(envelope).filter(([key]) => key !== 'credibilityFlags'),
   )
+  // 🔴 `hairRegion` is NOT degradable, unlike the attribute crops below. It is
+  // the envelope's own claim about where the hair is, and every attribute crop
+  // is checked against it; without it there is nothing to check containment
+  // AGAINST, so a malformed one is a broken payload rather than one weak
+  // attribute. A null one already means "I could not find the hair", which the
+  // prompt asks for explicitly and which is `unreadable`, not `bad_output`.
   const hair = region(hairRegion)
   if (!hair) throw new ConsultInspirationVisionError('unreadable')
-  const analysis = sanitizeConsultInspirationAnalysis(attributes)
+  const analysis = sanitizeConsultInspirationAnalysis(attributes, degradations)
   for (const field of CONSULT_INSPIRATION_ANALYSIS_FIELDS) {
     const box = analysis[field].region
     if (!box) continue
     const contained = clampIntoHair(box, hair)
-    if (!contained) throw new ConsultInspirationVisionError('bad_output', 'region_containment')
+    // A crop mostly outside the hair is pointing at a garment or a background,
+    // so the ATTRIBUTE is unreadable — but only that attribute. Before
+    // 2026-09-14 one such crop discarded the whole reading, which is the
+    // failure `clampIntoHair`'s own comment already describes costing a paid
+    // reproduction to find.
+    if (!contained) {
+      degradations.push({
+        field,
+        check: 'region_containment',
+        offered: analysis[field].value,
+      })
+      analysis[field] = degradedObservation()
+      continue
+    }
     if (contained !== box) {
       repairs.push({ field, received: box, stored: contained, hairRegion: hair })
       analysis[field].region = contained
     }
+  }
+  // 🔴 The floor is re-checked HERE as well as inside
+  // `sanitizeConsultInspirationAnalysis`. The containment pass above runs after
+  // that check and can itself degrade attributes, so it is able to empty a
+  // reading that had just passed. An all-UNKNOWN artefact is refused by the DB
+  // guard too; reaching it would be a 500 instead of an honest `unreadable`.
+  if (countKnownConsultInspirationAttributes(analysis) === 0) {
+    throw new ConsultInspirationVisionError('unreadable')
   }
   return analysis
 }
@@ -676,19 +806,32 @@ export function sanitizeConsultInspirationRead(raw: unknown): {
   credibilityFlags: ConsultInspirationCredibilityFlag[]
   /** Crops the containment rule clamped — empty on a clean read. */
   regionRepairs: ConsultInspirationRegionRepair[]
+  /** Attributes refused and turned into UNKNOWN — empty on a clean read. */
+  attributeDegradations: ConsultInspirationAttributeDegradation[]
 } {
   const regionRepairs: ConsultInspirationRegionRepair[] = []
-  const analysis = sanitizeLocalizedInspirationAnalysis(raw, regionRepairs)
+  const attributeDegradations: ConsultInspirationAttributeDegradation[] = []
+  const analysis = sanitizeLocalizedInspirationAnalysis(
+    raw,
+    regionRepairs,
+    attributeDegradations,
+  )
   // `sanitizeLocalizedInspirationAnalysis` has just proved `raw` is a record.
   const credibilityFlags = sanitizeConsultInspirationCredibilityFlags(
     isRecord(raw) ? raw.credibilityFlags : undefined,
   )
-  return { analysis, credibilityFlags, regionRepairs }
+  return { analysis, credibilityFlags, regionRepairs, attributeDegradations }
 }
 
 export function sanitizeConsultInspirationAnalysis(
   raw: unknown,
+  /** Filled with every attribute that was degraded; the provider logs them. */
+  degradations: ConsultInspirationAttributeDegradation[] = [],
 ): ConsultInspirationAnalysis {
+  // The key set stays strict. A missing or extra attribute is not one bad
+  // reading among eight, it is a payload that is not this schema at all — and
+  // the grammar makes all eight `required`, so a mismatch here means the
+  // contract broke, not that the photograph was hard to read.
   if (
     !isRecord(raw) ||
     Object.keys(raw).sort().join(',') !==
@@ -699,29 +842,80 @@ export function sanitizeConsultInspirationAnalysis(
   const analysis = Object.fromEntries(
     CONSULT_INSPIRATION_ANALYSIS_FIELDS.map((field) => [
       field,
-      observation(raw[field], CONSULT_INSPIRATION_FIELD_VALUES[field]),
+      observationOrDegraded(
+        raw[field],
+        CONSULT_INSPIRATION_FIELD_VALUES[field],
+        field,
+        degradations,
+      ),
     ]),
   ) as ConsultInspirationAnalysis
-  // The one relationship the level scale forbids. Either being UNKNOWN is
-  // simply unobserved and passes; a base LIGHTER than the lightest is a read
-  // that cannot be true of any head of hair, so it fails the whole result
-  // rather than being quietly swapped into order.
-  if (
-    !consultHairLevelPairIsOrdered(
-      analysis.baseLevel.value,
-      analysis.lightestLevel.value,
-    )
-  ) {
-    throw new ConsultInspirationVisionError('bad_output', 'level_order')
-  }
+  degradeUnorderedLevelPair(analysis, degradations)
   // Part 0 rule 4, and Stage 1's failure state: a result whose every attribute
   // is UNKNOWN is not a low-confidence answer, it is an unreadable photograph.
   // Shipping it would be an empty-attribute success — the exact silent
-  // fallback the pipeline is forbidden.
+  // fallback the pipeline is forbidden. Degrading attributes above can REACH
+  // this floor, which is the point: a reading that degraded to nothing is
+  // still refused, it is just no longer refused for the other seven's sake.
   if (countKnownConsultInspirationAttributes(analysis) === 0) {
     throw new ConsultInspirationVisionError('unreadable')
   }
   return analysis
+}
+
+/**
+ * The one relationship the level scale forbids: a base LIGHTER than the
+ * lightest cannot be true of any head of hair. Either level being UNKNOWN is
+ * simply unobserved and passes.
+ *
+ * 🔴 This one is NOT a blanket demote, and it is not a swap either.
+ *
+ * Not a swap, because the original rule was right about that: the pair is not
+ * a range, and quietly reordering it invents a reading nobody made. Not a
+ * blanket demote, because losing BOTH levels over their disagreement throws
+ * away the most valuable pair in the reading — exactly the over-refusal this
+ * change exists to stop.
+ *
+ * So the pair is split: the level the model was LESS sure of is the one that
+ * becomes UNKNOWN, and the more confident one survives. Confidence is the
+ * midpoint of the stated range, tie-broken on the narrower range — a tighter
+ * claim at the same centre is the more committed one.
+ *
+ * On an exact tie, `baseLevel` is the one that goes. That is a judgement, not
+ * a measurement: `lookPlan.ts` reasons "from where she is to where she wants
+ * to be", taking where she IS from her own capture reading and the
+ * DESTINATION from this artefact — so the reference's lightest level is the
+ * half that carries the goal, while its base level describes the roots of
+ * someone in a photograph, which the plan has a better source for. If only one
+ * can survive, the one that sets the lift target is worth more.
+ */
+function degradeUnorderedLevelPair(
+  analysis: ConsultInspirationAnalysis,
+  degradations: ConsultInspirationAttributeDegradation[],
+): void {
+  if (
+    consultHairLevelPairIsOrdered(
+      analysis.baseLevel.value,
+      analysis.lightestLevel.value,
+    )
+  ) {
+    return
+  }
+  const base = analysis.baseLevel.confidence
+  const lightest = analysis.lightestLevel.confidence
+  const baseCentre = (base.min + base.max) / 2
+  const lightestCentre = (lightest.min + lightest.max) / 2
+  const keepLightest =
+    lightestCentre > baseCentre ||
+    (lightestCentre === baseCentre &&
+      lightest.max - lightest.min <= base.max - base.min)
+  const field = keepLightest ? 'baseLevel' : 'lightestLevel'
+  degradations.push({
+    field,
+    check: 'level_order',
+    offered: analysis[field].value,
+  })
+  analysis[field] = degradedObservation()
 }
 
 /** How many of the seven attributes the reference actually answered. */
@@ -852,6 +1046,14 @@ export const runConsultInspirationVision: ConsultInspirationVisionProvider =
     // Geometry only — which crop moved and by how much, never what it showed.
     for (const repair of read.regionRepairs) {
       console.warn('consult inspiration crop clamped into the hair region', repair)
+    }
+    // A degraded attribute is a paid read that answered less than it was asked.
+    // It is logged rather than swallowed for the same reason #1174 put the
+    // refusing check on the row: a failure nobody can see is one nobody fixes.
+    // Content-free by construction — a field name, a check name, and a value
+    // only when it is one of our own enum members.
+    for (const degraded of read.attributeDegradations) {
+      console.warn('consult inspiration attribute degraded to UNKNOWN', degraded)
     }
     return { analysis: read.analysis, credibilityFlags: read.credibilityFlags, model }
       },
