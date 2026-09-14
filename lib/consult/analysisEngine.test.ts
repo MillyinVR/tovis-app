@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { isSupportedConsultObservation } from '@/lib/consult/analysisValidation'
+import { hairMapFixture } from '@/test/fixtures/consultHairMap'
+import { compareConsultHairMaps } from './hairComparison'
 import type { ConsultLookPlanProviderOutput } from '@/lib/consult/lookPlan'
 
 const mocks = vi.hoisted(() => ({
@@ -784,6 +786,23 @@ describe('hair-color consult analysis provider', () => {
         CONSULT_FACE_COLOR_TIMEOUT_MS +
         CONSULT_ANALYSIS_DIRECTION_TIMEOUT_MS,
     ).toBeLessThanOrEqual(CONSULT_ANALYSIS_ROUTE_MAX_DURATION_SECONDS * 1000)
+  })
+
+  it('sends the separate hair comparison only to the look-planning direction call', async () => {
+    const output = validOutput()
+    const styleDirections = Object.fromEntries(output.styleDirections.map(({ domain, ...fields }) => [domain, fields]))
+    mocks.create.mockResolvedValueOnce(message({ profile: output.profile, styleDirections }))
+    mocks.create.mockResolvedValueOnce(message({ core: output.core, serviceLens: output.serviceLens, safetyFlags: output.safetyFlags,
+      lookPlan: { tier: 'TOWARD', blocker: 'NO_MATCHING_OFFERING', summary: 'Discuss the look with your pro.', nextStep: 'Confirm the available services.', paths: [] },
+    }))
+    await runConsultAnalysis({ service: { ...service, lookPlanning: true, menuOfferings: [] }, capturePack,
+      intake: {}, intakeItems, captures, inspiration: noInspiration, safetyCodes: [...SAFETY_CODES],
+      hairComparison: Promise.resolve({ comparison: compareConsultHairMaps(hairMapFixture(), hairMapFixture('inspiration')), model: 'test' }),
+    })
+    const { profileCall, directionCall } = callParams()
+    expect(JSON.stringify(profileCall.messages)).not.toContain('ADDITIONAL VISUAL HAIR COMPARISON')
+    expect(JSON.stringify(directionCall.messages)).toContain('ADDITIONAL VISUAL HAIR COMPARISON')
+    expect(JSON.stringify(profileCall.messages)).not.toContain('"view":"inspiration"')
   })
 
   it('offers only the safety codes THIS intake can support, plus the one the photos raise', () => {

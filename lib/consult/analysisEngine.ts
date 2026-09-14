@@ -1,4 +1,6 @@
 import { CONSULT_CLIENT_LANGUAGE } from './clientLanguage'
+import { consultHairComparisonBlock } from './hairComparison'
+import type { ConsultHairComparisonResult } from './hairMapRuntime'
 import Anthropic from '@anthropic-ai/sdk'
 import { ConsultProviderCallKind, ConsultServiceFamily } from '@prisma/client'
 
@@ -676,6 +678,8 @@ export type ConsultAnalysisIntakeItem = {
 }
 
 export type ConsultAnalysisInput = {
+  /** Optional, separately scoped evidence; awaited only by the direction call. */
+  hairComparison?: Promise<ConsultHairComparisonResult | undefined>
   service: ConsultAnalysisServiceContext
   /** Answer codes by question key — the immutable stored form. */
   intake: Readonly<Record<string, string>>
@@ -2696,6 +2700,7 @@ export const runConsultAnalysis: ConsultAnalysisProvider = async (input) => {
     : undefined
   const lookPlanContext = profileWithStyles
     ? { menu: input.service.menuOfferings ?? [], ...profileWithStyles } : undefined
+  const hairComparison = lookPlanContext ? await input.hairComparison : undefined
 
   // ── Final call: the direction, grounded in the durable profile ───────────
   const directionRead = await requestConsultAnalysisJson({
@@ -2707,6 +2712,7 @@ export const runConsultAnalysis: ConsultAnalysisProvider = async (input) => {
           (text): Anthropic.ContentBlockParam => ({ type: 'text', text }),
         ),
         { type: 'text', text: consultProfileBlock(profile) },
+        ...(hairComparison ? [{ type: 'text' as const, text: consultHairComparisonBlock(hairComparison.comparison) }] : []),
       ],
       schema: buildConsultDirectionOutputSchema({
         menuServiceNames: input.service.menuServiceNames,

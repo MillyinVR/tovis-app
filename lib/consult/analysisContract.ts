@@ -1,4 +1,7 @@
 import { optionalConsultSuitability, type ConsultSuitabilityProvider } from './suitabilityRuntime'
+import { optionalConsultHairComparison, type ConsultHairMapProvider, type ConsultHairMapImage } from './hairMapRuntime'
+import { CONSULT_HAIR_MAP_VIEWS } from './hairMap'
+import { fetchConsultInspirationImage } from './inspirationImage'
 import { loadConsultLookHistory, CONSULT_LOOK_COLOR_HISTORY_QUESTIONS } from './lookHistory'
 import 'server-only'
 
@@ -112,6 +115,7 @@ import {
 } from '@/lib/offerings/locationCapability'
 import {
   requireCompletedConsultInspiration,
+  mintConsultInspirationReadUrl,
   type CompletedConsultInspiration,
 } from './inspirationContract'
 import { purgeConsultCaptureRawObject } from './capturePurge'
@@ -1537,6 +1541,7 @@ export async function executeConsultAnalysisRun(args: {
   inspirationStorage?: ConsultInspirationStorage
   inspirationProvider?: ConsultInspirationVisionProvider
   suitabilityProvider?: ConsultSuitabilityProvider
+  hairMapProvider?: ConsultHairMapProvider
 }): Promise<ConsultAnalysisRunOutcome> {
   const startedAt = Date.now()
   const now = args.now ?? new Date()
@@ -1632,10 +1637,28 @@ export async function executeConsultAnalysisRun(args: {
       runId: claimed.id,
       stage: ConsultAnalysisRunStage.BUILDING_PLAN,
     })
+    const hairImages: ConsultHairMapImage[] = images.flatMap(capture => {
+      const view = CONSULT_HAIR_MAP_VIEWS.find(view => view !== 'inspiration' && view === capture.shotKey)
+      return view ? [{ view, image: capture.image }] : []
+    })
+    // Starts alongside the feature call, not as another serial stage. The
+    // helper gates before fetching and catches optional failures internally.
+    const hairComparisonPending = optionalConsultHairComparison({
+      family: context.service.family, lookPlanning: context.service.lookPlanning === true, startedAt,
+      current: hairImages,
+      colorUncertainViews: hairImages.filter(image => images.some(capture => capture.shotKey === image.view && capture.qualityWarningCode !== null)).map(image => image.view),
+      ...(inspirationPlan ? { loadReference: async () => {
+        const read = await mintConsultInspirationReadUrl(inspirationPlan.target, args.inspirationStorage)
+        return fetchConsultInspirationImage(read.url)
+      } } : {}),
+      meter, provider: args.hairMapProvider,
+    })
+
     let providerResult
     try {
       providerResult = validateConsultAnalysisProviderResult(
         await provider({
+          hairComparison: hairComparisonPending,
           service: context.service,
           intake: context.intake.payload.answers,
           intakeItems: [...consultIntakeItems(pack, context.intake.payload.answers, context.intake.payload.textAnswers), ...context.lookHistory.items.filter(item => !context.intake.payload.answers[item.questionKey])],
@@ -1688,6 +1711,9 @@ export async function executeConsultAnalysisRun(args: {
         ),
       }
     } catch (error) {
+      // Drain the optional calls before this failed run flushes its meter.
+      // Otherwise a fast primary failure can leave billed work unfinished.
+      await hairComparisonPending
       if (error instanceof ConsultAnalysisProviderError) {
         throw new ConsultWriteError('ANALYSIS_UNAVAILABLE', 'Analysis is unavailable.')
       }
@@ -1697,6 +1723,7 @@ export async function executeConsultAnalysisRun(args: {
     // Reserve the analysis ID before the optional call so every citation names
     // the exact revision created below. Nothing is persisted until revalidation.
     const analysisRevisionId = randomUUID()
+    const hairComparison = await hairComparisonPending
     const suitability = await optionalConsultSuitability({
       family: context.service.family,
       startedAt,
@@ -1840,6 +1867,10 @@ export async function executeConsultAnalysisRun(args: {
           consultSessionId: finalContext.session.id,
           payload,
           ...(suitability ? { analysisRevisionId, suitability } : {}),
+          ...(hairComparison && inspirationPlan ? { hairComparison: {
+            ...hairComparison, inspirationId: inspirationPlan.target.inspirationId,
+            captures: context.captures.filter(capture => hairImages.some(image => image.view === capture.shotKey)).map(capture => ({ id: capture.id, shotKey: capture.shotKey })),
+          } } : {}),
           model: providerResult.model,
           idempotencyKey: claimed.idempotencyKey,
           requestHash: claimed.requestHash,
