@@ -1,0 +1,11 @@
+-- The content-free name of the check that refused a paid consult provider call.
+--
+-- The engines already raise this on their error classes and write it to the
+-- logs; logs age out and the cost row does not. Without it, a BAD_OUTPUT in
+-- the meter is only ever "something was refused" once the retention window has
+-- passed — which is exactly what happened to four INSPIRATION_READ failures
+-- from 2026-09-11, diagnosed on 2026-09-13 and found to be unexplainable.
+--
+-- Nullable and additive: every existing row keeps its meaning (NULL = "not
+-- recorded"), and no read depends on it being present.
+ALTER TABLE "ConsultProviderCall" ADD COLUMN "failureCheck" TEXT;

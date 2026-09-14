@@ -102,6 +102,7 @@ import {
   type ConsultFollowUpQuestion,
 } from './followUpEngine'
 import { renderConsultFollowUpContext } from './followUpContext'
+import { withOneConsultRetry } from './providerRetry'
 import {
   consultFollowUpSafetyEntries,
   resolveConsultFollowUpVocabulary,
@@ -362,10 +363,24 @@ export async function generateConsultFollowUpRound(
   let model: string | null
   let status: ConsultFollowUpRoundStatus
   try {
-    const result = await provider({
-      context,
-      vocabulary,
-      meter: { consultSessionId: args.consultSessionId },
+    // One retry, BAD_OUTPUT only — see lib/consult/providerRetry.ts for why a
+    // timeout is deliberately NOT retried here: this call's whole latency
+    // budget exists so she gets the fallback instead of a longer spinner.
+    const result = await withOneConsultRetry({
+      onRetry: (error) => {
+        console.warn('consult follow-up retrying once', {
+          consultSessionId: args.consultSessionId,
+          round,
+          check: error instanceof ConsultFollowUpError ? error.check : null,
+          ...safeError(error),
+        })
+      },
+      attempt: () =>
+        provider({
+          context,
+          vocabulary,
+          meter: { consultSessionId: args.consultSessionId },
+        }),
     })
     questions = result.questions
     model = result.model
@@ -387,6 +402,9 @@ export async function generateConsultFollowUpRound(
       consultSessionId: args.consultSessionId,
       round,
       safetyQuestionCount: safety.length,
+      // Which check refused, so a 0-for-N follow-up call is diagnosable from
+      // the log as well as from the meter row.
+      check: error instanceof ConsultFollowUpError ? error.check : null,
       ...safeError(error),
     })
     if (safety.length === 0) {

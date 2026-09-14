@@ -62,6 +62,10 @@
       "schedule": "* * * * *"
     },
     {
+      "path": "/api/internal/jobs/consult-health",
+      "schedule": "10 9 * * *"
+    },
+    {
       "path": "/api/internal/jobs/stale-sessions",
       "schedule": "*/15 * * * *"
     },

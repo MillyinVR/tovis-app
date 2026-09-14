@@ -42,6 +42,9 @@ describe('optional suitability runtime', () => {
     await flushConsultProviderMeter()
     expect(transport.record).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
       kind: 'ANALYSIS_SUITABILITY', outcome: invalid ? 'BAD_OUTPUT' : 'OK', inputTokens: 100, outputTokens: 20,
+      // The refusing check reaches the COLUMN, not just the log: a BAD_OUTPUT
+      // row has to be explainable after the logs have aged out.
+      failureCheck: invalid ? expect.stringMatching(/^[a-z0-9_]+$/) : null,
     }) }))
   })
   it.each(['', 'false', '1', 'TRUE'])('does no provider work when the flag is %s', async flag => {
@@ -74,6 +77,32 @@ describe('optional suitability runtime', () => {
     vi.stubEnv('AI_CONSULT_SUITABILITY_ENABLED', 'true')
     const provider = vi.fn().mockRejectedValue(new ConsultAnalysisProviderError(kind))
     expect(await optionalConsultSuitability({ ...args(), provider })).toBeUndefined()
+  })
+  it('recovers the 2026-09-13 production failure by asking once more', async () => {
+    // ANALYSIS_SUITABILITY returned BAD_OUTPUT on a live consult and the client
+    // silently lost her whole suitability translation, because this call had no
+    // second attempt. One retry is the repair.
+    vi.stubEnv('AI_CONSULT_SUITABILITY_ENABLED', 'true')
+    const provider = vi.fn()
+      .mockRejectedValueOnce(new ConsultAnalysisProviderError('bad_output', 'text_empty'))
+      .mockResolvedValueOnce({ raw, model: 'test-model' })
+    const result = await optionalConsultSuitability({ ...args(), provider })
+    expect(provider).toHaveBeenCalledTimes(2)
+    expect(result?.translation.analysisRevisionId).toBe('synthetic-analysis')
+  })
+  it.each(['unavailable', 'refused'] as const)('does not spend a second call on %s', async kind => {
+    vi.stubEnv('AI_CONSULT_SUITABILITY_ENABLED', 'true')
+    const provider = vi.fn().mockRejectedValue(new ConsultAnalysisProviderError(kind))
+    expect(await optionalConsultSuitability({ ...args(), provider })).toBeUndefined()
+    expect(provider).toHaveBeenCalledOnce()
+  })
+  it('gives up rather than starting a retry that would overrun the budget', async () => {
+    vi.stubEnv('AI_CONSULT_SUITABILITY_ENABLED', 'true')
+    const provider = vi.fn().mockRejectedValue(new ConsultAnalysisProviderError('bad_output'))
+    // Inside the start gate, but with no room left for another full timeout.
+    const startedAt = Date.now() - (CONSULT_SUITABILITY_LATEST_START_MS - CONSULT_SUITABILITY_TIMEOUT_MS) - 1
+    expect(await optionalConsultSuitability({ ...args(), startedAt, provider })).toBeUndefined()
+    expect(provider).toHaveBeenCalledOnce()
   })
   it('rejects fabricated citations, invalid model labels and mismatched companion revisions', async () => {
     vi.stubEnv('AI_CONSULT_SUITABILITY_ENABLED', 'true')
