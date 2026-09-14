@@ -35,6 +35,7 @@ import type { ConsultCaptureMediaType } from './captureVision'
 import {
   CONSULT_HAIR_LEVELS,
   consultHairLevelPairIsOrdered,
+  consultHairLevelScalePromptText,
   type ConsultHairLevel,
 } from './hairLevel'
 import {
@@ -73,7 +74,13 @@ export const CONSULT_INSPIRATION_ANALYSIS_SCHEMA_VERSION = 4
 // would have made every stored reading NULL for the pro, the cards and the
 // top line in the migrate-before-deploy window. The request hash includes
 // both versions, so the next read of a v3-read photograph pays once for v4.
-export const CONSULT_INSPIRATION_ANALYSIS_PROMPT_VERSION = 'inspiration-hair-color-v4'
+//
+// v5 (2026-09-13): the ten rungs of the salon depth scale are named
+// (lib/consult/hairLevel.ts), instead of only "1 is black and 10 is the
+// lightest blonde". PROSE ONLY — the stored shape, the schema version and what
+// a reading MEANS are all unchanged, which is why v4 stays readable rather
+// than being rolled off.
+export const CONSULT_INSPIRATION_ANALYSIS_PROMPT_VERSION = 'inspiration-hair-color-v5'
 
 /**
  * The versions a STORED artefact may carry and still be read back, newest
@@ -92,6 +99,11 @@ export const CONSULT_INSPIRATION_ANALYSIS_READABLE_VERSIONS: ReadonlyArray<{
     schemaVersion: CONSULT_INSPIRATION_ANALYSIS_SCHEMA_VERSION,
     promptVersion: CONSULT_INSPIRATION_ANALYSIS_PROMPT_VERSION,
   },
+  // v5 is a PROSE-ONLY bump (the depth scale), so a v4 reading means exactly
+  // what a v5 one does and stays readable. v3 is kept for the same reason it
+  // was kept at the v4 bump: rolling it off would blank the reference reading
+  // of a real consult that is still in the database.
+  { schemaVersion: 4, promptVersion: 'inspiration-hair-color-v4' },
   { schemaVersion: 3, promptVersion: 'inspiration-hair-color-v3' },
 ]
 
@@ -376,9 +388,10 @@ export const CONSULT_INSPIRATION_ANALYSIS_SYSTEM_PROMPT = [
   'Use UNKNOWN whenever the photograph does not actually show you the answer — a back-of-head shot cannot tell you the root blend, a black-and-white or heavily filtered image cannot tell you the tone. UNKNOWN must carry an empty evidence list, a confidence range whose max is at most 0.35, and a null region. Guessing is worse than UNKNOWN. A credibility flag on its own is never a reason for UNKNOWN: if the hair still shows you the answer, read it, and widen the confidence range instead.',
   'A value that is NOT UNKNOWN must cite the evidence label "inspiration", carry a confidence range rather than a certainty, and carry a region.',
   'The region is a normalized bounding box on this image where the attribute is most visible, written as the string "x,y,w,h": x and y are the top-left corner, w and h the width and height, each a decimal between 0 and 1 with at most four places, comma-separated with no spaces, and with x + w and y + h no greater than 1. For example "0.28,0.05,0.44,0.2". Point it at the part of the hair you actually read the attribute from — the root area for root blend and for baseLevel, a mid-length section for dimension, the ends for finish, and the lightest visible pieces for lightestLevel.',
+  consultHairLevelScalePromptText(),
   'Field meanings:',
-  'baseLevel — the depth the colour STARTS from: the darkest dominant colour on the head, which is normally what you see at the root. On the salon scale, 1 is black and 10 is the lightest blonde.',
-  'lightestLevel — the LIGHTEST dominant colour anywhere on the head, on the same 1 to 10 scale. This is normally the ends, the brightest highlighted pieces, or the money piece.',
+  'baseLevel — the depth the colour STARTS from: the darkest dominant colour on the head, which is normally what you see at the root. Place it on the depth scale above.',
+  'lightestLevel — the LIGHTEST dominant colour anywhere on the head, on that same depth scale. This is normally the ends, the brightest highlighted pieces, or the money piece.',
   'These two are separate readings, not a range. A solid single-process colour has the SAME value in both, and reporting them equal is the right answer, not a failure to decide. Balayage, highlights, a shadow root and a grown-out colour are where they differ. Never report a baseLevel LIGHTER than the lightestLevel. How sure you are goes in each field’s confidence range and nowhere else — do not widen the gap between the two levels to express doubt.',
   'tone — whether the colour reads WARM (gold, copper, red), COOL (ash, smoky, violet) or NEUTRAL.',
   'technique — how the colour looks like it was placed: SINGLE_PROCESS, BALAYAGE, FOIL_HIGHLIGHTS, BABYLIGHTS, LOWLIGHTS, COLOR_MELT, DOUBLE_PROCESS, GLOSS_ONLY, or NATURAL_UNCOLORED when it does not look coloured at all.',

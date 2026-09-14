@@ -98,11 +98,14 @@ describe('inspiration vision schema', () => {
     // writes an artefact through the live guard is the proof.
     expect(CONSULT_INSPIRATION_ANALYSIS_SCHEMA_VERSION).toBe(4)
     expect(CONSULT_INSPIRATION_ANALYSIS_PROMPT_VERSION).toBe(
-      'inspiration-hair-color-v4',
+      'inspiration-hair-color-v5',
     )
-    // C2-6b: the previous pair stays READABLE, so a v3 row is not blanked in
-    // the migrate-before-deploy window. Newest first.
+    // C2-6b: earlier pairs stay READABLE, so no stored row is blanked in the
+    // migrate-before-deploy window. Newest first. v5 is a prose-only bump (the
+    // depth scale), so a v4 reading means exactly what a v5 one does; v3 is
+    // still here because a real consult in the database is still on it.
     expect(CONSULT_INSPIRATION_ANALYSIS_READABLE_VERSIONS).toEqual([
+      { schemaVersion: 4, promptVersion: 'inspiration-hair-color-v5' },
       { schemaVersion: 4, promptVersion: 'inspiration-hair-color-v4' },
       { schemaVersion: 3, promptVersion: 'inspiration-hair-color-v3' },
     ])

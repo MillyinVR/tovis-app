@@ -2470,7 +2470,10 @@ describe('P4 — the inspiration reference is read, stored, and reaches both aud
         select: { schemaVersion: true, promptVersion: true, payload: true },
       })
       expect(artefact.schemaVersion).toBe(4)
-      expect(artefact.promptVersion).toBe('inspiration-hair-color-v4')
+      // The CURRENT writer's version, read from the constant rather than a
+      // literal: this asserts the engine wrote through the live DB guard, and
+      // a prompt bump should not need this line edited to stay true.
+      expect(artefact.promptVersion).toBe(CONSULT_INSPIRATION_ANALYSIS_PROMPT_VERSION)
       // Stored in vocabulary order, not arrival order — the sanitizer's doing.
       expect((artefact.payload as { credibilityFlags: string[] }).credibilityFlags).toEqual([
         'LIKELY_EDITED',
