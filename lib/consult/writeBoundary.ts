@@ -1,4 +1,5 @@
 import type { ConsultSuitabilityResult } from './suitabilityRuntime'
+import type { ConsultHairComparisonResult } from './hairMapRuntime'
 import type { ClientChartFact } from './chartFacts'
 import { toPrismaJson } from '@/lib/typed/prismaJson'
 import { effectiveConsultLookPlan } from './lookBriefPlan'
@@ -728,6 +729,7 @@ export async function finalizeLockedHairColorAnalysis(
     faceColorProfile?: ConsultFaceColorProfile
     analysisRevisionId?: string
     suitability?: ConsultSuitabilityResult
+    hairComparison?: ConsultHairComparisonResult & { inspirationId: string; captures: Array<{ id: string; shotKey: string }> }
   },
 ) {
   // Partial packs (Tori, 2026-08-27): between one and the full pack of
@@ -796,6 +798,20 @@ export async function finalizeLockedHairColorAnalysis(
       promptVersion: translation.promptVersion,
       model,
       payload: toPrismaJson(translation),
+    } })
+  }
+  if (args.hairComparison) {
+    const { comparison, model, inspirationId, captures } = args.hairComparison
+    if (captures.some(capture => !args.captureIds.includes(capture.id))) {
+      throw new ConsultWriteError('ANALYSIS_PREREQUISITES_REQUIRED', 'Hair comparison captures changed.')
+    }
+    await tx.consultHairComparison.create({ data: {
+      consultSessionId: args.consultSessionId, analysisRevisionId: revision.id,
+      requestHash: args.requestHash, schemaVersion: comparison.schemaVersion,
+      promptVersion: comparison.promptVersion, model,
+      // The difference list is deterministic; retain its source maps only.
+      payload: toPrismaJson({ schemaVersion: comparison.schemaVersion, promptVersion: comparison.promptVersion,
+        current: comparison.current, reference: comparison.reference, inspirationId, captures }),
     } })
   }
   // ── P7a-3: what completion does to the photos ─────────────────────────────

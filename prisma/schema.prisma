@@ -7789,6 +7789,8 @@ enum ConsultProviderCallKind {
   ANALYSIS_FACE_COLOR
   /// lib/consult/suitabilityRuntime.ts, optional derived guidance.
   ANALYSIS_SUITABILITY
+  /// lib/consult/hairMapRuntime.ts — separately scoped current/reference maps.
+  ANALYSIS_HAIR_MAP
   /// lib/consult/analysisEngine.ts, final call — the direction.
   ANALYSIS_DIRECTION
   /// lib/consult/followUpEngine.ts — P5g, the adaptive follow-up questions.
@@ -7924,6 +7926,7 @@ model ConsultSession {
   lookBriefVersions       ConsultLookBriefVersion[]
   providerCalls           ConsultProviderCall[]
   suitabilityTranslations ConsultSuitabilityTranslation[]
+  hairComparisons         ConsultHairComparison[]
   faceColorProfiles       ConsultFaceColorProfile[]
   followUpRounds          ConsultFollowUpRound[]
   proFollowUpQuestions    ConsultProFollowUpQuestion[]
@@ -8081,6 +8084,7 @@ model ConsultRevision {
   suitabilityTranslation   ConsultSuitabilityTranslation?  @relation("ConsultSuitabilityAnalysis")
   suitabilityClientSources ConsultSuitabilityTranslation[] @relation("ConsultSuitabilityClient")
   faceColorProfile         ConsultFaceColorProfile?        @relation("ConsultFaceColorProfileAnalysis")
+  hairComparison           ConsultHairComparison?
 
   @@unique([consultSessionId, revision])
   @@unique([consultSessionId, idempotencyKey])
@@ -8104,6 +8108,23 @@ model ConsultSuitabilityTranslation {
 
   @@index([consultSessionId, createdAt])
   @@index([clientRevisionId])
+}
+
+/// Private planner evidence. No raw images, historical API payloads unchanged.
+model ConsultHairComparison {
+  id                 String          @id @default(cuid())
+  consultSessionId   String
+  consultSession     ConsultSession  @relation(fields: [consultSessionId], references: [id], onDelete: Cascade)
+  analysisRevisionId String          @unique
+  analysisRevision   ConsultRevision @relation(fields: [analysisRevisionId], references: [id], onDelete: Cascade)
+  requestHash        String          @db.Char(64)
+  schemaVersion      Int
+  promptVersion      String
+  model              String
+  payload            Json
+  createdAt          DateTime        @default(now())
+
+  @@index([consultSessionId, createdAt])
 }
 
 /// C2-1 additive evidence, immutable and pinned to one analysis revision.

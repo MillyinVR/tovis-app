@@ -1,4 +1,6 @@
 import { loadAuthorizedClientConsultResults } from '@/lib/consult/clientResults'
+import { hairMapFixture, hairObservation } from '@/test/fixtures/consultHairMap'
+import type { ConsultHairMapProvider } from '@/lib/consult/hairMapRuntime'
 import { isRecord } from '@/lib/guards'
 import { toPrismaJson } from '@/lib/typed/prismaJson'
 import { loadLookBookingMaterialization } from '@/lib/consult/lookBookingMaterialization'
@@ -53,6 +55,12 @@ vi.hoisted(() => {
 
 const mockRequireClient = vi.hoisted(() => vi.fn())
 const mockSuitability = vi.hoisted(() => vi.fn())
+const mockHairMap = vi.hoisted(() => vi.fn<ConsultHairMapProvider>())
+vi.mock('@/lib/consult/hairMapRuntime', async importOriginal => {
+  const original = await importOriginal<typeof import('@/lib/consult/hairMapRuntime')>()
+  return { ...original, optionalConsultHairComparison: (args: Parameters<typeof original.optionalConsultHairComparison>[0]) =>
+    original.optionalConsultHairComparison({ ...args, provider: mockHairMap }) }
+})
 vi.mock('@/lib/consult/suitabilityRuntime', async importOriginal => {
   const original = await importOriginal<typeof import('@/lib/consult/suitabilityRuntime')>()
   return { ...original, optionalConsultSuitability: (args: Parameters<typeof original.optionalConsultSuitability>[0]) =>
@@ -176,6 +184,8 @@ beforeAll(async () => {
 })
 
 beforeEach(() => {
+  delete process.env.AI_CONSULT_HAIR_MAP_ENABLED
+  delete process.env.AI_CONSULT_LOOK_PLANS_ENABLED
   delete process.env.AI_CONSULT_FACE_COLOR_ENABLED
   delete process.env.AI_CONSULT_SUITABILITY_ENABLED
   vi.clearAllMocks()
@@ -362,6 +372,68 @@ async function retakePhoto(
 }
 
 describe('a completed consult still takes input', () => {
+  it('stores the hair comparison with its exact inputs, rejects mixed sessions and updates', async () => {
+    process.env.AI_CONSULT_HAIR_MAP_ENABLED = 'true'
+    process.env.AI_CONSULT_LOOK_PLANS_ENABLED = 'true'
+    mockHairMap.mockImplementation(async ({ scope }) => {
+      const map = hairMapFixture(scope.views[0])
+      map.zones.roots.level = hairObservation('level', scope.role === 'CURRENT' ? 'LEVEL_4' : 'LEVEL_8', scope.views[0])
+      return { raw: map, model: 'test-map-model' }
+    })
+    const sessionId = await completedConsult('hair-map-persist')
+    const row = await db.consultHairComparison.findFirstOrThrow({ where: { consultSessionId: sessionId } })
+    const analysis = await db.consultRevision.findUniqueOrThrow({ where: { id: row.analysisRevisionId } })
+    expect(analysis.payload).not.toHaveProperty('hairComparison')
+    expect(row.requestHash).toBe(analysis.requestHash)
+    expect(row.payload).toMatchObject({ schemaVersion: 1, promptVersion: 'hair-map-v1',
+      current: { zones: { roots: { level: { value: 'LEVEL_4' } } } },
+      reference: { zones: { roots: { level: { value: 'LEVEL_8' } } } },
+    })
+    expect(mockHairMap).toHaveBeenCalledTimes(2)
+    await expect(db.consultHairComparison.update({ where: { id: row.id }, data: { model: 'changed' } })).rejects.toThrow()
+    const otherId = await completedConsult('hair-map-other')
+    const other = await db.consultHairComparison.findFirstOrThrow({ where: { consultSessionId: otherId } })
+    await db.consultHairComparison.delete({ where: { id: other.id } })
+    const insert = { ...other, payload: row.payload, id: `${other.id}-bad` }
+    await expect(db.consultHairComparison.create({ data: { ...insert, payload: toPrismaJson(row.payload) } })).rejects.toThrow()
+    await expect(db.consultHairComparison.create({ data: { ...insert, requestHash: '0'.repeat(64), payload: toPrismaJson(other.payload) } })).rejects.toThrow()
+    if (!isRecord(other.payload)) throw new Error('Missing test payload')
+    const current = isRecord(other.payload.current) ? other.payload.current : null
+    if (!current || !isRecord(current.zones) || !isRecord(current.zones.roots)) throw new Error('Missing test map')
+    const payload = toPrismaJson({ ...other.payload, current: { ...current, zones: { ...current.zones, roots: {
+      ...current.zones.roots, level: hairObservation('level', 'LEVEL_4', 'inspiration'),
+    } } } })
+    await expect(db.consultHairComparison.create({ data: { ...insert, payload } })).rejects.toThrow()
+    const security = await db.$queryRaw<Array<{ relrowsecurity: boolean }>>`SELECT relrowsecurity FROM pg_class WHERE oid = 'public."ConsultHairComparison"'::regclass`
+    expect(security[0]?.relrowsecurity).toBe(true)
+    const policies = await db.$queryRaw<Array<{ count: bigint }>>`SELECT count(*) FROM pg_policies WHERE schemaname = 'public' AND tablename = 'ConsultHairComparison'`
+    expect(policies[0]?.count).toBe(BigInt(0))
+  })
+
+  it('keeps a valid plan when the optional map provider fails', async () => {
+    process.env.AI_CONSULT_HAIR_MAP_ENABLED = 'true'
+    process.env.AI_CONSULT_LOOK_PLANS_ENABLED = 'true'
+    mockHairMap.mockRejectedValue(new Error('unavailable'))
+    const sessionId = await completedConsult('hair-map-fallback')
+    expect(await db.consultHairComparison.count({ where: { consultSessionId: sessionId } })).toBe(0)
+    expect((await db.consultSession.findUniqueOrThrow({ where: { id: sessionId } })).status).toBe('COMPLETED')
+  })
+
+  it('discards a hair comparison when the client replaces a photo during its read', async () => {
+    process.env.AI_CONSULT_LOOK_PLANS_ENABLED = 'true'
+    const sessionId = await completedConsult('hair-map-race')
+    await changeAnIntakeAnswer(sessionId, 'hair-map-race-before')
+    process.env.AI_CONSULT_HAIR_MAP_ENABLED = 'true'
+    mockHairMap.mockImplementation(async ({ scope }) => {
+      if (scope.role === 'CURRENT') await retakePhoto(sessionId, 'hair_back', 'hair-map-race-during')
+      return { raw: hairMapFixture(scope.views[0]), model: 'test-map-model' }
+    })
+    const result = await rerunNow(sessionId)
+    expect(mockHairMap).toHaveBeenCalledTimes(2)
+    expect(result.result).not.toBe('COMPLETED')
+    expect(await db.consultHairComparison.count({ where: { consultSessionId: sessionId } })).toBe(0)
+    expect(await db.consultRevision.count({ where: { consultSessionId: sessionId, kind: 'ANALYSIS' } })).toBe(1)
+  })
   const suitabilityReply = (context: import('@/lib/consult/suitabilityTranslation').ConsultSuitabilityContext) => {
     const choice = context.sources.find(s => s.provenance === 'CLIENT_REPORTED' && (s.sentiment === 'LIKE' || s.sentiment === 'GOAL'))
     if (!choice) throw new Error('Fixture needs a desired choice')

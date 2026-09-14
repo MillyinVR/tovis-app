@@ -1,8 +1,8 @@
 // Shared boundary checks for analysis observations and look-plan output.
 import type { ConsultAnalysisObservationDTO } from '@/lib/dto/consult'
 
-/** Existing look-plan evidence floor, shared with Suitability Translation. */
-export function isSupportedConsultObservation(value: ConsultAnalysisObservationDTO<string>): boolean {
+/** Shared evidence floor; the caller validates its own source-label vocabulary. */
+export function isSupportedConsultObservation(value: Pick<ConsultAnalysisObservationDTO<string>, 'value' | 'confidence'> & { evidence: readonly string[] }): boolean {
   return value.value !== 'UNKNOWN' && value.confidence.min >= 0.5 &&
     value.evidence.some(key => key !== 'intake')
 }
