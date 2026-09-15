@@ -102,3 +102,9 @@ END;
 $$;
 CREATE TRIGGER look_media_review_immutable BEFORE UPDATE ON "LookMediaAnalysisReview"
 FOR EACH ROW EXECUTE FUNCTION look_media_review_immutable();
+
+-- Server-owned analysis is inaccessible to non-bypassing database roles.
+-- Match the application's deny-all RLS posture; access goes through the API.
+ALTER TABLE "LookMediaAnalysis" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "LookMediaAnalysisCall" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "LookMediaAnalysisReview" ENABLE ROW LEVEL SECURITY;
