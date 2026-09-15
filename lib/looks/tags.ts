@@ -28,6 +28,31 @@ export function slugifyLookTag(raw: string): string {
 }
 
 /**
+ * The floor a slug must clear to name a real tag: below this it is not parsed
+ * out of a caption and `/looks/tags/{slug}` does not resolve.
+ *
+ * One character carries no meaning as a hashtag and collides across wildly
+ * different captions (`#a`, `#á`, `#a!` all slug to `a`), so both the parser
+ * and the tag page refuse it rather than minting a junk tag.
+ */
+export const MIN_LOOK_TAG_SLUG_LENGTH = 2
+
+/**
+ * Slugify `raw` and answer null when it does not clear MIN_LOOK_TAG_SLUG_LENGTH.
+ *
+ * This is the single rule behind BOTH "does this caption token become a tag"
+ * (`parseLookTags`) and "does `/looks/tags/{raw}` resolve" (`loadLookTagPage`);
+ * the two had the same two lines written out separately. It is also the rule
+ * tovis-ios's `LooksPath.tagSlug` twins, and the one the generated parity
+ * fixture (`schema/parity/lookTagSlugs.json`) pins — so it must stay a single
+ * exported function, not a shape re-typed at each call site.
+ */
+export function resolveLookTagSlug(raw: string): string | null {
+  const slug = slugifyLookTag(raw)
+  return slug.length >= MIN_LOOK_TAG_SLUG_LENGTH ? slug : null
+}
+
+/**
  * Extract distinct `#tags` from a caption, in first-seen order, capped at
  * MAX_LOOK_TAGS. Dedupes by slug; drops slugs that normalize to < 2 chars.
  */
@@ -41,8 +66,8 @@ export function parseLookTags(caption: string | null | undefined): ParsedLookTag
     const raw = match[1]
     if (!raw) continue
 
-    const slug = slugifyLookTag(raw)
-    if (slug.length < 2 || seen.has(slug)) continue
+    const slug = resolveLookTagSlug(raw)
+    if (slug === null || seen.has(slug)) continue
 
     seen.add(slug)
     out.push({ slug, display: raw })

@@ -104,7 +104,7 @@
     "verify:launch-ops": "pnpm test:chaos && pnpm test:load:launch",
     "loadproof:fixtures": "tsx prisma/scripts/loadTestFixtures.ts",
     "check:privacy-guards": "pnpm check:canonical-normalization && pnpm check:pii-plaintext-reads",
-    "check:static-guards": "pnpm check:booking-boundary && pnpm check:booking-status-labels && pnpm check:calendar-block-cache-bump && pnpm check:waitlist-status-boundary && pnpm check:rate-limit-buckets-wired && pnpm check:sms-send-guarded && pnpm check:claim-invite-guarded && pnpm check:signup-invite-guarded && pnpm check:media-render-boundary && pnpm check:media-visibility-boundary && pnpm check:consultation-canonical && pnpm check:lifecycle-field-writes && pnpm check:no-type-escape && pnpm check:no-private-lib-fork && pnpm check:no-distance-fork && pnpm check:no-prisma-enum-shadow && pnpm check:no-client-prisma-import && pnpm check:client-safe-enums && pnpm check:client-safe-enum-scope && pnpm check:canonical-normalization && pnpm check:pii-plaintext-reads && pnpm check:tenant-aware-discovery && pnpm check:no-hardcoded-brand-strings && pnpm check:brand-resolution && pnpm check:no-raw-datetime-format && pnpm check:locale-pinned && pnpm check:no-bare-tint-token && pnpm check:no-raw-color && pnpm check:no-unbracketed-arbitrary-value && pnpm check:notification-kick && pnpm check:api-schema && pnpm check:ios-fixture-contract && pnpm check:ci-coverage",
+    "check:static-guards": "pnpm check:booking-boundary && pnpm check:booking-status-labels && pnpm check:calendar-block-cache-bump && pnpm check:waitlist-status-boundary && pnpm check:rate-limit-buckets-wired && pnpm check:sms-send-guarded && pnpm check:claim-invite-guarded && pnpm check:signup-invite-guarded && pnpm check:media-render-boundary && pnpm check:media-visibility-boundary && pnpm check:consultation-canonical && pnpm check:lifecycle-field-writes && pnpm check:no-type-escape && pnpm check:no-private-lib-fork && pnpm check:no-distance-fork && pnpm check:no-prisma-enum-shadow && pnpm check:no-client-prisma-import && pnpm check:client-safe-enums && pnpm check:client-safe-enum-scope && pnpm check:canonical-normalization && pnpm check:pii-plaintext-reads && pnpm check:tenant-aware-discovery && pnpm check:no-hardcoded-brand-strings && pnpm check:brand-resolution && pnpm check:no-raw-datetime-format && pnpm check:locale-pinned && pnpm check:no-bare-tint-token && pnpm check:no-raw-color && pnpm check:no-unbracketed-arbitrary-value && pnpm check:notification-kick && pnpm check:api-schema && pnpm check:ios-fixture-contract && pnpm check:ios-parity-fixtures && pnpm check:ci-coverage",
     "test:load:availability": "dotenv -e .env.local -- tsx tests/load/availability-bootstrap-load-test.ts",
     "test:load:holds": "dotenv -e .env.local -- tsx tests/load/hold-create-load-test.ts",
     "test:load:booking-finalize": "dotenv -e .env.local -- tsx tests/load/booking-finalize-load-test.ts",
@@ -143,7 +143,9 @@
     "import:license-permissions": "tsx scripts/importLicensePermissions.ts",
     "smoke": "tsx scripts/smoke.ts",
     "eval:consult": "tsx scripts/run-consult-evaluation.ts",
-    "test:live:consult-normalization": "vitest run --config vitest.live.config.mts tests/live/consult-image-normalization.test.ts"
+    "test:live:consult-normalization": "vitest run --config vitest.live.config.mts tests/live/consult-image-normalization.test.ts",
+    "gen:look-tag-slug-fixture": "tsx scripts/gen-look-tag-slug-fixture.ts",
+    "check:ios-parity-fixtures": "node tools/check-ios-parity-fixtures.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.109.1",
