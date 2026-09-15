@@ -724,7 +724,7 @@ describe('the consult schemas compile and answer against the live model', () => 
       HER_OWN_HAIR,
       defaultClientConsultInspirationCopy,
     )
-    expect(phrase).toBe('your light brown, golden base')
+    expect(phrase).toBe('your light brown hair with a golden shade')
     for (const question of questions) {
       if (/starting from|you'?re at|base\b/i.test(question.text)) {
         expect(question.text.toLowerCase()).toContain(phrase!.toLowerCase())
