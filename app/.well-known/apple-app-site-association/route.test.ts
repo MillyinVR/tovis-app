@@ -13,7 +13,7 @@ describe('GET /.well-known/apple-app-site-association', () => {
     expect(res.headers.get('content-type')).toBe('application/json')
   })
 
-  it('associates the reset-password + claim + referral + look paths with the real app id', async () => {
+  it('associates the reset-password + claim + referral + look + profile paths with the real app id', async () => {
     const res = GET()
     const body = await res.json()
 
@@ -27,9 +27,10 @@ describe('GET /.well-known/apple-app-site-association', () => {
 
     // The emailed reset link, the §27 account-claim link, the client referral
     // short-link (`/c/*`, opened in the in-app browser), a shared look, a shared
-    // public board (`/u/*/boards/*`) and a shared creator profile (`/u/*`) open
-    // in-app; everything else stays in the browser. `components` mirrors `paths`
-    // one-for-one (legacy "NOT " prefix ↔ modern `exclude: true`).
+    // public board (`/u/*/boards/*`), a shared creator profile (`/u/*`) and a
+    // shared PRO profile (`/professionals/*`) open in-app; everything else stays
+    // in the browser. `components` mirrors `paths` one-for-one (legacy "NOT "
+    // prefix ↔ modern `exclude: true`).
     expect(detail.paths).toEqual([
       '/reset-password/*',
       '/claim/*',
@@ -39,6 +40,8 @@ describe('GET /.well-known/apple-app-site-association', () => {
       '/looks/*',
       '/u/*/boards/*',
       '/u/*',
+      'NOT /professionals/dashboard',
+      '/professionals/*',
     ])
     expect(detail.components).toEqual([
       { '/': '/reset-password/*' },
@@ -49,6 +52,8 @@ describe('GET /.well-known/apple-app-site-association', () => {
       { '/': '/looks/*' },
       { '/': '/u/*/boards/*' },
       { '/': '/u/*' },
+      { '/': '/professionals/dashboard', exclude: true },
+      { '/': '/professionals/*' },
     ])
   })
 
@@ -88,5 +93,33 @@ describe('GET /.well-known/apple-app-site-association', () => {
     // There is no `/u/<handle>/boards` index route, so nothing between the two
     // patterns goes unhandled.
     expect(paths).not.toContain('/u/*/boards')
+  })
+
+  // `/professionals/dashboard` is a legacy redirect to `/pro`, not a pro id. The
+  // native parser takes the second segment as a professionalId, so an associated
+  // tap would open the app and fetch a pro called "dashboard". iOS stops at the
+  // first match, so the exclusion only works while it precedes the broad pattern.
+  it('excludes /professionals/dashboard BEFORE the broad /professionals/* pattern', async () => {
+    const res = GET()
+    const body = await res.json()
+    const { paths } = body.applinks.details[0]
+
+    const broad = paths.indexOf('/professionals/*')
+    const exclusion = paths.indexOf('NOT /professionals/dashboard')
+    expect(broad).toBeGreaterThan(-1)
+    expect(exclusion).toBeGreaterThan(-1)
+    expect(exclusion).toBeLessThan(broad)
+  })
+
+  // The handle-keyed mirror of the pro profile. Resolving a handle to a
+  // professionalId needs a lookup the native parser cannot do, so the app cannot
+  // handle `/p/<handle>` — associating it would turn a working web page into a
+  // silent no-op.
+  it('leaves the handle-keyed /p/<handle> mirror on the web', async () => {
+    const res = GET()
+    const body = await res.json()
+    const { paths } = body.applinks.details[0]
+
+    expect(paths.some((p: string) => p.startsWith('/p/'))).toBe(false)
   })
 })
