@@ -963,14 +963,12 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.PRO]: PRO_IN_APP_ONLY_CHANNELS,
     },
-    // ⚠️ This is a PRO notification pointing at an ADMIN route
-    // (`lib/notifications/viralRequestApproved.ts`). Declared as it actually is,
-    // not as it ought to be — the phone correctly refuses to open it, and on web
-    // a pro tapping it does not reach an admin page either. Flagged, not fixed:
-    // where it SHOULD point is a product call.
-    hrefShapes: [
-      '/admin/viral-requests/{viralRequestId}',
-    ],
+    // No href. This used to carry `/admin/viral-requests/{id}` — an ADMIN route
+    // on a PRO notification, and a 404 for an admin too (only the list page
+    // exists; there is no `[id]` route). There is no pro-facing viral-request
+    // surface to point at instead, so the emitter sends no destination at all
+    // rather than a dead one. See `lib/notifications/viralRequestApproved.ts`.
+    hrefShapes: [],
   },
 
   [NotificationEventKey.PAYMENT_COLLECTED]: {
