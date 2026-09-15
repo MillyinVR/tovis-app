@@ -33,6 +33,7 @@ import { isUniqueConstraintError } from '@/lib/prismaErrors'
 
 import { enqueueDispatch } from './dispatch/enqueueDispatch'
 import { getNotificationEventDefinition } from './eventKeys'
+import { assertNotificationHrefShape } from '@/lib/notifications/hrefShapeGuard'
 
 const MAX_ID = 64
 const MAX_TITLE = 160
@@ -109,7 +110,10 @@ function normalizeCreateAdminNotificationArgs(args: CreateAdminNotificationArgs)
     priority: getNotificationEventDefinition(args.eventKey).defaultPriority,
     title,
     body: normDefaultString(args.body, MAX_BODY),
-    href: normInternalHref(args.href, MAX_HREF),
+    href: assertNotificationHrefShape(
+      args.eventKey,
+      normInternalHref(args.href, MAX_HREF),
+    ),
     data: args.data,
     dedupeKey: normNullableString(args.dedupeKey, MAX_DEDUPE_KEY),
   }

@@ -741,7 +741,10 @@ describe('lib/notifications/clientNotifications', () => {
         clientId: 'client_1',
         eventKey: NotificationEventKey.APPOINTMENT_REMINDER,
         title: 'Appointment tomorrow',
-        href: '/client/notifications',
+        // The href an appointment reminder actually carries. It was
+        // '/client/notifications', which no emitter sends — a fixture that
+        // modelled nothing, and now refused by assertNotificationHrefShape.
+        href: '/client/bookings/booking_1?step=overview',
       })
 
       const recipient = enqueuedRecipient()

@@ -5,6 +5,8 @@ import {
   NotificationRecipientKind,
 } from '@prisma/client'
 
+import type { NotificationHrefShape } from './hrefShapes'
+
 export type NotificationTemplateKey =
   | 'booking_request_created'
   | 'booking_confirmed'
@@ -88,6 +90,25 @@ export type NotificationEventDefinition = {
   defaultChannelsByRecipient: Partial<
     Record<NotificationRecipientKind, readonly NotificationChannel[]>
   >
+  /**
+   * Every href SHAPE this event's notifications can carry.
+   *
+   * 🔴 This is the forcing function for the web<->iOS href contract. Because
+   * NOTIFICATION_EVENT_DEFINITIONS is an exhaustive
+   * `Record<NotificationEventKey, …>` and this field is REQUIRED, a new event
+   * key does not compile until it declares its shapes — which is the moment
+   * someone has to decide whether the phone can open the destination. Before
+   * this, a new href simply appeared, the iOS parser fell through to
+   * `.clientHome` / `.proHome`, and the notification centre dismissed itself
+   * onto Home: a dead tap that looks like a working one.
+   *
+   * `[]` is a legitimate answer (the event carries no href) and must be written
+   * out, so "no href" is a statement rather than an omission.
+   *
+   * Kept honest at runtime by `assertNotificationHrefShape`, which throws
+   * outside production when an emitted href does not reduce to one of these.
+   */
+  hrefShapes: readonly NotificationHrefShape[]
   // Critical events whose EMAIL channel can never be turned off by a recipient
   // preference (e.g. payment receipts / refunds / action-required). The channel
   // policy forces email through even when the recipient disabled it, and the
@@ -266,6 +287,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.PRO]: PRO_ALL_CHANNELS,
     },
+    hrefShapes: [
+      '/pro/bookings/{bookingId}',
+    ],
   },
 
   [NotificationEventKey.BOOKING_CONFIRMED]: {
@@ -291,6 +315,13 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       // Tier B confirmation: in-app + email + push. No SMS for app users.
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
     },
+    // Three: the plain client detail (rebook + createProBookingWithClient), the
+    // overview step (the confirm path), and the pro side.
+    hrefShapes: [
+      '/client/bookings/{bookingId}',
+      '/client/bookings/{bookingId}?step=overview',
+      '/pro/bookings/{bookingId}',
+    ],
   },
 
   [NotificationEventKey.BOOKING_STARTED]: {
@@ -305,6 +336,10 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       // email, but a good fit for a push tap.
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_PUSH_CHANNELS,
     },
+    // No emitter passes a href today — the event is defined and delivered, but
+    // nothing gives the row a destination. Declared empty rather than omitted so
+    // the absence is a statement, not a gap.
+    hrefShapes: [],
   },
 
   [NotificationEventKey.BOOKING_RESCHEDULED]: {
@@ -323,6 +358,10 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       // reminder, so it reaches the phone too.
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_SMS_EMAIL_PUSH_CHANNELS,
     },
+    hrefShapes: [
+      '/client/bookings/{bookingId}?step=overview',
+      '/pro/bookings/{bookingId}',
+    ],
   },
 
   [NotificationEventKey.BOOKING_CANCELLED_BY_CLIENT]: {
@@ -340,6 +379,10 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       [NotificationRecipientKind.PRO]: PRO_ALL_CHANNELS,
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_CHANNELS,
     },
+    hrefShapes: [
+      '/client/bookings/{bookingId}?step=overview',
+      '/pro/bookings/{bookingId}',
+    ],
   },
 
   [NotificationEventKey.BOOKING_CANCELLED_BY_PRO]: {
@@ -359,6 +402,10 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       // Client is the affected party → urgent in-app + email + SMS + push.
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_SMS_EMAIL_PUSH_CHANNELS,
     },
+    hrefShapes: [
+      '/client/bookings/{bookingId}?step=overview',
+      '/pro/bookings/{bookingId}',
+    ],
   },
 
   [NotificationEventKey.BOOKING_CANCELLED_BY_ADMIN]: {
@@ -377,6 +424,10 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       // Client is the affected party → same set as a pro-side cancellation.
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_SMS_EMAIL_PUSH_CHANNELS,
     },
+    hrefShapes: [
+      '/client/bookings/{bookingId}?step=overview',
+      '/pro/bookings/{bookingId}',
+    ],
   },
 
   [NotificationEventKey.CLIENT_CLAIM_INVITE]: {
@@ -389,6 +440,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.CLIENT]: CLIENT_EMAIL_SMS_CHANNELS,
     },
+    hrefShapes: [
+      '/claim/{token}',
+    ],
   },
 
   [NotificationEventKey.CONSULTATION_PROPOSAL_SENT]: {
@@ -407,6 +461,11 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       // secure consultation magic link. Email-preferred clients still get email.
       [NotificationRecipientKind.CLIENT]: CLIENT_ALL_CHANNELS,
     },
+    // The tokenised arm is the CONSULTATION_ACTION client action.
+    hrefShapes: [
+      '/client/bookings/{bookingId}?step=consult',
+      '/client/consultation/{token}',
+    ],
   },
 
   [NotificationEventKey.CONSULTATION_APPROVED]: {
@@ -426,6 +485,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       // Tier B confirmation: in-app + email + push. No SMS for app users.
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
     },
+    hrefShapes: [
+      '/pro/bookings/{bookingId}?step=consult',
+    ],
   },
 
   [NotificationEventKey.CONSULTATION_REJECTED]: {
@@ -445,6 +507,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       // Tier B confirmation: in-app + email + push. No SMS for app users.
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
     },
+    hrefShapes: [
+      '/pro/bookings/{bookingId}?step=consult',
+    ],
   },
 
   [NotificationEventKey.REVIEW_RECEIVED]: {
@@ -459,6 +524,12 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       // event worth an inbox message, but a push tap fits.
       [NotificationRecipientKind.PRO]: PRO_IN_APP_PUSH_CHANNELS,
     },
+    // Two spellings of one destination: the route emits the web ANCHOR form, and
+    // the parser lifts the id back out of the fragment.
+    hrefShapes: [
+      '/pro/reviews/{reviewId}',
+      '/pro/reviews#review-{reviewId}',
+    ],
   },
 
   [NotificationEventKey.REVIEW_REQUESTED]: {
@@ -474,6 +545,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
     },
+    hrefShapes: [
+      '/client/bookings/{bookingId}#review',
+    ],
   },
 
   [NotificationEventKey.APPOINTMENT_REMINDER]: {
@@ -492,6 +566,12 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       // notification that most needs to reach the phone, so PUSH is in the set.
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_SMS_EMAIL_PUSH_CHANNELS,
     },
+    // The reminder job swaps in the tokenised confirm/decline page when the ask
+    // is armed (`app/api/internal/jobs/client-reminders`), so BOTH are real.
+    hrefShapes: [
+      '/client/bookings/{bookingId}?step=overview',
+      '/client/appointment/{token}',
+    ],
   },
 
   [NotificationEventKey.APPOINTMENT_CONFIRMATION_DECLINED]: {
@@ -509,6 +589,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.PRO]: PRO_IN_APP_EMAIL_PUSH_CHANNELS,
     },
+    hrefShapes: [
+      '/pro/bookings/{bookingId}',
+    ],
   },
 
   [NotificationEventKey.AFTERCARE_READY]: {
@@ -533,6 +616,11 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       // until APNs is live.
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_SMS_EMAIL_PUSH_CHANNELS,
     },
+    // The tokenised arm is the AFTERCARE_ACCESS client action — a web-only page.
+    hrefShapes: [
+      '/client/bookings/{bookingId}?step=aftercare',
+      '/client/rebook/{token}',
+    ],
   },
 
   [NotificationEventKey.LAST_MINUTE_OPENING_AVAILABLE]: {
@@ -551,6 +639,14 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       // a channel-override on the emit) plus promotional-SMS consent verification.
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
     },
+    // Three arms: the last-minute job's opening claim sheet, the priority-offer
+    // route's offers screen, and the job's fallback when an opening has no
+    // offering to name.
+    hrefShapes: [
+      '/offerings/{offeringId}?openingId={openingId}',
+      '/client/offers?accept={recipientId}',
+      '/client',
+    ],
   },
 
   [NotificationEventKey.WAITLIST_TIME_OFFERED]: {
@@ -567,6 +663,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_PUSH_CHANNELS,
     },
+    hrefShapes: [
+      '/client/offers',
+    ],
   },
 
   [NotificationEventKey.SAVED_LOOK_AVAILABILITY_OPENED]: {
@@ -585,6 +684,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       // re-engagement nudges are not an approved transactional SMS use case.
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
     },
+    hrefShapes: [
+      '/looks/{lookPostId}',
+    ],
   },
 
   [NotificationEventKey.EVENT_DATE_COUNTDOWN]: {
@@ -604,6 +706,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       // re-engagement nudges are not an approved transactional SMS use case.
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
     },
+    hrefShapes: [
+      '/client/boards/{boardId}',
+    ],
   },
 
   [NotificationEventKey.REBOOK_CADENCE_DUE]: {
@@ -623,6 +728,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       // re-engagement nudges are not an approved transactional SMS use case.
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
     },
+    hrefShapes: [
+      '/professionals/{professionalId}',
+    ],
   },
 
   [NotificationEventKey.SAVED_LOOK_CONSULT_NUDGE]: {
@@ -642,6 +750,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       // re-engagement nudges are not an approved transactional SMS use case.
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
     },
+    hrefShapes: [
+      '/professionals/{professionalId}',
+    ],
   },
 
   [NotificationEventKey.CONSULT_STALLED_NUDGE]: {
@@ -665,6 +776,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       // re-engagement nudges are not an approved transactional SMS use case.
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
     },
+    hrefShapes: [
+      '/client/consult/{consultSessionId}',
+    ],
   },
 
   [NotificationEventKey.AI_CONSULT_INVITATION]: {
@@ -680,6 +794,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
     },
+    hrefShapes: [
+      '/client/bookings/{bookingId}',
+    ],
   },
 
   [NotificationEventKey.LOOK_BRIEF_REVIEW]: {
@@ -693,6 +810,10 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       [NotificationRecipientKind.CLIENT]: [NotificationChannel.IN_APP, NotificationChannel.PUSH],
       [NotificationRecipientKind.PRO]: PRO_IN_APP_PUSH_CHANNELS,
     },
+    hrefShapes: [
+      '/client/consult/{consultSessionId}',
+      '/pro/consults/{consultSessionId}',
+    ],
   },
   [NotificationEventKey.AI_CONSULT_ANALYSIS_READY]: {
     // P4b. TRANSACTIONAL, unlike its AI_CONSULT_INVITATION sibling above, and
@@ -713,6 +834,12 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       // on it.
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
     },
+    // 🔴 The four-part path. `lib/consult/analysisNotifications.ts` composes
+    // `${href}/results` away from this key, which is why two grep sweeps missed
+    // it and the payoff notice of the whole consult chain landed on Home.
+    hrefShapes: [
+      '/client/consult/{consultSessionId}/results',
+    ],
   },
 
   [NotificationEventKey.AI_CONSULT_ANALYSIS_FAILED]: {
@@ -729,6 +856,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
     },
+    hrefShapes: [
+      '/client/consult/{consultSessionId}',
+    ],
   },
 
   [NotificationEventKey.CONSULT_PREP_REMINDER]: {
@@ -754,6 +884,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       // consult's other client-facing events keep.
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
     },
+    hrefShapes: [
+      '/client/consult/{consultSessionId}',
+    ],
   },
 
   [NotificationEventKey.CONSULT_PRO_FOLLOW_UP]: {
@@ -776,6 +909,10 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
       [NotificationRecipientKind.PRO]: PRO_IN_APP_PUSH_CHANNELS,
     },
+    hrefShapes: [
+      '/client/consult/{consultSessionId}',
+      '/pro/consults/{consultSessionId}',
+    ],
   },
 
   [NotificationEventKey.SAVED_LOOK_PRICE_ALTERNATIVE]: {
@@ -796,6 +933,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       // re-engagement nudges are not an approved transactional SMS use case.
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
     },
+    hrefShapes: [
+      '/looks/{lookPostId}',
+    ],
   },
 
   [NotificationEventKey.VIRAL_REQUEST_APPROVED]: {
@@ -808,6 +948,14 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.PRO]: PRO_IN_APP_ONLY_CHANNELS,
     },
+    // ⚠️ This is a PRO notification pointing at an ADMIN route
+    // (`lib/notifications/viralRequestApproved.ts`). Declared as it actually is,
+    // not as it ought to be — the phone correctly refuses to open it, and on web
+    // a pro tapping it does not reach an admin page either. Flagged, not fixed:
+    // where it SHOULD point is a product call.
+    hrefShapes: [
+      '/admin/viral-requests/{viralRequestId}',
+    ],
   },
 
   [NotificationEventKey.PAYMENT_COLLECTED]: {
@@ -825,6 +973,10 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       [NotificationRecipientKind.PRO]: PRO_IN_APP_EMAIL_CHANNELS,
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_CHANNELS,
     },
+    hrefShapes: [
+      '/client/bookings/{bookingId}',
+      '/pro/bookings/{bookingId}',
+    ],
   },
 
   [NotificationEventKey.PAYMENT_ACTION_REQUIRED]: {
@@ -844,6 +996,10 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       [NotificationRecipientKind.PRO]: PRO_IN_APP_EMAIL_CHANNELS,
       [NotificationRecipientKind.CLIENT]: CLIENT_ALL_CHANNELS,
     },
+    hrefShapes: [
+      '/client/bookings/{bookingId}',
+      '/pro/bookings/{bookingId}',
+    ],
   },
 
   [NotificationEventKey.PAYMENT_CONFIRMATION_REQUIRED]: {
@@ -860,6 +1016,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.PRO]: PRO_IN_APP_EMAIL_CHANNELS,
     },
+    hrefShapes: [
+      '/pro/bookings/{bookingId}',
+    ],
   },
 
   [NotificationEventKey.PAYMENT_REFUNDED]: {
@@ -878,6 +1037,10 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       [NotificationRecipientKind.PRO]: PRO_IN_APP_EMAIL_PUSH_CHANNELS,
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
     },
+    hrefShapes: [
+      '/client/bookings/{bookingId}',
+      '/pro/bookings/{bookingId}',
+    ],
   },
 
   [NotificationEventKey.NO_SHOW_FEE_CHARGED]: {
@@ -893,6 +1056,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       // Tier B receipt: in-app + email + push. No SMS.
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
     },
+    hrefShapes: [
+      '/client/bookings/{bookingId}?step=overview',
+    ],
   },
 
   [NotificationEventKey.NO_SHOW_DEPOSIT_KEPT]: {
@@ -910,6 +1076,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       // Tier B disclosure: in-app + email + push. No SMS.
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
     },
+    hrefShapes: [
+      '/client/bookings/{bookingId}?step=overview',
+    ],
   },
 
   [NotificationEventKey.DEPOSIT_REMINDER]: {
@@ -925,6 +1094,14 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_PUSH_CHANNELS,
     },
+    // `buildDepositReminderHref` anchors the ClientDepositCard's "Pay deposit"
+    // CTA, so it is the STEP form, not the bare booking detail. (This entry was
+    // wrong on first writing — assumed from the helper's NAME instead of read —
+    // and the runtime assertion caught it in the integration suite. Exactly what
+    // the assertion is for.)
+    hrefShapes: [
+      '/client/bookings/{bookingId}?step=overview',
+    ],
   },
 
   [NotificationEventKey.DEPOSIT_PAYMENT_LINK]: {
@@ -943,6 +1120,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       // deposit surface via BOOKING_CONFIRMED's in-app row.
       [NotificationRecipientKind.CLIENT]: CLIENT_EMAIL_SMS_CHANNELS,
     },
+    hrefShapes: [
+      '/client/deposit/{token}',
+    ],
   },
 
   [NotificationEventKey.CONSENT_SIGNATURE_REQUEST]: {
@@ -960,6 +1140,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       // often-unclaimed clients, who have no in-app inbox to receive it in.
       [NotificationRecipientKind.CLIENT]: CLIENT_EMAIL_SMS_CHANNELS,
     },
+    hrefShapes: [
+      '/client/consent/{token}',
+    ],
   },
 
   // W5 follow-up: a pro asked to read this client's chart. Client-facing.
@@ -982,6 +1165,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_PUSH_CHANNELS,
     },
+    hrefShapes: [
+      '/client/settings/chart-sharing',
+    ],
   },
 
   // W5 follow-up: the client granted. Pro-facing, IN_APP + PUSH on the same
@@ -997,6 +1183,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.PRO]: PRO_IN_APP_PUSH_CHANNELS,
     },
+    hrefShapes: [
+      '/pro/clients/{clientId}',
+    ],
   },
 
   [NotificationEventKey.LOOK_FOLLOWER_NEW]: {
@@ -1009,6 +1198,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.PRO]: PRO_IN_APP_ONLY_CHANNELS,
     },
+    hrefShapes: [
+      '/pro/profile/public-profile',
+    ],
   },
 
   // Client→client follow. In-app only (the activity feed) — a follow should
@@ -1023,6 +1215,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_ONLY_CHANNELS,
     },
+    hrefShapes: [
+      '/client/activity',
+    ],
   },
 
   // Someone commented on your look. Social engagement → in-app + PUSH (A4
@@ -1045,6 +1240,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       [NotificationRecipientKind.PRO]: PRO_IN_APP_PUSH_CHANNELS,
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_PUSH_CHANNELS,
     },
+    hrefShapes: [
+      '/looks/{lookPostId}',
+    ],
   },
 
   // Someone replied to your comment on a look. Same policy as LOOK_COMMENTED
@@ -1063,6 +1261,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       [NotificationRecipientKind.PRO]: PRO_IN_APP_PUSH_CHANNELS,
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_PUSH_CHANNELS,
     },
+    hrefShapes: [
+      '/looks/{lookPostId}',
+    ],
   },
 
   // Batched "your look got liked" — one windowed inbox row per look per day
@@ -1084,6 +1285,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       [NotificationRecipientKind.PRO]: PRO_IN_APP_PUSH_CHANNELS,
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_PUSH_CHANNELS,
     },
+    hrefShapes: [
+      '/looks/{lookPostId}',
+    ],
   },
 
   // Batched "your look got saved to a board" — same windowed-dedupe policy as
@@ -1102,6 +1306,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       [NotificationRecipientKind.PRO]: PRO_IN_APP_PUSH_CHANNELS,
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_PUSH_CHANNELS,
     },
+    hrefShapes: [
+      '/looks/{lookPostId}',
+    ],
   },
 
   // A pro you follow published a new look — the FAN_OUT_NEW_LOOK_NOTIFICATIONS
@@ -1117,6 +1324,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_PUSH_CHANNELS,
     },
+    hrefShapes: [
+      '/looks/{lookPostId}',
+    ],
   },
 
   // "Your look hit N likes / N saves" — a one-time supply-side growth nudge to
@@ -1138,6 +1348,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       [NotificationRecipientKind.PRO]: PRO_IN_APP_PUSH_CHANNELS,
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_PUSH_CHANNELS,
     },
+    hrefShapes: [
+      '/looks/{lookPostId}',
+    ],
   },
 
   [NotificationEventKey.REFERRAL_TAP_RECEIVED]: {
@@ -1150,6 +1363,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_ONLY_CHANNELS,
     },
+    hrefShapes: [
+      '/client/referrals?confirm={referralId}',
+    ],
   },
 
   [NotificationEventKey.REFERRAL_CONFIRMED]: {
@@ -1162,6 +1378,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_ONLY_CHANNELS,
     },
+    hrefShapes: [
+      '/client/referrals',
+    ],
   },
 
   [NotificationEventKey.REFERRAL_CONVERTED]: {
@@ -1174,6 +1393,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_ONLY_CHANNELS,
     },
+    hrefShapes: [
+      '/client/referrals',
+    ],
   },
 
   // Vanity-handle reservation about to expire. In-app + email so the pro has a real
@@ -1188,6 +1410,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.PRO]: PRO_IN_APP_EMAIL_CHANNELS,
     },
+    hrefShapes: [
+      '/pro/membership',
+    ],
   },
 
   // License-expiry lifecycle: 30 days before ProfessionalProfile.licenseExpiry.
@@ -1205,6 +1430,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.PRO]: PRO_IN_APP_EMAIL_CHANNELS,
     },
+    hrefShapes: [
+      '/pro/verification',
+    ],
   },
 
   // Fires once the license has actually expired — the verified badge is now
@@ -1222,6 +1450,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.PRO]: PRO_IN_APP_EMAIL_CHANNELS,
     },
+    hrefShapes: [
+      '/pro/verification',
+    ],
   },
 
   // A new message in a thread → the OTHER participant (client or pro). In-app +
@@ -1243,6 +1474,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       [NotificationRecipientKind.PRO]: PRO_IN_APP_PUSH_CHANNELS,
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_PUSH_CHANNELS,
     },
+    hrefShapes: [
+      '/messages/thread/{threadId}',
+    ],
   },
 
   // W2: a client JOINED this pro's waitlist. In-app + PUSH + EMAIL — Tori's
@@ -1264,6 +1498,11 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.PRO]: PRO_IN_APP_EMAIL_PUSH_CHANNELS,
     },
+    // The join notice opens the conversation when there is one, else the list.
+    hrefShapes: [
+      '/messages/thread/{threadId}',
+      '/pro/waitlist',
+    ],
   },
 
   // An offered time lapsed unanswered. Deliberately the QUIETEST pro event in
@@ -1290,6 +1529,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.PRO]: PRO_IN_APP_ONLY_CHANNELS,
     },
+    hrefShapes: [
+      '/pro/waitlist',
+    ],
   },
 
   // A waitlisted client left while a live offer was out to them. In-app + push,
@@ -1312,6 +1554,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.PRO]: PRO_IN_APP_PUSH_CHANNELS,
     },
+    hrefShapes: [
+      '/pro/waitlist',
+    ],
   },
 
   // Admin operational alerts. Tier B (in-app + email; never SMS). Transactional
@@ -1327,6 +1572,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.ADMIN]: ADMIN_IN_APP_EMAIL_PUSH_CHANNELS,
     },
+    hrefShapes: [
+      '/admin/professionals/{professionalId}',
+    ],
   },
 
   [NotificationEventKey.ADMIN_SUPPORT_TICKET_CREATED]: {
@@ -1339,6 +1587,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.ADMIN]: ADMIN_IN_APP_EMAIL_PUSH_CHANNELS,
     },
+    hrefShapes: [
+      '/admin/support/{ticketId}',
+    ],
   },
 
   [NotificationEventKey.ADMIN_VIRAL_REQUEST_PENDING]: {
@@ -1351,6 +1602,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.ADMIN]: ADMIN_IN_APP_EMAIL_PUSH_CHANNELS,
     },
+    hrefShapes: [
+      '/admin',
+    ],
   },
 
   [NotificationEventKey.ADMIN_USER_SIGNED_UP]: {
@@ -1363,6 +1617,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.ADMIN]: ADMIN_IN_APP_EMAIL_PUSH_CHANNELS,
     },
+    hrefShapes: [
+      '/admin/invite-codes',
+    ],
   },
 }
 

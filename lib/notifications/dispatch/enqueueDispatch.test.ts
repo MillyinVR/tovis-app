@@ -152,7 +152,7 @@ function makeDispatchRecord(
         : 'notif_1',
     title: overrides.title ?? 'Appointment confirmed',
     body: overrides.body ?? 'Your appointment has been confirmed.',
-    href: overrides.href ?? '/client/bookings/booking_1',
+    href: overrides.href ?? '/client/bookings/booking_1?step=consult',
     scheduledFor,
     cancelledAt: 'cancelledAt' in overrides ? overrides.cancelledAt! : null,
     createdAt,
@@ -245,7 +245,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
       },
       title: ' Appointment confirmed ',
       body: ' Your appointment has been confirmed. ',
-      href: ' /client/bookings/booking_1 ',
+      href: ' /client/bookings/booking_1?step=consult ',
       payload: {
         bookingId: 'booking_1',
       },
@@ -287,7 +287,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
         recipientTimeZone: 'America/Los_Angeles',
         title: 'Appointment confirmed',
         body: 'Your appointment has been confirmed.',
-        href: '/client/bookings/booking_1',
+        href: '/client/bookings/booking_1?step=consult',
         scheduledFor,
         payload: {
           bookingId: 'booking_1',
@@ -485,7 +485,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
       },
       title: 'Appointment confirmed',
       body: 'Your appointment has been confirmed.',
-      href: '/client/bookings/booking_1',
+      href: '/client/bookings/booking_1?step=consult',
       payload: { bookingId: 'booking_1' },
       scheduledFor,
       clientNotificationId: 'notif_no_sms',
@@ -544,7 +544,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
       },
       title: 'Appointment confirmed',
       body: 'Your appointment has been confirmed.',
-      href: '/client/bookings/booking_1',
+      href: '/client/bookings/booking_1?step=consult',
       scheduledFor,
       clientNotificationId: 'notif_invalid_tz',
     })
@@ -585,7 +585,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
       },
       title: 'Appointment confirmed',
       body: 'Your appointment has been confirmed.',
-      href: '/client/bookings/booking_1',
+      href: '/client/bookings/booking_1?step=consult',
       clientNotificationId: 'notif_existing',
     })
 
@@ -626,7 +626,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
       },
       title: 'Appointment confirmed',
       body: 'Your appointment has been confirmed.',
-      href: '/client/bookings/booking_1',
+      href: '/client/bookings/booking_1?step=consult',
       clientNotificationId: 'notif_raced',
     })
 
@@ -700,7 +700,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
       },
       title: 'Appointment confirmed',
       body: 'Your appointment has been confirmed.',
-      href: '/client/bookings/booking_1',
+      href: '/client/bookings/booking_1?step=consult',
       requestedChannels: [NotificationChannel.SMS],
       scheduledFor,
       clientNotificationId: 'notif_sms_missing',
@@ -867,7 +867,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
       },
       title: 'Appointment confirmed',
       body: 'Your appointment has been confirmed.',
-      href: '/client/bookings/booking_1',
+      href: '/client/bookings/booking_1?step=consult',
       scheduledFor,
       clientNotificationId: 'notif_email_unverified',
     })

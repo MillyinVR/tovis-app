@@ -5,6 +5,11 @@
 // generated parity fixture no longer matches the copy tovis-ios drives its
 // Swift twins over.
 //
+// Two fixtures ride this guard today: the look-tag slug rule, and the set of
+// href shapes a notification can carry (which tovis-ios drives its REAL
+// deep-link parser over — see lib/notifications/hrefShapes.ts). Both have the
+// same shape of risk, described below with the slug rule as the example.
+//
 // What this is for, concretely. `lib/looks/tags.ts` has a Swift twin in
 // tovis-ios (`LooksPath.slugifyTag` / `LooksPath.tagSlug`). Web owns the rule;
 // the phone reimplements it so a tapped `/looks/tags/{slug}` link resolves to
@@ -64,6 +69,12 @@ const PARITY_FIXTURES = [
     web: 'schema/parity/lookTagSlugs.json',
     ios: 'TovisTests/Fixtures/lookTagSlugs.json',
     regen: 'pnpm gen:look-tag-slug-fixture',
+  },
+  {
+    what: 'notification href shapes (lib/notifications/hrefShapes.ts -> PushDeepLink)',
+    web: 'schema/parity/notificationHrefShapes.json',
+    ios: 'TovisTests/Fixtures/notificationHrefShapes.json',
+    regen: 'pnpm gen:notification-href-fixture',
   },
 ]
 

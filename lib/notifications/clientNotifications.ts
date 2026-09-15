@@ -21,6 +21,7 @@ import {
   resolveSyntheticVerificationTimestamp,
 } from './clientDestinationEligibility'
 import { enqueueDispatch } from './dispatch/enqueueDispatch'
+import { assertNotificationHrefShape } from '@/lib/notifications/hrefShapeGuard'
 
 export type ClientNotificationDbClient = Prisma.TransactionClient | typeof prisma
 
@@ -237,7 +238,10 @@ function normalizeCreateClientNotificationArgs(
     eventKey: args.eventKey,
     title,
     body: normDefaultString(args.body, MAX_BODY),
-    href: normInternalHref(args.href, MAX_HREF),
+    href: assertNotificationHrefShape(
+      args.eventKey,
+      normInternalHref(args.href, MAX_HREF),
+    ),
     data: args.data,
     dedupeKey: normNullableString(args.dedupeKey, MAX_DEDUPE_KEY),
     bookingId: normId(args.bookingId),
@@ -732,7 +736,10 @@ export async function scheduleClientNotification(
   const db = getDb(args.tx)
 
   const clientId = normRequiredString(args.clientId, MAX_ID)
-  const href = normInternalHref(args.href, MAX_HREF)
+  const href = assertNotificationHrefShape(
+    args.eventKey,
+    normInternalHref(args.href, MAX_HREF),
+  )
   const dedupeKey = normNullableString(args.dedupeKey, MAX_DEDUPE_KEY)
   const bookingId = normId(args.bookingId)
   const runAt = normalizeDate(args.runAt, 'runAt')
