@@ -675,6 +675,9 @@ export function BookingModal(props: BookingModalProps) {
                   selectedYmd={reschedDate || null}
                   disabled={saving}
                   onPick={onChangeReschedDate}
+                  // Moving a concrete appointment: show what is already on the
+                  // day being moved to, not just that something is.
+                  showDaySchedule
                   slotContext={rescheduleSlotContext}
                 />
               </div>

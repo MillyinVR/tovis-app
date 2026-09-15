@@ -177,6 +177,8 @@ export default function OpenSlotPicker({
           selectedYmd={selectedDate || null}
           disabled={disabled}
           onPick={(ymd) => setSelectedDate(ymd)}
+          // Booking a concrete appointment: show what is already on the day.
+          showDaySchedule
           // Counts real openings for THIS service + location + add-ons (R4), so
           // the grid shows where the appointment actually fits rather than only
           // where the day is already busy.
