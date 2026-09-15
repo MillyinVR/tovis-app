@@ -963,12 +963,15 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.PRO]: PRO_IN_APP_ONLY_CHANNELS,
     },
-    // No href. This used to carry `/admin/viral-requests/{id}` — an ADMIN route
-    // on a PRO notification, and a 404 for an admin too (only the list page
-    // exists; there is no `[id]` route). There is no pro-facing viral-request
-    // surface to point at instead, so the emitter sends no destination at all
-    // rather than a dead one. See `lib/notifications/viralRequestApproved.ts`.
-    hrefShapes: [],
+    // `/pro/viral-requests` — the pro-facing library (#1191). This carried
+    // `/admin/viral-requests/{id}` until #1189: an ADMIN route on a PRO
+    // notification, and a 404 for an admin too (only the list page exists,
+    // there is no `[id]` route). #1189 dropped it rather than invent a
+    // destination; the destination now exists, so the notice can point at it.
+    //
+    // Declared `web` in the shape registry, NOT `native`: the phone has no pro
+    // viral-requests screen yet. See `lib/notifications/viralRequestApproved.ts`.
+    hrefShapes: ['/pro/viral-requests'],
   },
 
   [NotificationEventKey.PAYMENT_COLLECTED]: {
