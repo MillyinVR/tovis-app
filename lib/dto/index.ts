@@ -520,6 +520,16 @@ export type {
   ProConsentFormLibraryResponseDTO,
 } from '@/lib/dto/proConsentForms'
 
+// ── Pro viral requests ────────────────────────────────────────────────────────
+// The approved viral looks a pro was matched to, and their own "I can do this"
+// answer (GET /api/v1/pro/viral-requests + the offer writes). Exported so the
+// generated schema — and the iOS contract validator with it — holds the shape.
+export type {
+  ProViralRequestDTO,
+  ProViralRequestListResponseDTO,
+  ProViralRequestOfferResponseDTO,
+} from '@/lib/dto/proViralRequests'
+
 // ── Pro bookings list ─────────────────────────────────────────────────────────
 // The native pro bookings list (GET /api/v1/pro/bookings). Exported so the iOS
 // contract validator can check its fixture against the real shape — until now

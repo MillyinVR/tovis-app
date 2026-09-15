@@ -2260,6 +2260,7 @@ model ProfessionalProfile {
   reviews                     Review[]
   reminders                   Reminder[]
   viralRequestApprovalFanOuts ViralRequestApprovalFanOut[]
+  viralRequestProOffers       ViralRequestProOffer[]
 
   searchIndexEntries ProfessionalSearchIndex[]
 
@@ -7408,6 +7409,40 @@ model ServiceFavorite {
   @@index([serviceId, createdAt])
 }
 
+/// A pro saying "I can do this" about an approved viral look.
+///
+/// 🔴 Deliberately NOT a status on `ViralRequestApprovalFanOut`. That model is a
+/// DELIVERY record — PLANNED/QUEUED/SENT/SKIPPED/FAILED describe whether we
+/// managed to tell the pro, which is a different fact from whether the pro
+/// agreed. Conflating them is how the client home came to say "N pros now offer
+/// this" while counting fan-out rows: every matched pro was reported as
+/// offering a service none of them had opted into. One table per fact.
+///
+/// A pro may withdraw. The row survives with `withdrawnAt` set rather than
+/// being deleted, so the unique pair keeps re-opt-in idempotent and the history
+/// of who once offered a look is not silently rewritten.
+model ViralRequestProOffer {
+  id String @id @default(cuid())
+
+  viralServiceRequestId String
+  professionalId        String
+
+  /// Null = currently offering. Readers that count or list pros for a client
+  /// MUST filter on this; it is the whole difference between the claim and the
+  /// delivery record above.
+  withdrawnAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  viralServiceRequest ViralServiceRequest @relation(fields: [viralServiceRequestId], references: [id], onDelete: Cascade)
+  professional        ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+
+  @@unique([viralServiceRequestId, professionalId])
+  @@index([viralServiceRequestId, withdrawnAt])
+  @@index([professionalId, withdrawnAt, createdAt])
+}
+
 model ViralServiceRequest {
   id            String  @id @default(cuid())
   clientId      String
@@ -7451,6 +7486,7 @@ model ViralServiceRequest {
   reviewedByUser  User?                        @relation("ViralServiceRequestReviewedByUser", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
   reports         ViralServiceRequestReport[]
   approvalFanOuts ViralRequestApprovalFanOut[]
+  proOffers       ViralRequestProOffer[]
 
   @@index([clientId, createdAt])
   @@index([status, createdAt])

@@ -23480,6 +23480,104 @@
       ],
       "type": "object"
     },
+    "ProViralRequestDTO": {
+      "properties": {
+        "approvedAt": {
+          "description": "ISO instant, or null if somehow unstamped.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "categoryId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "categoryName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "coverImageUrl": {
+          "description": "The REVIEWER's cover, or null for a gradient. Never the submitter's own attachment — that stays evidence in the admin queue.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "description": "The look's name — what the client typed and an admin vetted.",
+          "type": "string"
+        },
+        "offeredAt": {
+          "description": "ISO instant this pro first said so; null when they do not offer it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "offering": {
+          "description": "This pro currently offers this look.",
+          "type": "boolean"
+        },
+        "offeringProCount": {
+          "description": "Pros currently offering, this one included. Withdrawals are excluded.",
+          "type": "number"
+        },
+        "sourceUrl": {
+          "description": "Where it was spotted (TikTok, Instagram, …). Null when none was given.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "sourceUrl",
+        "coverImageUrl",
+        "approvedAt",
+        "categoryId",
+        "categoryName",
+        "offering",
+        "offeredAt",
+        "offeringProCount"
+      ],
+      "type": "object"
+    },
+    "ProViralRequestListResponseDTO": {
+      "properties": {
+        "requests": {
+          "items": {
+            "$ref": "#/definitions/ProViralRequestDTO"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "requests"
+      ],
+      "type": "object"
+    },
+    "ProViralRequestOfferResponseDTO": {
+      "description": "The single-look response both offer writes return, so a client can re-render.",
+      "properties": {
+        "request": {
+          "$ref": "#/definitions/ProViralRequestDTO"
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "type": "object"
+    },
     "ProVisibilityActionDTO": {
       "description": "Where the pro goes to pull this lever.",
       "properties": {

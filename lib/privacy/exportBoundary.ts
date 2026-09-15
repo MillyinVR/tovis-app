@@ -442,6 +442,11 @@ export const EXPORT_BOUNDARY: Readonly<Record<string, ExportDisposition>> = {
   },
   VerificationDocument: { status: 'PENDING', note: PENDING_NOTE },
   ViralRequestApprovalFanOut: { status: 'PENDING', note: PENDING_NOTE },
+  ViralRequestProOffer: {
+    status: 'OMITTED',
+    reason:
+      'Surfaced live in the app at /pro/viral-requests, where the pro can see every look they offer and withdraw any of them. The row is the pro\'s own published answer rather than a description of them, and it is already visible to clients on the look itself.',
+  },
   ViralServiceRequest: { status: 'PENDING', note: PENDING_NOTE },
   ViralServiceRequestReport: { status: 'PENDING', note: PENDING_NOTE },
   WaitlistEntry: { status: 'PENDING', note: PENDING_NOTE },
