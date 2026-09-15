@@ -365,11 +365,6 @@ export const NOTIFICATION_HREF_SHAPES = [
     surface: 'web',
     why: 'ADMIN_USER_SIGNED_UP. No native admin app.',
   },
-  {
-    shape: '/admin/viral-requests/{viralRequestId}',
-    surface: 'web',
-    why: 'The viral-request review queue. No native admin app.',
-  },
 ] as const satisfies readonly NotificationHrefShapeDefinition[]
 
 /** The literal shape strings, as a union — so a declaration cannot invent one. */

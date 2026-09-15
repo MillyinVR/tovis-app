@@ -149,12 +149,21 @@ describe('event definitions declare their href shapes', () => {
     expect(orphaned).toEqual([])
   })
 
-  // An event with no href is a real answer (BOOKING_STARTED has no emitter that
-  // passes one). It must be written as `[]`, and this asserts the empty set is
-  // small and deliberate rather than the default everyone reaches for.
+  // An event with no href is a real answer. It must be written as `[]`, and
+  // this asserts the empty set is small and deliberate rather than the default
+  // everyone reaches for — so every member has to be named here on purpose:
+  //
+  //   BOOKING_STARTED         no emitter passes one.
+  //   VIRAL_REQUEST_APPROVED  a PRO notice whose only candidate destination was
+  //                           an ADMIN route that 404s for an admin too. There
+  //                           is no pro-facing viral-request surface to point
+  //                           at, so it sends none rather than a dead one.
   it('keeps the no-href set small and nameable', () => {
     const none = definitions.filter((d) => d.hrefShapes.length === 0).map((d) => d.key)
-    expect(none).toEqual([NotificationEventKey.BOOKING_STARTED])
+    expect(none).toEqual([
+      NotificationEventKey.BOOKING_STARTED,
+      NotificationEventKey.VIRAL_REQUEST_APPROVED,
+    ])
   })
 })
 

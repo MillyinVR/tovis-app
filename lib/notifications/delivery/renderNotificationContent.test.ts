@@ -364,7 +364,11 @@ describe('lib/notifications/delivery/renderNotificationContent', () => {
     )
   })
 
-  it('renders viral request approved email content with the viral CTA label and absolute app href', () => {
+  // This event deliberately emits NO href (`hrefShapes: []` — there is no
+  // pro-facing viral-request surface to send anyone to), so it is rendered here
+  // the way it is actually dispatched: the title and body must survive intact,
+  // and the CTA must simply not appear rather than pointing at the app root.
+  it('renders viral request approved email content with no CTA, because it carries no href', () => {
     const result = renderNotificationContent({
       tenantContext: rootTenantContext('tenant_root'),
       channel: NotificationChannel.EMAIL,
@@ -373,7 +377,7 @@ describe('lib/notifications/delivery/renderNotificationContent', () => {
         eventKey: NotificationEventKey.VIRAL_REQUEST_APPROVED,
         title: ' New viral request in your category ',
         body: ' "Wolf Cut" was approved and matches your services. ',
-        href: ' /admin/viral-requests/request_1 ',
+        href: '',
       }),
     })
 
@@ -389,18 +393,15 @@ describe('lib/notifications/delivery/renderNotificationContent', () => {
     expect(result.text).toContain(
       '"Wolf Cut" was approved and matches your services.',
     )
-    expect(result.text).toContain(
-      'View request: https://tovis.test/admin/viral-requests/request_1',
-    )
+    expect(result.text).not.toContain('View request')
     expect(result.html).toContain(
       '<h1>New viral request in your category</h1>',
     )
     expect(result.html).toContain(
       '<p>&quot;Wolf Cut&quot; was approved and matches your services.</p>',
     )
-    expect(result.html).toContain(
-      '<a href="https://tovis.test/admin/viral-requests/request_1">View request</a>',
-    )
+    expect(result.html).not.toContain('View request')
+    expect(result.html).not.toContain('<a href=')
   })
 
   it('drops unsafe external href values from rendered content', () => {

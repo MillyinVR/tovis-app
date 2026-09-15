@@ -55,7 +55,6 @@ describe('lib/notifications/viralRequestApproved', () => {
       eventKey: NotificationEventKey.VIRAL_REQUEST_APPROVED,
       title: 'New viral request in your category',
       body: '"Wolf Cut" was approved and matches your services.',
-      href: '/admin/viral-requests/request_1',
       dedupeKey: 'viral-request:request_1:approved',
       data: {
         viralRequestId: 'request_1',
@@ -65,5 +64,14 @@ describe('lib/notifications/viralRequestApproved', () => {
       },
       tx: undefined,
     })
+
+    // Said out loud as well as implied by the literal above (which already
+    // fails on an extra key): the args carry no `href` at all. This event has
+    // nowhere to send a pro — see the emitter — and `hrefShapes: []` in
+    // eventKeys.ts is the other half of that claim, which
+    // `assertNotificationHrefShape` fails the pair on if they ever disagree.
+    expect(mockCreateProNotification.mock.calls[0]?.[0]).not.toHaveProperty(
+      'href',
+    )
   })
 })
