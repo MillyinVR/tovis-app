@@ -14,14 +14,24 @@
 // - `/looks/<id>` — a shared look → the native single-look detail (LookDetailView,
 //   paired iOS #155). The app's OWN share sheet emits this URL, so without the
 //   association it produced links it could not open.
+// - `/looks/tags/<slug>` — a hashtag browse page → the native tag feed
+//   (LookTagFeedView, routed by `LookTagLink` → `PushDeepLink.Target.lookTag`).
+//   ⚠️ This path was EXCLUDED here for one stated reason — "native has no tag
+//   screen" — and that premise expired: `LookTagFeedView` landed and replaced the
+//   app's three SafariView ejects (the feed's overlay chips, Discover's trending
+//   rail, the look detail's tag row). So the app rendered tag feeds natively from
+//   the inside while every tapped tag LINK still went to Safari. An exclusion
+//   carries its justification with it; when the justification stops being true,
+//   the exclusion is just a bug with a comment. The bare `/looks/tags` index
+//   stays excluded — web has no such page and neither does the app.
 // - `/c/<shortCode>` — a client's shareable referral link (the invite card + its
 //   QR emit this; `lib/referral/inviteCard.ts`). It redirects through the web NFC
 //   tap-funnel (`/c → /t`), which is web-only BY DESIGN, so there is no native
 //   funnel screen — instead the native handler opens this URL in the in-app
-//   browser (SFSafariViewController), the same way `/looks/tags` pages open. That
-//   still counts as "handling" the path (the tap does something deterministic, not
-//   a no-op), and it keeps the app-emitted invite/QR links inside the app rather
-//   than bouncing to system Safari. ⚠️ The in-app browser is cookieless, so the
+//   browser (SFSafariViewController). That still counts as "handling" the path
+//   (the tap does something deterministic, not a no-op), and it keeps the
+//   app-emitted invite/QR links inside the app rather than bouncing to system
+//   Safari. ⚠️ The in-app browser is cookieless, so the
 //   web funnel treats the tapper as anonymous → referral credit is only granted if
 //   they complete signup there. A richer NATIVE signup-with-attribution flow (route
 //   /c/ into ClientSignupView, plumb the tap intent through register/login) is
@@ -71,8 +81,15 @@ const APP_ID = 'SB3J675LNU.app.tovis.Tovis'
 // ⚠️ Only associate a path the app can actually HANDLE. An associated path the
 // app doesn't route is worse than no association: iOS opens the app, the app
 // recognizes nothing, and the tap becomes a silent no-op instead of loading the
-// web page. That's why `/looks/tags/…` is excluded — those are tag pages, and
-// native has no tag screen (it opens them in an in-app browser instead).
+// web page. That's why the bare `/looks/tags` index is excluded — there is no
+// such page on web and no such screen in the app.
+//
+// ⚠️ The converse costs just as much, and is harder to see: an exclusion whose
+// premise has EXPIRED. `/looks/tags/*` sat here as "native has no tag screen"
+// long after the app grew one, so the app's own tag chips opened natively while
+// the same page reached by LINK bounced to Safari. Re-read the reason before
+// trusting the entry — and pair every change here with the iOS parser that
+// routes it (tovis-ios `LookTagLink`).
 const ASSOCIATED_PATHS = [
   { path: '/reset-password/*' },
   { path: '/claim/*' },
@@ -80,9 +97,14 @@ const ASSOCIATED_PATHS = [
   // web funnel is web-only by design). No exclusion needed — `/c/` has a single
   // `{shortCode}` shape and no sub-paths.
   { path: '/c/*' },
-  // Exclusions first — see the ordering note above.
+  // Exclusion first — see the ordering note above. The bare `/looks/tags` index
+  // is not a page on web (only `/looks/tags/[slug]` exists) and not a screen in
+  // the app, so it stays in the browser. Its `/looks/tags/*` sibling does NOT:
+  // that one is the tag feed, which the app has routed since `LookTagLink`.
   { path: '/looks/tags', exclude: true },
-  { path: '/looks/tags/*', exclude: true },
+  // `/looks/{id}` → LookDetailView, `/looks/tags/{slug}` → LookTagFeedView. AASA
+  // `*` spans `/`, so this one pattern covers both and the app's two parsers
+  // (`LooksLink`, `LookTagLink`) decide between them.
   { path: '/looks/*' },
   // A shared public board → the native public-board viewer (PublicBoardView,
   // routed by `PublicBoardLink` in the app's `handleDeepLink`). `BoardShareSection`
