@@ -1,37 +1,21 @@
 // app/client/page.tsx
 import { redirect } from 'next/navigation'
-import { Role } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 
 import ClientHomeShell from './_components/ClientHomeShell'
 import { getClientHomeData } from './_data/getClientHomeData'
+import { requireClientPage } from './_data/requireClientPage'
 
 export const dynamic = 'force-dynamic'
 
-type MaybeCurrentUser = Awaited<ReturnType<typeof getCurrentUser>>
-type CurrentUser = NonNullable<MaybeCurrentUser>
+const CLIENT_HOME = '/client'
 
-type ClientPageUser = CurrentUser & {
-  role: 'CLIENT'
-  clientProfile: NonNullable<CurrentUser['clientProfile']>
-}
-
-function isClientPageUser(user: MaybeCurrentUser): user is ClientPageUser {
-  return Boolean(user && user.role === Role.CLIENT && user.clientProfile?.id)
-}
-
-async function requireClientOrRedirect(): Promise<ClientPageUser> {
-  const user = await getCurrentUser().catch(() => null)
-
-  if (!isClientPageUser(user)) {
-    redirect('/login?from=/client')
-  }
-
-  return user
+/** This page's gate — now the shared one, so a new gated page inherits it. */
+function requireClientOrRedirect() {
+  return requireClientPage(CLIENT_HOME)
 }
 
 async function removeProFavoriteAction(formData: FormData) {

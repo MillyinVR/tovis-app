@@ -24,3 +24,17 @@ export function proPublicProfilePath(
   if (!trimmed) return null
   return professionalProfileHref(trimmed)
 }
+
+/**
+ * Canonical path to one approved viral look and the pros who opted into it.
+ *
+ * ⚠️ Deliberately NOT under `/looks/…`. That prefix is an associated Universal
+ * Link (`app/.well-known/apple-app-site-association`), so on a device with the
+ * app installed iOS would intercept `/looks/viral/{id}`, hand it to the native
+ * `LooksLink` parser — which reads the second segment as a LookPost id — and
+ * the tap would open the app onto nothing. `/client/…` is not associated, so it
+ * opens the web page it is.
+ */
+export function viralLookPath(viralRequestId: string): string {
+  return `/client/viral/${encodeURIComponent(viralRequestId)}`
+}

@@ -4,7 +4,6 @@ import {
   BookingStatus,
   ConsultationApprovalStatus,
   LastMinuteRecipientStatus,
-  ModerationStatus,
   OpeningStatus,
   Prisma,
   SessionStep,
@@ -20,6 +19,10 @@ import {
 import { filterStillOpenRows } from '@/lib/booking/storedSlotLiveness'
 import { loadProRating } from '@/lib/booking/trustSignals'
 import { openingLivenessCandidate } from '@/lib/lastMinute/openingLiveness'
+import {
+  LIVE_VIRAL_REQUEST_WHERE,
+  offeringProCountSelect,
+} from '@/lib/viralRequests/liveLooks'
 
 export const clientHomeBookingSelect = Prisma.validator<Prisma.BookingSelect>()({
   id: true,
@@ -372,11 +375,14 @@ export const clientHomeViralLiveSelect =
     // selected here: this query returns every client's approved look, so it has
     // no business loading someone's unvetted attachment onto a client surface.
     coverImageUrl: true,
-    _count: {
-      select: {
-        approvalFanOuts: true,
-      },
-    },
+    // 🔴 "N pros now offer this" — pros who OPTED IN, not pros we notified.
+    // This counted `approvalFanOuts` until now: delivery records, i.e. pros
+    // whose services matched and who we managed to tell. None of them had
+    // agreed to anything, so the home page was telling clients that pros offer
+    // a look when not one of them had said so. `offeringProCountSelect` is the
+    // same definition `/client/viral/[id]` lists by, so the number and the
+    // names can never disagree.
+    _count: offeringProCountSelect,
   })
 
 export const clientHomeViralPendingSelect =
@@ -387,6 +393,12 @@ export const clientHomeViralPendingSelect =
     status: true,
     createdAt: true,
     coverImageUrl: true,
+    // Deliberately still the FAN-OUT, and deliberately unlike the live select
+    // above. The pending card says "Shared with N pros in your area" — that is
+    // a statement about DELIVERY, which is exactly what a fan-out row records,
+    // so counting opt-ins here would break a line that is currently true.
+    // (It is not dead copy: the dev database holds an IN_REVIEW request with
+    // three fan-out rows, so this branch does render.)
     _count: {
       select: {
         approvalFanOuts: true,
@@ -660,11 +672,9 @@ export async function getClientHomeData({
     }),
 
     prisma.viralServiceRequest.findMany({
-      where: {
-        status: ViralServiceRequestStatus.APPROVED,
-        moderationStatus: ModerationStatus.APPROVED,
-        removedAt: null,
-      },
+      // The shared predicate, not a third hand-written copy of the same three
+      // fields — a look must be live on every surface or none.
+      where: LIVE_VIRAL_REQUEST_WHERE,
       orderBy: {
         approvedAt: 'desc',
       },

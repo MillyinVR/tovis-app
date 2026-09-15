@@ -2,6 +2,7 @@
 import Link from 'next/link'
 
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import { viralLookPath } from '@/lib/routes'
 import { resolveViralCoverImage } from '@/lib/viralRequests/contracts'
 
 import type {
@@ -26,7 +27,10 @@ function currentStepIndex(status: ClientHomeViralPending['status']): number {
  */
 function LiveLookHero({ live }: { live: ClientHomeViralLive }) {
   const platform = platformFromUrl(live.sourceUrl)
-  const proCount = live._count.approvalFanOuts
+  // Pros who said "I can do this" — see `offeringProCountSelect`. This read
+  // `_count.approvalFanOuts` until now, which was the number of pros we had
+  // NOTIFIED, so the line below claimed agreement nobody had given.
+  const proCount = live._count.proOffers
   const cover = resolveViralCoverImage(live)
 
   return (
@@ -88,8 +92,13 @@ function LiveLookHero({ live }: { live: ClientHomeViralLive }) {
                   />
                 ))}
               </div>
+              {/* The verb agrees too. Counting fan-outs, this was almost
+                  always plural; counting opt-ins, exactly one pro is the
+                  ordinary case — the first one to say yes. */}
               <span className="text-[12px] text-textSecondary">
-                {proCount} {proCount === 1 ? 'pro' : 'pros'} now offer this
+                {proCount === 1
+                  ? '1 pro now offers this'
+                  : `${proCount} pros now offer this`}
               </span>
             </div>
           ) : (
@@ -97,20 +106,25 @@ function LiveLookHero({ live }: { live: ClientHomeViralLive }) {
               Newly approved — pros are picking it up now.
             </div>
           )}
+          {/* Tori, 2026-09-15: a look leads to the pros who explicitly opted
+              in. All three live entry points used to run a text search over the
+              look's NAME, which returned whatever happened to match the words —
+              pros who had never heard of it — and never the fact that any of
+              them had agreed. Pinned by ViralLooksBand.test.tsx. */}
           <Link
-            href={`/search?q=${encodeURIComponent(live.name)}`}
+            href={viralLookPath(live.id)}
             className="flex h-11 items-center justify-center rounded-[13px] bg-cta font-display text-[13.5px] font-bold text-onCta transition hover:opacity-95"
           >
-            Book this look
+            {proCount > 0 ? 'See who does this look' : 'See this look'}
           </Link>
           {/* Viral → waitlist bridge: routes discovery into the per-pro
-              waitlist-join flow (search → pro page → AvailabilityDrawer's
+              waitlist-join flow (look page → pro page → AvailabilityDrawer's
               WaitlistPanel) for when slots are tight. Honest-signals: we do NOT
               fabricate a "N pros booked out" count — real cross-pro availability
               lands with the PR-D presence/availability engine, at which point
               this line can carry that count. */}
           <Link
-            href={`/search?q=${encodeURIComponent(live.name)}`}
+            href={viralLookPath(live.id)}
             className="mt-2.5 flex items-center justify-center gap-1.5 font-display text-[12px] font-semibold text-textSecondary transition hover:text-textPrimary"
           >
             <span className="text-[9px] leading-none text-accentPrimary">✦</span>
@@ -143,12 +157,12 @@ function LiveLookStrip({
   index: number
 }) {
   const platform = platformFromUrl(live.sourceUrl)
-  const proCount = live._count.approvalFanOuts
+  const proCount = live._count.proOffers
   const cover = resolveViralCoverImage(live)
 
   return (
     <Link
-      href={`/search?q=${encodeURIComponent(live.name)}`}
+      href={viralLookPath(live.id)}
       className="brand-focus group relative block aspect-[2.05/1] overflow-hidden rounded-[18px] border border-textPrimary/10 bg-bgSecondary"
     >
       {cover ? (
@@ -191,9 +205,11 @@ function LiveLookStrip({
           {live.name}
         </div>
         <div className="mt-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-textSecondary">
-          {proCount > 0
-            ? `${proCount} ${proCount === 1 ? 'pro' : 'pros'} now offer this`
-            : 'Newly approved'}
+          {proCount === 0
+            ? 'Newly approved'
+            : proCount === 1
+              ? '1 pro now offers this'
+              : `${proCount} pros now offer this`}
         </div>
       </div>
     </Link>

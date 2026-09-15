@@ -157,11 +157,15 @@ describe('app/client/page.tsx', () => {
       clientProfile: null,
     })
 
+    // Percent-encoded, matching the gated layout (layout.test.tsx pins the
+    // same form). This page hand-wrote an unencoded literal until the gate was
+    // extracted into `requireClientPage`; the layout was always the outlier's
+    // counterexample, and `%2Fclient` decodes to the same path.
     await expect(ClientHomePage()).rejects.toThrow(
-      'NEXT_REDIRECT:/login?from=/client',
+      'NEXT_REDIRECT:/login?from=%2Fclient',
     )
 
-    expect(mocks.redirect).toHaveBeenCalledWith('/login?from=/client')
+    expect(mocks.redirect).toHaveBeenCalledWith('/login?from=%2Fclient')
     expect(mocks.getClientHomeData).not.toHaveBeenCalled()
   })
 })
