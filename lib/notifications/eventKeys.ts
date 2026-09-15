@@ -801,12 +801,14 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
   },
 
   [NotificationEventKey.LOOK_MEDIA_CLARIFICATION]: {
+    hrefShapes: ['/pro/looks/analysis'],
     key: NotificationEventKey.LOOK_MEDIA_CLARIFICATION, defaultPriority: NotificationPriority.NORMAL,
     transactional: true, allowQuietHoursBypass: false, templateKey: 'look_media_review',
     supportedRecipients: [NotificationRecipientKind.PRO],
     defaultChannelsByRecipient: { [NotificationRecipientKind.PRO]: PRO_IN_APP_EMAIL_PUSH_CHANNELS },
   },
   [NotificationEventKey.LOOK_MEDIA_ADMIN_REVIEW]: {
+    hrefShapes: ['/admin/looks/analysis'],
     key: NotificationEventKey.LOOK_MEDIA_ADMIN_REVIEW, defaultPriority: NotificationPriority.NORMAL,
     transactional: true, allowQuietHoursBypass: false, templateKey: 'look_media_review',
     supportedRecipients: [NotificationRecipientKind.ADMIN],
