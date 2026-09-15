@@ -13,10 +13,46 @@ import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { isClientTechnicalRecordEnabled } from '@/lib/clients/technicalRecord'
 import { parseConsentFormText } from '@/lib/consentForms/formText'
+import { loadProConsentFormLibrary } from '@/lib/consentForms/loader'
 import { createConsentFormWithFirstVersion } from '@/lib/consentForms/publish'
+import {
+  buildProConsentFormLibraryDTO,
+  type ProConsentFormLibraryResponseDTO,
+} from '@/lib/dto/proConsentForms'
 import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
+
+/**
+ * The pro's own forms plus the platform templates on offer — the read half of
+ * this library, which shipped with three write routes and none.
+ *
+ * `/pro/forms` renders the SAME `loadProConsentFormLibrary` output server-side,
+ * so the two surfaces cannot disagree about what a form is, what it was based
+ * on, or how many records already point at it. That reuse is the whole design:
+ * the loader was extracted from the page for exactly this route.
+ */
+export async function GET() {
+  try {
+    const auth = await requirePro()
+    if (!auth.ok) return auth.res
+    const professionalId = auth.professionalId
+
+    // Same gate, same 404 as every write route below: with the technical record
+    // off for this pro, the library does not exist rather than being empty.
+    if (!isClientTechnicalRecordEnabled(professionalId))
+      return jsonFail(404, 'Not found.')
+
+    const library = await loadProConsentFormLibrary(professionalId)
+    const response: ProConsentFormLibraryResponseDTO =
+      buildProConsentFormLibraryDTO(library)
+
+    return jsonOk(response)
+  } catch (e) {
+    console.error('GET /api/v1/pro/consent-forms error', e)
+    return jsonFail(500, 'Failed to load forms.')
+  }
+}
 
 function asConsentKind(value: unknown): ClientConsentKind | null {
   const v = typeof value === 'string' ? value.trim().toUpperCase() : ''

@@ -508,6 +508,18 @@ export type {
   ProClientTechnicalRecordResponseDTO,
 } from '@/lib/dto/proClientTechnicalRecord'
 
+// ── Pro consent-form LIBRARY (GET /api/v1/pro/consent-forms) ─────────────────
+// K14 shipped the library with three write routes and no read route, so form
+// authoring existed only inside a web server component. This is the contract
+// that lets a native client hold the same library.
+export type {
+  ProConsentFormLibraryVersionDTO,
+  ProConsentFormLibraryItemDTO,
+  ProConsentFormTemplateDTO,
+  ProConsentFormLimitsDTO,
+  ProConsentFormLibraryResponseDTO,
+} from '@/lib/dto/proConsentForms'
+
 // ── Pro bookings list ─────────────────────────────────────────────────────────
 // The native pro bookings list (GET /api/v1/pro/bookings). Exported so the iOS
 // contract validator can check its fixture against the real shape — until now

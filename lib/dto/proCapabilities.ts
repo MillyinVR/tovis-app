@@ -15,12 +15,18 @@
 // off. It carries no data beyond the booleans.
 
 /**
- * Deployment-level switches for pro features that are built but held.
+ * Switches for pro features that are built but held.
  *
- * Each key is a capability the client may *offer*, not a per-pro entitlement:
- * `true` means the endpoints behind it answer instead of 404ing. A client that
- * cannot read this (offline, error) must treat every capability as `false` —
- * hiding a live feature is recoverable, offering a dead one is not.
+ * Each key answers one question: would the endpoints behind this feature serve
+ * THIS pro, or 404? `true` means the client may offer the entry point. A client
+ * that cannot read this (offline, error) must treat every capability as
+ * `false` — hiding a live feature is recoverable, offering a dead one is not.
+ *
+ * Most keys are deployment-level (an env flag, the same answer for everybody).
+ * `clientTechnicalRecord` is not, and cannot be: its gate is an env flag OR a
+ * per-pro allowlist, so it is resolved for the ACTING pro. That is the honest
+ * answer to the question above — a flag readout that said "off" to an
+ * allowlisted pro would hide a surface they can actually use.
  */
 export type ProCapabilitiesDTO = {
   /**
@@ -40,6 +46,16 @@ export type ProCapabilitiesDTO = {
    * can create a standing appointment and nothing acquires a seriesId.
    */
   recurringAppointments: boolean
+  /**
+   * `ENABLE_CLIENT_TECHNICAL_RECORD`, **or** this pro being on the dogfood
+   * allowlist — the whole technical-record surface: the chart's formula /
+   * consent / photo-release tab, the per-client booking requirements, and the
+   * pro's consent-form library at `GET|POST /api/v1/pro/consent-forms`.
+   *
+   * 🔴 Per-pro, unlike its neighbours. Resolved from the acting pro's id, so a
+   * client must not cache it across a workspace switch.
+   */
+  clientTechnicalRecord: boolean
 }
 
 /** Response for GET /api/v1/pro/capabilities. */

@@ -7086,6 +7086,14 @@
       ],
       "type": "object"
     },
+    "ConsentFormOrigin": {
+      "enum": [
+        "PLATFORM_TEMPLATE",
+        "ADOPTED_TEMPLATE",
+        "PRO_AUTHORED"
+      ],
+      "type": "string"
+    },
     "ConsentFormVersionAttestation": {
       "description": "K14 — the form version a record attests to, resolved as it was signed. Null on every pre-K14 row (free-text records, which stay readable) and on any record a pro chose not to attach a form to.",
       "properties": {
@@ -20081,8 +20089,12 @@
       "type": "object"
     },
     "ProCapabilitiesDTO": {
-      "description": "Deployment-level switches for pro features that are built but held.\n\nEach key is a capability the client may *offer*, not a per-pro entitlement: `true` means the endpoints behind it answer instead of 404ing. A client that cannot read this (offline, error) must treat every capability as `false` — hiding a live feature is recoverable, offering a dead one is not.",
+      "description": "Switches for pro features that are built but held.\n\nEach key answers one question: would the endpoints behind this feature serve THIS pro, or 404? `true` means the client may offer the entry point. A client that cannot read this (offline, error) must treat every capability as `false` — hiding a live feature is recoverable, offering a dead one is not.\n\nMost keys are deployment-level (an env flag, the same answer for everybody). `clientTechnicalRecord` is not, and cannot be: its gate is an env flag OR a per-pro allowlist, so it is resolved for the ACTING pro. That is the honest answer to the question above — a flag readout that said \"off\" to an allowlisted pro would hide a surface they can actually use.",
       "properties": {
+        "clientTechnicalRecord": {
+          "description": "`ENABLE_CLIENT_TECHNICAL_RECORD`, **or** this pro being on the dogfood allowlist — the whole technical-record surface: the chart's formula / consent / photo-release tab, the per-client booking requirements, and the pro's consent-form library at `GET|POST /api/v1/pro/consent-forms`.\n\n🔴 Per-pro, unlike its neighbours. Resolved from the acting pro's id, so a client must not cache it across a workspace switch.",
+          "type": "boolean"
+        },
         "importFromAnotherApp": {
           "description": "`ENABLE_PRO_MIGRATION` — the guided import wizard (services, clients, calendar) for a pro coming from another booking app.",
           "type": "boolean"
@@ -20099,7 +20111,8 @@
       "required": [
         "noShowFees",
         "importFromAnotherApp",
-        "recurringAppointments"
+        "recurringAppointments",
+        "clientTechnicalRecord"
       ],
       "type": "object"
     },
@@ -20388,9 +20401,191 @@
       ],
       "type": "object"
     },
+    "ProConsentFormLibraryItemDTO": {
+      "description": "One form in the pro's own library.",
+      "properties": {
+        "currentVersion": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProConsentFormLibraryVersionDTO"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Null only for a form whose versions were never published — never expected."
+        },
+        "id": {
+          "type": "string"
+        },
+        "isActive": {
+          "description": "False = retired: kept for the records signed against it, offered to none.",
+          "type": "boolean"
+        },
+        "kind": {
+          "$ref": "#/definitions/ClientConsentKind"
+        },
+        "origin": {
+          "$ref": "#/definitions/ConsentFormOrigin"
+        },
+        "originLabel": {
+          "description": "Provenance in words, composed by `describeConsentFormOrigin`. Rendered verbatim and never re-derived on a device: the rule that distinguishes an adopted template from an EDITED one is the whole of D6, and a second spelling of it is how an edited form borrows the platform's authority.",
+          "type": "string"
+        },
+        "signatureCount": {
+          "description": "Consent records pointing at ANY version of this form.",
+          "type": "number"
+        },
+        "versionCount": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "isActive",
+        "origin",
+        "originLabel",
+        "currentVersion",
+        "versionCount",
+        "signatureCount"
+      ],
+      "type": "object"
+    },
+    "ProConsentFormLibraryResponseDTO": {
+      "properties": {
+        "forms": {
+          "items": {
+            "$ref": "#/definitions/ProConsentFormLibraryItemDTO"
+          },
+          "type": "array"
+        },
+        "limits": {
+          "$ref": "#/definitions/ProConsentFormLimitsDTO"
+        },
+        "templates": {
+          "items": {
+            "$ref": "#/definitions/ProConsentFormTemplateDTO"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "forms",
+        "templates",
+        "limits"
+      ],
+      "type": "object"
+    },
+    "ProConsentFormLibraryVersionDTO": {
+      "description": "The current text of a form. Identical to the loader's `ConsentFormVersionView` except that `publishedAt` is an ISO instant.",
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "publishedAt": {
+          "description": "ISO instant.",
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "verbatimFromTemplate": {
+          "description": "Whether these words are still the platform template's, byte for byte.",
+          "type": "boolean"
+        },
+        "version": {
+          "description": "The version NUMBER — 3 means \"v3\", not \"the 3rd form\".",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "title",
+        "body",
+        "publishedAt",
+        "verbatimFromTemplate"
+      ],
+      "type": "object"
+    },
+    "ProConsentFormLimitsDTO": {
+      "description": "The limits the write routes enforce, so a client can stop a pro at the field instead of letting `parseConsentFormText` refuse a waiver they already typed.\n\nOn the wire rather than hard-coded native-side deliberately: these are the numbers `lib/consentForms/formText.ts` refuses against, and a device holding its own copy is a device that silently disagrees with the server the day one of them moves.",
+      "properties": {
+        "bodyMax": {
+          "type": "number"
+        },
+        "titleMax": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "titleMax",
+        "bodyMax"
+      ],
+      "type": "object"
+    },
     "ProConsentFormOptionDTO": {
       "$ref": "#/definitions/ConsentFormOption",
       "description": "K14 — one of the pro's ACTIVE consent forms, resolved to the version that would be signed today. This list is what lets a native record-entry surface offer the same choices web does; a picker that exists on one platform only is how a record ends up form-less on the other."
+    },
+    "ProConsentFormTemplateDTO": {
+      "description": "A platform template on offer, plus whether this pro already adopted it.",
+      "properties": {
+        "adopted": {
+          "type": "boolean"
+        },
+        "currentVersion": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProConsentFormLibraryVersionDTO"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Null only for a form whose versions were never published — never expected."
+        },
+        "id": {
+          "type": "string"
+        },
+        "isActive": {
+          "description": "False = retired: kept for the records signed against it, offered to none.",
+          "type": "boolean"
+        },
+        "kind": {
+          "$ref": "#/definitions/ClientConsentKind"
+        },
+        "origin": {
+          "$ref": "#/definitions/ConsentFormOrigin"
+        },
+        "originLabel": {
+          "description": "Provenance in words, composed by `describeConsentFormOrigin`. Rendered verbatim and never re-derived on a device: the rule that distinguishes an adopted template from an EDITED one is the whole of D6, and a second spelling of it is how an edited form borrows the platform's authority.",
+          "type": "string"
+        },
+        "signatureCount": {
+          "description": "Consent records pointing at ANY version of this form.",
+          "type": "number"
+        },
+        "versionCount": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "adopted",
+        "currentVersion",
+        "id",
+        "isActive",
+        "kind",
+        "origin",
+        "originLabel",
+        "signatureCount",
+        "versionCount"
+      ],
+      "type": "object"
     },
     "ProConsentFormVersionDTO": {
       "$ref": "#/definitions/ConsentFormVersionAttestation",
