@@ -9,7 +9,7 @@ import { Prisma, type MediaType } from '@prisma/client'
 
 import { loadBlockedUserIds } from '@/lib/blocks/userBlocks'
 import { buildLooksFeedWhere } from '@/lib/looks/feed'
-import { slugifyLookTag } from '@/lib/looks/tags'
+import { resolveLookTagSlug } from '@/lib/looks/tags'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { prisma } from '@/lib/prisma'
 import type { TenantContext } from '@/lib/tenant'
@@ -72,8 +72,8 @@ export async function loadLookTagPage(args: {
    */
   viewerUserId?: string | null
 }): Promise<LookTagPageData | null> {
-  const slug = slugifyLookTag(args.slug)
-  if (slug.length < 2) return null
+  const slug = resolveLookTagSlug(args.slug)
+  if (slug === null) return null
 
   const tag = await prisma.lookTag.findUnique({
     where: { slug },
