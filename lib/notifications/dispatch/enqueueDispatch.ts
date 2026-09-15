@@ -33,6 +33,7 @@ import {
 } from '../delivery/providerPolicy'
 import { isPushProviderConfigured, isTwilioSmsConfigured } from '../config'
 import { getNotificationEventDefinition } from '../eventKeys'
+import { assertNotificationHrefShape } from '@/lib/notifications/hrefShapeGuard'
 
 const RECIPIENT_KIND = {
   PRO: 'PRO',
@@ -713,7 +714,10 @@ function normalizeArgs(args: EnqueueDispatchArgs): NormalizedEnqueueDispatchArgs
       preference: args.recipient.preference ?? null,
       title,
       body: normDefaultString(args.body, MAX_BODY),
-      href: normInternalHref(args.href, MAX_HREF),
+      href: assertNotificationHrefShape(
+        args.key,
+        normInternalHref(args.href, MAX_HREF),
+      ),
       payload: normalizeJsonField(args.payload),
       priority: args.priority ?? eventDefinition.defaultPriority,
       scheduledFor: normalizeDate(
@@ -752,7 +756,10 @@ function normalizeArgs(args: EnqueueDispatchArgs): NormalizedEnqueueDispatchArgs
       preference: args.recipient.preference ?? null,
       title,
       body: normDefaultString(args.body, MAX_BODY),
-      href: normInternalHref(args.href, MAX_HREF),
+      href: assertNotificationHrefShape(
+        args.key,
+        normInternalHref(args.href, MAX_HREF),
+      ),
       payload: normalizeJsonField(args.payload),
       priority: args.priority ?? eventDefinition.defaultPriority,
       scheduledFor: normalizeDate(
@@ -789,7 +796,10 @@ function normalizeArgs(args: EnqueueDispatchArgs): NormalizedEnqueueDispatchArgs
     preference: args.recipient.preference ?? null,
     title,
     body: normDefaultString(args.body, MAX_BODY),
-    href: normInternalHref(args.href, MAX_HREF),
+    href: assertNotificationHrefShape(
+      args.key,
+      normInternalHref(args.href, MAX_HREF),
+    ),
     payload: normalizeJsonField(args.payload),
     priority: args.priority ?? eventDefinition.defaultPriority,
     scheduledFor: normalizeDate(

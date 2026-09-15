@@ -145,6 +145,7 @@
     "eval:consult": "tsx scripts/run-consult-evaluation.ts",
     "test:live:consult-normalization": "vitest run --config vitest.live.config.mts tests/live/consult-image-normalization.test.ts",
     "gen:look-tag-slug-fixture": "tsx scripts/gen-look-tag-slug-fixture.ts",
+    "gen:notification-href-fixture": "tsx scripts/gen-notification-href-fixture.ts",
     "check:ios-parity-fixtures": "node tools/check-ios-parity-fixtures.mjs"
   },
   "dependencies": {
