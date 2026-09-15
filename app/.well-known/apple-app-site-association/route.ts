@@ -102,9 +102,17 @@ const ASSOCIATED_PATHS = [
   // the app, so it stays in the browser. Its `/looks/tags/*` sibling does NOT:
   // that one is the tag feed, which the app has routed since `LookTagLink`.
   { path: '/looks/tags', exclude: true },
-  // `/looks/{id}` → LookDetailView, `/looks/tags/{slug}` → LookTagFeedView. AASA
-  // `*` spans `/`, so this one pattern covers both and the app's two parsers
-  // (`LooksLink`, `LookTagLink`) decide between them.
+  // `/looks/tags/{slug}` → LookTagFeedView, routed by `LookTagLink`. Listed
+  // EXPLICITLY rather than leaning on `/looks/*` below to cover it. #1184
+  // dropped the old exclusion on the grounds that AASA `*` spans `/` — which
+  // would make the broad pattern sufficient — but that claim was never verified
+  // against Apple's own documentation, and the secondary sources found
+  // contradict each other. With this entry the association holds under EITHER
+  // semantics, so nobody has to know which one Apple implements. It must sit
+  // above `/looks/*`: iOS stops at the first match, and if `*` does span `/`
+  // the broad pattern would otherwise swallow these first.
+  { path: '/looks/tags/*' },
+  // `/looks/{id}` → LookDetailView, routed by `LooksLink`.
   { path: '/looks/*' },
   // A shared public board → the native public-board viewer (PublicBoardView,
   // routed by `PublicBoardLink` in the app's `handleDeepLink`). `BoardShareSection`

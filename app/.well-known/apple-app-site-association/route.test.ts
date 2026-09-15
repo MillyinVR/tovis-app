@@ -26,8 +26,9 @@ describe('GET /.well-known/apple-app-site-association', () => {
     expect(detail.appIDs).toEqual(['SB3J675LNU.app.tovis.Tovis'])
 
     // The emailed reset link, the §27 account-claim link, the client referral
-    // short-link (`/c/*`, opened in the in-app browser), a shared look, a tag
-    // page (both under `/looks/*`), a shared public board (`/u/*/boards/*`), a
+    // short-link (`/c/*`, opened in the in-app browser), a shared look
+    // (`/looks/*`), a tag page (`/looks/tags/*`, explicit so it does not depend
+    // on `*` spanning `/`), a shared public board (`/u/*/boards/*`), a
     // shared creator profile (`/u/*`) and a shared PRO profile
     // (`/professionals/*`) open in-app; everything else stays in the browser.
     // `components` mirrors `paths` one-for-one (legacy "NOT " prefix ↔ modern
@@ -37,6 +38,7 @@ describe('GET /.well-known/apple-app-site-association', () => {
       '/claim/*',
       '/c/*',
       'NOT /looks/tags',
+      '/looks/tags/*',
       '/looks/*',
       '/u/*/boards/*',
       '/u/*',
@@ -48,6 +50,7 @@ describe('GET /.well-known/apple-app-site-association', () => {
       { '/': '/claim/*' },
       { '/': '/c/*' },
       { '/': '/looks/tags', exclude: true },
+      { '/': '/looks/tags/*' },
       { '/': '/looks/*' },
       { '/': '/u/*/boards/*' },
       { '/': '/u/*' },
@@ -75,9 +78,8 @@ describe('GET /.well-known/apple-app-site-association', () => {
   // one (`LookTagFeedView`, with the feed's chips, Discover's trending rail and
   // the look detail's tag row all pushing it) and the exclusion outlived its
   // reason — so a tag chip opened natively and the identical page, reached by a
-  // tapped link, ejected to Safari. It is covered by `/looks/*` now, and iOS
-  // routes it through `LookTagLink`. Re-adding the exclusion needs a NEW reason,
-  // not the old one.
+  // tapped link, ejected to Safari. iOS routes it through `LookTagLink`.
+  // Re-adding the exclusion needs a NEW reason, not the old one.
   it('no longer excludes the tag pages the app can open', async () => {
     const res = GET()
     const body = await res.json()
@@ -85,8 +87,55 @@ describe('GET /.well-known/apple-app-site-association', () => {
 
     expect(paths).not.toContain('NOT /looks/tags/*')
     expect(components).not.toContainEqual({ '/': '/looks/tags/*', exclude: true })
-    // AASA `*` spans `/`, so the broad look pattern is what carries them.
-    expect(paths).toContain('/looks/*')
+  })
+
+  // Whether AASA's `*` spans `/` decides whether `/looks/*` alone reaches
+  // `/looks/tags/{slug}` — and that is precisely what nobody could establish
+  // from Apple's documentation. So the tag feed is associated EXPLICITLY and the
+  // answer stops mattering. Deleting this entry puts the association back on an
+  // unverified premise.
+  it('associates the tag feed explicitly, not via /looks/* spanning a slash', async () => {
+    const res = GET()
+    const body = await res.json()
+    const { paths, components } = body.applinks.details[0]
+
+    expect(paths).toContain('/looks/tags/*')
+    expect(components).toContainEqual({ '/': '/looks/tags/*' })
+  })
+
+  // Both forms are derived from ONE list, so a reorder has to show up in both or
+  // the served file contradicts itself across iOS versions. iOS stops at the
+  // first match: the bare-index exclusion must precede the specific tag pattern,
+  // which must in turn precede the broad `/looks/*` — otherwise, if `*` does
+  // span `/`, the broad pattern matches tag links first and the explicit entry
+  // above becomes decorative.
+  it('orders tag-index exclusion → /looks/tags/* → /looks/* in BOTH emitted forms', async () => {
+    const res = GET()
+    const body = await res.json()
+    const { paths, components } = body.applinks.details[0]
+
+    const inPaths = [
+      paths.indexOf('NOT /looks/tags'),
+      paths.indexOf('/looks/tags/*'),
+      paths.indexOf('/looks/*'),
+    ]
+    expect(inPaths.every((i) => i > -1)).toBe(true)
+    expect(inPaths).toEqual([...inPaths].sort((a, b) => a - b))
+
+    const componentPath = (p: string, exclude?: true) =>
+      components.findIndex(
+        (c: Record<string, unknown>) =>
+          c['/'] === p && c.exclude === exclude,
+      )
+    const inComponents = [
+      componentPath('/looks/tags', true),
+      componentPath('/looks/tags/*'),
+      componentPath('/looks/*'),
+    ]
+    expect(inComponents.every((i) => i > -1)).toBe(true)
+    expect(inComponents).toEqual([...inComponents].sort((a, b) => a - b))
+    // The two forms are one list rendered twice — same length, same order.
+    expect(inComponents).toEqual(inPaths)
   })
 
   // Both `/u/` shapes are now routed natively — the board detail by
