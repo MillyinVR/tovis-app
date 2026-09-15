@@ -275,6 +275,12 @@ export const NOTIFICATION_HREF_SHAPES = [
     why: 'CONSULTATION_APPROVED / _REJECTED — the client answered the proposal.',
   },
   {
+    shape: '/pro/looks/analysis',
+    surface: 'native',
+    target: 'proLookAnalysis',
+    why: 'LOOK_MEDIA_CLARIFICATION opens the signed-in shared look review from the pro shell.',
+  },
+  {
     shape: '/pro/consults/{consultSessionId}',
     surface: 'native',
     target: 'proConsult',
@@ -331,6 +337,11 @@ export const NOTIFICATION_HREF_SHAPES = [
   // must stay unclaimed. Declared rather than omitted: omission is how a shape
   // goes unnoticed, and `/admin/professionals/{id}` in particular is one path
   // segment away from `/professionals/{id}`, which the app DOES route.
+  {
+    shape: '/admin/looks/analysis',
+    surface: 'web',
+    why: 'LOOK_MEDIA_ADMIN_REVIEW opens the privileged web review; there is no native admin shell.',
+  },
   {
     shape: '/admin',
     surface: 'web',

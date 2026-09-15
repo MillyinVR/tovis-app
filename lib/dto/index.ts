@@ -749,3 +749,5 @@ export type {
 } from '@/lib/dto/consult'
 
 export type { ClientConsultSessionsDTO } from './consult'
+
+export type { LookAnalysisItem, LookAnalysisMutation } from '@/lib/looks/analysis/contracts'

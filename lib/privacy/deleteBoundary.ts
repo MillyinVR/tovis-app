@@ -115,6 +115,8 @@ export const DELETE_BOUNDARY: Readonly<Record<string, DeleteDisposition>> = {
     reason:
       "The subject's private photos. ⚠️ ClientIntentEvent.mediaId references it WITHOUT a cascade, so the intent events must be cleared first or the delete raises a foreign-key violation. Storage object bytes are a separate write boundary.",
   },
+  LookMediaAnalysis: { status: 'DELETE', reason: 'Derived media reading and snapshots are removed with subject-owned media; deleting a reviewer also removes their attributed decision from reuse.' },
+  LookMediaAnalysisReview: { status: 'DELETE', reason: 'Review history cascades with deleted media readings; actor-linked entries are explicitly removed on account deletion.' },
   MediaCaptureAttestation: {
     status: 'DELETE',
     reason:

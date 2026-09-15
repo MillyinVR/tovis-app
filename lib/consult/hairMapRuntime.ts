@@ -46,9 +46,12 @@ export async function optionalConsultHairComparison(args: {
   current: readonly ConsultHairMapImage[]
   colorUncertainViews: readonly ConsultHairMapView[]
   loadReference?: () => Promise<ConsultCaptureImage>
+  referenceReadDisabled?: boolean
+  referenceMap?: { model: string; map: import('./hairMap').ConsultHairMap }
   meter?: ConsultProviderMeterSink; provider?: ConsultHairMapProvider
 }): Promise<ConsultHairComparisonResult | undefined> {
-  if (readOptionalEnv('AI_CONSULT_HAIR_MAP_ENABLED') !== 'true' || args.family !== 'HAIR' || !args.lookPlanning || !args.loadReference || !args.current.length) return
+  if (args.referenceReadDisabled && !args.referenceMap) return
+  if (readOptionalEnv('AI_CONSULT_HAIR_MAP_ENABLED') !== 'true' || args.family !== 'HAIR' || !args.lookPlanning || (!args.loadReference && !args.referenceMap) || !args.current.length) return
   if (Date.now() - args.startedAt >= CONSULT_HAIR_MAP_LATEST_START_MS) return
   try {
     const provider = args.provider ?? runConsultHairMap
@@ -61,6 +64,8 @@ export async function optionalConsultHairComparison(args: {
     const [current, reference] = await Promise.allSettled([
       provider({ scope: currentScope, images: args.current, meter: args.meter }),
       (async () => {
+        if (args.referenceMap) return { model: args.referenceMap.model, raw: args.referenceMap.map }
+        if (!loadReference) throw new ConsultAnalysisProviderError('unavailable', 'hair_map_reference')
         const image = await loadReference()
         if (Date.now() - args.startedAt >= CONSULT_HAIR_MAP_LATEST_START_MS + 20_000) {
           throw new ConsultAnalysisProviderError('unavailable', 'hair_map_deadline')

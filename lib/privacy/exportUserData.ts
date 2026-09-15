@@ -271,6 +271,7 @@ const clientActionTokenExportSelect = {
 } satisfies Prisma.ClientActionTokenSelect
 
 const mediaAssetExportSelect = {
+  lookAnalyses: { select: { id: true, status: true, promptVersion: true, revision: true, selectedFrame: true, readings: true, proAnswers: true, reviewedAnalysis: true, reviewedAt: true, createdAt: true, updatedAt: true } },
   id: true,
   professionalId: true,
   bookingId: true,

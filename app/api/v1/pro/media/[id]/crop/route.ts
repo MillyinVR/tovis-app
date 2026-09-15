@@ -33,7 +33,8 @@
 // different days.
 //
 // See docs/design/media-crop-rect.md.
-import { MediaType } from '@prisma/client'
+import { enqueueLookMediaAnalysisForAsset, lookAnalysisEnabled } from '@/lib/looks/analysis/queue'
+import { MediaType, type Prisma } from '@prisma/client'
 
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
@@ -156,7 +157,8 @@ export async function PUT(req: Request, ctx: RouteContext) {
     // consented to. What must not race is two re-frames combining into a
     // widening, and the rect in the WHERE is what stops that.
     const columns = cropRectColumns(next)
-    const written = await prisma.mediaAsset.updateMany({
+    const writeCrop = async (db: Prisma.TransactionClient) => {
+      const result = await db.mediaAsset.updateMany({
       where: {
         id: mediaId,
         professionalId,
@@ -169,6 +171,11 @@ export async function PUT(req: Request, ctx: RouteContext) {
       },
       data: { ...columns, ...(undoColumns ?? {}) },
     })
+
+      if (result.count) await enqueueLookMediaAnalysisForAsset(db, mediaId)
+      return result
+    }
+    const written = lookAnalysisEnabled() ? await prisma.$transaction(writeCrop) : await writeCrop(prisma)
 
     if (written.count === 0) {
       return jsonFail(

@@ -1,3 +1,5 @@
+import { LOOK_ANALYSIS_ASSET_SELECT, type LookAnalysisAsset } from '@/lib/looks/analysis/identity'
+import { loadReusableLookAnalysis } from '@/lib/looks/analysis/cache'
 import { consultLookPlanningEnabled, hasConsultLookPlanMinimumIntake } from './lookPlanning'
 import { normalizeConsultIntakePayload } from './intake/registry'
 import 'server-only'
@@ -1917,17 +1919,23 @@ async function lookPrimaryMediaPointers(
   storageBucket: string | null
   storagePath: string | null
   url: string | null
+  analysisAsset?: LookAnalysisAsset
+  analysisFrameUrl?: string
 } | null> {
   if (!lookPostId) return null
   const look = await tx.lookPost.findUnique({
     where: { id: lookPostId },
     select: {
       primaryMediaAsset: {
-        select: { storageBucket: true, storagePath: true, url: true },
+        select: { ...LOOK_ANALYSIS_ASSET_SELECT, url: true },
       },
     },
   })
-  return look?.primaryMediaAsset ?? null
+  if (!look) return null
+  const reusable = await loadReusableLookAnalysis(tx, look.primaryMediaAsset)
+  return { ...look.primaryMediaAsset, analysisAsset: look.primaryMediaAsset,
+    ...(reusable ? { analysisFrameUrl: `data:image/jpeg;base64,${reusable.frame.base64}` } : {}) }
+
 }
 
 /**
@@ -2010,6 +2018,7 @@ export async function mintConsultInspirationReadUrl(
   storage: ConsultInspirationStorage = consultInspirationStorage,
 ): Promise<{ url: string; expiresInSeconds: number }> {
   if (target.kind === 'LOOK') {
+    if (target.pointers.analysisFrameUrl) return { url: target.pointers.analysisFrameUrl, expiresInSeconds: CONSULT_INSPIRATION_READ_TTL_SECONDS }
     const rendered = await renderMediaUrls(target.pointers)
     if (!rendered.renderUrl) {
       throw new ConsultWriteError(

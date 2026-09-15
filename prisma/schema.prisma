@@ -709,6 +709,8 @@ enum NotificationRecipientKind {
 
 enum NotificationEventKey {
   LOOK_BRIEF_REVIEW
+  LOOK_MEDIA_CLARIFICATION
+  LOOK_MEDIA_ADMIN_REVIEW
   BOOKING_REQUEST_CREATED
   BOOKING_CONFIRMED
   // C6: a gentle, budgeted invitation attached to an eligible booking
@@ -1059,6 +1061,16 @@ enum LooksSocialJobType {
   // primary image via the external embedding API so taste vectors and visual
   // similarity can rank within tag-retrieved candidates.
   EMBED_LOOK_POST_IMAGE
+}
+
+enum LookMediaAnalysisStatus {
+  PENDING
+  PROCESSING
+  NEEDS_PRO
+  NEEDS_ADMIN
+  READY
+  FAILED
+  REJECTED
 }
 
 enum LooksSocialJobStatus {
@@ -5406,6 +5418,7 @@ model Reminder {
 // =======================
 
 model MediaAsset {
+  lookAnalyses LookMediaAnalysis[]
   consultChartPhotoUses ConsultChartPhotoUse[]
   id                    String                 @id @default(cuid())
   professionalId        String
@@ -8939,4 +8952,57 @@ model ConsultAnalysisChartPhoto {
   photoUse   ConsultChartPhotoUse @relation(fields: [photoUseId], references: [id], onDelete: Cascade)
 
   @@id([revisionId, photoUseId])
+}
+
+// A reusable reading of one exact published media frame/version. Deletion of
+// its source deletes both image snapshots and private clarification history.
+model LookMediaAnalysis {
+  id String @id @default(cuid())
+  mediaAssetId String
+  mediaAsset MediaAsset @relation(fields: [mediaAssetId], references: [id], onDelete: Cascade)
+  sourceHash String
+  promptVersion String
+  status LookMediaAnalysisStatus @default(PENDING)
+  revision Int @default(0)
+  attemptCount Int @default(0)
+  runAt DateTime @default(now())
+  claimedAt DateTime?
+  failure String?
+  // Bounded JPEG snapshots: exactly the cropped pixels analysed, not raw video.
+  frames Json?
+  frameCount Int @default(0)
+  readings Json?
+  hairMaps Json?
+  calls LookMediaAnalysisCall[]
+  selectedFrame Int @default(0)
+  proAnswers Json?
+  reviewedAnalysis Json?
+  reviewedByUserId String?
+  reviewedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  reviews LookMediaAnalysisReview[]
+  @@unique([mediaAssetId, sourceHash, promptVersion])
+  @@index([status, runAt])
+}
+model LookMediaAnalysisReview {
+  id String @id @default(cuid())
+  analysisId String
+  analysis LookMediaAnalysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  actorUserId String
+  actorRole String
+  action String
+  revision Int
+  payload Json
+  createdAt DateTime @default(now())
+  @@unique([analysisId, revision])
+}
+
+model LookMediaAnalysisCall {
+  id String @id @default(cuid())
+  analysisId String
+  analysis LookMediaAnalysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  measurement Json
+  createdAt DateTime @default(now())
+  @@index([analysisId])
 }

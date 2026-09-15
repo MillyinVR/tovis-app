@@ -105,6 +105,8 @@ const EVENT_LABELS: Record<NotificationEventKey, string> = {
   [NotificationEventKey.SAVED_LOOK_CONSULT_NUDGE]: 'Consult reminders for big decisions',
   [NotificationEventKey.CONSULT_STALLED_NUDGE]: 'Reminders about a consult you started',
   [NotificationEventKey.AI_CONSULT_INVITATION]: 'Pre-appointment consult invitations',
+  [NotificationEventKey.LOOK_MEDIA_CLARIFICATION]: 'Questions about your uploaded looks',
+  [NotificationEventKey.LOOK_MEDIA_ADMIN_REVIEW]: 'Look analysis review requests',
   [NotificationEventKey.LOOK_BRIEF_REVIEW]: 'Look plan updates and review reminders',
   [NotificationEventKey.AI_CONSULT_ANALYSIS_READY]: 'Your consult is ready',
   [NotificationEventKey.AI_CONSULT_ANALYSIS_FAILED]:

@@ -56,8 +56,9 @@ import {
  * isn't metered rather than being attributed to nothing.
  */
 export type ConsultProviderMeterSink = {
-  consultSessionId: string
+  consultSessionId?: string
   analysisRunId?: string | null
+  record?: (record: ConsultProviderCallRecord) => Promise<void>
 }
 
 export type ConsultProviderCallMeasurement = {
@@ -159,9 +160,9 @@ export async function recordConsultProviderCall(
   sink: ConsultProviderMeterSink | null | undefined,
   measurement: ConsultProviderCallMeasurement,
 ): Promise<void> {
-  if (!sink?.consultSessionId) return
-
   const record = buildConsultProviderCallRecord(measurement)
+  if (sink?.record) { await sink.record(record); return }
+  if (!sink?.consultSessionId) return
   try {
     await prisma.consultProviderCall.create({
       data: {

@@ -4,6 +4,8 @@
 // SUPER_ADMIN only (the API enforces it; the page gates on Role.ADMIN like the
 // rest of /admin). Client-authored looks appear here by design (prerequisite
 // for unlocking client looks into the public feed, social-first C2).
+import Link from 'next/link'
+import { lookAnalysisCopy } from '@/lib/brand/lookAnalysisCopy'
 import { redirect } from 'next/navigation'
 import { Role } from '@prisma/client'
 
@@ -29,6 +31,7 @@ export default async function AdminLooksPage() {
           renames, or merges the user-facing hashtag/style tags.
         </p>
       </div>
+      <Link href="/admin/looks/analysis" className="mb-5 inline-flex min-h-11 items-center rounded-lg border border-surfaceGlass/20 px-4 py-2 font-semibold">{lookAnalysisCopy.adminTitle}</Link>
       <LooksAdminClient />
     </main>
   )

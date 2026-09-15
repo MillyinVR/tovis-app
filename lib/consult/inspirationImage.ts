@@ -83,6 +83,14 @@ function mediaType(value: string | null): ConsultCaptureMediaType {
 export async function fetchConsultInspirationImage(
   url: string,
 ): Promise<ConsultCaptureImage> {
+  // Only server-resolved reviewed look snapshots use this path. They contain the
+  // same bounded JPEG the client sees, so no second storage/provider read is needed.
+  if (url.startsWith('data:image/jpeg;base64,')) {
+    const base64 = url.slice('data:image/jpeg;base64,'.length)
+    if (!base64 || base64.length > 2_700_000 || !/^[A-Za-z0-9+/]+={0,2}$/.test(base64)) throw new ConsultWriteError('INSPIRATION_OBJECT_INVALID', 'Invalid reference snapshot.')
+    const normalized = await normalizeImageForVision(Buffer.from(base64, 'base64'), 'image/jpeg')
+    return { base64: normalized.bytes.toString('base64'), mediaType: normalized.contentType }
+  }
   const target = assertStorageOrigin(url)
   let response: Response
   try {
