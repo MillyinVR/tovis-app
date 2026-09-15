@@ -13,7 +13,7 @@ describe('GET /.well-known/apple-app-site-association', () => {
     expect(res.headers.get('content-type')).toBe('application/json')
   })
 
-  it('associates the reset-password + claim + referral + look + profile paths with the real app id', async () => {
+  it('associates the reset-password + claim + referral + look + tag + profile paths with the real app id', async () => {
     const res = GET()
     const body = await res.json()
 
@@ -26,17 +26,17 @@ describe('GET /.well-known/apple-app-site-association', () => {
     expect(detail.appIDs).toEqual(['SB3J675LNU.app.tovis.Tovis'])
 
     // The emailed reset link, the §27 account-claim link, the client referral
-    // short-link (`/c/*`, opened in the in-app browser), a shared look, a shared
-    // public board (`/u/*/boards/*`), a shared creator profile (`/u/*`) and a
-    // shared PRO profile (`/professionals/*`) open in-app; everything else stays
-    // in the browser. `components` mirrors `paths` one-for-one (legacy "NOT "
-    // prefix ↔ modern `exclude: true`).
+    // short-link (`/c/*`, opened in the in-app browser), a shared look, a tag
+    // page (both under `/looks/*`), a shared public board (`/u/*/boards/*`), a
+    // shared creator profile (`/u/*`) and a shared PRO profile
+    // (`/professionals/*`) open in-app; everything else stays in the browser.
+    // `components` mirrors `paths` one-for-one (legacy "NOT " prefix ↔ modern
+    // `exclude: true`).
     expect(detail.paths).toEqual([
       '/reset-password/*',
       '/claim/*',
       '/c/*',
       'NOT /looks/tags',
-      'NOT /looks/tags/*',
       '/looks/*',
       '/u/*/boards/*',
       '/u/*',
@@ -48,7 +48,6 @@ describe('GET /.well-known/apple-app-site-association', () => {
       { '/': '/claim/*' },
       { '/': '/c/*' },
       { '/': '/looks/tags', exclude: true },
-      { '/': '/looks/tags/*', exclude: true },
       { '/': '/looks/*' },
       { '/': '/u/*/boards/*' },
       { '/': '/u/*' },
@@ -57,22 +56,37 @@ describe('GET /.well-known/apple-app-site-association', () => {
     ])
   })
 
-  // The single rule that makes the tag exclusion work at all: iOS stops at the
-  // first match, so `NOT /looks/tags/*` is only honored while it precedes
-  // `/looks/*`. Reordering them silently sends every tag link into the app,
-  // which has no tag screen — the tap would become a no-op instead of loading
-  // the web page.
-  it('orders the tag exclusions BEFORE the broad /looks/* pattern', async () => {
+  // iOS stops at the first match, so `NOT /looks/tags` is only honored while it
+  // precedes `/looks/*`. Reordering them sends the bare tag index — a page that
+  // exists on neither platform — into the app, where the tap becomes a no-op.
+  it('orders the bare tag-index exclusion BEFORE the broad /looks/* pattern', async () => {
     const res = GET()
     const body = await res.json()
     const { paths } = body.applinks.details[0]
 
     const broadLooks = paths.indexOf('/looks/*')
     expect(broadLooks).toBeGreaterThan(-1)
-    for (const exclusion of ['NOT /looks/tags', 'NOT /looks/tags/*']) {
-      expect(paths.indexOf(exclusion)).toBeGreaterThan(-1)
-      expect(paths.indexOf(exclusion)).toBeLessThan(broadLooks)
-    }
+    expect(paths.indexOf('NOT /looks/tags')).toBeGreaterThan(-1)
+    expect(paths.indexOf('NOT /looks/tags')).toBeLessThan(broadLooks)
+  })
+
+  // 🔴 The regression this file exists to stop coming back. `/looks/tags/*` was
+  // excluded on the stated grounds that "native has no tag screen"; the app grew
+  // one (`LookTagFeedView`, with the feed's chips, Discover's trending rail and
+  // the look detail's tag row all pushing it) and the exclusion outlived its
+  // reason — so a tag chip opened natively and the identical page, reached by a
+  // tapped link, ejected to Safari. It is covered by `/looks/*` now, and iOS
+  // routes it through `LookTagLink`. Re-adding the exclusion needs a NEW reason,
+  // not the old one.
+  it('no longer excludes the tag pages the app can open', async () => {
+    const res = GET()
+    const body = await res.json()
+    const { paths, components } = body.applinks.details[0]
+
+    expect(paths).not.toContain('NOT /looks/tags/*')
+    expect(components).not.toContainEqual({ '/': '/looks/tags/*', exclude: true })
+    // AASA `*` spans `/`, so the broad look pattern is what carries them.
+    expect(paths).toContain('/looks/*')
   })
 
   // Both `/u/` shapes are now routed natively — the board detail by
