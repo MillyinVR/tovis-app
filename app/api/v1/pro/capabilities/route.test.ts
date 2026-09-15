@@ -22,18 +22,22 @@ vi.mock('@/app/api/_utils', () => ({
   requirePro: mocks.requirePro,
 }))
 
+import { TECHNICAL_RECORD_PRO_ALLOWLIST } from '@/lib/clients/technicalRecord'
+
 import { GET } from './route'
 
 const FLAG_ENV_KEYS = [
   'ENABLE_NO_SHOW_PROTECTION',
   'ENABLE_PRO_MIGRATION',
   'ENABLE_RECURRING_APPOINTMENTS',
+  'ENABLE_CLIENT_TECHNICAL_RECORD',
 ] as const
 
 const ORIGINALS: Record<(typeof FLAG_ENV_KEYS)[number], string | undefined> = {
   ENABLE_NO_SHOW_PROTECTION: process.env.ENABLE_NO_SHOW_PROTECTION,
   ENABLE_PRO_MIGRATION: process.env.ENABLE_PRO_MIGRATION,
   ENABLE_RECURRING_APPOINTMENTS: process.env.ENABLE_RECURRING_APPOINTMENTS,
+  ENABLE_CLIENT_TECHNICAL_RECORD: process.env.ENABLE_CLIENT_TECHNICAL_RECORD,
 }
 
 function restore(key: string, value: string | undefined) {
@@ -41,10 +45,10 @@ function restore(key: string, value: string | undefined) {
   else process.env[key] = value
 }
 
-function asPro() {
+function asPro(professionalId = 'pro_1') {
   mocks.requirePro.mockResolvedValue({
     ok: true as const,
-    professionalId: 'pro_1',
+    professionalId,
     userId: 'user_1',
     user: {},
   })
@@ -80,6 +84,7 @@ describe('GET /api/v1/pro/capabilities', () => {
       noShowFees: false,
       importFromAnotherApp: false,
       recurringAppointments: false,
+      clientTechnicalRecord: false,
     })
   })
 
@@ -92,6 +97,7 @@ describe('GET /api/v1/pro/capabilities', () => {
       noShowFees: true,
       importFromAnotherApp: false,
       recurringAppointments: false,
+      clientTechnicalRecord: false,
     })
 
     process.env.ENABLE_PRO_MIGRATION = 'true'
@@ -100,6 +106,7 @@ describe('GET /api/v1/pro/capabilities', () => {
       noShowFees: true,
       importFromAnotherApp: true,
       recurringAppointments: false,
+      clientTechnicalRecord: false,
     })
 
     process.env.ENABLE_RECURRING_APPOINTMENTS = '1'
@@ -108,7 +115,35 @@ describe('GET /api/v1/pro/capabilities', () => {
       noShowFees: true,
       importFromAnotherApp: true,
       recurringAppointments: true,
+      clientTechnicalRecord: false,
     })
+  })
+
+  // 🔴 The regression guard for the per-pro capability. `clientTechnicalRecord`
+  // is gated by the global flag OR a per-pro allowlist, so the route has to
+  // hand the ACTING pro's id to the resolver. Drop that argument and this is
+  // the only test that goes red — the flag-only cases above all still pass,
+  // because they resolve to the same false.
+  it('resolves clientTechnicalRecord for the acting pro, not the env alone', async () => {
+    const allowlisted = TECHNICAL_RECORD_PRO_ALLOWLIST[0]
+    // Emptying the allowlist is the documented way to re-darken the feature;
+    // that must not read as a failure here.
+    if (!allowlisted) return
+
+    asPro(allowlisted)
+    const body = await readJson(await GET())
+    expect(body.capabilities).toEqual({
+      noShowFees: false,
+      importFromAnotherApp: false,
+      recurringAppointments: false,
+      clientTechnicalRecord: true,
+    })
+
+    asPro('pro_not_on_the_list')
+    const other = await readJson(await GET())
+    expect(
+      (other.capabilities as Record<string, unknown>).clientTechnicalRecord,
+    ).toBe(false)
   })
 
   it('returns the auth refusal for a non-pro caller', async () => {

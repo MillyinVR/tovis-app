@@ -18,8 +18,11 @@ export async function GET() {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
 
+    // The acting pro's id, not just the env: `clientTechnicalRecord` is gated by
+    // the global flag OR a per-pro allowlist, so a flag-only readout would tell
+    // an allowlisted pro to hide a surface they can use.
     const response: ProCapabilitiesResponseDTO = {
-      capabilities: resolveProCapabilities(),
+      capabilities: resolveProCapabilities(auth.professionalId),
     }
     return jsonOk(response)
   } catch (error: unknown) {
