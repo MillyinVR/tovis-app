@@ -194,6 +194,11 @@ export async function prepareConsultInspirationRead(
     await resolveLockedConsultInspirationReadTarget(db, args.session, args.now)
   const asset = target.kind === 'LOOK' ? target.pointers.analysisAsset : undefined
   const reusable = asset ? await loadReusableLookAnalysis(db, asset) : null
+  // Gate before the per-consult cache: a legacy artefact must not bypass shared
+  // review or allow the optional comparison to pay for another reference read.
+  if (lookAnalysisEnabled() && asset && !reusable) {
+    throw new ConsultWriteError('INSPIRATION_ANALYSIS_UNAVAILABLE', 'This look is still being prepared for consultations. Please try again later.')
+  }
   const requestHash = inspirationAnalysisRequestHash({
     inspirationId: target.inspirationId,
     promptVersion: CONSULT_INSPIRATION_ANALYSIS_PROMPT_VERSION,
