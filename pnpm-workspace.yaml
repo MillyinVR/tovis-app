@@ -65,7 +65,7 @@ engineStrict: true
 # warned. That is what took out the integration and E2E jobs on the first
 # attempt at this upgrade.
 #
-# Every entry is `false`, which is exactly what pnpm 10 did here — none of these
+# The original entries are `false`, which is exactly what pnpm 10 did here — none of these
 # has ever run a build script in this repo, and the Next build, vitest and
 # prisma generate all work on their prebuilt platform binaries. So this upgrade
 # changes nothing about what lands in node_modules. Flipping one to `true` is a
@@ -76,5 +76,7 @@ allowBuilds:
   "@prisma/engines": false
   "@sentry/cli": false
   esbuild: false
+  # Downloads the platform decoder used only by server-side look analysis.
+  ffmpeg-static: true
   prisma: false
   unrs-resolver: false

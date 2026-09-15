@@ -187,6 +187,9 @@ export const EXPORT_BOUNDARY: Readonly<Record<string, ExportDisposition>> = {
   ClientActionToken: { status: 'EXPORTED', keys: ['clientActionTokens'] },
   AftercareSummary: { status: 'EXPORTED', keys: ['aftercareSummaries'] },
   MediaAsset: { status: 'EXPORTED', keys: ['mediaAssets'] },
+  LookMediaAnalysis: { status: 'EXPORTED', keys: ['mediaAssets'] },
+  LookMediaAnalysisReview: { status: 'OMITTED', reason: 'Immutable internal review audit; the resulting reading and professional answers are exported with mediaAssets. Reviewer identities are third-party data.' },
+  LookMediaAnalysisCall: { status: 'OMITTED', reason: 'Internal provider usage measurements contain no submitted media or professional answers.' },
   MediaCaptureAttestation: {
     status: 'OMITTED',
     reason:

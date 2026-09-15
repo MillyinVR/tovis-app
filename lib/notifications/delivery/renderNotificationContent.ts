@@ -424,6 +424,7 @@ const templateCtaLabels: Record<NotificationTemplateKey, string> = {
   saved_look_consult_nudge: 'Ask a question',
   consult_stalled_nudge: 'Finish my consult',
   ai_consult_invitation: 'Prepare for your appointment',
+  look_media_review: 'Review look',
   look_brief_review: 'Review the look',
   ai_consult_analysis_ready: 'See my consult',
   consult_prep_reminder: 'Answer the questions',
@@ -555,6 +556,7 @@ const templateRenderers: Record<NotificationTemplateKey, TemplateRendererSet> = 
   ai_consult_invitation: buildStandardTemplateRenderer(
     templateCtaLabels.ai_consult_invitation,
   ),
+  look_media_review: buildStandardTemplateRenderer(templateCtaLabels.look_media_review),
   look_brief_review: buildStandardTemplateRenderer(templateCtaLabels.look_brief_review),
   ai_consult_analysis_ready: buildStandardTemplateRenderer(
     templateCtaLabels.ai_consult_analysis_ready,

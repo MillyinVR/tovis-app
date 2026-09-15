@@ -1,3 +1,7 @@
+import { loadReusableLookAnalysis } from '@/lib/looks/analysis/cache'
+import { lookAnalysisSourceHash } from '@/lib/looks/analysis/identity'
+import { lookAnalysisEnabled } from '@/lib/looks/analysis/queue'
+import { readAnalysis } from '@/lib/looks/analysis/reading'
 import 'server-only'
 
 import { createHash } from 'node:crypto'
@@ -120,6 +124,8 @@ function inspirationAnalysisRequestHash(args: {
   inspirationId: string
   promptVersion: string
   schemaVersion: number
+  mediaIdentity?: string
+  reviewIdentity?: string
 }): string {
   return createHash('sha256').update(JSON.stringify(args)).digest('hex')
 }
@@ -186,13 +192,18 @@ export async function prepareConsultInspirationRead(
 ): Promise<ConsultInspirationReadPlan> {
   const target: ConsultInspirationReadTarget =
     await resolveLockedConsultInspirationReadTarget(db, args.session, args.now)
+  const asset = target.kind === 'LOOK' ? target.pointers.analysisAsset : undefined
+  const reusable = asset ? await loadReusableLookAnalysis(db, asset) : null
   const requestHash = inspirationAnalysisRequestHash({
     inspirationId: target.inspirationId,
     promptVersion: CONSULT_INSPIRATION_ANALYSIS_PROMPT_VERSION,
     schemaVersion: CONSULT_INSPIRATION_ANALYSIS_SCHEMA_VERSION,
+    ...(asset ? { mediaIdentity: lookAnalysisSourceHash(asset) } : {}),
+    ...(reusable ? { reviewIdentity: `${reusable.id}:${reusable.revision}` } : {}),
   })
 
   return {
+    reusable,
     target,
     requestHash,
     artefact: await findStoredConsultInspirationArtefact(db, {
@@ -249,6 +260,7 @@ async function findStoredConsultInspirationArtefact(
 }
 
 export type ConsultInspirationReadPlan = {
+  reusable?: Awaited<ReturnType<typeof loadReusableLookAnalysis>>
   target: ConsultInspirationReadTarget
   requestHash: string
   /** Non-null when this reference was already read — no call is needed. */
@@ -282,6 +294,14 @@ export async function performConsultInspirationRead(args: {
 }): Promise<ConsultInspirationReadResult> {
   const startedAt = Date.now()
   const source = sourceDto(args.plan.target.source)
+  if (args.plan.reusable) {
+    const cached = args.plan.reusable
+    return { source, model: cached.reading.model, analysis: readAnalysis(cached.reading.attributes), credibilityFlags: cached.reading.credibilityFlags }
+  }
+  // A published look must complete its shared analysis/review, not bill every client while pending.
+  if (lookAnalysisEnabled() && args.plan.target.kind === 'LOOK' && args.plan.target.pointers.analysisAsset) {
+    throw new ConsultWriteError('INSPIRATION_ANALYSIS_UNAVAILABLE', 'This look is still being prepared for consultations. Please try again later.')
+  }
   const provider = args.provider ?? runConsultInspirationVision
   let result
   try {
@@ -352,6 +372,11 @@ export async function persistLockedConsultInspirationAnalysis(
     actor: { type: typeof ConsultActorType.CLIENT; id: string }
   },
 ): Promise<ConsultInspirationAnalysisArtefact> {
+  if (args.plan.target.kind === 'LOOK' && args.plan.target.pointers.analysisAsset) {
+    const session = await tx.consultSession.findUniqueOrThrow({ where: { id: args.consultSessionId }, select: CONSULT_INSPIRATION_ANALYSIS_SESSION_SELECT })
+    const current = await prepareConsultInspirationRead(tx, { session, now: new Date() })
+    if (current.requestHash !== args.plan.requestHash) throw new ConsultWriteError('INSPIRATION_ANALYSIS_UNAVAILABLE', 'The reference changed. Please try again.')
+  }
   // Under the lock, and only now: did someone else store this same reading
   // while this caller was paying for it? If so theirs stands and this one is
   // dropped. Writing both would leave two artefacts for one photograph, and

@@ -312,6 +312,18 @@
       ],
       "type": "string"
     },
+    "$Enums.LookMediaAnalysisStatus": {
+      "enum": [
+        "PENDING",
+        "PROCESSING",
+        "NEEDS_PRO",
+        "NEEDS_ADMIN",
+        "READY",
+        "FAILED",
+        "REJECTED"
+      ],
+      "type": "string"
+    },
     "$Enums.LookPostStatus": {
       "enum": [
         "DRAFT",
@@ -405,6 +417,8 @@
     "$Enums.NotificationEventKey": {
       "enum": [
         "LOOK_BRIEF_REVIEW",
+        "LOOK_MEDIA_CLARIFICATION",
+        "LOOK_MEDIA_ADMIN_REVIEW",
         "BOOKING_REQUEST_CREATED",
         "BOOKING_CONFIRMED",
         "AI_CONSULT_INVITATION",
@@ -15120,6 +15134,297 @@
     "LocationType": {
       "$ref": "#/definitions/ProfessionalLocationType"
     },
+    "LookAnalysisItem": {
+      "properties": {
+        "answers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "caption": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "failure": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "flags": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "frameCount": {
+          "type": "number"
+        },
+        "frameReadBase": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "mediaAssetId": {
+          "type": "string"
+        },
+        "mediaType": {
+          "$ref": "#/definitions/MediaType"
+        },
+        "observations": {
+          "properties": {
+            "baseLevel": {
+              "$ref": "#/definitions/LookAnalysisObservation"
+            },
+            "dimension": {
+              "$ref": "#/definitions/LookAnalysisObservation"
+            },
+            "finish": {
+              "$ref": "#/definitions/LookAnalysisObservation"
+            },
+            "lightestLevel": {
+              "$ref": "#/definitions/LookAnalysisObservation"
+            },
+            "placement": {
+              "$ref": "#/definitions/LookAnalysisObservation"
+            },
+            "rootBlend": {
+              "$ref": "#/definitions/LookAnalysisObservation"
+            },
+            "technique": {
+              "$ref": "#/definitions/LookAnalysisObservation"
+            },
+            "tone": {
+              "$ref": "#/definitions/LookAnalysisObservation"
+            }
+          },
+          "type": "object"
+        },
+        "questions": {
+          "items": {
+            "$ref": "#/definitions/LookAnalysisQuestion"
+          },
+          "type": "array"
+        },
+        "reviewedByUserId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reviewedObservations": {
+          "properties": {
+            "baseLevel": {
+              "$ref": "#/definitions/LookAnalysisObservation"
+            },
+            "dimension": {
+              "$ref": "#/definitions/LookAnalysisObservation"
+            },
+            "finish": {
+              "$ref": "#/definitions/LookAnalysisObservation"
+            },
+            "lightestLevel": {
+              "$ref": "#/definitions/LookAnalysisObservation"
+            },
+            "placement": {
+              "$ref": "#/definitions/LookAnalysisObservation"
+            },
+            "rootBlend": {
+              "$ref": "#/definitions/LookAnalysisObservation"
+            },
+            "technique": {
+              "$ref": "#/definitions/LookAnalysisObservation"
+            },
+            "tone": {
+              "$ref": "#/definitions/LookAnalysisObservation"
+            }
+          },
+          "type": "object"
+        },
+        "revision": {
+          "type": "number"
+        },
+        "selectedFrame": {
+          "type": "number"
+        },
+        "status": {
+          "$ref": "#/definitions/LookMediaAnalysisStatus"
+        }
+      },
+      "required": [
+        "id",
+        "mediaAssetId",
+        "status",
+        "revision",
+        "mediaType",
+        "caption",
+        "selectedFrame",
+        "frameCount",
+        "frameReadBase",
+        "questions",
+        "answers",
+        "observations",
+        "flags",
+        "failure",
+        "reviewedByUserId"
+      ],
+      "type": "object"
+    },
+    "LookAnalysisMutation": {
+      "properties": {
+        "action": {
+          "enum": [
+            "answer",
+            "approve",
+            "reject",
+            "retry"
+          ],
+          "type": "string"
+        },
+        "answers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "corrections": {
+          "properties": {
+            "baseLevel": {
+              "$ref": "#/definitions/LookAnalysisObservation"
+            },
+            "dimension": {
+              "$ref": "#/definitions/LookAnalysisObservation"
+            },
+            "finish": {
+              "$ref": "#/definitions/LookAnalysisObservation"
+            },
+            "lightestLevel": {
+              "$ref": "#/definitions/LookAnalysisObservation"
+            },
+            "placement": {
+              "$ref": "#/definitions/LookAnalysisObservation"
+            },
+            "rootBlend": {
+              "$ref": "#/definitions/LookAnalysisObservation"
+            },
+            "technique": {
+              "$ref": "#/definitions/LookAnalysisObservation"
+            },
+            "tone": {
+              "$ref": "#/definitions/LookAnalysisObservation"
+            }
+          },
+          "type": "object"
+        },
+        "revision": {
+          "type": "number"
+        },
+        "selectedFrame": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "revision",
+        "action"
+      ],
+      "type": "object"
+    },
+    "LookAnalysisObservation": {
+      "properties": {
+        "confidence": {
+          "properties": {
+            "max": {
+              "type": "number"
+            },
+            "min": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "min",
+            "max"
+          ],
+          "type": "object"
+        },
+        "region": {
+          "anyOf": [
+            {
+              "properties": {
+                "h": {
+                  "type": "number"
+                },
+                "w": {
+                  "type": "number"
+                },
+                "x": {
+                  "type": "number"
+                },
+                "y": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "x",
+                "y",
+                "w",
+                "h"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "value",
+        "confidence",
+        "region"
+      ],
+      "type": "object"
+    },
+    "LookAnalysisQuestion": {
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "options": {
+          "items": {
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "value",
+              "label"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "key",
+        "label",
+        "options"
+      ],
+      "type": "object"
+    },
     "LookBadgeDto": {
       "properties": {
         "kind": {
@@ -15162,6 +15467,9 @@
         "neutral"
       ],
       "type": "string"
+    },
+    "LookMediaAnalysisStatus": {
+      "$ref": "#/definitions/%24Enums.LookMediaAnalysisStatus"
     },
     "LookPostStatus": {
       "$ref": "#/definitions/%24Enums.LookPostStatus"

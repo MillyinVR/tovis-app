@@ -1644,6 +1644,8 @@ export async function executeConsultAnalysisRun(args: {
     // Starts alongside the feature call, not as another serial stage. The
     // helper gates before fetching and catches optional failures internally.
     const hairComparisonPending = optionalConsultHairComparison({
+      referenceMap: inspirationPlan?.reusable?.referenceMap,
+      referenceReadDisabled: Boolean(inspirationPlan?.reusable),
       family: context.service.family, lookPlanning: context.service.lookPlanning === true, startedAt,
       current: hairImages,
       colorUncertainViews: hairImages.filter(image => images.some(capture => capture.shotKey === image.view && capture.qualityWarningCode !== null)).map(image => image.view),

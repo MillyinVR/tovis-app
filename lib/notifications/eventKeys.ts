@@ -32,6 +32,7 @@ export type NotificationTemplateKey =
   | 'saved_look_consult_nudge'
   | 'consult_stalled_nudge'
   | 'ai_consult_invitation'
+  | 'look_media_review'
   | 'look_brief_review'
   | 'ai_consult_analysis_ready'
   | 'ai_consult_analysis_failed'
@@ -799,6 +800,18 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     ],
   },
 
+  [NotificationEventKey.LOOK_MEDIA_CLARIFICATION]: {
+    key: NotificationEventKey.LOOK_MEDIA_CLARIFICATION, defaultPriority: NotificationPriority.NORMAL,
+    transactional: true, allowQuietHoursBypass: false, templateKey: 'look_media_review',
+    supportedRecipients: [NotificationRecipientKind.PRO],
+    defaultChannelsByRecipient: { [NotificationRecipientKind.PRO]: PRO_IN_APP_EMAIL_PUSH_CHANNELS },
+  },
+  [NotificationEventKey.LOOK_MEDIA_ADMIN_REVIEW]: {
+    key: NotificationEventKey.LOOK_MEDIA_ADMIN_REVIEW, defaultPriority: NotificationPriority.NORMAL,
+    transactional: true, allowQuietHoursBypass: false, templateKey: 'look_media_review',
+    supportedRecipients: [NotificationRecipientKind.ADMIN],
+    defaultChannelsByRecipient: { [NotificationRecipientKind.ADMIN]: ADMIN_IN_APP_EMAIL_PUSH_CHANNELS },
+  },
   [NotificationEventKey.LOOK_BRIEF_REVIEW]: {
     key: NotificationEventKey.LOOK_BRIEF_REVIEW,
     defaultPriority: NotificationPriority.NORMAL,

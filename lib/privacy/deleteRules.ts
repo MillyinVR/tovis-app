@@ -406,6 +406,21 @@ export const DELETE_RULES: readonly DeleteRule[] = [
 
   // ------------------------------------------------------------------ media
   deleteRule({
+    model: 'LookMediaAnalysisReview', delegate: db => db.lookMediaAnalysisReview,
+    where: s => ({ actorUserId: s.userId }),
+  }),
+  deleteRule({
+    model: 'LookMediaAnalysis', delegate: db => db.lookMediaAnalysis,
+    where: s => ({ OR: [
+      { reviewedByUserId: s.userId },
+      { mediaAsset: { OR: orArms<Prisma.MediaAssetWhereInput>(
+        { uploadedByUserId: s.userId },
+        s.clientProfileId ? { booking: { clientId: s.clientProfileId } } : null,
+        s.professionalProfileId ? { professionalId: s.professionalProfileId } : null,
+      ) } },
+    ] }),
+  }),
+  deleteRule({
     model: 'MediaAsset',
     notes: STORAGE_BYTES_NOTE,
     delegate: (db) => db.mediaAsset,

@@ -1,0 +1,28 @@
+import { defaultClientConsultInspirationCopy } from './defaultClientConsultInspirationCopy'
+
+export const lookAnalysisReviewCopy = {
+  valueLabels: defaultClientConsultInspirationCopy.cards.attributeShortNames,
+  imageAlt: 'Selected look frame for review',
+  imageUnavailable: 'This frame could not be loaded. Refresh before approving the reading.',
+  frameNumber: 'Frame {number}',
+  saveFrame: 'Use this frame and reload its reading',
+  frameChanged: 'Save the selected frame to load its reading before reviewing it.',
+  choose: 'Choose an answer',
+  noAnswer: 'No answer yet',
+  corrections: 'Reviewed reading',
+  approved: 'Previously approved reading',
+  confidenceRange: 'Confidence: {min}–{max}',
+  originalArea: 'Supporting area: left {x}, top {y}, width {w}, height {h}',
+  noArea: 'No supporting area marked',
+  confidenceMin: 'Confidence lower bound',
+  confidenceMax: 'Confidence upper bound',
+  confidenceHelp: 'Confidence runs from 0 to 1. The upper bound must be greater than the lower bound.',
+  region: 'Mark the supporting area',
+  regionHelp: 'Coordinates run from 0 to 1 relative to the image. Width and height must keep the area inside the image.',
+  regionLabels: { x: 'Left', y: 'Top', w: 'Width', h: 'Height' },
+  invalid: 'Check confidence ranges and image areas before approving.',
+  busy: 'Saving…',
+  required: 'Please answer each clarification question.',
+  reviewReady: 'Confirm that you have checked this frame and the reviewed reading.',
+  inspect: 'I have checked the displayed frame and reviewed reading',
+} as const

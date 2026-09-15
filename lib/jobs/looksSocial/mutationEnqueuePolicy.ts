@@ -1,3 +1,4 @@
+import { enqueueLookMediaAnalyses } from '@/lib/looks/analysis/queue'
 // lib/jobs/looksSocial/mutationEnqueuePolicy.ts
 import {
   LooksSocialJobType,
@@ -349,6 +350,7 @@ export async function enqueueLookPostMutationPolicy(
 ): Promise<EnqueueLookPostMutationPolicyResult> {
   const lookPostId = normalizeRequiredId('lookPostId', args.lookPostId)
   const deferredMode = args.deferredMode ?? 'GATE'
+  await enqueueLookMediaAnalyses(db, lookPostId)
 
   const plannedJobTypes = buildPlannedLookPostMutationJobTypes({
     ...args,

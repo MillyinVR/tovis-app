@@ -1,6 +1,7 @@
 // app/pro/portfolio/_components/ProPortfolioScreen.tsx
 'use client'
 
+import { lookAnalysisCopy } from '@/lib/brand/lookAnalysisCopy'
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
@@ -50,6 +51,8 @@ export default function ProPortfolioScreen({
       <p className="text-[13px] leading-relaxed text-textMuted">
         {model.subtitle}
       </p>
+
+      <Link href="/pro/looks/analysis" className="mt-3 inline-flex min-h-11 items-center rounded-lg border border-surfaceGlass/20 px-3 py-2 text-sm font-semibold">{lookAnalysisCopy.title}</Link>
 
       <div className="mt-[18px]">
         <div className="min-w-0">

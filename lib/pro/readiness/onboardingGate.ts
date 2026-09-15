@@ -29,6 +29,8 @@ const UNREADY_PRO_ALLOWED_PATH_PREFIXES = [
   '/pro/payments',
   '/pro/verification',
   '/pro/settings',
+  // Clarifying already published media does not make the professional bookable.
+  '/pro/looks/analysis',
   // Account deletion must NEVER be gated. A pro who signed up and stopped
   // half-way through onboarding is exactly the person most likely to want out,
   // and App Store guideline 5.1.1(v) requires the path to be reachable from
