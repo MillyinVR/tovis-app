@@ -316,9 +316,23 @@ export function inspirationOptions(
 }
 
 /**
- * One pack question. `allowText` is always false and `helpText` optional: v2
- * stores no free text, so the flag exists only because the wire DTO — which
- * still describes v1 rows to a client mid-consult — carries it.
+ * One pack question.
+ *
+ * 🔴 `allowText` defaults to TRUE (Tori, 2026-09-13: "there were times i
+ * couldnt answer the consult questions with the options it gave me… the client
+ * should have an option to fill in their own words").
+ *
+ * It used to be hardcoded false, because v2 was built on the premise that the
+ * cards carried everything worth saying. They do not. A closed option list is
+ * the platform telling a client which feelings about her own hair are
+ * expressible, and when none of them fit she either abandons the question or
+ * picks something untrue — and an untrue answer code is worse than silence,
+ * because the codes drive routing.
+ *
+ * Both behaviours she asked for already work downstream: text ALONGSIDE a
+ * choice is stored as a note, and text INSTEAD of a choice waives the
+ * selection requirement (`validateConsultInspirationAnswer`). Opt out per
+ * question only where prose genuinely cannot be honoured.
  */
 export function inspirationQuestion(args: {
   key: string
@@ -331,6 +345,8 @@ export function inspirationQuestion(args: {
   detailSentiment: ConsultInspirationExactDetailDTO['sentiment']
   catalogDetail?: ConsultInspirationCatalogDetail | null
   countsAsDetail?: boolean
+  /** Defaults to true — see the 🔴 above. */
+  allowText?: boolean
 }): ConsultInspirationPackQuestion {
   return {
     key: args.key,
@@ -340,7 +356,7 @@ export function inspirationQuestion(args: {
     options: inspirationOptions(args.options),
     minSelections: args.minSelections,
     maxSelections: args.maxSelections,
-    allowText: false,
+    allowText: args.allowText ?? true,
     detailSentiment: args.detailSentiment,
     catalogDetail: args.catalogDetail ?? null,
     countsAsDetail: args.countsAsDetail ?? true,
@@ -385,6 +401,8 @@ export function inspirationCard(args: {
   composedPrompt?: boolean
   /** P5g — offer only the options this client's own reading supports. */
   optionsFromReading?: boolean
+  /** Defaults to true — see `inspirationQuestion`'s 🔴. */
+  allowText?: boolean
 }): ConsultInspirationPackQuestion {
   return {
     key: args.key,
@@ -394,7 +412,7 @@ export function inspirationCard(args: {
     options: args.values.map((value) => ({ value, label: null })),
     minSelections: args.minSelections ?? 1,
     maxSelections: args.maxSelections ?? (args.kind === 'SINGLE_SELECT' ? 1 : args.values.length),
-    allowText: false,
+    allowText: args.allowText ?? true,
     detailSentiment: args.detailSentiment,
     catalogDetail: args.catalogDetail ?? null,
     countsAsDetail: args.countsAsDetail ?? true,

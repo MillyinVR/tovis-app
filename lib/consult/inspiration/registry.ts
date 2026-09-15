@@ -208,7 +208,17 @@ export function toConsultInspirationQuestionDTO(
     })),
     minSelections: question.minSelections,
     maxSelections: question.maxSelections,
-    allowText: true,
+    // 🔴 The PACK's own flag, not a hardcoded true.
+    //
+    // It was hardcoded, which meant every v2 question offered a free-text box
+    // including `understanding_check` — a confirmation whose selection text
+    // deliberately CANNOT waive (`validateConsultInspirationAnswer`). So that
+    // one card showed a box she could type into and still not get past: a
+    // control that cannot answer its own question.
+    //
+    // Defaults to true on both pack builders, so every card that should take
+    // her words still does.
+    allowText: question.allowText,
   }
 }
 
@@ -682,7 +692,16 @@ export function assertConsultInspirationPackWritable(
     if (CONSULT_INSPIRATION_FORBIDDEN_WORDS.test(question.key)) {
       fail(`question key "${question.key}" carries a word the guard refuses.`)
     }
-    if (question.allowText) fail(`question "${question.key}" allows free text.`)
+    // 🔴 This used to FAIL any question that allowed free text — the line that
+    // removed the client's own words from v2 (Tori, 2026-09-13: "we lost the
+    // option for the client to add in there own words"). What remains is the
+    // one case where prose cannot be honoured: `understanding_check` is a
+    // confirmation, and `validateConsultInspirationAnswer` deliberately does
+    // NOT let text waive its selection — so offering a box that cannot answer
+    // it would be a dead control.
+    if (question.allowText && question.key === 'understanding_check') {
+      fail(`question "${question.key}" is a confirmation and cannot be answered in free text.`)
+    }
     if (
       question.minSelections < 0 ||
       question.maxSelections < 1 ||
