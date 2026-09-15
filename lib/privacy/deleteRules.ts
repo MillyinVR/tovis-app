@@ -777,6 +777,18 @@ export const DELETE_RULES: readonly DeleteRule[] = [
         ? { professionalId: s.professionalProfileId }
         : null,
   }),
+  deleteRule({
+    model: 'ViralRequestProOffer',
+    notes:
+      "The pro's own \"I can do this\" answer. Deleted outright rather than \
+withdrawn: a withdrawal is a state a pro chose, and leaving one behind would \
+keep a deleted account in the offering history.",
+    delegate: (db) => db.viralRequestProOffer,
+    where: (s) =>
+      s.professionalProfileId
+        ? { professionalId: s.professionalProfileId }
+        : null,
+  }),
 
   // -------------------------------------------------------- health & charts
   deleteRule({

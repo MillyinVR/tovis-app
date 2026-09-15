@@ -333,6 +333,11 @@ export const DELETE_BOUNDARY: Readonly<Record<string, DeleteDisposition>> = {
     status: 'DELETE',
     reason: 'Ephemeral fan-out row addressed to the subject.',
   },
+  ViralRequestProOffer: {
+    status: 'DELETE',
+    reason:
+      "The pro's own \"I can do this\" answer about a viral look. It exists only to list them to clients, so a deleted pro must stop being listed; cascades from ProfessionalProfile.",
+  },
   ViralServiceRequest: {
     status: 'DELETE',
     reason:
