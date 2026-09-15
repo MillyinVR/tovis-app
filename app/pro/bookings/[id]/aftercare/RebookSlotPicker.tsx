@@ -456,6 +456,10 @@ export default function RebookSlotPicker({
           offWeekdays={offWeekdays}
           disabled={disabled}
           onPick={(ymd) => onDayChange(ymd)}
+          // The pro is claiming a concrete time on that day, so they get the
+          // day's own schedule under the grid — a dot alone can't tell them
+          // whether "something is here" is a 2pm client or a school run.
+          showDaySchedule
           // The rebook CLONES the source booking (base + add-ons), so the
           // counts are sized from that booking's clone width when we know it —
           // offering-base otherwise (waitlist offer has no source booking).

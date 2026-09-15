@@ -25,6 +25,12 @@
 // The jump chips (+1w / +2w / +4w / Suggested) step the SELECTION forward from
 // the currently selected day — tapping "+1w" repeatedly skips ahead a week at
 // a time — and never close the modal, so the pro can keep stepping.
+//
+// `showDaySchedule` adds `DaySchedulePanel` under the grid (R5): the busy-days
+// overlay can only mark a day, and a pro picking a day to book into needs to
+// see WHAT is on it. That panel reads the full calendar feed for the one
+// selected day — this component's own fetch stays the name-free per-day
+// aggregate it has always been.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { safeJson } from '@/lib/http'
@@ -38,6 +44,7 @@ import {
   todayYmdInTimeZone,
 } from '@/lib/booking/rebookDates'
 import { zClass } from '@/lib/zIndex'
+import DaySchedulePanel from './DaySchedulePanel'
 
 type DayBusy = { bookings: number; blocked: boolean; openSlots?: number }
 type BusyMap = Record<string, DayBusy>
@@ -103,6 +110,22 @@ type Props = {
    * busy-only overlay.
    */
   slotContext?: CalendarSlotContext | null
+  /**
+   * Show WHAT is on the selected day underneath the grid — times, client
+   * names, blocked windows (R5).
+   *
+   * Opt-in, because the grid's own overlay answers a different question. A cell
+   * can only say "something is here"; a pro about to book INTO that day needs
+   * to know whether "something" is a 2pm colour, a school run, or a client
+   * mid-checkout. Turn it on wherever the pro is choosing a day for a CONCRETE
+   * appointment (rebook, new booking, reschedule) — not on the recommended
+   * WINDOW pickers, whose day is a range bound for the client to book inside,
+   * not a time the pro is claiming.
+   *
+   * Ignored in the modal variant: picking there closes the popup, so a panel
+   * below the grid could never be read.
+   */
+  showDaySchedule?: boolean
 }
 
 const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
@@ -158,6 +181,7 @@ export default function AvailabilityCalendar({
   suggestedYmd,
   disabled = false,
   slotContext,
+  showDaySchedule = false,
 }: Props) {
   const todayYmd = useMemo(() => todayYmdInTimeZone(tz), [tz])
   const earliest = minYmd && minYmd > todayYmd ? minYmd : todayYmd
@@ -554,6 +578,10 @@ export default function AvailabilityCalendar({
           Open-time counts aren’t available for this service right now — showing
           your booked days instead.
         </div>
+      ) : null}
+
+      {showDaySchedule && !isModal ? (
+        <DaySchedulePanel ymd={selectedYmd ?? null} timeZone={tz} />
       ) : null}
     </>
   )
