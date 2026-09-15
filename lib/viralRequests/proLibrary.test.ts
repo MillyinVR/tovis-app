@@ -30,8 +30,8 @@ const mockPrisma = vi.hoisted(() => ({
 
 vi.mock('@/lib/prisma', () => ({ prisma: mockPrisma }))
 
+import { LIVE_VIRAL_REQUEST_WHERE, OFFERING_PRO_OFFER_WHERE } from './liveLooks'
 import {
-  LIVE_VIRAL_REQUEST_WHERE,
   loadProViralRequestLibrary,
   offerViralRequestAsPro,
   toProViralRequestEntry,
@@ -57,7 +57,9 @@ function row(overrides: Record<string, unknown> = {}) {
 
 describe('the live predicate', () => {
   // Pinned rather than described: a pro must not be offered a look a client
-  // cannot see, so this has to stay identical to the client home's filter.
+  // cannot see. It now LIVES in ./liveLooks and the client home composes the
+  // same constant, so "identical" is enforced by the import rather than by two
+  // copies agreeing — this test pins the value itself.
   it('is approved, moderation-approved and not removed', () => {
     expect(LIVE_VIRAL_REQUEST_WHERE).toEqual({
       status: ViralServiceRequestStatus.APPROVED,
@@ -123,12 +125,16 @@ describe('loadProViralRequestLibrary', () => {
 
   // 🔴 The count the client home's "N pros now offer this" will finally mean.
   // An unfiltered count reproduces the original defect against a new table.
-  it('counts only pros who have NOT withdrawn, and scopes the offer read to this pro', async () => {
+  it('counts by the SHARED offering predicate, and scopes the offer read to this pro', async () => {
     mockPrisma.viralServiceRequest.findMany.mockResolvedValue([])
     await loadProViralRequestLibrary('pro_1')
 
     const select = mockPrisma.viralServiceRequest.findMany.mock.calls[0]?.[0].select
-    expect(select._count.select.proOffers).toEqual({ where: { withdrawnAt: null } })
+    // Identity with the constant, not a re-spelling of it: the pro's count and
+    // the client's count are the same number or the two surfaces disagree.
+    expect(select._count.select.proOffers).toEqual({
+      where: OFFERING_PRO_OFFER_WHERE,
+    })
     expect(select.proOffers.where).toEqual({ professionalId: 'pro_1' })
   })
 

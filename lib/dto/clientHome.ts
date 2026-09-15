@@ -327,7 +327,23 @@ export type ClientHomeViralLiveDTO = {
    * different one. Optional on the wire for older clients.
    */
   coverImage?: string | null
-  _count: { approvalFanOuts: number }
+  /**
+   * 🔴 `offeringPros`, NOT the `approvalFanOuts` this field carried until now.
+   *
+   * The old key counted notification DELIVERY rows — pros whose services
+   * matched the look and who we managed to tell — and the client copy rendered
+   * it as "N pros now offer this". Nobody in that number had agreed to
+   * anything. This is the count of pros who explicitly opted in
+   * (`ViralRequestProOffer`, still offering, still publicly listable), which is
+   * the same set `/client/viral/[id]` lists by name.
+   *
+   * The rename is deliberate: leaving the key alone would have left a truthful
+   * number under a lying name, and every future reader would have had to know
+   * the history. A native build that predates the rename decodes this as absent
+   * and falls back to 0, which renders the honest "Newly approved" copy rather
+   * than a wrong count.
+   */
+  _count: { offeringPros: number }
 }
 
 export type ClientHomeViralPendingDTO = {
@@ -336,6 +352,11 @@ export type ClientHomeViralPendingDTO = {
   sourceUrl: string | null
   status: string
   createdAt: string
+  /**
+   * Still the fan-out, and correctly so — the pending card says "Shared with N
+   * pros in your area", which is a claim about delivery, not about agreement.
+   * A request in REQUESTED/IN_REVIEW has no opt-ins to count.
+   */
   _count: { approvalFanOuts: number }
 }
 
@@ -680,7 +701,7 @@ function serializeViralLive(row: ClientHomeViralLive): ClientHomeViralLiveDTO {
     sourceUrl: row.sourceUrl ?? null,
     approvedAt: iso(row.approvedAt),
     coverImage: resolveViralCoverImage(row),
-    _count: { approvalFanOuts: row._count.approvalFanOuts },
+    _count: { offeringPros: row._count.proOffers },
   }
 }
 

@@ -17,24 +17,13 @@
 // so the two surfaces cannot disagree about what "offering" means — the same
 // reuse `loadProConsentFormLibrary` was extracted for.
 
-import { ModerationStatus, Prisma, ViralServiceRequestStatus } from '@prisma/client'
+import { Prisma } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
-
-/**
- * A look is visible to a pro on exactly the terms a client sees it.
- *
- * Kept identical to the client home's live predicate
- * (`app/client/(gated)/_data/getClientHomeData.ts`) on purpose: a pro must not
- * be able to opt into something a client cannot see, and must not be asked
- * about a look that has been pulled. If that predicate changes, this is the
- * other caller to change with it.
- */
-export const LIVE_VIRAL_REQUEST_WHERE = {
-  status: ViralServiceRequestStatus.APPROVED,
-  moderationStatus: ModerationStatus.APPROVED,
-  removedAt: null,
-} as const satisfies Prisma.ViralServiceRequestWhereInput
+import {
+  LIVE_VIRAL_REQUEST_WHERE,
+  offeringProCountSelect,
+} from '@/lib/viralRequests/liveLooks'
 
 export function proViralRequestSelect(professionalId: string) {
   return Prisma.validator<Prisma.ViralServiceRequestSelect>()({
@@ -56,14 +45,11 @@ export function proViralRequestSelect(professionalId: string) {
       select: { withdrawnAt: true, createdAt: true },
       take: 1,
     },
-    _count: {
-      select: {
-        // 🔴 Filtered on `withdrawnAt: null` — an unfiltered count here would
-        // reproduce the exact bug this model was added to fix, just one table
-        // over. A withdrawn pro is not offering.
-        proOffers: { where: { withdrawnAt: null } },
-      },
-    },
+    // The SAME count the client sees — `offeringProCountSelect` is the one
+    // definition of "pros now offer this". An unfiltered count here would
+    // reproduce the exact bug `ViralRequestProOffer` was added to fix, just one
+    // table over, and a pro would be quoted a number no client ever sees.
+    _count: offeringProCountSelect,
   })
 }
 
@@ -79,7 +65,14 @@ export type ProViralRequestEntry = {
   approvedAt: Date | null
   categoryId: string | null
   categoryName: string | null
-  /** This pro has an active offer on this look. */
+  /**
+   * This pro has an active offer on this look.
+   *
+   * Deliberately NOT gated on being publicly listable, unlike the count beside
+   * it: this is the pro's own answer, and a pro whose verification lapsed
+   * should still see what they said and be able to withdraw it. They simply
+   * stop being one of the pros a CLIENT is shown until the status clears.
+   */
   offering: boolean
   /** When they first said so, null if they never have. */
   offeredAt: Date | null
