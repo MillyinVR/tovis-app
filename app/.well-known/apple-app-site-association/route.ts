@@ -34,6 +34,19 @@
 //   (routed by `PushDeepLink.Target.publicClient`). Associated only once the app
 //   gained that route; before then it was deliberately left out, because an
 //   associated path the app can't handle is the silent no-op described below.
+//   ⚠️ …and it became that no-op anyway. The app gained the route in its PUSH
+//   parser (`PushDeepLink`), but its Universal-Link handler never consulted that
+//   parser, so a TAPPED `/u/<handle>` opened the app and did nothing from the day
+//   this line was added until tovis-ios #461 wired the two together. "The app
+//   parses the path" is NOT the same claim as "the app handles the tap" — before
+//   associating anything here, read the `.onOpenURL` side, not just the parser.
+// - `/professionals/<id>` — a shared PRO profile → the native `ProProfileView`
+//   (routed by `PushDeepLink.Target.publicPro`). The pro-side twin of `/u/<handle>`
+//   above, and the same defect: `ProProfileView`'s own Share control emits exactly
+//   this URL, so every stranger who tapped a shared pro profile was sent to Safari.
+//   ⚠️ The handle-keyed mirror `/p/<handle>` stays OUT — resolving a handle to a
+//   professionalId needs a lookup the native parser cannot do, so the app cannot
+//   handle it and it must keep opening the web page.
 //
 // Notes:
 // - Must be served with `Content-Type: application/json` and NO redirect. A
@@ -84,6 +97,19 @@ const ASSOCIATED_PATHS = [
   // your profile"), so leaving it in the browser sent every stranger who tapped
   // a shared profile out of the app.
   { path: '/u/*' },
+  // Exclusion first — see the ordering note above. `/professionals/dashboard` is a
+  // legacy redirect to `/pro`, not a pro id: the native parser takes the second
+  // segment as a professionalId, so without this an associated tap would open the
+  // app and fetch a pro called "dashboard". Nothing in the repo emits it any more,
+  // but an old bookmark still can, and the web redirect is the honest answer.
+  { path: '/professionals/dashboard', exclude: true },
+  // A pro's public profile → the native `ProProfileView`, routed by
+  // `PushDeepLink.Target.publicPro`. Same story as `/u/*` directly above: the
+  // profile's own Share control emits exactly this link, so leaving it
+  // unassociated sent every stranger who tapped a shared pro profile out of the
+  // app. Deeper paths (`/professionals/<id>/anything`) don't exist on web and the
+  // native parser rejects them, so there is nothing between the two to carve out.
+  { path: '/professionals/*' },
 ] as const
 
 const AASA = {
