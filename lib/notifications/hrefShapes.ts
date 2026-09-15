@@ -330,6 +330,18 @@ export const NOTIFICATION_HREF_SHAPES = [
     target: 'proWaitlist',
     why: 'WAITLIST_CLIENT_LEFT / WAITLIST_OFFER_EXPIRED.',
   },
+  {
+    shape: '/pro/viral-requests',
+    surface: 'web',
+    why:
+      'VIRAL_REQUEST_APPROVED. The pro-facing library exists on WEB (#1191) ' +
+      'and there is no native screen for it yet, so the phone must decline ' +
+      'rather than fall through — the `/pro/*` default arm answers `.proHome`, ' +
+      'which would dismiss the notification centre onto the dashboard and look ' +
+      'exactly like a working tap. Same reasoning as the /admin rows below, ' +
+      'not a token flow. Flip this to `native` in the SAME change that adds ' +
+      'the iOS screen, never before it.',
+  },
 
   // ── Admin ────────────────────────────────────────────────────────────────
   //

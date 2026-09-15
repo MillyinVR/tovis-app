@@ -55,6 +55,7 @@ describe('lib/notifications/viralRequestApproved', () => {
       eventKey: NotificationEventKey.VIRAL_REQUEST_APPROVED,
       title: 'New viral request in your category',
       body: '"Wolf Cut" was approved and matches your services.',
+      href: '/pro/viral-requests',
       dedupeKey: 'viral-request:request_1:approved',
       data: {
         viralRequestId: 'request_1',
@@ -65,13 +66,14 @@ describe('lib/notifications/viralRequestApproved', () => {
       tx: undefined,
     })
 
-    // Said out loud as well as implied by the literal above (which already
-    // fails on an extra key): the args carry no `href` at all. This event has
-    // nowhere to send a pro — see the emitter — and `hrefShapes: []` in
-    // eventKeys.ts is the other half of that claim, which
-    // `assertNotificationHrefShape` fails the pair on if they ever disagree.
-    expect(mockCreateProNotification.mock.calls[0]?.[0]).not.toHaveProperty(
-      'href',
-    )
+    // Said out loud as well as implied by the literal above: the destination is
+    // the pro's OWN library. This event sent `/admin/viral-requests/{id}` once
+    // — an admin route on a pro notice, dead for both — and #1189 stripped it
+    // for want of anywhere honest to point. The check is spelled as a negative
+    // too, because "not an admin path" is the invariant that outlives this
+    // particular href.
+    const args = mockCreateProNotification.mock.calls[0]?.[0]
+    expect(args?.href).toBe('/pro/viral-requests')
+    expect(args?.href).not.toMatch(/^\/admin\b/)
   })
 })

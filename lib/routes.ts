@@ -38,3 +38,15 @@ export function proPublicProfilePath(
 export function viralLookPath(viralRequestId: string): string {
   return `/client/viral/${encodeURIComponent(viralRequestId)}`
 }
+
+/**
+ * The pro's viral-requests library — the approved looks matched to their
+ * services, and the "I can do this" opt-in (#1191).
+ *
+ * Named here because `VIRAL_REQUEST_APPROVED`'s notification href points at it
+ * and the page itself lives at the same path. The destination a notification
+ * promises and the route that answers it must not be two strings that can
+ * drift; that is how the old `/admin/viral-requests/{id}` href outlived the
+ * route it named (#1189).
+ */
+export const PRO_VIRAL_REQUESTS_PATH = '/pro/viral-requests' as const

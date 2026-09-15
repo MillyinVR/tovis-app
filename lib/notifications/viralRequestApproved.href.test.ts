@@ -1,6 +1,6 @@
 // lib/notifications/viralRequestApproved.href.test.ts
 //
-// VIRAL_REQUEST_APPROVED emits NO href, end to end.
+// VIRAL_REQUEST_APPROVED emits `/pro/viral-requests`, end to end.
 //
 // Why this is a second file rather than another case in
 // `viralRequestApproved.test.ts`: that suite mocks `./proNotifications`, so it
@@ -9,7 +9,7 @@
 // `assertNotificationHrefShape`, which throws outside production when an
 // emitted href does not reduce to a shape the event declares. A mocked
 // `createProNotification` skips that guard entirely, which is the one thing
-// worth proving about a change that removes a href. Mock config is per-file in
+// worth proving about a change that moves a href. Mock config is per-file in
 // vitest, so the real path needs its own.
 //
 // Assertions are deliberately narrow (`objectContaining`): this is a test about
@@ -52,7 +52,7 @@ const tx = {
     mockPrisma.professionalNotificationPreference,
 }
 
-describe('VIRAL_REQUEST_APPROVED carries no href through the write boundary', () => {
+describe('VIRAL_REQUEST_APPROVED carries the pro library href through the write boundary', () => {
   beforeEach(() => {
     for (const group of [
       mockPrisma.notification,
@@ -92,7 +92,7 @@ describe('VIRAL_REQUEST_APPROVED carries no href through the write boundary', ()
     mockEnqueueDispatch.mockResolvedValue(undefined)
   })
 
-  it('writes the row with an empty href, and the title/body survive', async () => {
+  it('writes the row with the pro library href, and the title/body survive', async () => {
     const result = await createViralRequestApprovedProNotification({
       professionalId: 'pro_1',
       viralRequestId: 'request_1',
@@ -105,37 +105,38 @@ describe('VIRAL_REQUEST_APPROVED carries no href through the write boundary', ()
 
     // 🔴 The whole point: this call runs `assertNotificationHrefShape`, which
     // throws here (NODE_ENV=test) if the emitted href is not one this event
-    // declares. Reaching this line at all is the guard agreeing that `[]` and
-    // "no href" are the same statement.
+    // declares. Reaching this line at all is the guard agreeing that
+    // `/pro/viral-requests` is a shape this event is allowed to emit — which is
+    // also what stops a PRO notice ever pointing at `/admin/*` again (#1189).
     expect(mockPrisma.notification.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           eventKey: NotificationEventKey.VIRAL_REQUEST_APPROVED,
           title: 'New viral request in your category',
           body: '"Wolf Cut" was approved and matches your services.',
-          // `normInternalHref` maps an absent href to '' — the column is not
-          // nullable, so '' IS "no destination" in this schema. Asserted as the
-          // literal rather than a falsy check so a real href cannot pass.
-          href: '',
+          // The literal, not a prefix match: the pro library is a bare path
+          // with no `{id}` segment, and a per-request URL would 404.
+          href: '/pro/viral-requests',
         }),
       }),
     )
 
-    // The dedupe path rewrites href too, so a re-emit onto a row minted before
-    // this change replaces the old /admin href with '' rather than leaving it.
+    // The dedupe path rewrites href too, so a re-emit onto a row minted while
+    // the event had NO href (or, older still, the dead `/admin` one) upgrades
+    // it in place rather than leaving the pro with the stale destination.
     expect(mockPrisma.notification.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ href: '' }),
+        data: expect.objectContaining({ href: '/pro/viral-requests' }),
       }),
     )
 
-    // The notice still goes out; only the destination is gone.
+    // The destination rides the dispatch too, not just the stored row.
     expect(mockEnqueueDispatch).toHaveBeenCalledWith(
       expect.objectContaining({
         key: NotificationEventKey.VIRAL_REQUEST_APPROVED,
         title: 'New viral request in your category',
         body: '"Wolf Cut" was approved and matches your services.',
-        href: '',
+        href: '/pro/viral-requests',
         notificationId: 'notif_1',
       }),
     )
