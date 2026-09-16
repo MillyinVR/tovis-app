@@ -2,6 +2,7 @@
 import Link from 'next/link'
 
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import { viralOfferingProsLine } from '@/lib/brand/viralLooksCopy'
 import { viralLookPath } from '@/lib/routes'
 import { resolveViralCoverImage } from '@/lib/viralRequests/contracts'
 
@@ -25,7 +26,13 @@ function currentStepIndex(status: ClientHomeViralPending['status']): number {
  * The single-look treatment. Only reached when there is exactly ONE live look —
  * two or more list as strips — so it carries no "+N more" line of its own.
  */
-function LiveLookHero({ live }: { live: ClientHomeViralLive }) {
+function LiveLookHero({
+  live,
+  brandName,
+}: {
+  live: ClientHomeViralLive
+  brandName: string
+}) {
   const platform = platformFromUrl(live.sourceUrl)
   // Pros who said "I can do this" — see `offeringProCountSelect`. This read
   // `_count.approvalFanOuts` until now, which was the number of pros we had
@@ -92,13 +99,15 @@ function LiveLookHero({ live }: { live: ClientHomeViralLive }) {
                   />
                 ))}
               </div>
-              {/* The verb agrees too. Counting fan-outs, this was almost
-                  always plural; counting opt-ins, exactly one pro is the
-                  ordinary case — the first one to say yes. */}
+              {/* One whole sentence per branch, and it names its own scope.
+                  The verb agrees, because counting opt-ins makes exactly one
+                  pro the ordinary case; and the line says WHERE those pros are
+                  counted (Tori, 2026-09-15 — platform-wide, say so), because a
+                  bare "3 pros now offer this" reads as "3 near me" and the
+                  matching query has no geography in it. Both rules, and this
+                  sentence, live in lib/brand/viralLooksCopy.ts. */}
               <span className="text-[12px] text-textSecondary">
-                {proCount === 1
-                  ? '1 pro now offers this'
-                  : `${proCount} pros now offer this`}
+                {viralOfferingProsLine(proCount, brandName)}
               </span>
             </div>
           ) : (
@@ -152,9 +161,11 @@ function LiveLookHero({ live }: { live: ClientHomeViralLive }) {
 function LiveLookStrip({
   live,
   index,
+  brandName,
 }: {
   live: ClientHomeViralLive
   index: number
+  brandName: string
 }) {
   const platform = platformFromUrl(live.sourceUrl)
   const proCount = live._count.proOffers
@@ -205,11 +216,12 @@ function LiveLookStrip({
           {live.name}
         </div>
         <div className="mt-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-textSecondary">
+          {/* Zero keeps the status label rather than the count sentence: this
+              line is a badge, and "Newly approved" says the useful thing about
+              a look nobody has picked up yet. */}
           {proCount === 0
             ? 'Newly approved'
-            : proCount === 1
-              ? '1 pro now offers this'
-              : `${proCount} pros now offer this`}
+            : viralOfferingProsLine(proCount, brandName)}
         </div>
       </div>
     </Link>
@@ -320,11 +332,18 @@ function PendingLookHero({
         <div className="text-[12.5px] leading-relaxed text-textSecondary">
           {sharedCount > 0 ? (
             <>
+              {/* "Shared with N pros" is a claim about DELIVERY, which is what
+                  a fan-out row records — that part was always true. "in your
+                  area" was not: `findMatchingProsByRequestedCategory` filters on
+                  the requested category and on public pro visibility, and on
+                  nothing else. What the match is actually about is the services
+                  a pro offers, so that is what the line now says. */}
               Shared with{' '}
               <span className="font-semibold text-textPrimary">
                 {sharedCount} {sharedCount === 1 ? 'pro' : 'pros'}
               </span>{' '}
-              in your area. We&apos;ll notify you the moment it&apos;s bookable.
+              whose services match. We&apos;ll notify you the moment it&apos;s
+              bookable.
             </>
           ) : (
             <>
@@ -363,9 +382,17 @@ function PendingLookEmpty() {
 export default function ViralLooksBand({
   viralLive,
   viralPending,
+  brandName,
 }: {
   viralLive: ClientHomeViralLive[]
   viralPending: ClientHomeViralPending[]
+  /**
+   * The brand's DISPLAY name, threaded from the page's tenant-resolved brand.
+   * It is what names the count's scope ("3 pros on X offer this"), so it is a
+   * prop rather than a literal — a white-label tenant must not be told how many
+   * pros a different brand has.
+   */
+  brandName: string
 }) {
   const live = viralLive[0] ?? null
   const pending = viralPending[0] ?? null
@@ -410,7 +437,12 @@ export default function ViralLooksBand({
         {liveStrips.length > 0 ? (
           <div className="flex flex-col gap-3">
             {liveStrips.map((item, index) => (
-              <LiveLookStrip key={item.id} live={item} index={index} />
+              <LiveLookStrip
+                key={item.id}
+                live={item}
+                index={index}
+                brandName={brandName}
+              />
             ))}
             {liveOverflow > 0 ? (
               <Link
@@ -422,7 +454,7 @@ export default function ViralLooksBand({
             ) : null}
           </div>
         ) : live ? (
-          <LiveLookHero live={live} />
+          <LiveLookHero live={live} brandName={brandName} />
         ) : (
           <LiveLookEmpty />
         )}

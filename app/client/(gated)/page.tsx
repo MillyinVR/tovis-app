@@ -52,6 +52,7 @@ export default async function ClientHomePage() {
   return (
     <ClientHomeShell
       brandText={brand.assets.wordmark.text}
+      brandName={brand.displayName}
       displayName={home.displayName}
       home={home}
       removeProFavoriteAction={removeProFavoriteAction}

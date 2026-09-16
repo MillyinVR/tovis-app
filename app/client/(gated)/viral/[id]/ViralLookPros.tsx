@@ -11,6 +11,7 @@ import Link from 'next/link'
 
 import ProProfileLink from '@/app/_components/ProProfileLink'
 import { Avatar, buttonClassName } from '@/app/_components/ui'
+import { viralOfferingProCountLabel } from '@/lib/brand/viralLooksCopy'
 import { formatProfessionLabel } from '@/lib/profiles/publicProfileFormatting'
 import { professionalProfileHref } from '@/lib/profiles/profileHrefs'
 import type { ClientViralLookPro } from '@/lib/viralRequests/liveLooks'
@@ -67,11 +68,14 @@ export default function ViralLookPros({
   pros,
   offeringProCount,
   lookName,
+  brandName,
 }: {
   pros: ClientViralLookPro[]
   /** The true total; larger than `pros.length` only when the list is capped. */
   offeringProCount: number
   lookName: string
+  /** The brand's display name — it names the count's platform-wide scope. */
+  brandName: string
 }) {
   if (pros.length === 0) {
     return (
@@ -110,8 +114,11 @@ export default function ViralLookPros({
         <h2 className="font-display text-[17px] font-semibold tracking-[-0.02em] text-textPrimary">
           Who does this look
         </h2>
+        {/* "3 pros" beside a list of three reads as "three near me". The
+            count is every eligible pro on the platform, and the heading says so
+            — same sentence family as the lede above it. */}
         <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-textMuted">
-          {offeringProCount} {offeringProCount === 1 ? 'pro' : 'pros'}
+          {viralOfferingProCountLabel(offeringProCount, brandName)}
         </span>
       </div>
 

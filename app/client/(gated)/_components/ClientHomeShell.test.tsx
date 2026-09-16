@@ -74,6 +74,7 @@ function renderShell() {
   return render(
     <ClientHomeShell
       brandText="Tovis"
+      brandName="TOVIS"
       displayName="Wanda"
       home={home}
       removeProFavoriteAction={async () => {}}

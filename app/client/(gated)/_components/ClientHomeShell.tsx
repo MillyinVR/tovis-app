@@ -15,12 +15,19 @@ import ViralLooksBand from './ViralLooksBand'
 
 type ClientHomeShellProps = {
   brandText: string
+  /**
+   * The brand's DISPLAY name, for prose. Distinct from `brandText`, which is
+   * the lowercase wordmark used as a mark. The viral band names it to make the
+   * pro count's scope explicit — see lib/brand/viralLooksCopy.ts.
+   */
+  brandName: string
   displayName: string
   home: ClientHomeData
   removeProFavoriteAction: (formData: FormData) => Promise<void>
 }
 
 export default function ClientHomeShell({
+  brandName,
   displayName,
   home,
   removeProFavoriteAction,
@@ -113,6 +120,7 @@ export default function ClientHomeShell({
       <ViralLooksBand
         viralLive={home.viralLive}
         viralPending={home.viralPending}
+        brandName={brandName}
       />
     </main>
   )
