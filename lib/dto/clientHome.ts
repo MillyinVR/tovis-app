@@ -354,8 +354,13 @@ export type ClientHomeViralPendingDTO = {
   createdAt: string
   /**
    * Still the fan-out, and correctly so — the pending card says "Shared with N
-   * pros in your area", which is a claim about delivery, not about agreement.
-   * A request in REQUESTED/IN_REVIEW has no opt-ins to count.
+   * pros whose services match", which is a claim about DELIVERY, not about
+   * agreement. A request in REQUESTED/IN_REVIEW has no opt-ins to count.
+   *
+   * That line used to end "in your area", which the fan-out never supported:
+   * `findMatchingProsByRequestedCategory` filters on the requested category and
+   * on public pro visibility, and on nothing else. The count was honest; the
+   * geography was not.
    */
   _count: { approvalFanOuts: number }
 }

@@ -5958,7 +5958,7 @@
     "ClientHomeViralPendingDTO": {
       "properties": {
         "_count": {
-          "description": "Still the fan-out, and correctly so — the pending card says \"Shared with N pros in your area\", which is a claim about delivery, not about agreement. A request in REQUESTED/IN_REVIEW has no opt-ins to count.",
+          "description": "Still the fan-out, and correctly so — the pending card says \"Shared with N pros whose services match\", which is a claim about DELIVERY, not about agreement. A request in REQUESTED/IN_REVIEW has no opt-ins to count.\n\nThat line used to end \"in your area\", which the fan-out never supported: `findMatchingProsByRequestedCategory` filters on the requested category and on public pro visibility, and on nothing else. The count was honest; the geography was not.",
           "properties": {
             "approvalFanOuts": {
               "type": "number"

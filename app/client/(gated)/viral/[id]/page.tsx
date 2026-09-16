@@ -28,7 +28,10 @@ import { notFound } from 'next/navigation'
 
 import RemoteImage from '@/app/_components/media/RemoteImage'
 import { buttonClassName } from '@/app/_components/ui'
+import { getBrandForTenantContext } from '@/lib/brand/forTenant'
+import { viralOfferingLede } from '@/lib/brand/viralLooksCopy'
 import { viralLookPath } from '@/lib/routes'
+import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 import { loadLiveViralLookForClient } from '@/lib/viralRequests/liveLooks'
 
 import ClientPage from '../../_components/ClientPage'
@@ -42,13 +45,6 @@ export const metadata: Metadata = {
   // A viral look is a marketplace object, but this page sits behind the client
   // gate — there is nothing here for a crawler to reach.
   robots: { index: false, follow: false },
-}
-
-/** The single sentence this whole slice exists to make true. */
-function offeringLede(count: number): string {
-  if (count === 0) return 'No pro has taken this one on yet.'
-  if (count === 1) return '1 pro has said they can do this look.'
-  return `${count} pros have said they can do this look.`
 }
 
 export default async function ViralLookPage({
@@ -67,6 +63,13 @@ export default async function ViralLookPage({
   // never existed.
   if (!look) notFound()
 
+  // AFTER the 404, deliberately. Resolving the tenant reads request headers, and
+  // a look nobody is allowed to see has no copy to brand — doing it first made
+  // the 404 path depend on a request scope it never needed. The count's scope is
+  // platform-wide and the copy names the brand to say so (Tori, 2026-09-15);
+  // resolved per tenant, never written as a literal.
+  const brand = getBrandForTenantContext(await resolveTenantContextForLayout())
+
   const platform = platformFromUrl(look.sourceUrl)
 
   return (
@@ -75,8 +78,9 @@ export default async function ViralLookPage({
       title={look.name}
       // The count and the list below are counted with the SAME predicate
       // (`OFFERING_PRO_OFFER_WHERE`), so this sentence cannot promise a pro the
-      // page does not then name.
-      lede={offeringLede(look.offeringProCount)}
+      // page does not then name. The sentence itself lives in
+      // lib/brand/viralLooksCopy.ts, with the four other surfaces that carry it.
+      lede={viralOfferingLede(look.offeringProCount, brand.displayName)}
       back={{ href: '/client', label: 'Home' }}
     >
       <div className="grid gap-4">
@@ -137,6 +141,7 @@ export default async function ViralLookPage({
           pros={look.pros}
           offeringProCount={look.offeringProCount}
           lookName={look.name}
+          brandName={brand.displayName}
         />
       </div>
     </ClientPage>

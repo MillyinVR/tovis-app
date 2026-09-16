@@ -14,6 +14,7 @@
 
 import { useCallback, useState } from 'react'
 
+import { viralOfferingProsLine } from '@/lib/brand/viralLooksCopy'
 import type { ProViralRequestDTO } from '@/lib/dto/proViralRequests'
 
 function platformLabel(sourceUrl: string | null): string | null {
@@ -33,8 +34,15 @@ function platformLabel(sourceUrl: string | null): string | null {
 
 export default function ViralRequestLibrary({
   initialRequests,
+  brandName,
 }: {
   initialRequests: ProViralRequestDTO[]
+  /**
+   * The brand's display name. `offeringProCount` is every eligible pro on the
+   * platform, not the pros near this one, and the line says so — the same
+   * sentence the client sees, from lib/brand/viralLooksCopy.ts.
+   */
+  brandName: string
 }) {
   const [requests, setRequests] = useState(initialRequests)
   const [pendingId, setPendingId] = useState<string | null>(null)
@@ -125,9 +133,7 @@ export default function ViralRequestLibrary({
                   {[
                     request.categoryName,
                     platform,
-                    request.offeringProCount === 1
-                      ? '1 pro offers this'
-                      : `${request.offeringProCount} pros offer this`,
+                    viralOfferingProsLine(request.offeringProCount, brandName),
                   ]
                     .filter(Boolean)
                     .join(' · ')}

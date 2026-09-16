@@ -6,6 +6,7 @@ import { rootTenantContext } from '@/lib/tenant/context'
 
 type MockClientHomeShellProps = {
   brandText: string
+  brandName: string
   displayName: string
   home: unknown
   removeProFavoriteAction: (formData: FormData) => Promise<void>
@@ -86,6 +87,10 @@ describe('app/client/page.tsx', () => {
     mocks.clientHomeShellProps.length = 0
 
     mocks.getBrandForTenantContext.mockReturnValue({
+      // Both brand strings, because they are different things: the wordmark is
+      // the mark, `displayName` is the name that lands mid-sentence in prose
+      // (the viral count's "N pros on X offer this").
+      displayName: 'TOVIS',
       assets: {
         wordmark: {
           text: 'TOVIS',
@@ -121,6 +126,7 @@ describe('app/client/page.tsx', () => {
     expect(mocks.clientHomeShellProps).toHaveLength(1)
     expect(mocks.clientHomeShellProps[0]).toMatchObject({
       brandText: 'TOVIS',
+      brandName: 'TOVIS',
       displayName: 'Tori',
       home: mocks.homeData,
     })

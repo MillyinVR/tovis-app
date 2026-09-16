@@ -44,19 +44,37 @@ describe('what the count counts', () => {
     expect(SOURCE).not.toMatch(/live\._count\.approvalFanOuts/)
   })
 
-  it('makes the verb agree, because ONE pro is now the ordinary case', () => {
-    // Counting fan-outs, a matched look almost always had several; counting
-    // opt-ins, the first pro to say yes leaves the count at exactly 1. The old
-    // `${n} ${n === 1 ? 'pro' : 'pros'} now offer this` rendered the sentence
-    // "1 pro now offer this" on the surface this slice makes reachable.
-    expect(SOURCE).not.toMatch(/'pro' : 'pros'\} now offer this/)
-    const singular = SOURCE.match(/'1 pro now offers this'/g) ?? []
-    expect(singular).toHaveLength(2)
+  it('states the count through the shared copy, on BOTH live surfaces', () => {
+    // The hero and the strip each spelled the sentence out, and the pluralised
+    // `${n} ${n === 1 ? 'pro' : 'pros'} now offer this` on both of them
+    // rendered "1 pro now offer this" — the singular branch became the ordinary
+    // case the moment the count started counting opt-ins. One definition, in
+    // lib/brand/viralLooksCopy.ts, is what stops the next edit fixing one of
+    // the two. The zero branches are deliberately NOT count sentences: the hero
+    // and strip say "Newly approved".
+    expect(SOURCE).not.toMatch(/'pro' : 'pros'\} now offer/)
+    const calls = SOURCE.match(/viralOfferingProsLine\(proCount, brandName\)/g) ?? []
+    expect(calls).toHaveLength(2)
   })
 
-  it('keeps the fan-out on the PENDING card, where it is the true statement', () => {
-    // "Shared with N pros in your area" is a claim about delivery. Counting
-    // opt-ins there would break a line that is currently correct.
+  it('takes the brand name as a prop rather than naming a brand', () => {
+    // The sentence names the platform to make the count's scope explicit (Tori,
+    // 2026-09-15). A literal here would ship one tenant's brand to another and
+    // would fail check:no-hardcoded-brand-strings.
+    expect(SOURCE).toMatch(/brandName: string/)
+  })
+
+  it('keeps the fan-out on the PENDING card, where delivery is the claim', () => {
+    // "Shared with N pros" is a claim about delivery, which is exactly what a
+    // fan-out row records. Counting opt-ins there would break a true line.
     expect(SOURCE).toMatch(/const sharedCount = pending\._count\.approvalFanOuts/)
+  })
+
+  it('does not claim the pros it shared with are near the client', () => {
+    // The line read "Shared with N pros IN YOUR AREA".
+    // `findMatchingProsByRequestedCategory` filters on the requested category
+    // and on public pro visibility — there is no geography in it, and never
+    // was. The fan-out count is honest; "in your area" was not.
+    expect(SOURCE).not.toMatch(/in your area/i)
   })
 })

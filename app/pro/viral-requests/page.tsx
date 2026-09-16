@@ -13,8 +13,10 @@
 // matches sees an honest empty state rather than a hidden page.
 import { redirect } from 'next/navigation'
 
+import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import { buildProViralRequestListDTO } from '@/lib/dto/proViralRequests'
 import { getCurrentUser } from '@/lib/currentUser'
+import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 import { loadProViralRequestLibrary } from '@/lib/viralRequests/proLibrary'
 
 import ViralRequestLibrary from './ViralRequestLibrary'
@@ -33,6 +35,10 @@ export default async function ProViralRequestsPage() {
   // this pro is offering one, or how a date is spelled.
   const entries = await loadProViralRequestLibrary(user.professionalProfile.id)
   const { requests } = buildProViralRequestListDTO(entries)
+  // The count a pro reads here is the same platform-wide number the client
+  // reads, so it carries the same scope in its wording — resolved per tenant
+  // rather than written as a literal.
+  const brand = getBrandForTenantContext(await resolveTenantContextForLayout())
 
   return (
     // The pro layout already provides <main>; a second one would be invalid and
@@ -49,7 +55,10 @@ export default async function ProViralRequestsPage() {
         </p>
       </header>
 
-      <ViralRequestLibrary initialRequests={requests} />
+      <ViralRequestLibrary
+        initialRequests={requests}
+        brandName={brand.displayName}
+      />
     </section>
   )
 }
