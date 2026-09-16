@@ -635,6 +635,15 @@
       ],
       "type": "string"
     },
+    "$Enums.ViralServiceRequestStatus": {
+      "enum": [
+        "REQUESTED",
+        "IN_REVIEW",
+        "APPROVED",
+        "REJECTED"
+      ],
+      "type": "string"
+    },
     "ActivityFollowBack": {
       "properties": {
         "alreadyFollowing": {
@@ -26109,6 +26118,153 @@
     "VerificationStatus": {
       "$ref": "#/definitions/%24Enums.VerificationStatus"
     },
+    "ViralRequestDto": {
+      "properties": {
+        "adminNotes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "approvedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "coverImage": {
+          "description": "The picture this look is shown by: the REVIEWER's `coverImageUrl`, and only that. Null until someone sets one — the surfaces then draw their own gradient. `mediaUrls` (what the submitter attached) is never a substitute; see `resolveViralCoverImage`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "links": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "mediaUrls": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "moderationStatus": {
+          "$ref": "#/definitions/ModerationStatus"
+        },
+        "name": {
+          "type": "string"
+        },
+        "rejectedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "removedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reportCount": {
+          "type": "number"
+        },
+        "requestedCategory": {
+          "anyOf": [
+            {
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "slug": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "slug"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requestedCategoryId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reviewedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reviewedByUserId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sourceUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/definitions/ViralServiceRequestStatus"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "description",
+        "sourceUrl",
+        "links",
+        "mediaUrls",
+        "coverImage",
+        "requestedCategoryId",
+        "requestedCategory",
+        "status",
+        "moderationStatus",
+        "reportCount",
+        "removedAt",
+        "reviewedAt",
+        "reviewedByUserId",
+        "approvedAt",
+        "rejectedAt",
+        "adminNotes",
+        "createdAt",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
     "ViralRequestModerationAction": {
       "enum": [
         "mark_in_review",
@@ -26116,6 +26272,9 @@
         "reject"
       ],
       "type": "string"
+    },
+    "ViralServiceRequestStatus": {
+      "$ref": "#/definitions/%24Enums.ViralServiceRequestStatus"
     },
     "WorkingHoursDay": {
       "properties": {

@@ -783,6 +783,14 @@ export type {
 // GET /api/v1/admin/reviews
 export type { AdminReviewModerationRow } from '@/lib/privacy/adminReviewModeration'
 
+// GET /api/v1/admin/viral-service-requests — the viral review queue's row.
+// 🔴 Under the guard because the native queue decodes it and its field names do
+// NOT match the Prisma columns: `coverImageUrl` ships as `coverImage`,
+// `linksJson` as `links`, `mediaUrlsJson` as `mediaUrls`. An iOS struct spelled
+// the Prisma way decodes to nil rather than failing, which is how a look with a
+// cover would have drawn a blank gradient forever.
+export type { ViralRequestDto } from '@/lib/viralRequests/contracts'
+
 // POST .../moderate — the action verbs and the state each one returns.
 export type {
   AdminModerationTargetKind,
