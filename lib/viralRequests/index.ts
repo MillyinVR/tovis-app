@@ -999,6 +999,23 @@ export function isViralRequestAwaitingReview(
 }
 
 /**
+ * How many requests are waiting on a reviewer's decision.
+ *
+ * Built from the same ADMIN_QUEUE_ACTIONABLE set that floats those rows to the
+ * top of `listAdminViralRequests`, so the inbox badge and the queue order agree
+ * by construction. Note this is a TRUE count: the page's own badge counts only
+ * within the rows it fetched (take 100), so on a queue that deep the two can
+ * differ — this one is the honest number.
+ */
+export async function countAdminViralRequestsAwaitingReview(
+  db: ViralRequestsDb,
+): Promise<number> {
+  return db.viralServiceRequest.count({
+    where: { status: { in: ADMIN_QUEUE_ACTIONABLE } },
+  })
+}
+
+/**
  * Where a reviewer's cover image lands. One object per request, overwritten on
  * replace — a cover has no history worth keeping, and leaving the old bytes
  * behind would make the bucket grow with every retry.

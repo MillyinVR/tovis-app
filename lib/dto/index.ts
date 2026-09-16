@@ -10,7 +10,9 @@
 //   - raw Prisma row types (`*Row`, `*Plan`) — they carry Prisma.Decimal/Date and
 //     are builder inputs, not wire shapes;
 //   - request/arg types (`*Args`) — request validation is still ad-hoc per route;
-//   - internal-only contracts (admin moderation, job payloads).
+//   - internal-only contracts (job payloads).
+// Admin moderation USED to be excluded here as web-only; it is included now that
+// a native admin inbox decodes it.
 // Everything re-exported here must be JSON-safe (Decimal→string, Date→ISO).
 //
 // Keep this list in sync as DTOs are added. The house rule is "Prisma is the
@@ -761,3 +763,35 @@ export type {
 export type { ClientConsultSessionsDTO } from './consult'
 
 export type { LookAnalysisItem, LookAnalysisMutation } from '@/lib/looks/analysis/contracts'
+
+// ── Admin moderation (native admin inbox) ────────────────────────────────────
+// GET /api/v1/admin/me · GET /api/v1/admin/moderation/counts
+export type {
+  AdminMeDTO,
+  AdminModerationCountsDTO,
+} from '@/lib/dto/adminModeration'
+
+export type { AdminUiPerms } from '@/lib/adminUiPermissions'
+
+// GET /api/v1/admin/looks · GET /api/v1/admin/look-comments
+export type {
+  AdminLookModerationRow,
+  AdminLookCommentModerationRow,
+  AdminLookModerationStatusFilter,
+} from '@/lib/privacy/adminLookModeration'
+
+// GET /api/v1/admin/reviews
+export type { AdminReviewModerationRow } from '@/lib/privacy/adminReviewModeration'
+
+// POST .../moderate — the action verbs and the state each one returns.
+export type {
+  AdminModerationTargetKind,
+  AdminModerationAction,
+  LookPostModerationAction,
+  LookCommentModerationAction,
+  ViralRequestModerationAction,
+  LookPostModerationStateDto,
+  LookCommentModerationStateDto,
+  LookPostModerationResultDto,
+  LookCommentModerationResultDto,
+} from '@/lib/adminModeration/contracts'
