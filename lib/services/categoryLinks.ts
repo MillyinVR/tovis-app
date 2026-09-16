@@ -8,6 +8,8 @@
 
 import type { Prisma } from '@prisma/client'
 
+import { parseFormIdSet } from './formIdSet'
+
 /** The form field both admin routes read; many values, or one comma-joined value. */
 export const ADDITIONAL_CATEGORY_IDS_FIELD = 'additionalCategoryIds'
 
@@ -16,18 +18,12 @@ export const ADDITIONAL_CATEGORY_IDS_FIELD = 'additionalCategoryIds'
  * a form that does not know about links cannot wipe them by saving
  * (memory: a replace write that does not echo a field wipes it). An empty
  * string or an empty list means "no additional categories".
+ *
+ * The parsing itself lives in `parseFormIdSet`, shared with the viral
+ * base-service links, which need the same absent-is-not-empty rule.
  */
 export function parseAdditionalCategoryIds(form: FormData): string[] | null {
-  if (!form.has(ADDITIONAL_CATEGORY_IDS_FIELD)) return null
-  const ids = new Set<string>()
-  for (const raw of form.getAll(ADDITIONAL_CATEGORY_IDS_FIELD)) {
-    if (typeof raw !== 'string') continue
-    for (const part of raw.split(',')) {
-      const id = part.trim()
-      if (id) ids.add(id)
-    }
-  }
-  return [...ids]
+  return parseFormIdSet(form, ADDITIONAL_CATEGORY_IDS_FIELD)
 }
 
 export class PrimaryCategoryLinkError extends Error {
