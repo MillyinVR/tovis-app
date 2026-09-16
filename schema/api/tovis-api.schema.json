@@ -388,6 +388,18 @@
       ],
       "type": "string"
     },
+    "$Enums.ModerationReportReason": {
+      "enum": [
+        "SPAM",
+        "HATE_OR_HARASSMENT",
+        "NUDITY_OR_SEXUAL_CONTENT",
+        "VIOLENCE_OR_DANGEROUS_ACTS",
+        "SCAM_OR_FRAUD",
+        "COPYRIGHT_OR_IMPERSONATION",
+        "OTHER"
+      ],
+      "type": "string"
+    },
     "$Enums.ModerationStatus": {
       "enum": [
         "PENDING_REVIEW",
@@ -623,6 +635,15 @@
       ],
       "type": "string"
     },
+    "$Enums.ViralServiceRequestStatus": {
+      "enum": [
+        "REQUESTED",
+        "IN_REVIEW",
+        "APPROVED",
+        "REJECTED"
+      ],
+      "type": "string"
+    },
     "ActivityFollowBack": {
       "properties": {
         "alreadyFollowing": {
@@ -653,6 +674,411 @@
         "milestone"
       ],
       "type": "string"
+    },
+    "AdminLookCommentModerationRow": {
+      "properties": {
+        "adminNotes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "authorLabel": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "lookCommentId": {
+          "type": "string"
+        },
+        "lookPostId": {
+          "type": "string"
+        },
+        "moderationStatus": {
+          "$ref": "#/definitions/ModerationStatus"
+        },
+        "proHandle": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "proLabel": {
+          "type": "string"
+        },
+        "professionalId": {
+          "type": "string"
+        },
+        "removedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reportCount": {
+          "type": "number"
+        },
+        "reportReasons": {
+          "items": {
+            "$ref": "#/definitions/ModerationReportReason"
+          },
+          "type": "array"
+        },
+        "reviewedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "lookCommentId",
+        "lookPostId",
+        "body",
+        "authorLabel",
+        "createdAt",
+        "moderationStatus",
+        "removedAt",
+        "professionalId",
+        "proLabel",
+        "proHandle",
+        "reportCount",
+        "reportReasons",
+        "adminNotes",
+        "reviewedAt"
+      ],
+      "type": "object"
+    },
+    "AdminLookModerationRow": {
+      "properties": {
+        "adminNotes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "authorKind": {
+          "enum": [
+            "PRO",
+            "CLIENT"
+          ],
+          "type": "string"
+        },
+        "authorLabel": {
+          "description": "Client's name (client-authored) or the pro's display label (pro-authored).",
+          "type": "string"
+        },
+        "caption": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "commentCount": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "featured": {
+          "type": "boolean"
+        },
+        "featuredAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "likeCount": {
+          "type": "number"
+        },
+        "lookPostId": {
+          "type": "string"
+        },
+        "mediaType": {
+          "$ref": "#/definitions/MediaType"
+        },
+        "moderationStatus": {
+          "$ref": "#/definitions/ModerationStatus"
+        },
+        "proHandle": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "proLabel": {
+          "description": "businessName, else the pro's personal name, else the handle.",
+          "type": "string"
+        },
+        "professionalId": {
+          "type": "string"
+        },
+        "publishedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reportCount": {
+          "description": "Count of unresolved reports (drives the Reported queue).",
+          "type": "number"
+        },
+        "reportReasons": {
+          "items": {
+            "$ref": "#/definitions/ModerationReportReason"
+          },
+          "type": "array"
+        },
+        "reviewedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "saveCount": {
+          "type": "number"
+        },
+        "shareCount": {
+          "type": "number"
+        },
+        "status": {
+          "$ref": "#/definitions/LookPostStatus"
+        },
+        "thumbUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "viewCount": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "lookPostId",
+        "caption",
+        "authorKind",
+        "authorLabel",
+        "professionalId",
+        "proLabel",
+        "proHandle",
+        "status",
+        "moderationStatus",
+        "createdAt",
+        "publishedAt",
+        "thumbUrl",
+        "mediaType",
+        "likeCount",
+        "commentCount",
+        "saveCount",
+        "shareCount",
+        "viewCount",
+        "reportCount",
+        "reportReasons",
+        "featured",
+        "featuredAt",
+        "adminNotes",
+        "reviewedAt"
+      ],
+      "type": "object"
+    },
+    "AdminLookModerationStatusFilter": {
+      "enum": [
+        "REPORTED",
+        "PENDING",
+        "FLAGGED",
+        "REJECTED",
+        "REMOVED",
+        "APPROVED",
+        "ALL"
+      ],
+      "type": "string"
+    },
+    "AdminMeDTO": {
+      "description": "GET /api/v1/admin/me → `admin`. Which admin surfaces this session unlocks.",
+      "properties": {
+        "email": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "perms": {
+          "$ref": "#/definitions/AdminUiPerms"
+        },
+        "userId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "userId",
+        "email",
+        "perms"
+      ],
+      "type": "object"
+    },
+    "AdminModerationAction": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/LookPostModerationAction"
+        },
+        {
+          "$ref": "#/definitions/LookCommentModerationAction"
+        },
+        {
+          "$ref": "#/definitions/ViralRequestModerationAction"
+        }
+      ]
+    },
+    "AdminModerationCountsDTO": {
+      "description": "GET /api/v1/admin/moderation/counts → `counts`.\n\nTrue database counts, NOT list lengths: the queue lists cap at 50 rows, so a badge of 80 beside a list of 50 is correct and intended.\n\n⚠️ No review count exists on purpose — there is no Review report model, so reviews are a browse-and-hide surface with no pending state to count.",
+      "properties": {
+        "pendingLooks": {
+          "description": "Looks whose moderationStatus is PENDING_REVIEW.",
+          "type": "number"
+        },
+        "reportedComments": {
+          "description": "Look comments with at least one UNRESOLVED report.",
+          "type": "number"
+        },
+        "reportedLooks": {
+          "description": "Looks with at least one UNRESOLVED report.",
+          "type": "number"
+        },
+        "viralAwaitingReview": {
+          "description": "Viral service requests still REQUESTED or IN_REVIEW.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "reportedLooks",
+        "pendingLooks",
+        "reportedComments",
+        "viralAwaitingReview"
+      ],
+      "type": "object"
+    },
+    "AdminModerationTargetKind": {
+      "enum": [
+        "LOOK_POST",
+        "LOOK_COMMENT",
+        "VIRAL_SERVICE_REQUEST"
+      ],
+      "type": "string"
+    },
+    "AdminReviewModerationRow": {
+      "properties": {
+        "body": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "clientLabel": {
+          "description": "Reviewer's name, for moderation context only.",
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "headline": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hidden": {
+          "type": "boolean"
+        },
+        "hiddenAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hiddenReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "proHandle": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "proLabel": {
+          "description": "businessName, else the pro's personal name, else the handle.",
+          "type": "string"
+        },
+        "proReplyAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "proReplyBody": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "professionalId": {
+          "type": "string"
+        },
+        "rating": {
+          "type": "number"
+        },
+        "reviewId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "reviewId",
+        "rating",
+        "headline",
+        "body",
+        "createdAt",
+        "clientLabel",
+        "professionalId",
+        "proLabel",
+        "proHandle",
+        "hidden",
+        "hiddenAt",
+        "hiddenReason",
+        "proReplyBody",
+        "proReplyAt"
+      ],
+      "type": "object"
+    },
+    "AdminUiPerms": {
+      "properties": {
+        "canManageCatalog": {
+          "type": "boolean"
+        },
+        "canManagePermissions": {
+          "type": "boolean"
+        },
+        "canReviewPros": {
+          "type": "boolean"
+        },
+        "canViewLogs": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "canReviewPros",
+        "canManageCatalog",
+        "canManagePermissions",
+        "canViewLogs"
+      ],
+      "type": "object"
     },
     "AftercareRebookMode": {
       "$ref": "#/definitions/%24Enums.AftercareRebookMode"
@@ -15470,8 +15896,211 @@
       ],
       "type": "string"
     },
+    "LookCommentModerationAction": {
+      "enum": [
+        "approve",
+        "reject",
+        "remove"
+      ],
+      "type": "string"
+    },
+    "LookCommentModerationResultDto": {
+      "properties": {
+        "action": {
+          "$ref": "#/definitions/LookCommentModerationAction"
+        },
+        "result": {
+          "$ref": "#/definitions/LookCommentModerationStateDto"
+        },
+        "target": {
+          "$ref": "#/definitions/LookCommentModerationTargetDto"
+        }
+      },
+      "required": [
+        "target",
+        "action",
+        "result"
+      ],
+      "type": "object"
+    },
+    "LookCommentModerationStateDto": {
+      "properties": {
+        "adminNotes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "commentsCount": {
+          "type": "number"
+        },
+        "id": {
+          "type": "string"
+        },
+        "lookPostId": {
+          "type": "string"
+        },
+        "moderationStatus": {
+          "$ref": "#/definitions/ModerationStatus"
+        },
+        "removedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reportCount": {
+          "type": "number"
+        },
+        "reviewedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reviewedByUserId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "lookPostId",
+        "moderationStatus",
+        "removedAt",
+        "reviewedAt",
+        "reviewedByUserId",
+        "adminNotes",
+        "reportCount",
+        "commentsCount"
+      ],
+      "type": "object"
+    },
+    "LookCommentModerationTargetDto": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "LOOK_COMMENT",
+          "type": "string"
+        },
+        "lookPostId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "lookPostId"
+      ],
+      "type": "object"
+    },
     "LookMediaAnalysisStatus": {
       "$ref": "#/definitions/%24Enums.LookMediaAnalysisStatus"
+    },
+    "LookPostModerationAction": {
+      "enum": [
+        "approve",
+        "reject",
+        "remove"
+      ],
+      "type": "string"
+    },
+    "LookPostModerationResultDto": {
+      "properties": {
+        "action": {
+          "$ref": "#/definitions/LookPostModerationAction"
+        },
+        "result": {
+          "$ref": "#/definitions/LookPostModerationStateDto"
+        },
+        "target": {
+          "$ref": "#/definitions/LookPostModerationTargetDto"
+        }
+      },
+      "required": [
+        "target",
+        "action",
+        "result"
+      ],
+      "type": "object"
+    },
+    "LookPostModerationStateDto": {
+      "properties": {
+        "adminNotes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "archivedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "moderationStatus": {
+          "$ref": "#/definitions/ModerationStatus"
+        },
+        "removedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reportCount": {
+          "type": "number"
+        },
+        "reviewedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reviewedByUserId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/definitions/LookPostStatus"
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "moderationStatus",
+        "archivedAt",
+        "removedAt",
+        "reviewedAt",
+        "reviewedByUserId",
+        "adminNotes",
+        "reportCount"
+      ],
+      "type": "object"
+    },
+    "LookPostModerationTargetDto": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "LOOK_POST",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "type": "object"
     },
     "LookPostStatus": {
       "$ref": "#/definitions/%24Enums.LookPostStatus"
@@ -17760,6 +18389,9 @@
         "count"
       ],
       "type": "object"
+    },
+    "ModerationReportReason": {
+      "$ref": "#/definitions/%24Enums.ModerationReportReason"
     },
     "ModerationStatus": {
       "$ref": "#/definitions/%24Enums.ModerationStatus"
@@ -25485,6 +26117,164 @@
     },
     "VerificationStatus": {
       "$ref": "#/definitions/%24Enums.VerificationStatus"
+    },
+    "ViralRequestDto": {
+      "properties": {
+        "adminNotes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "approvedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "coverImage": {
+          "description": "The picture this look is shown by: the REVIEWER's `coverImageUrl`, and only that. Null until someone sets one — the surfaces then draw their own gradient. `mediaUrls` (what the submitter attached) is never a substitute; see `resolveViralCoverImage`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "links": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "mediaUrls": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "moderationStatus": {
+          "$ref": "#/definitions/ModerationStatus"
+        },
+        "name": {
+          "type": "string"
+        },
+        "rejectedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "removedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reportCount": {
+          "type": "number"
+        },
+        "requestedCategory": {
+          "anyOf": [
+            {
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "slug": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "slug"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requestedCategoryId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reviewedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reviewedByUserId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sourceUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/definitions/ViralServiceRequestStatus"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "description",
+        "sourceUrl",
+        "links",
+        "mediaUrls",
+        "coverImage",
+        "requestedCategoryId",
+        "requestedCategory",
+        "status",
+        "moderationStatus",
+        "reportCount",
+        "removedAt",
+        "reviewedAt",
+        "reviewedByUserId",
+        "approvedAt",
+        "rejectedAt",
+        "adminNotes",
+        "createdAt",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "ViralRequestModerationAction": {
+      "enum": [
+        "mark_in_review",
+        "approve",
+        "reject"
+      ],
+      "type": "string"
+    },
+    "ViralServiceRequestStatus": {
+      "$ref": "#/definitions/%24Enums.ViralServiceRequestStatus"
     },
     "WorkingHoursDay": {
       "properties": {

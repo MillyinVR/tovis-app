@@ -1,4 +1,6 @@
 // lib/viralRequests/contracts.ts
+import type { ModerationStatus, ViralServiceRequestStatus } from '@prisma/client'
+
 import type {
   EnqueueViralRequestApprovalNotificationsResult,
   ViralRequestListRow,
@@ -50,8 +52,12 @@ export type ViralRequestDto = {
     name: string
     slug: string
   } | null
-  status: ViralRequestListRow['status']
-  moderationStatus: ViralRequestListRow['moderationStatus']
+  // Named enums rather than `ViralRequestListRow['status']`: identical types,
+  // but an indexed access into a Prisma payload cannot be turned into JSON
+  // Schema, and this DTO has to be under the wire guard — the native admin
+  // queue decodes it, and its field names deliberately differ from the columns.
+  status: ViralServiceRequestStatus
+  moderationStatus: ModerationStatus
   reportCount: number
   removedAt: string | null
   reviewedAt: string | null

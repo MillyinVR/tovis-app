@@ -10,7 +10,9 @@
 //   - raw Prisma row types (`*Row`, `*Plan`) — they carry Prisma.Decimal/Date and
 //     are builder inputs, not wire shapes;
 //   - request/arg types (`*Args`) — request validation is still ad-hoc per route;
-//   - internal-only contracts (admin moderation, job payloads).
+//   - internal-only contracts (job payloads).
+// Admin moderation USED to be excluded here as web-only; it is included now that
+// a native admin inbox decodes it.
 // Everything re-exported here must be JSON-safe (Decimal→string, Date→ISO).
 //
 // Keep this list in sync as DTOs are added. The house rule is "Prisma is the
@@ -761,3 +763,43 @@ export type {
 export type { ClientConsultSessionsDTO } from './consult'
 
 export type { LookAnalysisItem, LookAnalysisMutation } from '@/lib/looks/analysis/contracts'
+
+// ── Admin moderation (native admin inbox) ────────────────────────────────────
+// GET /api/v1/admin/me · GET /api/v1/admin/moderation/counts
+export type {
+  AdminMeDTO,
+  AdminModerationCountsDTO,
+} from '@/lib/dto/adminModeration'
+
+export type { AdminUiPerms } from '@/lib/adminUiPermissions'
+
+// GET /api/v1/admin/looks · GET /api/v1/admin/look-comments
+export type {
+  AdminLookModerationRow,
+  AdminLookCommentModerationRow,
+  AdminLookModerationStatusFilter,
+} from '@/lib/privacy/adminLookModeration'
+
+// GET /api/v1/admin/reviews
+export type { AdminReviewModerationRow } from '@/lib/privacy/adminReviewModeration'
+
+// GET /api/v1/admin/viral-service-requests — the viral review queue's row.
+// 🔴 Under the guard because the native queue decodes it and its field names do
+// NOT match the Prisma columns: `coverImageUrl` ships as `coverImage`,
+// `linksJson` as `links`, `mediaUrlsJson` as `mediaUrls`. An iOS struct spelled
+// the Prisma way decodes to nil rather than failing, which is how a look with a
+// cover would have drawn a blank gradient forever.
+export type { ViralRequestDto } from '@/lib/viralRequests/contracts'
+
+// POST .../moderate — the action verbs and the state each one returns.
+export type {
+  AdminModerationTargetKind,
+  AdminModerationAction,
+  LookPostModerationAction,
+  LookCommentModerationAction,
+  ViralRequestModerationAction,
+  LookPostModerationStateDto,
+  LookCommentModerationStateDto,
+  LookPostModerationResultDto,
+  LookCommentModerationResultDto,
+} from '@/lib/adminModeration/contracts'

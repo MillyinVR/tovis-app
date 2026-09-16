@@ -191,6 +191,40 @@ const proLabelSelect = {
   handle: true,
 } satisfies Prisma.ProfessionalProfileSelect
 
+/**
+ * How many looks / comments sit in ONE moderation queue.
+ *
+ * Deliberately in this file and built from the SAME `buildLookStatusWhere` +
+ * `buildProSearchWhere` the list queries use: an inbox badge that counts rows
+ * the list would not show is worse than no badge, and the cross-tenant
+ * professional filter is easy to forget when the predicate is re-typed
+ * elsewhere. These are true counts — unlike the lists they are NOT capped at
+ * MAX_RESULTS, so a queue of 80 reads "80" while the list shows the first 50.
+ */
+export async function countAdminLookModeration(args: {
+  status: AdminLookModerationStatusFilter
+  q?: string
+}): Promise<number> {
+  return prisma.lookPost.count({
+    where: {
+      professional: buildProSearchWhere((args.q ?? '').trim()),
+      ...buildLookStatusWhere(args.status),
+    },
+  })
+}
+
+export async function countAdminLookCommentModeration(args: {
+  status: AdminLookModerationStatusFilter
+  q?: string
+}): Promise<number> {
+  return prisma.lookComment.count({
+    where: {
+      lookPost: { professional: buildProSearchWhere((args.q ?? '').trim()) },
+      ...buildCommentStatusWhere(args.status),
+    },
+  })
+}
+
 export async function listAdminLookModeration(args: {
   status: AdminLookModerationStatusFilter
   q?: string
