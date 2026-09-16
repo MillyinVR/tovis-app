@@ -3220,6 +3220,25 @@ model Service {
    */
   limitations    String?
 
+  /// How the work is DONE, in professional terms — for the PRO, and for nobody
+  /// else.
+  ///
+  /// The third distinct description on this model, and the distinction is the
+  /// whole point of viral services (Tori, 2026-09-15):
+  ///
+  ///   `description`    → the CLIENT's blurb. "Hand-painted, lived-in lightness."
+  ///   `consultSummary` → the ENGINE's diagnostic facts, admin-owned.
+  ///   `proBreakdown`   → what a stylist needs to decide whether they can do it.
+  ///                      "A Wolf Cut is a heavily layered shag with a
+  ///                      disconnected fringe — point-cut through the crown…"
+  ///
+  /// 🔴 PRO and ADMIN only. Tori: *"the client should only see the name and
+  /// description of the viral service. the pro gets the full breakdown."*
+  /// Enforce that in the SELECT, never in the component — the same way
+  /// `mediaUrlsJson` is kept off client surfaces — so a client surface added
+  /// later cannot render it by accident.
+  proBreakdown String?
+
   intentEvents                 ClientIntentEvent[]
   lastMinuteOpeningServices    LastMinuteOpeningService[]
   lastMinuteTierFreeAddOnPlans LastMinuteTierPlan[]       @relation("LastMinuteTierPlanFreeAddOnService")
@@ -3249,6 +3268,61 @@ model Service {
   // read — and a link only adds the service to another category's list in the
   // library picker. Never a link to the primary itself (write paths refuse it).
   additionalCategoryLinks ServiceCategoryLink[]
+
+  // The two ends of "this trending name is really that work" — see
+  // ViralServiceBaseService. A row appears in `baseServiceLinks` when THIS
+  // service is the viral name, and in `viralNameLinks` when it is the real work
+  // underneath one.
+  baseServiceLinks ViralServiceBaseService[] @relation("ViralServiceBaseLinks")
+  viralNameLinks   ViralServiceBaseService[] @relation("BaseServiceViralLinks")
+
+  /// The viral look submissions this service was created FOR. A list rather
+  /// than one row because two clients can ask for the same trending name, and
+  /// `Service.name` is @unique — they resolve to the same catalog entry.
+  viralServiceRequests ViralServiceRequest[] @relation("ViralServiceRequestService")
+}
+
+/// A trending NAME, and the real service(s) underneath it.
+///
+/// Tori, 2026-09-15: *"a wolf cut is a viral name for a layered cut, so if a
+/// client books a wolf cut — even though we've added that service name — that
+/// service is still a haircut."* The client recognises "Wolf Cut"; the stylist
+/// knows it is a haircut; the platform needs to know both. This table is where
+/// it knows the second.
+///
+/// **Many-to-many, minimum one** (Tori: *"a viral service should always be
+/// connected to at least one if not more other services"*) — a look may need a
+/// cut AND a style. The minimum is enforced in the write path
+/// (`lib/services/viralBaseServiceLinks.ts`), not by the schema: a composite-key
+/// join table cannot express "at least one row".
+///
+/// 🔴 The link is **admin-set and never inferred** — not from the name, not from
+/// the category, not by a matcher. An admin looks at "Bubble Gum Nails",
+/// decides it is a gel manicure, and says so.
+///
+/// 🔴 It is also **internal**. The client sees the look's name and description;
+/// this is part of the pro-and-admin breakdown. Keep it out of client SELECTs.
+model ViralServiceBaseService {
+  /// The trending name — the Service a pro adds to their menu at their price.
+  viralServiceId String
+  /// The real work underneath it. What a Wolf Cut booking actually IS.
+  baseServiceId  String
+
+  createdAt DateTime @default(now())
+
+  /// Cascade: deleting the viral name takes its links with it — they describe
+  /// nothing without it.
+  viralService Service @relation("ViralServiceBaseLinks", fields: [viralServiceId], references: [id], onDelete: Cascade)
+  /// Restrict, NOT Cascade or SetNull: a base service that disappears would
+  /// silently leave a viral name with no idea what work it stands for, and
+  /// (slice 5) nothing to fire the keep-or-remove prompt against. Unlinking is
+  /// an explicit act.
+  baseService  Service @relation("BaseServiceViralLinks", fields: [baseServiceId], references: [id], onDelete: Restrict)
+
+  @@id([viralServiceId, baseServiceId])
+  /// "Which viral names are built on this service?" — the read slice 5's
+  /// keep-or-remove prompt makes when a pro drops a base service.
+  @@index([baseServiceId])
 }
 
 model OfferingAddOn {
@@ -7468,6 +7542,24 @@ model ViralServiceRequest {
   requestedCategoryId String?
   requestedCategory   ServiceCategory? @relation(fields: [requestedCategoryId], references: [id], onDelete: SetNull)
 
+  /// The catalog `Service` this look BECAME — the named line a pro adds to their
+  /// own menu at their own price, and the thing a client books.
+  ///
+  /// Tori, 2026-09-15: *"when the admin approves or adds a viral service it
+  /// should be connected on our end to the actual service the pro will be
+  /// doing."* This column is the "on our end".
+  ///
+  /// 🔴 Nullable, and deliberately so. "No service, no approval" is a rule about
+  /// the APPROVAL TRANSITION, enforced in `updateViralRequestStatus` — not a
+  /// column constraint. Three dev requests are already APPROVED with no service
+  /// and prod holds none; a required column would refuse existing rows, and a
+  /// guard that cannot be deployed is not a guard.
+  serviceId String?
+  /// Restrict: a Service a live look is published under must not be deletable
+  /// out from under it, leaving a look clients can see and nobody can book.
+  /// Retiring a service is `isActive = false`, which is reversible.
+  service   Service? @relation("ViralServiceRequestService", fields: [serviceId], references: [id], onDelete: Restrict)
+
   status           ViralServiceRequestStatus @default(REQUESTED)
   moderationStatus ModerationStatus          @default(APPROVED)
 
@@ -7491,6 +7583,7 @@ model ViralServiceRequest {
   @@index([clientId, createdAt])
   @@index([status, createdAt])
   @@index([requestedCategoryId, status, createdAt])
+  @@index([serviceId])
   @@index([moderationStatus, reportCount, createdAt])
   @@index([reviewedByUserId, reviewedAt])
 }
